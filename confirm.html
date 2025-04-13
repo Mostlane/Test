@@ -1,2 +1,45 @@
+
 <!DOCTYPE html>
-<html><body><h1>You have successfully logged in</h1></body></html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirmation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    h1 {
+      color: #005695;
+      font-size: 26px;
+    }
+    #map {
+      margin-top: 20px;
+      border-radius: 10px;
+      width: 100%;
+      max-width: 500px;
+    }
+  </style>
+</head>
+<body>
+  <h1 id="statusMsg">Status</h1>
+  <p id="timestamp">Time</p>
+  <img id="map" src="" alt="Location Map">
+  <br><br>
+  <button onclick="window.location.href='index.html'" style="padding: 15px 30px; font-size: 18px;">Back</button>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const lat = params.get("lat");
+    const lon = params.get("lon");
+    const time = decodeURIComponent(params.get("time"));
+    const apiKey = "AIzaSyCKy2bleP7tFz6s8RcsSpwciPb9xn-id9o";
+
+    document.getElementById("statusMsg").innerText = `You have successfully logged ${status}`;
+    document.getElementById("timestamp").innerText = `at ${time}`;
+    document.getElementById("map").src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=16&size=600x300&markers=color:red%7C${lat},${lon}&key=${apiKey}`;
+  </script>
+</body>
+</html>
