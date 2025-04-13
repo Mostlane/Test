@@ -1,1 +1,72 @@
-<!DOCTYPE html><html><body style='font-size:18px;text-align:center;padding:20px;'><h1>Login</h1><input style='font-size:20px;width:90%;max-width:300px;padding:10px;' placeholder='Email'><br><input style='font-size:20px;width:90%;max-width:300px;padding:10px;' placeholder='Password'><br><button style='padding:15px 30px;font-size:20px;'>Login</button></body></html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mostlane Portal Login</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #ffffff;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #0e5c9d;
+      padding: 20px;
+    }
+    header img {
+      height: 50px;
+    }
+    h1 {
+      font-size: 22px;
+      margin: 20px 0;
+      color: #0e5c9d;
+    }
+    .login-box {
+      margin: 40px auto;
+      width: 90%;
+      max-width: 400px;
+    }
+    input[type="email"], input[type="password"] {
+      width: 100%;
+      padding: 15px;
+      margin: 10px 0;
+      font-size: 18px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      font-size: 18px;
+      background-color: #005695;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
+    a {
+      display: block;
+      margin-top: 15px;
+      color: #005695;
+      text-decoration: none;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="logo.png" alt="Mostlane Logo">
+  </header>
+  <div class="login-box">
+    <h1>Engineer Login</h1>
+    <input type="email" placeholder="Email" required />
+    <input type="password" placeholder="Password" required />
+    <button onclick="window.location.href='index.html'">Login</button>
+    <a href="#">Forgot your password?</a>
+  </div>
+</body>
+</html>
