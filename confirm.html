@@ -1,0 +1,32 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Check-In Confirmation</title>
+  <style>
+    body { font-family: Arial; text-align: center; background: #ffffff; padding: 40px; }
+    h1 { color: #005695; }
+    .map { margin: 20px auto; max-width: 90%; }
+    button { padding: 10px 20px; margin-top: 20px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h1 id="status"></h1>
+  <p id="datetime"></p>
+  <img id="map" class="map" src="" alt="Map Snapshot">
+  <br>
+  <button onclick="window.location.href='index.html'">Back to Check-In</button>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    const lat = params.get("lat");
+    const lon = params.get("lon");
+    const time = decodeURIComponent(params.get("time"));
+
+    document.getElementById("status").innerText = `You have successfully logged ${status}`;
+    document.getElementById("datetime").innerText = `at ${time}`;
+    document.getElementById("map").src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=15&size=600x300&markers=color:red%7C${lat},${lon}&key=YOUR_API_KEY`;
+  </script>
+</body>
+</html>
