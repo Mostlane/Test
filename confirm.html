@@ -1,0 +1,22 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Check In Confirmation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <h1 id="status"></h1>
+  <p id="datetime"></p>
+  <img id="map" class="map" src="" style="width: 90%; max-width: 500px;" />
+  <br>
+  <a class="button" href="main.html">Back to Main Menu</a>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    document.getElementById("status").innerText = "You have successfully logged " + params.get("status");
+    document.getElementById("datetime").innerText = "at " + decodeURIComponent(params.get("time"));
+    document.getElementById("map").src = `https://maps.google.com/maps?q=${params.get("lat")},${params.get("lon")}&z=15&output=embed`;
+  </script>
+</body>
+</html>
