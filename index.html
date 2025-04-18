@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mostlane Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    function checkInOut(status) {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          const now = new Date();
+          const time = encodeURIComponent(now.toLocaleString());
+
+          window.location.href = `confirm.html?status=${status}&lat=${lat}&lon=${lon}&time=${time}`;
+        },
+        () => {
+          alert("Location access denied. Please enable location services to Check In or Out.");
+        }
+      );
+    }
+  </script>
+</head>
+<body>
+  <header><h1>Mostlane Portal</h1></header>
+  <a class="button" href="#" onclick="checkInOut('Check In')">Check In</a>
+  <a class="button" href="#" onclick="checkInOut('Check Out')">Check Out</a>
+  <a class="button" href="main.html">Main Menu</a>
+</body>
+</html>
