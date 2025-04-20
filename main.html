@@ -1,0 +1,34 @@
+
+<!DOCTYPE html>
+
+<html>
+<head>
+<title>Main Menu</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="style.css" rel="stylesheet"/>
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+<style>
+body {
+    background: url('assets/embossed-m-bg.png') no-repeat center center fixed;
+    background-size: cover;
+}
+</style></head>
+<body>
+<div style="text-align:center; padding: 20px;">
+<img alt="Mostlane Logo" src="assets/mostlane-logo.jpeg" style="max-height:60px;"/>
+</div>
+
+<h1>Mostlane Engineer Portal</h1>
+<a class="button" href="index.html">Check In / Out</a>
+<a class="button" href="timesheet.html">My Timesheet</a>
+<a class="button" href="holiday.html">Holiday Requests</a>
+<a class="button" href="hr.html">HR Documents</a>
+<a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+<a class="button" href="weekly.html">Weekly Summary</a>
+<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+</body>
+</html>
