@@ -1,0 +1,14 @@
+
+{
+  "name": "Mostlane Portal",
+  "short_name": "Mostlane",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "description": "Mostlane Offline Portal",
+  "icons": [{
+    "src": "icon.png",
+    "type": "image/png",
+    "sizes": "192x192"
+  }]
+}
