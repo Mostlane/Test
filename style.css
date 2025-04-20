@@ -1,7 +1,11 @@
 
 body {
   font-family: Arial, sans-serif;
-  background: #fff;
+  background: background-image: url("assets/Mostlane_Embossed.png");
+background-size: cover;
+background-repeat: no-repeat;
+background-attachment: fixed;
+background-position: center;
   margin: 0;
   padding: 40px;
   text-align: center;
