@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+
+<html>
+<head>
+<title>Check In Confirmation</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="style.css" rel="stylesheet"/>
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+<style>
+body {
+    background: url('assets/embossed-m-bg.png') no-repeat center center fixed;
+    background-size: cover;
+}
+</style></head>
+<body>
+<div style="text-align:center; padding: 20px;">
+<img alt="Mostlane Logo" src="assets/mostlane-logo.jpeg" style="max-height:60px;"/>
+</div>
+
+<h1 id="status"></h1>
+<p id="datetime"></p>
+<img class="map" id="map" src="" style="width: 90%; max-width: 500px;"/>
+<br/>
+<a class="button" href="main.html">Back to Main Menu</a>
+<script>
+    const params = new URLSearchParams(window.location.search);
+    const lat = params.get("lat");
+    const lon = params.get("lon");
+    const time = decodeURIComponent(params.get("time"));
+    const status = params.get("status");
+
+    document.getElementById("status").innerText = "You have successfully logged " + status;
+    document.getElementById("datetime").innerText = "at " + time;
+    document.getElementById("map").src =
+      "https://maps.googleapis.com/maps/api/staticmap?center=" +
+      lat + "," + lon +
+      "&zoom=15&size=600x300&markers=color:red%7C" +
+      lat + "," + lon +
+      "&key=AIzaSyCKy2bleP7tFz6s8RcsSpwciPb9xn-id9o";
+  </script>
+</body>
+</html>
