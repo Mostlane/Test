@@ -1,0 +1,28 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Check-In Saved (Offline)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Check-In Saved (Offline Mode)</h2>
+    <p>Your check-in has been successfully captured on this device.<br>
+    It will automatically upload to the system as soon as your internet connection is restored.</p>
+    <div class="details">
+      <p><strong>GPS Location:</strong> <span id="gps"></span></p>
+      <p><strong>Time:</strong> <span id="timestamp"></span></p>
+      <p><strong>Status:</strong> Waiting to sync</p>
+    </div>
+    <p class="small">If your device does not reconnect automatically, please ensure mobile data or Wi-Fi is enabled and the portal will automatically upload information when you next use it.</p>
+    <button onclick="window.location.href='index.html'">Return to Home</button>
+  </div>
+  <script>
+    const data = JSON.parse(localStorage.getItem('lastOfflineCheckIn') || '{}');
+    document.getElementById('gps').innerText = data.gps || 'Unknown';
+    document.getElementById('timestamp').innerText = data.time || 'Unknown';
+  </script>
+</body>
+</html>
