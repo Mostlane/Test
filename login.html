@@ -1,65 +1,75 @@
+
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Mostlane Portal Login</title>
-    <link rel="stylesheet" href="style.css">
     <style>
         body {
+            font-family: 'Segoe UI', sans-serif;
             background: url('Mostlane_Embossed.png') no-repeat center center fixed;
             background-size: cover;
-            font-family: "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
         }
         .login-container {
-            width: 300px;
-            margin: 120px auto;
             background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            border-radius: 10px;
+            padding: 30px 40px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            width: 300px;
             text-align: center;
         }
         .login-container img {
-            width: 120px;
+            width: 160px;
             margin-bottom: 20px;
         }
-        .login-container input[type="text"],
-        .login-container input[type="password"] {
+        .login-container h2 {
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        .login-container input {
             width: 100%;
-            padding: 10px;
-            margin: 8px 0;
-            border-radius: 6px;
+            padding: 12px;
+            margin: 10px 0;
             border: 1px solid #ccc;
+            border-radius: 6px;
             font-size: 16px;
         }
         .login-container button {
-            width: 100%;
-            padding: 12px;
-            background-color: #0066b3;
+            background-color: #005a9e;
             color: white;
-            font-size: 16px;
-            font-weight: bold;
+            padding: 12px;
+            width: 100%;
             border: none;
             border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
             margin-top: 10px;
+        }
+        .login-container button:hover {
+            background-color: #004080;
         }
         .login-container a {
             display: block;
-            margin-top: 15px;
-            color: #0066b3;
+            margin-top: 10px;
             text-decoration: none;
+            color: #005a9e;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <img src="Mostlane_Logo.png" alt="Mostlane Logo">
-        <form>
-            <input type="text" placeholder="Email address" required>
-            <input type="password" placeholder="Password" required>
-            <button type="submit">Sign in</button>
-            <a href="https://forms.office.com/e/EdkdtaAtke?origin=lprLink">Sign up</a>
-        </form>
+        <img src="Mostlane Logo - Copy.jpeg" alt="Mostlane Logo">
+        <input type="text" placeholder="Email address">
+        <input type="password" placeholder="Password">
+        <button>Sign in</button>
+        <a href="https://forms.office.com/e/EdkdtaAtke?origin=lprLink">Sign Up</a>
     </div>
 </body>
 </html>
