@@ -1,78 +1,84 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mostlane Portal Login</title>
-  <link rel="stylesheet" href="style.css" />
-  <style>
-    body {
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .login-container {
-      max-width: 320px;
-      margin: 10vh auto;
-      padding: 2rem;
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      text-align: center;
-    }
-    .login-container img {
-      max-width: 140px;
-      margin-bottom: 1rem;
-    }
-    .login-container input {
-      width: 100%;
-      padding: 0.75rem;
-      margin: 0.5rem 0;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      font-size: 1rem;
-    }
-    .login-container button {
-      width: 100%;
-      padding: 0.75rem;
-      background-color: #005daa;
-      color: white;
-      font-size: 1rem;
-      font-weight: bold;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .login-container a {
-      display: block;
-      margin-top: 1rem;
-      text-decoration: none;
-      color: #005daa;
-      font-size: 0.9rem;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Mostlane Portal Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: "Segoe UI", sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 320px;
+            text-align: center;
+        }
+        .login-container img {
+            width: 140px;
+            margin-bottom: 20px;
+        }
+        .login-container input[type="text"],
+        .login-container input[type="password"] {
+            width: 100%;
+            padding: 12px 10px;
+            margin: 8px 0;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        .login-container button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 16px;
+            background-color: #005aab;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .login-container button:hover {
+            background-color: #004080;
+        }
+        .login-container .signup-link {
+            display: block;
+            margin-top: 16px;
+            color: #005aab;
+            text-decoration: none;
+        }
+    </style>
 </head>
 <body>
-  <div class="login-container">
-    <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
-    <input type="text" id="username" placeholder="Email address" />
-    <input type="password" id="password" placeholder="Password" />
-    <button onclick="login()">Sign in</button>
-    <a href="onboard.html">Sign Up</a>
-  </div>
+    <div class="login-container">
+        <img src="mostlane-logo.jpg" alt="Mostlane Logo">
+        <input type="text" id="username" placeholder="Email address" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button onclick="login()">Sign in</button>
+        <a class="signup-link" href="onboard.html">Sign up</a>
+    </div>
 
-  <script>
-    function login() {
-      var username = document.getElementById('username').value;
-      var password = document.getElementById('password').value;
+    <script>
+        function login() {
+            var username = document.getElementById("username").value;
+            var password = document.getElementById("password").value;
 
-      if (username === 'engineer' && password === 'mostlane123') {
-        window.location.href = 'main.html';
-      } else {
-        alert('Incorrect username or password.');
-      }
-    }
-  </script>
+            if (username === "engineer" && password === "mostlane123") {
+                window.location.href = "./main.html";
+            } else {
+                alert("Invalid credentials. Please try again.");
+            }
+        }
+    </script>
 </body>
 </html>
