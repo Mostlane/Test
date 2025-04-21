@@ -15,12 +15,14 @@
 }
   return id;
 }
+  return id;
+}
 
     function getLocation(callback) {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           pos => callback(pos.coords.latitude, pos.coords.longitude),
-          () => callback(null, null)
+          () => { alert("Location access denied or failed."); callback(null, null); }
         );
       } else {
         callback(null, null);
@@ -28,6 +30,7 @@
     }
 
     async function autoSubmit() {
+      alert("Submitting...");
       const engineer = localStorage.getItem("engineerName") || "Unknown";
       const deviceId = await getDeviceId();
       const timestamp = new Date().toISOString();
@@ -63,7 +66,7 @@
     window.onload = autoSubmit;
   </script>
 </head>
-<body>
+<body class="checkout-body">
   <h1>Check Out...</h1>
 </body>
 </html>
