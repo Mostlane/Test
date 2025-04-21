@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Check Out</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+
+    window.onload = function() {
+      navigator.geolocation.getCurrentPosition(success, error);
+
+      function success(position) {
+        const data = {
+          status: "Check Out",
+          timestamp: new Date().toISOString(),
+          device_id: (() => {
+            let id = localStorage.getItem("mostlane_device_id");
+            if (!id) {
+              id = "device-" + crypto.randomUUID();
+              localStorage.setItem("mostlane_device_id", id);
+            }
+            return id;
+          })(),
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          timestamp: new Date().toISOString(),
+          device_id: (() => {
+            let id = localStorage.getItem("mostlane_device_id");
+            if (!id) {
+              id = "device-" + crypto.randomUUID();
+              localStorage.setItem("mostlane_device_id", id);
+            }
+            return id;
+          })(),
+          engineer: localStorage.getItem("engineerName") || "Unknown"
+        };
+
+        console.log("Data ready:", data);
+        alert("Sending data:\n" + JSON.stringify(data, null, 2));
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(data).toString()
+        })
+        .then(response => {
+          console.log("Fetch response:", response);
+          if (!response.ok) throw new Error("Network response was not ok");
+        
+          const now = new Date().toLocaleString();
+          window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
+        }).catch((err) => {
+          console.error("Fetch error:", err);
+          alert("Error submitting to Zapier. See console for details.");
+        });
+      }
+
+      function error() {
+        alert("Please enable location to check in.");
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Checking Out...</h1>
+</body>
+</html>
