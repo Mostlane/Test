@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="style.css">
   <script>
-    async function getDeviceId() {
-      const msg = navigator.userAgent + new Date().getTimezoneOffset();
-      return btoa(msg);
+    function getDeviceId() {
+      let id = localStorage.getItem("mostlane_device_id");
+      if (!id) {
+        id = "dev-" + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("mostlane_device_id", id);
+      }
+      return id;
     }
 
     function getLocation(callback) {
