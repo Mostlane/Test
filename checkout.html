@@ -1,28 +1,27 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <style>
+    body {
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+    }
+  </style>
+
   <title>Check Out</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="style.css">
   <script>
     async function getDeviceId() {
-  let id = localStorage.getItem("mostlane_device_id");
-  if (!id) {
-    id = "dev-" + Math.random().toString(36).substring(2, 10);
-    localStorage.setItem("mostlane_device_id", id);
-  }
-  return id;
-}
-  return id;
-}
-  return id;
-}
+      const msg = navigator.userAgent + new Date().getTimezoneOffset();
+      return btoa(msg);
+    }
 
     function getLocation(callback) {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           pos => callback(pos.coords.latitude, pos.coords.longitude),
-          () => { alert("Location access denied or failed."); callback(null, null); }
+          () => callback(null, null)
         );
       } else {
         callback(null, null);
@@ -30,7 +29,6 @@
     }
 
     async function autoSubmit() {
-      alert("Submitting...");
       const engineer = localStorage.getItem("engineerName") || "Unknown";
       const deviceId = await getDeviceId();
       const timestamp = new Date().toISOString();
@@ -66,7 +64,7 @@
     window.onload = autoSubmit;
   </script>
 </head>
-<body class="checkout-body">
+<body>
   <h1>Check Out...</h1>
 </body>
 </html>
