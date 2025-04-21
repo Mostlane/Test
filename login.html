@@ -1,21 +1,65 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mostlane Portal Login</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+            background-size: cover;
+            font-family: "Segoe UI", Roboto, sans-serif;
+        }
+        .login-container {
+            width: 300px;
+            margin: 120px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        .login-container img {
+            width: 120px;
+            margin-bottom: 20px;
+        }
+        .login-container input[type="text"],
+        .login-container input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+        .login-container button {
+            width: 100%;
+            padding: 12px;
+            background-color: #0066b3;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        .login-container a {
+            display: block;
+            margin-top: 15px;
+            color: #0066b3;
+            text-decoration: none;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h2>Mostlane Portal Login</h2>
+    <div class="login-container">
+        <img src="Mostlane_Logo.png" alt="Mostlane Logo">
         <form>
-            <div class="form-group"><label>Username</label><input type="text" name="username"></div>
-            <div class="form-group"><label>Password</label><input type="password" name="password"></div>
-            <button type="submit" class="btn">Login</button>
+            <input type="text" placeholder="Email address" required>
+            <input type="password" placeholder="Password" required>
+            <button type="submit">Sign in</button>
+            <a href="https://forms.office.com/e/EdkdtaAtke?origin=lprLink">Sign up</a>
         </form>
-        <a href="onboard.html"><button class="btn">Sign Up</button></a>
     </div>
 </body>
 </html>
