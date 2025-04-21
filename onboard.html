@@ -27,51 +27,36 @@
     }
 
     async function submitForm(event) {
-  console.log("Submit button clicked");
-
       event.preventDefault();
+
       const firstName = document.getElementById("firstName").value.trim();
       const lastName = document.getElementById("lastName").value.trim();
       const email = document.getElementById("email").value;
       const mobile = document.getElementById("mobile").value;
       const jobRole = document.getElementById("jobRole").value;
-      const startDate = document.getElementById("startDate").value;
       const postcode = document.getElementById("postcode").value;
-      const team = document.getElementById("team").value;
-      const supervisor = document.getElementById("supervisor").value;
-      const accessLevel = document.getElementById("accessLevel").value;
-      const isAdmin = document.getElementById("isAdmin").checked ? "Yes" : "No";
-      const signature = document.getElementById("signature").checked ? "Confirmed" : "Not confirmed";
       const deviceId = await getDeviceId();
 
-      getLocation(async (lat, lon) => {
+      getLocation((lat, lon) => {
         const username = generateUsername(firstName, lastName);
         const data = {
-          firstName, lastName, email, mobile, jobRole, startDate,
+          firstName, lastName, email, mobile, jobRole,
           postcode, deviceId,
           latitude: lat?.toString() || "",
-          longitude: lon?.toString() || "",
-          team, supervisor, accessLevel, isAdmin, signature
+          longitude: lon?.toString() || ""
         };
 
-        const webhookUrl = "https://script.google.com/macros/s/AKfycbwMCEPphtuw6p7CA_vdNtW3MbFhbei65gVRxFsHN7YoPxS5MHsfISqh34aeGt_LaDPn/exec";
-        
-try {
-  console.log("Sending data to webhook:", data);
-  const response = await fetch(webhookUrl, {
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2x5j07h/", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data)
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(data).toString()
+        })
+        .then(() => {
+          window.location.href = "confirmation.html";
+        })
+        .catch(() => {
+          alert("Error submitting data to Zapier.");
         });
-  console.log("Webhook response status:", response.status);
-} catch (error) {
-  console.error("Error during fetch:", error);
-  alert("Something went wrong while submitting. Please try again.");
-  return;
-}
-
-
-        console.log("Redirecting to confirmation.html"); window.location.href = "confirmation.html";
       });
     }
   </script>
@@ -85,23 +70,9 @@ try {
       <input id="email" type="email" placeholder="Email" required><br>
       <input id="mobile" placeholder="Mobile"><br>
       <input id="jobRole" placeholder="Job Role"><br>
-      <input id="startDate" type="date"><br>
       <input id="postcode" placeholder="Home Postcode"><br>
-      <input id="team" placeholder="Team"><br>
-      <input id="supervisor" placeholder="Supervisor"><br>
-      <select id="accessLevel">
-        <option value="Standard">Standard</option>
-        <option value="Supervisor">Supervisor</option>
-        <option value="Admin">Admin</option>
-      </select><br>
-      <label><input type="checkbox" id="isAdmin"> Is Admin?</label><br>
-      <label><input type="checkbox" id="signature" required> I confirm this is my assigned work device</label><br>
       <button type="submit">Submit</button>
     </form>
-  </div>
-  <div id="thank-you" style="display:none;">
-    <h3>Thank you for signing up!</h3>
-    <p>Your portal access will be reviewed and enabled shortly.</p>
   </div>
 </body>
 </html>
