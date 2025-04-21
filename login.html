@@ -1,35 +1,23 @@
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Mostlane Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>Login to Mostlane Portal</h1>
-  <form id="loginForm">
-    <input type="text" id="username" placeholder="Username" required><br><br>
-    <input type="password" id="password" placeholder="Password" required><br><br>
-    <button type="submit" class="button">Login</button>
-  </form>
-  <p id="error" style="color:red;"></p>
-  <a href="https://forms.office.com/Pages/ResponsePage.aspx?id=WsVeACaHQ0i9YBUQaraMGa_J6nrSM2tFpIQ8AAKTugJUNUFQUUIxSk9FN1lTSkpWOFNKTzI3OEZMTi4u" class="button">New user? Sign up here</a>
-  <script>
-    document.getElementById('loginForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      const user = document.getElementById('username').value.trim();
-      const pass = document.getElementById('password').value;
-
-      if ((user === "engineer" && pass === "mostlane123") ||
-          (user === "admin" && pass === "admin123")) {
-        sessionStorage.setItem("mostlaneLoggedIn", "true");
-        window.location.href = "main.html";
-      } else {
-        document.getElementById('error').textContent = "Invalid login credentials.";
-      }
-    });
-  </script>
+  <div class="container">
+    <h2>Mostlane Portal Login</h2>
+    <form>
+      <label>Username</label>
+      <input type="text" required />
+      <label>Password</label>
+      <input type="password" required />
+      <button type="submit" class="button">Login</button>
+    </form>
+    <a href="onboard.html" class="button">Sign Up</a>
+  </div>
 </body>
 </html>

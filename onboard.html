@@ -1,0 +1,86 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Engineer Onboarding</title>
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    let deviceId = navigator.userAgent + '_' + Math.random().toString(36).substring(2);
+    let gpsData = "Location not allowed";
+
+    function getLocation(callback) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            gpsData = pos.coords.latitude + ", " + pos.coords.longitude;
+            callback();
+          },
+          () => callback()
+        );
+      } else {
+        callback();
+      }
+    }
+
+    async function handleSubmit(event) {
+      event.preventDefault();
+
+      const data = {
+        "First name": document.getElementById("firstName").value,
+        "Last name": document.getElementById("lastName").value,
+        "Email": document.getElementById("email").value,
+        "Mobile": document.getElementById("mobile").value,
+        "Job Role": document.getElementById("jobRole").value,
+        "Home Postcode": document.getElementById("postcode").value,
+        "Device ID": deviceId,
+        "Latitude & Longitude": gpsData
+      };
+
+      try {
+        await fetch("{{WEBHOOK_URL}}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        window.location.href = "confirmation.html";
+      } catch (err) {
+        alert("Submission failed. Please try again.");
+      }
+    }
+
+    window.onload = function () {
+      getLocation(() => {
+        document.getElementById("submitBtn").disabled = false;
+      });
+    };
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h2>Engineer Onboarding</h2>
+    <form onsubmit="handleSubmit(event)">
+      <label>First Name</label>
+      <input type="text" id="firstName" required />
+
+      <label>Last Name</label>
+      <input type="text" id="lastName" required />
+
+      <label>Email</label>
+      <input type="email" id="email" required />
+
+      <label>Mobile</label>
+      <input type="tel" id="mobile" required />
+
+      <label>Job Role</label>
+      <input type="text" id="jobRole" required />
+
+      <label>Home Postcode</label>
+      <input type="text" id="postcode" required />
+
+      <button type="submit" id="submitBtn" class="button" disabled>Submit</button>
+    </form>
+  </div>
+</body>
+</html>
