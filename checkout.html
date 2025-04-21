@@ -26,7 +26,7 @@
           device: navigator.userAgent,
           engineer: localStorage.getItem("engineerName") || "Unknown"
         };
-        fetch("https://script.google.com/macros/s/AKfycbwMCEPphtuw6p7CA_vdNtW3MbFhbei65gVRxFsHN7YoPxS5MHsfISqh34aeGt_LaDPn/exec", {
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(data).toString()
