@@ -12,10 +12,17 @@
     }
   </style>
   <script>
-    async function getDeviceId() {
-      const msg = navigator.userAgent + new Date().getTimezoneOffset();
-      return btoa(msg);
+
+    function getDeviceId() {
+      let id = localStorage.getItem("mostlane_device_id");
+      if (!id) {
+        id = "dev-" + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("mostlane_device_id", id);
+      }
+      return id;
     }
+
+    
 
     function getLocation(callback) {
       if (navigator.geolocation) {
@@ -85,27 +92,6 @@
     }
 
     .content-box {
-    .content-box input {
-      width: 100%;
-      padding: 12px;
-      margin: 10px 0;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      font-size: 14px;
-      box-sizing: border-box;
-    }
-
-    .content-box button {
-      background-color: #0066cc;
-      color: white;
-      padding: 12px;
-      width: 100%;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
       background: rgba(255, 255, 255, 0.6);
       padding: 30px 20px;
       max-width: 400px;
@@ -117,7 +103,7 @@
   </style>
   <div class="content-box">
   <div style="text-align: center; margin-top: 20px;">
-    <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="height: 60px;">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="max-width: 200px; height: auto;">
   </div>
   <div id="form-section">
     <h2>Portal Onboarding</h2>

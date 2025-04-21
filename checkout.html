@@ -6,6 +6,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
   <script>
+
+    function getDeviceId() {
+      let id = localStorage.getItem("mostlane_device_id");
+      if (!id) {
+        id = "dev-" + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("mostlane_device_id", id);
+      }
+      return id;
+    }
+
     window.onload = function() {
       navigator.geolocation.getCurrentPosition(success, error);
       function success(position) {
@@ -37,47 +47,7 @@
 </script>
 
 </head>
-<body class="checkout-body">
-  <style>
-  body.checkout-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
-  }
-
-  h1 {
-    background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
-  }
-
-  </style>
+<body>
   <h1>Checking Out...</h1>
 </body>
 </html>
