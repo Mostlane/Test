@@ -1,0 +1,116 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Portal Onboarding (Debug)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    #statusMsg {
+      font-weight: bold;
+      margin-top: 20px;
+    }
+  </style>
+  <script>
+    async function getDeviceId() {
+      const msg = navigator.userAgent + new Date().getTimezoneOffset();
+      return btoa(msg);
+    }
+
+    function getLocation(callback) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          position => callback(position.coords.latitude, position.coords.longitude),
+          () => callback(null, null)
+        );
+      } else {
+        callback(null, null);
+      }
+    }
+
+    function generateUsername(first, last) {
+      return `${first}.${last}`.replace(/\s+/g, '').toLowerCase();
+    }
+
+    async function submitForm(event) {
+      event.preventDefault();
+
+      document.getElementById("statusMsg").textContent = "Submitting...";
+      const firstName = document.getElementById("firstName").value.trim();
+      const lastName = document.getElementById("lastName").value.trim();
+      const email = document.getElementById("email").value;
+      const mobile = document.getElementById("mobile").value;
+      const jobRole = document.getElementById("jobRole").value;
+      const postcode = document.getElementById("postcode").value;
+      const deviceId = await getDeviceId();
+
+      getLocation((lat, lon) => {
+        const data = {
+          firstName, lastName, email, mobile, jobRole,
+          postcode, deviceId,
+          latitude: lat?.toString() || "",
+          longitude: lon?.toString() || ""
+        };
+
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2x5j07h/", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(data).toString()
+        })
+        .then(() => {
+          document.getElementById("statusMsg").textContent = "Success! Redirecting...";
+          setTimeout(() => {
+            window.location.href = "confirmation.html";
+          }, 1000);
+        })
+        .catch(() => {
+          document.getElementById("statusMsg").textContent = "Error submitting data. Please try again.";
+        });
+      });
+    }
+  </script>
+</head>
+<body class="onboard-body">
+  <style>
+    .onboard-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .content-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 20px;
+      max-width: 400px;
+      width: 90%;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+  </style>
+  <div class="content-box">
+  <div style="text-align: center; margin-top: 20px;">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="max-width: 200px; height: auto;">
+  </div>
+  <div id="form-section">
+    <h2>Portal Onboarding</h2>
+    <form onsubmit="submitForm(event)">
+      <input id="firstName" placeholder="First Name" required><br>
+      <input id="lastName" placeholder="Last Name" required><br>
+      <input id="email" type="email" placeholder="Email" required><br>
+      <input id="mobile" placeholder="Mobile"><br>
+      <input id="jobRole" placeholder="Job Role"><br>
+      <input id="postcode" placeholder="Home Postcode"><br>
+      <button type="submit">Submit</button>
+    </form>
+    <p id="statusMsg"></p>
+  </div>
+</div>
+</body>
+</html>
