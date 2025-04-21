@@ -1,93 +1,43 @@
+
 <!DOCTYPE html>
 <html>
 <head>
   <title>Check Out</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
   <script>
-    function getDeviceId() {
-      let id = localStorage.getItem("mostlane_device_id");
-      if (!id) {
-        id = "dev-" + Math.random().toString(36).substring(2, 10);
-        localStorage.setItem("mostlane_device_id", id);
-      }
-      return id;
-    }
-
-    function getLocation(callback) {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          pos => callback(pos.coords.latitude, pos.coords.longitude),
-          () => callback(null, null)
-        );
-      } else {
-        callback(null, null);
-      }
-    }
-
-    async function autoSubmit() {
-      const engineer = localStorage.getItem("engineerName") || "Unknown";
-      const deviceId = await getDeviceId();
-      const timestamp = new Date().toISOString();
-
-      getLocation((lat, lon) => {
+    window.onload = function() {
+      navigator.geolocation.getCurrentPosition(success, error);
+      function success(position) {
         const data = {
           status: "Check Out",
-          engineer,
-          deviceId,
-          timestamp,
-          latitude: lat?.toString() || "",
-          longitude: lon?.toString() || ""
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          device: navigator.userAgent,
+          engineer: localStorage.getItem("engineerName") || "Unknown"
         };
-
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
+        fetch("https://script.google.com/macros/s/AKfycbwMCEPphtuw6p7CA_vdNtW3MbFhbei65gVRxFsHN7YoPxS5MHsfISqh34aeGt_LaDPn/exec", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(data).toString()
-        })
-        .then(() => {
-          window.location.href = "confirmation.html?status=Check Out&lat=" + data.latitude + "&lon=" + data.longitude;
-        })
-        .catch(() => {
-          alert("Error submitting data.");
-        });
-      });
+        }).then(() => {
+          const now = new Date().toLocaleString();
+          window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
+        }).catch(() => alert("Error submitting data."));
+      }
+      function error() {
+        alert("Please enable location to check out.");
+      }
     }
-
-    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-      window.location.href = "login.html";
-    }
-
-    window.onload = autoSubmit;
   </script>
-</head>
-<body class="checkout-body">
-  <style>
-  .checkin-body, .checkout-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
   }
+</script>
 
-  h1 {
-    background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
-  }
-</style>
-  <h1>Check Out...</h1>
+</head>
+<body>
+  <h1>Checking Out...</h1>
 </body>
 </html>
