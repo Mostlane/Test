@@ -8,10 +8,22 @@
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      text-align: center;
-      padding: 40px;
       margin: 0;
+      padding: 0;
       min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .content-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 20px;
+      max-width: 400px;
+      width: 90%;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      text-align: center;
     }
       text-align: center;
       font-family: Arial, sans-serif;
@@ -38,10 +50,13 @@
   </style>
 </head>
 <body>
-  <img src="mostlane-logo.jpg" alt="Mostlane Logo">
+  
+  <div class="content-box">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="max-width: 200px; height: auto; margin-bottom: 20px;">
   <h1>Request Submitted</h1>
   <p>Your onboarding form has been successfully submitted.</p>
 
   <a class="button" href="login.html">Return to Login Page</a>
+</div>
 </body>
 </html>
