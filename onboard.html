@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -11,13 +12,9 @@
     }
   </style>
   <script>
-    function getDeviceId() {
-      let id = localStorage.getItem("mostlane_device_id");
-      if (!id) {
-        id = "dev-" + Math.random().toString(36).substring(2, 10);
-        localStorage.setItem("mostlane_device_id", id);
-      }
-      return id;
+    async function getDeviceId() {
+      const msg = navigator.userAgent + new Date().getTimezoneOffset();
+      return btoa(msg);
     }
 
     function getLocation(callback) {
@@ -74,6 +71,10 @@
   </script>
 </head>
 <body>
+  <div style="text-align: center; margin-bottom: 30px;">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="max-width: 200px; height: auto;">
+  </div>
+
   <div id="form-section">
     <h2>Portal Onboarding</h2>
     <form onsubmit="submitForm(event)">
@@ -87,11 +88,5 @@
     </form>
     <p id="statusMsg"></p>
   </div>
-
-<div style="text-align:center; margin-top: 40px;">
-  <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="max-width: 200px; height: auto; display:block; margin: 0 auto 20px;">
-  <a href="login.html" style="display:inline-block; padding: 10px 20px; background-color:#0078D4; color:white; text-decoration:none; border-radius:5px;">Return to Login Page</a>
-</div>
-
 </body>
 </html>
