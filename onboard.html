@@ -2,9 +2,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Portal Onboarding</title>
+  <title>Portal Onboarding (Debug)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="style.css">
+  <style>
+    #statusMsg {
+      font-weight: bold;
+      margin-top: 20px;
+    }
+  </style>
   <script>
     async function getDeviceId() {
       const msg = navigator.userAgent + new Date().getTimezoneOffset();
@@ -29,6 +35,7 @@
     async function submitForm(event) {
       event.preventDefault();
 
+      document.getElementById("statusMsg").textContent = "Submitting...";
       const firstName = document.getElementById("firstName").value.trim();
       const lastName = document.getElementById("lastName").value.trim();
       const email = document.getElementById("email").value;
@@ -38,7 +45,6 @@
       const deviceId = await getDeviceId();
 
       getLocation((lat, lon) => {
-        const username = generateUsername(firstName, lastName);
         const data = {
           firstName, lastName, email, mobile, jobRole,
           postcode, deviceId,
@@ -52,10 +58,13 @@
           body: new URLSearchParams(data).toString()
         })
         .then(() => {
-          window.location.href = "confirmation.html";
+          document.getElementById("statusMsg").textContent = "Success! Redirecting...";
+          setTimeout(() => {
+            window.location.href = "confirmation.html";
+          }, 1000);
         })
         .catch(() => {
-          alert("Error submitting data to Zapier.");
+          document.getElementById("statusMsg").textContent = "Error submitting data. Please try again.";
         });
       });
     }
@@ -73,6 +82,7 @@
       <input id="postcode" placeholder="Home Postcode"><br>
       <button type="submit">Submit</button>
     </form>
+    <p id="statusMsg"></p>
   </div>
 </body>
 </html>
