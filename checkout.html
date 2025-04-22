@@ -42,7 +42,7 @@
           body: new URLSearchParams(data).toString()
         })
         .then(() => {
-          window.location.href = "confirm.html?status=Check Out&latitude=" + data.latitude + "&longitude=" + data.longitude;
+          window.location.href = "confirmation.html?status=Check Out&lat=" + data.latitude + "&lon=" + data.longitude;
         })
         .catch(() => {
           alert("Error submitting data.");
