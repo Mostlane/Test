@@ -13,14 +13,7 @@
           status: "Check Out",
           lat: position.coords.latitude,
           lon: position.coords.longitude,
-          device: (function() {
-            let id = localStorage.getItem("mostlane_device_id");
-            if (!id) {
-              id = "dev-" + Math.random().toString(36).substring(2, 10);
-              localStorage.setItem("mostlane_device_id", id);
-            }
-            return id;
-          })(),
+          device: navigator.userAgent,
           engineer: localStorage.getItem("engineerName") || "Unknown"
         };
         fetch("https://script.google.com/macros/s/AKfycbwMCEPphtuw6p7CA_vdNtW3MbFhbei65gVRxFsHN7YoPxS5MHsfISqh34aeGt_LaDPn/exec", {
