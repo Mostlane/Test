@@ -35,20 +35,6 @@
           latitude: lat?.toString() || "",
           longitude: lon?.toString() || ""
         };
-        const now = new Date().toLocaleString("en-GB", { timeZone: "Europe/London" });
-
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(data).toString()
-        })
-        .then(() => {
-          window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
-        })
-        .catch(() => {
-          alert("Error submitting data.");
-        });
-
 
         fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
           method: "POST",
@@ -68,9 +54,7 @@
       window.location.href = "login.html";
     }
 
-    window.onload = function() {
-      setTimeout(autoSubmit, 2000); // Add 2s delay before triggering
-    };
+    window.onload = autoSubmit;
   </script>
 </head>
 <body>
