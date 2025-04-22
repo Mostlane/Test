@@ -54,7 +54,9 @@
       window.location.href = "login.html";
     }
 
-    window.onload = autoSubmit;
+    window.onload = function() {
+      setTimeout(autoSubmit, 2000); // Add 2s delay before triggering
+    };
   </script>
 </head>
 <body>
