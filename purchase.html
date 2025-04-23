@@ -9,7 +9,48 @@
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
       window.location.href = "login.html";
     }
-  </script>
+  
+    
+    
+    
+    
+    
+    
+    
+    async function populateDropdowns() {
+      try {
+        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+        const sites = (await siteRes.text()).trim().split("
+");
+        const suppliers = (await supplierRes.text()).trim().split("
+");
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
+</script>
 </head>
 <body class="main-body">
 <style>
@@ -63,7 +104,7 @@
   }
 </style>
 <script>
-  let engineerName = sessionStorage.getItem("mostlaneEmail") || "Unknown";
+  let engineerName = localStorage.getItem("engineerName") || "Unknown";
   let today = new Date().toISOString().slice(0, 10);
 
   function getLocationAndSubmit() {
@@ -129,6 +170,47 @@
       `;
     }
   }
+
+    
+    
+    
+    
+    
+    
+    
+    async function populateDropdowns() {
+      try {
+        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+        const sites = (await siteRes.text()).trim().split("
+");
+        const suppliers = (await supplierRes.text()).trim().split("
+");
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
 </script>
 
 <h1>Generate Purchase Order Reference</h1>
@@ -140,16 +222,10 @@
   <input type="text" value="" id="date" disabled />
 
   <label>Site Name:</label>
-  <select id="site">
-    <option value="Site A">Site A</option>
-    <option value="Site B">Site B</option>
-  </select>
+  <select id="site"></select>
 
   <label>Supplier:</label>
-  <select id="supplier">
-    <option value="Supplier X">Supplier X</option>
-    <option value="Supplier Y">Supplier Y</option>
-  </select>
+  <select id="supplier"></select>
 
   <label>Incident Number (if applicable):</label>
   <input type="text" id="incident" />
@@ -160,13 +236,346 @@
   <label>Cost:</label>
   <input type="text" id="cost" />
 
-  <button type="submit" class="button">Submit</button>
+  <button type="button" class="button" onclick="submitForm()">Submit</button>
   <a class="button" href="main.html">Back to Menu</a>
 </form>
 
 <script>
-  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
+  document.getElementById("engineer").value = engineerName;
   document.getElementById("date").value = today;
+
+    
+    
+    
+    
+    
+    
+    
+    async function populateDropdowns() {
+      try {
+        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+        const sites = (await siteRes.text()).trim().split("
+");
+        const suppliers = (await supplierRes.text()).trim().split("
+");
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
 </script>
+<script>window.onload = populateDropdowns;</script>
+<script>
+  async function populateDropdowns() {
+    try {
+      const [siteRes, supplierRes] = await Promise.all([
+        fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt"),
+        fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt")
+      ]);
+
+      const siteText = await siteRes.text();
+      const supplierText = await supplierRes.text();
+
+      const sites = siteText.split("\n").map(s => s.trim()).filter(s => s);
+      const suppliers = supplierText.split("\n").map(s => s.trim()).filter(s => s);
+
+      const siteDropdown = document.getElementById("site");
+      const supplierDropdown = document.getElementById("supplier");
+
+      siteDropdown.innerHTML = "";
+      sites.forEach(site => {
+        const option = document.createElement("option");
+        option.value = site;
+        option.textContent = site;
+        siteDropdown.appendChild(option);
+      });
+
+      supplierDropdown.innerHTML = "";
+      suppliers.forEach(supplier => {
+        const option = document.createElement("option");
+        option.value = supplier;
+        option.textContent = supplier;
+        supplierDropdown.appendChild(option);
+      });
+    } catch (err) {
+      alert("Failed to load dropdown data.");
+    }
+  }
+
+  window.onload = populateDropdowns;
+</script>
+
+
+<script>
+let engineerName = localStorage.getItem("engineerName") || "Unknown";
+let today = new Date().toISOString().slice(0, 10);
+
+async function fetchTextFile(url) {
+  const res = await fetch(url);
+  return (await res.text()).trim().split("\n").filter(Boolean);
+}
+
+async function generateReference(siteName, supplierName) {
+  const siteCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/site_codes.txt");
+  const supplierCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/supplier_codes.txt");
+  const logLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/reference_log.txt");
+
+  const siteCode = siteCodeLines.find(line => line.startsWith(siteName + "|"))?.split("|")[1] || "XXX";
+  const supplierCode = supplierCodeLines.find(line => line.startsWith(supplierName + "|"))?.split("|")[1] || "XX";
+
+  const count = logLines.filter(line => {
+    const parts = line.split("|");
+    return parts[0] === siteCode && parts[1] === supplierCode;
+  }).length;
+
+  const sequence = String(count + 1).padStart(3, '0');
+  return siteCode + supplierCode + sequence;
+}
+
+function showConfirmation(ref, lat, lon) {
+  const time = new Date().toLocaleString();
+  document.body.innerHTML = `
+    <div class="main-body">
+      <h1>Reference Submitted</h1>
+      <p><strong>Reference:</strong> ${ref}</p>
+      <p><strong>Time:</strong> ${time}</p>
+      <p><strong>GPS:</strong> ${lat}, ${lon}</p>
+      <a class="button" href="main.html">Return to Main Menu</a>
+    </div>
+  `;
+}
+
+async function submitForm() {
+  const site = document.getElementById("site").value;
+  const supplier = document.getElementById("supplier").value;
+  const incident = document.getElementById("incident").value;
+  const desc = document.getElementById("desc").value;
+  const cost = document.getElementById("cost").value;
+
+  const ref = await generateReference(site, supplier);
+
+  navigator.geolocation.getCurrentPosition(async function(position) {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+    const device = navigator.userAgent;
+
+    const payload = {
+      engineer: engineerName,
+      date: today,
+      site: site,
+      supplier: supplier,
+      incident: incident,
+      description: desc,
+      cost: cost,
+      reference: ref,
+      lat: lat,
+      lon: lon,
+      device: device
+    };
+
+    await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams(payload).toString()
+    });
+
+    showConfirmation(ref, lat, lon);
+  }, function() {
+    alert("Location access is required.");
+  });
+}
+
+window.onload = function() {
+  document.getElementById("engineer").value = engineerName;
+  document.getElementById("date").value = today;
+};
+</script>
+
+
+<script>
+async function fetchTextFile(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch: " + url);
+  return (await res.text()).trim().split("\n").filter(Boolean);
+}
+
+async function populateDropdowns() {
+  try {
+    const sites = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+    const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+    const siteDropdown = document.getElementById("site");
+    const supplierDropdown = document.getElementById("supplier");
+
+    siteDropdown.innerHTML = "";
+    sites.forEach(site => {
+      const opt = document.createElement("option");
+      opt.value = site;
+      opt.textContent = site;
+      siteDropdown.appendChild(opt);
+    });
+
+    supplierDropdown.innerHTML = "";
+    suppliers.forEach(supplier => {
+      const opt = document.createElement("option");
+      opt.value = supplier;
+      opt.textContent = supplier;
+      supplierDropdown.appendChild(opt);
+    });
+  } catch (error) {
+    alert("Error loading dropdowns: " + error.message);
+  }
+}
+
+window.onload = function() {
+  populateDropdowns();
+  const engineer = localStorage.getItem("engineerName") || "Unknown";
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("engineer").value = engineer;
+  document.getElementById("date").value = today;
+};
+</script>
+
+
+<script>
+async function fetchTextFile(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch: " + url);
+  return (await res.text()).trim().split("\n").filter(Boolean);
+}
+
+async function populateDropdowns() {
+  try {
+    const sites = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+    const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+    const siteDropdown = document.getElementById("site");
+    const supplierDropdown = document.getElementById("supplier");
+
+    siteDropdown.innerHTML = "";
+    sites.forEach(site => {
+      const opt = document.createElement("option");
+      opt.value = site;
+      opt.textContent = site;
+      siteDropdown.appendChild(opt);
+    });
+
+    supplierDropdown.innerHTML = "";
+    suppliers.forEach(supplier => {
+      const opt = document.createElement("option");
+      opt.value = supplier;
+      opt.textContent = supplier;
+      supplierDropdown.appendChild(opt);
+    });
+  } catch (error) {
+    alert("Error loading dropdowns: " + error.message);
+  }
+}
+
+async function generateReference(siteName, supplierName) {
+  const siteCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/site_codes.txt");
+  const supplierCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/supplier_codes.txt");
+  const logLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/reference_log.txt");
+
+  const siteCode = siteCodeLines.find(line => line.startsWith(siteName + "|"))?.split("|")[1] || "XXX";
+  const supplierCode = supplierCodeLines.find(line => line.startsWith(supplierName + "|"))?.split("|")[1] || "XX";
+
+  const count = logLines.filter(line => {
+    const parts = line.split("|");
+    return parts[0] === siteCode && parts[1] === supplierCode;
+  }).length;
+
+  const sequence = String(count + 1).padStart(3, '0');
+  return siteCode + supplierCode + sequence;
+}
+
+function showConfirmation(ref, lat, lon) {
+  const time = new Date().toLocaleString();
+  document.body.innerHTML = `
+    <div class="main-body">
+      <h1>Reference Submitted</h1>
+      <p><strong>Reference:</strong> ${ref}</p>
+      <p><strong>Time:</strong> ${time}</p>
+      <p><strong>GPS:</strong> ${lat}, ${lon}</p>
+      <a class="button" href="main.html">Return to Main Menu</a>
+    </div>
+  `;
+}
+
+async function submitForm() {
+  const site = document.getElementById("site").value;
+  const supplier = document.getElementById("supplier").value;
+  const incident = document.getElementById("incident").value;
+  const desc = document.getElementById("desc").value;
+  const cost = document.getElementById("cost").value;
+
+  const engineerName = localStorage.getItem("engineerName") || "Unknown";
+  const today = new Date().toISOString().slice(0, 10);
+
+  const ref = await generateReference(site, supplier);
+
+  navigator.geolocation.getCurrentPosition(async function(position) {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+    const device = navigator.userAgent;
+
+    const payload = {
+      engineer: engineerName,
+      date: today,
+      site: site,
+      supplier: supplier,
+      incident: incident,
+      description: desc,
+      cost: cost,
+      reference: ref,
+      lat: lat,
+      lon: lon,
+      device: device
+    };
+
+    await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams(payload).toString()
+    });
+
+    showConfirmation(ref, lat, lon);
+  }, function() {
+    alert("Location access is required.");
+  });
+}
+
+window.onload = function() {
+  populateDropdowns();
+  document.getElementById("engineer").value = localStorage.getItem("engineerName") || "Unknown";
+  document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+};
+</script>
+
 </body>
 </html>
