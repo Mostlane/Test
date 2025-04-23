@@ -9,48 +9,7 @@
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
       window.location.href = "login.html";
     }
-  
-    
-    
-    
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
-        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
-
-        const sites = (await siteRes.text()).trim().split("
-");
-        const suppliers = (await supplierRes.text()).trim().split("
-");
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
-</script>
+  </script>
 </head>
 <body class="main-body">
 <style>
@@ -170,47 +129,6 @@
       `;
     }
   }
-
-    
-    
-    
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
-        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
-
-        const sites = (await siteRes.text()).trim().split("
-");
-        const suppliers = (await supplierRes.text()).trim().split("
-");
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
 </script>
 
 <h1>Generate Purchase Order Reference</h1>
@@ -249,88 +167,6 @@
 <script>
   document.getElementById("engineer").value = engineerName;
   document.getElementById("date").value = today;
-
-    
-    
-    
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const siteRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
-        const supplierRes = await fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
-
-        const sites = (await siteRes.text()).trim().split("
-");
-        const suppliers = (await supplierRes.text()).trim().split("
-");
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
 </script>
-<script>window.onload = populateDropdowns;</script>
-<script>
-  async function populateDropdowns() {
-    try {
-      const [siteRes, supplierRes] = await Promise.all([
-        fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt"),
-        fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt")
-      ]);
-
-      const siteText = await siteRes.text();
-      const supplierText = await supplierRes.text();
-
-      const sites = siteText.split("\n").map(s => s.trim()).filter(s => s);
-      const suppliers = supplierText.split("\n").map(s => s.trim()).filter(s => s);
-
-      const siteDropdown = document.getElementById("site");
-      const supplierDropdown = document.getElementById("supplier");
-
-      siteDropdown.innerHTML = "";
-      sites.forEach(site => {
-        const option = document.createElement("option");
-        option.value = site;
-        option.textContent = site;
-        siteDropdown.appendChild(option);
-      });
-
-      supplierDropdown.innerHTML = "";
-      suppliers.forEach(supplier => {
-        const option = document.createElement("option");
-        option.value = supplier;
-        option.textContent = supplier;
-        supplierDropdown.appendChild(option);
-      });
-    } catch (err) {
-      alert("Failed to load dropdown data.");
-    }
-  }
-
-  window.onload = populateDropdowns;
-</script>
-
 </body>
 </html>
