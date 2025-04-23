@@ -459,5 +459,123 @@ window.onload = function() {
 };
 </script>
 
+
+<script>
+async function fetchTextFile(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch: " + url);
+  return (await res.text()).trim().split("\n").filter(Boolean);
+}
+
+async function populateDropdowns() {
+  try {
+    const sites = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+    const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+    const siteDropdown = document.getElementById("site");
+    const supplierDropdown = document.getElementById("supplier");
+
+    siteDropdown.innerHTML = "";
+    sites.forEach(site => {
+      const opt = document.createElement("option");
+      opt.value = site;
+      opt.textContent = site;
+      siteDropdown.appendChild(opt);
+    });
+
+    supplierDropdown.innerHTML = "";
+    suppliers.forEach(supplier => {
+      const opt = document.createElement("option");
+      opt.value = supplier;
+      opt.textContent = supplier;
+      supplierDropdown.appendChild(opt);
+    });
+  } catch (error) {
+    alert("Error loading dropdowns: " + error.message);
+  }
+}
+
+async function generateReference(siteName, supplierName) {
+  const siteCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/site_codes.txt");
+  const supplierCodeLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/supplier_codes.txt");
+  const logLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/reference_log.txt");
+
+  const siteCode = siteCodeLines.find(line => line.startsWith(siteName + "|"))?.split("|")[1] || "XXX";
+  const supplierCode = supplierCodeLines.find(line => line.startsWith(supplierName + "|"))?.split("|")[1] || "XX";
+
+  const count = logLines.filter(line => {
+    const parts = line.split("|");
+    return parts[0] === siteCode && parts[1] === supplierCode;
+  }).length;
+
+  const sequence = String(count + 1).padStart(3, '0');
+  return siteCode + supplierCode + sequence;
+}
+
+function showConfirmation(ref, lat, lon) {
+  const time = new Date().toLocaleString();
+  document.body.innerHTML = `
+    <div class="main-body">
+      <h1>Reference Submitted</h1>
+      <p><strong>Reference:</strong> ${ref}</p>
+      <p><strong>Time:</strong> ${time}</p>
+      <p><strong>GPS:</strong> ${lat}, ${lon}</p>
+      <a class="button" href="main.html">Return to Main Menu</a>
+    </div>
+  `;
+}
+
+async function submitForm() {
+  const site = document.getElementById("site").value;
+  const supplier = document.getElementById("supplier").value;
+  const incident = document.getElementById("incident").value;
+  const desc = document.getElementById("desc").value;
+  const cost = document.getElementById("cost").value;
+
+  const engineerName = localStorage.getItem("engineerName") || "Unknown";
+  const today = new Date().toISOString().slice(0, 10);
+
+  const ref = await generateReference(site, supplier);
+
+  navigator.geolocation.getCurrentPosition(async function(position) {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+    const device = navigator.userAgent;
+
+    const payload = {
+      engineer: engineerName,
+      date: today,
+      site: site,
+      supplier: supplier,
+      incident: incident,
+      description: desc,
+      cost: cost,
+      reference: ref,
+      lat: lat,
+      lon: lon,
+      device: device
+    };
+
+    await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams(payload).toString()
+    });
+
+    showConfirmation(ref, lat, lon);
+  }, function() {
+    alert("Location access is required.");
+  });
+}
+
+window.onload = function() {
+  populateDropdowns();
+  document.getElementById("engineer").value = localStorage.getItem("engineerName") || "Unknown";
+  document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+};
+</script>
+
 </body>
 </html>
