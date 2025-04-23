@@ -104,7 +104,7 @@
   }
 </style>
 <script>
-  let engineerName = localStorage.getItem("engineerName") || "Unknown";
+  let engineerName = sessionStorage.getItem("mostlaneUsername") || "Unknown";
   let today = new Date().toISOString().slice(0, 10);
 
   function getLocationAndSubmit() {
@@ -328,7 +328,7 @@
 
 
 <script>
-let engineerName = localStorage.getItem("engineerName") || "Unknown";
+let engineerName = sessionStorage.getItem("mostlaneUsername") || "Unknown";
 let today = new Date().toISOString().slice(0, 10);
 
 async function fetchTextFile(url) {
@@ -356,6 +356,32 @@ async function generateReference(siteName, supplierName) {
 function showConfirmation(ref, lat, lon) {
   const time = new Date().toLocaleString();
   document.body.innerHTML = `
+<style>
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: 180%;
+    margin: 0;
+    padding: 40px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #003366;
+  }
+  .button {
+    margin-top: 20px;
+    padding: 12px 20px;
+    font-size: 16px;
+    text-align: center;
+    color: #ffffff;
+    background-color: rgba(0, 74, 153, 0.6);
+    text-decoration: none;
+    border-radius: 6px;
+  }
+</style>
+
     <div class="main-body">
       <h1>Reference Submitted</h1>
       <p><strong>Reference:</strong> ${ref}</p>
@@ -515,6 +541,32 @@ async function generateReference(siteName, supplierName) {
 function showConfirmation(ref, lat, lon) {
   const time = new Date().toLocaleString();
   document.body.innerHTML = `
+<style>
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: 180%;
+    margin: 0;
+    padding: 40px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #003366;
+  }
+  .button {
+    margin-top: 20px;
+    padding: 12px 20px;
+    font-size: 16px;
+    text-align: center;
+    color: #ffffff;
+    background-color: rgba(0, 74, 153, 0.6);
+    text-decoration: none;
+    border-radius: 6px;
+  }
+</style>
+
     <div class="main-body">
       <h1>Reference Submitted</h1>
       <p><strong>Reference:</strong> ${ref}</p>
@@ -572,7 +624,7 @@ async function submitForm() {
 
 window.onload = function() {
   populateDropdowns();
-  document.getElementById("engineer").value = localStorage.getItem("engineerName") || "Unknown";
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUsername") || "Unknown";
   document.getElementById("date").value = new Date().toISOString().slice(0, 10);
 };
 </script>
