@@ -11,14 +11,15 @@
     }
   
     
+    
     async function populateDropdowns() {
       try {
         const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/x-www-form-urlencoded"
           },
-          body: JSON.stringify({ request: "dropdowns" })
+          body: "request=dropdowns"
         });
         const data = await res.json();
 
@@ -167,14 +168,15 @@
   }
 
     
+    
     async function populateDropdowns() {
       try {
         const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/x-www-form-urlencoded"
           },
-          body: JSON.stringify({ request: "dropdowns" })
+          body: "request=dropdowns"
         });
         const data = await res.json();
 
@@ -241,14 +243,15 @@
   document.getElementById("date").value = today;
 
     
+    
     async function populateDropdowns() {
       try {
         const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/x-www-form-urlencoded"
           },
-          body: JSON.stringify({ request: "dropdowns" })
+          body: "request=dropdowns"
         });
         const data = await res.json();
 
