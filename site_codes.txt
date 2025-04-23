@@ -1,0 +1,10 @@
+Gosport Retail|GX3
+Fareham Store|FHM
+Southampton Depot|SOT
+Portsmouth Unit|PMT
+Winchester Hub|WCH
+Andover Branch|AND
+Eastleigh Office|EST
+Bournemouth South|BTH
+Havant Centre|HVT
+Totton Warehouse|TOT
