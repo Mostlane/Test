@@ -9,40 +9,7 @@
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
       window.location.href = "login.html";
     }
-  
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/?request=dropdowns");
-        const data = await res.json();
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        data.sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        data.suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
-</script>
+  </script>
 </head>
 <body class="main-body">
 <style>
@@ -96,7 +63,7 @@
   }
 </style>
 <script>
-  let engineerName = localStorage.getItem("engineerName") || "Unknown";
+  let engineerName = sessionStorage.getItem("mostlaneEmail") || "Unknown";
   let today = new Date().toISOString().slice(0, 10);
 
   function getLocationAndSubmit() {
@@ -162,39 +129,6 @@
       `;
     }
   }
-
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/?request=dropdowns");
-        const data = await res.json();
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        data.sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        data.suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
 </script>
 
 <h1>Generate Purchase Order Reference</h1>
@@ -231,41 +165,8 @@
 </form>
 
 <script>
-  document.getElementById("engineer").value = engineerName;
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
   document.getElementById("date").value = today;
-
-    
-    
-    
-    
-    async function populateDropdowns() {
-      try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/?request=dropdowns");
-        const data = await res.json();
-
-        const siteDropdown = document.getElementById("site");
-        const supplierDropdown = document.getElementById("supplier");
-
-        siteDropdown.innerHTML = "";
-        data.sites.forEach(site => {
-          const opt = document.createElement("option");
-          opt.value = site;
-          opt.textContent = site;
-          siteDropdown.appendChild(opt);
-        });
-
-        supplierDropdown.innerHTML = "";
-        data.suppliers.forEach(supplier => {
-          const opt = document.createElement("option");
-          opt.value = supplier;
-          opt.textContent = supplier;
-          supplierDropdown.appendChild(opt);
-        });
-      } catch (err) {
-        alert("Could not load site or supplier options.");
-      }
-    }
-
 </script>
-<script>window.onload = populateDropdowns;</script></body>
+</body>
 </html>
