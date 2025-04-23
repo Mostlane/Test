@@ -222,16 +222,10 @@
   <input type="text" value="" id="date" disabled />
 
   <label>Site Name:</label>
-  <select id="site">
-    <option value="Site A">Site A</option>
-    <option value="Site B">Site B</option>
-  </select>
+  <select id="site"></select>
 
   <label>Supplier:</label>
-  <select id="supplier">
-    <option value="Supplier X">Supplier X</option>
-    <option value="Supplier Y">Supplier Y</option>
-  </select>
+  <select id="supplier"></select>
 
   <label>Incident Number (if applicable):</label>
   <input type="text" id="incident" />
@@ -416,6 +410,51 @@ async function submitForm() {
 
 window.onload = function() {
   document.getElementById("engineer").value = engineerName;
+  document.getElementById("date").value = today;
+};
+</script>
+
+
+<script>
+async function fetchTextFile(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to fetch: " + url);
+  return (await res.text()).trim().split("\n").filter(Boolean);
+}
+
+async function populateDropdowns() {
+  try {
+    const sites = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/sites.txt");
+    const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+
+    const siteDropdown = document.getElementById("site");
+    const supplierDropdown = document.getElementById("supplier");
+
+    siteDropdown.innerHTML = "";
+    sites.forEach(site => {
+      const opt = document.createElement("option");
+      opt.value = site;
+      opt.textContent = site;
+      siteDropdown.appendChild(opt);
+    });
+
+    supplierDropdown.innerHTML = "";
+    suppliers.forEach(supplier => {
+      const opt = document.createElement("option");
+      opt.value = supplier;
+      opt.textContent = supplier;
+      supplierDropdown.appendChild(opt);
+    });
+  } catch (error) {
+    alert("Error loading dropdowns: " + error.message);
+  }
+}
+
+window.onload = function() {
+  populateDropdowns();
+  const engineer = localStorage.getItem("engineerName") || "Unknown";
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById("engineer").value = engineer;
   document.getElementById("date").value = today;
 };
 </script>
