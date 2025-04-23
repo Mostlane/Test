@@ -10,9 +10,16 @@
       window.location.href = "login.html";
     }
   
+    
     async function populateDropdowns() {
       try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ request: "dropdowns" })
+        });
         const data = await res.json();
 
         const siteDropdown = document.getElementById("site");
@@ -159,9 +166,16 @@
     }
   }
 
+    
     async function populateDropdowns() {
       try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ request: "dropdowns" })
+        });
         const data = await res.json();
 
         const siteDropdown = document.getElementById("site");
@@ -226,9 +240,16 @@
   document.getElementById("engineer").value = engineerName;
   document.getElementById("date").value = today;
 
+    
     async function populateDropdowns() {
       try {
-        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ request: "dropdowns" })
+        });
         const data = await res.json();
 
         const siteDropdown = document.getElementById("site");
