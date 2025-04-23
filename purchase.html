@@ -9,7 +9,36 @@
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
       window.location.href = "login.html";
     }
-  </script>
+  
+    async function populateDropdowns() {
+      try {
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const data = await res.json();
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        data.sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        data.suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
+</script>
 </head>
 <body class="main-body">
 <style>
@@ -129,6 +158,35 @@
       `;
     }
   }
+
+    async function populateDropdowns() {
+      try {
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const data = await res.json();
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        data.sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        data.suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
 </script>
 
 <h1>Generate Purchase Order Reference</h1>
@@ -167,6 +225,35 @@
 <script>
   document.getElementById("engineer").value = engineerName;
   document.getElementById("date").value = today;
+
+    async function populateDropdowns() {
+      try {
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/2xny0l7/");
+        const data = await res.json();
+
+        const siteDropdown = document.getElementById("site");
+        const supplierDropdown = document.getElementById("supplier");
+
+        siteDropdown.innerHTML = "";
+        data.sites.forEach(site => {
+          const opt = document.createElement("option");
+          opt.value = site;
+          opt.textContent = site;
+          siteDropdown.appendChild(opt);
+        });
+
+        supplierDropdown.innerHTML = "";
+        data.suppliers.forEach(supplier => {
+          const opt = document.createElement("option");
+          opt.value = supplier;
+          opt.textContent = supplier;
+          supplierDropdown.appendChild(opt);
+        });
+      } catch (err) {
+        alert("Could not load site or supplier options.");
+      }
+    }
+
 </script>
-</body>
+<script>window.onload = populateDropdowns;</script></body>
 </html>
