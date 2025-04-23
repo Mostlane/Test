@@ -5,57 +5,105 @@
   <title>Generate Purchase Order Reference</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
-<script>
-  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    window.location.href = "login.html";
-  }
-</script>
+  <script>
+    let engineerName = localStorage.getItem("engineerName") || "Unknown";
+    let today = new Date().toISOString().slice(0, 10);
 
+    function getLocationAndSubmit() {
+      if (!navigator.geolocation) {
+        showErrorScreen();
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(success, error);
+
+      function success(position) {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const device = navigator.userAgent;
+
+        const site = document.getElementById("site").value;
+        const supplier = document.getElementById("supplier").value;
+        const incident = document.getElementById("incident").value;
+        const desc = document.getElementById("desc").value;
+        const cost = document.getElementById("cost").value;
+
+        const data = {
+          engineer: engineerName,
+          date: today,
+          site: site,
+          supplier: supplier,
+          incident: incident,
+          description: desc,
+          cost: cost,
+          lat: lat,
+          lon: lon,
+          device: device
+        };
+
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: new URLSearchParams(data).toString()
+        }).then(() => {
+          window.location.href = "confirm.html?status=Purchase Reference Submitted&lat=" + lat + "&lon=" + lon + "&time=" + encodeURIComponent(new Date().toLocaleString());
+        }).catch(() => {
+          alert("Error submitting data.");
+        });
+      }
+
+      function error() {
+        showErrorScreen();
+      }
+
+      function showErrorScreen() {
+        document.body.innerHTML = `
+          <h1>Location Access Required</h1>
+          <p>Please enable location to generate a reference.</p>
+          <p style="color:#b00000;">Submission was not completed.</p>
+          <p>Instructions:</p>
+          <ul style="text-align:left; max-width:500px; margin:auto;">
+            <li><strong>iPhone:</strong> Settings > Safari > Location > Allow</li>
+            <li><strong>Android:</strong> Settings > Apps > Browser > Permissions > Location</li>
+          </ul>
+          <p>If needed, call <a href="tel:02380262000">02380 262000</a></p>
+        `;
+      }
+    }
+  </script>
 </head>
-<body class="purchase-body">
-  <style>
-  body.purchase-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
-  }
-
-  h1 {
-    background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
-  }
-
-  </style>
+<body>
   <h1>Generate Purchase Order Reference</h1>
-  <p>This form links to your Microsoft Form.</p>
-  <a class="button" href="https://forms.office.com/e/pBsA2XXM6Q" target="_blank">Open Form</a>
-  <a class="button" href="main.html">Back to Menu</a>
+  <form onsubmit="event.preventDefault(); getLocationAndSubmit();">
+    <label>Engineer:</label>
+    <input type="text" value="" id="engineer" disabled /><br>
+    <label>Date:</label>
+    <input type="text" value="" id="date" disabled /><br>
+    <label>Site Name:</label>
+    <select id="site">
+      <option value="Site A">Site A</option>
+      <option value="Site B">Site B</option>
+    </select><br>
+    <label>Supplier:</label>
+    <select id="supplier">
+      <option value="Supplier X">Supplier X</option>
+      <option value="Supplier Y">Supplier Y</option>
+    </select><br>
+    <label>Incident Number (if applicable):</label>
+    <input type="text" id="incident" /><br>
+    <label>Short Description:</label>
+    <input type="text" id="desc" /><br>
+    <label>Cost:</label>
+    <input type="text" id="cost" /><br><br>
+    <button type="submit" class="button">Submit</button>
+    <br>
+    <a class="button" href="main.html">Back to Menu</a>
+  </form>
+  <script>
+    document.getElementById("engineer").value = engineerName;
+    document.getElementById("date").value = today;
+  </script>
 </body>
 </html>
