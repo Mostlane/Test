@@ -16,5 +16,24 @@
     "25th Aug 2025 \u2013 Summer Bank Holiday",
     "25th Dec 2025 \u2013 Christmas Day",
     "26th Dec 2025 \u2013 Boxing Day"
+  ],
+  "shutdown_dates": [
+    "24th Dec 2025 \u2013 Company Shutdown",
+    "25th Dec 2025 \u2013 Christmas Day",
+    "26th Dec 2025 \u2013 Boxing Day"
+  ],
+  "holiday_history": [
+    {
+      "range": "10th \u2013 12th Apr 2025",
+      "type": "Annual Leave"
+    },
+    {
+      "range": "15th \u2013 16th Mar 2025",
+      "type": "Sick Leave"
+    },
+    {
+      "range": "1st \u2013 2nd Jan 2025",
+      "type": "Annual Leave"
+    }
   ]
 }

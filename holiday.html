@@ -108,10 +108,17 @@
         <p><strong>Bank Holiday List:</strong></p>
         <ul id="bankList"></ul>
       </div>
+    
+        <p><strong>Compulsory Shutdown Dates:</strong></p>
+        <ul id="shutdownList"></ul>
+
+        <p><strong>Holiday History:</strong></p>
+        <ul id="historyList"></ul>
+      </div>
     </div>
-  </div>
 
   <script>
+
     fetch('sample-holiday-data.json')
       .then(res => res.json())
       .then(data => {
@@ -123,6 +130,21 @@
         document.getElementById("remaining").innerText = data.remaining_to_accumulate;
 
         const list = document.getElementById("bankList");
+        
+        const shutdownList = document.getElementById("shutdownList");
+        data.shutdown_dates.forEach(date => {
+          const li = document.createElement("li");
+          li.innerText = date;
+          shutdownList.appendChild(li);
+        });
+
+        const historyList = document.getElementById("historyList");
+        data.holiday_history.forEach(entry => {
+          const li = document.createElement("li");
+          li.innerText = entry.range + " – " + entry.type;
+          historyList.appendChild(li);
+        });
+
         data.bank_holiday_list.forEach(holiday => {
           const li = document.createElement("li");
           li.innerText = holiday;
