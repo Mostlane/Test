@@ -1,0 +1,20 @@
+{
+  "email": "jamie@mostlane.co.uk",
+  "allowance": 28,
+  "used": 7,
+  "booked": 4,
+  "shutdown": 3,
+  "bank_holidays": 8,
+  "accumulated": 10.5,
+  "remaining_to_accumulate": 7.5,
+  "bank_holiday_list": [
+    "1st Jan 2025 \u2013 New Year's Day",
+    "18th Apr 2025 \u2013 Good Friday",
+    "21st Apr 2025 \u2013 Easter Monday",
+    "5th May 2025 \u2013 Early May Bank Holiday",
+    "26th May 2025 \u2013 Spring Bank Holiday",
+    "25th Aug 2025 \u2013 Summer Bank Holiday",
+    "25th Dec 2025 \u2013 Christmas Day",
+    "26th Dec 2025 \u2013 Boxing Day"
+  ]
+}
