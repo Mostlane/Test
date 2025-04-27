@@ -2,28 +2,103 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Mostlane Portal Login</title>
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body class="login-body">
-    <div class="login-container">
-        <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="login-logo">
-        <form id="loginForm">
-            <input type="text" id="username" placeholder="Username" required>
-            <input type="password" id="password" placeholder="Password" required>
-            <button type="submit">Sign In</button>
-            <p id="error" class="error-message"></p>
-            <p class="signup-link"><a href="https://your-signup-link">Sign Up</a></p>
-        </form>
-    </div>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mostlane Portal Login</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .login-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 25px;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 320px;
+      text-align: center;
+    }
+    .login-box img {
+      height: 60px;
+      margin-bottom: 20px;
+    }
+    .login-box input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .login-box button {
+      background-color: #0066cc;
+      color: white;
+      padding: 12px;
+      width: 100%;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .login-box a {
+      display: block;
+      margin-top: 15px;
+      font-size: 14px;
+      color: #0066cc;
+      text-decoration: none;
+    }
+    .login-box p#error {
+      color: red;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+  
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  width: 100%;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
 
+  
+.login-container {
+  
+}
+
+  </style>
+</head>
+<body>
+  
+  <div class="login-box">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
+    <form id="loginForm">
+      <input type="text" id="username" placeholder="Email address" required />
+      <input type="password" id="password" placeholder="Password" required />
+      <button type="submit">Sign in</button>
+      <p id="error"></p>
+    </form>
+    <a href="onboard.html">Sign up</a>
+  </div>
+  
 <script>
-// Hardcoded admin credentials
+// Hardcoded Admin credentials
 const adminUsername = "Admin"; // Capital A
 const adminPasswordHash = "7de84fd55c26dbc28df9421e507cdc42981ff57e5f88af6d0066d6a676989a6d";
 
-// Function to hash password input
+// Function to hash the password
 async function hashPassword(password) {
   const msgUint8 = new TextEncoder().encode(password);
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
@@ -33,17 +108,15 @@ async function hashPassword(password) {
 }
 
 // Login function
-document.getElementById('loginForm').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  const enteredUsername = document.getElementById('username').value.trim();
-  const enteredPassword = document.getElementById('password').value.trim();
+async function login() {
+  const enteredUsername = document.getElementById("username").value.trim();
+  const enteredPassword = document.getElementById("password").value.trim();
 
   if (enteredUsername === adminUsername) {
     const hashed = await hashPassword(enteredPassword);
     if (hashed === adminPasswordHash) {
-      // Admin login successful
       sessionStorage.setItem('mostlaneLoggedIn', 'true');
-      sessionStorage.setItem('filePath', 'https://yourcompany.sharepoint.com/sites/Portal/Admin'); // Update this URL if needed
+      sessionStorage.setItem('filePath', 'https://yourcompany.sharepoint.com/sites/Portal/Admin'); // Update path if needed
       window.location.href = "main.html";
       return;
     } else {
@@ -52,7 +125,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
     }
   }
 
-  // Normal user login using users.json
+  // Fetch normal users from users.json
   fetch('https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/users.json')
     .then(response => response.json())
     .then(users => {
@@ -67,9 +140,10 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
     })
     .catch(error => {
       console.error('Error fetching users.json:', error);
-      document.getElementById("error").textContent = "Login system error. Please contact admin.";
+      document.getElementById("error").textContent = "Login system error.";
     });
-});
+}
 </script>
+
 </body>
 </html>
