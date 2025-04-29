@@ -87,19 +87,22 @@ input[type="email"] {
     <form id="loginForm">
       <input type="text" id="username" placeholder="Email address" required />
       <input type="password" id="password" placeholder="Password" required />
+<div class="checkbox-container"><input type="checkbox" id="showPassword" onclick="togglePassword()"> Show Password</div>
+<div class="checkbox-container"><input type="checkbox" id="rememberMe"> Remember Me</div>
       <button type="submit">Sign in</button>
       <p id="error"></p>
     </form>
     <a href="onboard.html">Sign up</a>
   </div>
   
+
 <script>
 const adminUsername = "Admin";
 const adminPasswordHash = "7de84fd55c26dbc28df9421e507cdc42981ff57e5f88af6d0066d6a676989a6d";
 
 function togglePassword() {
-  const passwordField = document.getElementById("password");
-  passwordField.type = passwordField.type === "password" ? "text" : "password";
+  const pwField = document.getElementById("password");
+  pwField.type = pwField.type === "password" ? "text" : "password";
 }
 
 async function hashPassword(password) {
@@ -110,15 +113,24 @@ async function hashPassword(password) {
   return hashHex;
 }
 
-async function login() {
-  const enteredUsername = document.getElementById("username").value.trim();
-  const enteredPassword = document.getElementById("password").value.trim();
+async function login(e) {
+  if (e) e.preventDefault();
 
-  if (enteredUsername === adminUsername) {
-    const hashed = await hashPassword(enteredPassword);
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const rememberMe = document.getElementById("rememberMe").checked;
+
+  if (rememberMe) {
+    localStorage.setItem("rememberedUsername", username);
+  } else {
+    localStorage.removeItem("rememberedUsername");
+  }
+
+  if (username === adminUsername) {
+    const hashed = await hashPassword(password);
     if (hashed === adminPasswordHash) {
-      sessionStorage.setItem('mostlaneLoggedIn', 'true');
-      sessionStorage.setItem('filePath', 'https://yourcompany.sharepoint.com/sites/Portal/Admin');
+      sessionStorage.setItem("mostlaneLoggedIn", "true");
+      sessionStorage.setItem("filePath", "https://yourcompany.sharepoint.com/sites/Portal/Admin");
       window.location.href = "main.html";
       return;
     } else {
@@ -127,24 +139,33 @@ async function login() {
     }
   }
 
-  fetch('https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/users.json')
+  fetch("https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/users.json")
     .then(response => response.json())
     .then(users => {
-      const user = users.find(u => u.username.toLowerCase() === enteredUsername.toLowerCase() && u.password === enteredPassword);
+      const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
       if (user) {
-        sessionStorage.setItem('mostlaneLoggedIn', 'true');
-        sessionStorage.setItem('filePath', user.filepath);
+        sessionStorage.setItem("mostlaneLoggedIn", "true");
+        sessionStorage.setItem("filePath", user.filepath);
         window.location.href = "main.html";
       } else {
         document.getElementById("error").textContent = "Invalid login credentials.";
       }
     })
     .catch(error => {
-      console.error('Error fetching users.json:', error);
+      console.error("Login error:", error);
       document.getElementById("error").textContent = "Login system error.";
     });
 }
+
+window.onload = function() {
+  const remembered = localStorage.getItem("rememberedUsername");
+  if (remembered) {
+    document.getElementById("username").value = remembered;
+    document.getElementById("rememberMe").checked = true;
+  }
+};
 </script>
+
 
 </body>
 </html>
