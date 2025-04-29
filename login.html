@@ -86,18 +86,8 @@ input[type="email"] {
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
     <form id="loginForm">
       <input type="text" id="username" placeholder="Email address" required />
-      <div class="form-row"><div class="form-row">
-<div class="form-row password-wrapper" style="position: relative;">
-  <input type="password" id="password" placeholder="Password" required style="padding-right: 30px;">
-  <span onclick="togglePassword()" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 14px;">👁️</span>
-</div>
-</div>
-</div>
-
-
-
-
-      <button type="submit" onclick="login(event)">Sign in</button>
+      <input type="password" id="password" placeholder="Password" required />
+      <button type="submit">Sign in</button>
       <p id="error"></p>
     </form>
     <a href="onboard.html">Sign up</a>
@@ -139,8 +129,7 @@ async function login(e) {
     }
   }
 
-  // If not Admin, check users.json
-  fetch("https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/users.json")
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/users.json")
     .then(response => response.json())
     .then(users => {
       const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
@@ -154,7 +143,7 @@ async function login(e) {
     })
     .catch(error => {
       console.error("Login error:", error);
-      document.getElementById("error").textContent = "Login system error.";
+      document.getElementById("error").textContent = "Unable to verify user account. Please try again or contact admin.";
     });
 }
 </script>
