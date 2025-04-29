@@ -86,12 +86,13 @@ input[type="email"] {
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
     <form id="loginForm">
       <input type="text" id="username" placeholder="Email address" required />
-      <div class="form-row"><div class="form-row"><input type="password" id="password" placeholder="Password" required /></div>
-<div class="form-row" style="margin-top: 8px;">
-  <label style="font-size: 13px; display: flex; align-items: center; gap: 6px;">
-    <input type="checkbox" id="showPassword" style="transform: scale(0.8);" onclick="togglePassword()"> Show Password
-  </label>
-</div></div>
+      <div class="form-row"><div class="form-row">
+<div class="form-row password-wrapper" style="position: relative;">
+  <input type="password" id="password" placeholder="Password" required style="padding-right: 30px;">
+  <span onclick="togglePassword()" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; font-size: 14px;">👁️</span>
+</div>
+</div>
+</div>
 
 
 
