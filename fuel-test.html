@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Fuel Test</title>
+  <title>Fuel Claim Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     body {
@@ -77,7 +77,7 @@
                Chargeable: ${data.deductedMiles} mi<br>
                Claim: £${data.claim}`;
           } else {
-            document.getElementById("result").innerText = "Mileage unavailable – check format";
+            document.getElementById("result").innerText = "Mileage unavailable – check postcode";
           }
         } catch (err) {
           document.getElementById("result").innerText = "Error contacting server";
