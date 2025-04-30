@@ -103,6 +103,7 @@
   </div>
 
   <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyqW3rB5_7TO1VMI2c6EC3g-fnAgMJmbAC_zz_3NKw6kTcyvlK2YhKHO75xZr3nbvHj/exec";
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const container = document.getElementById('days-container');
 
@@ -146,20 +147,34 @@
 
     async function calculateMileage(day) {
       const inputs = document.querySelectorAll(`#postcodes-${day} input`);
-      const sites = Array.from(inputs).map(i => i.value.trim()).filter(v => v);
+      const sites = Array.from(inputs)
+        .map(i => i.value.trim().toUpperCase().replace(/\s+/g, ''))
+        .filter(v => v);
       if (sites.length === 0) return;
 
-      const response = await fetch("https://script.google.com/macros/s/AKfycbyqW3rB5_7TO1VMI2c6EC3g-fnAgMJmbAC_zz_3NKw6kTcyvlK2YhKHO75xZr3nbvHj/exec", {
-        method: "POST",
-        body: JSON.stringify({ sites }),
-        headers: { "Content-Type": "application/json" }
-      });
+      const totalField = document.getElementById(`${day}-total`);
+      const chargeField = document.getElementById(`${day}-chargeable`);
+      const claimField = document.getElementById(`${day}-claim`);
 
-      const result = await response.json();
-      if (result.totalMiles) {
-        document.getElementById(`${day}-total`).value = result.totalMiles + " mi";
-        document.getElementById(`${day}-chargeable`).value = result.deductedMiles + " mi";
-        document.getElementById(`${day}-claim`).value = "£" + result.claim;
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          body: JSON.stringify({ sites }),
+          headers: { "Content-Type": "application/json" }
+        });
+
+        const result = await response.json();
+        if (result.totalMiles) {
+          totalField.value = result.totalMiles + " mi";
+          chargeField.value = result.deductedMiles + " mi";
+          claimField.value = "£" + result.claim;
+        } else {
+          throw new Error("Missing response data");
+        }
+      } catch (err) {
+        totalField.value = "Mileage unavailable";
+        chargeField.value = "Check postcodes";
+        claimField.value = "N/A";
       }
     }
 
