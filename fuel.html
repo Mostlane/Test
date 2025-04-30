@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Fuel & Expenses</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      padding: 40px 20px;
+      color: #003366;
+    }
+    .form-container {
+      background: rgba(255,255,255,0.6);
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 900px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input[type="text"], input[type="date"], input[type="time"], input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    .day-section {
+      margin-top: 30px;
+      padding: 10px;
+      background: #f0f3f8;
+      border-radius: 6px;
+    }
+    .site-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .submit-btn {
+      background: #004a99;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 30px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="form-container">
+    <h1>Fuel & Expenses</h1>
+
+    <label for="engineer">Engineer Name</label>
+    <input type="text" id="engineer" name="engineer" readonly>
+
+    <label for="week">Week Commencing</label>
+    <input type="date" id="week" name="week">
+
+    <!-- Placeholder for dynamic days -->
+    <div id="days-container"></div>
+
+    <label for="receipt">Upload Fuel Receipt (Optional)</label>
+    <input type="file" id="receipt" name="receipt">
+
+    <label>
+      <input type="checkbox" required> I confirm this timesheet is accurate
+    </label>
+
+    <button class="submit-btn" onclick="submitForm()">Submit</button>
+  </div>
+
+  <script>
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const container = document.getElementById('days-container');
+
+    days.forEach(day => {
+      const section = document.createElement('div');
+      section.className = 'day-section';
+      section.innerHTML = `<h3>${day}</h3>` + [1, 2, 3].map(i => `
+        <div class="site-row">
+          <input type="text" placeholder="Site Name ${i}">
+          <input type="text" placeholder="Site Postcode ${i}">
+          <input type="time" placeholder="Arrival Time">
+          <input type="time" placeholder="Departure Time">
+        </div>
+      `).join('') + `
+        <div class="site-row">
+          <input type="text" placeholder="Total Mileage (auto)" readonly>
+          <input type="text" placeholder="Chargeable Mileage (auto)" readonly>
+          <input type="text" placeholder="Claim Amount (£0.25/mi)" readonly>
+          <div></div>
+        </div>
+      `;
+      container.appendChild(section);
+    });
+
+    document.getElementById('engineer').value = sessionStorage.getItem("engineerName") || "";
+
+    function submitForm() {
+      alert("Form submission logic will be added here.");
+    }
+  </script>
+</body>
+</html>
