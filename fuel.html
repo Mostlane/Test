@@ -169,11 +169,11 @@
           chargeField.value = result.deductedMiles + " mi";
           claimField.value = "£" + result.claim;
         } else {
-          throw new Error("Missing response data");
+          throw new Error("No mileage data");
         }
       } catch (err) {
         totalField.value = "Mileage unavailable";
-        chargeField.value = "Check postcodes";
+        chargeField.value = "Check postcode";
         claimField.value = "N/A";
       }
     }
