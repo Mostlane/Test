@@ -92,61 +92,20 @@ input[type="email"] {
     </form>
     <a href="onboard.html">Sign up</a>
   </div>
-  
-<script>
-const adminUsername = "Admin";
-const adminPasswordHash = "2dbbf450ca8a53d49c16a04493e76f1c86f8412ceb354347979669c721234092";
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const user = document.getElementById('username').value.trim();
+      const pass = document.getElementById('password').value;
 
-function togglePassword() {
-  const pwField = document.getElementById("password");
-  pwField.type = pwField.type === "password" ? "text" : "password";
-}
-
-async function hashPassword(password) {
-  const msgUint8 = new TextEncoder().encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
-}
-
-async function login(e) {
-  if (e) e.preventDefault();
-
-  const username = document.getElementById("username").value.trim();
-  const password = document.getElementById("password").value.trim();
-
-  if (username === adminUsername) {
-    const hashed = await hashPassword(password);
-    if (hashed === adminPasswordHash) {
-      sessionStorage.setItem("mostlaneLoggedIn", "true");
-      sessionStorage.setItem("filePath", "https://yourcompany.sharepoint.com/sites/Portal/Admin");
-      window.location.href = "main.html";
-      return;
-    } else {
-      document.getElementById("error").textContent = "Incorrect Admin password.";
-      return;
-    }
-  }
-
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/users.json")
-    .then(response => response.json())
-    .then(users => {
-      const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
-      if (user) {
+      if ((user === "engineer" && pass === "mostlane123") || 
+          (user === "admin" && pass === "admin123")) {
         sessionStorage.setItem("mostlaneLoggedIn", "true");
-        sessionStorage.setItem("filePath", user.filepath);
         window.location.href = "main.html";
       } else {
         document.getElementById("error").textContent = "Invalid login credentials.";
       }
-    })
-    .catch(error => {
-      console.error("Login error:", error);
-      document.getElementById("error").textContent = "Unable to verify user account. Please try again or contact admin.";
     });
-}
-</script>
-
+  </script>
 </body>
 </html>
