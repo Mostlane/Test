@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Fuel & Expenses</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      padding: 40px 20px;
+      color: #003366;
+    }
+    .form-container {
+      background: rgba(255,255,255,0.6);
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 900px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input[type="text"], input[type="date"], input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    .small-output {
+      width: 100%;
+      font-size: 14px;
+      padding: 6px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f9f9f9;
+    }
+    .day-section {
+      margin-top: 30px;
+      padding: 10px;
+      background: #f0f3f8;
+      border-radius: 6px;
+    }
+    .postcode-entry {
+      margin-bottom: 8px;
+    }
+    .summary-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .add-btn {
+      margin-top: 5px;
+      padding: 6px 10px;
+      background-color: #ccc;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .submit-btn {
+      background: #004a99;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 30px;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="form-container">
+    <h1>Fuel & Expenses</h1>
+
+    <label for="engineer">Engineer Name</label>
+    <input type="text" id="engineer" name="engineer" readonly>
+
+    <label for="week">Week Commencing</label>
+    <input type="date" id="week" name="week">
+
+    <div id="days-container"></div>
+
+    <label for="receipt">Upload Fuel Receipt (Optional)</label>
+    <input type="file" id="receipt" name="receipt">
+
+    <label>
+      <input type="checkbox" required> I confirm this mileage claim is accurate
+    </label>
+
+    <button class="submit-btn" onclick="submitForm()">Submit</button>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyqW3rB5_7TO1VMI2c6EC3g-fnAgMJmbAC_zz_3NKw6kTcyvlK2YhKHO75xZr3nbvHj/exec";
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const container = document.getElementById('days-container');
+
+    days.forEach(day => {
+      const section = document.createElement('div');
+      section.className = 'day-section';
+      section.innerHTML = `
+        <h3>${day}</h3>
+        <div id="postcodes-${day}">
+          <div class="postcode-entry">
+            <input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">
+          </div>
+        </div>
+        <button type="button" class="add-btn" onclick="addPostcode('${day}')">+ Add Another Postcode</button>
+        <div class="summary-row">
+          <input type="text" id="${day}-total" class="small-output" placeholder="Total Mileage" readonly>
+          <input type="text" id="${day}-chargeable" class="small-output" placeholder="Chargeable Mileage" readonly>
+          <input type="text" id="${day}-claim" class="small-output" placeholder="Claim (£0.25/mi)" readonly>
+        </div>
+      `;
+      container.appendChild(section);
+    });
+
+    function addPostcode(day) {
+      const div = document.createElement('div');
+      div.className = 'postcode-entry';
+      div.innerHTML = `<input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">`;
+      document.getElementById(`postcodes-${day}`).appendChild(div);
+    }
+
+    function triggerCalc(day) {
+      const totalField = document.getElementById(`${day}-total`);
+      const chargeField = document.getElementById(`${day}-chargeable`);
+      const claimField = document.getElementById(`${day}-claim`);
+      totalField.value = "Calculating...";
+      chargeField.value = "";
+      claimField.value = "";
+      clearTimeout(window[`calcTimer_${day}`]);
+      window[`calcTimer_${day}`] = setTimeout(() => calculateMileage(day), 1000);
+    }
+
+    async function calculateMileage(day) {
+      const inputs = document.querySelectorAll(`#postcodes-${day} input`);
+      const sites = Array.from(inputs)
+        .map(i => i.value.trim().toUpperCase().replace(/\s+/g, ''))
+        .filter(v => v);
+      if (sites.length === 0) return;
+
+      const totalField = document.getElementById(`${day}-total`);
+      const chargeField = document.getElementById(`${day}-chargeable`);
+      const claimField = document.getElementById(`${day}-claim`);
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          body: JSON.stringify({ sites }),
+          headers: { "Content-Type": "application/json" }
+        });
+
+        const result = await response.json();
+        if (result.totalMiles) {
+          totalField.value = result.totalMiles + " mi";
+          chargeField.value = result.deductedMiles + " mi";
+          claimField.value = "£" + result.claim;
+        } else {
+          throw new Error("Missing response data");
+        }
+      } catch (err) {
+        totalField.value = "Mileage unavailable";
+        chargeField.value = "Check postcodes";
+        claimField.value = "N/A";
+      }
+    }
+
+    document.getElementById('engineer').value = sessionStorage.getItem("engineerName") || "";
+
+    function submitForm() {
+      alert("Submission to Zapier coming next.");
+    }
+  </script>
+</body>
+</html>
