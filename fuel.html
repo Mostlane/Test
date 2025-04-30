@@ -149,7 +149,7 @@
       const sites = Array.from(inputs).map(i => i.value.trim()).filter(v => v);
       if (sites.length === 0) return;
 
-      const response = await fetch("https://script.google.com/macros/s/AKfycbxTfqpegx-3IChcqGIVrrcO2YZGMyVbfcz9UFpEr7biX22wNTyYv3DH7K5RhoNrq2Kh/exec", {
+      const response = await fetch("https://script.google.com/macros/s/AKfycbyqW3rB5_7TO1VMI2c6EC3g-fnAgMJmbAC_zz_3NKw6kTcyvlK2YhKHO75xZr3nbvHj/exec", {
         method: "POST",
         body: JSON.stringify({ sites }),
         headers: { "Content-Type": "application/json" }
