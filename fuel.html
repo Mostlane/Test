@@ -42,6 +42,7 @@
       padding: 6px;
       border-radius: 4px;
       border: 1px solid #ccc;
+      background-color: #f9f9f9;
     }
     .day-section {
       margin-top: 30px;
@@ -112,7 +113,7 @@
         <h3>${day}</h3>
         <div id="postcodes-${day}">
           <div class="postcode-entry">
-            <input type="text" placeholder="Enter Site Postcode" onblur="calculateMileage('${day}')">
+            <input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">
           </div>
         </div>
         <button type="button" class="add-btn" onclick="addPostcode('${day}')">+ Add Another Postcode</button>
@@ -128,12 +129,22 @@
     function addPostcode(day) {
       const div = document.createElement('div');
       div.className = 'postcode-entry';
-      div.innerHTML = `<input type="text" placeholder="Enter Site Postcode" onblur="calculateMileage('${day}')">`;
+      div.innerHTML = `<input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">`;
       document.getElementById(`postcodes-${day}`).appendChild(div);
     }
 
+    function triggerCalc(day) {
+      const totalField = document.getElementById(`${day}-total`);
+      const chargeField = document.getElementById(`${day}-chargeable`);
+      const claimField = document.getElementById(`${day}-claim`);
+      totalField.value = "Calculating...";
+      chargeField.value = "";
+      claimField.value = "";
+      clearTimeout(window[`calcTimer_${day}`]);
+      window[`calcTimer_${day}`] = setTimeout(() => calculateMileage(day), 1000);
+    }
+
     async function calculateMileage(day) {
-      const start = "PO15 5RQ";
       const inputs = document.querySelectorAll(`#postcodes-${day} input`);
       const sites = Array.from(inputs).map(i => i.value.trim()).filter(v => v);
       if (sites.length === 0) return;
