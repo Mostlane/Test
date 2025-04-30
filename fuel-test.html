@@ -1,0 +1,89 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Fuel Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      padding: 40px;
+      color: #003366;
+    }
+    .container {
+      background: #fff;
+      padding: 20px;
+      max-width: 500px;
+      margin: auto;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    label, input, button {
+      display: block;
+      width: 100%;
+      margin-bottom: 15px;
+    }
+    input {
+      padding: 8px;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px;
+      background: #004a99;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .output {
+      margin-top: 20px;
+      font-weight: bold;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Fuel Claim Test</h2>
+    <label for="postcode">Enter 1 Postcode</label>
+    <input type="text" id="postcode" placeholder="e.g. SO317AQ" oninput="calculate()">
+    <div class="output" id="result"></div>
+  </div>
+
+  <script>
+    const API_URL = "https://script.google.com/macros/s/AKfycbyn2OogFgDINuQgLhh3OXOfY1Ce9uPvL59XOg9ouN_5lt988GdE26BMhXBju8jt5ybE/exec";
+
+    let timer;
+    function calculate() {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const raw = document.getElementById('postcode').value;
+        const pc = raw.toUpperCase().replace(/\s+/g, '');
+        if (!pc || pc.length < 5) return;
+
+        document.getElementById("result").innerText = "Calculating...";
+
+        try {
+          const res = await fetch(API_URL, {
+            method: "POST",
+            body: JSON.stringify({ sites: [pc] }),
+            headers: { "Content-Type": "application/json" }
+          });
+          const data = await res.json();
+          if (data.totalMiles) {
+            document.getElementById("result").innerHTML =
+              `Total Mileage: ${data.totalMiles} mi<br>
+               Chargeable: ${data.deductedMiles} mi<br>
+               Claim: £${data.claim}`;
+          } else {
+            document.getElementById("result").innerText = "Mileage unavailable – check format";
+          }
+        } catch (err) {
+          document.getElementById("result").innerText = "Error contacting server";
+        }
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
