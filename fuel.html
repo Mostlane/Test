@@ -3,8 +3,8 @@
 <html>
 <head>
   <title>Fuel & Expenses</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
@@ -24,164 +24,112 @@
       text-align: center;
       margin-bottom: 30px;
     }
-    label {
-      display: block;
-      margin-top: 10px;
-      font-weight: bold;
-    }
-    input[type="text"], input[type="date"], input[type="file"] {
+    input, button {
       width: 100%;
-      padding: 8px;
-      margin-top: 4px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-    }
-    .small-output {
-      width: 100%;
-      font-size: 14px;
-      padding: 6px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      background-color: #f9f9f9;
-    }
-    .day-section {
-      margin-top: 30px;
       padding: 10px;
-      background: #f0f3f8;
+      margin: 6px 0;
       border-radius: 6px;
+      border: 1px solid #ccc;
     }
-    .postcode-entry {
-      margin-bottom: 8px;
-    }
-    .summary-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 10px;
-      margin-top: 10px;
-    }
-    .add-btn {
-      margin-top: 5px;
-      padding: 6px 10px;
-      background-color: #ccc;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .submit-btn {
+    .button {
       background: #004a99;
       color: white;
-      padding: 12px 20px;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
       cursor: pointer;
-      margin-top: 30px;
-      width: 100%;
+    }
+    .section {
+      margin-bottom: 25px;
+    }
+    .postcode-entry {
+      display: flex;
+      gap: 10px;
+    }
+    .postcode-entry input {
+      flex: 1;
     }
   </style>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places"></script>
 </head>
 <body>
   <div class="form-container">
     <h1>Fuel & Expenses</h1>
+    <div class="section">
+      <label>Engineer Name</label>
+      <input type="text" id="engineer" readonly>
+      <label>Week Commencing</label>
+      <input type="date" id="week">
+    </div>
 
-    <label for="engineer">Engineer Name</label>
-    <input type="text" id="engineer" name="engineer" readonly>
+    <div class="section">
+      <label>Enter Site Postcodes (in order of visit)</label>
+      <div id="postcodeList">
+        <div class="postcode-entry"><input type="text" class="postcode" placeholder="e.g. BH15 2BS"></div>
+      </div>
+      <button class="button" onclick="addPostcode()">+ Add Another Site</button>
+    </div>
 
-    <label for="week">Week Commencing</label>
-    <input type="date" id="week" name="week">
+    <div class="section">
+      <button class="button" onclick="calculateRoute()">Calculate Mileage</button>
+    </div>
 
-    <div id="days-container"></div>
-
-    <label for="receipt">Upload Fuel Receipt (Optional)</label>
-    <input type="file" id="receipt" name="receipt">
-
-    <label>
-      <input type="checkbox" required> I confirm this mileage claim is accurate
-    </label>
-
-    <button class="submit-btn" onclick="submitForm()">Submit</button>
+    <div class="section">
+      <label>Total Mileage (inc. return to PO15 5RQ)</label>
+      <input type="text" id="totalMiles" readonly>
+      <label>Chargeable Mileage (minus 20 miles)</label>
+      <input type="text" id="chargeableMiles" readonly>
+      <label>Fuel Claim (£0.25 per mile)</label>
+      <input type="text" id="fuelClaim" readonly>
+    </div>
   </div>
 
   <script>
-    const API_URL = "https://script.google.com/macros/s/AKfycbyn2OogFgDINuQgLhh3OXOfY1Ce9uPvL59XOg9ouN_5lt988GdE26BMhXBju8jt5ybE/exec";
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const container = document.getElementById('days-container');
+    document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
 
-    days.forEach(day => {
-      const section = document.createElement('div');
-      section.className = 'day-section';
-      section.innerHTML = `
-        <h3>${day}</h3>
-        <div id="postcodes-${day}">
-          <div class="postcode-entry">
-            <input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">
-          </div>
-        </div>
-        <button type="button" class="add-btn" onclick="addPostcode('${day}')">+ Add Another Postcode</button>
-        <div class="summary-row">
-          <input type="text" id="${day}-total" class="small-output" placeholder="Total Mileage" readonly>
-          <input type="text" id="${day}-chargeable" class="small-output" placeholder="Chargeable Mileage" readonly>
-          <input type="text" id="${day}-claim" class="small-output" placeholder="Claim (£0.25/mi)" readonly>
-        </div>
-      `;
-      container.appendChild(section);
-    });
-
-    function addPostcode(day) {
-      const div = document.createElement('div');
-      div.className = 'postcode-entry';
-      div.innerHTML = `<input type="text" placeholder="Enter Site Postcode" oninput="triggerCalc('${day}')">`;
-      document.getElementById(`postcodes-${day}`).appendChild(div);
+    function addPostcode() {
+      const div = document.createElement("div");
+      div.className = "postcode-entry";
+      div.innerHTML = '<input type="text" class="postcode" placeholder="e.g. PO12 3AX">';
+      document.getElementById("postcodeList").appendChild(div);
     }
 
-    function triggerCalc(day) {
-      const totalField = document.getElementById(`${day}-total`);
-      const chargeField = document.getElementById(`${day}-chargeable`);
-      const claimField = document.getElementById(`${day}-claim`);
-      totalField.value = "Calculating...";
-      chargeField.value = "";
-      claimField.value = "";
-      clearTimeout(window[`calcTimer_${day}`]);
-      window[`calcTimer_${day}`] = setTimeout(() => calculateMileage(day), 1000);
-    }
+    function calculateRoute() {
+      const postcodes = Array.from(document.querySelectorAll(".postcode"))
+        .map(input => input.value.trim())
+        .filter(Boolean);
 
-    async function calculateMileage(day) {
-      const inputs = document.querySelectorAll(`#postcodes-${day} input`);
-      const sites = Array.from(inputs)
-        .map(i => i.value.trim().toUpperCase().replace(/\s+/g, ''))
-        .filter(v => v);
-      if (sites.length === 0) return;
-
-      const totalField = document.getElementById(`${day}-total`);
-      const chargeField = document.getElementById(`${day}-chargeable`);
-      const claimField = document.getElementById(`${day}-claim`);
-
-      try {
-        const response = await fetch(API_URL, {
-          method: "POST",
-          body: JSON.stringify({ sites }),
-          headers: { "Content-Type": "application/json" }
-        });
-
-        const result = await response.json();
-        if (result.totalMiles) {
-          totalField.value = result.totalMiles + " mi";
-          chargeField.value = result.deductedMiles + " mi";
-          claimField.value = "£" + result.claim;
-        } else {
-          throw new Error("No mileage data");
-        }
-      } catch (err) {
-        totalField.value = "Mileage unavailable";
-        chargeField.value = "Check postcode";
-        claimField.value = "N/A";
+      if (postcodes.length === 0) {
+        alert("Please enter at least one site postcode.");
+        return;
       }
-    }
 
-    document.getElementById('engineer').value = sessionStorage.getItem("engineerName") || "";
+      const directionsService = new google.maps.DirectionsService();
+      const start = "PO15 5RQ";
+      const end = "PO15 5RQ";
+      const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
 
-    function submitForm() {
-      alert("Submission to Zapier coming next.");
+      directionsService.route({
+        origin: start,
+        destination: end,
+        waypoints: waypoints,
+        optimizeWaypoints: false,
+        travelMode: google.maps.TravelMode.DRIVING
+      }, function(response, status) {
+        if (status === google.maps.DirectionsStatus.OK) {
+          let totalMeters = 0;
+          const legs = response.routes[0].legs;
+          for (let leg of legs) {
+            totalMeters += leg.distance.value;
+          }
+          const totalMiles = totalMeters / 1609.34;
+          const chargeable = Math.max(totalMiles - 20, 0);
+          const claim = chargeable * 0.25;
+
+          document.getElementById("totalMiles").value = totalMiles.toFixed(2);
+          document.getElementById("chargeableMiles").value = chargeable.toFixed(2);
+          document.getElementById("fuelClaim").value = "£" + claim.toFixed(2);
+        } else {
+          alert("Could not calculate route. Check postcodes and try again.");
+        }
+      });
     }
   </script>
 </body>
