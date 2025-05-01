@@ -6,47 +6,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="style.css">
   <style>
-    body {{
+    body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
       padding: 40px 20px;
       color: #003366;
-    }}
-    .form-container {{
+    }
+    .form-container {
       background: rgba(255,255,255,0.6);
       padding: 20px;
       border-radius: 10px;
       max-width: 1000px;
       margin: auto;
-    }}
-    h1 {{
+    }
+    h1 {
       text-align: center;
       margin-bottom: 30px;
-    }}
-    .day-section {{
+    }
+    .day-section {
       margin-top: 30px;
       padding: 15px;
       background: #f0f3f8;
       border-radius: 6px;
-    }}
-    .postcode-entry {{
+    }
+    .postcode-entry {
       display: flex;
       gap: 10px;
       margin-bottom: 10px;
-    }}
-    input[type="text"], input[type="date"], input[type="time"], button {{
+    }
+    input[type="text"], input[type="date"], input[type="time"], button {
       width: 100%;
       padding: 10px;
       margin: 6px 0;
       border-radius: 6px;
       border: 1px solid #ccc;
-    }}
-    .button {{
+    }
+    .button {
       background: #004a99;
       color: white;
       cursor: pointer;
-    }}
+    }
   </style>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </head>
@@ -57,7 +57,6 @@
     <input type="text" id="engineer" readonly>
     <label>Week Commencing</label>
     <input type="date" id="week">
-
     
     <div class="day-section">
       <h2>Monday</h2>
@@ -179,44 +178,42 @@
     </div>
     
   </div>
-
 <script>
   let directionsService;
-
-  function initMap() {{
+  function initMap() {
     directionsService = new google.maps.DirectionsService();
     document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
-  }}
+  }
 
-  function addPostcode(day) {{
+  function addPostcode(day) {
     const container = document.getElementById(day + "-sites");
     const div = document.createElement("div");
     div.className = "postcode-entry";
     div.innerHTML = '<input type="text" class="postcode" placeholder="Site Postcode">';
     container.appendChild(div);
-  }}
+  }
 
-  function calculateRoute(day) {{
-    const inputs = document.querySelectorAll(`#${day}-sites .postcode`);
+  function calculateRoute(day) {
+    const inputs = document.querySelectorAll(`#$Sunday-sites .postcode`);
     const postcodes = Array.from(inputs).map(input => input.value.trim()).filter(Boolean);
-    if (postcodes.length === 0) {{
+    if (postcodes.length === 0) {
       alert("Please enter at least one site postcode for " + day);
       return;
-    }}
+    }
 
-    const waypoints = postcodes.map(p => ({{ location: p, stopover: true }}));
-    directionsService.route({{
+    const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
+    directionsService.route({
       origin: "PO15 5RQ",
       destination: "PO15 5RQ",
       waypoints: waypoints,
       optimizeWaypoints: false,
       travelMode: google.maps.TravelMode.DRIVING
-    }}, function(response, status) {{
-      if (status === google.maps.DirectionsStatus.OK) {{
+    }, function(response, status) {
+      if (status === google.maps.DirectionsStatus.OK) {
         let totalMeters = 0;
-        for (let leg of response.routes[0].legs) {{
+        for (let leg of response.routes[0].legs) {
           totalMeters += leg.distance.value;
-        }}
+        }
         const totalMiles = totalMeters / 1609.34;
         const chargeable = Math.max(totalMiles - 20, 0);
         const claim = chargeable * 0.25;
@@ -224,11 +221,11 @@
         document.getElementById(day + "-total").value = totalMiles.toFixed(2);
         document.getElementById(day + "-chargeable").value = chargeable.toFixed(2);
         document.getElementById(day + "-claim").value = "£" + claim.toFixed(2);
-      }} else {{
+      } else {
         alert("Route calculation failed for " + day + ". Please check postcodes.");
-      }}
-    }});
-  }}
+      }
+    });
+  }
 </script>
 </body>
 </html>
