@@ -196,7 +196,7 @@
 
     function calculateRoute(day) {
       if (!directionsService) {
-        alert("Google Maps has not loaded yet.");
+        alert("Google Maps is not loaded.");
         return;
       }
 
@@ -234,6 +234,6 @@
     }
   </script>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </body>
 </html>
