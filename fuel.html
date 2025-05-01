@@ -1,248 +1,95 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Fuel & Expenses</title>
+  <title>Fuel & Expenses – Diagnostic</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      padding: 40px 20px;
-      color: #003366;
-    }
-    .form-container {
-      background: rgba(255,255,255,0.6);
+      font-family: Arial, sans-serif;
       padding: 20px;
-      border-radius: 10px;
-      max-width: 1000px;
-      margin: auto;
-    }
-    .day-section {
-      margin-top: 30px;
-      padding: 15px;
-      background: #f0f3f8;
-      border-radius: 6px;
-    }
-    .postcode-entry {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 10px;
+      background: #f0f0f0;
     }
     input, button {
+      display: block;
       width: 100%;
       padding: 10px;
-      margin: 6px 0;
-      border-radius: 6px;
-      border: 1px solid #ccc;
+      margin-top: 10px;
+      font-size: 16px;
     }
-    .button {
-      background: #004a99;
-      color: white;
-      cursor: pointer;
+    .debug {
+      margin-top: 20px;
+      padding: 10px;
+      background: #fff;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      white-space: pre-wrap;
     }
   </style>
 </head>
 <body>
-  <div class="form-container">
-    <h1>Fuel & Expenses</h1>
-    <p style="font-size:12px;color:#666;margin-bottom:20px;">Generated: 2025-05-01 19:30:30 UTC</p>
-    <label>Engineer Name</label>
-    <input type="text" id="engineer" readonly>
-    <label>Week Commencing</label>
-    <input type="date" id="week">
+  <h1>Fuel & Expenses (Diagnostic)</h1>
+  <p>Generated: 2025-05-01 19:37:28 UTC</p>
 
-    <div class="day-section">
-      <h2>Monday</h2>
-      <div id="monday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('monday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('monday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="monday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="monday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="monday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Tuesday</h2>
-      <div id="tuesday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('tuesday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('tuesday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="tuesday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="tuesday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="tuesday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Wednesday</h2>
-      <div id="wednesday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('wednesday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('wednesday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="wednesday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="wednesday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="wednesday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Thursday</h2>
-      <div id="thursday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('thursday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('thursday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="thursday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="thursday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="thursday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Friday</h2>
-      <div id="friday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('friday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('friday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="friday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="friday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="friday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Saturday</h2>
-      <div id="saturday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('saturday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('saturday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="saturday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="saturday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="saturday-claim" readonly>
-    </div>
-    
-    <div class="day-section">
-      <h2>Sunday</h2>
-      <div id="sunday-sites">
-        <div class="postcode-entry">
-          <input type="text" class="postcode" placeholder="Site Postcode">
-        </div>
-      </div>
-      <button class="button" onclick="addPostcode('sunday')">+ Add Site</button>
-      <button class="button" onclick="calculateRoute('sunday')">Calculate Mileage</button>
-      <label>Total Mileage</label>
-      <input type="text" id="sunday-total" readonly>
-      <label>Chargeable Mileage</label>
-      <input type="text" id="sunday-chargeable" readonly>
-      <label>Fuel Claim (£0.25/mile)</label>
-      <input type="text" id="sunday-claim" readonly>
-    </div>
-    
-    <button class="button" onclick="submitForm()">Submit</button>
-  </div>
+  <label for="postcode1">Site Postcode</label>
+  <input type="text" id="postcode1" placeholder="e.g. BH15 2BS">
+  <button onclick="calculate()">Calculate Mileage</button>
+
+  <label>Total Mileage</label>
+  <input type="text" id="total" readonly>
+  <label>Chargeable Mileage</label>
+  <input type="text" id="chargeable" readonly>
+  <label>Claim (£0.25/mile)</label>
+  <input type="text" id="claim" readonly>
+
+  <div class="debug" id="debug">Status: Waiting for Google Maps...</div>
 
   <script>
     let directionsService;
-
     function initMap() {
+      document.getElementById('debug').textContent = "Google Maps Loaded.";
       directionsService = new google.maps.DirectionsService();
-      document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
     }
 
-    function addPostcode(day) {
-      const container = document.getElementById(day + "-sites");
-      const div = document.createElement("div");
-      div.className = "postcode-entry";
-      div.innerHTML = '<input type="text" class="postcode" placeholder="Site Postcode">';
-      container.appendChild(div);
-    }
+    function calculate() {
+      document.getElementById('debug').textContent = "Calculate button clicked.";
+      if (!directionsService) {
+        document.getElementById('debug').textContent = "ERROR: directionsService not initialized.";
+        return;
+      }
 
-    function calculateRoute(day) {
-      const inputs = document.querySelectorAll(`#${day}-sites .postcode`);
-      const postcodes = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
-      if (postcodes.length === 0) return alert("Enter at least one postcode for " + day);
-      const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
+      const postcode = document.getElementById('postcode1').value.trim();
+      if (!postcode) {
+        document.getElementById('debug').textContent = "ERROR: No postcode entered.";
+        return;
+      }
+
+      const waypoints = [{ location: postcode, stopover: true }];
       directionsService.route({
         origin: "PO15 5RQ",
         destination: "PO15 5RQ",
         waypoints,
         travelMode: "DRIVING"
       }, (response, status) => {
-        if (status === "OK") {
-          let total = response.routes[0].legs.reduce((sum, leg) => sum + leg.distance.value, 0);
-          let miles = total / 1609.34;
-          let chargeable = Math.max(miles - 20, 0);
-          let claim = chargeable * 0.25;
-          document.getElementById(day + "-total").value = miles.toFixed(2);
-          document.getElementById(day + "-chargeable").value = chargeable.toFixed(2);
-          document.getElementById(day + "-claim").value = "£" + claim.toFixed(2);
-        } else {
-          alert("Google Maps error: " + status);
+        if (status !== "OK") {
+          document.getElementById('debug').textContent = "Google Maps error: " + status;
+          return;
         }
+        let total = response.routes[0].legs.reduce((sum, leg) => sum + leg.distance.value, 0);
+        let miles = total / 1609.34;
+        let chargeable = Math.max(miles - 20, 0);
+        let claim = chargeable * 0.25;
+
+        document.getElementById("total").value = miles.toFixed(2);
+        document.getElementById("chargeable").value = chargeable.toFixed(2);
+        document.getElementById("claim").value = "£" + claim.toFixed(2);
+        document.getElementById("debug").textContent = "Calculation successful.";
       });
     }
 
-    function submitForm() {
-      const payload = {
-        engineer: document.getElementById("engineer").value,
-        week: document.getElementById("week").value,
-        days: {}
-      };
-      ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"].forEach(day => {
-        payload.days[day] = {
-          total: document.getElementById(day + "-total").value,
-          chargeable: document.getElementById(day + "-chargeable").value,
-          claim: document.getElementById(day + "-claim").value
-        };
-      });
-      fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString()
-      }).then(() => {
-        alert("Submitted!");
-        location.reload();
-      }).catch(err => {
-        alert("Error submitting: " + err);
-      });
-    }
-
-    window.onload = initMap;
+    window.onload = function() {
+      document.getElementById('debug').textContent = "Page loaded. Waiting for Google Maps...";
+    };
   </script>
-
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4"></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </body>
 </html>
