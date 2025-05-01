@@ -35,7 +35,7 @@
       gap: 10px;
       margin-bottom: 10px;
     }
-    input[type="text"], input[type="date"], input[type="time"], button {
+    input[type="text"], input[type="date"], button {
       width: 100%;
       padding: 10px;
       margin: 6px 0;
@@ -48,7 +48,6 @@
       cursor: pointer;
     }
   </style>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </head>
 <body>
   <div class="form-container">
@@ -57,7 +56,7 @@
     <input type="text" id="engineer" readonly>
     <label>Week Commencing</label>
     <input type="date" id="week">
-    
+
     <div class="day-section">
       <h2>Monday</h2>
       <div id="monday-sites">
@@ -65,8 +64,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('monday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('monday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('monday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('monday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="monday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -82,8 +81,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('tuesday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('tuesday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('tuesday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('tuesday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="tuesday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -99,8 +98,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('wednesday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('wednesday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('wednesday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('wednesday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="wednesday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -116,8 +115,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('thursday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('thursday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('thursday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('thursday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="thursday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -133,8 +132,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('friday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('friday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('friday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('friday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="friday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -150,8 +149,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('saturday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('saturday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('saturday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('saturday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="saturday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -167,8 +166,8 @@
           <input type="text" class="postcode" placeholder="Site Postcode">
         </div>
       </div>
-      <button class="button" type="button" onclick="addPostcode('sunday')">+ Add Site</button>
-      <button class="button" type="button" onclick="calculateRoute('sunday')">Calculate Mileage</button>
+      <button class="button" onclick="addPostcode('sunday')">+ Add Site</button>
+      <button class="button" onclick="calculateRoute('sunday')">Calculate Mileage</button>
       <label>Total Mileage</label>
       <input type="text" id="sunday-total" readonly>
       <label>Chargeable Mileage</label>
@@ -178,54 +177,63 @@
     </div>
     
   </div>
-<script>
-  let directionsService;
-  function initMap() {
-    directionsService = new google.maps.DirectionsService();
-    document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
-  }
 
-  function addPostcode(day) {
-    const container = document.getElementById(day + "-sites");
-    const div = document.createElement("div");
-    div.className = "postcode-entry";
-    div.innerHTML = '<input type="text" class="postcode" placeholder="Site Postcode">';
-    container.appendChild(div);
-  }
+  <script>
+    let directionsService;
 
-  function calculateRoute(day) {
-    const inputs = document.querySelectorAll(`#$Sunday-sites .postcode`);
-    const postcodes = Array.from(inputs).map(input => input.value.trim()).filter(Boolean);
-    if (postcodes.length === 0) {
-      alert("Please enter at least one site postcode for " + day);
-      return;
+    function initMap() {
+      directionsService = new google.maps.DirectionsService();
+      document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
     }
 
-    const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
-    directionsService.route({
-      origin: "PO15 5RQ",
-      destination: "PO15 5RQ",
-      waypoints: waypoints,
-      optimizeWaypoints: false,
-      travelMode: google.maps.TravelMode.DRIVING
-    }, function(response, status) {
-      if (status === google.maps.DirectionsStatus.OK) {
-        let totalMeters = 0;
-        for (let leg of response.routes[0].legs) {
-          totalMeters += leg.distance.value;
-        }
-        const totalMiles = totalMeters / 1609.34;
-        const chargeable = Math.max(totalMiles - 20, 0);
-        const claim = chargeable * 0.25;
+    function addPostcode(day) {
+      const container = document.getElementById(day + "-sites");
+      const div = document.createElement("div");
+      div.className = "postcode-entry";
+      div.innerHTML = '<input type="text" class="postcode" placeholder="Site Postcode">';
+      container.appendChild(div);
+    }
 
-        document.getElementById(day + "-total").value = totalMiles.toFixed(2);
-        document.getElementById(day + "-chargeable").value = chargeable.toFixed(2);
-        document.getElementById(day + "-claim").value = "£" + claim.toFixed(2);
-      } else {
-        alert("Route calculation failed for " + day + ". Please check postcodes.");
+    function calculateRoute(day) {
+      if (!directionsService) {
+        alert("Google Maps has not loaded yet.");
+        return;
       }
-    });
-  }
-</script>
+
+      const inputs = document.querySelectorAll(`#${day}-sites .postcode`);
+      const postcodes = Array.from(inputs).map(input => input.value.trim()).filter(Boolean);
+      if (postcodes.length === 0) {
+        alert("Please enter at least one postcode for " + day);
+        return;
+      }
+
+      const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
+      directionsService.route({
+        origin: "PO15 5RQ",
+        destination: "PO15 5RQ",
+        waypoints: waypoints,
+        optimizeWaypoints: false,
+        travelMode: google.maps.TravelMode.DRIVING
+      }, function(response, status) {
+        if (status === google.maps.DirectionsStatus.OK) {
+          let totalMeters = 0;
+          for (let leg of response.routes[0].legs) {
+            totalMeters += leg.distance.value;
+          }
+          const totalMiles = totalMeters / 1609.34;
+          const chargeable = Math.max(totalMiles - 20, 0);
+          const claim = chargeable * 0.25;
+
+          document.getElementById(day + "-total").value = totalMiles.toFixed(2);
+          document.getElementById(day + "-chargeable").value = chargeable.toFixed(2);
+          document.getElementById(day + "-claim").value = "£" + claim.toFixed(2);
+        } else {
+          alert("Could not calculate route. Please check postcodes.");
+        }
+      });
+    }
+  </script>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap" async defer></script>
 </body>
 </html>
