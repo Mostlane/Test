@@ -1,10 +1,8 @@
-
 <!DOCTYPE html>
 <html>
 <head>
   <title>Fuel & Expenses</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
@@ -20,10 +18,6 @@
       max-width: 1000px;
       margin: auto;
     }
-    h1 {
-      text-align: center;
-      margin-bottom: 30px;
-    }
     .day-section {
       margin-top: 30px;
       padding: 15px;
@@ -35,7 +29,7 @@
       gap: 10px;
       margin-bottom: 10px;
     }
-    input[type="text"], input[type="date"], button {
+    input, button {
       width: 100%;
       padding: 10px;
       margin: 6px 0;
@@ -52,11 +46,12 @@
 <body>
   <div class="form-container">
     <h1>Fuel & Expenses</h1>
+    <p style="font-size:12px;color:#666;margin-bottom:20px;">Generated: 2025-05-01 19:24:33 UTC</p>
     <label>Engineer Name</label>
     <input type="text" id="engineer" readonly>
     <label>Week Commencing</label>
     <input type="date" id="week">
-
+    
     <div class="day-section">
       <h2>Monday</h2>
       <div id="monday-sites">
@@ -176,16 +171,14 @@
       <input type="text" id="sunday-claim" readonly>
     </div>
     
+    <button class="button" onclick="submitForm()">Submit</button>
   </div>
-
   <script>
     let directionsService;
-
     function initMap() {
       directionsService = new google.maps.DirectionsService();
       document.getElementById("engineer").value = sessionStorage.getItem("engineerName") || "";
     }
-
     function addPostcode(day) {
       const container = document.getElementById(day + "-sites");
       const div = document.createElement("div");
@@ -193,47 +186,52 @@
       div.innerHTML = '<input type="text" class="postcode" placeholder="Site Postcode">';
       container.appendChild(div);
     }
-
     function calculateRoute(day) {
-      if (!directionsService) {
-        alert("Google Maps is not loaded.");
-        return;
-      }
-
-      const inputs = document.querySelectorAll(`#${day}-sites .postcode`);
-      const postcodes = Array.from(inputs).map(input => input.value.trim()).filter(Boolean);
-      if (postcodes.length === 0) {
-        alert("Please enter at least one postcode for " + day);
-        return;
-      }
-
+      const inputs = document.querySelectorAll(`#$Sunday-sites .postcode`);
+      const postcodes = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+      if (postcodes.length === 0) return alert("Enter at least one postcode for " + day);
       const waypoints = postcodes.map(p => ({ location: p, stopover: true }));
       directionsService.route({
-        origin: "PO15 5RQ",
-        destination: "PO15 5RQ",
-        waypoints: waypoints,
-        optimizeWaypoints: false,
-        travelMode: google.maps.TravelMode.DRIVING
-      }, function(response, status) {
-        if (status === google.maps.DirectionsStatus.OK) {
-          let totalMeters = 0;
-          for (let leg of response.routes[0].legs) {
-            totalMeters += leg.distance.value;
-          }
-          const totalMiles = totalMeters / 1609.34;
-          const chargeable = Math.max(totalMiles - 20, 0);
-          const claim = chargeable * 0.25;
-
-          document.getElementById(day + "-total").value = totalMiles.toFixed(2);
+        origin: "PO15 5RQ", destination: "PO15 5RQ", waypoints, travelMode: "DRIVING"
+      }, (response, status) => {
+        if (status === "OK") {
+          let total = response.routes[0].legs.reduce((sum, leg) => sum + leg.distance.value, 0);
+          let miles = total / 1609.34;
+          let chargeable = Math.max(miles - 20, 0);
+          let claim = chargeable * 0.25;
+          document.getElementById(day + "-total").value = miles.toFixed(2);
           document.getElementById(day + "-chargeable").value = chargeable.toFixed(2);
           document.getElementById(day + "-claim").value = "£" + claim.toFixed(2);
         } else {
-          alert("Could not calculate route. Please check postcodes.");
+          alert("Google Maps error: " + status);
         }
       });
     }
+    function submitForm() {
+      const payload = {
+        engineer: document.getElementById("engineer").value,
+        week: document.getElementById("week").value,
+        days: {}
+      };
+      ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"].forEach(day => {
+        payload.days[day] = {
+          total: document.getElementById(day + "-total").value,
+          chargeable: document.getElementById(day + "-chargeable").value,
+          claim: document.getElementById(day + "-claim").value
+        };
+      });
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString()
+      }).then(() => {
+        alert("Submitted!");
+        location.reload();
+      }).catch(err => {
+        alert("Error submitting: " + err);
+      });
+    }
   </script>
-
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </body>
 </html>
