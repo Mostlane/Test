@@ -57,7 +57,17 @@
       <input type="text" id="engineer" readonly />
       <label>Date:</label>
       <input type="text" id="date" readonly />
-      <label>Site Name:</label>
+      <label>Store Type:</label>
+<select id="storeType" required>
+<option value="Retail Stores">Retail Stores</option>
+<option value="ELS">ELS</option>
+<option value="ELS - Private Funeral Homes">ELS - Private Funeral Homes</option>
+<option value="Franchises - Welcome">Franchises - Welcome</option>
+<option value="Starbucks">Starbucks</option>
+<option value="Fareham Borough Council">Fareham Borough Council</option>
+<option value="Other Site">Other Site</option>
+</select>
+<br><br><label>Site Name:</label>
       <select id="site"></select>
       <label>Supplier:</label>
       <select id="supplier"></select>
@@ -186,49 +196,51 @@
     };
   </script>
 
+
 <script>
 async function fetchTextFile(url) {
   const res = await fetch(url);
   return res.ok ? (await res.text()).split("\n") : [];
 }
 
-async function populateCategoryDropdown() {
-  const storeTypeSelect = document.getElementById("storeType");
-  const siteSelect = document.getElementById("site");
-
-  const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt?v=" + Date.now());
-
-  const categories = [...new Set(siteLines.map(line => line.split("|")[0]))].sort();
-  categories.forEach(category => {
+async function populateDropdowns() {
+  const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/suppliers.txt");
+  const supplierDropdown = document.getElementById("supplier");
+  supplierDropdown.innerHTML = "";
+  suppliers.forEach(supplier => {
     const opt = document.createElement("option");
-    opt.value = category;
-    opt.text = category;
-    storeTypeSelect.appendChild(opt);
+    opt.value = supplier;
+    opt.textContent = supplier;
+    supplierDropdown.appendChild(opt);
   });
-
-  storeTypeSelect.addEventListener("change", () => {
-    const selectedCategory = storeTypeSelect.value;
-    siteSelect.innerHTML = "";
-    const filteredSites = siteLines.filter(line => line.startsWith(selectedCategory + "|"));
-    filteredSites.forEach(line => {
-      const parts = line.split("|");
-      if (parts.length === 3) {
-        const opt = document.createElement("option");
-        opt.value = parts[2];
-        opt.text = parts[1];
-        siteSelect.appendChild(opt);
-      }
-    });
-  });
-
-  // Preload first category's sites
-  if (categories.length > 0) {
-    storeTypeSelect.value = categories[0];
-    storeTypeSelect.dispatchEvent(new Event("change"));
-  }
 }
 
-window.addEventListener("DOMContentLoaded", populateCategoryDropdown);
+async function populateSiteDropdown(category) {
+  const siteDropdown = document.getElementById("site");
+  siteDropdown.innerHTML = "";
+  const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt?v=" + Date.now());
+  const filtered = siteLines.filter(line => line.startsWith(category + "|"));
+  filtered.forEach(line => {
+    const [cat, name, code] = line.split("|");
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = code + " " + name;
+    siteDropdown.appendChild(opt);
+  });
+}
+
+window.onload = function () {
+  populateDropdowns();
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
+  document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+  const storeTypeSelect = document.getElementById("storeType");
+  if (storeTypeSelect) {
+    populateSiteDropdown(storeTypeSelect.value);
+    storeTypeSelect.addEventListener("change", () => {
+      populateSiteDropdown(storeTypeSelect.value);
+    });
+  }
+};
 </script>
 
 </body>
