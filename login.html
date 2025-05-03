@@ -73,12 +73,22 @@
     <a href="onboard.html">Sign up</a>
   </div>
   <script>
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hashBuffer))
+                  .map(b => b.toString(16).padStart(2, '0'))
+                  .join('');
+    }
+
     const usersTxtURL = "https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt";
 
-    document.getElementById('loginForm').addEventListener('submit', function(e) {
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
+      const hashedInput = await hashPassword(password);
 
       fetch(usersTxtURL)
         .then(response => {
@@ -89,8 +99,8 @@
           const lines = text.split('\n');
           let found = false;
           for (let line of lines) {
-            const [user, pass, folder] = line.trim().split('|');
-            if (username === user && password === pass) {
+            const [user, hash, folder] = line.trim().split('|');
+            if (username === user && hashedInput === hash) {
               sessionStorage.setItem("mostlaneLoggedIn", "true");
               sessionStorage.setItem("mostlaneUser", user);
               sessionStorage.setItem("mostlaneFolder", folder);
