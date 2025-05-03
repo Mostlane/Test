@@ -1,10 +1,200 @@
-Gosport Retail|GX3
-Fareham Store|FHM
-Southampton Depot|SOT
-Portsmouth Unit|PMT
-Winchester Hub|WCH
-Andover Branch|AND
-Eastleigh Office|EST
-Bournemouth South|BTH
-Havant Centre|HVT
-Totton Warehouse|TOT
+Retail|0152 Bow, Burston Cross Road|0152
+Retail|0177 Nailsea, Hannah More Road|0177
+Retail|0226 Cotford St Luke, Graham Way|0226
+Retail|0318 Norton Fitzwarren, Morse Road|0318
+Retail|0334 Exeter, Buddle Lane|0334
+Retail|0335 Bridgwater, Stockmoor Drive|0335
+Retail|0348 Taunton, Wellington New Road|0348
+Retail|0350 Exeter, Alphington Road|0350
+Retail|0358 Exmouth, Exeter Road|0358
+Retail|0372 Banwell, Knightcott Road|0372
+Retail|0373 Cranbrook, Younghayes Road|0373
+Retail|0377 Exmouth, Brixington Parade|0377
+Retail|0405 Burnham on Sea, Berrow Road|0405
+Retail|0391 Portishead, Port Marine|0391
+Retail|0070 Bristol, Wells Road|0070
+Retail|0225 Bristol, Redcliffe Street|0225
+Retail|0238 Bedminster, North Street|0238
+Retail|0312 Hanham, Memorial Road|0312
+Retail|0313 Pill, Baltic Place|0313
+Retail|0314 Bristol, Ashley Down Road|0314
+Retail|0322 Keynsham, Queens Road|0322
+Retail|0327 Bristol, Two Mile Hill Road|0327
+Retail|0333 Bristol, Church Road|0333
+Retail|0337 Bristol, School Road|0337
+Retail|0371 Bristol, Long Down Avenue|0371
+Retail|0224 Corsham, Macie Drive|0224
+Retail|0249 Bradford On Avon, Winsley Road|0249
+Retail|0385 Bath, Widcombe Hill|0385
+Retail|0075 Mere, The Square|0075
+Retail|0170 Shrewton, High Street|0170
+Retail|0193 Shaftesbury, Beaufoy Close|0193
+Retail|0212 Salisbury, Kelsey Road|0212
+Retail|0240 Sturminster, Station Road|0240
+Retail|0248 Blandford, Salisbury Road|0248
+Retail|0359 Frome, Nunney Road|0359
+Retail|0367 Yeovil, Mudford Road|0367
+Retail|0403 Old Sarum, Crosier Close|0403
+Retail|0148 Verwood, Ringwood Road|0148
+Retail|0192 Portland, Weston Road|0192
+Retail|0216 Alderholt, Ringwood Road|0216
+Retail|0380 Wimborne, Wimborne Rd (PFS)|0380
+Retail|0409 Weymouth, Chickerell Road|0409
+Retail|0171 Bournemouth, Belle Vue Road|0171
+Retail|0173 Poole, Tatnam Road|0173
+Retail|0217 Bearwood, King John Avenue|0217
+Retail|0219 Creekmoor, Northmead Drive|0219
+Retail|0239 Bournemouth, Castle Lane|0239
+Retail|0303 Bournemouth, Madeira Road|0303
+Retail|0332 Bournemouth, East Howe Lane|0332
+Retail|0362 Poole, Ringwood Road|0362
+Retail|0026 Southampton, High Street|0026
+Retail|0081 Milford on Sea, High Street|0081
+Retail|0366 Southampton, Commercial Road|0366
+Retail|0393 Holbury, Long Lane|0393
+Retail|0396 Southampton, Archers Road|0396
+Retail|0411 Lyndhurst, High Street|0411
+Retail|0107 Lambourn, High Street|0107
+Retail|0427 Basingstoke, Wallingford Road|0427
+Retail|0095 Beggarwood, Broadmere Road|0095
+Retail|0103 Basingstoke, Kings Road|0103
+Retail|0106 Tadley, Franklin Avenue|0106
+Retail|0119 Stockbridge, High Street|0119
+Retail|0121 Overton, Winchester Street|0121
+Retail|0307 Winchester, City Road|0307
+Retail|0316 Rooksdown, Limes Park|0316
+Retail|0345 Newbury, Pound Street|0345
+Retail|0408 Newbury, Brummell Road|0408
+Retail|0415 Andover East Anton Farm Road|0415
+Retail|0426 Andover, Picket Twenty|0426
+Retail|0104 Fairoak, Sandy Lane|0104
+Retail|0211 Colden Common, St Vigor Way|0211
+Retail|0310 Eastleigh, Leigh Road|0310
+Retail|0023 North Baddesley, Seymour Parade|0023
+Retail|0109 Romsey, Winchester Hill (PFS)|0109
+Retail|0213 Romsey, Warren Gardens|0213
+Retail|0245 Romsey, The Hundred|0245
+Retail|0341 Romsey, Abbotswood Common Road|0341
+Retail|0381 Romsey, Botley Road|0381
+Retail|0397 Southampton, City Gateway|0397
+Retail|0406 West End, High Street|0406
+Retail|0028 Chandlers Ford, Falkland Court|0028
+Retail|0055 Bishops Waltham, High Street|0055
+Retail|0066 Wickham, The Square|0066
+Retail|0098 Boyatt Wood, The Parade|0098
+Retail|0062 Denmead, Hambledon Road|0062
+Retail|0150 Whiteley, Yew Tree Drive|0150
+Retail|0178 Southampton, Hursley Road|0178
+Retail|0125 Shanklin, Regent Street|0125
+Retail|0127 Gosport, Forton Road 268|0127
+Retail|0128 Bridgemary, Gregson Avenue|0128
+Retail|0129 Gosport, Palmyra Road|0129
+Retail|0136 Sandown, Avenue Road (PFS)|0136
+Retail|0202 Rookley, Main Road|0202
+Retail|0203 Ryde, West Street|0203
+Retail|0204 Bembridge, Sherbourne Street|0204
+Retail|0205 Cowes, Mill Hill Road|0205
+Retail|0207 Carisbrooke, High Street|0207
+Retail|0208 Freshwater, Avenue Road|0208
+Retail|0210 Gosport, Dartmouth Court|0210
+Retail|0022 Lee on Solent, Twyford Drive|0022
+Retail|0032 Fareham, Gudge Heath Lane|0032
+Retail|0037 Titchfield, The Square|0037
+Retail|0126 Lee on Solent, High Street|0126
+Retail|0052 Cowplain, London Road|0052
+Retail|0073 Crookhorn, The Precinct|0073
+Retail|0076 Hayling Island, Elm Grove|0076
+Retail|0090 Havant, St Albans Road|0090
+Retail|0122 Clanfield, White Dirt Lane|0122
+Retail|0347 Waterlooville, Milton Road|0347
+Retail|0392 Purbrook, London Road|0392
+Retail|0079 Emsworth, High Street|0079
+Retail|0085 East Wittering, Cakeham Road|0085
+Retail|0089 Westbourne, The Square|0089
+Retail|0093 Selsey, High Street|0093
+Retail|0096 Bosham, Station Road|0096
+Retail|0246 Bosham, Delling Lane|0246
+Retail|0321 Chichester, Stockbridge Road|0321
+Retail|0339 Southbourne, Main Road|0339
+Retail|0083 Havant, Middle Park Way|0083
+Retail|0069 Portsmouth, Tregaron Avenue|0069
+Retail|0305 Portchester, White Hart Lane|0305
+Retail|0323 Drayton, Havant Road|0323
+Retail|0325 Portsmouth, Western Road|0325
+Retail|0002 Portsmouth, Devonshire Square|0002
+Retail|0006 Portsmouth, Elm Grove|0006
+Retail|0007 Portsmouth, Eastney Road|0007
+Retail|0008 Portsmouth, Tangier Road|0008
+Retail|0009 Portsmouth, Winter Road|0009
+Retail|0014 Portsmouth, Copnor Road 331|0014
+Retail|0018 Portsmouth, Twyford Avenue|0018
+Retail|0019 Portsmouth, New Road|0019
+Retail|0021 Portsmouth, The Hard|0021
+Retail|0024 Portsmouth, Fawcett Road|0024
+Retail|0042 Portsmouth, Great Southsea Street|0042
+Retail|0247 Portsmouth, Northern Parade|0247
+Retail|0328 Southsea, Highland Road|0328
+Retail|0088 Bognor Regis, Hawthorn Road|0088
+Retail|0091 Bognor Regis, Rose Green Road|0091
+Retail|0309 Chichester, Oliver Whitby Road|0309
+Retail|0342 Chichester, Bognor Road|0342
+Retail|0352 Chichester, Spitalfield Lane|0352
+Retail|0414 Chichester, Lavant Road (PFS)|0414
+Retail|0036 Ferring, Ferring Street|0036
+Retail|0049 Yapton, Main Road|0049
+Retail|0220 Angmering, The Square|0220
+Retail|0302 Falmer, Bramber House|0302
+Retail|0308 Hove, Western Road|0308
+Retail|0320 East Preston, Station Parade|0320
+Retail|0346 Hove, Portland Road|0346
+Retail|0338 Portslade, Abinger Road|0338
+Retail|0368 Hove, Old Shoreham Road|0368
+Retail|0355 Burgess Hill, Junction Road|0355
+Retail|0361 Burgess Hill, London Road|0361
+Retail|0378 Haywards Heath, Franklynn Road (PFS)|0378
+Retail|0315 Eastbourne, Seaside|0315
+Retail|0336 Seasalter, Faversham Road|0336
+Retail|0344 Wadhurst, Sparrows Green Road|0344
+Retail|0354 St Leonards, Battle Road 100|0354
+Retail|0356 Eastbourne, Lindfield Road|0356
+Retail|0363 St Leonards Battle Road 290|0363
+Retail|0379 Lenham, Faversham Road|0379
+Retail|0389 Eastbourne, Beatty Road|0389
+Retail|0402 Minster, Monkton Road|0402
+Retail|0410 Ashford, Loudon Way|0410
+Retail|0413 Whitstable, Cromwell Road|0413
+Retail|0370 Reigate, London Road|0370
+Retail|0172 Banstead, Nork Way|0172
+Retail|0176 Windsor, Arthur Road|0176
+Retail|0319 West Ewell, Ruxley Lane|0319
+Retail|0340 Sidcup, The Oval|0340
+Retail|0383 Addlestone, Church Road|0383
+Retail|0384 Addlestone, New Haw Road|0384
+Retail|0394 Staines, Laleham Road|0394
+Retail|0401 Chertsey, Fordwater Road|0401
+Retail|0404 Wimbledon, Ridgway|0404
+Retail|0412 Chislehurst, White Horse Hill|0412
+Retail|0326 Chobham, Bagshot Road|0326
+Retail|0428 Guildford, Woodbridge Road (PFS)|0428
+Retail|0110 Alresford, West Street|0110
+Retail|0105 Alton, High Street|0105
+Retail|0351 Four Marks, Winchester Road|0351
+Retail|0317 Horsham, Guildford Road|0317
+Retail|0425 Broadbridge Heath, Wickhurst Square|0425
+Retail|0077 Moggs Mead, The Crundles|0077
+Retail|0078 Liphook, Headley Road|0078
+Retail|0306 Farnham, Farnborough Road|0306
+Retail|0330 Aldershot, Lower Farnham Road|0330
+Retail|0331 Camberley, Frimley Road|0331
+Retail|0357 Wrecclesham Wrecclesham Road|0357
+Retail|0365 Odiham, High Street|0365
+Retail|0376 Rowledge, The Square|0376
+Retail|0382 Binfield, Forest Road|0382
+Retail|0395 Wokingham, Market Place|0395
+Retail|0399 Church Crookham, Aldershot Road|0399
+Retail|9712 Ashurst, Lyndhurst Road|9712
+Retail|9746 Brockenhurst, Brookley Road|9746
+Retail|9701 Denvilles, Snowberry Crescent|9701
+Retail|9704 Fair Oak, Fair Oak Road|9704
+Retail|9710 Marchwood, Marchwood Village|9710
+Retail|9711 Stubbington, Upper Old Street|9711
