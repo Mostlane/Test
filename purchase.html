@@ -142,7 +142,7 @@
       const incident = document.getElementById("incident").value;
       const desc = document.getElementById("desc").value;
       const cost = document.getElementById("cost").value;
-      const engineerName = sessionStorage.getItem("mostlaneEmail") || "Unknown";
+      const engineerName = sessionStorage.getItem("mostlaneUsername") || "Unknown";
       const today = new Date().toISOString().slice(0, 10);
       const ref = await generateReference(site, supplier);
 
@@ -181,8 +181,14 @@
 
     window.onload = function() {
       populateDropdowns();
-      document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
-      document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+      document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUsername") || "Unknown";
+      
+    const now = new Date();
+    const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
+                          (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
+                          now.getFullYear();
+    document.getElementById("date").value = formattedDate;
+    
     };
   </script>
 
@@ -221,8 +227,14 @@ async function populateSites(category) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
-  document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUsername") || "Unknown";
+  
+    const now = new Date();
+    const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
+                          (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
+                          now.getFullYear();
+    document.getElementById("date").value = formattedDate;
+    
   populateSuppliers();
 
   const storeType = document.getElementById("storeType");
