@@ -192,36 +192,40 @@ async function fetchTextFile(url) {
   return res.ok ? (await res.text()).split("\n") : [];
 }
 
-async function populateSiteDropdown(selectedCategory) {
-  const siteDropdown = document.getElementById("site");
-  siteDropdown.innerHTML = "";
-
-  const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt");
-
-  const filtered = siteLines.filter(line => line.startsWith(selectedCategory + "|"));
-  for (const line of filtered) {
-    const [category, display, code] = line.split("|");
-    const opt = document.createElement("option");
-    opt.value = display;
-    opt.text = display;
-    siteDropdown.appendChild(opt);
-  }
-}
-
 async function populateCategoryDropdown() {
-  const dropdown = document.getElementById("storeType");
-  const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt");
+  const storeTypeSelect = document.getElementById("storeType");
+  const siteSelect = document.getElementById("site");
 
-  const categories = [...new Set(siteLines.map(line => line.split("|")[0]))];
-  for (const cat of categories.sort()) {
+  const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt?v=" + Date.now());
+
+  const categories = [...new Set(siteLines.map(line => line.split("|")[0]))].sort();
+  categories.forEach(category => {
     const opt = document.createElement("option");
-    opt.value = cat;
-    opt.text = cat;
-    dropdown.appendChild(opt);
-  }
+    opt.value = category;
+    opt.text = category;
+    storeTypeSelect.appendChild(opt);
+  });
 
-  dropdown.addEventListener("change", e => populateSiteDropdown(e.target.value));
-  if (categories.length > 0) populateSiteDropdown(categories[0]);
+  storeTypeSelect.addEventListener("change", () => {
+    const selectedCategory = storeTypeSelect.value;
+    siteSelect.innerHTML = "";
+    const filteredSites = siteLines.filter(line => line.startsWith(selectedCategory + "|"));
+    filteredSites.forEach(line => {
+      const parts = line.split("|");
+      if (parts.length === 3) {
+        const opt = document.createElement("option");
+        opt.value = parts[2];
+        opt.text = parts[1];
+        siteSelect.appendChild(opt);
+      }
+    });
+  });
+
+  // Preload first category's sites
+  if (categories.length > 0) {
+    storeTypeSelect.value = categories[0];
+    storeTypeSelect.dispatchEvent(new Event("change"));
+  }
 }
 
 window.addEventListener("DOMContentLoaded", populateCategoryDropdown);
