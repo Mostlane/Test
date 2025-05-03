@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>HR Documents</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 20px;
+    }
+    .frame-container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      background: rgba(255,255,255,0.6);
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+    }
+    iframe {
+      width: 100%;
+      height: 800px;
+      border: none;
+      border-radius: 6px;
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame-container">
+    <h1>Your HR Documents</h1>
+    <iframe id="hrFrame" src=""></iframe>
+  </div>
+
+  <script>
+    const folderLink = sessionStorage.getItem("mostlaneFolder");
+    const frame = document.getElementById("hrFrame");
+    if (folderLink) {
+      frame.src = folderLink;
+    } else {
+      frame.srcdoc = "<p style='color:red; text-align:center;'>No folder assigned. Please log in again.</p>";
+    }
+  </script>
+</body>
+</html>
