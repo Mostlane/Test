@@ -73,17 +73,13 @@
     <a href="onboard.html">Sign up</a>
   </div>
   <script>
-    const adminUser = "Admin";
-    const adminPass = "X6484CT";
-    const adminFolder = "docs/admin";
-    const usersTxtURL = "https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/Users.txt";
+    const usersTxtURL = "Users.txt";
 
     document.getElementById('loginForm').addEventListener('submit', function(e) {
       e.preventDefault();
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
 
-      // Check external Users.txt
       fetch(usersTxtURL)
         .then(response => {
           if (!response.ok) throw new Error("Network error");
