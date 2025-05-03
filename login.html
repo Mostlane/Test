@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -60,32 +59,13 @@
       font-size: 14px;
       margin-top: 10px;
     }
-  
-input[type="text"],
-input[type="password"],
-input[type="email"] {
-  width: 100%;
-  padding: 6px 8px;
-  margin: 6px 0;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-sizing: border-box;
-  font-size: 14px;
-}
-
-  
-.login-container {
-  
-}
-
   </style>
 </head>
 <body>
-  
   <div class="login-box">
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
     <form id="loginForm">
-      <input type="text" id="username" placeholder="Email address" required />
+      <input type="text" id="username" placeholder="Username" required />
       <input type="password" id="password" placeholder="Password" required />
       <button type="submit">Sign in</button>
       <p id="error"></p>
@@ -93,18 +73,52 @@ input[type="email"] {
     <a href="onboard.html">Sign up</a>
   </div>
   <script>
+    const adminUser = "Admin";
+    const adminPass = "X6484CT";
+    const adminFolder = "docs/admin";
+    const usersTxtURL = "https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt";
+
     document.getElementById('loginForm').addEventListener('submit', function(e) {
       e.preventDefault();
-      const user = document.getElementById('username').value.trim();
-      const pass = document.getElementById('password').value;
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
 
-      if ((user === "engineer" && pass === "mostlane123") || 
-          (user === "admin" && pass === "admin123")) {
+      // Check for hardcoded Admin login
+      if (username === adminUser && password === adminPass) {
         sessionStorage.setItem("mostlaneLoggedIn", "true");
+        sessionStorage.setItem("mostlaneUser", username);
+        sessionStorage.setItem("mostlaneFolder", adminFolder);
         window.location.href = "main.html";
-      } else {
-        document.getElementById("error").textContent = "Invalid login credentials.";
+        return;
       }
+
+      // Check external Users.txt
+      fetch(usersTxtURL)
+        .then(response => {
+          if (!response.ok) throw new Error("Network error");
+          return response.text();
+        })
+        .then(text => {
+          const lines = text.split('\n');
+          let found = false;
+          for (let line of lines) {
+            const [user, pass, folder] = line.trim().split('|');
+            if (username === user && password === pass) {
+              sessionStorage.setItem("mostlaneLoggedIn", "true");
+              sessionStorage.setItem("mostlaneUser", user);
+              sessionStorage.setItem("mostlaneFolder", folder);
+              window.location.href = "main.html";
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            document.getElementById("error").textContent = "Invalid login credentials.";
+          }
+        })
+        .catch(() => {
+          document.getElementById("error").textContent = "Could not load user list.";
+        });
     });
   </script>
 </body>
