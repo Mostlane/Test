@@ -1,4 +1,0 @@
-Admin|X6484CT|https://mostlane.sharepoint.com/:f:/g/EilRdPc2B-tBrpZhXuJ-LjIBWMYTLTV7F__boQU-xJQPSg?e=JdCNJR
-aaron|pass123|docs/aaron
-chris|pass123|docs/chris
-frazer|frazerpw|https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/Frazer
