@@ -75,7 +75,7 @@
   <script>
     async function hashPassword(password) {
       const encoder = new TextEncoder();
-      const data = encoder.encode(password);
+      const data = encoder.encode(password.trim());
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       return Array.from(new Uint8Array(hashBuffer))
                   .map(b => b.toString(16).padStart(2, '0'))
@@ -100,10 +100,10 @@
           let found = false;
           for (let line of lines) {
             const [user, hash, folder] = line.trim().split('|');
-            if (username === user && hashedInput === hash) {
+            if (username === user.trim() && hashedInput === hash.trim()) {
               sessionStorage.setItem("mostlaneLoggedIn", "true");
               sessionStorage.setItem("mostlaneUser", user);
-              sessionStorage.setItem("mostlaneFolder", folder);
+              sessionStorage.setItem("mostlaneFolder", folder.trim());
               window.location.href = "main.html";
               found = true;
               break;
