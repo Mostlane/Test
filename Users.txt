@@ -1,4 +1,4 @@
-Admin|X6484CT|docs/admin
+Admin|X6484CT|https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/Admin
 aaron|pass123|docs/aaron
 chris|pass123|docs/chris
-frazer|frazerpw|docs/frazer
+frazer|frazerpw|https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/Frazer
