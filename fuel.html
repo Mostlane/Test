@@ -1,95 +1,67 @@
+
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Fuel & Expenses – Diagnostic</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Main Menu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+
+</head>
+<body class="main-body">
+  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
+  <script>
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (user) {
+      document.getElementById("user-display").textContent = "You are logged in as " + user;
+    }
+  </script>
+
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      background: #f0f0f0;
+    .main-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
-    input, button {
+    h1 {
+      color: #003366;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .button {
       display: block;
-      width: 100%;
-      padding: 10px;
-      margin-top: 10px;
+      margin: 10px auto;
+      padding: 12px 20px;
       font-size: 16px;
-    }
-    .debug {
-      margin-top: 20px;
-      padding: 10px;
-      background: #fff;
-      border: 1px solid #ccc;
-      font-size: 14px;
-      white-space: pre-wrap;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.6);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 300px;
     }
   </style>
-</head>
-<body>
-  <h1>Fuel & Expenses (Diagnostic)</h1>
-  <p>Generated: 2025-05-01 19:37:28 UTC</p>
+  
+  <a class="button" href="index.html">Check In / Out</a>
+  <a class="button" href="timesheet.html">My Timesheet</a>
+  <a class="button" href="fuel.html">Fuel & Expenses</a>
+  <a class="button" href="holiday.html">Holiday Requests</a>
+  <a class="button" href="hr.html">HR Documents</a>
+  <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+  <a class="button" href="weekly.html">Weekly Summary</a>
 
-  <label for="postcode1">Site Postcode</label>
-  <input type="text" id="postcode1" placeholder="e.g. BH15 2BS">
-  <button onclick="calculate()">Calculate Mileage</button>
+<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 
-  <label>Total Mileage</label>
-  <input type="text" id="total" readonly>
-  <label>Chargeable Mileage</label>
-  <input type="text" id="chargeable" readonly>
-  <label>Claim (£0.25/mile)</label>
-  <input type="text" id="claim" readonly>
-
-  <div class="debug" id="debug">Status: Waiting for Google Maps...</div>
-
-  <script>
-    let directionsService;
-    function initMap() {
-      document.getElementById('debug').textContent = "Google Maps Loaded.";
-      directionsService = new google.maps.DirectionsService();
-    }
-
-    function calculate() {
-      document.getElementById('debug').textContent = "Calculate button clicked.";
-      if (!directionsService) {
-        document.getElementById('debug').textContent = "ERROR: directionsService not initialized.";
-        return;
-      }
-
-      const postcode = document.getElementById('postcode1').value.trim();
-      if (!postcode) {
-        document.getElementById('debug').textContent = "ERROR: No postcode entered.";
-        return;
-      }
-
-      const waypoints = [{ location: postcode, stopover: true }];
-      directionsService.route({
-        origin: "PO15 5RQ",
-        destination: "PO15 5RQ",
-        waypoints,
-        travelMode: "DRIVING"
-      }, (response, status) => {
-        if (status !== "OK") {
-          document.getElementById('debug').textContent = "Google Maps error: " + status;
-          return;
-        }
-        let total = response.routes[0].legs.reduce((sum, leg) => sum + leg.distance.value, 0);
-        let miles = total / 1609.34;
-        let chargeable = Math.max(miles - 20, 0);
-        let claim = chargeable * 0.25;
-
-        document.getElementById("total").value = miles.toFixed(2);
-        document.getElementById("chargeable").value = chargeable.toFixed(2);
-        document.getElementById("claim").value = "£" + claim.toFixed(2);
-        document.getElementById("debug").textContent = "Calculation successful.";
-      });
-    }
-
-    window.onload = function() {
-      document.getElementById('debug').textContent = "Page loaded. Waiting for Google Maps...";
-    };
-  </script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap"></script>
 </body>
 </html>
