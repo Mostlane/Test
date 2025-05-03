@@ -213,10 +213,7 @@ async function populateCategoryDropdown() {
   const siteLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/site_codes.txt");
 
   const categories = [...new Set(siteLines.map(line => line.split("|")[0]))];
-  const extra = ["Fareham Borough Council", "Other Sites"];
-  const all = [...new Set([...categories, ...extra])].sort();
-
-  for (const cat of all) {
+  for (const cat of categories.sort()) {
     const opt = document.createElement("option");
     opt.value = cat;
     opt.text = cat;
@@ -224,7 +221,7 @@ async function populateCategoryDropdown() {
   }
 
   dropdown.addEventListener("change", e => populateSiteDropdown(e.target.value));
-  if (all.length > 0) populateSiteDropdown(all[0]);
+  if (categories.length > 0) populateSiteDropdown(categories[0]);
 }
 
 window.addEventListener("DOMContentLoaded", populateCategoryDropdown);
