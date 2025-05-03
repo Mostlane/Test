@@ -1,57 +1,66 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
   <title>Main Menu</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 20px;
-    }
-    .login-info {
-      font-size: 16px;
-      margin-bottom: 10px;
-      font-weight: bold;
-    }
-    .menu-button {
-      display: block;
-      width: 100%;
-      max-width: 300px;
-      margin: 10px auto;
-      padding: 15px;
-      background-color: #0066cc;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 16px;
-      text-align: center;
-      text-decoration: none;
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+
 </head>
-<body>
-  <div class="login-info" id="userDisplay">You are logged in as ...</div>
-
-  <a href="checkin.html" class="menu-button">Check In</a>
-  <a href="checkout.html" class="menu-button">Check Out</a>
-  <a href="purchase.html" class="menu-button">Purchase References</a>
-  <a href="hr.html" class="menu-button">HR Documents</a>
-  <a href="fuel.html" class="menu-button">Fuel & Expenses</a>
-  <a href="holiday.html" class="menu-button">Holiday Requests</a>
-  <a href="weekly.html" class="menu-button">Weekly Summary</a>
-  <a href="login.html" class="menu-button">Log Out</a>
-
+<body class="main-body">
+  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
     const user = sessionStorage.getItem("mostlaneUser");
     if (user) {
-      document.getElementById("userDisplay").textContent = "You are logged in as " + user;
-    } else {
-      document.getElementById("userDisplay").textContent = "You are not logged in.";
+      document.getElementById("user-display").textContent = "You are logged in as " + user;
     }
   </script>
+
+  <style>
+    .main-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      color: #003366;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .button {
+      display: block;
+      margin: 10px auto;
+      padding: 12px 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.6);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 300px;
+    }
+  </style>
+  
+  <a class="button" href="index.html">Check In / Out</a>
+  <a class="button" href="timesheet.html">My Timesheet</a>
+  <a class="button" href="holiday.html">Holiday Requests</a>
+  <a class="button" href="hr.html">HR Documents</a>
+  <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+  <a class="button" href="weekly.html">Weekly Summary</a>
+
+<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+
 </body>
 </html>
