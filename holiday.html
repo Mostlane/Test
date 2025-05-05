@@ -3,157 +3,119 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Holiday Request – Mostlane Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Holiday Booking</title>
   <style>
     body {
-      margin: 0;
       font-family: 'Segoe UI', sans-serif;
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
-      background-color: #e6e8eb;
+      margin: 0;
+      padding: 40px 20px;
     }
     .container {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      padding: 40px;
-      background-color: rgba(255,255,255,0.6);
-      margin: 40px auto;
       max-width: 1000px;
-      border-radius: 12px;
+      margin: auto;
+      display: flex;
+      gap: 20px;
     }
     .form-section, .summary-section {
-      flex: 1 1 48%;
-      margin-bottom: 20px;
+      background: rgba(255,255,255,0.6);
+      padding: 30px;
+      border-radius: 8px;
+      flex: 1;
     }
     h2 {
+      text-align: center;
       color: #003366;
     }
     label {
-      font-weight: bold;
       display: block;
-      margin-top: 10px;
+      margin-top: 15px;
+      font-weight: bold;
     }
-    input, select, textarea {
+    input, select {
       width: 100%;
-      padding: 8px;
+      padding: 10px;
+      font-size: 16px;
       margin-top: 5px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      box-sizing: border-box;
     }
     button {
-      margin-top: 20px;
-      padding: 10px 20px;
-      background-color: #0078d7;
-      color: #fff;
+      margin-top: 30px;
+      padding: 12px;
+      width: 100%;
+      background-color: rgba(0, 74, 153, 0.6);
+      color: white;
+      font-size: 18px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
-    }
-    .summary-box {
-      background: #fff;
-      padding: 15px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-    }
-    .summary-box p {
-      margin: 8px 0;
-    }
-    ul {
-      padding-left: 20px;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="form-section">
-      <h2>Request Holiday</h2>
+      <h2>Holiday Request</h2>
       <form id="holidayForm">
-        <label for="engineer">Engineer Name</label>
-        <input type="text" id="engineer" name="engineer" readonly value="jamie@mostlane.co.uk" />
+        <label>Engineer Name:</label>
+        <input type="text" id="engineer" name="engineer" readonly>
 
-        <label for="start">Start Date</label>
-        <input type="date" id="start" name="start" required />
+        <label>Start Date:</label>
+        <input type="date" id="start" name="start" required>
 
-        <label for="end">End Date</label>
-        <input type="date" id="end" name="end" required />
+        <label>End Date:</label>
+        <input type="date" id="end" name="end" required>
 
-        <label for="type">Leave Type</label>
+        <label>Leave Type:</label>
         <select id="type" name="type" required>
           <option value="Annual Leave">Annual Leave</option>
           <option value="Sick Leave">Sick Leave</option>
-          <option value="Unpaid Leave">Unpaid Leave</option>
+          <option value="Bank Holiday">Bank Holiday</option>
+          <option value="Compulsory Leave">Compulsory Leave</option>
         </select>
 
-        <label for="notes">Notes (Optional)</label>
-        <textarea id="notes" name="notes" rows="3"></textarea>
+        <label>Notes:</label>
+        <input type="text" id="notes" name="notes" placeholder="Optional">
 
-        <input type="hidden" name="status" value="Pending" />
-
-        <button type="submit">Submit Request</button>
+        <button type="submit">Submit</button>
       </form>
-      <div style="margin-top: 30px;">
-        <h3>Holiday History</h3>
-        <ul id="historyList"></ul>
-      </div>
     </div>
-
     <div class="summary-section">
       <h2>Holiday Summary</h2>
-      <div class="summary-box" id="summaryBox">
-        <p><strong>Allowance:</strong> 28 Days (incl. Bank Holidays)</p>
-        <p><strong>Days Used:</strong> <span id="used">–</span></p>
-        <p><strong>Days Booked:</strong> <span id="booked">–</span></p>
-        <p><strong>Compulsory Shutdown Days:</strong> <span id="shutdown">–</span></p>
-        <p><strong>UK Bank Holidays:</strong> <span id="bank">–</span></p>
-        <p><strong>Accumulated Days to Book:</strong> <span id="accumulated">–</span></p>
-        <p><strong>Remaining to Accumulate:</strong> <span id="remaining">–</span></p>
-        <p><strong>Bank Holiday List:</strong></p>
-        <ul id="bankList"></ul>
-      </div>
-    
-        <p><strong>Compulsory Shutdown Dates:</strong></p>
-        <ul id="shutdownList"></ul>
-
-        
+      <div id="summaryContent">
+        <p><strong>Allowance:</strong> 28 Days</p>
+        <p><strong>Used:</strong> -</p>
+        <p><strong>Booked:</strong> -</p>
+        <p><strong>Mandatory Days:</strong> -</p>
+        <p><strong>Remaining:</strong> -</p>
       </div>
     </div>
+  </div>
 
-  <script>
+<script>
+document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUsername") || "Unknown";
 
-    fetch('sample-holiday-data.json')
-      .then(res => res.json())
-      .then(data => {
-        document.getElementById("used").innerText = data.used;
-        document.getElementById("booked").innerText = data.booked;
-        document.getElementById("shutdown").innerText = data.shutdown;
-        document.getElementById("bank").innerText = data.bank_holidays;
-        document.getElementById("accumulated").innerText = data.accumulated;
-        document.getElementById("remaining").innerText = data.remaining_to_accumulate;
+document.getElementById("holidayForm").addEventListener("submit", function(e) {
+  e.preventDefault();
 
-        const list = document.getElementById("bankList");
-        
-        const shutdownList = document.getElementById("shutdownList");
-        data.shutdown_dates.forEach(date => {
-          const li = document.createElement("li");
-          li.innerText = date;
-          shutdownList.appendChild(li);
-        });
+  const data = {
+    engineer: document.getElementById("engineer").value,
+    start: document.getElementById("start").value,
+    end: document.getElementById("end").value,
+    type: document.getElementById("type").value,
+    notes: document.getElementById("notes").value
+  };
 
-        const historyList = document.getElementById("historyList");
-        data.holiday_history.forEach(entry => {
-          const li = document.createElement("li");
-          li.innerText = entry.range + " – " + entry.type;
-          historyList.appendChild(li);
-        });
-
-        data.bank_holiday_list.forEach(holiday => {
-          const li = document.createElement("li");
-          li.innerText = holiday;
-          list.appendChild(li);
-        });
-      });
-  </script>
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/2xv9n1h/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(data).toString()
+  }).then(() => {
+    alert("Request submitted!");
+    document.getElementById("holidayForm").reset();
+  });
+});
+</script>
 </body>
 </html>
