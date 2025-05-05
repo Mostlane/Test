@@ -1,0 +1,66 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Main Menu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+
+</head>
+<body class="main-body">
+  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
+  <script>
+    const display = sessionStorage.getItem("mostlaneDisplay");
+    const fallback = sessionStorage.getItem("mostlaneUser");
+    document.getElementById("user-display").textContent = "You are logged in as " + (display || fallback || "Unknown");
+  </script>
+
+  <style>
+    .main-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      color: #003366;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .button {
+      display: block;
+      margin: 10px auto;
+      padding: 12px 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.6);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 300px;
+    }
+  </style>
+  
+  <a class="button" href="index.html">Check In / Out</a>
+  <a class="button" href="timesheet.html">My Timesheet</a>
+  <a class="button" href="fuel.html">Fuel & Expenses</a>
+  <a class="button" href="holiday.html">Holiday Requests</a>
+  <a class="button" href="hr.html">HR Documents</a>
+  <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+  <a class="button" href="weekly.html">Weekly Summary</a>
+
+<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+
+</body>
+</html>
