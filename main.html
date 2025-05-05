@@ -15,10 +15,9 @@
 <body class="main-body">
   <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
-    const displayName = sessionStorage.getItem("mostlaneDisplay") || sessionStorage.getItem("mostlaneUser");
-    if (displayName) {
-      document.getElementById("user-display").textContent = "You are logged in as " + displayName;
-    }
+    const display = sessionStorage.getItem("mostlaneDisplay");
+    const fallback = sessionStorage.getItem("mostlaneUser");
+    document.getElementById("user-display").textContent = "You are logged in as " + (display || fallback || "Unknown");
   </script>
 
   <style>
