@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mostlane Portal Login</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .login-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 25px;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 320px;
+      text-align: center;
+    }
+    .login-box img {
+      height: 60px;
+      margin-bottom: 20px;
+    }
+    .login-box input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .login-box button {
+      background-color: #0066cc;
+      color: white;
+      padding: 12px;
+      width: 100%;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .login-box a {
+      display: block;
+      margin-top: 15px;
+      font-size: 14px;
+      color: #0066cc;
+      text-decoration: none;
+    }
+    .login-box p#error {
+      color: red;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
+    <form id="loginForm">
+      <input type="text" id="username" placeholder="Username" required />
+      <input type="password" id="password" placeholder="Password" required />
+      <button type="submit">Sign in</button>
+      <p id="error"></p>
+    </form>
+    <a href="onboard.html">Sign up</a>
+  </div>
+  <script>
+    async function hashPassword(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password.trim());
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hashBuffer))
+                  .map(b => b.toString(16).padStart(2, '0'))
+                  .join('');
+    }
+
+    const usersTxtURL = "https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt";
+
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const hashedInput = await hashPassword(password);
+
+      fetch(usersTxtURL)
+        .then(response => {
+          if (!response.ok) throw new Error("Network error");
+          return response.text();
+        })
+        .then(text => {
+          const lines = text.split('\n');
+          let found = false;
+          for (let line of lines) {
+            const [user, hash, folder] = line.trim().split('|');
+            if (username === user.trim() && hashedInput === hash.trim()) {
+              sessionStorage.setItem("mostlaneLoggedIn", "true");
+              sessionStorage.setItem("mostlaneUser", user);
+              sessionStorage.setItem("mostlaneFolder", folder.trim());
+              window.location.href = "main.html";
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            document.getElementById("error").textContent = "Invalid login credentials.";
+          }
+        })
+        .catch(() => {
+          document.getElementById("error").textContent = "Could not load user list.";
+        });
+    });
+  </script>
+</body>
+</html>
