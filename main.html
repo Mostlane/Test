@@ -15,9 +15,9 @@
 <body class="main-body">
   <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
-    const user = sessionStorage.getItem("mostlaneUser");
-    if (user) {
-      document.getElementById("user-display").textContent = "You are logged in as " + user;
+    const displayName = sessionStorage.getItem("mostlaneDisplay") || sessionStorage.getItem("mostlaneUser");
+    if (displayName) {
+      document.getElementById("user-display").textContent = "You are logged in as " + displayName;
     }
   </script>
 
