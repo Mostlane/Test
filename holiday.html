@@ -83,6 +83,11 @@
   <div class="summary-section">
       <h2>Holiday Summary</h2>
       <div id="summaryContent">
+<div style="margin-top:20px; font-size: 13px; color: gray;">
+  <p>Last Update: <span id="lastUpdate">Loading...</span></p>
+  <p>Next Update: <span id="nextUpdate">Loading...</span></p>
+</div>
+
         <p><strong>Allowance:</strong> 28 Days</p>
         <p><strong>Used:</strong> -</p>
         <p><strong>Booked:</strong> -</p>
@@ -116,5 +121,36 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
   });
 });
 </script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const username = sessionStorage.getItem("mostlaneUser");
+  fetch("https://mostlane.github.io/Test/holiday-summary.json")
+    .then(response => response.json())
+    .then(data => {
+      const match = data.summary.find(row => row.username === username);
+      if (!match) {
+        document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
+        return;
+      }
+
+      document.getElementById("summaryContent").innerHTML = `
+        <p><strong>Annual Leave:</strong> ${match.annualLeave}</p>
+        <p><strong>Sick Leave:</strong> ${match.sickLeave}</p>
+        <p><strong>Compulsory Leave:</strong> ${match.compulsoryLeave}</p>
+        <p><strong>Total Booked:</strong> ${match.totalBooked}</p>
+        <p><strong>Allowance:</strong> ${match.allowance}</p>
+        <p><strong>Remaining:</strong> ${match.remaining}</p>
+      `;
+
+      document.getElementById("lastUpdate").textContent = data.lastUpdated;
+      document.getElementById("nextUpdate").textContent = data.nextUpdate;
+    })
+    .catch(() => {
+      document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
+    });
+});
+</script>
+
 </body>
 </html>
