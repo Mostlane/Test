@@ -45,6 +45,11 @@
 
 </head>
 <body class="checkin-body">
+
+<div id="deviceWarning" style="display:none; padding: 20px; background-color: #ffdddd; border: 1px solid red; color: black; font-weight: bold; border-radius: 8px; margin-bottom: 20px;">
+  This device is not recognised on Mostlane Portal. Either this device is being used in Incognito mode or the device is different. Please ensure you are using your normal device and not in private browser.
+</div>
+
   <style>
   body.checkin-body {
     font-family: "Segoe UI", sans-serif;
@@ -88,3 +93,11 @@
   <h1>Checking In...</h1>
 </body>
 </html>
+
+<script>
+  if (!localStorage.getItem("mostlane_device_id")) {
+    document.getElementById("deviceWarning").style.display = "block";
+    // Stop script execution by removing geolocation handler
+    window.onload = null;
+  }
+</script>
