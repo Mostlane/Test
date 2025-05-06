@@ -100,17 +100,7 @@ function getWeekRange(date) {
 
   return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
 }
-
-      const monday = new Date(date);
-      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
-      const friday = new Date(monday);
-      friday.setDate(monday.getDate() + 4);
-
-      const format = d => d.toLocaleDateString("en-UK", { day: 'numeric', month: 'short' });
-      return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
-    }
-
-    function loadWeek() {
+function loadWeek() {
       const range = getWeekRange(new Date());
       document.getElementById("weekRange").textContent = range.label;
 
