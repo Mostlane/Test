@@ -96,6 +96,7 @@
     function loadWeek() {
       const range = getWeekRange(new Date());
       document.getElementById("weekRange").textContent = range.label;
+      console.log("Current week range:", range.label);
 
       const logs = sampleData[user] || [];
       const filtered = logs.filter(log => {
@@ -114,6 +115,7 @@
 
       if (filtered.length === 0) {
         container.innerHTML = "<p>No activity this week.</p>";
+        console.log("No activity found for user:", user);
       }
     }
 
