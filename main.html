@@ -15,9 +15,10 @@
 <body class="main-body">
   <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
-    const display = sessionStorage.getItem("mostlaneDisplay");
-    const fallback = sessionStorage.getItem("mostlaneUser");
-    document.getElementById("user-display").textContent = "You are logged in as " + (display || fallback || "Unknown");
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (user) {
+      document.getElementById("user-display").textContent = "You are logged in as " + user;
+    }
   </script>
 
   <style>
@@ -56,11 +57,24 @@
   <a class="button" href="timesheet.html">My Timesheet</a>
   <a class="button" href="fuel.html">Fuel & Expenses</a>
   <a class="button" href="holiday.html">Holiday Requests</a>
-  <a class="button" href="hr.html">HR Documents</a>
+  <a class="button" id="hrButton" href="#">HR Documents</a>
   <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
   <a class="button" href="weekly.html">Weekly Summary</a>
 
 <a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 
+<script>
+  const folder = sessionStorage.getItem("mostlaneFolder");
+  const hrButton = document.getElementById("hrButton");
+  if (folder) {
+    hrButton.href = folder;
+    hrButton.target = "_blank";
+  } else {
+    hrButton.addEventListener("click", function(e) {
+      e.preventDefault();
+      alert("No folder assigned. Please log in again.");
+    });
+  }
+</script>
 </body>
 </html>
