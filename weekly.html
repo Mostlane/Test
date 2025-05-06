@@ -58,11 +58,17 @@
   </div>
 
   <script>
-    const user = sessionStorage.getItem("mostlaneUser");
+    let user = sessionStorage.getItem("mostlaneUser") || "admin";
     const now = new Date();
     let offset = 0;
 
     fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
+  .catch(error => {
+    document.getElementById("weekRange").textContent = "Failed to load data";
+    document.getElementById("activityLog").innerHTML = `<p style="color:red;">Error loading log file.</p>`;
+    console.error("Fetch failed:", error);
+    return Promise.reject(error);
+  })
       .then(response => response.json())
       .then(sampleData => {
 
@@ -96,7 +102,6 @@
     function loadWeek() {
       const range = getWeekRange(new Date());
       document.getElementById("weekRange").textContent = range.label;
-      console.log("Current week range:", range.label);
 
       const logs = sampleData[user] || [];
       const filtered = logs.filter(log => {
@@ -115,7 +120,6 @@
 
       if (filtered.length === 0) {
         container.innerHTML = "<p>No activity this week.</p>";
-        console.log("No activity found for user:", user);
       }
     }
 
