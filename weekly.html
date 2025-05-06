@@ -62,45 +62,38 @@
     const now = new Date();
     let offset = 0;
 
-    const sampleData = {
-      "jamie.line": [
-        { type: "checkin", datetime: "2025-05-06T08:00:00", location: "Gosport" },
-        { type: "purchase_order", datetime: "2025-05-06T10:15:00", reference: "SHP-MET-0021" },
-        { type: "holiday", datetime: "2025-05-05T00:00:00", description: "Annual Leave" }
-      ],
-      "aaron": [
-        { type: "checkin", datetime: "2025-05-06T09:00:00", location: "Portsmouth" }
-      ]
-    };
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
+      .then(response => response.json())
+      .then(sampleData => {
+
+    function getOrdinal(n) {
+      const s = ["th", "st", "nd", "rd"], v = n % 100;
+      return s[(v - 20) % 10] || s[v] || s[0];
+    }
+
+    function getWeekRange(date) {
+      const monday = new Date(date);
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+
+      const format = d => {
+        const day = d.getDate();
+        const suffix = getOrdinal(day);
+        const month = d.toLocaleDateString("en-UK", { month: 'short' });
+        const year = String(d.getFullYear()).slice(-2);
+        return `${day}${suffix} ${month}${year}`;
+      };
+
+      return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
+    }
 
     function changeWeek(delta) {
       offset += delta;
       loadWeek();
     }
 
-    
-function getOrdinal(n) {
-  const s = ["th", "st", "nd", "rd"], v = n % 100;
-  return s[(v - 20) % 10] || s[v] || s[0];
-}
-
-function getWeekRange(date) {
-  const monday = new Date(date);
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
-  const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
-
-  const format = d => {
-    const day = d.getDate();
-    const suffix = getOrdinal(day);
-    const month = d.toLocaleDateString("en-UK", { month: 'short' });
-    const year = String(d.getFullYear()).slice(-2);
-    return `${day}${suffix} ${month}${year}`;
-  };
-
-  return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
-}
-function loadWeek() {
+    function loadWeek() {
       const range = getWeekRange(new Date());
       document.getElementById("weekRange").textContent = range.label;
 
@@ -125,6 +118,7 @@ function loadWeek() {
     }
 
     loadWeek();
+  });
   </script>
 </body>
 </html>
