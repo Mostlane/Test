@@ -1,0 +1,78 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Register New Device</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .content-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 20px;
+      max-width: 400px;
+      width: 90%;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-weight: bold;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="content-box">
+    <h2>Register a New Device</h2>
+    <input id="username" placeholder="Enter Username" required><br>
+    <button onclick="registerDevice()">Submit</button>
+    <p id="statusMsg" style="margin-top: 15px; font-weight: bold;"></p>
+  </div>
+
+  <script>
+    function registerDevice() {
+      const username = document.getElementById("username").value.trim();
+      if (!username) {
+        document.getElementById("statusMsg").textContent = "Username is required.";
+        return;
+      }
+
+      let deviceId = localStorage.getItem("mostlane_device_id");
+      if (!deviceId) {
+        deviceId = "dev-" + Math.random().toString(36).substring(2, 10);
+        localStorage.setItem("mostlane_device_id", deviceId);
+      }
+
+      const data = { username, deviceId };
+
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(data).toString()
+      })
+      .then(() => {
+        document.getElementById("statusMsg").textContent = "Device successfully registered.";
+      })
+      .catch(() => {
+        document.getElementById("statusMsg").textContent = "Error. Please try again.";
+      });
+    }
+  </script>
+</body>
+</html>
