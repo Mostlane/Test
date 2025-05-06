@@ -1,0 +1,156 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Holiday Booking</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      display: block;
+    }
+    .form-section, .summary-section {
+      background: rgba(255,255,255,0.6);
+      padding: 30px;
+      border-radius: 8px;
+      flex: 1;
+    }
+    h2 {
+      text-align: center;
+      color: #003366;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      margin-top: 5px;
+    }
+    button {
+      margin-top: 30px;
+      padding: 12px;
+      width: 100%;
+      background-color: rgba(0, 74, 153, 0.6);
+      color: white;
+      font-size: 18px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+  <div class="form-section">
+      <h2>Holiday Request</h2>
+      <form id="holidayForm">
+        <label>Engineer Name:</label>
+        <input type="text" id="engineer" name="engineer" readonly>
+
+        <label>Start Date:</label>
+        <input type="date" id="start" name="start" required>
+
+        <label>End Date:</label>
+        <input type="date" id="end" name="end" required>
+
+        <label>Leave Type:</label>
+        <select id="type" name="type" required>
+          <option value="Annual Leave">Annual Leave</option>
+          <option value="Sick Leave">Sick Leave</option>
+          <option value="Bank Holiday">Bank Holiday</option>
+          <option value="Compulsory Leave">Compulsory Leave</option>
+        </select>
+
+        <label>Notes:</label>
+        <input type="text" id="notes" name="notes" placeholder="Optional">
+
+        <button type="submit">Submit</button>
+      </form>
+    </div>
+  <div class="summary-section">
+      <h2>Holiday Summary</h2>
+      <div id="summaryContent">
+<div style="margin-top:20px; font-size: 13px; color: gray;">
+  <p>Last Update: <span id="lastUpdate">Loading...</span></p>
+  <p>Next Update: <span id="nextUpdate">Loading...</span></p>
+</div>
+
+        <p><strong>Allowance:</strong> 28 Days</p>
+        <p><strong>Used:</strong> -</p>
+        <p><strong>Booked:</strong> -</p>
+        <p><strong>Mandatory Days:</strong> -</p>
+        <p><strong>Remaining:</strong> -</p>
+      </div>
+    </div>
+  </div>
+
+<script>
+document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+
+document.getElementById("holidayForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+
+  const data = {
+    engineer: document.getElementById("engineer").value,
+    start: document.getElementById("start").value,
+    end: document.getElementById("end").value,
+    type: document.getElementById("type").value,
+    notes: document.getElementById("notes").value
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/2nudfug/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(data).toString()
+  }).then(() => {
+    alert("Request submitted!");
+    document.getElementById("holidayForm").reset();
+  });
+});
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const username = sessionStorage.getItem("mostlaneUser");
+  fetch("https://mostlane.github.io/Test/holiday-summary.json")
+    .then(response => response.json())
+    .then(data => {
+      const match = data.summary.find(row => row.username === username);
+      if (!match) {
+        document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
+        return;
+      }
+
+      document.getElementById("summaryContent").innerHTML = `
+        <p><strong>Annual Leave:</strong> ${match.annualLeave}</p>
+        <p><strong>Sick Leave:</strong> ${match.sickLeave}</p>
+        <p><strong>Compulsory Leave:</strong> ${match.compulsoryLeave}</p>
+        <p><strong>Total Booked:</strong> ${match.totalBooked}</p>
+        <p><strong>Allowance:</strong> ${match.allowance}</p>
+        <p><strong>Remaining:</strong> ${match.remaining}</p>
+      `;
+
+      document.getElementById("lastUpdate").textContent = data.lastUpdated;
+      document.getElementById("nextUpdate").textContent = data.nextUpdate;
+    })
+    .catch(() => {
+      document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
+    });
+});
+</script>
+
+</body>
+</html>
