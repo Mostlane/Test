@@ -78,7 +78,29 @@
       loadWeek();
     }
 
-    function getWeekRange(date) {
+    
+function getOrdinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+}
+
+function getWeekRange(date) {
+  const monday = new Date(date);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+
+  const format = d => {
+    const day = d.getDate();
+    const suffix = getOrdinal(day);
+    const month = d.toLocaleDateString("en-UK", { month: 'short' });
+    const year = String(d.getFullYear()).slice(-2);
+    return `${day}${suffix} ${month}${year}`;
+  };
+
+  return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
+}
+
       const monday = new Date(date);
       monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
       const friday = new Date(monday);
