@@ -14,61 +14,53 @@
           lat: position.coords.latitude,
           lon: position.coords.longitude,
           device: (function() {
-            let id = localStorage.getItem("mostlane_device_id");
-            if (!id) {
-              id = "dev-" + Math.random().toString(36).substring(2, 10);
-              localStorage.setItem("mostlane_device_id", id);
-            }
-            return id;
-          })(),
+          let id = localStorage.getItem("mostlane_device_id");
+          if (!id) {
+            id = "dev-" + Math.random().toString(36).substring(2, 10);
+            localStorage.setItem("mostlane_device_id", id);
+          }
+          return id;
+        })(),
           engineer: localStorage.getItem("engineerName") || "Unknown"
         };
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/2xzexxb/", {
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(data).toString()
-        })
-        .then(response => {
-          if (!response.ok) {
-            return response.text().then(text => {
-              throw new Error(`Zapier error: ${text}`);
+        }).then(() => {
+
+        setTimeout(() => {
+          try {
+            fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: data.engineer,
+                type: "checkin",
+                datetime: new Date().toISOString(),
+                location: "GPS: " + data.lat + "," + data.lon
+              })
             });
+          } catch (e) {
+            console.warn("GitHub log error:", e);
           }
-        })
-        .then(() => {
-          setTimeout(() => {
-            try {
-              fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  user: data.engineer,
-                  type: "checkin",
-                  datetime: new Date().toISOString(),
-                  location: "GPS: " + data.lat + "," + data.lon
-                })
-              });
-            } catch (e) {
-              console.warn("GitHub log error:", e);
-            }
-          }, 500);
+        }, 500);
 
           const now = new Date().toLocaleString();
           window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
-        })
-        .catch(err => alert("Error submitting data: " + err.message));
+        }).catch(() => alert("Error submitting data."));
       }
-
       function error() {
         alert("Please enable location to check in.");
       }
     }
   </script>
-  <script>
-    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-      window.location.href = "login.html";
-    }
-  </script>
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
+
 </head>
 <body class="checkin-body">
 
@@ -78,7 +70,7 @@
   If issues persist, please call Mostlane office on 02380 262000.
 </div>
 
-<style>
+  <style>
   body.checkin-body {
     font-family: "Segoe UI", sans-serif;
     background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -116,15 +108,16 @@
     max-width: 90%;
     text-align: center;
   }
-</style>
 
-<h1>Checking In...</h1>
+  </style>
+  <h1>Checking In...</h1>
+</body>
+</html>
 
 <script>
   if (!localStorage.getItem("mostlane_device_id")) {
     document.getElementById("deviceWarning").style.display = "block";
+    // Stop script execution by removing geolocation handler
+    window.onload = null;
   }
 </script>
-
-</body>
-</html>
