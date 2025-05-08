@@ -1,0 +1,14 @@
+{
+  "admin": [
+    {
+      "type": "checkin",
+      "datetime": "2025-05-06T08:00:00",
+      "location": "Gosport"
+    },
+    {
+      "type": "checkout",
+      "datetime": "2025-05-06T16:30:00",
+      "location": "Gosport"
+    }
+  ]
+}
