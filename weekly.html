@@ -58,7 +58,7 @@
   </div>
 
   <script>
-    let user = "Jamie.Line";
+    let user = sessionStorage.getItem("mostlaneUser") || "admin";
     let offset = 0;
     let dataStore = null;
 
