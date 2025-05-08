@@ -1,9 +1,9 @@
 {
   "Jamie.Line": [
     {
-      "type": "Check In",
-      "datetime": "09/05/2025 00:06",
-      "location": "Latitude: 50.8744719732656Longitude: -1.2819549167291202"
+      "type": "Check Out",
+      "datetime": "09/05/2025 23:08",
+      "location": "Latitude: 50.87447197326561Longitude: -1.2819549167291207"
     }
   ]
 }
