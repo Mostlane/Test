@@ -1,7 +1,14 @@
-"Jamie.Line": [
-  {
-    "type": "checkin",
-    "datetime": "2025-05-09T08:10:00Z",
-    "location": "Gosport"
-  }
-]
+{
+  "Jamie.Line": [
+    {
+      "type": "Check In",
+      "datetime": "2025-05-08T12:30:00Z",
+      "location": "Latitude: 50.8744 Longitude: -1.2819"
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-08T18:00:00Z",
+      "location": "Latitude: 50.8744 Longitude: -1.2819"
+    }
+  ]
+}
