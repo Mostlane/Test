@@ -14,6 +14,11 @@
       "type": "Check Out",
       "datetime": "09/05/2025 23:16",
       "location": "Latitude: 50.874472049855044Longitude: -1.2819552090360122"
+    },
+    {
+      "type": "Check In",
+      "datetime": "09/05/2025 23:16",
+      "location": "Latitude: 50.874472049856465Longitude: -1.2819552090413917"
     }
   ]
 }
