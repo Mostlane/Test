@@ -60,63 +60,64 @@
   <script>
     let user = sessionStorage.getItem("mostlaneUser") || "admin";
     let offset = 0;
+    let dataStore = null;
+
+    function getOrdinal(n) {
+      const s = ["th", "st", "nd", "rd"], v = n % 100;
+      return s[(v - 20) % 10] || s[v] || s[0];
+    }
+
+    function getWeekRange(date) {
+      const monday = new Date(date);
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
+      const friday = new Date(monday);
+      friday.setDate(monday.getDate() + 4);
+      friday.setHours(23, 59, 59, 999); // include all of Friday
+
+      const format = d => {
+        const day = d.getDate();
+        const suffix = getOrdinal(day);
+        const month = d.toLocaleDateString("en-UK", { month: 'short' });
+        const year = String(d.getFullYear()).slice(-2);
+        return `${day}${suffix} ${month}${year}`;
+      };
+
+      return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
+    }
+
+    function changeWeek(delta) {
+      offset += delta;
+      loadWeek();
+    }
+
+    function loadWeek() {
+      const range = getWeekRange(new Date());
+      document.getElementById("weekRange").textContent = range.label;
+
+      const logs = dataStore[user] || [];
+      const filtered = logs.filter(log => {
+        const d = new Date(log.datetime);
+        return d >= range.start && d <= range.end;
+      });
+
+      const container = document.getElementById("activityLog");
+      container.innerHTML = "";
+      filtered.forEach(log => {
+        const div = document.createElement("div");
+        div.className = "activity";
+        div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${log.datetime}<br>${log.location || log.reference || log.description || ""}`;
+        container.appendChild(div);
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = "<p>No activity this week.</p>";
+      }
+    }
 
     fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
       .then(response => response.json())
-      .then(sampleData => {
-        const now = new Date();
-
-        function getOrdinal(n) {
-          const s = ["th", "st", "nd", "rd"], v = n % 100;
-          return s[(v - 20) % 10] || s[v] || s[0];
-        }
-
-        function getWeekRange(date) {
-          const monday = new Date(date);
-          monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
-          const friday = new Date(monday);
-          friday.setDate(monday.getDate() + 4);
-
-          const format = d => {
-            const day = d.getDate();
-            const suffix = getOrdinal(day);
-            const month = d.toLocaleDateString("en-UK", { month: 'short' });
-            const year = String(d.getFullYear()).slice(-2);
-            return `${day}${suffix} ${month}${year}`;
-          };
-
-          return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
-        }
-
-        function changeWeek(delta) {
-          offset += delta;
-          loadWeek();
-        }
-
-        function loadWeek() {
-          const range = getWeekRange(new Date());
-          document.getElementById("weekRange").textContent = range.label;
-
-          const logs = sampleData[user] || [];
-          const filtered = logs.filter(log => {
-            const d = new Date(log.datetime);
-            return d >= range.start && d <= range.end;
-          });
-
-          const container = document.getElementById("activityLog");
-          container.innerHTML = "";
-          filtered.forEach(log => {
-            const div = document.createElement("div");
-            div.className = "activity";
-            div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${log.datetime}<br>${log.location || log.reference || log.description || ""}`;
-            container.appendChild(div);
-          });
-
-          if (filtered.length === 0) {
-            container.innerHTML = "<p>No activity this week.</p>";
-          }
-        }
-
+      .then(json => {
+        dataStore = json;
         loadWeek();
       })
       .catch(error => {
