@@ -37,3 +37,10 @@
     }
   ]
 }
+"Jamie.Line": [
+  {
+    "type": "checkin",
+    "datetime": "2025-05-09T08:10:00Z",
+    "location": "Gosport"
+  }
+]
