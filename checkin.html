@@ -28,17 +28,20 @@
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(data).toString()
         
-        // Also send to GitHub logger
-        fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user: sessionStorage.getItem("mostlaneUser"),
-            type: "checkin",
-            datetime: new Date().toISOString(),
-            location: "GPS: " + data.lat + "," + data.lon
-          })
-        });
+        try {
+          fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user: sessionStorage.getItem("mostlaneUser"),
+              type: "checkin",
+              datetime: new Date().toISOString(),
+              location: "GPS: " + data.lat + "," + data.lon
+            })
+          });
+        } catch (e) {
+          console.error("GitHub log failed:", e);
+        }
 
         }).then(() => {
           const now = new Date().toLocaleString();
