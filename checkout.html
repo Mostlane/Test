@@ -29,7 +29,7 @@
           body: new URLSearchParams(data).toString()
         }).then(() => {
 
-          // Also log to GitHub (non-blocking)
+        setTimeout(() => {
           try {
             fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
               method: "POST",
@@ -42,8 +42,9 @@
               })
             });
           } catch (e) {
-            console.warn("GitHub log failed:", e);
+            console.warn("GitHub log error:", e);
           }
+        }, 500);
 
           const now = new Date().toLocaleString();
           window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
