@@ -105,7 +105,17 @@
       filtered.forEach(log => {
         const div = document.createElement("div");
         div.className = "activity";
-        div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${log.datetime}<br>${log.location || log.reference || log.description || ""}`;
+        
+const d = new Date(log.datetime);
+d.setHours(d.getHours() + 1);
+const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
+const date = d.getDate();
+const suffix = getOrdinal(date);
+const hour = d.getHours().toString().padStart(2, '0');
+const minute = d.getMinutes().toString().padStart(2, '0');
+const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
+div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${log.location || log.reference || log.description || ""}`;
+
         container.appendChild(div);
       });
 
@@ -126,41 +136,6 @@
         console.error("Fetch error:", error);
       });
   
-let debugInfo = document.createElement('pre');
-debugInfo.style.background = '#f4f4f4';
-debugInfo.style.border = '1px solid #ccc';
-debugInfo.style.padding = '10px';
-debugInfo.style.marginTop = '20px';
-debugInfo.textContent = 'Loading debug info...';
-document.body.prepend(debugInfo);
-
-fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
-  .then((response) => response.json())
-  .then((dataStore) => {
-    const user = sessionStorage.getItem("mostlaneUser") || "admin";
-    const logs = dataStore[user] || [];
-    const now = new Date();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-    const friday = new Date(monday);
-    friday.setDate(monday.getDate() + 4);
-
-    const visibleLogs = logs.filter(log => {
-      const d = new Date(log.datetime);
-      return d >= monday && d <= friday;
-    });
-
-    debugInfo.textContent =
-      "Logged in as: " + user + "\n" +
-      "Found logs for user: " + logs.length + "\n" +
-      "Logs visible this week: " + visibleLogs.length + "\n" +
-      "Monday: " + monday.toISOString() + "\n" +
-      "Friday: " + friday.toISOString() + "\n" +
-      "Raw log entries: " + JSON.stringify(logs, null, 2);
-  })
-  .catch((err) => {
-    debugInfo.textContent = "ERROR: " + err.message;
-  });
 
 </script>
 </body>
