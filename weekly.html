@@ -107,14 +107,22 @@
         div.className = "activity";
         
 const d = new Date(log.datetime);
-d.setHours(d.getHours() + 1);
 const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
 const date = d.getDate();
 const suffix = getOrdinal(date);
 const hour = d.getHours().toString().padStart(2, '0');
 const minute = d.getMinutes().toString().padStart(2, '0');
 const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
-div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${log.location || log.reference || log.description || ""}`;
+
+let locationDisplay = "";
+if (log.location) {
+  const lat = log.location.match(/Latitude:\s*([^\s]+)/i);
+  const lon = log.location.match(/Longitude:\s*([^\s]+)/i);
+  if (lat) locationDisplay += `Latitude: ${lat[1]}<br>`;
+  if (lon) locationDisplay += `Longitude: ${lon[1]}`;
+}
+
+div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay || log.reference || log.description || ""}`;
 
         container.appendChild(div);
       });
