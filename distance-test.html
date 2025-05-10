@@ -1,0 +1,47 @@
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Travel Distance Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body { font-family: sans-serif; padding: 20px; }
+      #result { margin-top: 20px; font-size: 1.2em; color: #004a99; }
+    </style>
+    <script>
+      function initMap() {
+        const origin = new google.maps.LatLng(50.8529, -1.2445); // PO15 5RQ
+        const destination = new google.maps.LatLng(51.559483, -0.125273); // Example location
+
+        const service = new google.maps.DistanceMatrixService();
+        service.getDistanceMatrix({
+          origins: [origin],
+          destinations: [destination],
+          travelMode: 'DRIVING'
+        }, (response, status) => {
+          if (status === 'OK') {
+            const meters = response.rows[0].elements[0].distance.value;
+            const miles = meters / 1609.34;
+            const paidMiles = Math.max(0, miles - 10);
+            const mileagePay = paidMiles * 0.25;
+
+            document.getElementById("result").innerHTML = `
+              <strong>Raw Distance:</strong> ${miles.toFixed(2)} miles<br>
+              <strong>Paid Mileage:</strong> ${paidMiles.toFixed(2)} miles<br>
+              <strong>Reimbursement:</strong> £${mileagePay.toFixed(2)}
+            `;
+          } else {
+            document.getElementById("result").innerText = "API Error: " + status;
+          }
+        });
+      }
+    </script>
+    <script async defer
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&callback=initMap">
+    </script>
+  </head>
+  <body>
+    <h2>Google Maps Mileage Test</h2>
+    <div id="result">Loading...</div>
+  </body>
+</html>
