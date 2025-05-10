@@ -1,49 +1,9 @@
 {
-  "Jamie.Line": [
-    {
-      "type": "Check In",
-      "datetime": "2025-05-08T07:59:00.000Z",
-      "location": "Latitude: 50.87452597458799Longitude: -1.2819020142035729"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-08T15:59:00.000Z",
-      "location": "Latitude: 50.87452597458799Longitude: -1.2819020142035729"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-09T08:13:00.000Z",
-      "location": "Latitude: 50.8746452897501Longitude: -1.2818971813022673"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-09T16:27:00.000Z",
-      "location": "Latitude: 50.87452597458799Longitude: -1.2819020142035729"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-09T11:20:00.000Z",
-      "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
-    },
-    {
-      "datetime": "2025-05-10T13:21:00.000Z",
-      "location": "Latitude: Longitude: "
-    }
-  ],
   "Greg.Line": [
     {
-      "type": "Check In",
-      "datetime": "2025-05-09T12:18:00.000Z",
-      "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-10T12:26:00.000Z",
-      "location": "Latitude: 50.87456755496939Longitude: -1.2818562386677441"
-    },
-    {
       "type": "Check Out",
-      "datetime": "2025-05-10T13:50:00.000Z",
+      "datetime": "2025-05-10T13:58:00.000Z",
       "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
     }
-  ],
+  ]
+}
