@@ -48,6 +48,33 @@
   </style>
 </head>
 <body>
+
+<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+  <a href="main.html" class="portal-btn">Main Menu</a>
+  <button onclick="createTimesheet()" class="portal-btn">Create Invoice</button>
+</div>
+<style>
+  .portal-btn {
+    background-color: #004a99;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 16px;
+    border: none;
+    cursor: pointer;
+  }
+  .portal-btn:hover {
+    background-color: #003366;
+  }
+</style>
+<script>
+function createTimesheet() {
+  alert("Invoice creation logic will go here.");
+}
+</script>
+
   <div class="content-box">
     <div class="header">
       <div class="arrow" onclick="changeWeek(-1)">←</div>
