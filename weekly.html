@@ -129,6 +129,7 @@ function createInvoice() {
 
       const container = document.getElementById("activityLog");
       container.innerHTML = "";
+      summarizeWeeklyHours(filtered);
       filtered.forEach(log => {
         const div = document.createElement("div");
         div.className = "activity";
