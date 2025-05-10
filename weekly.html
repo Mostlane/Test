@@ -132,11 +132,19 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
       }
     }
 
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
-      .then(response => response.json())
+    fetch("https://api.github.com/repos/Mostlane/Test/contents/logs/activity-log.json?cb=2025-05-10T11:31:49.543796")
+        .then(response => response.json())
       .then(json => {
-        dataStore = json;
-        loadWeek();
+            .then(data => {
+    const decoded = atob(data.content);
+    dataStore = JSON.parse(decoded);
+    loadWeek();
+  })
+  .catch(error => {
+    document.getElementById("weekRange").textContent = "Error loading data";
+    document.getElementById("activityLog").innerHTML = "<p style='color:red;'>Could not load activity log.</p>";
+    console.error("Fetch error:", error);
+  });
       })
       .catch(error => {
         document.getElementById("weekRange").textContent = "Error loading data";
