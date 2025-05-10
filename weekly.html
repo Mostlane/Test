@@ -51,7 +51,7 @@
 
 <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
   <a href="main.html" class="portal-btn">Main Menu</a>
-  <button onclick="createInvoice()" class="portal-btn">Create Invoice</button>
+  <button onclick="createInvoice()" class="portal-btn invoice">Loading…</button>
 </div>
 <style>
   .portal-btn {
@@ -157,7 +157,7 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
       });
 
       if (filtered.length === 0) {
-        container.innerHTML = "<p style='color:#004a99;font-weight:bold;'>Pull down to refresh</p>";
+        container.innerHTML = "<p>No activity this week.</p>";
       }
     }
 
@@ -340,6 +340,59 @@ async function calculateTravelAdditions(user, logs) {
   document.getElementById("activityLog").appendChild(container);
 
 }
+</script>
+
+
+<script>
+async function updateSummaryExtras() {
+  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const [employmentRaw, travelRaw, roleRaw] = await Promise.all([
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt").then(r => r.text()),
+  ]);
+
+  const getMapValue = (raw, key) => {
+    const line = raw.split("\n").find(l => l.includes(key));
+    return line ? line.split(" - ")[1].trim() : null;
+  };
+
+  const employment = getMapValue(employmentRaw, user) || "SelfEmployed";
+  const travel = getMapValue(travelRaw, user) || "No";
+  const role = getMapValue(roleRaw, user) || "Field";
+
+  // Set correct button label
+  const btn = document.querySelector(".portal-btn.invoice");
+  if (btn) {
+    btn.textContent = employment === "SelfEmployed" ? "Create Invoice" : "Create Timesheet";
+  }
+
+  // Show travel and mileage if data was calculated
+  const container = document.createElement("div");
+  container.style.marginTop = "20px";
+  container.style.padding = "10px";
+  let content = "";
+
+  const minutes = Math.round((window._travelSeconds || 0) / 60);
+  const paidMiles = window._paidMiles || 0;
+  const mileagePay = (paidMiles * 0.25).toFixed(2);
+
+  if (role === "Field") {
+    if (employment === "Employed" && travel === "Yes" && minutes > 0) {
+      content += `<strong>Paid Travel Time:</strong> ${Math.floor(minutes/60)}h ${minutes%60}m<br>`;
+    }
+    if (employment === "SelfEmployed" && paidMiles >= 0) {
+      content += `<strong>Paid Mileage:</strong> £${mileagePay} (${paidMiles.toFixed(1)} miles)<br>`;
+    }
+  }
+
+  if (!content) content = "<em>No travel pay this week</em>";
+
+  container.innerHTML = content;
+  document.getElementById("activityLog").appendChild(container);
+}
+
+updateSummaryExtras();
 </script>
 
 </body>
