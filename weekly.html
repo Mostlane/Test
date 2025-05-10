@@ -51,7 +51,7 @@
 
 <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
   <a href="main.html" class="portal-btn">Main Menu</a>
-  <button onclick="createInvoice()" class="portal-btn">Create Invoice</button>
+  <button onclick="createInvoice()" class="portal-btn create-invoice">Create Invoice</button>
 </div>
 <style>
   .portal-btn {
@@ -239,6 +239,34 @@ async function summarizeWeeklyHours(logs) {
   `;
   document.getElementById("activityLog").appendChild(summary);
 }
+</script>
+
+
+<script>
+async function fetchEmploymentType() {
+  const response = await fetch('https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/employment.txt');
+  const text = await response.text();
+  const map = {};
+  text.split('\n').forEach(line => {
+    const [name, type] = line.split(' - ');
+    if (name && type) {
+      map[name.trim()] = type.trim();
+    }
+  });
+  return map;
+}
+
+async function updateInvoiceButtonLabel() {
+  const map = await fetchEmploymentType();
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const type = map[username] || "Employed";
+  const button = document.querySelector('.portal-btn.create-invoice');
+  if (button) {
+    button.textContent = type === "SelfEmployed" ? "Create Invoice" : "Create Timesheet";
+  }
+}
+
+window.addEventListener("DOMContentLoaded", updateInvoiceButtonLabel);
 </script>
 
 </body>
