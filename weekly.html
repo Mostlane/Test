@@ -71,7 +71,7 @@
       const monday = new Date(date);
       monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
       const friday = new Date(monday);
-      friday.setDate(monday.getDate() + 4);
+      friday.setDate(monday.getDate() + 6);
       friday.setHours(23, 59, 59, 999); // include all of Friday
 
       const format = d => {
@@ -116,7 +116,7 @@ const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
 
 let locationDisplay = "";
 if (log.location) {
-  const lat = log.location.match(/Latitude:\s*([^\s]+)/i);
+  const lat = log.location.match(/Latitude:\s*([^L]+)/i);
   const lon = log.location.match(/Longitude:\s*([^\s]+)/i);
   if (lat) locationDisplay += `Latitude: ${lat[1]}<br>`;
   if (lon) locationDisplay += `Longitude: ${lon[1]}`;
