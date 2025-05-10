@@ -24,6 +24,10 @@
       "type": "Check In",
       "datetime": "2025-05-09T11:20:00.000Z",
       "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
+    },
+    {
+      "datetime": "2025-05-10T13:21:00.000Z",
+      "location": "Latitude: Longitude: "
     }
   ],
   "Greg.Line": [
