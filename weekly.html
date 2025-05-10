@@ -128,6 +128,7 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
       });
 
       summarizeWeeklyHours(filtered);
+appendFinancialSummary(user, totalStandard, totalOvertime);
 
       if (filtered.length === 0) {
         container.innerHTML = "<p>No activity this week.</p>";
@@ -146,6 +147,67 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
         console.error("Fetch error:", error);
       });
   
+
+
+
+// --- Financial Summary Injection ---
+async function appendFinancialSummary(user, totalStandard, totalOvertime) {
+  const [rates, employment, roleType] = await Promise.all([
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/rates.txt').then(r => r.text()),
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt').then(r => r.text()),
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt').then(r => r.text())
+  ]);
+
+  const rateLine = rates.split('\n').find(l => l.includes(user)) || "";
+  const rate = parseFloat(rateLine.split('£')[1]) || 0;
+
+  const employmentType = (employment.split('\n').find(l => l.includes(user)) || "").split(' - ')[1] || "SelfEmployed";
+  const role = (roleType.split('\n').find(l => l.includes(user)) || "").split(' - ')[1] || "Field";
+
+  // Calculate hours
+  const stdHours = (totalStandard / 60).toFixed(2);
+  const otHours = (totalOvertime / 60).toFixed(2);
+  const stdPay = (stdHours * rate).toFixed(2);
+  const otPay = (otHours * rate * 1.5).toFixed(2);
+
+  // Calculate mileage (deduct 10mi per Check In and 10mi per Check Out)
+  let paidMileage = 0;
+  if (role !== "Office") {
+    const range = getWeekRange(new Date());
+    const relevant = dataStore[user].filter(log => {
+      const d = new Date(log.datetime);
+      return d >= range.start && d <= range.end &&
+             (log.type.toLowerCase() === "check in" || log.type.toLowerCase() === "check out");
+    });
+
+    relevant.forEach(log => {
+      if (log.distance) {
+        const rawMiles = parseFloat(log.distance);
+        const adjusted = Math.max(0, rawMiles - 10); // 10 miles off each trip
+        paidMileage += adjusted;
+      }
+    });
+  }
+
+  const mileagePay = (paidMileage * 0.25).toFixed(2);
+  const total = (parseFloat(stdPay) + parseFloat(otPay) + parseFloat(mileagePay)).toFixed(2);
+
+  const fin = document.createElement("div");
+  fin.style.marginTop = "20px";
+  fin.style.padding = "10px";
+  fin.style.borderTop = "2px solid #004a99";
+  fin.innerHTML = \`
+    <h3>\${employmentType === "SelfEmployed" ? "Invoice Summary" : "Weekly Timesheet Summary"}</h3>
+    <strong>Standard Hours:</strong> \${stdHours} hrs – £\${stdPay}<br>
+    <strong>Overtime Hours:</strong> \${otHours} hrs – £\${otPay}<br>
+    <strong>Paid Mileage:</strong> \${paidMileage.toFixed(2)} mi – £\${mileagePay}<br>
+    <strong>Total Weekly Pay:</strong> <strong>£\${total}</strong>
+  \`;
+
+  document.getElementById("activityLog").appendChild(fin);
+}
+
+}
 
 </script>
 
