@@ -2,4647 +2,1657 @@
   "Tanya.Chinnery": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:28:00",
-      "location": "Latitude: 50.7390761744Longitude: -1.3272863579"
+      "datetime": "2025-05-09T08:47:00",
+      "location": "Latitude: 50.94594911Longitude: -1.21103933",
+      "distance": "28.8 miles",
+      "duration": "70 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T18:43:00",
-      "location": "Latitude: 50.7390761744Longitude: -1.3272863579"
+      "datetime": "2025-05-09T19:45:00",
+      "location": "Latitude: 50.94594911Longitude: -1.21103933",
+      "distance": "28.8 miles",
+      "duration": "70 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:55:00",
-      "location": "Latitude: 50.7551947592Longitude: -1.0688354957"
+      "datetime": "2025-05-08T08:46:00",
+      "location": "Latitude: 50.77142865Longitude: -1.19877888",
+      "distance": "35.4 miles",
+      "duration": "37 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:23:00",
-      "location": "Latitude: 50.7551947592Longitude: -1.0688354957"
+      "datetime": "2025-05-08T16:40:00",
+      "location": "Latitude: 50.77142865Longitude: -1.19877888",
+      "distance": "35.4 miles",
+      "duration": "37 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T06:06:00",
-      "location": "Latitude: 50.9612419736Longitude: -1.1570338742"
+      "datetime": "2025-05-07T08:52:00",
+      "location": "Latitude: 50.94068662Longitude: -1.26038667",
+      "distance": "28.4 miles",
+      "duration": "42 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T16:46:00",
-      "location": "Latitude: 50.9612419736Longitude: -1.1570338742"
+      "datetime": "2025-05-07T17:55:00",
+      "location": "Latitude: 50.94068662Longitude: -1.26038667",
+      "distance": "28.4 miles",
+      "duration": "42 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:53:00",
-      "location": "Latitude: 50.8097776051Longitude: -1.3702198988"
+      "datetime": "2025-05-06T07:04:00",
+      "location": "Latitude: 50.77446358Longitude: -1.18106503",
+      "distance": "23.1 miles",
+      "duration": "43 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T17:39:00",
-      "location": "Latitude: 50.8097776051Longitude: -1.3702198988"
+      "datetime": "2025-05-06T15:03:00",
+      "location": "Latitude: 50.77446358Longitude: -1.18106503",
+      "distance": "23.1 miles",
+      "duration": "43 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:34:00",
-      "location": "Latitude: 50.7795978923Longitude: -1.2826765308"
+      "datetime": "2025-05-05T08:45:00",
+      "location": "Latitude: 50.79224747Longitude: -1.22797379",
+      "distance": "18.1 miles",
+      "duration": "61 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T15:33:00",
-      "location": "Latitude: 50.7795978923Longitude: -1.2826765308"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:25:00",
-      "location": "Latitude: 50.9853906161Longitude: -1.2661677021"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T15:41:00",
-      "location": "Latitude: 50.9853906161Longitude: -1.2661677021"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:16:00",
-      "location": "Latitude: 50.9448545086Longitude: -1.416644444"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T18:05:00",
-      "location": "Latitude: 50.9448545086Longitude: -1.416644444"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:16:00",
-      "location": "Latitude: 50.6890980038Longitude: -1.0395701737"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T19:41:00",
-      "location": "Latitude: 50.6890980038Longitude: -1.0395701737"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:59:00",
-      "location": "Latitude: 50.8251079916Longitude: -1.3301231899"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T18:57:00",
-      "location": "Latitude: 50.8251079916Longitude: -1.3301231899"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:20:00",
-      "location": "Latitude: 50.8896070959Longitude: -1.191971597"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T18:06:00",
-      "location": "Latitude: 50.8896070959Longitude: -1.191971597"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T08:23:00",
-      "location": "Latitude: 50.6692664427Longitude: -1.2361463914"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T20:00:00",
-      "location": "Latitude: 50.6692664427Longitude: -1.2361463914"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T07:24:00",
-      "location": "Latitude: 51.035263219Longitude: -1.3625256153"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T14:36:00",
-      "location": "Latitude: 51.035263219Longitude: -1.3625256153"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T06:50:00",
-      "location": "Latitude: 50.8122090081Longitude: -1.0839256758"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T18:00:00",
-      "location": "Latitude: 50.8122090081Longitude: -1.0839256758"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:57:00",
-      "location": "Latitude: 50.9094588257Longitude: -1.2091752709"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T16:12:00",
-      "location": "Latitude: 50.9094588257Longitude: -1.2091752709"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:05:00",
-      "location": "Latitude: 50.8252178464Longitude: -1.3964507264"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T15:29:00",
-      "location": "Latitude: 50.8252178464Longitude: -1.3964507264"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:38:00",
-      "location": "Latitude: 50.8189024134Longitude: -1.1934827864"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T15:48:00",
-      "location": "Latitude: 50.8189024134Longitude: -1.1934827864"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:05:00",
-      "location": "Latitude: 50.7707558966Longitude: -1.145992055"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T18:48:00",
-      "location": "Latitude: 50.7707558966Longitude: -1.145992055"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:50:00",
-      "location": "Latitude: 50.8135815723Longitude: -1.3346024175"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:23:00",
-      "location": "Latitude: 50.8135815723Longitude: -1.3346024175"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:37:00",
-      "location": "Latitude: 50.8944040864Longitude: -1.1369697826"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:42:00",
-      "location": "Latitude: 50.8944040864Longitude: -1.1369697826"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:42:00",
-      "location": "Latitude: 50.889580415Longitude: -1.3471436659"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T13:53:00",
-      "location": "Latitude: 50.889580415Longitude: -1.3471436659"
+      "datetime": "2025-05-05T17:19:00",
+      "location": "Latitude: 50.79224747Longitude: -1.22797379",
+      "distance": "18.1 miles",
+      "duration": "61 mins"
     }
   ],
   "Ryan.Diggens": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:20:00",
-      "location": "Latitude: 50.7528941604Longitude: -1.2265370644"
+      "datetime": "2025-05-09T08:08:00",
+      "location": "Latitude: 50.91346267Longitude: -1.27705149",
+      "distance": "29.6 miles",
+      "duration": "35 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T14:34:00",
-      "location": "Latitude: 50.7528941604Longitude: -1.2265370644"
+      "datetime": "2025-05-09T17:23:00",
+      "location": "Latitude: 50.91346267Longitude: -1.27705149",
+      "distance": "29.6 miles",
+      "duration": "35 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T08:46:00",
-      "location": "Latitude: 50.7943804694Longitude: -1.2671582029"
+      "datetime": "2025-05-08T07:39:00",
+      "location": "Latitude: 50.80575605Longitude: -1.27701184",
+      "distance": "29.4 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:16:00",
-      "location": "Latitude: 50.7943804694Longitude: -1.2671582029"
+      "datetime": "2025-05-08T17:48:00",
+      "location": "Latitude: 50.80575605Longitude: -1.27701184",
+      "distance": "29.4 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:08:00",
-      "location": "Latitude: 50.8768837471Longitude: -1.0979945298"
+      "datetime": "2025-05-07T06:54:00",
+      "location": "Latitude: 50.89842088Longitude: -1.30241751",
+      "distance": "18.1 miles",
+      "duration": "66 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:10:00",
-      "location": "Latitude: 50.8768837471Longitude: -1.0979945298"
+      "datetime": "2025-05-07T16:07:00",
+      "location": "Latitude: 50.89842088Longitude: -1.30241751",
+      "distance": "18.1 miles",
+      "duration": "66 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:04:00",
-      "location": "Latitude: 50.6756127529Longitude: -1.2048988256"
+      "datetime": "2025-05-06T07:19:00",
+      "location": "Latitude: 50.84583403Longitude: -1.29340431",
+      "distance": "32.4 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T14:03:00",
-      "location": "Latitude: 50.6756127529Longitude: -1.2048988256"
+      "datetime": "2025-05-06T17:25:00",
+      "location": "Latitude: 50.84583403Longitude: -1.29340431",
+      "distance": "32.4 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:21:00",
-      "location": "Latitude: 50.9402049712Longitude: -1.2569943499"
+      "datetime": "2025-05-05T07:47:00",
+      "location": "Latitude: 50.85450476Longitude: -1.24790439",
+      "distance": "39.7 miles",
+      "duration": "29 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T17:08:00",
-      "location": "Latitude: 50.9402049712Longitude: -1.2569943499"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:15:00",
-      "location": "Latitude: 50.9172546056Longitude: -1.1513195848"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T14:33:00",
-      "location": "Latitude: 50.9172546056Longitude: -1.1513195848"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:19:00",
-      "location": "Latitude: 51.0551516265Longitude: -1.2795642844"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T16:04:00",
-      "location": "Latitude: 51.0551516265Longitude: -1.2795642844"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:47:00",
-      "location": "Latitude: 50.8410721624Longitude: -1.2668400126"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T19:08:00",
-      "location": "Latitude: 50.8410721624Longitude: -1.2668400126"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:09:00",
-      "location": "Latitude: 50.7937567857Longitude: -1.2551703355"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T17:05:00",
-      "location": "Latitude: 50.7937567857Longitude: -1.2551703355"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:22:00",
-      "location": "Latitude: 51.0206700507Longitude: -1.1843844061"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T15:31:00",
-      "location": "Latitude: 51.0206700507Longitude: -1.1843844061"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T08:04:00",
-      "location": "Latitude: 50.9907195341Longitude: -1.3912289679"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:38:00",
-      "location": "Latitude: 50.9907195341Longitude: -1.3912289679"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:16:00",
-      "location": "Latitude: 50.7670878399Longitude: -1.2383887777"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T15:47:00",
-      "location": "Latitude: 50.7670878399Longitude: -1.2383887777"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T06:37:00",
-      "location": "Latitude: 50.8779786809Longitude: -1.0241351819"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:02:00",
-      "location": "Latitude: 50.8779786809Longitude: -1.0241351819"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:49:00",
-      "location": "Latitude: 50.7884947975Longitude: -1.2252919174"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T15:53:00",
-      "location": "Latitude: 50.7884947975Longitude: -1.2252919174"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T06:30:00",
-      "location": "Latitude: 50.8863337127Longitude: -1.2297448133"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T17:05:00",
-      "location": "Latitude: 50.8863337127Longitude: -1.2297448133"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:10:00",
-      "location": "Latitude: 50.6729170509Longitude: -1.1822162051"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:46:00",
-      "location": "Latitude: 50.6729170509Longitude: -1.1822162051"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:05:00",
-      "location": "Latitude: 50.6614293543Longitude: -1.3319969288"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T15:55:00",
-      "location": "Latitude: 50.6614293543Longitude: -1.3319969288"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:49:00",
-      "location": "Latitude: 51.0289236919Longitude: -1.0453939106"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T14:57:00",
-      "location": "Latitude: 51.0289236919Longitude: -1.0453939106"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:09:00",
-      "location": "Latitude: 51.0514336291Longitude: -1.1364374698"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:54:00",
-      "location": "Latitude: 51.0514336291Longitude: -1.1364374698"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T08:17:00",
-      "location": "Latitude: 51.0468590136Longitude: -1.2532396676"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T19:55:00",
-      "location": "Latitude: 51.0468590136Longitude: -1.2532396676"
+      "datetime": "2025-05-05T16:32:00",
+      "location": "Latitude: 50.85450476Longitude: -1.24790439",
+      "distance": "39.7 miles",
+      "duration": "29 mins"
     }
   ],
   "Joanna.Marcinkowski": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:14:00",
-      "location": "Latitude: 50.8787745529Longitude: -1.2234222143"
+      "datetime": "2025-05-09T06:37:00",
+      "location": "Latitude: 50.80881337Longitude: -1.25536569",
+      "distance": "26.3 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T17:02:00",
-      "location": "Latitude: 50.8787745529Longitude: -1.2234222143"
+      "datetime": "2025-05-09T13:51:00",
+      "location": "Latitude: 50.80881337Longitude: -1.25536569",
+      "distance": "26.3 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:01:00",
-      "location": "Latitude: 51.0424866187Longitude: -1.243157994"
+      "datetime": "2025-05-08T08:35:00",
+      "location": "Latitude: 50.85927364Longitude: -1.27812418",
+      "distance": "19.4 miles",
+      "duration": "75 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T17:13:00",
-      "location": "Latitude: 51.0424866187Longitude: -1.243157994"
+      "datetime": "2025-05-08T17:59:00",
+      "location": "Latitude: 50.85927364Longitude: -1.27812418",
+      "distance": "19.4 miles",
+      "duration": "75 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:23:00",
-      "location": "Latitude: 50.8366615287Longitude: -1.1994436711"
+      "datetime": "2025-05-07T08:19:00",
+      "location": "Latitude: 50.82457536Longitude: -1.19618257",
+      "distance": "26.8 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T17:41:00",
-      "location": "Latitude: 50.8366615287Longitude: -1.1994436711"
+      "datetime": "2025-05-07T15:31:00",
+      "location": "Latitude: 50.82457536Longitude: -1.19618257",
+      "distance": "26.8 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:17:00",
-      "location": "Latitude: 50.8385666424Longitude: -1.2493051276"
+      "datetime": "2025-05-06T06:00:00",
+      "location": "Latitude: 50.94101946Longitude: -1.17646092",
+      "distance": "22.5 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:50:00",
-      "location": "Latitude: 50.8385666424Longitude: -1.2493051276"
+      "datetime": "2025-05-06T13:26:00",
+      "location": "Latitude: 50.94101946Longitude: -1.17646092",
+      "distance": "22.5 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:11:00",
-      "location": "Latitude: 50.7657683897Longitude: -1.0557406682"
+      "datetime": "2025-05-05T08:21:00",
+      "location": "Latitude: 50.86617079Longitude: -1.17845963",
+      "distance": "14.3 miles",
+      "duration": "26 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T17:12:00",
-      "location": "Latitude: 50.7657683897Longitude: -1.0557406682"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:23:00",
-      "location": "Latitude: 50.8888883704Longitude: -1.2268176257"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T15:16:00",
-      "location": "Latitude: 50.8888883704Longitude: -1.2268176257"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:37:00",
-      "location": "Latitude: 50.7948370433Longitude: -1.2171314199"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T19:42:00",
-      "location": "Latitude: 50.7948370433Longitude: -1.2171314199"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:44:00",
-      "location": "Latitude: 50.8691119619Longitude: -1.0421472191"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T18:26:00",
-      "location": "Latitude: 50.8691119619Longitude: -1.0421472191"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:03:00",
-      "location": "Latitude: 50.6783227662Longitude: -1.4213717145"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T15:15:00",
-      "location": "Latitude: 50.6783227662Longitude: -1.4213717145"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:00:00",
-      "location": "Latitude: 50.7243803135Longitude: -1.2215393672"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T14:33:00",
-      "location": "Latitude: 50.7243803135Longitude: -1.2215393672"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:51:00",
-      "location": "Latitude: 50.7081161341Longitude: -1.0960257006"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T17:53:00",
-      "location": "Latitude: 50.7081161341Longitude: -1.0960257006"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:54:00",
-      "location": "Latitude: 51.0304576816Longitude: -1.369864782"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T20:24:00",
-      "location": "Latitude: 51.0304576816Longitude: -1.369864782"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T06:19:00",
-      "location": "Latitude: 50.7266893345Longitude: -1.1751701273"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:35:00",
-      "location": "Latitude: 50.7266893345Longitude: -1.1751701273"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T07:31:00",
-      "location": "Latitude: 50.7366806244Longitude: -1.0716535919"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T19:06:00",
-      "location": "Latitude: 50.7366806244Longitude: -1.0716535919"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T06:23:00",
-      "location": "Latitude: 50.7290933035Longitude: -1.2108467015"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T15:37:00",
-      "location": "Latitude: 50.7290933035Longitude: -1.2108467015"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:43:00",
-      "location": "Latitude: 50.7731501064Longitude: -1.2101472155"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:28:00",
-      "location": "Latitude: 50.7731501064Longitude: -1.2101472155"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:46:00",
-      "location": "Latitude: 50.9312277611Longitude: -1.1320948159"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T18:09:00",
-      "location": "Latitude: 50.9312277611Longitude: -1.1320948159"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:00:00",
-      "location": "Latitude: 50.7414883418Longitude: -1.2546611501"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:27:00",
-      "location": "Latitude: 50.7414883418Longitude: -1.2546611501"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:46:00",
-      "location": "Latitude: 50.9247111334Longitude: -1.3562001271"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T16:48:00",
-      "location": "Latitude: 50.9247111334Longitude: -1.3562001271"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T07:35:00",
-      "location": "Latitude: 50.9283967782Longitude: -1.2252321257"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:58:00",
-      "location": "Latitude: 50.9283967782Longitude: -1.2252321257"
+      "datetime": "2025-05-05T16:09:00",
+      "location": "Latitude: 50.86617079Longitude: -1.17845963",
+      "distance": "14.3 miles",
+      "duration": "26 mins"
     }
   ],
   "James.Baczynski": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:07:00",
-      "location": "Latitude: 50.7227137625Longitude: -1.3568800354"
+      "datetime": "2025-05-09T06:25:00",
+      "location": "Latitude: 50.84181486Longitude: -1.14342245",
+      "distance": "36.6 miles",
+      "duration": "58 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T15:34:00",
-      "location": "Latitude: 50.7227137625Longitude: -1.3568800354"
+      "datetime": "2025-05-09T16:43:00",
+      "location": "Latitude: 50.84181486Longitude: -1.14342245",
+      "distance": "36.6 miles",
+      "duration": "58 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:45:00",
-      "location": "Latitude: 50.805306512Longitude: -1.1007021757"
+      "datetime": "2025-05-08T08:39:00",
+      "location": "Latitude: 50.91383662Longitude: -1.16565853",
+      "distance": "33.0 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:31:00",
-      "location": "Latitude: 50.805306512Longitude: -1.1007021757"
+      "datetime": "2025-05-08T19:06:00",
+      "location": "Latitude: 50.91383662Longitude: -1.16565853",
+      "distance": "33.0 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T06:01:00",
-      "location": "Latitude: 50.9215846969Longitude: -1.2015737099"
+      "datetime": "2025-05-07T07:08:00",
+      "location": "Latitude: 50.77536879Longitude: -1.28814982",
+      "distance": "30.4 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:34:00",
-      "location": "Latitude: 50.9215846969Longitude: -1.2015737099"
+      "datetime": "2025-05-07T16:08:00",
+      "location": "Latitude: 50.77536879Longitude: -1.28814982",
+      "distance": "30.4 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:33:00",
-      "location": "Latitude: 50.976218679Longitude: -1.2586206855"
+      "datetime": "2025-05-06T08:58:00",
+      "location": "Latitude: 50.8771282Longitude: -1.20573066",
+      "distance": "22.1 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T19:17:00",
-      "location": "Latitude: 50.976218679Longitude: -1.2586206855"
+      "datetime": "2025-05-06T16:19:00",
+      "location": "Latitude: 50.8771282Longitude: -1.20573066",
+      "distance": "22.1 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:10:00",
-      "location": "Latitude: 50.7319656478Longitude: -1.1371072797"
+      "datetime": "2025-05-05T07:23:00",
+      "location": "Latitude: 50.85134267Longitude: -1.12463337",
+      "distance": "30.0 miles",
+      "duration": "29 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T17:50:00",
-      "location": "Latitude: 50.7319656478Longitude: -1.1371072797"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:03:00",
-      "location": "Latitude: 50.9482070695Longitude: -1.2722325882"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T16:49:00",
-      "location": "Latitude: 50.9482070695Longitude: -1.2722325882"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:11:00",
-      "location": "Latitude: 50.7319524713Longitude: -1.3060081302"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T16:46:00",
-      "location": "Latitude: 50.7319524713Longitude: -1.3060081302"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:51:00",
-      "location": "Latitude: 51.0020209774Longitude: -1.1220917976"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T17:06:00",
-      "location": "Latitude: 51.0020209774Longitude: -1.1220917976"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:59:00",
-      "location": "Latitude: 50.7144112055Longitude: -1.2104526013"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T20:31:00",
-      "location": "Latitude: 50.7144112055Longitude: -1.2104526013"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:48:00",
-      "location": "Latitude: 51.0043802265Longitude: -1.1677774304"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:38:00",
-      "location": "Latitude: 51.0043802265Longitude: -1.1677774304"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:37:00",
-      "location": "Latitude: 50.8919795747Longitude: -1.3198969886"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:27:00",
-      "location": "Latitude: 50.8919795747Longitude: -1.3198969886"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T07:55:00",
-      "location": "Latitude: 50.9180580257Longitude: -1.1709281958"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T14:58:00",
-      "location": "Latitude: 50.9180580257Longitude: -1.1709281958"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:30:00",
-      "location": "Latitude: 50.8635743407Longitude: -1.3849246993"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T18:39:00",
-      "location": "Latitude: 50.8635743407Longitude: -1.3849246993"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:16:00",
-      "location": "Latitude: 50.8396326702Longitude: -1.2683189057"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T16:59:00",
-      "location": "Latitude: 50.8396326702Longitude: -1.2683189057"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:59:00",
-      "location": "Latitude: 50.737634432Longitude: -1.1613885891"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:47:00",
-      "location": "Latitude: 50.737634432Longitude: -1.1613885891"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:00:00",
-      "location": "Latitude: 50.8546610004Longitude: -1.355577902"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T13:18:00",
-      "location": "Latitude: 50.8546610004Longitude: -1.355577902"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:23:00",
-      "location": "Latitude: 50.8346929459Longitude: -1.154581761"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T17:55:00",
-      "location": "Latitude: 50.8346929459Longitude: -1.154581761"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:20:00",
-      "location": "Latitude: 50.7077754902Longitude: -1.1759342917"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T17:28:00",
-      "location": "Latitude: 50.7077754902Longitude: -1.1759342917"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:26:00",
-      "location": "Latitude: 51.0066955462Longitude: -1.3507830433"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T19:14:00",
-      "location": "Latitude: 51.0066955462Longitude: -1.3507830433"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:24:00",
-      "location": "Latitude: 50.8748501849Longitude: -1.1698000245"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T16:57:00",
-      "location": "Latitude: 50.8748501849Longitude: -1.1698000245"
+      "datetime": "2025-05-05T15:32:00",
+      "location": "Latitude: 50.85134267Longitude: -1.12463337",
+      "distance": "30.0 miles",
+      "duration": "29 mins"
     }
   ],
   "Greg.Line": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:35:00",
-      "location": "Latitude: 50.9492574715Longitude: -1.2469731099"
+      "datetime": "2025-05-09T07:43:00",
+      "location": "Latitude: 50.8455048Longitude: -1.26784676",
+      "distance": "32.7 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T18:22:00",
-      "location": "Latitude: 50.9492574715Longitude: -1.2469731099"
+      "datetime": "2025-05-09T17:24:00",
+      "location": "Latitude: 50.8455048Longitude: -1.26784676",
+      "distance": "32.7 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:40:00",
-      "location": "Latitude: 50.7557353133Longitude: -1.132531704"
+      "datetime": "2025-05-08T07:17:00",
+      "location": "Latitude: 50.86637289Longitude: -1.27291181",
+      "distance": "22.7 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:45:00",
-      "location": "Latitude: 50.7557353133Longitude: -1.132531704"
+      "datetime": "2025-05-08T17:23:00",
+      "location": "Latitude: 50.86637289Longitude: -1.27291181",
+      "distance": "22.7 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:28:00",
-      "location": "Latitude: 51.0487435495Longitude: -1.3911811399"
+      "datetime": "2025-05-07T08:37:00",
+      "location": "Latitude: 50.76714042Longitude: -1.21204953",
+      "distance": "18.4 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T17:18:00",
-      "location": "Latitude: 51.0487435495Longitude: -1.3911811399"
+      "datetime": "2025-05-07T15:38:00",
+      "location": "Latitude: 50.76714042Longitude: -1.21204953",
+      "distance": "18.4 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:02:00",
-      "location": "Latitude: 50.7566379438Longitude: -1.0788108541"
+      "datetime": "2025-05-06T06:25:00",
+      "location": "Latitude: 50.88111513Longitude: -1.17442454",
+      "distance": "12.4 miles",
+      "duration": "53 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T15:08:00",
-      "location": "Latitude: 50.7566379438Longitude: -1.0788108541"
+      "datetime": "2025-05-06T14:59:00",
+      "location": "Latitude: 50.88111513Longitude: -1.17442454",
+      "distance": "12.4 miles",
+      "duration": "53 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:44:00",
-      "location": "Latitude: 50.8877730609Longitude: -1.3493239639"
+      "datetime": "2025-05-05T07:16:00",
+      "location": "Latitude: 50.8508309Longitude: -1.14486285",
+      "distance": "35.9 miles",
+      "duration": "70 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T19:01:00",
-      "location": "Latitude: 50.8877730609Longitude: -1.3493239639"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:18:00",
-      "location": "Latitude: 50.9168041603Longitude: -1.1013092786"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T19:48:00",
-      "location": "Latitude: 50.9168041603Longitude: -1.1013092786"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:39:00",
-      "location": "Latitude: 50.8559111047Longitude: -1.0924390767"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T15:10:00",
-      "location": "Latitude: 50.8559111047Longitude: -1.0924390767"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:56:00",
-      "location": "Latitude: 50.9582046227Longitude: -1.1256287619"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T17:14:00",
-      "location": "Latitude: 50.9582046227Longitude: -1.1256287619"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:17:00",
-      "location": "Latitude: 51.0414745316Longitude: -1.1552737333"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T17:01:00",
-      "location": "Latitude: 51.0414745316Longitude: -1.1552737333"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:07:00",
-      "location": "Latitude: 50.8620858138Longitude: -1.2072547571"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:31:00",
-      "location": "Latitude: 50.8620858138Longitude: -1.2072547571"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:31:00",
-      "location": "Latitude: 51.0232863192Longitude: -1.2730824289"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:49:00",
-      "location": "Latitude: 51.0232863192Longitude: -1.2730824289"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T07:15:00",
-      "location": "Latitude: 50.6682176805Longitude: -1.1860882859"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T16:47:00",
-      "location": "Latitude: 50.6682176805Longitude: -1.1860882859"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:49:00",
-      "location": "Latitude: 50.7350776994Longitude: -1.3708866849"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T15:43:00",
-      "location": "Latitude: 50.7350776994Longitude: -1.3708866849"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:14:00",
-      "location": "Latitude: 50.7545574501Longitude: -1.4079478948"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T16:26:00",
-      "location": "Latitude: 50.7545574501Longitude: -1.4079478948"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:12:00",
-      "location": "Latitude: 50.9820668106Longitude: -1.1496490595"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:31:00",
-      "location": "Latitude: 50.9820668106Longitude: -1.1496490595"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:23:00",
-      "location": "Latitude: 50.703529617Longitude: -1.1930192676"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T13:23:00",
-      "location": "Latitude: 50.703529617Longitude: -1.1930192676"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:30:00",
-      "location": "Latitude: 50.7822857186Longitude: -1.3362979728"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T18:34:00",
-      "location": "Latitude: 50.7822857186Longitude: -1.3362979728"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:11:00",
-      "location": "Latitude: 50.9347975606Longitude: -1.1139782414"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T16:23:00",
-      "location": "Latitude: 50.9347975606Longitude: -1.1139782414"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:15:00",
-      "location": "Latitude: 50.9599846409Longitude: -1.3086007112"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T19:15:00",
-      "location": "Latitude: 50.9599846409Longitude: -1.3086007112"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:04:00",
-      "location": "Latitude: 50.7693311524Longitude: -1.268428073"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:41:00",
-      "location": "Latitude: 50.7693311524Longitude: -1.268428073"
+      "datetime": "2025-05-05T14:58:00",
+      "location": "Latitude: 50.8508309Longitude: -1.14486285",
+      "distance": "35.9 miles",
+      "duration": "70 mins"
     }
   ],
   "Joe.Line": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:14:00",
-      "location": "Latitude: 50.8402768462Longitude: -1.1941300066"
+      "datetime": "2025-05-09T08:43:00",
+      "location": "Latitude: 50.87316022Longitude: -1.16242034",
+      "distance": "23.1 miles",
+      "duration": "54 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T14:17:00",
-      "location": "Latitude: 50.8402768462Longitude: -1.1941300066"
+      "datetime": "2025-05-09T18:54:00",
+      "location": "Latitude: 50.87316022Longitude: -1.16242034",
+      "distance": "23.1 miles",
+      "duration": "54 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:38:00",
-      "location": "Latitude: 50.7486733711Longitude: -1.1665000981"
+      "datetime": "2025-05-08T07:46:00",
+      "location": "Latitude: 50.87084862Longitude: -1.25292425",
+      "distance": "33.0 miles",
+      "duration": "64 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T17:31:00",
-      "location": "Latitude: 50.7486733711Longitude: -1.1665000981"
+      "datetime": "2025-05-08T15:43:00",
+      "location": "Latitude: 50.87084862Longitude: -1.25292425",
+      "distance": "33.0 miles",
+      "duration": "64 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T06:16:00",
-      "location": "Latitude: 50.7920933429Longitude: -1.2427179856"
+      "datetime": "2025-05-07T08:56:00",
+      "location": "Latitude: 50.91365998Longitude: -1.13196772",
+      "distance": "22.0 miles",
+      "duration": "47 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:43:00",
-      "location": "Latitude: 50.7920933429Longitude: -1.2427179856"
+      "datetime": "2025-05-07T16:02:00",
+      "location": "Latitude: 50.91365998Longitude: -1.13196772",
+      "distance": "22.0 miles",
+      "duration": "47 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:22:00",
-      "location": "Latitude: 50.939997968Longitude: -1.1420768451"
+      "datetime": "2025-05-06T06:09:00",
+      "location": "Latitude: 50.85498453Longitude: -1.25341381",
+      "distance": "28.8 miles",
+      "duration": "55 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:09:00",
-      "location": "Latitude: 50.939997968Longitude: -1.1420768451"
+      "datetime": "2025-05-06T13:22:00",
+      "location": "Latitude: 50.85498453Longitude: -1.25341381",
+      "distance": "28.8 miles",
+      "duration": "55 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:36:00",
-      "location": "Latitude: 50.8264083471Longitude: -1.0352775568"
+      "datetime": "2025-05-05T07:42:00",
+      "location": "Latitude: 50.77321168Longitude: -1.16600912",
+      "distance": "30.0 miles",
+      "duration": "56 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T14:42:00",
-      "location": "Latitude: 50.8264083471Longitude: -1.0352775568"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:19:00",
-      "location": "Latitude: 50.9173476118Longitude: -1.0640453537"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T15:46:00",
-      "location": "Latitude: 50.9173476118Longitude: -1.0640453537"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:57:00",
-      "location": "Latitude: 50.9971899889Longitude: -1.1508878624"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T17:09:00",
-      "location": "Latitude: 50.9971899889Longitude: -1.1508878624"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:26:00",
-      "location": "Latitude: 50.8209486876Longitude: -1.030708296"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T17:52:00",
-      "location": "Latitude: 50.8209486876Longitude: -1.030708296"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:03:00",
-      "location": "Latitude: 50.7558110604Longitude: -1.4123906886"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T16:31:00",
-      "location": "Latitude: 50.7558110604Longitude: -1.4123906886"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:35:00",
-      "location": "Latitude: 50.9543772437Longitude: -1.3785542275"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T13:56:00",
-      "location": "Latitude: 50.9543772437Longitude: -1.3785542275"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:21:00",
-      "location": "Latitude: 50.7232336952Longitude: -1.1758683004"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T17:57:00",
-      "location": "Latitude: 50.7232336952Longitude: -1.1758683004"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:42:00",
-      "location": "Latitude: 50.9442389902Longitude: -1.1161710491"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:47:00",
-      "location": "Latitude: 50.9442389902Longitude: -1.1161710491"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:33:00",
-      "location": "Latitude: 50.8601869313Longitude: -1.03133482"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T19:14:00",
-      "location": "Latitude: 50.8601869313Longitude: -1.03133482"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:08:00",
-      "location": "Latitude: 50.678592788Longitude: -1.335581324"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T15:46:00",
-      "location": "Latitude: 50.678592788Longitude: -1.335581324"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:44:00",
-      "location": "Latitude: 50.8473266006Longitude: -1.2383706985"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:26:00",
-      "location": "Latitude: 50.8473266006Longitude: -1.2383706985"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:57:00",
-      "location": "Latitude: 50.8253105525Longitude: -1.1687550923"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:13:00",
-      "location": "Latitude: 50.8253105525Longitude: -1.1687550923"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:12:00",
-      "location": "Latitude: 50.9029027096Longitude: -1.1073904369"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T19:24:00",
-      "location": "Latitude: 50.9029027096Longitude: -1.1073904369"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:25:00",
-      "location": "Latitude: 50.802525995Longitude: -1.1798316252"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T17:07:00",
-      "location": "Latitude: 50.802525995Longitude: -1.1798316252"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:09:00",
-      "location": "Latitude: 50.9104470141Longitude: -1.1218050561"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T18:30:00",
-      "location": "Latitude: 50.9104470141Longitude: -1.1218050561"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T08:58:00",
-      "location": "Latitude: 50.8051393964Longitude: -1.0372865993"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:31:00",
-      "location": "Latitude: 50.8051393964Longitude: -1.0372865993"
+      "datetime": "2025-05-05T14:54:00",
+      "location": "Latitude: 50.77321168Longitude: -1.16600912",
+      "distance": "30.0 miles",
+      "duration": "56 mins"
     }
   ],
   "Jamie.Line": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:23:00",
-      "location": "Latitude: 51.0014004265Longitude: -1.0882779797"
+      "datetime": "2025-05-09T08:10:00",
+      "location": "Latitude: 50.857441Longitude: -1.28467141",
+      "distance": "31.3 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T17:24:00",
-      "location": "Latitude: 51.0014004265Longitude: -1.0882779797"
+      "datetime": "2025-05-09T17:03:00",
+      "location": "Latitude: 50.857441Longitude: -1.28467141",
+      "distance": "31.3 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:30:00",
-      "location": "Latitude: 50.7809472225Longitude: -1.1693123984"
+      "datetime": "2025-05-08T08:58:00",
+      "location": "Latitude: 50.8019141Longitude: -1.28831348",
+      "distance": "32.1 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T14:52:00",
-      "location": "Latitude: 50.7809472225Longitude: -1.1693123984"
+      "datetime": "2025-05-08T16:04:00",
+      "location": "Latitude: 50.8019141Longitude: -1.28831348",
+      "distance": "32.1 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:03:00",
-      "location": "Latitude: 50.7456916843Longitude: -1.4175594257"
+      "datetime": "2025-05-07T07:56:00",
+      "location": "Latitude: 50.87928816Longitude: -1.26695101",
+      "distance": "25.5 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T17:20:00",
-      "location": "Latitude: 50.7456916843Longitude: -1.4175594257"
+      "datetime": "2025-05-07T18:07:00",
+      "location": "Latitude: 50.87928816Longitude: -1.26695101",
+      "distance": "25.5 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:46:00",
-      "location": "Latitude: 50.893464784Longitude: -1.0761509074"
+      "datetime": "2025-05-06T08:46:00",
+      "location": "Latitude: 50.92981765Longitude: -1.2811902",
+      "distance": "30.4 miles",
+      "duration": "38 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T15:03:00",
-      "location": "Latitude: 50.893464784Longitude: -1.0761509074"
+      "datetime": "2025-05-06T19:46:00",
+      "location": "Latitude: 50.92981765Longitude: -1.2811902",
+      "distance": "30.4 miles",
+      "duration": "38 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T06:06:00",
-      "location": "Latitude: 50.7318008102Longitude: -1.0474055514"
+      "datetime": "2025-05-05T08:47:00",
+      "location": "Latitude: 50.93693916Longitude: -1.13544323",
+      "distance": "34.1 miles",
+      "duration": "29 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T14:33:00",
-      "location": "Latitude: 50.7318008102Longitude: -1.0474055514"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:39:00",
-      "location": "Latitude: 50.9403367673Longitude: -1.3712050317"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T19:04:00",
-      "location": "Latitude: 50.9403367673Longitude: -1.3712050317"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:25:00",
-      "location": "Latitude: 50.884075387Longitude: -1.2695639652"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T18:29:00",
-      "location": "Latitude: 50.884075387Longitude: -1.2695639652"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:07:00",
-      "location": "Latitude: 50.866567295Longitude: -1.0612761642"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T19:50:00",
-      "location": "Latitude: 50.866567295Longitude: -1.0612761642"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:31:00",
-      "location": "Latitude: 50.7033913655Longitude: -1.3047153138"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T19:16:00",
-      "location": "Latitude: 50.7033913655Longitude: -1.3047153138"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:59:00",
-      "location": "Latitude: 50.7185121331Longitude: -1.3290681796"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T16:14:00",
-      "location": "Latitude: 50.7185121331Longitude: -1.3290681796"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T08:48:00",
-      "location": "Latitude: 50.7128971479Longitude: -1.0506031384"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T18:50:00",
-      "location": "Latitude: 50.7128971479Longitude: -1.0506031384"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:27:00",
-      "location": "Latitude: 50.8798425508Longitude: -1.3232963372"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:15:00",
-      "location": "Latitude: 50.8798425508Longitude: -1.3232963372"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:57:00",
-      "location": "Latitude: 51.0175296411Longitude: -1.2612446722"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T17:07:00",
-      "location": "Latitude: 51.0175296411Longitude: -1.2612446722"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:35:00",
-      "location": "Latitude: 51.0374451631Longitude: -1.2431879922"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T17:48:00",
-      "location": "Latitude: 51.0374451631Longitude: -1.2431879922"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:58:00",
-      "location": "Latitude: 50.8681350786Longitude: -1.3259599567"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T16:45:00",
-      "location": "Latitude: 50.8681350786Longitude: -1.3259599567"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:13:00",
-      "location": "Latitude: 50.9480876204Longitude: -1.2142513364"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:09:00",
-      "location": "Latitude: 50.9480876204Longitude: -1.2142513364"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T06:11:00",
-      "location": "Latitude: 50.6898868721Longitude: -1.1512026953"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T14:47:00",
-      "location": "Latitude: 50.6898868721Longitude: -1.1512026953"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:32:00",
-      "location": "Latitude: 50.7260604797Longitude: -1.4219584846"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T15:39:00",
-      "location": "Latitude: 50.7260604797Longitude: -1.4219584846"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:48:00",
-      "location": "Latitude: 51.0465441898Longitude: -1.1868145139"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:09:00",
-      "location": "Latitude: 51.0465441898Longitude: -1.1868145139"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:59:00",
-      "location": "Latitude: 50.9441474948Longitude: -1.3601649301"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T15:13:00",
-      "location": "Latitude: 50.9441474948Longitude: -1.3601649301"
+      "datetime": "2025-05-05T17:48:00",
+      "location": "Latitude: 50.93693916Longitude: -1.13544323",
+      "distance": "34.1 miles",
+      "duration": "29 mins"
     }
   ],
   "Frazer.Miller": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:26:00",
-      "location": "Latitude: 50.8756466169Longitude: -1.4022198085"
+      "datetime": "2025-05-09T07:32:00",
+      "location": "Latitude: 50.78164249Longitude: -1.22206855",
+      "distance": "33.2 miles",
+      "duration": "42 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T17:59:00",
-      "location": "Latitude: 50.8756466169Longitude: -1.4022198085"
+      "datetime": "2025-05-09T14:38:00",
+      "location": "Latitude: 50.78164249Longitude: -1.22206855",
+      "distance": "33.2 miles",
+      "duration": "42 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:27:00",
-      "location": "Latitude: 50.7588861911Longitude: -1.1117415562"
+      "datetime": "2025-05-08T08:02:00",
+      "location": "Latitude: 50.80858161Longitude: -1.28468123",
+      "distance": "27.6 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:30:00",
-      "location": "Latitude: 50.7588861911Longitude: -1.1117415562"
+      "datetime": "2025-05-08T16:03:00",
+      "location": "Latitude: 50.80858161Longitude: -1.28468123",
+      "distance": "27.6 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:41:00",
-      "location": "Latitude: 50.8709386695Longitude: -1.3914447422"
+      "datetime": "2025-05-07T08:02:00",
+      "location": "Latitude: 50.86407224Longitude: -1.26931144",
+      "distance": "22.7 miles",
+      "duration": "63 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:11:00",
-      "location": "Latitude: 50.8709386695Longitude: -1.3914447422"
+      "datetime": "2025-05-07T17:26:00",
+      "location": "Latitude: 50.86407224Longitude: -1.26931144",
+      "distance": "22.7 miles",
+      "duration": "63 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:29:00",
-      "location": "Latitude: 50.70710819Longitude: -1.27934871"
+      "datetime": "2025-05-06T07:57:00",
+      "location": "Latitude: 50.84518965Longitude: -1.13181164",
+      "distance": "20.1 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T20:18:00",
-      "location": "Latitude: 50.70710819Longitude: -1.27934871"
+      "datetime": "2025-05-06T17:17:00",
+      "location": "Latitude: 50.84518965Longitude: -1.13181164",
+      "distance": "20.1 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T06:26:00",
-      "location": "Latitude: 50.8562453789Longitude: -1.0560791815"
+      "datetime": "2025-05-05T07:48:00",
+      "location": "Latitude: 50.89054773Longitude: -1.13139836",
+      "distance": "27.0 miles",
+      "duration": "58 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T14:52:00",
-      "location": "Latitude: 50.8562453789Longitude: -1.0560791815"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:15:00",
-      "location": "Latitude: 50.7935875333Longitude: -1.2172852442"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T16:23:00",
-      "location": "Latitude: 50.7935875333Longitude: -1.2172852442"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:08:00",
-      "location": "Latitude: 50.697018366Longitude: -1.3261894109"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T18:48:00",
-      "location": "Latitude: 50.697018366Longitude: -1.3261894109"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:09:00",
-      "location": "Latitude: 50.9743324629Longitude: -1.1581487521"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T16:35:00",
-      "location": "Latitude: 50.9743324629Longitude: -1.1581487521"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:20:00",
-      "location": "Latitude: 50.7670349731Longitude: -1.3977120597"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T17:17:00",
-      "location": "Latitude: 50.7670349731Longitude: -1.3977120597"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:35:00",
-      "location": "Latitude: 50.8825711592Longitude: -1.1545380136"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T15:52:00",
-      "location": "Latitude: 50.8825711592Longitude: -1.1545380136"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:01:00",
-      "location": "Latitude: 50.7475578101Longitude: -1.0774742318"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T18:07:00",
-      "location": "Latitude: 50.7475578101Longitude: -1.0774742318"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:30:00",
-      "location": "Latitude: 50.9636552704Longitude: -1.0657960975"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T20:05:00",
-      "location": "Latitude: 50.9636552704Longitude: -1.0657960975"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:38:00",
-      "location": "Latitude: 50.9013276168Longitude: -1.273042145"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T18:47:00",
-      "location": "Latitude: 50.9013276168Longitude: -1.273042145"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:40:00",
-      "location": "Latitude: 50.9876571029Longitude: -1.2650462056"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T13:45:00",
-      "location": "Latitude: 50.9876571029Longitude: -1.2650462056"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:22:00",
-      "location": "Latitude: 50.9229713868Longitude: -1.3843230329"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T16:31:00",
-      "location": "Latitude: 50.9229713868Longitude: -1.3843230329"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:13:00",
-      "location": "Latitude: 50.9788176968Longitude: -1.317223295"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:20:00",
-      "location": "Latitude: 50.9788176968Longitude: -1.317223295"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:29:00",
-      "location": "Latitude: 51.0548756717Longitude: -1.3191978515"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T17:20:00",
-      "location": "Latitude: 51.0548756717Longitude: -1.3191978515"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:15:00",
-      "location": "Latitude: 50.6774445332Longitude: -1.1823430801"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:23:00",
-      "location": "Latitude: 50.6774445332Longitude: -1.1823430801"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:17:00",
-      "location": "Latitude: 50.7370997342Longitude: -1.0726919193"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:20:00",
-      "location": "Latitude: 50.7370997342Longitude: -1.0726919193"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T07:35:00",
-      "location": "Latitude: 50.9398908027Longitude: -1.3984115668"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T18:10:00",
-      "location": "Latitude: 50.9398908027Longitude: -1.3984115668"
+      "datetime": "2025-05-05T16:26:00",
+      "location": "Latitude: 50.89054773Longitude: -1.13139836",
+      "distance": "27.0 miles",
+      "duration": "58 mins"
     }
   ],
   "David.Molloy": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:13:00",
-      "location": "Latitude: 50.9977916153Longitude: -1.2687377969"
+      "datetime": "2025-05-09T06:49:00",
+      "location": "Latitude: 50.93282639Longitude: -1.29479828",
+      "distance": "34.3 miles",
+      "duration": "63 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T16:39:00",
-      "location": "Latitude: 50.9977916153Longitude: -1.2687377969"
+      "datetime": "2025-05-09T14:49:00",
+      "location": "Latitude: 50.93282639Longitude: -1.29479828",
+      "distance": "34.3 miles",
+      "duration": "63 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T08:30:00",
-      "location": "Latitude: 50.7204433265Longitude: -1.0304170701"
+      "datetime": "2025-05-08T06:59:00",
+      "location": "Latitude: 50.76791531Longitude: -1.25208101",
+      "distance": "18.4 miles",
+      "duration": "33 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T16:44:00",
-      "location": "Latitude: 50.7204433265Longitude: -1.0304170701"
+      "datetime": "2025-05-08T17:20:00",
+      "location": "Latitude: 50.76791531Longitude: -1.25208101",
+      "distance": "18.4 miles",
+      "duration": "33 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:36:00",
-      "location": "Latitude: 50.7009646133Longitude: -1.3027647047"
+      "datetime": "2025-05-07T06:30:00",
+      "location": "Latitude: 50.78702875Longitude: -1.16365545",
+      "distance": "37.5 miles",
+      "duration": "78 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:37:00",
-      "location": "Latitude: 50.7009646133Longitude: -1.3027647047"
+      "datetime": "2025-05-07T14:29:00",
+      "location": "Latitude: 50.78702875Longitude: -1.16365545",
+      "distance": "37.5 miles",
+      "duration": "78 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:28:00",
-      "location": "Latitude: 51.0284564757Longitude: -1.2239498568"
+      "datetime": "2025-05-06T08:10:00",
+      "location": "Latitude: 50.84410978Longitude: -1.32235244",
+      "distance": "24.1 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:41:00",
-      "location": "Latitude: 51.0284564757Longitude: -1.2239498568"
+      "datetime": "2025-05-06T18:43:00",
+      "location": "Latitude: 50.84410978Longitude: -1.32235244",
+      "distance": "24.1 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:39:00",
-      "location": "Latitude: 50.8611929315Longitude: -1.2277567965"
+      "datetime": "2025-05-05T07:56:00",
+      "location": "Latitude: 50.80826519Longitude: -1.15646488",
+      "distance": "28.6 miles",
+      "duration": "32 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T16:48:00",
-      "location": "Latitude: 50.8611929315Longitude: -1.2277567965"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:36:00",
-      "location": "Latitude: 50.7102568345Longitude: -1.2514897794"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T19:33:00",
-      "location": "Latitude: 50.7102568345Longitude: -1.2514897794"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:22:00",
-      "location": "Latitude: 50.7824458288Longitude: -1.357953481"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T14:51:00",
-      "location": "Latitude: 50.7824458288Longitude: -1.357953481"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:09:00",
-      "location": "Latitude: 50.7239038134Longitude: -1.0450223241"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T15:43:00",
-      "location": "Latitude: 50.7239038134Longitude: -1.0450223241"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:55:00",
-      "location": "Latitude: 50.6722331224Longitude: -1.03554427"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T18:05:00",
-      "location": "Latitude: 50.6722331224Longitude: -1.03554427"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:22:00",
-      "location": "Latitude: 50.8434547766Longitude: -1.1787389867"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T16:28:00",
-      "location": "Latitude: 50.8434547766Longitude: -1.1787389867"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:04:00",
-      "location": "Latitude: 50.6852789436Longitude: -1.2299895603"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T14:29:00",
-      "location": "Latitude: 50.6852789436Longitude: -1.2299895603"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:40:00",
-      "location": "Latitude: 50.9881937422Longitude: -1.041768839"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:17:00",
-      "location": "Latitude: 50.9881937422Longitude: -1.041768839"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:24:00",
-      "location": "Latitude: 50.6768996892Longitude: -1.2048706015"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T20:20:00",
-      "location": "Latitude: 50.6768996892Longitude: -1.2048706015"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:45:00",
-      "location": "Latitude: 50.7024057694Longitude: -1.2683623742"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T13:54:00",
-      "location": "Latitude: 50.7024057694Longitude: -1.2683623742"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:14:00",
-      "location": "Latitude: 51.0094217399Longitude: -1.3667162975"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:00:00",
-      "location": "Latitude: 51.0094217399Longitude: -1.3667162975"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:36:00",
-      "location": "Latitude: 50.8899043468Longitude: -1.0312398805"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:59:00",
-      "location": "Latitude: 50.8899043468Longitude: -1.0312398805"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:27:00",
-      "location": "Latitude: 51.0222366751Longitude: -1.1311259144"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T18:25:00",
-      "location": "Latitude: 51.0222366751Longitude: -1.1311259144"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:59:00",
-      "location": "Latitude: 50.6663825752Longitude: -1.1140042035"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:41:00",
-      "location": "Latitude: 50.6663825752Longitude: -1.1140042035"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:29:00",
-      "location": "Latitude: 50.9729361507Longitude: -1.2342919322"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:40:00",
-      "location": "Latitude: 50.9729361507Longitude: -1.2342919322"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:27:00",
-      "location": "Latitude: 50.9766347405Longitude: -1.2057635735"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T15:42:00",
-      "location": "Latitude: 50.9766347405Longitude: -1.2057635735"
+      "datetime": "2025-05-05T17:33:00",
+      "location": "Latitude: 50.80826519Longitude: -1.15646488",
+      "distance": "28.6 miles",
+      "duration": "32 mins"
     }
   ],
   "Connor.Brady": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:44:00",
-      "location": "Latitude: 50.7443923319Longitude: -1.0707529192"
+      "datetime": "2025-05-09T07:42:00",
+      "location": "Latitude: 50.75750845Longitude: -1.20263911",
+      "distance": "16.7 miles",
+      "duration": "62 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T15:27:00",
-      "location": "Latitude: 50.7443923319Longitude: -1.0707529192"
+      "datetime": "2025-05-09T17:13:00",
+      "location": "Latitude: 50.75750845Longitude: -1.20263911",
+      "distance": "16.7 miles",
+      "duration": "62 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:21:00",
-      "location": "Latitude: 50.8583591581Longitude: -1.0652530277"
+      "datetime": "2025-05-08T08:24:00",
+      "location": "Latitude: 50.7576702Longitude: -1.30208304",
+      "distance": "20.4 miles",
+      "duration": "32 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:17:00",
-      "location": "Latitude: 50.8583591581Longitude: -1.0652530277"
+      "datetime": "2025-05-08T18:32:00",
+      "location": "Latitude: 50.7576702Longitude: -1.30208304",
+      "distance": "20.4 miles",
+      "duration": "32 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:56:00",
-      "location": "Latitude: 50.6592860264Longitude: -1.2169904562"
+      "datetime": "2025-05-07T07:16:00",
+      "location": "Latitude: 50.91631307Longitude: -1.3150688",
+      "distance": "16.3 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T20:06:00",
-      "location": "Latitude: 50.6592860264Longitude: -1.2169904562"
+      "datetime": "2025-05-07T16:05:00",
+      "location": "Latitude: 50.91631307Longitude: -1.3150688",
+      "distance": "16.3 miles",
+      "duration": "49 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:37:00",
-      "location": "Latitude: 50.8198616665Longitude: -1.0780109179"
+      "datetime": "2025-05-06T06:15:00",
+      "location": "Latitude: 50.85318243Longitude: -1.30858349",
+      "distance": "29.7 miles",
+      "duration": "52 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:06:00",
-      "location": "Latitude: 50.8198616665Longitude: -1.0780109179"
+      "datetime": "2025-05-06T16:42:00",
+      "location": "Latitude: 50.85318243Longitude: -1.30858349",
+      "distance": "29.7 miles",
+      "duration": "52 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T06:23:00",
-      "location": "Latitude: 50.9609284413Longitude: -1.1583586766"
+      "datetime": "2025-05-05T08:08:00",
+      "location": "Latitude: 50.79005181Longitude: -1.1914849",
+      "distance": "37.3 miles",
+      "duration": "77 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T17:11:00",
-      "location": "Latitude: 50.9609284413Longitude: -1.1583586766"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:29:00",
-      "location": "Latitude: 51.0513477124Longitude: -1.3190717976"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T14:33:00",
-      "location": "Latitude: 51.0513477124Longitude: -1.3190717976"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T07:31:00",
-      "location": "Latitude: 50.9467420895Longitude: -1.0359391039"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T19:14:00",
-      "location": "Latitude: 50.9467420895Longitude: -1.0359391039"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:13:00",
-      "location": "Latitude: 51.0312342501Longitude: -1.2866113224"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:40:00",
-      "location": "Latitude: 51.0312342501Longitude: -1.2866113224"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:32:00",
-      "location": "Latitude: 50.9334767602Longitude: -1.1745618912"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T19:43:00",
-      "location": "Latitude: 50.9334767602Longitude: -1.1745618912"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:25:00",
-      "location": "Latitude: 50.6833932347Longitude: -1.3679004667"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T16:12:00",
-      "location": "Latitude: 50.6833932347Longitude: -1.3679004667"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:40:00",
-      "location": "Latitude: 50.9616970346Longitude: -1.0320999488"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T16:40:00",
-      "location": "Latitude: 50.9616970346Longitude: -1.0320999488"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:03:00",
-      "location": "Latitude: 50.9015422754Longitude: -1.3210370818"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T14:26:00",
-      "location": "Latitude: 50.9015422754Longitude: -1.3210370818"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:05:00",
-      "location": "Latitude: 50.9683175367Longitude: -1.3183426546"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:08:00",
-      "location": "Latitude: 50.9683175367Longitude: -1.3183426546"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T07:26:00",
-      "location": "Latitude: 50.8245011687Longitude: -1.0806350272"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T16:37:00",
-      "location": "Latitude: 50.8245011687Longitude: -1.0806350272"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:07:00",
-      "location": "Latitude: 50.7028877025Longitude: -1.1805277288"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:24:00",
-      "location": "Latitude: 50.7028877025Longitude: -1.1805277288"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:38:00",
-      "location": "Latitude: 51.0504279832Longitude: -1.3501631659"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T19:14:00",
-      "location": "Latitude: 51.0504279832Longitude: -1.3501631659"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:39:00",
-      "location": "Latitude: 50.823911321Longitude: -1.3129859378"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T16:18:00",
-      "location": "Latitude: 50.823911321Longitude: -1.3129859378"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:00:00",
-      "location": "Latitude: 51.0559106398Longitude: -1.3843868868"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T15:24:00",
-      "location": "Latitude: 51.0559106398Longitude: -1.3843868868"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:34:00",
-      "location": "Latitude: 50.7654907907Longitude: -1.1961246769"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T18:19:00",
-      "location": "Latitude: 50.7654907907Longitude: -1.1961246769"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:55:00",
-      "location": "Latitude: 50.8335194939Longitude: -1.168024267"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T14:49:00",
-      "location": "Latitude: 50.8335194939Longitude: -1.168024267"
+      "datetime": "2025-05-05T18:16:00",
+      "location": "Latitude: 50.79005181Longitude: -1.1914849",
+      "distance": "37.3 miles",
+      "duration": "77 mins"
     }
   ],
   "Ciprian.Zugravu": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:49:00",
-      "location": "Latitude: 51.0529859039Longitude: -1.0317910344"
+      "datetime": "2025-05-09T08:57:00",
+      "location": "Latitude: 50.88479247Longitude: -1.17349898",
+      "distance": "13.3 miles",
+      "duration": "22 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T20:16:00",
-      "location": "Latitude: 51.0529859039Longitude: -1.0317910344"
+      "datetime": "2025-05-09T16:51:00",
+      "location": "Latitude: 50.88479247Longitude: -1.17349898",
+      "distance": "13.3 miles",
+      "duration": "22 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:15:00",
-      "location": "Latitude: 50.8601367665Longitude: -1.0748396209"
+      "datetime": "2025-05-08T06:03:00",
+      "location": "Latitude: 50.81135186Longitude: -1.29210226",
+      "distance": "36.9 miles",
+      "duration": "78 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T14:02:00",
-      "location": "Latitude: 50.8601367665Longitude: -1.0748396209"
+      "datetime": "2025-05-08T15:18:00",
+      "location": "Latitude: 50.81135186Longitude: -1.29210226",
+      "distance": "36.9 miles",
+      "duration": "78 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:39:00",
-      "location": "Latitude: 50.9465076895Longitude: -1.3236740583"
+      "datetime": "2025-05-07T07:53:00",
+      "location": "Latitude: 50.76557152Longitude: -1.13556215",
+      "distance": "31.2 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T18:54:00",
-      "location": "Latitude: 50.9465076895Longitude: -1.3236740583"
+      "datetime": "2025-05-07T17:38:00",
+      "location": "Latitude: 50.76557152Longitude: -1.13556215",
+      "distance": "31.2 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:56:00",
-      "location": "Latitude: 51.0094812352Longitude: -1.1280249755"
+      "datetime": "2025-05-06T08:20:00",
+      "location": "Latitude: 50.88404087Longitude: -1.19380815",
+      "distance": "34.5 miles",
+      "duration": "24 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:44:00",
-      "location": "Latitude: 51.0094812352Longitude: -1.1280249755"
+      "datetime": "2025-05-06T18:42:00",
+      "location": "Latitude: 50.88404087Longitude: -1.19380815",
+      "distance": "34.5 miles",
+      "duration": "24 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:51:00",
-      "location": "Latitude: 50.6826207353Longitude: -1.040342763"
+      "datetime": "2025-05-05T08:57:00",
+      "location": "Latitude: 50.93698943Longitude: -1.22554069",
+      "distance": "39.6 miles",
+      "duration": "56 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T15:58:00",
-      "location": "Latitude: 50.6826207353Longitude: -1.040342763"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:40:00",
-      "location": "Latitude: 50.697965072Longitude: -1.3451408448"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T18:47:00",
-      "location": "Latitude: 50.697965072Longitude: -1.3451408448"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:53:00",
-      "location": "Latitude: 50.8706149095Longitude: -1.2109319529"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T20:23:00",
-      "location": "Latitude: 50.8706149095Longitude: -1.2109319529"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:32:00",
-      "location": "Latitude: 50.8952032959Longitude: -1.1471708146"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:47:00",
-      "location": "Latitude: 50.8952032959Longitude: -1.1471708146"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:16:00",
-      "location": "Latitude: 50.6746410587Longitude: -1.1454409811"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T15:41:00",
-      "location": "Latitude: 50.6746410587Longitude: -1.1454409811"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:35:00",
-      "location": "Latitude: 50.7129463181Longitude: -1.284560742"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T15:10:00",
-      "location": "Latitude: 50.7129463181Longitude: -1.284560742"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:07:00",
-      "location": "Latitude: 50.8866441184Longitude: -1.4147789735"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T18:17:00",
-      "location": "Latitude: 50.8866441184Longitude: -1.4147789735"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:04:00",
-      "location": "Latitude: 50.9665205545Longitude: -1.2370510053"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:31:00",
-      "location": "Latitude: 50.9665205545Longitude: -1.2370510053"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T06:43:00",
-      "location": "Latitude: 50.7636277124Longitude: -1.2432908335"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T15:55:00",
-      "location": "Latitude: 50.7636277124Longitude: -1.2432908335"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:06:00",
-      "location": "Latitude: 50.8614114548Longitude: -1.3752069935"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T18:55:00",
-      "location": "Latitude: 50.8614114548Longitude: -1.3752069935"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:36:00",
-      "location": "Latitude: 50.6696694128Longitude: -1.1172111516"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:25:00",
-      "location": "Latitude: 50.6696694128Longitude: -1.1172111516"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:33:00",
-      "location": "Latitude: 51.0369676886Longitude: -1.1668854745"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:28:00",
-      "location": "Latitude: 51.0369676886Longitude: -1.1668854745"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:05:00",
-      "location": "Latitude: 50.7529576988Longitude: -1.0911939331"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T15:33:00",
-      "location": "Latitude: 50.7529576988Longitude: -1.0911939331"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:21:00",
-      "location": "Latitude: 50.7335629921Longitude: -1.4150408768"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T19:04:00",
-      "location": "Latitude: 50.7335629921Longitude: -1.4150408768"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:22:00",
-      "location": "Latitude: 50.9448396749Longitude: -1.3626371601"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T14:56:00",
-      "location": "Latitude: 50.9448396749Longitude: -1.3626371601"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:03:00",
-      "location": "Latitude: 50.9964303843Longitude: -1.217069508"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:05:00",
-      "location": "Latitude: 50.9964303843Longitude: -1.217069508"
+      "datetime": "2025-05-05T16:54:00",
+      "location": "Latitude: 50.93698943Longitude: -1.22554069",
+      "distance": "39.6 miles",
+      "duration": "56 mins"
     }
   ],
   "Chris.Cooke": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:40:00",
-      "location": "Latitude: 50.8282585873Longitude: -1.3429467627"
+      "datetime": "2025-05-09T08:14:00",
+      "location": "Latitude: 50.92468858Longitude: -1.13172628",
+      "distance": "24.8 miles",
+      "duration": "45 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T20:06:00",
-      "location": "Latitude: 50.8282585873Longitude: -1.3429467627"
+      "datetime": "2025-05-09T15:28:00",
+      "location": "Latitude: 50.92468858Longitude: -1.13172628",
+      "distance": "24.8 miles",
+      "duration": "45 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:00:00",
-      "location": "Latitude: 50.8021987304Longitude: -1.082810677"
+      "datetime": "2025-05-08T07:24:00",
+      "location": "Latitude: 50.92359291Longitude: -1.16590067",
+      "distance": "14.7 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T14:48:00",
-      "location": "Latitude: 50.8021987304Longitude: -1.082810677"
+      "datetime": "2025-05-08T16:03:00",
+      "location": "Latitude: 50.92359291Longitude: -1.16590067",
+      "distance": "14.7 miles",
+      "duration": "46 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:57:00",
-      "location": "Latitude: 51.0075916037Longitude: -1.2246218112"
+      "datetime": "2025-05-07T08:59:00",
+      "location": "Latitude: 50.88838291Longitude: -1.3222218",
+      "distance": "38.7 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T19:54:00",
-      "location": "Latitude: 51.0075916037Longitude: -1.2246218112"
+      "datetime": "2025-05-07T19:13:00",
+      "location": "Latitude: 50.88838291Longitude: -1.3222218",
+      "distance": "38.7 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:02:00",
-      "location": "Latitude: 50.9557899119Longitude: -1.3979255725"
+      "datetime": "2025-05-06T07:12:00",
+      "location": "Latitude: 50.77407159Longitude: -1.21166688",
+      "distance": "21.7 miles",
+      "duration": "51 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:34:00",
-      "location": "Latitude: 50.9557899119Longitude: -1.3979255725"
+      "datetime": "2025-05-06T17:40:00",
+      "location": "Latitude: 50.77407159Longitude: -1.21166688",
+      "distance": "21.7 miles",
+      "duration": "51 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:37:00",
-      "location": "Latitude: 51.0443740363Longitude: -1.0413581182"
+      "datetime": "2025-05-05T07:56:00",
+      "location": "Latitude: 50.78097757Longitude: -1.142196",
+      "distance": "17.9 miles",
+      "duration": "68 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T20:05:00",
-      "location": "Latitude: 51.0443740363Longitude: -1.0413581182"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:24:00",
-      "location": "Latitude: 51.0558557034Longitude: -1.1180543796"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T19:03:00",
-      "location": "Latitude: 51.0558557034Longitude: -1.1180543796"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:33:00",
-      "location": "Latitude: 51.0190198361Longitude: -1.1424350721"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T16:20:00",
-      "location": "Latitude: 51.0190198361Longitude: -1.1424350721"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:35:00",
-      "location": "Latitude: 50.8687210862Longitude: -1.3940349438"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T18:17:00",
-      "location": "Latitude: 50.8687210862Longitude: -1.3940349438"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:15:00",
-      "location": "Latitude: 50.7693645446Longitude: -1.1188496329"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T20:02:00",
-      "location": "Latitude: 50.7693645446Longitude: -1.1188496329"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:31:00",
-      "location": "Latitude: 50.8952672568Longitude: -1.2823890678"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T18:43:00",
-      "location": "Latitude: 50.8952672568Longitude: -1.2823890678"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:19:00",
-      "location": "Latitude: 50.8201009731Longitude: -1.247554072"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T17:30:00",
-      "location": "Latitude: 50.8201009731Longitude: -1.247554072"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T07:17:00",
-      "location": "Latitude: 50.7751354526Longitude: -1.0466677091"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T17:39:00",
-      "location": "Latitude: 50.7751354526Longitude: -1.0466677091"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:38:00",
-      "location": "Latitude: 50.7816614607Longitude: -1.4182919704"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:06:00",
-      "location": "Latitude: 50.7816614607Longitude: -1.4182919704"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T07:12:00",
-      "location": "Latitude: 51.0253802395Longitude: -1.3377377929"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T14:57:00",
-      "location": "Latitude: 51.0253802395Longitude: -1.3377377929"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T06:10:00",
-      "location": "Latitude: 50.7958901495Longitude: -1.1989165108"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T13:47:00",
-      "location": "Latitude: 50.7958901495Longitude: -1.1989165108"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:12:00",
-      "location": "Latitude: 50.9062357377Longitude: -1.4024611778"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T13:59:00",
-      "location": "Latitude: 50.9062357377Longitude: -1.4024611778"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:11:00",
-      "location": "Latitude: 50.7126255551Longitude: -1.1237582298"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T19:21:00",
-      "location": "Latitude: 50.7126255551Longitude: -1.1237582298"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:05:00",
-      "location": "Latitude: 51.0029751131Longitude: -1.1774703701"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T20:05:00",
-      "location": "Latitude: 51.0029751131Longitude: -1.1774703701"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:14:00",
-      "location": "Latitude: 51.0092151858Longitude: -1.3589884213"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T14:01:00",
-      "location": "Latitude: 51.0092151858Longitude: -1.3589884213"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T07:26:00",
-      "location": "Latitude: 50.8493007784Longitude: -1.340364325"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T16:34:00",
-      "location": "Latitude: 50.8493007784Longitude: -1.340364325"
+      "datetime": "2025-05-05T15:44:00",
+      "location": "Latitude: 50.78097757Longitude: -1.142196",
+      "distance": "17.9 miles",
+      "duration": "68 mins"
     }
   ],
   "Cai.Griffiths": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:52:00",
-      "location": "Latitude: 50.8865790321Longitude: -1.0434689206"
+      "datetime": "2025-05-09T07:36:00",
+      "location": "Latitude: 50.8310625Longitude: -1.20068475",
+      "distance": "17.6 miles",
+      "duration": "59 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T19:19:00",
-      "location": "Latitude: 50.8865790321Longitude: -1.0434689206"
+      "datetime": "2025-05-09T17:09:00",
+      "location": "Latitude: 50.8310625Longitude: -1.20068475",
+      "distance": "17.6 miles",
+      "duration": "59 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:18:00",
-      "location": "Latitude: 50.9668475347Longitude: -1.3686027068"
+      "datetime": "2025-05-08T08:14:00",
+      "location": "Latitude: 50.87450458Longitude: -1.1621494",
+      "distance": "12.2 miles",
+      "duration": "60 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T16:37:00",
-      "location": "Latitude: 50.9668475347Longitude: -1.3686027068"
+      "datetime": "2025-05-08T18:13:00",
+      "location": "Latitude: 50.87450458Longitude: -1.1621494",
+      "distance": "12.2 miles",
+      "duration": "60 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:45:00",
-      "location": "Latitude: 50.7322302385Longitude: -1.416925966"
+      "datetime": "2025-05-07T07:02:00",
+      "location": "Latitude: 50.80914022Longitude: -1.18009792",
+      "distance": "17.1 miles",
+      "duration": "29 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T20:27:00",
-      "location": "Latitude: 50.7322302385Longitude: -1.416925966"
+      "datetime": "2025-05-07T16:59:00",
+      "location": "Latitude: 50.80914022Longitude: -1.18009792",
+      "distance": "17.1 miles",
+      "duration": "29 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:12:00",
-      "location": "Latitude: 50.8509780284Longitude: -1.3183929606"
+      "datetime": "2025-05-06T07:44:00",
+      "location": "Latitude: 50.86672962Longitude: -1.14203545",
+      "distance": "39.2 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:21:00",
-      "location": "Latitude: 50.8509780284Longitude: -1.3183929606"
+      "datetime": "2025-05-06T17:03:00",
+      "location": "Latitude: 50.86672962Longitude: -1.14203545",
+      "distance": "39.2 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:02:00",
-      "location": "Latitude: 50.8247380796Longitude: -1.2492048242"
+      "datetime": "2025-05-05T06:54:00",
+      "location": "Latitude: 50.84494011Longitude: -1.27349623",
+      "distance": "36.8 miles",
+      "duration": "77 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T18:48:00",
-      "location": "Latitude: 50.8247380796Longitude: -1.2492048242"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:27:00",
-      "location": "Latitude: 50.9677569962Longitude: -1.3102283347"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T16:33:00",
-      "location": "Latitude: 50.9677569962Longitude: -1.3102283347"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:06:00",
-      "location": "Latitude: 50.9898871197Longitude: -1.1613657617"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T16:56:00",
-      "location": "Latitude: 50.9898871197Longitude: -1.1613657617"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:48:00",
-      "location": "Latitude: 50.6595092089Longitude: -1.1422661549"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:58:00",
-      "location": "Latitude: 50.6595092089Longitude: -1.1422661549"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:35:00",
-      "location": "Latitude: 51.0277885162Longitude: -1.1700988516"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T16:59:00",
-      "location": "Latitude: 51.0277885162Longitude: -1.1700988516"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:15:00",
-      "location": "Latitude: 51.0166800375Longitude: -1.0474897311"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T16:02:00",
-      "location": "Latitude: 51.0166800375Longitude: -1.0474897311"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:48:00",
-      "location": "Latitude: 50.9681287863Longitude: -1.3958309939"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T14:17:00",
-      "location": "Latitude: 50.9681287863Longitude: -1.3958309939"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:05:00",
-      "location": "Latitude: 50.9770729684Longitude: -1.0782328837"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T15:28:00",
-      "location": "Latitude: 50.9770729684Longitude: -1.0782328837"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:48:00",
-      "location": "Latitude: 50.877968046Longitude: -1.3655116464"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:22:00",
-      "location": "Latitude: 50.877968046Longitude: -1.3655116464"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:31:00",
-      "location": "Latitude: 50.9268274538Longitude: -1.2902454461"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T18:41:00",
-      "location": "Latitude: 50.9268274538Longitude: -1.2902454461"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T06:15:00",
-      "location": "Latitude: 50.7532075775Longitude: -1.3157272314"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T17:11:00",
-      "location": "Latitude: 50.7532075775Longitude: -1.3157272314"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:23:00",
-      "location": "Latitude: 50.7219347977Longitude: -1.4093912179"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T20:09:00",
-      "location": "Latitude: 50.7219347977Longitude: -1.4093912179"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:47:00",
-      "location": "Latitude: 50.9681997189Longitude: -1.1007773422"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T15:24:00",
-      "location": "Latitude: 50.9681997189Longitude: -1.1007773422"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:46:00",
-      "location": "Latitude: 50.8259201549Longitude: -1.3809882561"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T17:34:00",
-      "location": "Latitude: 50.8259201549Longitude: -1.3809882561"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T08:56:00",
-      "location": "Latitude: 50.844858994Longitude: -1.1853108953"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:52:00",
-      "location": "Latitude: 50.844858994Longitude: -1.1853108953"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T08:09:00",
-      "location": "Latitude: 50.7338755288Longitude: -1.2047944854"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T19:50:00",
-      "location": "Latitude: 50.7338755288Longitude: -1.2047944854"
+      "datetime": "2025-05-05T14:37:00",
+      "location": "Latitude: 50.84494011Longitude: -1.27349623",
+      "distance": "36.8 miles",
+      "duration": "77 mins"
     }
   ],
   "John.Morrison": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:04:00",
-      "location": "Latitude: 50.8307390109Longitude: -1.1238725052"
+      "datetime": "2025-05-09T07:03:00",
+      "location": "Latitude: 50.7831442Longitude: -1.24592113",
+      "distance": "31.2 miles",
+      "duration": "37 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T17:09:00",
-      "location": "Latitude: 50.8307390109Longitude: -1.1238725052"
+      "datetime": "2025-05-09T14:23:00",
+      "location": "Latitude: 50.7831442Longitude: -1.24592113",
+      "distance": "31.2 miles",
+      "duration": "37 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:50:00",
-      "location": "Latitude: 50.8731116381Longitude: -1.248406982"
+      "datetime": "2025-05-08T07:15:00",
+      "location": "Latitude: 50.92624Longitude: -1.29574974",
+      "distance": "36.5 miles",
+      "duration": "57 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:56:00",
-      "location": "Latitude: 50.8731116381Longitude: -1.248406982"
+      "datetime": "2025-05-08T15:52:00",
+      "location": "Latitude: 50.92624Longitude: -1.29574974",
+      "distance": "36.5 miles",
+      "duration": "57 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:09:00",
-      "location": "Latitude: 50.7624042227Longitude: -1.2202333097"
+      "datetime": "2025-05-07T07:53:00",
+      "location": "Latitude: 50.76352697Longitude: -1.23618323",
+      "distance": "20.3 miles",
+      "duration": "24 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T17:36:00",
-      "location": "Latitude: 50.7624042227Longitude: -1.2202333097"
+      "datetime": "2025-05-07T15:58:00",
+      "location": "Latitude: 50.76352697Longitude: -1.23618323",
+      "distance": "20.3 miles",
+      "duration": "24 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:24:00",
-      "location": "Latitude: 50.7363686452Longitude: -1.2274767857"
+      "datetime": "2025-05-06T08:52:00",
+      "location": "Latitude: 50.88681112Longitude: -1.3114142",
+      "distance": "21.2 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:03:00",
-      "location": "Latitude: 50.7363686452Longitude: -1.2274767857"
+      "datetime": "2025-05-06T18:20:00",
+      "location": "Latitude: 50.88681112Longitude: -1.3114142",
+      "distance": "21.2 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:06:00",
-      "location": "Latitude: 50.9275025154Longitude: -1.2381213623"
+      "datetime": "2025-05-05T06:54:00",
+      "location": "Latitude: 50.8960234Longitude: -1.29025302",
+      "distance": "36.2 miles",
+      "duration": "24 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T16:56:00",
-      "location": "Latitude: 50.9275025154Longitude: -1.2381213623"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:58:00",
-      "location": "Latitude: 51.0128228952Longitude: -1.2097142175"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T16:46:00",
-      "location": "Latitude: 51.0128228952Longitude: -1.2097142175"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:55:00",
-      "location": "Latitude: 50.7809774122Longitude: -1.1187361448"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T14:26:00",
-      "location": "Latitude: 50.7809774122Longitude: -1.1187361448"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:41:00",
-      "location": "Latitude: 50.8965869547Longitude: -1.2347977803"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T20:15:00",
-      "location": "Latitude: 50.8965869547Longitude: -1.2347977803"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:46:00",
-      "location": "Latitude: 50.6798042101Longitude: -1.1717654814"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T19:34:00",
-      "location": "Latitude: 50.6798042101Longitude: -1.1717654814"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:26:00",
-      "location": "Latitude: 50.7990667744Longitude: -1.0835286469"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T18:39:00",
-      "location": "Latitude: 50.7990667744Longitude: -1.0835286469"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:50:00",
-      "location": "Latitude: 51.0487355861Longitude: -1.3396714696"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:31:00",
-      "location": "Latitude: 51.0487355861Longitude: -1.3396714696"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:49:00",
-      "location": "Latitude: 51.0413817578Longitude: -1.0625295502"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:47:00",
-      "location": "Latitude: 51.0413817578Longitude: -1.0625295502"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:21:00",
-      "location": "Latitude: 50.963187331Longitude: -1.1906573219"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T16:43:00",
-      "location": "Latitude: 50.963187331Longitude: -1.1906573219"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:22:00",
-      "location": "Latitude: 50.7976331518Longitude: -1.058365409"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T17:57:00",
-      "location": "Latitude: 50.7976331518Longitude: -1.058365409"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:53:00",
-      "location": "Latitude: 50.9161247368Longitude: -1.3627063224"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:06:00",
-      "location": "Latitude: 50.9161247368Longitude: -1.3627063224"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:34:00",
-      "location": "Latitude: 50.9210292249Longitude: -1.4007596521"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:52:00",
-      "location": "Latitude: 50.9210292249Longitude: -1.4007596521"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:44:00",
-      "location": "Latitude: 50.876897687Longitude: -1.2650105421"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T16:49:00",
-      "location": "Latitude: 50.876897687Longitude: -1.2650105421"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:59:00",
-      "location": "Latitude: 51.0017807919Longitude: -1.2908680924"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T19:11:00",
-      "location": "Latitude: 51.0017807919Longitude: -1.2908680924"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:45:00",
-      "location": "Latitude: 50.7258489733Longitude: -1.0239105883"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:50:00",
-      "location": "Latitude: 50.7258489733Longitude: -1.0239105883"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T07:32:00",
-      "location": "Latitude: 50.886932091Longitude: -1.2376172048"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T14:48:00",
-      "location": "Latitude: 50.886932091Longitude: -1.2376172048"
+      "datetime": "2025-05-05T16:58:00",
+      "location": "Latitude: 50.8960234Longitude: -1.29025302",
+      "distance": "36.2 miles",
+      "duration": "24 mins"
     }
   ],
   "John.Thorn": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:06:00",
-      "location": "Latitude: 50.870054514Longitude: -1.3834815298"
+      "datetime": "2025-05-09T06:29:00",
+      "location": "Latitude: 50.85929849Longitude: -1.13868646",
+      "distance": "37.8 miles",
+      "duration": "73 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T15:48:00",
-      "location": "Latitude: 50.870054514Longitude: -1.3834815298"
+      "datetime": "2025-05-09T16:19:00",
+      "location": "Latitude: 50.85929849Longitude: -1.13868646",
+      "distance": "37.8 miles",
+      "duration": "73 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:52:00",
-      "location": "Latitude: 50.764325283Longitude: -1.0961989224"
+      "datetime": "2025-05-08T07:06:00",
+      "location": "Latitude: 50.82611172Longitude: -1.23518829",
+      "distance": "34.4 miles",
+      "duration": "34 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T19:27:00",
-      "location": "Latitude: 50.764325283Longitude: -1.0961989224"
+      "datetime": "2025-05-08T16:38:00",
+      "location": "Latitude: 50.82611172Longitude: -1.23518829",
+      "distance": "34.4 miles",
+      "duration": "34 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:14:00",
-      "location": "Latitude: 50.7100254823Longitude: -1.0944014424"
+      "datetime": "2025-05-07T06:55:00",
+      "location": "Latitude: 50.85945794Longitude: -1.21341809",
+      "distance": "17.1 miles",
+      "duration": "51 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T19:02:00",
-      "location": "Latitude: 50.7100254823Longitude: -1.0944014424"
+      "datetime": "2025-05-07T17:42:00",
+      "location": "Latitude: 50.85945794Longitude: -1.21341809",
+      "distance": "17.1 miles",
+      "duration": "51 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:48:00",
-      "location": "Latitude: 50.9150911549Longitude: -1.1134952394"
+      "datetime": "2025-05-06T07:04:00",
+      "location": "Latitude: 50.94758104Longitude: -1.1303274",
+      "distance": "15.3 miles",
+      "duration": "40 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:22:00",
-      "location": "Latitude: 50.9150911549Longitude: -1.1134952394"
+      "datetime": "2025-05-06T16:00:00",
+      "location": "Latitude: 50.94758104Longitude: -1.1303274",
+      "distance": "15.3 miles",
+      "duration": "40 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:11:00",
-      "location": "Latitude: 51.0027203307Longitude: -1.1998649655"
+      "datetime": "2025-05-05T06:51:00",
+      "location": "Latitude: 50.92068871Longitude: -1.19008329",
+      "distance": "19.5 miles",
+      "duration": "64 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T15:24:00",
-      "location": "Latitude: 51.0027203307Longitude: -1.1998649655"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:30:00",
-      "location": "Latitude: 50.8516098211Longitude: -1.3600334531"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T16:37:00",
-      "location": "Latitude: 50.8516098211Longitude: -1.3600334531"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:49:00",
-      "location": "Latitude: 50.8497040718Longitude: -1.3528922173"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T13:49:00",
-      "location": "Latitude: 50.8497040718Longitude: -1.3528922173"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:22:00",
-      "location": "Latitude: 50.8006674074Longitude: -1.1467733917"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T15:08:00",
-      "location": "Latitude: 50.8006674074Longitude: -1.1467733917"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:31:00",
-      "location": "Latitude: 50.9198318041Longitude: -1.3951875126"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T16:20:00",
-      "location": "Latitude: 50.9198318041Longitude: -1.3951875126"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:45:00",
-      "location": "Latitude: 50.6697847098Longitude: -1.1317756147"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:35:00",
-      "location": "Latitude: 50.6697847098Longitude: -1.1317756147"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:58:00",
-      "location": "Latitude: 50.8117297968Longitude: -1.1671640323"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T17:21:00",
-      "location": "Latitude: 50.8117297968Longitude: -1.1671640323"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:20:00",
-      "location": "Latitude: 50.7631633244Longitude: -1.0500984551"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T18:54:00",
-      "location": "Latitude: 50.7631633244Longitude: -1.0500984551"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:28:00",
-      "location": "Latitude: 50.977281265Longitude: -1.0296530119"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T17:32:00",
-      "location": "Latitude: 50.977281265Longitude: -1.0296530119"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:56:00",
-      "location": "Latitude: 50.886120801Longitude: -1.2115194353"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T20:35:00",
-      "location": "Latitude: 50.886120801Longitude: -1.2115194353"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T06:58:00",
-      "location": "Latitude: 50.7253411683Longitude: -1.0646902497"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T14:59:00",
-      "location": "Latitude: 50.7253411683Longitude: -1.0646902497"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:58:00",
-      "location": "Latitude: 50.7840862442Longitude: -1.1512505277"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:26:00",
-      "location": "Latitude: 50.7840862442Longitude: -1.1512505277"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:58:00",
-      "location": "Latitude: 50.8592802185Longitude: -1.294645606"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T15:27:00",
-      "location": "Latitude: 50.8592802185Longitude: -1.294645606"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:15:00",
-      "location": "Latitude: 50.921523669Longitude: -1.2683370604"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T15:13:00",
-      "location": "Latitude: 50.921523669Longitude: -1.2683370604"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:28:00",
-      "location": "Latitude: 50.7253313611Longitude: -1.21705811"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:12:00",
-      "location": "Latitude: 50.7253313611Longitude: -1.21705811"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:19:00",
-      "location": "Latitude: 50.8273130732Longitude: -1.0874600692"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T16:10:00",
-      "location": "Latitude: 50.8273130732Longitude: -1.0874600692"
+      "datetime": "2025-05-05T17:05:00",
+      "location": "Latitude: 50.92068871Longitude: -1.19008329",
+      "distance": "19.5 miles",
+      "duration": "64 mins"
     }
   ],
   "David.Chandler": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:21:00",
-      "location": "Latitude: 50.9766226918Longitude: -1.1844816527"
+      "datetime": "2025-05-09T06:04:00",
+      "location": "Latitude: 50.8033801Longitude: -1.28287008",
+      "distance": "34.4 miles",
+      "duration": "45 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T19:21:00",
-      "location": "Latitude: 50.9766226918Longitude: -1.1844816527"
+      "datetime": "2025-05-09T13:55:00",
+      "location": "Latitude: 50.8033801Longitude: -1.28287008",
+      "distance": "34.4 miles",
+      "duration": "45 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:44:00",
-      "location": "Latitude: 50.9806560642Longitude: -1.1413132239"
+      "datetime": "2025-05-08T08:30:00",
+      "location": "Latitude: 50.8641468Longitude: -1.17371917",
+      "distance": "30.6 miles",
+      "duration": "80 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:19:00",
-      "location": "Latitude: 50.9806560642Longitude: -1.1413132239"
+      "datetime": "2025-05-08T17:14:00",
+      "location": "Latitude: 50.8641468Longitude: -1.17371917",
+      "distance": "30.6 miles",
+      "duration": "80 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:00:00",
-      "location": "Latitude: 50.9537622744Longitude: -1.2847567266"
+      "datetime": "2025-05-07T06:31:00",
+      "location": "Latitude: 50.84017966Longitude: -1.22134879",
+      "distance": "20.8 miles",
+      "duration": "20 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T18:09:00",
-      "location": "Latitude: 50.9537622744Longitude: -1.2847567266"
+      "datetime": "2025-05-07T15:40:00",
+      "location": "Latitude: 50.84017966Longitude: -1.22134879",
+      "distance": "20.8 miles",
+      "duration": "20 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:13:00",
-      "location": "Latitude: 50.7886937035Longitude: -1.356352889"
+      "datetime": "2025-05-06T08:00:00",
+      "location": "Latitude: 50.86740103Longitude: -1.17314869",
+      "distance": "24.5 miles",
+      "duration": "34 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T17:07:00",
-      "location": "Latitude: 50.7886937035Longitude: -1.356352889"
+      "datetime": "2025-05-06T16:40:00",
+      "location": "Latitude: 50.86740103Longitude: -1.17314869",
+      "distance": "24.5 miles",
+      "duration": "34 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:10:00",
-      "location": "Latitude: 50.8310253446Longitude: -1.3373372782"
+      "datetime": "2025-05-05T07:51:00",
+      "location": "Latitude: 50.79870064Longitude: -1.12855808",
+      "distance": "29.1 miles",
+      "duration": "20 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T18:12:00",
-      "location": "Latitude: 50.8310253446Longitude: -1.3373372782"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:07:00",
-      "location": "Latitude: 50.9798045719Longitude: -1.0394796649"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T14:41:00",
-      "location": "Latitude: 50.9798045719Longitude: -1.0394796649"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T07:01:00",
-      "location": "Latitude: 50.7908629736Longitude: -1.3378110805"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T18:42:00",
-      "location": "Latitude: 50.7908629736Longitude: -1.3378110805"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:27:00",
-      "location": "Latitude: 50.7833528065Longitude: -1.0477168587"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T16:08:00",
-      "location": "Latitude: 50.7833528065Longitude: -1.0477168587"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:02:00",
-      "location": "Latitude: 50.9454588569Longitude: -1.2240401104"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T14:38:00",
-      "location": "Latitude: 50.9454588569Longitude: -1.2240401104"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:19:00",
-      "location": "Latitude: 50.9009790816Longitude: -1.2071929475"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T16:15:00",
-      "location": "Latitude: 50.9009790816Longitude: -1.2071929475"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T06:04:00",
-      "location": "Latitude: 50.944490828Longitude: -1.177953852"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:43:00",
-      "location": "Latitude: 50.944490828Longitude: -1.177953852"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:09:00",
-      "location": "Latitude: 50.8354642121Longitude: -1.1224157941"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T16:46:00",
-      "location": "Latitude: 50.8354642121Longitude: -1.1224157941"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T06:53:00",
-      "location": "Latitude: 50.7560148631Longitude: -1.3750840216"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T15:36:00",
-      "location": "Latitude: 50.7560148631Longitude: -1.3750840216"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:09:00",
-      "location": "Latitude: 51.0457929456Longitude: -1.2896246694"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T18:16:00",
-      "location": "Latitude: 51.0457929456Longitude: -1.2896246694"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:15:00",
-      "location": "Latitude: 50.8715188408Longitude: -1.3507744191"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T15:54:00",
-      "location": "Latitude: 50.8715188408Longitude: -1.3507744191"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:02:00",
-      "location": "Latitude: 50.7277256783Longitude: -1.2711068397"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T14:49:00",
-      "location": "Latitude: 50.7277256783Longitude: -1.2711068397"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T06:31:00",
-      "location": "Latitude: 50.7298832813Longitude: -1.2578671526"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T14:45:00",
-      "location": "Latitude: 50.7298832813Longitude: -1.2578671526"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:25:00",
-      "location": "Latitude: 50.8342739383Longitude: -1.2779190495"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:24:00",
-      "location": "Latitude: 50.8342739383Longitude: -1.2779190495"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:35:00",
-      "location": "Latitude: 50.8507149927Longitude: -1.0782864851"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T18:14:00",
-      "location": "Latitude: 50.8507149927Longitude: -1.0782864851"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:50:00",
-      "location": "Latitude: 50.6649777175Longitude: -1.2674329547"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:17:00",
-      "location": "Latitude: 50.6649777175Longitude: -1.2674329547"
+      "datetime": "2025-05-05T18:32:00",
+      "location": "Latitude: 50.79870064Longitude: -1.12855808",
+      "distance": "29.1 miles",
+      "duration": "20 mins"
     }
   ],
   "John.Chandler": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:42:00",
-      "location": "Latitude: 51.0011238198Longitude: -1.4080167318"
+      "datetime": "2025-05-09T08:24:00",
+      "location": "Latitude: 50.87340251Longitude: -1.18586572",
+      "distance": "23.8 miles",
+      "duration": "66 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T18:23:00",
-      "location": "Latitude: 51.0011238198Longitude: -1.4080167318"
+      "datetime": "2025-05-09T17:41:00",
+      "location": "Latitude: 50.87340251Longitude: -1.18586572",
+      "distance": "23.8 miles",
+      "duration": "66 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T08:25:00",
-      "location": "Latitude: 50.7903425268Longitude: -1.1206950616"
+      "datetime": "2025-05-08T08:36:00",
+      "location": "Latitude: 50.75981259Longitude: -1.17781559",
+      "distance": "29.0 miles",
+      "duration": "69 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T17:51:00",
-      "location": "Latitude: 50.7903425268Longitude: -1.1206950616"
+      "datetime": "2025-05-08T15:42:00",
+      "location": "Latitude: 50.75981259Longitude: -1.17781559",
+      "distance": "29.0 miles",
+      "duration": "69 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T06:42:00",
-      "location": "Latitude: 50.6575386714Longitude: -1.0999170726"
+      "datetime": "2025-05-07T06:06:00",
+      "location": "Latitude: 50.83146172Longitude: -1.2293048",
+      "distance": "23.9 miles",
+      "duration": "50 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T18:06:00",
-      "location": "Latitude: 50.6575386714Longitude: -1.0999170726"
+      "datetime": "2025-05-07T13:51:00",
+      "location": "Latitude: 50.83146172Longitude: -1.2293048",
+      "distance": "23.9 miles",
+      "duration": "50 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:17:00",
-      "location": "Latitude: 50.9596319384Longitude: -1.2031822933"
+      "datetime": "2025-05-06T07:32:00",
+      "location": "Latitude: 50.89064408Longitude: -1.14843268",
+      "distance": "26.4 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:44:00",
-      "location": "Latitude: 50.9596319384Longitude: -1.2031822933"
+      "datetime": "2025-05-06T18:21:00",
+      "location": "Latitude: 50.89064408Longitude: -1.14843268",
+      "distance": "26.4 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:04:00",
-      "location": "Latitude: 50.7384977879Longitude: -1.1888579037"
+      "datetime": "2025-05-05T07:53:00",
+      "location": "Latitude: 50.8939271Longitude: -1.17825685",
+      "distance": "31.5 miles",
+      "duration": "28 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T19:41:00",
-      "location": "Latitude: 50.7384977879Longitude: -1.1888579037"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:48:00",
-      "location": "Latitude: 51.0262283497Longitude: -1.1320037406"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T18:28:00",
-      "location": "Latitude: 51.0262283497Longitude: -1.1320037406"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:08:00",
-      "location": "Latitude: 50.672108721Longitude: -1.1363154486"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T15:04:00",
-      "location": "Latitude: 50.672108721Longitude: -1.1363154486"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:27:00",
-      "location": "Latitude: 50.7420658352Longitude: -1.2250852154"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:59:00",
-      "location": "Latitude: 50.7420658352Longitude: -1.2250852154"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:56:00",
-      "location": "Latitude: 50.702393473Longitude: -1.0492599133"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T18:22:00",
-      "location": "Latitude: 50.702393473Longitude: -1.0492599133"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:32:00",
-      "location": "Latitude: 50.7224886001Longitude: -1.0384882697"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T20:24:00",
-      "location": "Latitude: 50.7224886001Longitude: -1.0384882697"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:33:00",
-      "location": "Latitude: 50.9159132596Longitude: -1.0333188851"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T16:46:00",
-      "location": "Latitude: 50.9159132596Longitude: -1.0333188851"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:47:00",
-      "location": "Latitude: 50.684172461Longitude: -1.0358602396"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T16:13:00",
-      "location": "Latitude: 50.684172461Longitude: -1.0358602396"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:22:00",
-      "location": "Latitude: 50.9902879926Longitude: -1.192631736"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T19:48:00",
-      "location": "Latitude: 50.9902879926Longitude: -1.192631736"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:18:00",
-      "location": "Latitude: 50.9874451302Longitude: -1.398930058"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T17:05:00",
-      "location": "Latitude: 50.9874451302Longitude: -1.398930058"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:38:00",
-      "location": "Latitude: 50.9115245381Longitude: -1.2334946192"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T19:21:00",
-      "location": "Latitude: 50.9115245381Longitude: -1.2334946192"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:05:00",
-      "location": "Latitude: 50.8416178808Longitude: -1.0943643904"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:56:00",
-      "location": "Latitude: 50.8416178808Longitude: -1.0943643904"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:13:00",
-      "location": "Latitude: 50.8304063876Longitude: -1.1570402794"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T19:01:00",
-      "location": "Latitude: 50.8304063876Longitude: -1.1570402794"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:24:00",
-      "location": "Latitude: 50.8252274494Longitude: -1.2543848851"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T17:49:00",
-      "location": "Latitude: 50.8252274494Longitude: -1.2543848851"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:16:00",
-      "location": "Latitude: 50.7390089952Longitude: -1.260997806"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:02:00",
-      "location": "Latitude: 50.7390089952Longitude: -1.260997806"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:56:00",
-      "location": "Latitude: 51.0298098006Longitude: -1.3744073719"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:41:00",
-      "location": "Latitude: 51.0298098006Longitude: -1.3744073719"
+      "datetime": "2025-05-05T17:50:00",
+      "location": "Latitude: 50.8939271Longitude: -1.17825685",
+      "distance": "31.5 miles",
+      "duration": "28 mins"
     }
   ],
   "Bradley.Graham": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:22:00",
-      "location": "Latitude: 50.9894646381Longitude: -1.2038542357"
+      "datetime": "2025-05-09T06:21:00",
+      "location": "Latitude: 50.83805577Longitude: -1.18404065",
+      "distance": "18.2 miles",
+      "duration": "54 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T15:21:00",
-      "location": "Latitude: 50.9894646381Longitude: -1.2038542357"
+      "datetime": "2025-05-09T16:13:00",
+      "location": "Latitude: 50.83805577Longitude: -1.18404065",
+      "distance": "18.2 miles",
+      "duration": "54 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:23:00",
-      "location": "Latitude: 51.0451990027Longitude: -1.1672902381"
+      "datetime": "2025-05-08T07:39:00",
+      "location": "Latitude: 50.86468581Longitude: -1.31674765",
+      "distance": "13.4 miles",
+      "duration": "38 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:28:00",
-      "location": "Latitude: 51.0451990027Longitude: -1.1672902381"
+      "datetime": "2025-05-08T16:07:00",
+      "location": "Latitude: 50.86468581Longitude: -1.31674765",
+      "distance": "13.4 miles",
+      "duration": "38 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:30:00",
-      "location": "Latitude: 50.9369314532Longitude: -1.3005494371"
+      "datetime": "2025-05-07T06:39:00",
+      "location": "Latitude: 50.87627643Longitude: -1.18621825",
+      "distance": "31.5 miles",
+      "duration": "62 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T16:34:00",
-      "location": "Latitude: 50.9369314532Longitude: -1.3005494371"
+      "datetime": "2025-05-07T15:52:00",
+      "location": "Latitude: 50.87627643Longitude: -1.18621825",
+      "distance": "31.5 miles",
+      "duration": "62 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:18:00",
-      "location": "Latitude: 50.770431003Longitude: -1.2764537299"
+      "datetime": "2025-05-06T08:56:00",
+      "location": "Latitude: 50.88532898Longitude: -1.22414659",
+      "distance": "21.8 miles",
+      "duration": "44 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T16:09:00",
-      "location": "Latitude: 50.770431003Longitude: -1.2764537299"
+      "datetime": "2025-05-06T18:01:00",
+      "location": "Latitude: 50.88532898Longitude: -1.22414659",
+      "distance": "21.8 miles",
+      "duration": "44 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T06:36:00",
-      "location": "Latitude: 50.8931246631Longitude: -1.2493429299"
+      "datetime": "2025-05-05T06:44:00",
+      "location": "Latitude: 50.76356357Longitude: -1.25101056",
+      "distance": "39.9 miles",
+      "duration": "68 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T16:45:00",
-      "location": "Latitude: 50.8931246631Longitude: -1.2493429299"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:25:00",
-      "location": "Latitude: 51.0321254852Longitude: -1.2505832255"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T18:00:00",
-      "location": "Latitude: 51.0321254852Longitude: -1.2505832255"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:37:00",
-      "location": "Latitude: 50.9189720894Longitude: -1.3395813582"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T15:50:00",
-      "location": "Latitude: 50.9189720894Longitude: -1.3395813582"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:13:00",
-      "location": "Latitude: 50.8864256902Longitude: -1.224033705"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:39:00",
-      "location": "Latitude: 50.8864256902Longitude: -1.224033705"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:25:00",
-      "location": "Latitude: 50.8843640683Longitude: -1.3264486856"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T16:05:00",
-      "location": "Latitude: 50.8843640683Longitude: -1.3264486856"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:21:00",
-      "location": "Latitude: 50.6721633222Longitude: -1.2770932146"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:57:00",
-      "location": "Latitude: 50.6721633222Longitude: -1.2770932146"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T08:53:00",
-      "location": "Latitude: 50.6746779068Longitude: -1.2255905641"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T15:57:00",
-      "location": "Latitude: 50.6746779068Longitude: -1.2255905641"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:21:00",
-      "location": "Latitude: 51.0070540591Longitude: -1.0347213743"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T16:06:00",
-      "location": "Latitude: 51.0070540591Longitude: -1.0347213743"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:36:00",
-      "location": "Latitude: 50.7484380503Longitude: -1.2377835946"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T20:22:00",
-      "location": "Latitude: 50.7484380503Longitude: -1.2377835946"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T06:51:00",
-      "location": "Latitude: 50.7636248031Longitude: -1.2685051401"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T17:54:00",
-      "location": "Latitude: 50.7636248031Longitude: -1.2685051401"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:22:00",
-      "location": "Latitude: 50.8933658223Longitude: -1.0488385362"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T18:44:00",
-      "location": "Latitude: 50.8933658223Longitude: -1.0488385362"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:58:00",
-      "location": "Latitude: 51.0141413013Longitude: -1.1652233558"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:21:00",
-      "location": "Latitude: 51.0141413013Longitude: -1.1652233558"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T06:36:00",
-      "location": "Latitude: 50.8804051553Longitude: -1.3746609526"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T15:06:00",
-      "location": "Latitude: 50.8804051553Longitude: -1.3746609526"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:53:00",
-      "location": "Latitude: 50.9465270032Longitude: -1.2192250306"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T15:08:00",
-      "location": "Latitude: 50.9465270032Longitude: -1.2192250306"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:10:00",
-      "location": "Latitude: 50.7318209279Longitude: -1.0676795246"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T18:00:00",
-      "location": "Latitude: 50.7318209279Longitude: -1.0676795246"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T07:26:00",
-      "location": "Latitude: 51.0241768242Longitude: -1.2586766999"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:59:00",
-      "location": "Latitude: 51.0241768242Longitude: -1.2586766999"
+      "datetime": "2025-05-05T15:29:00",
+      "location": "Latitude: 50.76356357Longitude: -1.25101056",
+      "distance": "39.9 miles",
+      "duration": "68 mins"
     }
   ],
   "Adrian.Furdui": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:10:00",
-      "location": "Latitude: 50.7894034107Longitude: -1.3854442604"
+      "datetime": "2025-05-09T08:12:00",
+      "location": "Latitude: 50.78444918Longitude: -1.22436719",
+      "distance": "13.1 miles",
+      "duration": "60 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T16:05:00",
-      "location": "Latitude: 50.7894034107Longitude: -1.3854442604"
+      "datetime": "2025-05-09T18:52:00",
+      "location": "Latitude: 50.78444918Longitude: -1.22436719",
+      "distance": "13.1 miles",
+      "duration": "60 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:40:00",
-      "location": "Latitude: 50.8259881557Longitude: -1.0367272911"
+      "datetime": "2025-05-08T06:32:00",
+      "location": "Latitude: 50.87365568Longitude: -1.18711072",
+      "distance": "13.8 miles",
+      "duration": "79 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T15:16:00",
-      "location": "Latitude: 50.8259881557Longitude: -1.0367272911"
+      "datetime": "2025-05-08T16:20:00",
+      "location": "Latitude: 50.87365568Longitude: -1.18711072",
+      "distance": "13.8 miles",
+      "duration": "79 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:07:00",
-      "location": "Latitude: 50.8574052858Longitude: -1.0705284705"
+      "datetime": "2025-05-07T07:55:00",
+      "location": "Latitude: 50.88840894Longitude: -1.13959965",
+      "distance": "15.7 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:19:00",
-      "location": "Latitude: 50.8574052858Longitude: -1.0705284705"
+      "datetime": "2025-05-07T15:33:00",
+      "location": "Latitude: 50.88840894Longitude: -1.13959965",
+      "distance": "15.7 miles",
+      "duration": "31 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T08:09:00",
-      "location": "Latitude: 50.9909186356Longitude: -1.1802903295"
+      "datetime": "2025-05-06T07:36:00",
+      "location": "Latitude: 50.8411507Longitude: -1.26365282",
+      "distance": "15.2 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T15:44:00",
-      "location": "Latitude: 50.9909186356Longitude: -1.1802903295"
+      "datetime": "2025-05-06T16:47:00",
+      "location": "Latitude: 50.8411507Longitude: -1.26365282",
+      "distance": "15.2 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T06:22:00",
-      "location": "Latitude: 50.8208282645Longitude: -1.1057126599"
+      "datetime": "2025-05-05T08:28:00",
+      "location": "Latitude: 50.84492762Longitude: -1.23113283",
+      "distance": "35.6 miles",
+      "duration": "63 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T16:30:00",
-      "location": "Latitude: 50.8208282645Longitude: -1.1057126599"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:18:00",
-      "location": "Latitude: 50.7130095923Longitude: -1.3743477123"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T14:19:00",
-      "location": "Latitude: 50.7130095923Longitude: -1.3743477123"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:35:00",
-      "location": "Latitude: 51.0392987188Longitude: -1.3807257068"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T17:47:00",
-      "location": "Latitude: 51.0392987188Longitude: -1.3807257068"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:10:00",
-      "location": "Latitude: 50.9455831808Longitude: -1.3846700679"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T17:30:00",
-      "location": "Latitude: 50.9455831808Longitude: -1.3846700679"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:49:00",
-      "location": "Latitude: 51.0059025112Longitude: -1.1721238905"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T18:02:00",
-      "location": "Latitude: 51.0059025112Longitude: -1.1721238905"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:00:00",
-      "location": "Latitude: 50.9555540451Longitude: -1.1645351776"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:09:00",
-      "location": "Latitude: 50.9555540451Longitude: -1.1645351776"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:45:00",
-      "location": "Latitude: 50.8285672876Longitude: -1.2146233296"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T16:47:00",
-      "location": "Latitude: 50.8285672876Longitude: -1.2146233296"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T07:16:00",
-      "location": "Latitude: 50.9680536104Longitude: -1.3350923582"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T16:21:00",
-      "location": "Latitude: 50.9680536104Longitude: -1.3350923582"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:40:00",
-      "location": "Latitude: 50.6925327342Longitude: -1.0378260045"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T15:35:00",
-      "location": "Latitude: 50.6925327342Longitude: -1.0378260045"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:59:00",
-      "location": "Latitude: 50.7273243258Longitude: -1.3090961105"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T16:22:00",
-      "location": "Latitude: 50.7273243258Longitude: -1.3090961105"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:12:00",
-      "location": "Latitude: 50.9561519445Longitude: -1.1057272939"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T19:23:00",
-      "location": "Latitude: 50.9561519445Longitude: -1.1057272939"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:11:00",
-      "location": "Latitude: 50.9571032979Longitude: -1.1701172899"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T18:16:00",
-      "location": "Latitude: 50.9571032979Longitude: -1.1701172899"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:28:00",
-      "location": "Latitude: 51.0098253842Longitude: -1.2714766442"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T17:25:00",
-      "location": "Latitude: 51.0098253842Longitude: -1.2714766442"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T07:23:00",
-      "location": "Latitude: 50.7041675339Longitude: -1.3221780384"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T17:06:00",
-      "location": "Latitude: 50.7041675339Longitude: -1.3221780384"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:25:00",
-      "location": "Latitude: 50.8249516995Longitude: -1.2499413246"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:15:00",
-      "location": "Latitude: 50.8249516995Longitude: -1.2499413246"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:12:00",
-      "location": "Latitude: 50.7905422875Longitude: -1.1251983577"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T14:59:00",
-      "location": "Latitude: 50.7905422875Longitude: -1.1251983577"
+      "datetime": "2025-05-05T17:09:00",
+      "location": "Latitude: 50.84492762Longitude: -1.23113283",
+      "distance": "35.6 miles",
+      "duration": "63 mins"
     }
   ],
   "Chris.Freeman": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T08:56:00",
-      "location": "Latitude: 50.7113997568Longitude: -1.180277459"
+      "datetime": "2025-05-09T07:50:00",
+      "location": "Latitude: 50.84812405Longitude: -1.17694259",
+      "distance": "25.2 miles",
+      "duration": "74 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T18:51:00",
-      "location": "Latitude: 50.7113997568Longitude: -1.180277459"
+      "datetime": "2025-05-09T15:09:00",
+      "location": "Latitude: 50.84812405Longitude: -1.17694259",
+      "distance": "25.2 miles",
+      "duration": "74 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:57:00",
-      "location": "Latitude: 50.8646053288Longitude: -1.3998025549"
+      "datetime": "2025-05-08T07:58:00",
+      "location": "Latitude: 50.77860063Longitude: -1.20073381",
+      "distance": "24.4 miles",
+      "duration": "68 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T17:08:00",
-      "location": "Latitude: 50.8646053288Longitude: -1.3998025549"
+      "datetime": "2025-05-08T17:50:00",
+      "location": "Latitude: 50.77860063Longitude: -1.20073381",
+      "distance": "24.4 miles",
+      "duration": "68 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:20:00",
-      "location": "Latitude: 50.9464464266Longitude: -1.3437508801"
+      "datetime": "2025-05-07T06:03:00",
+      "location": "Latitude: 50.8936482Longitude: -1.19867051",
+      "distance": "29.7 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T16:35:00",
-      "location": "Latitude: 50.9464464266Longitude: -1.3437508801"
+      "datetime": "2025-05-07T15:10:00",
+      "location": "Latitude: 50.8936482Longitude: -1.19867051",
+      "distance": "29.7 miles",
+      "duration": "23 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:19:00",
-      "location": "Latitude: 50.8979168705Longitude: -1.3486359821"
+      "datetime": "2025-05-06T07:49:00",
+      "location": "Latitude: 50.83202817Longitude: -1.1228146",
+      "distance": "35.1 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T18:07:00",
-      "location": "Latitude: 50.8979168705Longitude: -1.3486359821"
+      "datetime": "2025-05-06T14:52:00",
+      "location": "Latitude: 50.83202817Longitude: -1.1228146",
+      "distance": "35.1 miles",
+      "duration": "76 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T07:21:00",
-      "location": "Latitude: 50.9551042536Longitude: -1.0230592705"
+      "datetime": "2025-05-05T06:18:00",
+      "location": "Latitude: 50.90360847Longitude: -1.31978355",
+      "distance": "24.9 miles",
+      "duration": "50 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T15:01:00",
-      "location": "Latitude: 50.9551042536Longitude: -1.0230592705"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T08:05:00",
-      "location": "Latitude: 50.6903088701Longitude: -1.0644911832"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T17:56:00",
-      "location": "Latitude: 50.6903088701Longitude: -1.0644911832"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T08:33:00",
-      "location": "Latitude: 50.9973734712Longitude: -1.2179742906"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T17:12:00",
-      "location": "Latitude: 50.9973734712Longitude: -1.2179742906"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T07:38:00",
-      "location": "Latitude: 50.7674386979Longitude: -1.3321195368"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T14:38:00",
-      "location": "Latitude: 50.7674386979Longitude: -1.3321195368"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:53:00",
-      "location": "Latitude: 50.8276251415Longitude: -1.3599286229"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T17:11:00",
-      "location": "Latitude: 50.8276251415Longitude: -1.3599286229"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T07:20:00",
-      "location": "Latitude: 50.9530530181Longitude: -1.1914517767"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T17:58:00",
-      "location": "Latitude: 50.9530530181Longitude: -1.1914517767"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:20:00",
-      "location": "Latitude: 50.8243995682Longitude: -1.2088703567"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T14:30:00",
-      "location": "Latitude: 50.8243995682Longitude: -1.2088703567"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:25:00",
-      "location": "Latitude: 50.9876390869Longitude: -1.1045602068"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T19:22:00",
-      "location": "Latitude: 50.9876390869Longitude: -1.1045602068"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:18:00",
-      "location": "Latitude: 50.9118849648Longitude: -1.1274699066"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T19:25:00",
-      "location": "Latitude: 50.9118849648Longitude: -1.1274699066"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T07:28:00",
-      "location": "Latitude: 50.8735423184Longitude: -1.0992456961"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T18:39:00",
-      "location": "Latitude: 50.8735423184Longitude: -1.0992456961"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:15:00",
-      "location": "Latitude: 51.0241660154Longitude: -1.3699323867"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T16:49:00",
-      "location": "Latitude: 51.0241660154Longitude: -1.3699323867"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:17:00",
-      "location": "Latitude: 51.0217322855Longitude: -1.351427428"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T15:24:00",
-      "location": "Latitude: 51.0217322855Longitude: -1.351427428"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:48:00",
-      "location": "Latitude: 50.7355991679Longitude: -1.2990793889"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T16:17:00",
-      "location": "Latitude: 50.7355991679Longitude: -1.2990793889"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:48:00",
-      "location": "Latitude: 50.7440563905Longitude: -1.1022429861"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T18:04:00",
-      "location": "Latitude: 50.7440563905Longitude: -1.1022429861"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T06:37:00",
-      "location": "Latitude: 50.9249431152Longitude: -1.2994907837"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:54:00",
-      "location": "Latitude: 50.9249431152Longitude: -1.2994907837"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:07:00",
-      "location": "Latitude: 50.8976303216Longitude: -1.4144133742"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T16:29:00",
-      "location": "Latitude: 50.8976303216Longitude: -1.4144133742"
+      "datetime": "2025-05-05T14:43:00",
+      "location": "Latitude: 50.90360847Longitude: -1.31978355",
+      "distance": "24.9 miles",
+      "duration": "50 mins"
     }
   ],
   "Colby.Lunsford": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:22:00",
-      "location": "Latitude: 50.9121797689Longitude: -1.1753367344"
+      "datetime": "2025-05-09T06:18:00",
+      "location": "Latitude: 50.81247481Longitude: -1.31300605",
+      "distance": "30.3 miles",
+      "duration": "53 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T13:30:00",
-      "location": "Latitude: 50.9121797689Longitude: -1.1753367344"
+      "datetime": "2025-05-09T14:49:00",
+      "location": "Latitude: 50.81247481Longitude: -1.31300605",
+      "distance": "30.3 miles",
+      "duration": "53 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T07:14:00",
-      "location": "Latitude: 51.0246831809Longitude: -1.0247204943"
+      "datetime": "2025-05-08T07:48:00",
+      "location": "Latitude: 50.80503308Longitude: -1.25271118",
+      "distance": "36.8 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:33:00",
-      "location": "Latitude: 51.0246831809Longitude: -1.0247204943"
+      "datetime": "2025-05-08T16:17:00",
+      "location": "Latitude: 50.80503308Longitude: -1.25271118",
+      "distance": "36.8 miles",
+      "duration": "48 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T07:08:00",
-      "location": "Latitude: 51.0193079622Longitude: -1.2346468532"
+      "datetime": "2025-05-07T08:07:00",
+      "location": "Latitude: 50.79983685Longitude: -1.27136068",
+      "distance": "22.0 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T16:41:00",
-      "location": "Latitude: 51.0193079622Longitude: -1.2346468532"
+      "datetime": "2025-05-07T19:07:00",
+      "location": "Latitude: 50.79983685Longitude: -1.27136068",
+      "distance": "22.0 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:05:00",
-      "location": "Latitude: 50.7618058551Longitude: -1.2788031768"
+      "datetime": "2025-05-06T07:48:00",
+      "location": "Latitude: 50.79485617Longitude: -1.22099037",
+      "distance": "38.3 miles",
+      "duration": "75 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T17:07:00",
-      "location": "Latitude: 50.7618058551Longitude: -1.2788031768"
+      "datetime": "2025-05-06T14:53:00",
+      "location": "Latitude: 50.79485617Longitude: -1.22099037",
+      "distance": "38.3 miles",
+      "duration": "75 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:23:00",
-      "location": "Latitude: 50.8942183223Longitude: -1.1847187546"
+      "datetime": "2025-05-05T08:35:00",
+      "location": "Latitude: 50.84079889Longitude: -1.17182708",
+      "distance": "18.6 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T19:13:00",
-      "location": "Latitude: 50.8942183223Longitude: -1.1847187546"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T06:44:00",
-      "location": "Latitude: 50.9637067893Longitude: -1.1695607784"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T18:40:00",
-      "location": "Latitude: 50.9637067893Longitude: -1.1695607784"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T07:34:00",
-      "location": "Latitude: 50.9486459295Longitude: -1.3392334169"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T19:01:00",
-      "location": "Latitude: 50.9486459295Longitude: -1.3392334169"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T08:40:00",
-      "location": "Latitude: 50.9934261026Longitude: -1.3821249918"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T16:50:00",
-      "location": "Latitude: 50.9934261026Longitude: -1.3821249918"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T08:09:00",
-      "location": "Latitude: 50.9967660829Longitude: -1.3737408376"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T15:59:00",
-      "location": "Latitude: 50.9967660829Longitude: -1.3737408376"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:10:00",
-      "location": "Latitude: 50.749095012Longitude: -1.4195190702"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T19:51:00",
-      "location": "Latitude: 50.749095012Longitude: -1.4195190702"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T08:58:00",
-      "location": "Latitude: 50.7277500762Longitude: -1.1847517004"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T17:24:00",
-      "location": "Latitude: 50.7277500762Longitude: -1.1847517004"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:59:00",
-      "location": "Latitude: 50.9124008223Longitude: -1.1811858943"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T17:26:00",
-      "location": "Latitude: 50.9124008223Longitude: -1.1811858943"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:20:00",
-      "location": "Latitude: 50.7249900939Longitude: -1.4149740581"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T18:23:00",
-      "location": "Latitude: 50.7249900939Longitude: -1.4149740581"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:24:00",
-      "location": "Latitude: 50.8249247042Longitude: -1.0661868119"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T20:01:00",
-      "location": "Latitude: 50.8249247042Longitude: -1.0661868119"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T08:55:00",
-      "location": "Latitude: 50.7544988035Longitude: -1.1727389084"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T17:32:00",
-      "location": "Latitude: 50.7544988035Longitude: -1.1727389084"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T08:27:00",
-      "location": "Latitude: 50.8012546553Longitude: -1.1190386816"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T16:56:00",
-      "location": "Latitude: 50.8012546553Longitude: -1.1190386816"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T06:26:00",
-      "location": "Latitude: 50.7531032404Longitude: -1.2066430882"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T16:30:00",
-      "location": "Latitude: 50.7531032404Longitude: -1.2066430882"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:52:00",
-      "location": "Latitude: 50.9856996373Longitude: -1.0400495979"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T16:04:00",
-      "location": "Latitude: 50.9856996373Longitude: -1.0400495979"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:25:00",
-      "location": "Latitude: 50.759224526Longitude: -1.2707798579"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T17:00:00",
-      "location": "Latitude: 50.759224526Longitude: -1.2707798579"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T08:02:00",
-      "location": "Latitude: 50.7326849572Longitude: -1.0937426137"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T17:43:00",
-      "location": "Latitude: 50.7326849572Longitude: -1.0937426137"
+      "datetime": "2025-05-05T18:39:00",
+      "location": "Latitude: 50.84079889Longitude: -1.17182708",
+      "distance": "18.6 miles",
+      "duration": "36 mins"
     }
   ],
   "Megan.Line": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T07:00:00",
-      "location": "Latitude: 50.8275879438Longitude: -1.0362888156"
+      "datetime": "2025-05-09T08:45:00",
+      "location": "Latitude: 50.76089074Longitude: -1.22374798",
+      "distance": "23.8 miles",
+      "duration": "28 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T16:24:00",
-      "location": "Latitude: 50.8275879438Longitude: -1.0362888156"
+      "datetime": "2025-05-09T15:48:00",
+      "location": "Latitude: 50.76089074Longitude: -1.22374798",
+      "distance": "23.8 miles",
+      "duration": "28 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T08:20:00",
-      "location": "Latitude: 50.7445269046Longitude: -1.0677737961"
+      "datetime": "2025-05-08T08:01:00",
+      "location": "Latitude: 50.80280526Longitude: -1.22060581",
+      "distance": "32.8 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T17:10:00",
-      "location": "Latitude: 50.7445269046Longitude: -1.0677737961"
+      "datetime": "2025-05-08T16:36:00",
+      "location": "Latitude: 50.80280526Longitude: -1.22060581",
+      "distance": "32.8 miles",
+      "duration": "41 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-07T08:58:00",
-      "location": "Latitude: 51.0435176691Longitude: -1.1111938582"
+      "datetime": "2025-05-07T07:03:00",
+      "location": "Latitude: 50.81742889Longitude: -1.16404276",
+      "distance": "32.6 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T17:32:00",
-      "location": "Latitude: 51.0435176691Longitude: -1.1111938582"
+      "datetime": "2025-05-07T14:10:00",
+      "location": "Latitude: 50.81742889Longitude: -1.16404276",
+      "distance": "32.6 miles",
+      "duration": "71 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T07:06:00",
-      "location": "Latitude: 50.9536499731Longitude: -1.2136618311"
+      "datetime": "2025-05-06T08:15:00",
+      "location": "Latitude: 50.93673242Longitude: -1.19760119",
+      "distance": "12.4 miles",
+      "duration": "30 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T14:43:00",
-      "location": "Latitude: 50.9536499731Longitude: -1.2136618311"
+      "datetime": "2025-05-06T19:00:00",
+      "location": "Latitude: 50.93673242Longitude: -1.19760119",
+      "distance": "12.4 miles",
+      "duration": "30 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:16:00",
-      "location": "Latitude: 51.0384535567Longitude: -1.3539605673"
+      "datetime": "2025-05-05T08:31:00",
+      "location": "Latitude: 50.93971738Longitude: -1.2039035",
+      "distance": "24.7 miles",
+      "duration": "61 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T15:36:00",
-      "location": "Latitude: 51.0384535567Longitude: -1.3539605673"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:00:00",
-      "location": "Latitude: 50.7349926833Longitude: -1.3999471818"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T18:32:00",
-      "location": "Latitude: 50.7349926833Longitude: -1.3999471818"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T07:03:00",
-      "location": "Latitude: 50.9383749795Longitude: -1.0249088427"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T14:09:00",
-      "location": "Latitude: 50.9383749795Longitude: -1.0249088427"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:57:00",
-      "location": "Latitude: 50.8877537076Longitude: -1.1539670014"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T15:08:00",
-      "location": "Latitude: 50.8877537076Longitude: -1.1539670014"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T06:32:00",
-      "location": "Latitude: 50.8900883665Longitude: -1.2311522567"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T17:33:00",
-      "location": "Latitude: 50.8900883665Longitude: -1.2311522567"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T08:03:00",
-      "location": "Latitude: 50.9746491254Longitude: -1.3193558049"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T15:06:00",
-      "location": "Latitude: 50.9746491254Longitude: -1.3193558049"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:31:00",
-      "location": "Latitude: 50.8035625551Longitude: -1.3340231953"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T16:04:00",
-      "location": "Latitude: 50.8035625551Longitude: -1.3340231953"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T08:20:00",
-      "location": "Latitude: 50.9941196831Longitude: -1.0413811518"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T18:27:00",
-      "location": "Latitude: 50.9941196831Longitude: -1.0413811518"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T08:29:00",
-      "location": "Latitude: 50.6985230293Longitude: -1.2229173277"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T18:58:00",
-      "location": "Latitude: 50.6985230293Longitude: -1.2229173277"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:17:00",
-      "location": "Latitude: 50.9764306622Longitude: -1.2015192024"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T19:12:00",
-      "location": "Latitude: 50.9764306622Longitude: -1.2015192024"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:03:00",
-      "location": "Latitude: 50.7511621494Longitude: -1.1254135237"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T16:17:00",
-      "location": "Latitude: 50.7511621494Longitude: -1.1254135237"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T06:37:00",
-      "location": "Latitude: 50.8494403063Longitude: -1.2229990706"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T15:38:00",
-      "location": "Latitude: 50.8494403063Longitude: -1.2229990706"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T08:45:00",
-      "location": "Latitude: 51.0547623153Longitude: -1.0922797463"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T18:54:00",
-      "location": "Latitude: 51.0547623153Longitude: -1.0922797463"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T06:23:00",
-      "location": "Latitude: 50.9685077182Longitude: -1.4139580187"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T13:30:00",
-      "location": "Latitude: 50.9685077182Longitude: -1.4139580187"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:21:00",
-      "location": "Latitude: 50.9644524783Longitude: -1.0459116941"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:58:00",
-      "location": "Latitude: 50.9644524783Longitude: -1.0459116941"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:09:00",
-      "location": "Latitude: 50.6944597038Longitude: -1.2173377763"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T14:16:00",
-      "location": "Latitude: 50.6944597038Longitude: -1.2173377763"
+      "datetime": "2025-05-05T15:51:00",
+      "location": "Latitude: 50.93971738Longitude: -1.2039035",
+      "distance": "24.7 miles",
+      "duration": "61 mins"
     }
   ],
   "Chloe.Line": [
     {
       "type": "Check In",
-      "datetime": "2025-05-09T06:31:00",
-      "location": "Latitude: 50.8671369832Longitude: -1.2162944084"
+      "datetime": "2025-05-09T07:08:00",
+      "location": "Latitude: 50.89334616Longitude: -1.21108884",
+      "distance": "35.8 miles",
+      "duration": "70 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-09T17:11:00",
-      "location": "Latitude: 50.8671369832Longitude: -1.2162944084"
+      "datetime": "2025-05-09T15:15:00",
+      "location": "Latitude: 50.89334616Longitude: -1.21108884",
+      "distance": "35.8 miles",
+      "duration": "70 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-08T06:44:00",
-      "location": "Latitude: 51.0175340975Longitude: -1.3468516958"
+      "datetime": "2025-05-08T06:03:00",
+      "location": "Latitude: 50.9113193Longitude: -1.19315823",
+      "distance": "36.9 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-08T18:43:00",
-      "location": "Latitude: 51.0175340975Longitude: -1.3468516958"
+      "datetime": "2025-05-08T17:00:00",
+      "location": "Latitude: 50.9113193Longitude: -1.19315823",
+      "distance": "36.9 miles",
+      "duration": "65 mins"
     },
     {
       "type": "Check In",
       "datetime": "2025-05-07T06:18:00",
-      "location": "Latitude: 50.8220605833Longitude: -1.2779748508"
+      "location": "Latitude: 50.76865827Longitude: -1.31571519",
+      "distance": "38.6 miles",
+      "duration": "58 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-07T15:03:00",
-      "location": "Latitude: 50.8220605833Longitude: -1.2779748508"
+      "datetime": "2025-05-07T16:38:00",
+      "location": "Latitude: 50.76865827Longitude: -1.31571519",
+      "distance": "38.6 miles",
+      "duration": "58 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-06T06:11:00",
-      "location": "Latitude: 50.837206724Longitude: -1.3181091261"
+      "datetime": "2025-05-06T06:17:00",
+      "location": "Latitude: 50.89795409Longitude: -1.17111546",
+      "distance": "39.0 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-06T17:24:00",
-      "location": "Latitude: 50.837206724Longitude: -1.3181091261"
+      "datetime": "2025-05-06T14:02:00",
+      "location": "Latitude: 50.89795409Longitude: -1.17111546",
+      "distance": "39.0 miles",
+      "duration": "36 mins"
     },
     {
       "type": "Check In",
-      "datetime": "2025-05-05T08:40:00",
-      "location": "Latitude: 50.6866087429Longitude: -1.1692196116"
+      "datetime": "2025-05-05T06:04:00",
+      "location": "Latitude: 50.83552504Longitude: -1.17875862",
+      "distance": "36.4 miles",
+      "duration": "26 mins"
     },
     {
       "type": "Check Out",
-      "datetime": "2025-05-05T16:11:00",
-      "location": "Latitude: 50.6866087429Longitude: -1.1692196116"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-02T07:04:00",
-      "location": "Latitude: 50.7621241242Longitude: -1.3830567658"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-02T15:15:00",
-      "location": "Latitude: 50.7621241242Longitude: -1.3830567658"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-01T06:36:00",
-      "location": "Latitude: 50.7878131515Longitude: -1.2038633129"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-01T13:58:00",
-      "location": "Latitude: 50.7878131515Longitude: -1.2038633129"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-30T06:06:00",
-      "location": "Latitude: 50.7175400423Longitude: -1.0753317147"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-30T13:56:00",
-      "location": "Latitude: 50.7175400423Longitude: -1.0753317147"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-29T07:01:00",
-      "location": "Latitude: 50.7454650793Longitude: -1.2869795519"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-29T14:31:00",
-      "location": "Latitude: 50.7454650793Longitude: -1.2869795519"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-28T06:43:00",
-      "location": "Latitude: 50.6723755383Longitude: -1.0432725158"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-28T14:56:00",
-      "location": "Latitude: 50.6723755383Longitude: -1.0432725158"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-25T07:30:00",
-      "location": "Latitude: 50.8635582897Longitude: -1.213567923"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-25T16:12:00",
-      "location": "Latitude: 50.8635582897Longitude: -1.213567923"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-24T06:50:00",
-      "location": "Latitude: 50.8719797907Longitude: -1.1428426762"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-24T18:07:00",
-      "location": "Latitude: 50.8719797907Longitude: -1.1428426762"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-23T07:56:00",
-      "location": "Latitude: 50.7780605968Longitude: -1.115120001"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-23T15:01:00",
-      "location": "Latitude: 50.7780605968Longitude: -1.115120001"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-22T08:11:00",
-      "location": "Latitude: 50.6955779934Longitude: -1.2413180645"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-22T17:26:00",
-      "location": "Latitude: 50.6955779934Longitude: -1.2413180645"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-21T07:42:00",
-      "location": "Latitude: 50.6977452164Longitude: -1.0725740273"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-21T15:42:00",
-      "location": "Latitude: 50.6977452164Longitude: -1.0725740273"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-18T07:46:00",
-      "location": "Latitude: 50.8718949412Longitude: -1.272034712"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-18T17:24:00",
-      "location": "Latitude: 50.8718949412Longitude: -1.272034712"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-17T07:19:00",
-      "location": "Latitude: 50.6776514939Longitude: -1.2285899563"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-17T19:04:00",
-      "location": "Latitude: 50.6776514939Longitude: -1.2285899563"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-16T08:21:00",
-      "location": "Latitude: 50.8398855881Longitude: -1.1165788501"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-16T20:09:00",
-      "location": "Latitude: 50.8398855881Longitude: -1.1165788501"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-15T07:30:00",
-      "location": "Latitude: 50.9974750135Longitude: -1.1369558571"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-15T15:39:00",
-      "location": "Latitude: 50.9974750135Longitude: -1.1369558571"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-04-14T06:40:00",
-      "location": "Latitude: 50.7567834421Longitude: -1.1120057073"
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-04-14T16:16:00",
-      "location": "Latitude: 50.7567834421Longitude: -1.1120057073"
+      "datetime": "2025-05-05T15:11:00",
+      "location": "Latitude: 50.83552504Longitude: -1.17875862",
+      "distance": "36.4 miles",
+      "duration": "26 mins"
     }
   ]
 }
