@@ -183,58 +183,56 @@ async function fetchRates() {
   const text = await response.text();
   const rates = {};
   text.split('\n').forEach(line => {
-    const [name, rate] = line.split(' - £');
-    if (name && rate) {
-      rates[name.trim()] = parseFloat(rate.trim());
+    const [user, rate] = line.split(' - £');
+    if (user && rate) {
+      rates[user.trim()] = parseFloat(rate.trim());
     }
   });
   return rates;
 }
 
 async function summarizeWeeklyHours(logs) {
-  const dailyMinutes = {};
-
+  const dailyTotals = {};
   logs.forEach(log => {
     if (!log.datetime || !log.type) return;
-    const dayKey = new Date(log.datetime).toISOString().split("T")[0];
-    if (!dailyMinutes[dayKey]) dailyMinutes[dayKey] = [];
-    dailyMinutes[dayKey].push({ type: log.type.toLowerCase(), time: new Date(log.datetime) });
+    const key = new Date(log.datetime).toISOString().split("T")[0];
+    if (!dailyTotals[key]) dailyTotals[key] = [];
+    dailyTotals[key].push({ type: log.type.toLowerCase(), time: new Date(log.datetime) });
   });
 
   let totalStandard = 0;
   let totalOvertime = 0;
 
-  for (const day in dailyMinutes) {
-    const dayLogs = dailyMinutes[day];
-    const checkIns = dayLogs.filter(e => e.type === "check in").sort((a, b) => a.time - b.time);
-    const checkOuts = dayLogs.filter(e => e.type === "check out").sort((a, b) => b.time - a.time);
-    if (checkIns.length && checkOuts.length) {
-      const workedMins = Math.floor((checkOuts[0].time - checkIns[0].time) / 60000);
-      const standard = Math.min(600, workedMins);
-      const overtime = Math.max(0, workedMins - 600);
+  for (const key in dailyTotals) {
+    const entries = dailyTotals[key];
+    const ins = entries.filter(e => e.type === "check in").sort((a, b) => a.time - b.time);
+    const outs = entries.filter(e => e.type === "check out").sort((a, b) => b.time - a.time);
+    if (ins.length && outs.length) {
+      const mins = Math.floor((outs[0].time - ins[0].time) / 60000);
+      const standard = Math.min(600, mins);
+      const overtime = Math.max(0, mins - 600);
       totalStandard += standard;
       totalOvertime += overtime;
     }
   }
 
-  const summary = document.createElement("div");
-  summary.style.marginTop = "20px";
-  summary.style.padding = "10px";
-  summary.style.borderTop = "2px solid #004a99";
-
   const rates = await fetchRates();
-  const currentUser = sessionStorage.getItem("mostlaneUser") || "admin";
-  const rate = rates[currentUser] || 0;
-  const stdPay = (rate * (totalStandard / 60)).toFixed(2);
-  const otPay = (rate * 1.5 * (totalOvertime / 60)).toFixed(2);
-  const totalPay = (parseFloat(stdPay) + parseFloat(otPay)).toFixed(2);
+  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const rate = rates[user] || 0;
+  const standardPay = (rate * (totalStandard / 60)).toFixed(2);
+  const overtimePay = (rate * 1.5 * (totalOvertime / 60)).toFixed(2);
+  const totalPay = (parseFloat(standardPay) + parseFloat(overtimePay)).toFixed(2);
 
-  summary.innerHTML = `
-    <strong>Total standard rate hours:</strong> ${formatTime(totalStandard)} (£${stdPay})<br>
-    <strong>Total overtime rate hours:</strong> ${formatTime(totalOvertime)} (£${otPay})<br>
+  const div = document.createElement("div");
+  div.style.marginTop = "20px";
+  div.style.padding = "15px";
+  div.style.borderTop = "2px solid #004a99";
+  div.innerHTML = `
+    <strong>Total standard rate hours:</strong> ${formatTime(totalStandard)} (£${standardPay})<br>
+    <strong>Total overtime rate hours:</strong> ${formatTime(totalOvertime)} (£${overtimePay})<br>
     <strong>Total earnings:</strong> £${totalPay}
   `;
-  document.getElementById("activityLog").appendChild(summary);
+  document.getElementById("activityLog").appendChild(div);
 }
 </script>
 
