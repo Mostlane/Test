@@ -1,0 +1,94 @@
+{
+  "Colby.Lunsford": [
+    {
+      "type": "Check In",
+      "datetime": "2025-05-06T07:00:00",
+      "location": "Latitude: 51.5074 Longitude: -0.1278",
+      "location_coords": {
+        "lat": 51.5074,
+        "lon": -0.1278
+      }
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-06T16:00:00",
+      "location": "Latitude: 51.5074 Longitude: -0.1278",
+      "location_coords": {
+        "lat": 51.5074,
+        "lon": -0.1278
+      }
+    },
+    {
+      "type": "Check In",
+      "datetime": "2025-05-07T07:00:00",
+      "location": "Latitude: 50.9097 Longitude: -1.4044",
+      "location_coords": {
+        "lat": 50.9097,
+        "lon": -1.4044
+      }
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-07T16:00:00",
+      "location": "Latitude: 50.9097 Longitude: -1.4044",
+      "location_coords": {
+        "lat": 50.9097,
+        "lon": -1.4044
+      }
+    },
+    {
+      "type": "Check In",
+      "datetime": "2025-05-08T07:00:00",
+      "location": "Latitude: 51.4543 Longitude: -0.9781",
+      "location_coords": {
+        "lat": 51.4543,
+        "lon": -0.9781
+      }
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-08T16:00:00",
+      "location": "Latitude: 51.4543 Longitude: -0.9781",
+      "location_coords": {
+        "lat": 51.4543,
+        "lon": -0.9781
+      }
+    },
+    {
+      "type": "Check In",
+      "datetime": "2025-05-09T07:00:00",
+      "location": "Latitude: 51.4545 Longitude: -2.5879",
+      "location_coords": {
+        "lat": 51.4545,
+        "lon": -2.5879
+      }
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-09T16:00:00",
+      "location": "Latitude: 51.4545 Longitude: -2.5879",
+      "location_coords": {
+        "lat": 51.4545,
+        "lon": -2.5879
+      }
+    },
+    {
+      "type": "Check In",
+      "datetime": "2025-05-10T07:00:00",
+      "location": "Latitude: 50.8198 Longitude: -1.088",
+      "location_coords": {
+        "lat": 50.8198,
+        "lon": -1.088
+      }
+    },
+    {
+      "type": "Check Out",
+      "datetime": "2025-05-10T16:00:00",
+      "location": "Latitude: 50.8198 Longitude: -1.088",
+      "location_coords": {
+        "lat": 50.8198,
+        "lon": -1.088
+      }
+    }
+  ]
+}
