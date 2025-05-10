@@ -395,28 +395,5 @@ async function updateSummaryExtras() {
 updateSummaryExtras();
 </script>
 
-
-<script>
-function calculateAndStoreDistance(origin, destination, callback) {
-  const service = new google.maps.DistanceMatrixService();
-  service.getDistanceMatrix({
-    origins: [origin],
-    destinations: [destination],
-    travelMode: 'DRIVING'
-  }, (response, status) => {
-    if (status === 'OK') {
-      const element = response.rows[0].elements[0];
-      const meters = element.distance.value;
-      const miles = meters / 1609.34;
-      const chargeable = Math.max(0, miles - 10); // deduct 10 miles per trip
-      callback(chargeable);
-    } else {
-      console.warn("Distance API error:", status);
-      callback(0);
-    }
-  });
-}
-</script>
-
 </body>
 </html>
