@@ -221,5 +221,61 @@ function summarizeWeeklyHours(logs) {
 }
 </script>
 
+
+<script>
+function renderLogsGroupedByDay(logs) {
+  const logContainer = document.getElementById("activityLog");
+  logContainer.innerHTML = ""; // clear existing
+
+  const days = {};
+
+  logs.forEach(entry => {
+    if (!entry.datetime) return;
+    const date = new Date(entry.datetime);
+    const dayKey = date.toISOString().split("T")[0];
+    if (!days[dayKey]) days[dayKey] = [];
+    days[dayKey].push({ ...entry, parsed: date });
+  });
+
+  const sortedDays = Object.keys(days).sort();
+
+  sortedDays.forEach(day => {
+    const header = document.createElement("h3");
+    const dateObj = new Date(day);
+    const weekday = dateObj.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+    header.textContent = weekday;
+    header.style.marginTop = "20px";
+    header.style.color = "#004a99";
+    logContainer.appendChild(header);
+
+    days[day]
+      .sort((a, b) => a.parsed - b.parsed)
+      .forEach(log => {
+        const div = document.createElement("div");
+        div.className = "log-entry";
+        const d = log.parsed;
+        const time = d.getHours().toString().padStart(2, '0') + ":" + d.getMinutes().toString().padStart(2, '0');
+
+        const lat = log.location?.match(/Latitude:\s*([^L]+)/i);
+        const lon = log.location?.match(/Longitude:\s*([^\s]+)/i);
+
+        let locationDisplay = "";
+        if (lat) locationDisplay += `Latitude: ${lat[1].trim()}<br>`;
+        if (lon) locationDisplay += `Longitude: ${lon[1].trim()}`;
+
+        div.innerHTML = `
+          <strong>${log.type?.toUpperCase() || "UNKNOWN"}</strong><br>
+          ${time}<br>
+          ${locationDisplay || ""}<br>
+          ${log.distance ? "Distance: " + log.distance + "<br>" : ""}
+          ${log.duration ? "Duration: " + log.duration + "<br>" : ""}
+          ${log.paidMileage ? "Paid Mileage: " + log.paidMileage : ""}
+        `;
+        logContainer.appendChild(div);
+      });
+  });
+}
+</script>
+
 </body>
 </html>
