@@ -8,6 +8,72 @@
   <script>
     window.onload = function() {
       navigator.geolocation.getCurrentPosition(success, error);
+function success(position) {
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  const apiUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=PO15+5RQ&destinations=${lat},${lon}&departure_time=${Math.floor(Date.now() / 1000)}&traffic_model=best_guess&units=imperial&key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4`;
+
+  fetch(apiUrl)
+    .then(res => res.json())
+    .then(result => {
+      const element = result.rows[0].elements[0];
+      const distance = element.distance.text;
+      const duration = element.duration_in_traffic.text;
+      const paidMileage = Math.max(0, parseFloat(distance) - 10).toFixed(1) + " mi";
+
+      const data = {
+        status: "Check Out",
+        lat,
+        lon,
+        distance,
+        duration,
+        paidMileage,
+        device: (function() {
+          let id = localStorage.getItem("mostlane_device_id");
+          if (!id) {
+            id = "dev-" + Math.random().toString(36).substring(2, 10);
+            localStorage.setItem("mostlane_device_id", id);
+          }
+          return id;
+        })(),
+        engineer: localStorage.getItem("engineerName") || "Unknown"
+      };
+      
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(data).toString()
+      }).then(() => {
+        setTimeout(() => {
+          try {
+            fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: data.engineer,
+                type: "checkout",
+                datetime: new Date().toISOString(),
+                location: "GPS: " + data.lat + "," + data.lon,
+                distance: data.distance,
+                duration: data.duration,
+                paidMileage: data.paidMileage
+              })
+            });
+          } catch (e) {
+            console.warn("GitHub log error:", e);
+          }
+        }, 500);
+
+        const now = new Date().toLocaleString();
+        window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
+      }).catch(() => alert("Error submitting data."));
+    })
+    .catch(() => alert("Unable to calculate distance and time."));
+}
+
+function error() {
+  alert("Please enable location to check in.");
+}
       function success(position) {
         const data = {
           status: "Check Out",
@@ -21,7 +87,7 @@
           }
           return id;
         })(),
-          engineer: sessionStorage.getItem("mostlaneUser") || "Unknown"
+          engineer: localStorage.getItem("engineerName") || "Unknown"
         };
         fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
           method: "POST",
