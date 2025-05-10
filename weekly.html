@@ -1,399 +1,52 @@
+
 <!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Weekly Summary</title>
-  <link rel="stylesheet" href="style.css" />
-  <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 0;
-    }
-    .content-box {
-      background: rgba(255,255,255,0.6);
-      margin: 60px auto;
-      padding: 20px;
-      max-width: 900px;
-      border-radius: 10px;
-    }
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background-color: #004a99;
-      color: white;
-      padding: 10px 20px;
-      border-radius: 6px;
-    }
-    .arrow {
-      font-size: 20px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .week-range {
-      font-size: 18px;
-      font-weight: bold;
-    }
-    .activity {
-      background: white;
-      border-left: 5px solid #004a99;
-      padding: 10px;
-      margin-top: 10px;
-      border-radius: 6px;
-    }
-  </style>
-</head>
-<body>
+<html>
+  <head>
+    <title>Weekly Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body { font-family: sans-serif; padding: 20px; background: #fff; }
+      #result { margin-top: 20px; font-size: 1.1em; color: #004a99; }
+    </style>
+  </head>
+  <body>
+    <h2>Mostlane Portal – Mileage Test</h2>
+    <div id="result">Loading distance data...</div>
 
-<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
-  <a href="main.html" class="portal-btn">Main Menu</a>
-  <button onclick="createInvoice()" class="portal-btn invoice">Loading…</button>
-</div>
-<style>
-  .portal-btn {
-    background-color: #004a99;
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-weight: bold;
-    font-size: 16px;
-    border: none;
-    cursor: pointer;
-  }
-  .portal-btn:hover {
-    background-color: #003366;
-  }
-</style>
-<script>
-function createInvoice() {
-  alert("Invoice generation will be implemented here.");
-}
-</script>
+    <script>
+      function calculateTravelAdditions() {
+        const origin = new google.maps.LatLng(50.8529, -1.2445);  // PO15 5RQ
+        const destination = new google.maps.LatLng(51.559483, -0.125273);  // Example
 
-  <div class="content-box">
-    <div class="header">
-      <div class="arrow" onclick="changeWeek(-1)">←</div>
-      <div class="week-range" id="weekRange">Loading…</div>
-      <div class="arrow" onclick="changeWeek(1)">→</div>
-    </div>
-    <div id="activityLog"></div>
-  </div>
+        const service = new google.maps.DistanceMatrixService();
+        service.getDistanceMatrix({
+          origins: [origin],
+          destinations: [destination],
+          travelMode: 'DRIVING'
+        }, (response, status) => {
+          if (status === 'OK') {
+            const meters = response.rows[0].elements[0].distance.value;
+            const miles = meters / 1609.34;
+            const paidMiles = Math.max(0, miles - 10);
+            const mileagePay = paidMiles * 0.25;
 
-  <script>
-    let user = sessionStorage.getItem("mostlaneUser") || "admin";
-    let offset = 0;
-    let dataStore = null;
-
-    function getOrdinal(n) {
-      const s = ["th", "st", "nd", "rd"], v = n % 100;
-      return s[(v - 20) % 10] || s[v] || s[0];
-    }
-
-    function getWeekRange(date) {
-      const monday = new Date(date);
-      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
-      const friday = new Date(monday);
-      friday.setDate(monday.getDate() + 6);
-      friday.setHours(23, 59, 59, 999); // include all of Friday
-
-      const format = d => {
-        const day = d.getDate();
-        const suffix = getOrdinal(day);
-        const month = d.toLocaleDateString("en-UK", { month: 'short' });
-        const year = String(d.getFullYear()).slice(-2);
-        return `${day}${suffix} ${month}${year}`;
-      };
-
-      return { start: monday, end: friday, label: `${format(monday)} – ${format(friday)}` };
-    }
-
-    function changeWeek(delta) {
-      offset += delta;
-      loadWeek();
-    }
-
-    function loadWeek() {
-      const range = getWeekRange(new Date());
-      document.getElementById("weekRange").textContent = range.label;
-
-      const logs = dataStore[user] || [];
-      const filtered = logs.filter(log => {
-        const d = new Date(log.datetime);
-        return d >= range.start && d <= range.end;
-      });
-
-      const container = document.getElementById("activityLog");
-      container.innerHTML = "";
-      summarizeWeeklyHours(filtered);
-      calculateTravelAdditions(sessionStorage.getItem('mostlaneUser'), filtered);
-      filtered.forEach(log => {
-        const div = document.createElement("div");
-        div.className = "activity";
-        
-const d = new Date(log.datetime);
-const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
-const date = d.getDate();
-const suffix = getOrdinal(date);
-const hour = d.getHours().toString().padStart(2, '0');
-const minute = d.getMinutes().toString().padStart(2, '0');
-const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
-
-let locationDisplay = "";
-if (log.location) {
-  const lat = log.location.match(/Latitude:\s*([^L]+)/i);
-  const lon = log.location.match(/Longitude:\s*([^\s]+)/i);
-  if (lat) locationDisplay += `Latitude: ${lat[1]}<br>`;
-  if (lon) locationDisplay += `Longitude: ${lon[1]}`;
-}
-
-div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay || log.reference || log.description || ""}`;
-
-        container.appendChild(div);
-      });
-
-      if (filtered.length === 0) {
-        container.innerHTML = "<p>No activity this week.</p>";
-      }
-    }
-
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
-      .then(response => response.json())
-      .then(json => {
-        dataStore = json;
-        loadWeek();
-      })
-      .catch(error => {
-        document.getElementById("weekRange").textContent = "Error loading data";
-        document.getElementById("activityLog").innerHTML = "<p style='color:red;'>Could not load activity log.</p>";
-        console.error("Fetch error:", error);
-      });
-  
-
-</script>
-
-<script>
-async function fetchRates() {
-  const response = await fetch('https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/logs/rates.txt');
-  const text = await response.text();
-  const rates = {};
-  text.split('\n').forEach(line => {
-    const [user, rate] = line.split(' - £');
-    if (user && rate) {
-      rates[user.trim()] = parseFloat(rate.trim());
-    }
-  });
-  return rates;
-}
-
-async function summarizeWeeklyHours(logs) {
-  const dailyMinutes = {};
-  logs.forEach(log => {
-    if (!log.datetime || !log.type) return;
-    const dayKey = new Date(log.datetime).toISOString().split("T")[0];
-    if (!dailyMinutes[dayKey]) dailyMinutes[dayKey] = [];
-    dailyMinutes[dayKey].push({ type: log.type.toLowerCase(), time: new Date(log.datetime) });
-  });
-
-  let totalStandard = 0;
-  let totalOvertime = 0;
-
-  for (const day in dailyMinutes) {
-    const logs = dailyMinutes[day];
-    const ins = logs.filter(e => e.type === "check in").sort((a, b) => a.time - b.time);
-    const outs = logs.filter(e => e.type === "check out").sort((a, b) => b.time - a.time);
-    if (ins.length && outs.length) {
-      const minutes = Math.floor((outs[0].time - ins[0].time) / 60000);
-      const standard = Math.min(600, minutes);
-      const overtime = Math.max(0, minutes - 600);
-      totalStandard += standard;
-      totalOvertime += overtime;
-    }
-  }
-
-  const summary = document.createElement("div");
-  summary.style.marginTop = "20px";
-  summary.style.padding = "10px";
-  summary.style.borderTop = "2px solid #004a99";
-
-  const rates = await fetchRates();
-  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const rate = rates[username] || 0;
-  const stdPay = (rate * (totalStandard / 60)).toFixed(2);
-  const otPay = (rate * 1.5 * (totalOvertime / 60)).toFixed(2);
-  const totalPay = (parseFloat(stdPay) + parseFloat(otPay)).toFixed(2);
-
-  const formatTime = (m) => {
-    const h = Math.floor(m / 60);
-    const min = m % 60;
-    return `${h} Hours, ${min} Mins`;
-  };
-
-  summary.innerHTML = `
-    <strong>Total standard rate hours:</strong> ${formatTime(totalStandard)} (£${stdPay})<br>
-    <strong>Total overtime rate hours:</strong> ${formatTime(totalOvertime)} (£${otPay})<br>
-    <strong>Total earnings:</strong> £${totalPay}
-  `;
-  
-  document.getElementById("activityLog").appendChild(summary);
-  try {
-    const mileagePay = (window._paidMiles * 0.25).toFixed(2);
-    const extra = document.createElement("div");
-    extra.style.marginTop = "10px";
-    extra.innerHTML = `<strong>Paid Mileage:</strong> £${mileagePay} (${window._paidMiles.toFixed(1)} miles)`;
-    document.getElementById("activityLog").appendChild(extra);
-  } catch (e) {
-    console.warn("No mileage data available to show.");
-  }
-
-}
-</script>
-
-
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places"></script>
-<script>
-async function fetchTextMap(path) {
-  const res = await fetch(path);
-  const text = await res.text();
-  const map = {};
-  text.split('\n').forEach(line => {
-    const [key, value] = line.split(' - ');
-    if (key && value) map[key.trim()] = value.trim();
-  });
-  return map;
-}
-
-function calculateTravelTimeAndDistance(origin, destination) {
-  return new Promise((resolve) => {
-    const service = new google.maps.DistanceMatrixService();
-    service.getDistanceMatrix({
-      origins: [origin],
-      destinations: [destination],
-      travelMode: google.maps.TravelMode.DRIVING
-    }, (response, status) => {
-      if (status === 'OK') {
-        const el = response.rows[0].elements[0];
-        resolve({
-          distanceMeters: el.distance.value,
-          durationSeconds: el.duration.value
+            document.getElementById("result").innerHTML = `
+              <strong>Raw Distance:</strong> ${miles.toFixed(2)} miles<br>
+              <strong>Paid Mileage:</strong> ${paidMiles.toFixed(2)} miles<br>
+              <strong>Reimbursement:</strong> £${mileagePay.toFixed(2)}
+            `;
+          } else {
+            document.getElementById("result").innerHTML = "API Error: " + status;
+          }
         });
-      } else {
-        resolve({ distanceMeters: 0, durationSeconds: 0 });
       }
-    });
-  });
-}
 
-async function calculateTravelAdditions(user, logs) {
-  const employment = await fetchTextMap("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/employment.txt");
-  const travelTime = await fetchTextMap("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/travel-time.txt");
-  const postcodes = await fetchTextMap("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/home-postcodes.txt");
-  const roles = await fetchTextMap("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/role-type.txt");
-
-  if (roles[user] === "Office") return;
-
-  const eligibleForTravelTime = travelTime[user] === "Yes";
-  const isSelfEmployed = employment[user] === "SelfEmployed";
-  const userHome = postcodes[user] || "PO15 5RQ";
-
-  let travelSecondsTotal = 0;
-  let paidMiles = 0;
-
-  for (let i = 0; i < logs.length; i++) {
-    const log = logs[i];
-    const loc = log.location?.match(/Latitude: ([^L]+)Longitude: (.+)/);
-    if (!loc) continue;
-
-    const lat = parseFloat(loc[1]);
-    const lon = parseFloat(loc[2]);
-    const site = `${lat},${lon}`;
-
-    if (eligibleForTravelTime) {
-      const trip = await calculateTravelTimeAndDistance(userHome, site);
-      travelSecondsTotal += trip.durationSeconds * 2;
-    } else if (isSelfEmployed) {
-      const trip = await calculateTravelTimeAndDistance(userHome, site);
-      const totalMiles = trip.distanceMeters * 2 / 1609.34;
-      const chargeable = Math.max(0, totalMiles - 10);
-      paidMiles += chargeable;
-    }
-  }
-
-  const container = document.createElement('div');
-  container.style.marginTop = "20px";
-  container.style.padding = "10px";
-
-  if (eligibleForTravelTime) {
-    const travelMinutes = Math.round(travelSecondsTotal / 60);
-    container.innerHTML = `<strong>Paid Travel Time:</strong> ${Math.floor(travelMinutes/60)}h ${travelMinutes%60}m`;
-  } else if (paidMiles > 0) {
-    const mileagePay = (paidMiles * 0.25).toFixed(2);
-    container.innerHTML = `<strong>Paid Mileage:</strong> £${mileagePay} (${paidMiles.toFixed(1)} miles)`;
-  }
-
-  
-  window._paidMiles = paidMiles;  // Store for later use
-  document.getElementById("activityLog").appendChild(container);
-
-}
-</script>
-
-
-<script>
-async function updateSummaryExtras() {
-  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const [employmentRaw, travelRaw, roleRaw] = await Promise.all([
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text()),
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text()),
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt").then(r => r.text()),
-  ]);
-
-  const getMapValue = (raw, key) => {
-    const line = raw.split("\n").find(l => l.includes(key));
-    return line ? line.split(" - ")[1].trim() : null;
-  };
-
-  const employment = getMapValue(employmentRaw, user) || "SelfEmployed";
-  const travel = getMapValue(travelRaw, user) || "No";
-  const role = getMapValue(roleRaw, user) || "Field";
-
-  // Set correct button label
-  const btn = document.querySelector(".portal-btn.invoice");
-  if (btn) {
-    btn.textContent = employment === "SelfEmployed" ? "Create Invoice" : "Create Timesheet";
-  }
-
-  // Show travel and mileage if data was calculated
-  const container = document.createElement("div");
-  container.style.marginTop = "20px";
-  container.style.padding = "10px";
-  let content = "";
-
-  const minutes = Math.round((window._travelSeconds || 0) / 60);
-  const paidMiles = window._paidMiles || 0;
-  const mileagePay = (paidMiles * 0.25).toFixed(2);
-
-  if (role === "Field") {
-    if (employment === "Employed" && travel === "Yes" && minutes > 0) {
-      content += `<strong>Paid Travel Time:</strong> ${Math.floor(minutes/60)}h ${minutes%60}m<br>`;
-    }
-    if (employment === "SelfEmployed" && paidMiles >= 0) {
-      content += `<strong>Paid Mileage:</strong> £${mileagePay} (${paidMiles.toFixed(1)} miles)<br>`;
-    }
-  }
-
-  if (!content) content = "<em>No travel pay this week</em>";
-
-  container.innerHTML = content;
-  document.getElementById("activityLog").appendChild(container);
-}
-
-updateSummaryExtras();
-</script>
-
-</body>
+      function initMap() {
+        calculateTravelAdditions();
+      }
+    </script>
+    <script async defer
+      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCKy2bleP7tFz6s8RcsSpwciPb9xn-id9o&callback=initMap">
+    </script>
+  </body>
 </html>
