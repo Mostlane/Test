@@ -254,7 +254,7 @@ async function summarizeWeeklyHours(logs) {
 </script>
 
 
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQMAIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places"></script>
 <script>
 async function fetchTextMap(path) {
   const res = await fetch(path);
@@ -393,6 +393,29 @@ async function updateSummaryExtras() {
 }
 
 updateSummaryExtras();
+</script>
+
+
+<script>
+function calculateAndStoreDistance(origin, destination, callback) {
+  const service = new google.maps.DistanceMatrixService();
+  service.getDistanceMatrix({
+    origins: [origin],
+    destinations: [destination],
+    travelMode: 'DRIVING'
+  }, (response, status) => {
+    if (status === 'OK') {
+      const element = response.rows[0].elements[0];
+      const meters = element.distance.value;
+      const miles = meters / 1609.34;
+      const chargeable = Math.max(0, miles - 10); // deduct 10 miles per trip
+      callback(chargeable);
+    } else {
+      console.warn("Distance API error:", status);
+      callback(0);
+    }
+  });
+}
 </script>
 
 </body>
