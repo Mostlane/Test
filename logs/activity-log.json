@@ -7599,6 +7599,11 @@
         "lat": 50.389867,
         "lon": -1.977944
       }
+    },
+    {
+      "type": "Check In",
+      "datetime": "2025-05-10T22:44:00.000Z",
+      "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
     }
   ],
   "Megan.Line": [
