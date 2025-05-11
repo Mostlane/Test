@@ -53,11 +53,6 @@
   </style>
 </head>
 <body>
-
-  <div style="text-align: right; margin-bottom: 20px;">
-    <button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
-  </div>
-
   <div class="container">
   <div class="form-section">
       <h2>Holiday Request</h2>
@@ -145,6 +140,7 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
 
 
 
+
 <script>
 function formatDateLabel(dateStr) {
   const date = new Date(dateStr);
@@ -176,10 +172,13 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
 
+      const pendingCount = (userData.pending || []).length;
+
       document.getElementById("summaryContent").innerHTML = `
         <p><strong>Allowance:</strong> ${userData.available} Days</p>
         <p><strong>Used:</strong> ${userData.used}</p>
-        <p><strong>Booked:</strong> ${userData.booked}</p>
+        <p><strong>Approved Upcoming Holidays:</strong> ${userData.booked}</p>
+        <p><strong>Pending Requests:</strong> ${pendingCount}</p>
         <p><strong>Mandatory Days:</strong> ${userData.shutdown + userData.bankholidays}</p>
         <p><strong>Remaining:</strong> ${userData.remaining}</p>
         <div style="margin-top:20px; font-size: 13px; color: gray;">
@@ -224,6 +223,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 });
 </script>
+
 
 
 
