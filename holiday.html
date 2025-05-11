@@ -141,7 +141,6 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
 
 
 <script>
-
 function formatDateLabel(dateStr) {
   const date = new Date(dateStr);
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -184,11 +183,15 @@ document.addEventListener("DOMContentLoaded", function () {
         </div>
       `;
 
-      (userData.approved || []).forEach(h => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-        document.getElementById("approvedList").appendChild(li);
-      });
+      const today = new Date().toISOString().split("T")[0];
+
+      (userData.approved || [])
+        .filter(h => h.date >= today)
+        .forEach(h => {
+          const li = document.createElement("li");
+          li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
+          document.getElementById("approvedList").appendChild(li);
+        });
 
       (userData.pending || []).forEach(h => {
         const li = document.createElement("li");
@@ -196,7 +199,10 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("pendingList").appendChild(li);
       });
 
-      (userData.shutdownDates || []).forEach(date => {
+      const bankSet = new Set(userData.bankHolidayDates || []);
+      const filteredShutdowns = (userData.shutdownDates || []).filter(d => !bankSet.has(d));
+
+      filteredShutdowns.forEach(date => {
         const li = document.createElement("li");
         li.textContent = `${formatDateLabel(date)}`;
         document.getElementById("shutdownList").appendChild(li);
