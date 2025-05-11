@@ -141,6 +141,26 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
 
 
 <script>
+
+function formatDateLabel(dateStr) {
+  const date = new Date(dateStr);
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dayName = dayNames[date.getUTCDay()];
+  const day = date.getUTCDate();
+  const month = monthNames[date.getUTCMonth()];
+  const suffix = (d => {
+    if (d > 3 && d < 21) return "th";
+    switch (d % 10) {
+      case 1: return "st";
+      case 2: return "nd";
+      case 3: return "rd";
+      default: return "th";
+    }
+  })(day);
+  return `${dayName} ${day}${suffix} ${month}`;
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   const username = sessionStorage.getItem("mostlaneUser");
   fetch("https://mostlane.github.io/Test/holiday-summary.json")
@@ -166,25 +186,25 @@ document.addEventListener("DOMContentLoaded", function () {
 
       (userData.approved || []).forEach(h => {
         const li = document.createElement("li");
-        li.textContent = `${h.date} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
+        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
         document.getElementById("approvedList").appendChild(li);
       });
 
       (userData.pending || []).forEach(h => {
         const li = document.createElement("li");
-        li.textContent = `${h.date} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
+        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
         document.getElementById("pendingList").appendChild(li);
       });
 
       (userData.shutdownDates || []).forEach(date => {
         const li = document.createElement("li");
-        li.textContent = `${date}`;
+        li.textContent = `${formatDateLabel(date)}`;
         document.getElementById("shutdownList").appendChild(li);
       });
 
       (userData.bankHolidayDates || []).forEach(date => {
         const li = document.createElement("li");
-        li.textContent = `${date}`;
+        li.textContent = `${formatDateLabel(date)}`;
         document.getElementById("bankHolidayList").appendChild(li);
       });
     })
