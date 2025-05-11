@@ -50,32 +50,10 @@
       border-radius: 6px;
       cursor: pointer;
     }
-  
-    <style>
-      #approvedList, #pendingList, #shutdownList, #bankHolidayList {
-        margin-top: 0;
-      }
-      #approvedList:empty, #pendingList:empty, #shutdownList:empty, #bankHolidayList:empty {
-        display: none;
-      }
-      #approvedList:empty::before,
-      #pendingList:empty::before,
-      #shutdownList:empty::before,
-      #bankHolidayList:empty::before {
-        content: none;
-      }
-      .summary-section { display: none; }
-    </style>
-
   </style>
 </head>
 <body>
-  
-  <div style="text-align: right; margin-bottom: 10px;">
-    <button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
-  </div>
   <div class="container">
-
   <div class="form-section">
       <h2>Holiday Request</h2>
       <form id="holidayForm">
@@ -135,7 +113,33 @@
     </div>
 
 <script>
-document.getElementById("engineer").value = sessionStorage.getIt
+document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+
+document.getElementById("holidayForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+
+  const data = {
+    engineer: document.getElementById("engineer").value,
+    start: document.getElementById("start").value,
+    end: document.getElementById("end").value,
+    type: document.getElementById("type").value,
+    notes: document.getElementById("notes").value
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/2nudfug/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(data).toString()
+  }).then(() => {
+    alert("Request submitted!");
+    document.getElementById("holidayForm").reset();
+  });
+});
+</script>
+
+
+
+
 <script>
 function formatDateLabel(dateStr) {
   const date = new Date(dateStr);
@@ -164,62 +168,6 @@ document.addEventListener("DOMContentLoaded", function () {
       const userData = data[username];
       if (!userData) {
         document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
-        return;
-      }
-
-      document.getElementById("summaryContent").innerHTML = `
-        <p><strong>Allowance:</strong> ${userData.available} Days</p>
-        <p><strong>Used:</strong> ${userData.used}</p>
-        <p><strong>Booked:</strong> ${userData.booked}</p>
-        <p><strong>Mandatory Days:</strong> ${userData.shutdown + userData.bankholidays}</p>
-        <p><strong>Remaining:</strong> ${userData.remaining}</p>
-        <div style="margin-top:20px; font-size: 13px; color: gray;">
-          <p>Last Update: ${new Date().toLocaleString()}</p>
-          <p>Next Update: Auto-synced daily</p>
-        </div>
-      `;
-
-      const today = new Date().toISOString().split("T")[0];
-
-      (userData.approved || [])
-        .filter(h => h.date >= today)
-        .forEach(h => {
-          const li = document.createElement("li");
-          li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-          document.getElementById("approvedList").appendChild(li);
-          document.getElementById("approvedList").parentElement.style.display = "block";
-        });
-
-      (userData.pending || []).forEach(h => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-        document.getElementById("pendingList").appendChild(li);
-          document.getElementById("pendingList").parentElement.style.display = "block";
-      });
-
-      const bankSet = new Set(userData.bankHolidayDates || []);
-      const filteredShutdowns = (userData.shutdownDates || []).filter(d => !bankSet.has(d));
-
-      filteredShutdowns.forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("shutdownList").appendChild(li);
-          document.getElementById("shutdownList").parentElement.style.display = "block";
-      });
-
-      (userData.bankHolidayDates || []).forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("bankHolidayList").appendChild(li);
-          document.getElementById("bankHolidayList").parentElement.style.display = "block";
-      });
-    })
-    .catch(() => {
-      document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
-    });
-});
-</script>
-ntent").innerHTML = "<p>No summary data found for this user.</p>";
         return;
       }
 
