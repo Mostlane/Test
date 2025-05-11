@@ -161,7 +161,7 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
       }
     }
 
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/refs/heads/main/activity-log.txt")
       .then(response => response.json())
       .then(json => {
         dataStore = json;
@@ -254,7 +254,7 @@ async function summarizeWeeklyHours(logs) {
 </script>
 
 
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places"></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&libraries=places"></script>
 <script>
 async function fetchTextMap(path) {
   const res = await fetch(path);
