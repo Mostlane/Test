@@ -1,0 +1,80 @@
+{
+  "Jamie.Line": {
+    "available": 28,
+    "used": 3,
+    "booked": 0,
+    "shutdown": 0,
+    "bankholidays": 1,
+    "accumulated": 4,
+    "remaining": 24,
+    "approved": [
+      {
+        "date": "2025-01-01",
+        "type": "Annual Leave",
+        "duration": 1
+      },
+      {
+        "date": "2025-05-29",
+        "type": "Bank Holiday",
+        "duration": 1
+      }
+    ],
+    "pending": [
+      {
+        "date": "2025-06-02",
+        "type": "Annual Leave",
+        "duration": 2
+      }
+    ],
+    "shutdownDates": [],
+    "bankHolidayDates": [
+      "2025-01-01",
+      "2025-04-18",
+      "2025-05-29"
+    ]
+  },
+  "Chris.Freeman": {
+    "available": 28,
+    "used": 9,
+    "booked": 1,
+    "shutdown": 1,
+    "bankholidays": 0,
+    "accumulated": 11,
+    "remaining": 17,
+    "approved": [
+      {
+        "date": "2025-01-01",
+        "type": "Compulsory Leave",
+        "duration": 1
+      }
+    ],
+    "pending": [],
+    "shutdownDates": [
+      "2025-01-01"
+    ],
+    "bankHolidayDates": [
+      "2025-01-01"
+    ]
+  },
+  "Frazer.Miller": {
+    "available": 28,
+    "used": 1,
+    "booked": 1,
+    "shutdown": 0,
+    "bankholidays": 0,
+    "accumulated": 2,
+    "remaining": 26,
+    "approved": [
+      {
+        "date": "2025-01-01",
+        "type": "Annual Leave",
+        "duration": 1
+      }
+    ],
+    "pending": [],
+    "shutdownDates": [],
+    "bankHolidayDates": [
+      "2025-01-01"
+    ]
+  }
+}

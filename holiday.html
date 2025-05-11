@@ -122,35 +122,37 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
 });
 </script>
 
+
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const username = sessionStorage.getItem("mostlaneUser");
   fetch("https://mostlane.github.io/Test/holiday-summary.json")
     .then(response => response.json())
     .then(data => {
-      const match = data.summary.find(row => row.username === username);
-      if (!match) {
+      const userData = data[username];
+      if (!userData) {
         document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
         return;
       }
 
       document.getElementById("summaryContent").innerHTML = `
-        <p><strong>Annual Leave:</strong> ${match.annualLeave}</p>
-        <p><strong>Sick Leave:</strong> ${match.sickLeave}</p>
-        <p><strong>Compulsory Leave:</strong> ${match.compulsoryLeave}</p>
-        <p><strong>Total Booked:</strong> ${match.totalBooked}</p>
-        <p><strong>Allowance:</strong> ${match.allowance}</p>
-        <p><strong>Remaining:</strong> ${match.remaining}</p>
+        <p><strong>Allowance:</strong> ${userData.available} Days</p>
+        <p><strong>Used:</strong> ${userData.used}</p>
+        <p><strong>Booked:</strong> ${userData.booked}</p>
+        <p><strong>Mandatory Days:</strong> ${userData.shutdown + userData.bankholidays}</p>
+        <p><strong>Remaining:</strong> ${userData.remaining}</p>
+        <div style="margin-top:20px; font-size: 13px; color: gray;">
+          <p>Last Update: ${new Date().toLocaleString()}</p>
+          <p>Next Update: Auto-synced daily</p>
+        </div>
       `;
-
-      document.getElementById("lastUpdate").textContent = data.lastUpdated;
-      document.getElementById("nextUpdate").textContent = data.nextUpdate;
     })
     .catch(() => {
       document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
     });
 });
 </script>
+
 
 </body>
 </html>
