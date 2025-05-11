@@ -94,8 +94,23 @@
         <p><strong>Mandatory Days:</strong> -</p>
         <p><strong>Remaining:</strong> -</p>
       </div>
+    
+    <div class="summary-section">
+      <h2>Approved Holidays</h2>
+      <ul id="approvedList"></ul>
     </div>
-  </div>
+    <div class="summary-section">
+      <h2>Pending Requests</h2>
+      <ul id="pendingList"></ul>
+    
+    <div class="summary-section">
+      <h2>Compulsory Shutdown Days</h2>
+      <ul id="shutdownList"></ul>
+    </div>
+    <div class="summary-section">
+      <h2>Bank Holidays</h2>
+      <ul id="bankHolidayList"></ul>
+    </div>
 
 <script>
 document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
@@ -123,6 +138,8 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
 </script>
 
 
+
+
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const username = sessionStorage.getItem("mostlaneUser");
@@ -146,12 +163,38 @@ document.addEventListener("DOMContentLoaded", function () {
           <p>Next Update: Auto-synced daily</p>
         </div>
       `;
+
+      (userData.approved || []).forEach(h => {
+        const li = document.createElement("li");
+        li.textContent = `${h.date} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
+        document.getElementById("approvedList").appendChild(li);
+      });
+
+      (userData.pending || []).forEach(h => {
+        const li = document.createElement("li");
+        li.textContent = `${h.date} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
+        document.getElementById("pendingList").appendChild(li);
+      });
+
+      (userData.shutdownDates || []).forEach(date => {
+        const li = document.createElement("li");
+        li.textContent = `${date}`;
+        document.getElementById("shutdownList").appendChild(li);
+      });
+
+      (userData.bankHolidayDates || []).forEach(date => {
+        const li = document.createElement("li");
+        li.textContent = `${date}`;
+        document.getElementById("bankHolidayList").appendChild(li);
+      });
     })
     .catch(() => {
       document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
     });
 });
 </script>
+
+
 
 
 </body>
