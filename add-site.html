@@ -63,12 +63,17 @@
 <div class="container" id="formContainer">
   <h2>Add New Site Location</h2>
   <form method="POST" action="https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/" target="_self" onsubmit="
+    sessionStorage.setItem('lastJobNumber', document.getElementById('jobNumber').value);
     sessionStorage.setItem('lastSiteName', document.getElementById('siteName').value);
     sessionStorage.setItem('lastLatitude', document.getElementById('latitude').value);
     sessionStorage.setItem('lastLongitude', document.getElementById('longitude').value);
     sessionStorage.setItem('lastMileage', document.getElementById('mileageFromHQ').value);
-    setTimeout(() => window.location.href='site-added.html', 1200);
+    setTimeout(() => window.location.href='site-added_with_job_number.html', 1200);
   ">
+    
+    <label for="jobNumber">Job Number</label>
+    <input type="text" name="jobNumber" id="jobNumber" pattern="\d{3,6}" required>
+
     <label for="siteName">Site Name</label>
     <input type="text" name="siteName" id="siteName" required>
 
