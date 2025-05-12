@@ -234,6 +234,88 @@ async function loadWeek() {
   if (filtered.length === 0) {
     container.innerHTML = "<p>No activity this week.</p>";
   }
+
+  // Group logs by date
+  const dayGroups = {};
+  for (const log of filtered) {
+    const dateKey = new Date(log.datetime).toISOString().split('T')[0];
+    if (!dayGroups[dateKey]) dayGroups[dateKey] = [];
+    dayGroups[dateKey].push(log);
+  }
+
+  let totalStandardHours = 0;
+  let totalOvertimeHours = 0;
+  for (const date in dayGroups) {
+    const dayLogs = dayGroups[date];
+    const checkIn = dayLogs.find(l => l.type?.toLowerCase() === "check in");
+    const checkOut = dayLogs.find(l => l.type?.toLowerCase() === "check out");
+
+    
+    if (checkIn && checkOut) {
+      const inTime = new Date(checkIn.datetime);
+      const outTime = new Date(checkOut.datetime);
+      if (!isNaN(inTime) && !isNaN(outTime) && outTime > inTime) {
+        const diffHrs = (outTime - inTime) / (1000 * 60 * 60);
+        if (diffHrs > 10) {
+          totalStandardHours += 10;
+          totalOvertimeHours += (diffHrs - 10);
+        } else {
+          totalStandardHours += diffHrs;
+        }
+      }
+    }
+
+      const outTime = new Date(checkOut.datetime);
+      const diffHrs = (outTime - inTime) / (1000 * 60 * 60); // ms to hours
+
+      if (diffHrs > 10) {
+        totalStandardHours += 10;
+        totalOvertimeHours += (diffHrs - 10);
+      } else {
+        totalStandardHours += diffHrs;
+      }
+    }
+  }
+
+  const stdRate = 12.0;
+  const otRate = 18.0;
+  const earningsStd = totalStandardHours * stdRate;
+  const earningsOT = totalOvertimeHours * otRate;
+
+  document.getElementById("std-hours").innerText = totalStandardHours.toFixed(2);
+  document.getElementById("ot-hours").innerText = totalOvertimeHours.toFixed(2);
+  document.getElementById("std-rate").innerText = "£" + stdRate.toFixed(2);
+  document.getElementById("ot-rate").innerText = "£" + otRate.toFixed(2);
+  document.getElementById("total-earnings").innerText = "£" + (earningsStd + earningsOT).toFixed(2);
+
+
+  let stdRate = 12.0;
+  let otRate = 18.0;
+  let totalStandardHours = 0;
+  let totalOvertimeHours = 0;
+
+  for (const log of filtered) {
+    const type = log.type?.toLowerCase();
+    if (type === "check in" || type === "check out") {
+      const mins = log.minutes || 0;
+      const hrs = mins / 60;
+      if (hrs > 10) {
+        totalStandardHours += 10;
+        totalOvertimeHours += (hrs - 10);
+      } else {
+        totalStandardHours += hrs;
+      }
+    }
+  }
+
+  const earningsStd = totalStandardHours * stdRate;
+  const earningsOT = totalOvertimeHours * otRate;
+  document.getElementById("std-hours").innerText = totalStandardHours.toFixed(2);
+  document.getElementById("ot-hours").innerText = totalOvertimeHours.toFixed(2);
+  document.getElementById("std-rate").innerText = "£" + stdRate.toFixed(2);
+  document.getElementById("ot-rate").innerText = "£" + otRate.toFixed(2);
+  document.getElementById("total-earnings").innerText = "£" + (earningsStd + earningsOT).toFixed(2);
+
 }
 
 Promise.all([
@@ -263,5 +345,12 @@ async function showCorrectButton() {
 showCorrectButton();
 </script>
 
+
+  <div class="content-box">
+    <h3>Earnings Summary</h3>
+    <p>Total Standard Hours: <span id="std-hours"></span> at <span id="std-rate"></span></p>
+    <p>Total Overtime Hours: <span id="ot-hours"></span> at <span id="ot-rate"></span></p>
+    <p><strong>Total Earnings:</strong> <span id="total-earnings"></span></p>
+  </div>
 </body>
 </html>
