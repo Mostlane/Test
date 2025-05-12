@@ -231,6 +231,62 @@ async function loadWeek() {
   if (filtered.length === 0) {
     container.innerHTML = "<p>No activity this week.</p>";
   }
+
+  // Group logs by day and calculate hours
+  const dayGroups = {};
+  let totalMiles = 0;
+  for (const log of filtered) {
+    const day = new Date(log.datetime).toISOString().split('T')[0];
+    if (!dayGroups[day]) dayGroups[day] = [];
+    dayGroups[day].push(log);
+
+    if (fuelOK && log.miles) {
+      const miles = parseFloat(log.miles);
+      const claimable = Math.max(0, miles - 10);
+      totalMiles += claimable;
+    }
+  }
+
+  let totalStandardHours = 0;
+  let totalOvertimeHours = 0;
+
+  for (const date in dayGroups) {
+    const logs = dayGroups[date];
+    const checkIn = logs.find(l => l.type?.toLowerCase() === 'check in');
+    const checkOut = logs.find(l => l.type?.toLowerCase() === 'check out');
+    if (checkIn && checkOut) {
+      const start = new Date(checkIn.datetime);
+      const end = new Date(checkOut.datetime);
+      if (!isNaN(start) && !isNaN(end) && end > start) {
+        const hours = (end - start) / (1000 * 60 * 60);
+        if (hours > 10) {
+          totalStandardHours += 10;
+          totalOvertimeHours += (hours - 10);
+        } else {
+          totalStandardHours += hours;
+        }
+      }
+    }
+  }
+
+  const stdRate = 15;
+  const otRate = 22.5;
+  const mileageRate = 0.25;
+  const stdPay = totalStandardHours * stdRate;
+  const otPay = totalOvertimeHours * otRate;
+  const totalPay = stdPay + otPay;
+  const mileagePay = totalMiles * mileageRate;
+
+  document.getElementById("std-hours").innerText = totalStandardHours.toFixed(2) + " Hours, 0 Mins";
+  document.getElementById("ot-hours").innerText = totalOvertimeHours.toFixed(2) + " Hours, 0 Mins";
+  document.getElementById("std-rate").innerText = "£" + stdRate.toFixed(2);
+  document.getElementById("ot-rate").innerText = "£" + otRate.toFixed(2);
+  document.getElementById("std-pay").innerText = "£" + stdPay.toFixed(2);
+  document.getElementById("ot-pay").innerText = "£" + otPay.toFixed(2);
+  document.getElementById("total-earnings").innerText = "£" + totalPay.toFixed(2);
+  document.getElementById("total-mileage-pay").innerText = "£" + mileagePay.toFixed(2);
+  document.getElementById("total-mileage").innerText = totalMiles.toFixed(1);
+
 }
 
 Promise.all([
@@ -260,5 +316,14 @@ async function showCorrectButton() {
 showCorrectButton();
 </script>
 
+
+<div class="content-box">
+  <hr style="margin-top: 30px;">
+  <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
+  <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
+  <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
+  <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
+</div>
 </body>
+
 </html>
