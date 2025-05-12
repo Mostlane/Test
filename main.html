@@ -76,5 +76,24 @@
     });
   }
 </script>
+
+<script>
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.split("\n");
+      const user = sessionStorage.getItem("mostlaneUser");
+      const match = lines.find(line => line.includes(user));
+      const isOffice = match && match.includes("Office");
+      if (isOffice) {
+        const btn = document.createElement("a");
+        btn.className = "button";
+        btn.href = "add-site.html";
+        btn.textContent = "Add Site";
+        document.querySelector("a[href='weekly.html']").insertAdjacentElement("afterend", btn);
+      }
+    });
+</script>
+
 </body>
 </html>
