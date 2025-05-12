@@ -2531,17 +2531,6 @@
         "lat": 50.268547,
         "lon": -2.170115
       }
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-12T09:00:00Z",
-      "location": "Latitude: 50.9115 Longitude: -1.3882",
-      "miles": 13.5
-    },
-    {
-      "type": "Check Out",
-      "datetime": "2025-05-12T16:11:00.000Z",
-      "location": "Latitude: 50.87452681779667Longitude: -1.2819023355731798"
     }
   ],
   "Frazer.Miller": [
@@ -6524,12 +6513,6 @@
         "lat": 50.217676,
         "lon": -0.238306
       }
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-12T09:00:00Z",
-      "location": "Latitude: 50.9115 Longitude: -1.3882",
-      "miles": 13.5
     }
   ],
   "Adrian.Furdui": [
@@ -7631,12 +7614,6 @@
       "type": "Check In",
       "datetime": "2025-05-12T13:32:00.000Z",
       "location": "Latitude: 50.86168723268338Longitude: -1.24763016519439"
-    },
-    {
-      "type": "Check In",
-      "datetime": "2025-05-12T09:00:00Z",
-      "location": "Latitude: 50.9115 Longitude: -1.3882",
-      "miles": 13.5
     }
   ],
   "Megan.Line": [
