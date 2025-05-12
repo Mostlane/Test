@@ -62,15 +62,7 @@
 <body>
 <div class="container" id="formContainer">
   <h2>Add New Site Location</h2>
-  <form method="POST" action="https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/" target="_self" onsubmit="
-    sessionStorage.setItem('lastJobNumber', document.getElementById('jobNumber').value);
-    sessionStorage.setItem('lastSiteName', document.getElementById('siteName').value);
-    sessionStorage.setItem('lastLatitude', document.getElementById('latitude').value);
-    sessionStorage.setItem('lastLongitude', document.getElementById('longitude').value);
-    sessionStorage.setItem('lastMileage', document.getElementById('mileageFromHQ').value);
-    setTimeout(() => window.location.href='site-added_with_job_number.html', 1200);
-  ">
-    
+  <form id="siteForm">
     <label for="jobNumber">Job Number</label>
     <input type="text" name="jobNumber" id="jobNumber" pattern="\d{3,6}" required>
 
@@ -176,6 +168,41 @@
       }
     });
   }
+
+  document.getElementById("siteForm").addEventListener("submit", function(e) {
+    e.preventDefault();
+
+    const jobNumber = document.getElementById("jobNumber").value;
+    const siteName = document.getElementById("siteName").value;
+    const latitude = document.getElementById("latitude").value;
+    const longitude = document.getElementById("longitude").value;
+    const mileage = document.getElementById("mileageFromHQ").value;
+
+    const formData = new URLSearchParams();
+    formData.append("jobNumber", jobNumber);
+    formData.append("siteName", siteName);
+    formData.append("latitude", latitude);
+    formData.append("longitude", longitude);
+    formData.append("mileageFromHQ", mileage);
+
+    // Store in session for confirmation screen
+    sessionStorage.setItem("lastJobNumber", jobNumber);
+    sessionStorage.setItem("lastSiteName", siteName);
+    sessionStorage.setItem("lastLatitude", latitude);
+    sessionStorage.setItem("lastLongitude", longitude);
+    sessionStorage.setItem("lastMileage", mileage);
+
+    fetch("https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    }).then(() => {
+      window.location.href = "site-added.html";
+    }).catch(err => {
+      alert("Failed to submit. Please try again.");
+      console.error(err);
+    });
+  });
 </script>
 <script async defer id="mapsScript"
   src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&callback=initMap">
