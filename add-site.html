@@ -165,7 +165,7 @@
         const element = res.rows[0].elements[0];
         if (element.status === "OK") {
           const miles = (element.distance.value / 1609.34).toFixed(1);
-          document.getElementById("distanceOutput").innerText = `Distance from HQ: ${miles} miles`;
+          document.getElementById("distanceOutput").innerText = `Distance from Mostlane Office: ${miles} miles`;
           document.getElementById("mileageFromHQ").value = miles;
         }
       }
