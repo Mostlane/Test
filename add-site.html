@@ -1,0 +1,120 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Add Site Location</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background: rgba(255,255,255,0.95);
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    h2 {
+      color: #004a99;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #004a99;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      margin-top: 20px;
+    }
+    #map {
+      height: 300px;
+      margin-top: 15px;
+      border-radius: 6px;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+<div class="container" id="formContainer">
+  <h2>Add New Site Location</h2>
+  <form method="POST" action="https://hooks.zapier.com/hooks/catch/20261714/xxxxx" target="_blank">
+    <label for="siteName">Site Name</label>
+    <input type="text" name="siteName" id="siteName" required>
+
+    <label for="latitude">Latitude</label>
+    <input type="text" name="latitude" id="latitude" readonly required>
+
+    <label for="longitude">Longitude</label>
+    <input type="text" name="longitude" id="longitude" readonly required>
+
+    <div id="map"></div>
+
+    <button type="submit">Submit Site</button>
+  </form>
+</div>
+
+<div class="container hidden" id="blockedContainer">
+  <h2>Access Denied</h2>
+  <p>This page is only available to office staff.</p>
+</div>
+
+<script>
+  const user = sessionStorage.getItem("mostlaneUser") || "";
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.split("\n");
+      const roleLine = lines.find(line => line.includes(user));
+      const isOffice = roleLine && roleLine.includes("Office");
+      if (!isOffice) {
+        document.getElementById("formContainer").classList.add("hidden");
+        document.getElementById("blockedContainer").classList.remove("hidden");
+      }
+    });
+
+  function initMap() {
+    const map = new google.maps.Map(document.getElementById("map"), {
+      center: { lat: 50.8529, lng: -1.2445 },
+      zoom: 8
+    });
+    let marker = null;
+
+    map.addListener("click", (e) => {
+      const lat = e.latLng.lat().toFixed(6);
+      const lng = e.latLng.lng().toFixed(6);
+      document.getElementById("latitude").value = lat;
+      document.getElementById("longitude").value = lng;
+
+      if (marker) marker.setMap(null);
+      marker = new google.maps.Marker({
+        position: { lat: parseFloat(lat), lng: parseFloat(lng) },
+        map: map
+      });
+    });
+  }
+</script>
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&callback=initMap">
+</script>
+</body>
+</html>
