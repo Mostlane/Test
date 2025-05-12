@@ -62,7 +62,13 @@
 <body>
 <div class="container" id="formContainer">
   <h2>Add New Site Location</h2>
-  <form method="POST" action="https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/" target="_blank">
+  <form method="POST" action="https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/" target="_self" onsubmit="
+    sessionStorage.setItem('lastSiteName', document.getElementById('siteName').value);
+    sessionStorage.setItem('lastLatitude', document.getElementById('latitude').value);
+    sessionStorage.setItem('lastLongitude', document.getElementById('longitude').value);
+    sessionStorage.setItem('lastMileage', document.getElementById('mileageFromHQ').value);
+    setTimeout(() => window.location.href='site-added.html', 1200);
+  ">
     <label for="siteName">Site Name</label>
     <input type="text" name="siteName" id="siteName" required>
 
@@ -78,11 +84,9 @@
 
     <input type="hidden" name="mileageFromHQ" id="mileageFromHQ">
 
-    
     <p style="margin-top:10px; font-weight:bold;">Starting Postcode: PO15 5RQ</p>
     <div id="map" style="height:300px; min-height:300px; background:#f0f0f0; border-radius:6px;"></div>
     <button type="button" onclick="calculateDistance()">Calculate Mileage</button>
-    
 
     <div class="distanceBox" id="distanceOutput"></div>
 
@@ -110,11 +114,10 @@
     });
 
   let map, marker = null, destination = null;
-  let hq; // HQ location declared here and initialized in initMap
+  let hq;
 
   function initMap() {
     hq = new google.maps.LatLng(50.8529, -1.2445);
-  window.initMap = initMap;
     map = new google.maps.Map(document.getElementById("map"), {
       center: hq,
       zoom: 8
@@ -134,10 +137,7 @@
 
   function placeMarker(location) {
     if (marker) marker.setMap(null);
-    marker = new google.maps.Marker({
-      position: location,
-      map: map
-    });
+    marker = new google.maps.Marker({ position: location, map: map });
   }
 
   function lookupPostcode() {
@@ -154,7 +154,7 @@
   }
 
   function calculateDistance() {
-    if (!destination) return;
+    if (!destination || !hq) return;
     const service = new google.maps.DistanceMatrixService();
     service.getDistanceMatrix({
       origins: [hq],
