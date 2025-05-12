@@ -277,8 +277,8 @@ async function loadWeek() {
   const totalPay = stdPay + otPay;
   const mileagePay = totalMiles * mileageRate;
 
-  document.getElementById("std-hours").innerText = totalStandardHours.toFixed(2) + " Hours, 0 Mins";
-  document.getElementById("ot-hours").innerText = totalOvertimeHours.toFixed(2) + " Hours, 0 Mins";
+  document.getElementById("std-hours").innerText = formatTime(totalStandardHours);
+  document.getElementById("ot-hours").innerText = formatTime(totalOvertimeHours);
   document.getElementById("std-rate").innerText = "£" + stdRate.toFixed(2);
   document.getElementById("ot-rate").innerText = "£" + otRate.toFixed(2);
   document.getElementById("std-pay").innerText = "£" + stdPay.toFixed(2);
