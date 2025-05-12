@@ -196,7 +196,10 @@ async function loadWeek() {
     const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
 
     let lat = null, lon = null, siteName = null;
-    if (log.location) {
+    if (log.location_coords) {
+      lat = parseFloat(log.location_coords.lat);
+      lon = parseFloat(log.location_coords.lon);
+    } else if (log.location) {
       const latMatch = log.location.match(/Latitude:\s*([^L]+)/i);
       const lonMatch = log.location.match(/Longitude:\s*([^\s]+)/i);
       if (latMatch) lat = parseFloat(latMatch[1]);
