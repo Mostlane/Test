@@ -1,0 +1,18 @@
+[
+  {
+    "jobNumber": "0123",
+    "siteName": "5 Woodlands Close",
+    "latitude": 50.874399,
+    "longitude": -1.281986,
+    "mileageFromHQ": 2.7,
+    "radiusMeters": 500
+  },
+  {
+    "jobNumber": "999999",
+    "siteName": "Test Fuel Site",
+    "latitude": 50.9115,
+    "longitude": -1.3882,
+    "mileageFromHQ": 13.5,
+    "radiusMeters": 500
+  }
+]
