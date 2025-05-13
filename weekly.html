@@ -101,7 +101,47 @@ function createInvoice() {
 }
 
 function createTimesheet() {
-  alert("Timesheet generation logic will go here.");
+  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const week = document.getElementById("weekRange")?.textContent || "Unknown";
+  const stdHours = document.getElementById("std-hours")?.textContent || "";
+  const stdRate = document.getElementById("std-rate")?.textContent || "";
+  const stdPay = document.getElementById("std-pay")?.textContent || "";
+  const otHours = document.getElementById("ot-hours")?.textContent || "";
+  const otRate = document.getElementById("ot-rate")?.textContent || "";
+  const otPay = document.getElementById("ot-pay")?.textContent || "";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "";
+  const mileage = document.getElementById("total-mileage")?.textContent || "";
+  const mileagePay = document.getElementById("total-mileage-pay")?.textContent || "";
+
+  const payload = {
+    user,
+    week,
+    stdHours,
+    stdRate,
+    stdPay,
+    otHours,
+    otRate,
+    otPay,
+    totalEarnings,
+    mileage,
+    mileagePay
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams(payload).toString()
+  })
+  .then(res => {
+    if (!res.ok) throw new Error(`Status: ${res.status}`);
+    alert("Timesheet submitted successfully!");
+  })
+  .catch(err => {
+    console.error(err);
+    alert("Submission failed.");
+  });
 }
 
 function haversine(lat1, lon1, lat2, lon2) {
