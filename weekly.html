@@ -290,7 +290,7 @@ async function loadWeek() {
 }
 
 Promise.all([
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json").then(r => r.json()),
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json?t=" + Date.now()).then(r => r.json()),
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json").then(r => r.json())
 ]).then(([logData, siteData]) => {
   dataStore = logData;
