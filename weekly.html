@@ -169,6 +169,13 @@ function changeWeek(delta) {
   loadWeek();
 }
 
+
+function formatTime(decimalHours) {
+  const hrs = Math.floor(decimalHours);
+  const mins = Math.round((decimalHours - hrs) * 60);
+  return `${hrs} Hours, ${mins} Mins`;
+}
+
 async function loadWeek() {
   const range = getWeekRange(new Date());
   document.getElementById("weekRange").textContent = range.label;
@@ -196,7 +203,10 @@ async function loadWeek() {
     const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
 
     let lat = null, lon = null, siteName = null;
-    if (log.location) {
+    if (log.location_coords) {
+      lat = parseFloat(log.location_coords.lat);
+      lon = parseFloat(log.location_coords.lon);
+    } else if (log.location) {
       const latMatch = log.location.match(/Latitude:\s*([^L]+)/i);
       const lonMatch = log.location.match(/Longitude:\s*([^\s]+)/i);
       if (latMatch) lat = parseFloat(latMatch[1]);
@@ -269,8 +279,18 @@ async function loadWeek() {
     }
   }
 
-  const stdRate = 15;
-  const otRate = 22.5;
+  const rateText = await getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/logs/rates.txt');
+  const rateLines = rateText.split('\n');
+  let stdRate = 15; // fallback
+  for (const line of rateLines) {
+    const [name, value] = line.split(' - ');
+    if (name && value && name.trim() === user) {
+      const cleaned = value.replace(/[^\d.]/g, '');
+      stdRate = parseFloat(cleaned);
+      break;
+    }
+  }
+  const otRate = stdRate * 1.5;
   const mileageRate = 0.25;
   const stdPay = totalStandardHours * stdRate;
   const otPay = totalOvertimeHours * otRate;
@@ -290,7 +310,7 @@ async function loadWeek() {
 }
 
 Promise.all([
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json?t=" + Date.now()).then(r => r.json()),
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json").then(r => r.json()),
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json").then(r => r.json())
 ]).then(([logData, siteData]) => {
   dataStore = logData;
