@@ -101,8 +101,7 @@ function createInvoice() {
 }
 
 function createTimesheet() {
-  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const week = document.getElementById("weekRange")?.textContent || "Unknown";
+const week = document.getElementById("weekRange")?.textContent || "Unknown";
   const stdHours = document.getElementById("std-hours")?.textContent || "";
   const stdRate = document.getElementById("std-rate")?.textContent || "";
   const stdPay = document.getElementById("std-pay")?.textContent || "";
@@ -135,7 +134,7 @@ function createTimesheet() {
     body: new URLSearchParams(payload).toString()
   })
   .then(res => {
-    if (!res.ok) throw new Error(`Status: ${res.status}`);
+    if (!res.ok) throw new Error("Submission failed");
     alert("Timesheet submitted successfully!");
   })
   .catch(err => {
