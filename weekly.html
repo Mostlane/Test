@@ -164,16 +164,39 @@ function getWeekRange(date) {
   return { start: monday, end: sunday, label: `${format(monday)} – ${format(sunday)}` };
 }
 
-function changeWeek(delta) {
-  offset += delta;
-  loadWeek();
+
+async function createTimesheet() {
+  const weekLabel = document.getElementById("weekRange").textContent;
+  const user = sessionStorage.getItem("mostlaneUser");
+
+  const summary = {
+    user,
+    week: weekLabel,
+    html: document.querySelector(".content-box").innerHTML
+  };
+
+  try {
+    const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(summary)
+    });
+    if (res.ok) {
+      alert("Timesheet submitted successfully!");
+    } else {
+      alert("Error submitting timesheet.");
+    }
+  } catch (err) {
+    alert("Submission failed.");
+  }
 }
 
 
-function formatTime(decimalHours) {
-  const hrs = Math.floor(decimalHours);
-  const mins = Math.round((decimalHours - hrs) * 60);
-  return `${hrs} Hours, ${mins} Mins`;
+function changeWeek(delta) {
+  offset += delta;
+  loadWeek();
 }
 
 async function loadWeek() {
@@ -297,8 +320,8 @@ async function loadWeek() {
   const totalPay = stdPay + otPay;
   const mileagePay = totalMiles * mileageRate;
 
-  document.getElementById("std-hours").innerText = formatTime(totalStandardHours);
-  document.getElementById("ot-hours").innerText = formatTime(totalOvertimeHours);
+  document.getElementById("std-hours").innerText = totalStandardHours.toFixed(2) + " Hours, 0 Mins";
+  document.getElementById("ot-hours").innerText = totalOvertimeHours.toFixed(2) + " Hours, 0 Mins";
   document.getElementById("std-rate").innerText = "£" + stdRate.toFixed(2);
   document.getElementById("ot-rate").innerText = "£" + otRate.toFixed(2);
   document.getElementById("std-pay").innerText = "£" + stdPay.toFixed(2);
