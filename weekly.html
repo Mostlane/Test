@@ -164,37 +164,6 @@ function getWeekRange(date) {
   return { start: monday, end: sunday, label: `${format(monday)} – ${format(sunday)}` };
 }
 
-
-async function createTimesheet() {
-  const weekLabel = document.getElementById("weekRange")?.textContent || "Unknown Week";
-  const user = sessionStorage.getItem("mostlaneUser") || "Unknown User";
-
-  const summary = {
-    user: user,
-    week: weekLabel,
-    html: document.querySelector(".content-box")?.outerHTML || ""
-  };
-
-  try {
-    const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(summary)
-    });
-    if (res.ok) {
-      alert("Timesheet submitted successfully!");
-    } else {
-      alert("Error submitting timesheet. Response not OK.");
-    }
-  } catch (err) {
-    alert("Submission failed. Check console for details.");
-    console.error(err);
-  }
-}
-
-
 function changeWeek(delta) {
   offset += delta;
   loadWeek();
