@@ -1,0 +1,38 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Webhook Test</title>
+</head>
+<body>
+  <h2>Zapier Webhook Test</h2>
+  <button onclick="sendTest()">Send Test Payload</button>
+  <p id="result"></p>
+
+  <script>
+    async function sendTest() {
+      const data = {
+        user: "Test.User",
+        week: "Test Week",
+        totalEarnings: "£123.45"
+      };
+
+      try {
+        const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+
+        if (res.ok) {
+          document.getElementById("result").innerText = "✅ Submission successful!";
+        } else {
+          document.getElementById("result").innerText = "❌ Failed. Status: " + res.status;
+        }
+      } catch (err) {
+        document.getElementById("result").innerText = "❌ Error: " + err.message;
+      }
+    }
+  </script>
+</body>
+</html>
