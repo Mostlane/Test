@@ -7335,6 +7335,14 @@
   ],
   "Colby.Lunsford": [
 {
+  "type": "Check In",
+  "datetime": "2025-05-15T19:05:00.000Z",
+  "location_coords": {
+    "lat": 50.87452617241149,
+    "lon": -1.2819323536912708
+  }
+},
+{
   "type": "Check Out",
   "datetime": "2025-05-13T21:12:00.000Z",
   "location_coords": {
