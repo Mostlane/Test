@@ -469,6 +469,29 @@ showCorrectButton();
 <!-- Result Display -->
 <div id="mileageResult" style="margin:20px; font-weight:bold; text-align:center;"></div>
 
+
+<script>
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    let paidMiles = 0;
+    document.querySelectorAll(".mileage").forEach(el => {
+      const match = el.textContent.match(/([\d\.]+) miles/);
+      if (match) {
+        const raw = parseFloat(match[1]);
+        const paid = Math.max(0, raw - 10);
+        paidMiles += paid;
+      }
+    });
+    if (paidMiles > 0) {
+      const div = document.createElement("div");
+      div.style.marginTop = "20px";
+      div.innerHTML = `<strong>Total Paid Mileage:</strong> ${paidMiles.toFixed(1)} mi @ £0.25 = £${(paidMiles * 0.25).toFixed(2)}`;
+      document.querySelector(".content-box").appendChild(div);
+    }
+  }, 1000); // allow mileage blocks to render
+});
+</script>
+
 </body>
 
 </html>
