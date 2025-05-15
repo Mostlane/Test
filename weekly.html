@@ -132,5 +132,59 @@ function processMileage() {
 showCorrectButton();
 </script>
 
+
+<script>
+async function calculateMileageSummary() {
+  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const [logData, usersTxt, travelTxt, employmentTxt] = await Promise.all([
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json").then(r => r.json()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text())
+  ]);
+
+  const eligible = employmentTxt.includes(user + " - SelfEmployed") && travelTxt.includes(user + " - No");
+  if (!eligible) return;
+
+  const line = usersTxt.split("\n").find(l => l.startsWith(user + "|"));
+  const homePostcode = line ? line.split("|").pop().trim() : "PO15 5RQ";
+  const logs = logData[user] || [];
+
+  const service = new google.maps.DistanceMatrixService();
+  let totalMiles = 0;
+
+  const requests = logs.map(log => {
+    if (!log.location_coords) return Promise.resolve(0);
+    const dest = log.location_coords;
+    return new Promise(resolve => {
+      service.getDistanceMatrix({
+        origins: [homePostcode],
+        destinations: [{ lat: dest.lat, lng: dest.lon }],
+        travelMode: google.maps.TravelMode.DRIVING
+      }, (res, status) => {
+        if (status !== "OK") return resolve(0);
+        const miles = res.rows[0].elements[0].distance.value / 1609.34;
+        resolve(Math.max(0, miles - 10));
+      });
+    });
+  });
+
+  const results = await Promise.all(requests);
+  totalMiles = results.reduce((a, b) => a + b, 0);
+  const cost = totalMiles * 0.25;
+
+  const div = document.createElement("p");
+  div.innerHTML = `<strong>Paid Miles:</strong> ${totalMiles.toFixed(1)} mi | <strong>Reimbursement:</strong> £${cost.toFixed(2)}`;
+  document.querySelector(".content-box").appendChild(div);
+}
+
+window.addEventListener("load", () => {
+  if (typeof google !== "undefined") {
+    calculateMileageSummary();
+  }
+});
+</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM"></script>
+
 </body>
 </html>
