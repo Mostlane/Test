@@ -273,6 +273,18 @@ async function loadWeek() {
       mileageText = `<div class='mileage'>Paid Mileage: £${paid} (${chargeable.toFixed(1)} mi @ £0.25)</div>`;
     }
 
+    
+    let mileageText = "";
+    if (fuelOK && lat && lon) {
+      const match = sites.find(s => {
+        const d = haversine(lat, lon, s.latitude, s.longitude);
+        return d <= s.radiusMeters;
+      });
+      if (match && match.mileageFromHQ !== undefined) {
+        mileageText = `<div class='mileage'>Mileage: ${match.mileageFromHQ.toFixed(1)} mi</div>`;
+      }
+    }
+
     div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay}${mileageText}`;
     container.appendChild(div);
   }
@@ -424,7 +436,7 @@ function processMileage() {
     if (!log.miles) continue;
 
     const trip = parseFloat(log.miles);
-    const chargeable = trip;
+    const chargeable = Math.max(0, trip - 10);
     totalMiles += chargeable;
   }
 
