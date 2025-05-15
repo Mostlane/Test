@@ -38,5 +38,13 @@
     "longitude": -0.167835,
     "mileageFromHQ": 67.7,
     "radiusMeters": 500
+  },
+  {
+    "jobNumber": "0004",
+    "siteName": "The Old Vicarage",
+    "latitude": 51.098356,
+    "longitude": -0.943547,
+    "mileageFromHQ": 33.5,
+    "radiusMeters": 500
   }
 ]
