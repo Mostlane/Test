@@ -46,5 +46,13 @@
     "longitude": -0.943547,
     "mileageFromHQ": 33.5,
     "radiusMeters": 500
+  },
+  {
+    "jobNumber": "0005",
+    "siteName": "The Oaks Crematorium ",
+    "latitude": 50.869469,
+    "longitude": -0.95682,
+    "mileageFromHQ": 17.5,
+    "radiusMeters": 500
   }
 ]
