@@ -372,6 +372,68 @@ async function showCorrectButton() {
     container.innerHTML = '<button onclick="createTimesheet()" class="portal-btn">Create Timesheet</button>';
   }
 }
+function showMileagePopup() {
+  document.getElementById("mileagePopup").style.display = "block";
+}
+
+async function eligibleForMileage(user) {
+  const [emp, travel] = await Promise.all([
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text())
+  ]);
+  return (
+    emp.includes(user + " - SelfEmployed") &&
+    travel.includes(user + " - No")
+  );
+}
+
+async function showCorrectButton() {
+  const user = sessionStorage.getItem("mostlaneUser") || "admin";
+  const container = document.getElementById("actionButtons");
+  const empTxt = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text());
+  const type = empTxt.includes(`${user} - SelfEmployed`) ? 'SelfEmployed' : 'Employed';
+  const eligibleMileage = await eligibleForMileage(user);
+  let html = '';
+
+  if (type === 'SelfEmployed') {
+    html += '<button onclick="createInvoice()" class="portal-btn">Create Invoice</button>';
+  } else {
+    html += '<button onclick="createTimesheet()" class="portal-btn">Create Timesheet</button>';
+  }
+
+  if (eligibleMileage) {
+    html += '<button onclick="showMileagePopup()" class="portal-btn">Calculate Mileage</button>';
+  }
+
+  container.innerHTML = html;
+}
+
+function processMileage() {
+  const selected = Array.from(document.querySelectorAll('#mileagePopup input[type=checkbox]:checked')).map(cb => cb.value);
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const filterDays = selected.includes("All") ? days : selected;
+
+  const user = sessionStorage.getItem("mostlaneUser") || "admin";
+  const logs = dataStore[user] || [];
+  let totalMiles = 0;
+
+  for (const log of logs) {
+    const d = new Date(log.datetime);
+    const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    if (!filterDays.includes(day)) continue;
+    if (!log.miles) continue;
+
+    const trip = parseFloat(log.miles);
+    const chargeable = Math.max(0, trip - 10);
+    totalMiles += chargeable;
+  }
+
+  const reimbursed = (totalMiles * 0.25).toFixed(2);
+  document.getElementById("mileagePopup").style.display = "none";
+  document.getElementById("mileageResult").innerText =
+    `Paid Miles: ${totalMiles.toFixed(1)} mi | Reimbursement: £${reimbursed}`;
+}
+
 showCorrectButton();
 </script>
 
@@ -384,54 +446,24 @@ showCorrectButton();
   <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
 </div>
 
-<script>
-window.addEventListener("load", async () => {
-  const user = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const [usersTxt, travelTxt, employmentTxt] = await Promise.all([
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt").then(r => r.text()),
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text()),
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text())
-  ]);
+<!-- Mileage Claim Popup -->
+<div id="mileagePopup" style="display:none; position:fixed; top:20%; left:50%; transform:translateX(-50%);
+ background:#fff; border:1px solid #ccc; padding:20px; border-radius:10px; z-index:1000; max-width:300px; box-shadow:0 0 10px rgba(0,0,0,0.2);">
+  <h3>Select Days</h3>
+  <label><input type="checkbox" value="All" checked> All Week</label><br>
+  <label><input type="checkbox" value="Mon"> Monday</label><br>
+  <label><input type="checkbox" value="Tue"> Tuesday</label><br>
+  <label><input type="checkbox" value="Wed"> Wednesday</label><br>
+  <label><input type="checkbox" value="Thu"> Thursday</label><br>
+  <label><input type="checkbox" value="Fri"> Friday</label><br>
+  <label><input type="checkbox" value="Sat"> Saturday</label><br>
+  <label><input type="checkbox" value="Sun"> Sunday</label><br><br>
+  <button onclick="processMileage()">Calculate</button>
+  <button onclick="document.getElementById('mileagePopup').style.display='none'">Cancel</button>
+</div>
 
-  const eligible = employmentTxt.includes(user + " - SelfEmployed") && travelTxt.includes(user + " - No");
-  if (!eligible) return;
-
-  const line = usersTxt.split("\n").find(l => l.startsWith(user + "|"));
-  const postcode = line ? line.split("|").pop().trim() : "PO15 5RQ";
-
-  const logs = (window.dataStore && dataStore[user]) ? dataStore[user].filter(l => l.location_coords) : [];
-  const service = new google.maps.DistanceMatrixService();
-
-  const distances = await Promise.all(logs.map(log => new Promise(resolve => {
-    const dest = log.location_coords;
-    service.getDistanceMatrix({
-      origins: [postcode],
-      destinations: [{ lat: dest.lat, lng: dest.lon }],
-      travelMode: google.maps.TravelMode.DRIVING
-    }, (res, status) => {
-      if (status === "OK") {
-        const rawMiles = res.rows[0].elements[0].distance.value / 1609.34;
-        resolve(Math.max(0, rawMiles - 10));
-      } else {
-        resolve(0);
-      }
-    });
-  })));
-
-  const totalMiles = distances.reduce((a, b) => a + b, 0);
-  const reimbursed = totalMiles * 0.25;
-
-  const result = document.createElement("p");
-  result.innerHTML = `<strong>Paid Miles:</strong> ${totalMiles.toFixed(1)} mi | <strong>Reimbursement:</strong> £${reimbursed.toFixed(2)}`;
-  const box = document.querySelector(".content-box");
-  if (box) box.appendChild(result);
-});
-</script>
-
-
-<script async defer
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&callback=initMap">
-</script>
+<!-- Result Display -->
+<div id="mileageResult" style="margin:20px; font-weight:bold; text-align:center;"></div>
 
 </body>
 
