@@ -424,7 +424,7 @@ function processMileage() {
     if (!log.miles) continue;
 
     const trip = parseFloat(log.miles);
-    const chargeable = Math.max(0, trip - 10);
+    const chargeable = trip;
     totalMiles += chargeable;
   }
 
