@@ -2173,6 +2173,14 @@
   ],
   "Jamie.Line": [
 {
+  "type": "Check Out",
+  "datetime": "2025-05-15T12:14:00.000Z",
+  "location_coords": {
+    "lat": 50.87457227527557,
+    "lon": -1.281903236312916
+  }
+},
+{
   "type": "Check In",
   "datetime": "2025-05-15T12:08:00.000Z",
   "location_coords": {
