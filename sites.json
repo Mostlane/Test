@@ -30,5 +30,13 @@
     "longitude": -0.913927,
     "mileageFromHQ": 46.5,
     "radiusMeters": 500
+  },
+  {
+    "jobNumber": "0003",
+    "siteName": "Starbucks Gatwick",
+    "latitude": 51.133573,
+    "longitude": -0.167835,
+    "mileageFromHQ": 67.7,
+    "radiusMeters": 500
   }
 ]
