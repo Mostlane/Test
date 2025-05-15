@@ -73,7 +73,7 @@
 </head>
 <body>
 
-<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+<div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
   <a href="main.html" class="portal-btn">Main Menu</a>
   <span id="actionButtons"></span>
 </div>
@@ -489,7 +489,7 @@ function updateMileageTotal() {
   if (total > 0) {
     display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
   } else {
-    display.innerHTML = `<strong>Total Paid Mileage:</strong> £0.00`;
+    display.innerHTML = ``;
   }
 }
 
