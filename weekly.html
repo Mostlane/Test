@@ -73,7 +73,7 @@
 </head>
 <body>
 
-<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+<div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
   <a href="main.html" class="portal-btn">Main Menu</a>
   <span id="actionButtons"></span>
 </div>
@@ -97,7 +97,48 @@ const RATE = 0.25;
 const FREE_MILES = 10;
 
 function createInvoice() {
-  alert("Invoice generation logic will go here.");
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const name = username.replace(".", " ");
+  const stdHours = document.getElementById("std-hours")?.textContent || "0";
+  const otHours = document.getElementById("ot-hours")?.textContent || "0";
+  const stdRate = document.getElementById("std-rate")?.textContent || "£0.00";
+  const otRate = document.getElementById("ot-rate")?.textContent || "£0.00";
+  const stdPay = document.getElementById("std-pay")?.textContent || "£0.00";
+  const otPay = document.getElementById("ot-pay")?.textContent || "£0.00";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "£0.00";
+  const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
+  const weekRange = document.getElementById("weekRange")?.textContent || "";
+
+  const payload = {
+    engineer: name,
+    username: username,
+    week_range: weekRange,
+    standard_hours: stdHours,
+    overtime_hours: otHours,
+    hourly_rate: stdRate,
+    overtime_rate: otRate,
+    std_pay: stdPay,
+    ot_pay: otPay,
+    total_earnings: totalEarnings,
+    mileage_summary: paidMileageText
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams(payload).toString()
+  }).then(response => {
+    if (response.ok) {
+      alert("Invoice submitted successfully!");
+    } else {
+      alert("Failed to submit invoice.");
+    }
+  }).catch(error => {
+    alert("Error sending invoice.");
+    console.error(error);
+  });
 }
 
 function createTimesheet() {
@@ -262,6 +303,7 @@ async function loadWeek() {
         const matchedSite = sites.find(s => s.siteName === siteName);
         if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
           locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
+       locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
         }
     } else if (lat && lon) {
       locationDisplay = `<span class='unknown'>Location not known – <a href='https://maps.google.com/?q=${lat},${lon}' target='_blank'>Click Here</a></span>`;
@@ -353,8 +395,8 @@ async function loadWeek() {
 }
 
 Promise.all([
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json").then(r => r.json()),
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json").then(r => r.json())
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json?cb=" + Date.now()).then(r => r.json()),
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?cb=" + Date.now()).then(r => r.json())
 ]).then(([logData, siteData]) => {
   dataStore = logData;
   sites = siteData;
@@ -468,6 +510,39 @@ showCorrectButton();
 
 <!-- Result Display -->
 <div id="mileageResult" style="margin:20px; font-weight:bold; text-align:center;"></div>
+
+
+<script>
+function updateMileageTotal() {
+  let total = 0;
+  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+    const raw = parseFloat(el.dataset.miles || "0");
+    const paid = Math.max(0, raw - 10);
+    total += paid;
+  });
+  let display = document.getElementById("mileageTotalDisplay");
+  if (!display) {
+    display = document.createElement("div");
+    display.id = "mileageTotalDisplay";
+    display.style.marginTop = "20px";
+    document.querySelector(".content-box").appendChild(display);
+  }
+  if (total > 0) {
+    display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+  } else {
+    display.innerHTML = ``;
+  }
+}
+
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    document.querySelectorAll(".claim-mileage").forEach(el => {
+      el.addEventListener("change", updateMileageTotal);
+    });
+    updateMileageTotal();
+  }, 1000);
+});
+</script>
 
 </body>
 
