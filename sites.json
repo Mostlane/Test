@@ -14,5 +14,13 @@
     "longitude": -1.3882,
     "mileageFromHQ": 13.5,
     "radiusMeters": 500
+  },
+  {
+    "jobNumber": "0002",
+    "siteName": "Brockhurst Road",
+    "latitude": 50.808241,
+    "longitude": -1.153669,
+    "mileageFromHQ": 6.1,
+    "radiusMeters": 500
   }
 ]
