@@ -9,35 +9,6 @@
     window.onload = function() {
       navigator.geolocation.getCurrentPosition(success, error);
       function success(position) {
-        
-        const engineer = sessionStorage.getItem("mostlaneUser") || "Unknown";
-
-        // Fetch home postcode and travel-time setting
-        const [usersText, travelText] = await Promise.all([
-          fetch("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt").then(r => r.text()),
-          fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text())
-        ]);
-
-        const userLine = usersText.split("\n").find(l => l.startsWith(engineer + "|"));
-        const postcode = userLine ? userLine.split("|").pop().trim() : "PO15 5RQ";
-        const travelOK = travelText.includes(engineer + " - Yes");
-
-        // Google Maps API request
-        const mapsKey = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
-        let travelTimeMins = 0;
-        let travelMiles = 0;
-
-        try {
-          const mapRes = await fetch(`https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(postcode)}&destinations=${position.coords.latitude},${position.coords.longitude}&key=${mapsKey}`);
-          const map = await mapRes.json();
-          const leg = map.rows[0].elements[0];
-          travelTimeMins = Math.round(leg.duration.value / 60);
-          travelMiles = leg.distance.value / 1609.34;
-        } catch (e) {
-          console.warn("Maps API error", e);
-        }
-
-
         const data = {
           status: "Check In",
           lat: position.coords.latitude,
@@ -50,10 +21,7 @@
           }
           return id;
         })(),
-          engineer: engineer,
-          travel_time_mins: travelOK ? travelTimeMins : "",
-          paid_mileage_miles: !travelOK ? Math.max(0, (travelMiles - 10).toFixed(2)) : "",
-          fuel_cost: !travelOK ? "£" + (Math.max(0, travelMiles - 10) * 0.25).toFixed(2) : ""
+          engineer: sessionStorage.getItem("mostlaneUser") || "Unknown"
         };
         fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
           method: "POST",
