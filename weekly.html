@@ -97,7 +97,40 @@ const RATE = 0.25;
 const FREE_MILES = 10;
 
 function createInvoice() {
-  alert("Invoice generation logic will go here.");
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const name = username.replace(".", " ");
+  const stdHours = document.getElementById("std-hours")?.textContent || "0";
+  const otHours = document.getElementById("ot-hours")?.textContent || "0";
+  const stdRate = document.getElementById("std-rate")?.textContent || "£0.00";
+  const otRate = document.getElementById("ot-rate")?.textContent || "£0.00";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "£0.00";
+  const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
+  const weekRange = document.getElementById("weekRange")?.textContent || "";
+
+  const payload = {
+    engineer: name,
+    username: username,
+    week_range: weekRange,
+    standard_hours: stdHours,
+    overtime_hours: otHours,
+    hourly_rate: stdRate,
+    overtime_rate: otRate,
+    total_earnings: totalEarnings,
+    mileage_summary: paidMileageText
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  }).then(response => {
+    alert("Invoice data sent to Zapier!");
+  }).catch(error => {
+    alert("Failed to send invoice data.");
+    console.error(error);
+  });
 }
 
 function createTimesheet() {
