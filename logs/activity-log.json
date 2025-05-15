@@ -6248,14 +6248,6 @@
     }
   ],
   "Bradley.Graham": [
-{
-  "type": "Check In",
-  "datetime": "2025-05-15T20:07:00.000Z",
-  "location_coords": {
-    "lat": 50.874572291660925,
-    "lon": -1.2819049851604936
-  }
-},
     {
       "type": "Check In",
       "datetime": "2025-05-09T07:22:00",
@@ -7721,22 +7713,38 @@
     {
       "type": "Check In",
       "datetime": "2025-05-10T22:44:00.000Z",
-      "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758"
+      "location": "Latitude: 50.87452547817493Longitude: -1.2819024029176758",
+      "location_coords": {
+        "lat": 50.87452547817493,
+        "lon": -1.2819024029176758
+      }
     },
     {
       "type": "Check In",
       "datetime": "2025-05-12T07:56:00.000Z",
-      "location": "Latitude: 50.86168723268338Longitude: -1.24763016519439"
+      "location": "Latitude: 50.86168723268338Longitude: -1.24763016519439",
+      "location_coords": {
+        "lat": 50.86168723268338,
+        "lon": -1.24763016519439
+      }
     },
     {
       "type": "Check In",
       "datetime": "2025-05-12T13:32:00.000Z",
-      "location": "Latitude: 50.86168723268338Longitude: -1.24763016519439"
+      "location": "Latitude: 50.86168723268338Longitude: -1.24763016519439",
+      "location_coords": {
+        "lat": 50.86168723268338,
+        "lon": -1.24763016519439
+      }
     },
     {
       "type": "Check In",
       "datetime": "2025-05-13T11:20:00.000Z",
-      "location": "Latitude: 51.247767302417735Longitude: -0.11940299826886112"
+      "location": "Latitude: 51.247767302417735Longitude: -0.11940299826886112",
+      "location_coords": {
+        "lat": 51.247767302417735,
+        "lon": -0.11940299826886112
+      }
     }
   ],
   "Megan.Line": [
