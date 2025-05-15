@@ -259,6 +259,10 @@ async function loadWeek() {
     let locationDisplay = "";
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
+        const matchedSite = sites.find(s => s.siteName === siteName);
+        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
+          locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
+        }
     } else if (lat && lon) {
       locationDisplay = `<span class='unknown'>Location not known – <a href='https://maps.google.com/?q=${lat},${lon}' target='_blank'>Click Here</a></span>`;
     } else {
@@ -468,12 +472,3 @@ showCorrectButton();
 </body>
 
 </html>
-
-<!-- Mileage injection -->
-<script>
-
-    if (siteName && site.mileageFromHQ) {
-      locationDisplay += `<div style='color:gray;font-size:0.9em;'>Distance from office: ${site.mileageFromHQ} miles</div>`;
-    }
-
-</script>
