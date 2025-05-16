@@ -52,5 +52,11 @@
     "longitude": null,
     "mileageFromHQ": null,
     "radiusMeters": 500
+  },
+  {
+    "latitude": null,
+    "longitude": null,
+    "mileageFromHQ": null,
+    "radiusMeters": 500
   }
 ]
