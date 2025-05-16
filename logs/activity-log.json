@@ -6662,6 +6662,13 @@
   }
 },
 {
+  "datetime": "2025-05-16T23:44:00.000Z",
+  "location_coords": {
+    "lat": null,
+    "lon": null
+  }
+},
+{
   "type": "Check Out",
   "datetime": "2025-05-16T23:20:00.000Z",
   "location_coords": {
