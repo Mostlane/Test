@@ -109,7 +109,8 @@ function createInvoice() {
   const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
   const weekRange = document.getElementById("weekRange")?.textContent || "";
 
-  const payload = {
+  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
+  const payload = { screen_snapshot: screenSnapshot,
     engineer: name,
     username: username,
     week_range: weekRange,
@@ -153,7 +154,8 @@ const week = document.getElementById("weekRange")?.textContent || "Unknown";
   const mileage = document.getElementById("total-mileage")?.textContent || "";
   const mileagePay = document.getElementById("total-mileage-pay")?.textContent || "";
 
-  const payload = {
+  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
+  const payload = { screen_snapshot: screenSnapshot,
     user,
     week,
     stdHours,
@@ -210,9 +212,9 @@ async function getSiteName(lat, lon) {
 
 async function eligibleForFuel(username) {
   const [employment, role, travel] = await Promise.all([
-    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt'),
-    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt'),
-    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt')
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Portal/main/employment.txt'),
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Portal/main/role-type.txt'),
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Portal/main/travel-time.txt')
   ]);
   return (
     employment.includes(`${username} - SelfEmployed`) &&
@@ -364,7 +366,7 @@ async function loadWeek() {
     }
   }
 
-  const rateText = await getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/logs/rates.txt');
+  const rateText = await getTextFile('https://raw.githubusercontent.com/Mostlane/Portal/main/logs/rates.txt');
   const rateLines = rateText.split('\n');
   let stdRate = 15; // fallback
   for (const line of rateLines) {
@@ -395,8 +397,8 @@ async function loadWeek() {
 }
 
 Promise.all([
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json?cb=" + Date.now()).then(r => r.json()),
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?cb=" + Date.now()).then(r => r.json())
+  fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/logs/activity-log.json?cb=" + Date.now()).then(r => r.json()),
+  fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/sites.json?cb=" + Date.now()).then(r => r.json())
 ]).then(([logData, siteData]) => {
   dataStore = logData;
   sites = siteData;
@@ -409,7 +411,7 @@ Promise.all([
 
 // Replace buttons based on employment type
 async function showCorrectButton() {
-  const text = await getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt');
+  const text = await getTextFile('https://raw.githubusercontent.com/Mostlane/Portal/main/employment.txt');
   const type = text.includes(`${user} - SelfEmployed`) ? 'SelfEmployed' : 'Employed';
   const container = document.getElementById("actionButtons");
   if (type === 'SelfEmployed') {
@@ -424,8 +426,8 @@ function showMileagePopup() {
 
 async function eligibleForMileage(user) {
   const [emp, travel] = await Promise.all([
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text()),
-    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt").then(r => r.text())
+    fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/employment.txt").then(r => r.text()),
+    fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/travel-time.txt").then(r => r.text())
   ]);
   return (
     emp.includes(user + " - SelfEmployed") &&
@@ -436,7 +438,7 @@ async function eligibleForMileage(user) {
 async function showCorrectButton() {
   const user = sessionStorage.getItem("mostlaneUser") || "admin";
   const container = document.getElementById("actionButtons");
-  const empTxt = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt").then(r => r.text());
+  const empTxt = await fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/employment.txt").then(r => r.text());
   const type = empTxt.includes(`${user} - SelfEmployed`) ? 'SelfEmployed' : 'Employed';
   const eligibleMileage = await eligibleForMileage(user);
   let html = '';
