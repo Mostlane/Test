@@ -21844,6 +21844,15 @@
   "Chris.Freeman": [
 {
   "type": "Check In",
+  "datetime": "2025-05-19T21:06:00.000Z",
+  "location_coords": {
+    "lat": 50.87456821818355,
+    "lon": -1.2819205626664056
+  },
+  "driver": false
+},
+{
+  "type": "Check In",
   "datetime": "2025-05-19T20:28:00.000Z",
   "location_coords": {
     "lat": 50.87456821817742,
