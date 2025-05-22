@@ -21843,6 +21843,16 @@
   ],
   "Chris.Freeman": [
 {
+  "type": "Check In",
+  "datetime": "2025-05-13T17:48:00Z",
+  "location": "Latitude: 50.87456821818355 Longitude: -1.2819205626664056",
+  "location_coords": {
+    "lat": 50.87456821818355,
+    "lon": -1.2819205626664056
+  },
+  "driver": false
+},
+{
   "type": "Check Out",
   "datetime": "2025-05-19T21:32:00.000Z",
   "location": "Latitude: 50.874568218183505 Longitude: -1.2819205626664052",
