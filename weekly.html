@@ -88,12 +88,6 @@
 </div>
 
 <script>
-
-function normalizeDatetime(dt) {
-  // Convert "2025-05-19T19:46:00.000Z" to "2025-05-19T19:46:00Z"
-  return dt.replace(/\.\d{3}Z$/, "Z");
-}
-
 let user = sessionStorage.getItem("mostlaneUser") || "admin";
 let offset = 0;
 let dataStore = null;
@@ -115,8 +109,7 @@ function createInvoice() {
   const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
   const weekRange = document.getElementById("weekRange")?.textContent || "";
 
-  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
-  const payload = { screen_snapshot: screenSnapshot,
+  const payload = {
     engineer: name,
     username: username,
     week_range: weekRange,
@@ -160,8 +153,7 @@ const week = document.getElementById("weekRange")?.textContent || "Unknown";
   const mileage = document.getElementById("total-mileage")?.textContent || "";
   const mileagePay = document.getElementById("total-mileage-pay")?.textContent || "";
 
-  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
-  const payload = { screen_snapshot: screenSnapshot,
+  const payload = {
     user,
     week,
     stdHours,
@@ -270,7 +262,7 @@ async function loadWeek() {
 
   const logs = dataStore[user] || [];
   const filtered = logs.filter(log => {
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     return d >= range.start && d <= range.end;
   });
 
@@ -282,7 +274,7 @@ async function loadWeek() {
     const div = document.createElement("div");
     div.className = "activity";
 
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
     const date = d.getDate();
     const suffix = getOrdinal(date);
@@ -320,8 +312,8 @@ async function loadWeek() {
     }
 
     let mileageText = "";
-    if (fuelOK && matchedSite && matchedSite.mileageFromHQ !== undefined) {
-      const miles = parseFloat(matchedSite.mileageFromHQ);
+    if (fuelOK && log.miles) {
+      const miles = parseFloat(log.miles);
       const chargeable = Math.max(0, miles - 10);
       const paid = (chargeable * RATE).toFixed(2);
       mileageText = `<div class='mileage'>Paid Mileage: £${paid} (${chargeable.toFixed(1)} mi @ £0.25)</div>`;
@@ -339,12 +331,12 @@ async function loadWeek() {
   const dayGroups = {};
   let totalMiles = 0;
   for (const log of filtered) {
-    const day = new Date(normalizeDatetime(log.datetime)).toISOString().split('T')[0];
+    const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
     dayGroups[day].push(log);
 
-    if (fuelOK && matchedSite && matchedSite.mileageFromHQ !== undefined) {
-      const miles = parseFloat(matchedSite.mileageFromHQ);
+    if (fuelOK && log.miles) {
+      const miles = parseFloat(log.miles);
       const claimable = Math.max(0, miles - 10);
       totalMiles += claimable;
     }
@@ -358,8 +350,8 @@ async function loadWeek() {
     const checkIn = logs.find(l => l.type?.toLowerCase() === 'check in');
     const checkOut = logs.find(l => l.type?.toLowerCase() === 'check out');
     if (checkIn && checkOut) {
-      const start = new Date(normalizeDatetime(checkIn.datetime));
-      const end = new Date(normalizeDatetime(checkOut.datetime));
+      const start = new Date(checkIn.datetime);
+      const end = new Date(checkOut.datetime);
       if (!isNaN(start) && !isNaN(end) && end > start) {
         const hours = (end - start) / (1000 * 60 * 60);
         if (hours > 10) {
@@ -472,12 +464,12 @@ function processMileage() {
   let totalMiles = 0;
 
   for (const log of logs) {
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
     if (!filterDays.includes(day)) continue;
     if (!log.miles) continue;
 
-    const trip = parseFloat(matchedSite.mileageFromHQ);
+    const trip = parseFloat(log.miles);
     const chargeable = Math.max(0, trip - 10);
     totalMiles += chargeable;
   }
@@ -521,12 +513,6 @@ showCorrectButton();
 
 
 <script>
-
-function normalizeDatetime(dt) {
-  // Convert "2025-05-19T19:46:00.000Z" to "2025-05-19T19:46:00Z"
-  return dt.replace(/\.\d{3}Z$/, "Z");
-}
-
 function updateMileageTotal() {
   let total = 0;
   document.querySelectorAll(".claim-mileage:checked").forEach(el => {
