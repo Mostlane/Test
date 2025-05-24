@@ -304,7 +304,7 @@ async function loadWeek() {
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
         const matchedSite = sites.find(s => s.siteName === siteName);
-        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
+        if (matchedSite && matchedSite.mileageFromHQ !== undefined && fuelOK) {
           locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
           locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
         }
