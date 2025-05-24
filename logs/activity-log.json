@@ -26792,6 +26792,15 @@
   ],
   "Unknown": [
 {
+  "datetime": "2025-05-24T17:19:00Z",
+  "location": "Latitude: NaN Longitude: NaN",
+  "location_coords": {
+    "lat": null,
+    "lon": null
+  },
+  "driver": false
+},
+{
   "datetime": "2025-05-24T17:17:00Z",
   "location": "Latitude: NaN Longitude: NaN",
   "location_coords": {
