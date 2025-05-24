@@ -97,51 +97,7 @@ const RATE = 0.25;
 const FREE_MILES = 10;
 
 function createInvoice() {
-  
-const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
-const name = username.replace(".", " ");
-const stdHours = document.getElementById("std-hours")?.textContent || "0";
-const otHours = document.getElementById("ot-hours")?.textContent || "0";
-const stdRate = document.getElementById("std-rate")?.textContent || "£0.00";
-const otRate = document.getElementById("ot-rate")?.textContent || "£0.00";
-const stdPay = document.getElementById("std-pay")?.textContent || "£0.00";
-const otPay = document.getElementById("ot-pay")?.textContent || "£0.00";
-const totalEarnings = document.getElementById("total-earnings")?.textContent || "£0.00";
-const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
-const weekRange = document.getElementById("weekRange")?.textContent || "";
-
-const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
-const payload = { screen_snapshot: screenSnapshot,
-  engineer: name,
-  username: username,
-  week_range: weekRange,
-  standard_hours: stdHours,
-  overtime_hours: otHours,
-  hourly_rate: stdRate,
-  overtime_rate: otRate,
-  std_pay: stdPay,
-  ot_pay: otPay,
-  total_earnings: totalEarnings,
-  mileage_summary: paidMileageText
-};
-
-fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded"
-  },
-  body: new URLSearchParams(payload).toString()
-}).then(response => {
-  if (response.ok) {
-    alert("Invoice submitted successfully!");
-  } else {
-    alert("Failed to submit invoice.");
-  }
-}).catch(error => {
-  alert("Error sending invoice.");
-  console.error(error);
-});
-
+  alert("Invoice generation logic will go here.");
 }
 
 function createTimesheet() {
@@ -273,24 +229,18 @@ async function loadWeek() {
   container.innerHTML = "";
   const fuelOK = await eligibleForFuel(user);
 
-  
-  const logsByDay = {};
+  let lastDayRendered = '';
   for (const log of filtered) {
-    const dayKey = new Date(log.datetime).toDateString();
-    if (!logsByDay[dayKey]) logsByDay[dayKey] = [];
-    logsByDay[dayKey].push(log);
-  }
 
-  const sortedDays = Object.keys(logsByDay).sort((a, b) => new Date(a) - new Date(b));
-  for (const day of sortedDays) {
-    const header = document.createElement("h3");
-    header.textContent = day;
-    header.style.marginTop = "30px";
-    header.style.borderBottom = "1px solid #004a99";
-    container.appendChild(header);
-
-    const dayLogs = logsByDay[day];
-    for (const log of dayLogs) {
+      const logDay = new Date(log.datetime).toDateString();
+      if (logDay !== lastDayRendered) {
+        const h3 = document.createElement("h3");
+        h3.textContent = logDay;
+        h3.style.marginTop = "30px";
+        h3.style.borderBottom = "1px solid #004a99";
+        container.appendChild(h3);
+        lastDayRendered = logDay;
+      }
 
     const div = document.createElement("div");
     div.className = "activity";
@@ -321,11 +271,6 @@ async function loadWeek() {
     let locationDisplay = "";
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
-        const matchedSite = sites.find(s => s.siteName === siteName);
-        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
-          locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
-          locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
-        }
     } else if (lat && lon) {
       locationDisplay = `<span class='unknown'>Location not known – <a href='https://maps.google.com/?q=${lat},${lon}' target='_blank'>Click Here</a></span>`;
     } else {
@@ -342,8 +287,6 @@ async function loadWeek() {
 
     div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay}${mileageText}`;
     container.appendChild(div);
-    }
-  }
   }
 
   if (filtered.length === 0) {
@@ -353,24 +296,18 @@ async function loadWeek() {
   // Group logs by day and calculate hours
   const dayGroups = {};
   let totalMiles = 0;
-  
-  const logsByDay = {};
+  let lastDayRendered = '';
   for (const log of filtered) {
-    const dayKey = new Date(log.datetime).toDateString();
-    if (!logsByDay[dayKey]) logsByDay[dayKey] = [];
-    logsByDay[dayKey].push(log);
-  }
 
-  const sortedDays = Object.keys(logsByDay).sort((a, b) => new Date(a) - new Date(b));
-  for (const day of sortedDays) {
-    const header = document.createElement("h3");
-    header.textContent = day;
-    header.style.marginTop = "30px";
-    header.style.borderBottom = "1px solid #004a99";
-    container.appendChild(header);
-
-    const dayLogs = logsByDay[day];
-    for (const log of dayLogs) {
+      const logDay = new Date(log.datetime).toDateString();
+      if (logDay !== lastDayRendered) {
+        const h3 = document.createElement("h3");
+        h3.textContent = logDay;
+        h3.style.marginTop = "30px";
+        h3.style.borderBottom = "1px solid #004a99";
+        container.appendChild(h3);
+        lastDayRendered = logDay;
+      }
 
     const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
@@ -468,40 +405,8 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-  
+  <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
 </div>
 </body>
 
 </html>
-
-<script>
-function updateMileageTotal() {
-  let total = 0;
-  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
-    const raw = parseFloat(el.dataset.miles || "0");
-    const paid = Math.max(0, raw - 10);
-    total += paid;
-  });
-  let display = document.getElementById("mileageTotalDisplay");
-  if (!display) {
-    display = document.createElement("div");
-    display.id = "mileageTotalDisplay";
-    display.style.marginTop = "20px";
-    document.querySelector(".content-box").appendChild(display);
-  }
-  if (total > 0) {
-    display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
-  } else {
-    display.innerHTML = ``;
-  }
-}
-
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    document.querySelectorAll(".claim-mileage").forEach(el => {
-      el.addEventListener("change", updateMileageTotal);
-    });
-    updateMileageTotal();
-  }, 1000);
-});
-</script>
