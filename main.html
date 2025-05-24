@@ -19,12 +19,27 @@
   const currentUser = sessionStorage.getItem("mostlaneUser");
   const status = localStorage.getItem("mostlaneStatus_" + currentUser);
   const site = localStorage.getItem("mostlaneSite_" + currentUser);
-  const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
+  
+const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
+function getRelativeDayLabel(dateStr) {
+  const now = new Date();
+  const d = new Date(dateStr);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const logDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = (today - logDate) / (1000 * 60 * 60 * 24);
+
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+
+  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return "Last " + weekdays[d.getDay()];
+}
+
   let statusText = "Status unknown";
   if (status === "checked-in") {
     statusText = "Checked In" + (site ? ` at ${site}` : "");
   } else if (status === "checked-out") {
-    statusText = "Last Checkout: " + (timestamp ? timestamp : "unknown time");
+    statusText = "Last Checkout: " + (timestamp ? getRelativeDayLabel(timestamp) : "unknown time");
     if (site) statusText += " at " + site;
   }
   document.getElementById("statusBox").textContent = "Current Status: " + statusText;
