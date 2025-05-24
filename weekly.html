@@ -1,12 +1,13 @@
 
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Weekly Summary</title>
-  <link rel="stylesheet" href="style.css" />
-  <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Weekly Summary</title>
+<link href="style.css" rel="stylesheet"/>
+<style>
     body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -72,25 +73,19 @@
   </style>
 </head>
 <body>
-
 <div style="display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px;">
-  <a href="main.html" class="portal-btn">Main Menu</a>
-  <span id="actionButtons"></span>
+<a class="portal-btn" href="main.html">Main Menu</a>
+<span id="actionButtons"></span>
 </div>
-
 <div class="content-box">
-  <div class="header">
-    <div class="arrow" onclick="changeWeek(-1)">←</div>
-    <div class="week-range" id="weekRange">Loading…</div>
-    <div class="arrow" onclick="changeWeek(1)">→</div>
-  </div>
-  <div id="activityLog"></div>
+<div class="header">
+<div class="arrow" onclick="changeWeek(-1)">←</div>
+<div class="week-range" id="weekRange">Loading…</div>
+<div class="arrow" onclick="changeWeek(1)">→</div>
 </div>
-
+<div id="activityLog"></div>
+</div>
 <script>
-function normalizeDatetime(dt) {
-  return dt.replace(/\.\d{3}Z$/, "Z");
-}
 let user = sessionStorage.getItem("mostlaneUser") || "admin";
 let offset = 0;
 let dataStore = null;
@@ -172,7 +167,7 @@ const week = document.getElementById("weekRange")?.textContent || "Unknown";
     mileagePay
   };
 
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -267,7 +262,7 @@ async function loadWeek() {
 
   const logs = dataStore[user] || [];
   const filtered = logs.filter(log => {
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     return d >= range.start && d <= range.end;
   });
 
@@ -279,7 +274,7 @@ async function loadWeek() {
     const div = document.createElement("div");
     div.className = "activity";
 
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
     const date = d.getDate();
     const suffix = getOrdinal(date);
@@ -336,7 +331,7 @@ async function loadWeek() {
   const dayGroups = {};
   let totalMiles = 0;
   for (const log of filtered) {
-    const day = new Date(normalizeDatetime(log.datetime)).toISOString().split('T')[0];
+    const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
     dayGroups[day].push(log);
 
@@ -355,8 +350,8 @@ async function loadWeek() {
     const checkIn = logs.find(l => l.type?.toLowerCase() === 'check in');
     const checkOut = logs.find(l => l.type?.toLowerCase() === 'check out');
     if (checkIn && checkOut) {
-      const start = new Date(normalizeDatetime(checkIn.datetime));
-      const end = new Date(normalizeDatetime(checkOut.datetime));
+      const start = new Date(checkIn.datetime);
+      const end = new Date(checkOut.datetime);
       if (!isNaN(start) && !isNaN(end) && end > start) {
         const hours = (end - start) / (1000 * 60 * 60);
         if (hours > 10) {
@@ -400,7 +395,7 @@ async function loadWeek() {
 }
 
 Promise.all([
-  fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/logs/activity-log.json?cb=" + Date.now()).then(r => r.json()),
+  fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/logs/activity-log-latest.json?cb=" + Date.now()).then(r => r.json()),
   fetch("https://raw.githubusercontent.com/Mostlane/Portal/main/sites.json?cb=" + Date.now()).then(r => r.json())
 ]).then(([logData, siteData]) => {
   dataStore = logData;
@@ -469,7 +464,7 @@ function processMileage() {
   let totalMiles = 0;
 
   for (const log of logs) {
-    const d = new Date(normalizeDatetime(log.datetime));
+    const d = new Date(log.datetime);
     const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
     if (!filterDays.includes(day)) continue;
     if (!log.miles) continue;
@@ -487,40 +482,31 @@ function processMileage() {
 
 showCorrectButton();
 </script>
-
-
 <div class="content-box">
-  <hr style="margin-top: 30px;">
-  <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
-  <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
-  <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-  <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
+<hr style="margin-top: 30px;"/>
+<p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
+<p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
+<p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
+<p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
 </div>
-
 <!-- Mileage Claim Popup -->
 <div id="mileagePopup" style="display:none; position:fixed; top:20%; left:50%; transform:translateX(-50%);
  background:#fff; border:1px solid #ccc; padding:20px; border-radius:10px; z-index:1000; max-width:300px; box-shadow:0 0 10px rgba(0,0,0,0.2);">
-  <h3>Select Days</h3>
-  <label><input type="checkbox" value="All" checked> All Week</label><br>
-  <label><input type="checkbox" value="Mon"> Monday</label><br>
-  <label><input type="checkbox" value="Tue"> Tuesday</label><br>
-  <label><input type="checkbox" value="Wed"> Wednesday</label><br>
-  <label><input type="checkbox" value="Thu"> Thursday</label><br>
-  <label><input type="checkbox" value="Fri"> Friday</label><br>
-  <label><input type="checkbox" value="Sat"> Saturday</label><br>
-  <label><input type="checkbox" value="Sun"> Sunday</label><br><br>
-  <button onclick="processMileage()">Calculate</button>
-  <button onclick="document.getElementById('mileagePopup').style.display='none'">Cancel</button>
+<h3>Select Days</h3>
+<label><input checked="" type="checkbox" value="All"/> All Week</label><br/>
+<label><input type="checkbox" value="Mon"/> Monday</label><br/>
+<label><input type="checkbox" value="Tue"/> Tuesday</label><br/>
+<label><input type="checkbox" value="Wed"/> Wednesday</label><br/>
+<label><input type="checkbox" value="Thu"/> Thursday</label><br/>
+<label><input type="checkbox" value="Fri"/> Friday</label><br/>
+<label><input type="checkbox" value="Sat"/> Saturday</label><br/>
+<label><input type="checkbox" value="Sun"/> Sunday</label><br/><br/>
+<button onclick="processMileage()">Calculate</button>
+<button onclick="document.getElementById('mileagePopup').style.display='none'">Cancel</button>
 </div>
-
 <!-- Result Display -->
 <div id="mileageResult" style="margin:20px; font-weight:bold; text-align:center;"></div>
-
-
 <script>
-function normalizeDatetime(dt) {
-  return dt.replace(/\.\d{3}Z$/, "Z");
-}
 function updateMileageTotal() {
   let total = 0;
   document.querySelectorAll(".claim-mileage:checked").forEach(el => {
@@ -551,7 +537,5 @@ window.addEventListener("load", () => {
   }, 1000);
 });
 </script>
-
 </body>
-
 </html>
