@@ -304,7 +304,7 @@ async function loadWeek() {
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
         const matchedSite = sites.find(s => s.siteName === siteName);
-        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
+        if (matchedSite && matchedSite.mileageFromHQ !== undefined && fuelOK) {
           locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
           locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
         }
@@ -430,7 +430,7 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-<p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
+  <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
   
 </div>
 </body>
