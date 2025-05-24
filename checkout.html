@@ -49,7 +49,7 @@
           const now = new Date().toLocaleString();
           
         localStorage.setItem("mostlaneStatus_" + data.engineer, "checked-out");
-        localStorage.setItem("mostlaneSite_" + data.engineer, document.getElementById("matchedSite")?.textContent || "Unknown site"); // You may dynamically assign site if needed
+        localStorage.setItem("mostlaneSite_" + data.engineer, "Matched Site"); // You may dynamically assign site if needed
         localStorage.setItem("mostlaneTimestamp_" + data.engineer, now);
         window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
         
