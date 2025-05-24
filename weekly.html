@@ -304,7 +304,7 @@ async function loadWeek() {
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
         const matchedSite = sites.find(s => s.siteName === siteName);
-        if (matchedSite && matchedSite.mileageFromHQ !== undefined && fuelOK) {
+        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
           locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
           locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
         }
@@ -323,7 +323,34 @@ async function loadWeek() {
     }
 
     div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay}${mileageText}`;
+    
+    const logDate = new Date(log.datetime);
+    const logDay = logDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+
+    if (!window.currentRenderDay || window.currentRenderDay !== logDay) {
+      if (window.currentRenderDay) {
+        const summary = document.createElement("p");
+        summary.className = "daily-summary";
+        summary.style = "color:#444; margin-top:-10px; margin-bottom:25px;";
+        summary.textContent = `Total time: ${Math.floor(window.currentDayMinutes / 60)}h ${window.currentDayMinutes % 60}m`;
+        container.appendChild(summary);
+      }
+      const header = document.createElement("p");
+      header.className = "day-header";
+      header.style = "font-weight:bold; margin-top:20px;";
+      header.textContent = logDay;
+      container.appendChild(header);
+      window.currentRenderDay = logDay;
+      window.currentDayMinutes = 0;
+    }
+
+    if (log.type === "Check Out" && previousCheckIn) {
+      const duration = (new Date(log.datetime) - new Date(previousCheckIn.datetime)) / 60000;
+      window.currentDayMinutes += Math.floor(duration);
+    }
+
     container.appendChild(div);
+    
   }
 
   if (filtered.length === 0) {
@@ -430,7 +457,6 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-  <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
   
 </div>
 </body>
