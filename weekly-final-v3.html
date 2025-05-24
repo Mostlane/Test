@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Weekly Summary</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+    }
+    .content-box {
+      background: rgba(255,255,255,0.6);
+      margin: 60px auto;
+      padding: 20px;
+      max-width: 900px;
+      border-radius: 10px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #004a99;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 6px;
+    }
+    .arrow {
+      font-size: 20px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .week-range {
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .activity {
+      background: white;
+      border-left: 5px solid #004a99;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 6px;
+    }
+    .mileage {
+      color: #004a99;
+      font-style: italic;
+      margin-top: 5px;
+    }
+    .portal-btn {
+      background-color: #004a99;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: bold;
+      font-size: 16px;
+      border: none;
+      cursor: pointer;
+    }
+    .portal-btn:hover {
+      background-color: #003366;
+    }
+    .unknown {
+      color: red;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+  <a href="main.html" class="portal-btn">Main Menu</a>
+  <span id="actionButtons"></span>
+</div>
+
+<div class="content-box">
+  <div class="header">
+    <div class="arrow" onclick="changeWeek(-1)">←</div>
+    <div class="week-range" id="weekRange">Loading…</div>
+    <div class="arrow" onclick="changeWeek(1)">→</div>
+  </div>
+  <div id="activityLog"></div>
+</div>
+
+
+
+<script>
+function updateMileageTotal() {
+  let total = 0;
+  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+    const raw = parseFloat(el.dataset.miles || "0");
+    const paid = Math.max(0, raw - 10);
+    total += paid;
+  });
+  const box = document.getElementById("mileageTotalDisplay");
+  if (box) {
+    if (total > 0) {
+      box.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+    } else {
+      box.innerHTML = "";
+    }
+  }
+}
+
+// Ensure it runs after log display finishes
+window.addEventListener("load", () => {
+  const runLater = () => {
+    setTimeout(() => {
+      document.querySelectorAll(".claim-mileage").forEach(el => {
+        el.removeEventListener("change", updateMileageTotal);
+        el.addEventListener("change", updateMileageTotal);
+      });
+      updateMileageTotal();
+    }, 1000); // wait for log rendering
+  };
+  runLater();
+});
+</script>
