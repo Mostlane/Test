@@ -26789,5 +26789,16 @@
         "lon": -0.914592
       }
     }
+  ],
+  "Unknown": [
+{
+  "datetime": "2025-05-24T17:17:00Z",
+  "location": "Latitude: NaN Longitude: NaN",
+  "location_coords": {
+    "lat": null,
+    "lon": null
+  },
+  "driver": false
+}
   ]
 }
