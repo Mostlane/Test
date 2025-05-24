@@ -58,5 +58,13 @@
     "longitude": null,
     "mileageFromHQ": null,
     "radiusMeters": 500
+  },
+  {
+    "jobNumber": "0001",
+    "siteName": "Office",
+    "latitude": 50.86164,
+    "longitude": -1.247527,
+    "mileageFromHQ": 1.4,
+    "radiusMeters": 500
   }
 ]
