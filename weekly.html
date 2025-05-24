@@ -274,23 +274,23 @@ async function loadWeek() {
   const fuelOK = await eligibleForFuel(user);
 
   
-  const logsByDate = {};
-  filtered.forEach(log => {
-    const key = new Date(log.datetime).toDateString();
-    if (!logsByDate[key]) logsByDate[key] = [];
-    logsByDate[key].push(log);
-  });
+  const logsByDay = {};
+  for (const log of filtered) {
+    const dayKey = new Date(log.datetime).toDateString();
+    if (!logsByDay[dayKey]) logsByDay[dayKey] = [];
+    logsByDay[dayKey].push(log);
+  }
 
-  const sortedDates = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
-  for (const date of sortedDates) {
+  const sortedDays = Object.keys(logsByDay).sort((a, b) => new Date(a) - new Date(b));
+  for (const day of sortedDays) {
     const header = document.createElement("h3");
-    header.textContent = date;
+    header.textContent = day;
     header.style.marginTop = "30px";
     header.style.borderBottom = "1px solid #004a99";
     container.appendChild(header);
 
-    const logs = logsByDate[date];
-    for (const log of logs) {
+    const dayLogs = logsByDay[day];
+    for (const log of dayLogs) {
 
     const div = document.createElement("div");
     div.className = "activity";
@@ -354,23 +354,23 @@ async function loadWeek() {
   const dayGroups = {};
   let totalMiles = 0;
   
-  const logsByDate = {};
-  filtered.forEach(log => {
-    const key = new Date(log.datetime).toDateString();
-    if (!logsByDate[key]) logsByDate[key] = [];
-    logsByDate[key].push(log);
-  });
+  const logsByDay = {};
+  for (const log of filtered) {
+    const dayKey = new Date(log.datetime).toDateString();
+    if (!logsByDay[dayKey]) logsByDay[dayKey] = [];
+    logsByDay[dayKey].push(log);
+  }
 
-  const sortedDates = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
-  for (const date of sortedDates) {
+  const sortedDays = Object.keys(logsByDay).sort((a, b) => new Date(a) - new Date(b));
+  for (const day of sortedDays) {
     const header = document.createElement("h3");
-    header.textContent = date;
+    header.textContent = day;
     header.style.marginTop = "30px";
     header.style.borderBottom = "1px solid #004a99";
     container.appendChild(header);
 
-    const logs = logsByDate[date];
-    for (const log of logs) {
+    const dayLogs = logsByDay[day];
+    for (const log of dayLogs) {
 
     const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
@@ -468,7 +468,7 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-  <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
+  
 </div>
 </body>
 
