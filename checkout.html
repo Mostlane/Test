@@ -23,7 +23,24 @@
         })(),
           engineer: sessionStorage.getItem("mostlaneUser") || "Unknown"
         };
+        
+    const queueKey = "mostlaneOfflineQueue";
+    const queue = JSON.parse(localStorage.getItem(queueKey) || "[]");
+
+    // Attempt resending old logs first
+    if (navigator.onLine && queue.length > 0) {
+      queue.forEach(payload => {
         fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams(payload).toString()
+        });
+      });
+      localStorage.setItem(queueKey, "[]");
+    }
+
+    fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
+
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams(data).toString()
@@ -53,7 +70,11 @@
         localStorage.setItem("mostlaneTimestamp_" + data.engineer, now);
         window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
         
-        }).catch(() => alert("Error submitting data."));
+        }).catch(() => {
+          queue.push(data);
+          localStorage.setItem(queueKey, JSON.stringify(queue));
+          alert("You are offline. Your check-out will be uploaded automatically when you reconnect.");
+        });
       }
       function error() {
         alert("Please enable location to check out.");
