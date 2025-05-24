@@ -275,22 +275,22 @@ async function loadWeek() {
 
   
   const logsByDate = {};
-  for (const log of filtered) {
-    const dayKey = new Date(log.datetime).toDateString();
-    if (!logsByDate[dayKey]) logsByDate[dayKey] = [];
-    logsByDate[dayKey].push(log);
-  }
+  filtered.forEach(log => {
+    const key = new Date(log.datetime).toDateString();
+    if (!logsByDate[key]) logsByDate[key] = [];
+    logsByDate[key].push(log);
+  });
 
-  const sortedDays = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
-
-  for (const day of sortedDays) {
+  const sortedDates = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
+  for (const date of sortedDates) {
     const header = document.createElement("h3");
-    header.textContent = day;
+    header.textContent = date;
     header.style.marginTop = "30px";
     header.style.borderBottom = "1px solid #004a99";
     container.appendChild(header);
 
-    for (const log of logsByDate[day]) {
+    const logs = logsByDate[date];
+    for (const log of logs) {
 
     const div = document.createElement("div");
     div.className = "activity";
@@ -342,6 +342,8 @@ async function loadWeek() {
 
     div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>${locationDisplay}${mileageText}`;
     container.appendChild(div);
+    }
+  }
   }
 
   if (filtered.length === 0) {
@@ -353,22 +355,22 @@ async function loadWeek() {
   let totalMiles = 0;
   
   const logsByDate = {};
-  for (const log of filtered) {
-    const dayKey = new Date(log.datetime).toDateString();
-    if (!logsByDate[dayKey]) logsByDate[dayKey] = [];
-    logsByDate[dayKey].push(log);
-  }
+  filtered.forEach(log => {
+    const key = new Date(log.datetime).toDateString();
+    if (!logsByDate[key]) logsByDate[key] = [];
+    logsByDate[key].push(log);
+  });
 
-  const sortedDays = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
-
-  for (const day of sortedDays) {
+  const sortedDates = Object.keys(logsByDate).sort((a, b) => new Date(a) - new Date(b));
+  for (const date of sortedDates) {
     const header = document.createElement("h3");
-    header.textContent = day;
+    header.textContent = date;
     header.style.marginTop = "30px";
     header.style.borderBottom = "1px solid #004a99";
     container.appendChild(header);
 
-    for (const log of logsByDate[day]) {
+    const logs = logsByDate[date];
+    for (const log of logs) {
 
     const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
@@ -466,7 +468,7 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
-  
+  <p><strong>Paid Mileage:</strong> <span id="total-mileage-pay"></span> (<span id="total-mileage"></span> miles)</p>
 </div>
 </body>
 
