@@ -47,7 +47,12 @@
         }, 500);
 
           const now = new Date().toLocaleString();
-          window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
+          
+        localStorage.setItem("mostlaneStatus_" + data.engineer, "checked-in");
+        localStorage.setItem("mostlaneSite_" + data.engineer, "Matched Site"); // You may dynamically assign site if needed
+        localStorage.setItem("mostlaneTimestamp_" + data.engineer, now);
+        window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
+        
         }).catch(() => alert("Error submitting data."));
       }
       function error() {

@@ -13,7 +13,24 @@
 
 </head>
 <body class="main-body">
-  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
+  
+<div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
+<script>
+  const currentUser = sessionStorage.getItem("mostlaneUser");
+  const status = localStorage.getItem("mostlaneStatus_" + currentUser);
+  const site = localStorage.getItem("mostlaneSite_" + currentUser);
+  const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
+  let statusText = "Status unknown";
+  if (status === "checked-in") {
+    statusText = "Checked In" + (site ? ` at ${site}` : "");
+  } else if (status === "checked-out") {
+    statusText = "Last Checkout: " + (timestamp ? timestamp : "unknown time");
+    if (site) statusText += " at " + site;
+  }
+  document.getElementById("statusBox").textContent = "Current Status: " + statusText;
+</script>
+
+<div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
     const user = sessionStorage.getItem("mostlaneUser");
     if (user) {
