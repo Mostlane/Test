@@ -273,17 +273,7 @@ async function loadWeek() {
   container.innerHTML = "";
   const fuelOK = await eligibleForFuel(user);
 
-  let lastDayRendered = "";
   for (const log of filtered) {
-    const logDay = new Date(log.datetime).toDateString();
-    if (logDay !== lastDayRendered) {
-      const h3 = document.createElement("h3");
-      h3.textContent = logDay;
-      h3.style.marginTop = "30px";
-      h3.style.borderBottom = "1px solid #004a99";
-      container.appendChild(h3);
-      lastDayRendered = logDay;
-    }
     const div = document.createElement("div");
     div.className = "activity";
 
@@ -343,7 +333,6 @@ async function loadWeek() {
   // Group logs by day and calculate hours
   const dayGroups = {};
   let totalMiles = 0;
-  let lastDayRendered = "";
   for (const log of filtered) {
     const day = new Date(log.datetime).toISOString().split('T')[0];
     if (!dayGroups[day]) dayGroups[day] = [];
