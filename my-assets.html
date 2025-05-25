@@ -27,6 +27,26 @@
       border-radius: 12px 12px 0 0;
       text-align: center;
     }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .username {
+      font-weight: bold;
+      color: #003366;
+      font-size: 15px;
+    }
+    .button {
+      display: inline-block;
+      padding: 8px 16px;
+      font-size: 14px;
+      background-color: rgba(0, 74, 153, 0.6);
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+    }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -38,6 +58,9 @@
       padding: 15px;
       border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
     .card h3 {
       margin-top: 0;
@@ -48,6 +71,18 @@
       margin: 4px 0;
       font-size: 14px;
     }
+    .card .transfer-button {
+      margin-top: 10px;
+      text-align: right;
+    }
+    .card .transfer-button a {
+      font-size: 13px;
+      padding: 6px 12px;
+      background-color: #004a99;
+      color: white;
+      border-radius: 4px;
+      text-decoration: none;
+    }
   </style>
   <script>
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
@@ -57,35 +92,41 @@
 </head>
 <body>
   <div class="content">
+    <div class="top-bar">
+      <a class="button" href="main.html">Main Menu</a>
+      <div class="username" id="user-display"></div>
+    </div>
     <h1>Plant & Equipment</h1>
     <div id="assetGrid" class="grid"></div>
   </div>
   <script>
     const username = sessionStorage.getItem("mostlaneUser");
-    let assetData = [];
-    let logData = [];
+    document.getElementById("user-display").textContent = "Logged in as " + username;
 
     Promise.all([
       fetch('assets/assets.json').then(r => r.json()),
       fetch('assets/asset-log.json').then(r => r.json())
     ])
     .then(([assets, logs]) => {
-      assetData = assets.filter(asset => asset.assignedTo === username);
-      logData = logs;
-
+      const assigned = assets.filter(asset => asset.assignedTo === username);
       const container = document.getElementById("assetGrid");
 
-      if (assetData.length === 0) {
+      if (assigned.length === 0) {
         container.innerHTML = "<p>No assets currently assigned to you.</p>";
         return;
       }
 
-      assetData.forEach(asset => {
-        const assignedLog = logData
-          .filter(log => log.assetID === asset.id && log.to === username)
+      assigned.forEach(asset => {
+        const log = logs
+          .filter(l => l.assetID === asset.id && l.to === username)
           .sort((a, b) => new Date(b.datetime) - new Date(a.datetime))[0];
 
-        const assignedDate = assignedLog ? new Date(assignedLog.datetime).toLocaleDateString() : "Unknown";
+        const assignedDate = log ? new Date(log.datetime).toLocaleDateString() : "Unknown";
+
+        const formUrl = new URL("https://www.jotform.com/form/241443354739360");
+        formUrl.searchParams.append("assetID", asset.id);
+        formUrl.searchParams.append("assignedTo", asset.assignedTo);
+        formUrl.searchParams.append("assetName", asset.name);
 
         const card = document.createElement("div");
         card.className = "card";
@@ -95,6 +136,9 @@
           <p><strong>Serial:</strong> ${asset.serial}</p>
           <p><strong>Value:</strong> ${asset.value}</p>
           <p><strong>Since:</strong> ${assignedDate}</p>
+          <div class="transfer-button">
+            <a href="${formUrl}" target="_blank">Transfer</a>
+          </div>
         `;
         container.appendChild(card);
       });
