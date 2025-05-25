@@ -1,15 +1,15 @@
+
 <!DOCTYPE html>
 <html>
 <head>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
-<script>
-  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    window.location.href = "login.html";
-  }
-</script>
-
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  </script>
 </head>
 <body class="main-body">
 
@@ -30,108 +30,51 @@
 </script>
 
 <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
-  <script>
-    const user = sessionStorage.getItem("mostlaneUser");
-    if (user) {
-      document.getElementById("user-display").textContent = "You are logged in as " + user;
-    }
-  </script>
-
-  <style>
-    .main-body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 40px 20px;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    h1 {
-      color: #003366;
-      margin-bottom: 30px;
-      text-align: center;
-    }
-    .button {
-      display: block;
-      margin: 10px auto;
-      padding: 12px 20px;
-      font-size: 16px;
-      text-align: center;
-      color: #ffffff;
-      background-color: rgba(0, 74, 153, 0.6);
-      text-decoration: none;
-      border-radius: 6px;
-      width: 90%;
-      max-width: 300px;
-    }
-  </style>
-
-  <a class="button" href="index.html">Check In / Out</a>
-  <a class="button" href="holiday.html">Holiday Requests</a>
-  <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
-  <a class="button" href="my-assets.html">Plant & Equipment</a>
-  <a class="button" href="weekly.html">Weekly Summary</a>
-
-<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
-
 <script>
-  const folder = sessionStorage.getItem("mostlaneFolder");
-  const hrButton = document.getElementById("hrButton");
-  if (folder) {
-    hrButton.href = folder;
-    hrButton.target = "_blank";
-  } else {
-    hrButton.addEventListener("click", function(e) {
-      e.preventDefault();
-      alert("No folder assigned. Please log in again.");
-    });
+  const user = sessionStorage.getItem("mostlaneUser");
+  if (user) {
+    document.getElementById("user-display").textContent = "You are logged in as " + user;
   }
 </script>
 
-<script>
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.trim().split("\n");
-      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
-      const user = sessionStorage.getItem("mostlaneUser");
-      if (employment[user] === "SelfEmployed") {
-        const holidayBtn = document.querySelector("a[href='holiday.html']");
-        if (holidayBtn) holidayBtn.remove();
-      }
-    });
+<style>
+  .main-body {
+    font-family: "Segoe UI", sans-serif;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: 180%;
+    margin: 0;
+    padding: 40px 20px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #003366;
+    margin-bottom: 30px;
+    text-align: center;
+  }
+  .button {
+    display: block;
+    margin: 10px auto;
+    padding: 12px 20px;
+    font-size: 16px;
+    text-align: center;
+    color: #ffffff;
+    background-color: rgba(0, 74, 153, 0.6);
+    text-decoration: none;
+    border-radius: 6px;
+    width: 90%;
+    max-width: 300px;
+  }
+</style>
 
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.split("\n");
-      const user = sessionStorage.getItem("mostlaneUser");
-      const match = lines.find(line => line.includes(user));
-      const isOffice = match && match.includes("Office");
-      if (isOffice) {
-        const siteBtn = document.createElement("a");
-        siteBtn.className = "button";
-        siteBtn.href = "add-site.html";
-        siteBtn.textContent = "Add Site";
-
-        const assetBtn = document.createElement("a");
-        assetBtn.className = "button";
-        assetBtn.href = "add-asset.html";
-        assetBtn.textContent = "Add Asset";
-
-        const reference = document.querySelector("a[href='weekly.html']");
-        const viewBtn = document.createElement("a");
-        viewBtn.className = "button";
-        viewBtn.href = "view-assets.html";
-        viewBtn.textContent = "View All Assets";
-
-        reference.insertAdjacentElement("afterend", siteBtn);
-        siteBtn.insertAdjacentElement("afterend", assetBtn);
-      }
-    });
+<a class="button" href="index.html">Check In / Out</a>
+<a class="button" href="holiday.html">Holiday Requests</a>
+<a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+<a class="button" href="my-assets.html">Plant & Equipment</a>
+<a class="button" href="weekly.html">Weekly Summary</a>
+<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 
 <script>
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
@@ -153,34 +96,29 @@
       const roles = Object.fromEntries(lines.map(line => line.split(" - ")));
       const user = sessionStorage.getItem("mostlaneUser");
       if (roles[user] === "Office") {
-        const menu = document.querySelector(".main-body");
-        const addAsset = document.createElement("a");
-        addAsset.className = "button";
-        addAsset.href = "add-asset.html";
-        addAsset.textContent = "Add Asset";
+        const reference = document.querySelector("a[href='weekly.html']");
+
+        const viewBtn = document.createElement("a");
+        viewBtn.className = "button";
+        viewBtn.href = "view-assets.html";
+        viewBtn.textContent = "View All Assets";
 
         const addSite = document.createElement("a");
         addSite.className = "button";
         addSite.href = "add-site.html";
         addSite.textContent = "Add Site";
 
-        const viewAll = document.createElement("a");
-        viewAll.className = "button";
-        viewAll.href = "view-assets.html";
-        viewAll.textContent = "View All Assets";
+        const addAsset = document.createElement("a");
+        addAsset.className = "button";
+        addAsset.href = "add-asset.html";
+        addAsset.textContent = "Add Asset";
 
-        const reference = document.querySelector("a[href='weekly.html']");
-        if (reference) {
-          reference.insertAdjacentElement("afterend", viewAll);
-          viewAll.insertAdjacentElement("afterend", addSite);
-          addSite.insertAdjacentElement("afterend", addAsset);
-        } else {
-          menu.appendChild(viewAll);
-          menu.appendChild(addSite);
-          menu.appendChild(addAsset);
-        }
+        reference.insertAdjacentElement("afterend", viewBtn);
+        viewBtn.insertAdjacentElement("afterend", addSite);
+        addSite.insertAdjacentElement("afterend", addAsset);
       }
     });
 </script>
+
 </body>
 </html>
