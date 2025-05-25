@@ -70,9 +70,9 @@
   </style>
 
   <a class="button" href="index.html">Check In / Out</a>
-    <a class="button" href="holiday.html">Holiday Requests</a>
-  <a class="button" id="hrButton" href="#">HR Documents</a>
+  <a class="button" href="holiday.html">Holiday Requests</a>
   <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
+  <a class="button" href="my-assets.html">Plant & Equipment</a>
   <a class="button" href="weekly.html">Weekly Summary</a>
 
 <a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
@@ -92,6 +92,18 @@
 </script>
 
 <script>
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.trim().split("\n");
+      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
+      const user = sessionStorage.getItem("mostlaneUser");
+      if (employment[user] === "SelfEmployed") {
+        const holidayBtn = document.querySelector("a[href='holiday.html']");
+        if (holidayBtn) holidayBtn.remove();
+      }
+    });
+
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
     .then(r => r.text())
     .then(text => {
@@ -111,26 +123,16 @@
         assetBtn.textContent = "Add Asset";
 
         const reference = document.querySelector("a[href='weekly.html']");
+        const viewBtn = document.createElement("a");
+        viewBtn.className = "button";
+        viewBtn.href = "view-assets.html";
+        viewBtn.textContent = "View All Assets";
+
         reference.insertAdjacentElement("afterend", siteBtn);
         siteBtn.insertAdjacentElement("afterend", assetBtn);
       }
     });
 </script>
 
-
-<script>
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.trim().split("\n");
-      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
-      const user = sessionStorage.getItem("mostlaneUser");
-      if (employment[user] === "SelfEmployed") {
-        const holidayBtn = document.querySelector("a[href='holiday.html']");
-        if (holidayBtn) holidayBtn.remove();
-      }
-    });
-</script>
 </body>
 </html>
-
