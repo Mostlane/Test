@@ -91,7 +91,7 @@
             <p><strong>Category:</strong> ${asset.category}</p>
             <p><strong>Serial:</strong> ${asset.serial}</p>
             <p><strong>Value:</strong> ${asset.value}</p>
-            <p><strong>Currently Assigned To:</strong> ${asset.assignedTo}</p>
+            <p><strong>Currently Assigned To:</strong> ${asset.assignedTo.replace(".", " ")}</p>
           `;
           container.appendChild(card);
         });
