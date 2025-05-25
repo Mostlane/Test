@@ -132,7 +132,55 @@
         siteBtn.insertAdjacentElement("afterend", assetBtn);
       }
     });
-</script>
 
+<script>
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.trim().split("\n");
+      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
+      const user = sessionStorage.getItem("mostlaneUser");
+      if (employment[user] === "SelfEmployed") {
+        const holidayBtn = document.querySelector("a[href='holiday.html']");
+        if (holidayBtn) holidayBtn.remove();
+      }
+    });
+
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.trim().split("\n");
+      const roles = Object.fromEntries(lines.map(line => line.split(" - ")));
+      const user = sessionStorage.getItem("mostlaneUser");
+      if (roles[user] === "Office") {
+        const menu = document.querySelector(".main-body");
+        const addAsset = document.createElement("a");
+        addAsset.className = "button";
+        addAsset.href = "add-asset.html";
+        addAsset.textContent = "Add Asset";
+
+        const addSite = document.createElement("a");
+        addSite.className = "button";
+        addSite.href = "add-site.html";
+        addSite.textContent = "Add Site";
+
+        const viewAll = document.createElement("a");
+        viewAll.className = "button";
+        viewAll.href = "view-assets.html";
+        viewAll.textContent = "View All Assets";
+
+        const reference = document.querySelector("a[href='weekly.html']");
+        if (reference) {
+          reference.insertAdjacentElement("afterend", viewAll);
+          viewAll.insertAdjacentElement("afterend", addSite);
+          addSite.insertAdjacentElement("afterend", addAsset);
+        } else {
+          menu.appendChild(viewAll);
+          menu.appendChild(addSite);
+          menu.appendChild(addAsset);
+        }
+      }
+    });
+</script>
 </body>
 </html>
