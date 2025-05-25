@@ -129,6 +129,7 @@
         formUrl.searchParams.append("assetID", asset.id);
         formUrl.searchParams.append("assignedTo", asset.assignedTo);
         formUrl.searchParams.append("assetName", asset.name);
+        formUrl.searchParams.append("value", asset.value);
 
         const card = document.createElement("div");
         card.className = "card";
