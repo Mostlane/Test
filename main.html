@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -13,7 +12,7 @@
 
 </head>
 <body class="main-body">
-  
+
 <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
 <script>
   const currentUser = sessionStorage.getItem("mostlaneUser");
@@ -69,13 +68,9 @@
       max-width: 300px;
     }
   </style>
-  
-  <a class="button" href="index.html">Check In / Out</a>
-    <a class="button" href="fuel.html">Fuel & Expenses</a>
-  <a class="button" href="holiday.html">Holiday Requests</a>
-  <a class="button" href="my-assets.html">Plant & Equipment</a>
-  <a class="button" href="shared-assets.html">Shared Assets</a>
 
+  <a class="button" href="index.html">Check In / Out</a>
+    <a class="button" href="holiday.html">Holiday Requests</a>
   <a class="button" id="hrButton" href="#">HR Documents</a>
   <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
   <a class="button" href="weekly.html">Weekly Summary</a>
@@ -105,14 +100,37 @@
       const match = lines.find(line => line.includes(user));
       const isOffice = match && match.includes("Office");
       if (isOffice) {
-        const btn = document.createElement("a");
-        btn.className = "button";
-        btn.href = "add-site.html";
-        btn.textContent = "Add Site";
-        document.querySelector("a[href='weekly.html']").insertAdjacentElement("afterend", btn);
+        const siteBtn = document.createElement("a");
+        siteBtn.className = "button";
+        siteBtn.href = "add-site.html";
+        siteBtn.textContent = "Add Site";
+
+        const assetBtn = document.createElement("a");
+        assetBtn.className = "button";
+        assetBtn.href = "add-asset.html";
+        assetBtn.textContent = "Add Asset";
+
+        const reference = document.querySelector("a[href='weekly.html']");
+        reference.insertAdjacentElement("afterend", siteBtn);
+        siteBtn.insertAdjacentElement("afterend", assetBtn);
       }
     });
 </script>
 
+
+<script>
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
+    .then(r => r.text())
+    .then(text => {
+      const lines = text.trim().split("\n");
+      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
+      const user = sessionStorage.getItem("mostlaneUser");
+      if (employment[user] === "SelfEmployed") {
+        const holidayBtn = document.querySelector("a[href='holiday.html']");
+        if (holidayBtn) holidayBtn.remove();
+      }
+    });
+</script>
 </body>
 </html>
+
