@@ -124,7 +124,7 @@
         const assignedDate = log ? new Date(log.datetime).toLocaleDateString() : "Unknown";
         const pdfURL = log && log.pdfURL ? log.pdfURL : null;
 
-        const formUrl = new URL("https://www.jotform.com/form/241443354739360");
+        const formUrl = new URL("https://www.jotform.com/form/251441412477049");
         formUrl.searchParams.append("assetID", asset.id);
         formUrl.searchParams.append("assignedTo", asset.assignedTo);
         formUrl.searchParams.append("assetName", asset.name);
