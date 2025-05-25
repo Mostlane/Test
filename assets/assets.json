@@ -1,0 +1,20 @@
+[
+    {
+        "id": "A1001",
+        "name": "Hilti SDS Drill",
+        "category": "Tool",
+        "serial": "HILTI-001",
+        "value": "\u00a3350",
+        "assignedTo": "Jamie.Line",
+        "shared": "Yes"
+    },
+    {
+        "id": "A1002",
+        "name": "Petrol Mixer",
+        "category": "Plant",
+        "serial": "MIX-409",
+        "value": "\u00a3500",
+        "assignedTo": "Colby.Lunsford",
+        "shared": "No"
+    }
+]
