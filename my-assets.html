@@ -39,5 +39,33 @@
     <h1>My Assets</h1>
     <p>This page will list all assets assigned to the logged-in user.</p>
   </div>
+
+<script>
+  const username = sessionStorage.getItem("mostlaneUser");
+  console.log("Logged in as:", username);
+
+  fetch('assets/assets.json')
+    .then(response => response.json())
+    .then(data => {
+      const container = document.createElement("div");
+      let matched = 0;
+      data.forEach(asset => {
+        if (asset.assignedTo === username) {
+          const div = document.createElement("div");
+          div.innerHTML = `<strong>${asset.name}</strong><br>Category: ${asset.category}<br>Serial: ${asset.serial}<br>Value: ${asset.value}`;
+          div.style.marginBottom = "20px";
+          container.appendChild(div);
+          matched++;
+        }
+      });
+      if (matched === 0) {
+        container.innerHTML = "<p>No assets currently assigned to you.</p>";
+      }
+      document.querySelector(".content").appendChild(container);
+    })
+    .catch(error => {
+      console.error("Failed to load assets.json:", error);
+    });
+</script>
 </body>
 </html>
