@@ -109,7 +109,7 @@
       fetch('assets/asset-log.json').then(r => r.json())
     ])
     .then(([assets, logs]) => {
-      const assigned = assets.filter(asset => asset.assignedTo === username);
+      const assigned = assets.filter(asset => asset.assignedTo && asset.assignedTo === username);
       const container = document.getElementById("assetGrid");
 
       if (assigned.length === 0) {
