@@ -81,7 +81,14 @@
   <div class="content">
     <a class="button" href="main.html">Main Menu</a>
     <h1>All Registered Assets</h1>
-    <div id="assetGrid" class="grid"></div>
+    <div id="assetGrid" class="grid">
+<div id="historyModal" style="display:none; position:fixed; top:10%; left:50%; transform:translateX(-50%);
+background:white; border:2px solid #003366; padding:20px; z-index:1000; width:90%; max-width:500px; border-radius:12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <h3 style="margin-top:0; color:#003366;">Transfer History</h3>
+  <div id="historyContent" style="font-size:14px; max-height:400px; overflow-y:auto;"></div>
+  <button onclick="document.getElementById('historyModal').style.display='none'" class="button" style="margin-top:10px;">Close</button>
+</div>
+</div>
   </div>
   <script>
     fetch("assets/assets.json")
@@ -98,6 +105,8 @@
           const card = document.createElement("div");
           card.className = "card";
           card.innerHTML = `
+<button class="button" onclick="showHistory('${asset.id}')">History</button>
+
             <h3>${asset.name}</h3>
             <p><strong>Category:</strong> ${asset.category}</p>
             <p><strong>Serial:</strong> ${asset.serial}</p>
@@ -113,5 +122,26 @@
         document.getElementById("assetGrid").innerHTML = "<p>Error loading assets.</p>";
       });
   </script>
+
+<script>
+function showHistory(assetID) {
+  fetch('assets/asset-log.json?bust=' + new Date().getTime())
+    .then(res => res.json())
+    .then(logs => {
+      const history = logs.filter(entry => entry.assetID === assetID);
+      if (history.length === 0) {
+        document.getElementById('historyContent').innerHTML = '<p>No transfer history available.</p>';
+      } else {
+        const sorted = history.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const lines = sorted.map(entry => {
+          const date = new Date(entry.timestamp).toLocaleString();
+          return `<p><strong>${entry.from}</strong> → <strong>${entry.to}</strong><br><em>${date}</em></p>`;
+        }).join('');
+        document.getElementById('historyContent').innerHTML = lines;
+      }
+      document.getElementById('historyModal').style.display = 'block';
+    });
+}
+</script>
 </body>
 </html>
