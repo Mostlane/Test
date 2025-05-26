@@ -4,7 +4,7 @@
     "name": "Makita Combi Drill",
     "category": "Tool",
     "serial": "S-0001",
-    "value": "\u00a3334",
+    "value": "£334",
     "assignedTo": "Aaron.Smith",
     "shared": "Yes"
   },
@@ -13,7 +13,7 @@
     "name": "Cordless Angle Grinder",
     "category": "Tool",
     "serial": "S-0002",
-    "value": "\u00a3652",
+    "value": "£652",
     "assignedTo": "Jamie.Line",
     "shared": "No"
   },
@@ -22,7 +22,7 @@
     "name": "Petrol Cut-Off Saw",
     "category": "Tool",
     "serial": "S-0003",
-    "value": "\u00a3501",
+    "value": "£501",
     "assignedTo": "Bradley.Graham",
     "shared": "No"
   },
@@ -31,7 +31,7 @@
     "name": "Plate Compactor",
     "category": "Plant",
     "serial": "S-0004",
-    "value": "\u00a3794",
+    "value": "£794",
     "assignedTo": "Bradley.Graham",
     "shared": "Yes"
   },
@@ -40,7 +40,7 @@
     "name": "Laser Level",
     "category": "Plant",
     "serial": "S-0005",
-    "value": "\u00a3396",
+    "value": "£396",
     "assignedTo": "Bradley.Graham",
     "shared": "No"
   },
@@ -49,7 +49,7 @@
     "name": "Aluminium Tower",
     "category": "Plant",
     "serial": "S-0006",
-    "value": "\u00a3307",
+    "value": "£307",
     "assignedTo": "Ali.Khan",
     "shared": "No"
   },
@@ -58,7 +58,7 @@
     "name": "Paslode Nail Gun",
     "category": "Plant",
     "serial": "S-0007",
-    "value": "\u00a3260",
+    "value": "£260",
     "assignedTo": "Bradley.Graham",
     "shared": "Yes"
   },
@@ -67,7 +67,7 @@
     "name": "Petrol Generator",
     "category": "Plant",
     "serial": "S-0008",
-    "value": "\u00a3559",
+    "value": "£559",
     "assignedTo": "Bradley.Graham",
     "shared": "Yes"
   },
@@ -76,7 +76,7 @@
     "name": "Work Light Set",
     "category": "Plant",
     "serial": "S-0009",
-    "value": "\u00a3598",
+    "value": "£598",
     "assignedTo": "Aaron.Smith",
     "shared": "Yes"
   },
@@ -85,7 +85,7 @@
     "name": "Corded SDS Drill",
     "category": "Tool",
     "serial": "S-0010",
-    "value": "\u00a3787",
+    "value": "£787",
     "assignedTo": "Bradley.Graham",
     "shared": "No"
   },
@@ -94,7 +94,7 @@
     "name": "Bench Grinder",
     "category": "Tool",
     "serial": "S-0011",
-    "value": "\u00a3312",
+    "value": "£312",
     "assignedTo": "Bradley.Graham",
     "shared": "No"
   },
@@ -103,7 +103,7 @@
     "name": "Electric Mixer",
     "category": "Plant",
     "serial": "S-0012",
-    "value": "\u00a3259",
+    "value": "£259",
     "assignedTo": "Ali.Khan",
     "shared": "Yes"
   },
@@ -112,7 +112,7 @@
     "name": "Dust Extractor",
     "category": "Plant",
     "serial": "S-0013",
-    "value": "\u00a3606",
+    "value": "£606",
     "assignedTo": "Aaron.Smith",
     "shared": "No"
   },
@@ -121,7 +121,7 @@
     "name": "Mobile Scaffold",
     "category": "Plant",
     "serial": "S-0014",
-    "value": "\u00a3311",
+    "value": "£311",
     "assignedTo": "Ali.Khan",
     "shared": "Yes"
   },
@@ -130,7 +130,7 @@
     "name": "Podium Step",
     "category": "Plant",
     "serial": "S-0015",
-    "value": "\u00a3587",
+    "value": "£587",
     "assignedTo": "Colby.Lunsford",
     "shared": "No"
   },
@@ -139,7 +139,7 @@
     "name": "Reciprocating Saw",
     "category": "Tool",
     "serial": "S-0016",
-    "value": "\u00a3291",
+    "value": "£291",
     "assignedTo": "Colby.Lunsford",
     "shared": "Yes"
   },
@@ -148,7 +148,7 @@
     "name": "Petrol Lawn Mower",
     "category": "Plant",
     "serial": "S-0017",
-    "value": "\u00a3677",
+    "value": "£677",
     "assignedTo": "Colby.Lunsford",
     "shared": "No"
   },
@@ -157,7 +157,7 @@
     "name": "Mitre Saw",
     "category": "Tool",
     "serial": "S-0018",
-    "value": "\u00a3667",
+    "value": "£667",
     "assignedTo": "Ali.Khan",
     "shared": "No"
   },
@@ -166,7 +166,7 @@
     "name": "Cordless Circular Saw",
     "category": "Tool",
     "serial": "S-0019",
-    "value": "\u00a3228",
+    "value": "£228",
     "assignedTo": "Jamie.Line",
     "shared": "Yes"
   },
@@ -175,7 +175,7 @@
     "name": "Measuring Wheel",
     "category": "Plant",
     "serial": "S-0020",
-    "value": "\u00a3431",
+    "value": "£431",
     "assignedTo": "Colby.Lunsford",
     "shared": "No"
   },
@@ -184,7 +184,7 @@
     "name": "Tripod Stand",
     "category": "Plant",
     "serial": "S-0021",
-    "value": "\u00a3271",
+    "value": "£271",
     "assignedTo": "Jamie.Line",
     "shared": "Yes"
   },
@@ -193,7 +193,7 @@
     "name": "PVC Pipe Cutter",
     "category": "Plant",
     "serial": "S-0022",
-    "value": "\u00a3768",
+    "value": "£768",
     "assignedTo": "Aaron.Smith",
     "shared": "No"
   },
@@ -202,7 +202,7 @@
     "name": "Multi-tool Cutter",
     "category": "Plant",
     "serial": "S-0023",
-    "value": "\u00a3332",
+    "value": "£332",
     "assignedTo": "Ali.Khan",
     "shared": "No"
   },
@@ -211,7 +211,7 @@
     "name": "Hot Air Gun",
     "category": "Plant",
     "serial": "S-0024",
-    "value": "\u00a3632",
+    "value": "£632",
     "assignedTo": "Aaron.Smith",
     "shared": "Yes"
   },
@@ -220,7 +220,7 @@
     "name": "Pipe Freezing Kit",
     "category": "Plant",
     "serial": "S-0025",
-    "value": "\u00a3800",
+    "value": "£800",
     "assignedTo": "Ali.Khan",
     "shared": "Yes"
   }
