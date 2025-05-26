@@ -117,15 +117,24 @@
 </script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  const username = sessionStorage.getItem("mostlaneUsername") || sessionStorage.getItem("mostlaneLoggedInUser");
-  if (username) {
-    const displayName = username.replace(".", " ");
-    const sharePointURL = "https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/" + encodeURIComponent(displayName) + "/HR%20Documents";
-    const btn = document.getElementById("my-documents-btn");
-    if (btn) {
-      btn.href = sharePointURL;
-    }
-  }
+  const username = sessionStorage.getItem("mostlaneUsername");
+  if (!username) return;
+
+  fetch("https://mostlane.github.io/Test/Users.txt")
+    .then(response => response.text())
+    .then(data => {
+      const rows = data.split("\n");
+      const match = rows.find(row => row.startsWith(username + "|"));
+      if (!match) return;
+
+      const parts = match.split("|");
+      const sharePointURL = parts[2];
+
+      const btn = document.getElementById("my-documents-btn");
+      if (btn) {
+        btn.href = sharePointURL;
+      }
+    });
 });
 </script></body>
 </html>
