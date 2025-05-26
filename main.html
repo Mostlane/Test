@@ -70,7 +70,7 @@
 <a class="button" href="holiday.html">Holiday Requests</a>
 <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
 <a class="button" href="my-assets.html">Plant &amp; Equipment</a>
-<a class="button" href="documents.html">HR Documents</a><a class="button" href="weekly.html">Weekly Summary</a>
+<a class="button" href="weekly.html">Weekly Summary</a>
 <a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 <script>
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
@@ -115,5 +115,22 @@
       }
     });
 </script>
-</body>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const username = sessionStorage.getItem("mostlaneUsername");
+  if (username) {
+    const displayName = username.replace(".", " ");
+    const sharePointURL = "https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/" + encodeURIComponent(displayName) + "/HR%20Documents";
+    const hrBtn = document.createElement("a");
+    hrBtn.href = sharePointURL;
+    hrBtn.className = "button";
+    hrBtn.innerText = "HR Documents";
+
+    const referenceButton = document.querySelector('a[href="weekly.html"]');
+    if (referenceButton && referenceButton.parentNode) {
+      referenceButton.parentNode.insertBefore(hrBtn, referenceButton);
+    }
+  }
+});
+</script></body>
 </html>
