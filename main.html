@@ -117,7 +117,7 @@
 </script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  const username = sessionStorage.getItem("mostlaneUsername");
+  const username = sessionStorage.getItem("mostlaneUsername") || sessionStorage.getItem("mostlaneLoggedInUser");
   if (username) {
     const displayName = username.replace(".", " ");
     const sharePointURL = "https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/Portal/User%20Folders/" + encodeURIComponent(displayName) + "/HR%20Documents";
