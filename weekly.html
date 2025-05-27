@@ -88,6 +88,58 @@
 </div>
 
 <script>
+const siteList = [
+  {
+    name: "5 Woodlands Close",
+    lat: 50.874399,
+    lon: -1.281986,
+    mileage: 2.7,
+    radius: 500
+  },
+  {
+    name: "Brockhurst Road",
+    lat: 50.808241,
+    lon: -1.153669,
+    mileage: 6.1,
+    radius: 500
+  },
+  {
+    name: "Hartley Wintney",
+    lat: 51.298408,
+    lon: -0.913927,
+    mileage: 46.5,
+    radius: 500
+  },
+  {
+    name: "Starbucks Gatwick",
+    lat: 51.133573,
+    lon: -0.167835,
+    mileage: 67.7,
+    radius: 500
+  },
+  {
+    name: "The Old Vicarage",
+    lat: 51.098356,
+    lon: -0.943547,
+    mileage: 33.5,
+    radius: 500
+  },
+  {
+    name: "The Oaks Crematorium ",
+    lat: 50.869469,
+    lon: -0.95682,
+    mileage: 17.5,
+    radius: 500
+  },
+  {
+    name: "Office",
+    lat: 50.86164,
+    lon: -1.247527,
+    mileage: 1.4,
+    radius: 500
+  },
+];
+
 let user = sessionStorage.getItem("mostlaneUser") || "admin";
 let offset = 0;
 let dataStore = null;
@@ -439,8 +491,78 @@ showCorrectButton();
 </html>
 
 <script>
+const siteList = [
+  {
+    name: "5 Woodlands Close",
+    lat: 50.874399,
+    lon: -1.281986,
+    mileage: 2.7,
+    radius: 500
+  },
+  {
+    name: "Brockhurst Road",
+    lat: 50.808241,
+    lon: -1.153669,
+    mileage: 6.1,
+    radius: 500
+  },
+  {
+    name: "Hartley Wintney",
+    lat: 51.298408,
+    lon: -0.913927,
+    mileage: 46.5,
+    radius: 500
+  },
+  {
+    name: "Starbucks Gatwick",
+    lat: 51.133573,
+    lon: -0.167835,
+    mileage: 67.7,
+    radius: 500
+  },
+  {
+    name: "The Old Vicarage",
+    lat: 51.098356,
+    lon: -0.943547,
+    mileage: 33.5,
+    radius: 500
+  },
+  {
+    name: "The Oaks Crematorium ",
+    lat: 50.869469,
+    lon: -0.95682,
+    mileage: 17.5,
+    radius: 500
+  },
+  {
+    name: "Office",
+    lat: 50.86164,
+    lon: -1.247527,
+    mileage: 1.4,
+    radius: 500
+  },
+];
+
 function updateMileageTotal() {
   let total = 0;
+  const boxes = document.querySelectorAll(".claim-mileage:checked");
+  console.clear();
+  console.log("Calculating mileage from selected boxes...");
+  boxes.forEach(el => {
+    const raw = parseFloat(el.dataset.miles || "0");
+    const paid = Math.max(0, raw - 10);
+    console.log(`✓ Box with raw: ${raw} → paid: ${paid}`);
+    total += paid;
+  });
+  const box = document.getElementById("mileageTotalDisplay");
+  if (boxes.length === 0) {
+    box.innerText = "No mileage selected.";
+    box.style.color = "red";
+  } else {
+    box.innerText = `Total Paid Mileage: ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+    box.style.color = "#004a99";
+  }
+
   document.querySelectorAll(".claim-mileage:checked").forEach(el => {
     const raw = parseFloat(el.dataset.miles || "0");
     const paid = Math.max(0, raw - 10);
