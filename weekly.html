@@ -439,13 +439,21 @@ showCorrectButton();
 </html>
 
 <script>
+
 function updateMileageTotal() {
   let total = 0;
-  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+  const boxes = document.querySelectorAll(".claim-mileage:checked");
+  boxes.forEach(el => {
     const raw = parseFloat(el.dataset.miles || "0");
     const paid = Math.max(0, raw - 10);
     total += paid;
   });
+  const summary = document.getElementById("mileageTotalDisplay");
+  if (summary) {
+    summary.innerText = `Total Paid Mileage: ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+  }
+}
+);
   let display = document.getElementById("mileageTotalDisplay");
   if (!display) {
     display = document.createElement("div");
