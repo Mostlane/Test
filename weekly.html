@@ -304,7 +304,7 @@ async function loadWeek() {
     if (siteName) {
       locationDisplay = `<strong>Location:</strong> ${siteName}`;
         const matchedSite = sites.find(s => s.siteName === siteName);
-        if (matchedSite && matchedSite.mileageFromHQ !== undefined) {
+        if (matchedSite && matchedSite.mileageFromHQ !== undefined && fuelOK) {
           locationDisplay += `<br><span class='mileage'>Distance from office: ${matchedSite.mileageFromHQ.toFixed(1)} miles</span>`;
           locationDisplay += `<br><label><input type='checkbox' class='claim-mileage' data-miles='${matchedSite.mileageFromHQ.toFixed(1)}'> Claim mileage for this trip</label>`;
         }
@@ -430,20 +430,30 @@ showCorrectButton();
   <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
   <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
   <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
+  <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
   
 </div>
+<footer style='text-align:center; font-size:11px; color:#999; margin-top:40px;'>Weekly version: 2024-05-27-FINAL</footer>
 </body>
 
 </html>
 
 <script>
+
 function updateMileageTotal() {
   let total = 0;
-  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+  const boxes = document.querySelectorAll(".claim-mileage:checked");
+  boxes.forEach(el => {
     const raw = parseFloat(el.dataset.miles || "0");
     const paid = Math.max(0, raw - 10);
     total += paid;
   });
+  const summary = document.getElementById("mileageTotalDisplay");
+  if (summary) {
+    summary.innerText = `Total Paid Mileage: ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+  }
+}
+);
   let display = document.getElementById("mileageTotalDisplay");
   if (!display) {
     display = document.createElement("div");
