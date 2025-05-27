@@ -71,7 +71,7 @@
       const monday = new Date(date);
       monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
       const friday = new Date(monday);
-      friday.setDate(monday.getDate() + 4);
+      friday.setDate(monday.getDate() + 6);
       friday.setHours(23, 59, 59, 999); // include all of Friday
 
       const format = d => {
@@ -116,7 +116,7 @@ const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
 
 let locationDisplay = "";
 if (log.location) {
-  const lat = log.location.match(/Latitude:\s*([^\s]+)/i);
+  const lat = log.location.match(/Latitude:\s*([^L]+)/i);
   const lon = log.location.match(/Longitude:\s*([^\s]+)/i);
   if (lat) locationDisplay += `Latitude: ${lat[1]}<br>`;
   if (lon) locationDisplay += `Longitude: ${lon[1]}`;
@@ -132,19 +132,11 @@ div.innerHTML = `<strong>${log.type.toUpperCase()}</strong><br>${formatted}<br>$
       }
     }
 
-    fetch("https://api.github.com/repos/Mostlane/Test/contents/logs/activity-log.json?cb=2025-05-10T11:31:49.543796")
-        .then(response => response.json())
+    fetch("https://raw.githubusercontent.com/Mostlane/Test/main/logs/activity-log.json")
+      .then(response => response.json())
       .then(json => {
-            .then(data => {
-    const decoded = atob(data.content);
-    dataStore = JSON.parse(decoded);
-    loadWeek();
-  })
-  .catch(error => {
-    document.getElementById("weekRange").textContent = "Error loading data";
-    document.getElementById("activityLog").innerHTML = "<p style='color:red;'>Could not load activity log.</p>";
-    console.error("Fetch error:", error);
-  });
+        dataStore = json;
+        loadWeek();
       })
       .catch(error => {
         document.getElementById("weekRange").textContent = "Error loading data";
