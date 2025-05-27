@@ -459,12 +459,12 @@ function updateMileageTotal() {
   }
 }
 
+
 window.addEventListener("load", () => {
-  setTimeout(() => {
-    document.querySelectorAll(".claim-mileage").forEach(el => {
-      el.addEventListener("change", updateMileageTotal);
-    });
-    updateMileageTotal();
-  }, 1000);
+  document.querySelectorAll(".claim-mileage").forEach(el => {
+    el.addEventListener("change", updateMileageTotal);
+  });
+  updateMileageTotal();
 });
+
 </script>
