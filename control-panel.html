@@ -1,0 +1,242 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mostlane Control Panel</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      color: #333;
+    }
+
+    .main-menu {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background-color: #003366;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      text-decoration: none;
+      font-weight: bold;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 80px auto;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 20px;
+      padding: 30px 40px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .form-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .form-group.full-width {
+      grid-template-columns: 1fr;
+    }
+
+    label {
+      font-weight: bold;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border-radius: 12px;
+      border: 1px solid #ccc;
+      background-color: white;
+      font-size: 16px;
+    }
+
+    .toggle-switch {
+      display: flex;
+      align-items: center;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 32px;
+      margin-left: 10px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0;
+      right: 0; bottom: 0;
+      background-color: #ccc;
+      transition: 0.4s;
+      border-radius: 32px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 24px;
+      width: 24px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: 0.4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: #003366;
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(28px);
+    }
+
+    button {
+      background-color: #003366;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+
+    button:hover {
+      background-color: #002244;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <a href="main.html" class="main-menu">Main Menu</a>
+  <div class="container">
+    <h1>User Control Panel</h1>
+
+    <div class="form-group full-width">
+      <label for="userSelect">Select User</label>
+      <select id="userSelect">
+        <option>Loading...</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <div>
+        <label>Employment Type: <span id="employmentLabel">Employed</span></label>
+        <div class="toggle-switch">
+          <label class="switch">
+            <input type="checkbox" id="employmentToggle" onchange="toggleLabel('employmentToggle','employmentLabel',['Employed','SelfEmployed'])">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label>Travel Time Paid: <span id="travelTimeLabel">Yes</span></label>
+        <div class="toggle-switch">
+          <label class="switch">
+            <input type="checkbox" id="travelTimeToggle" onchange="toggleLabel('travelTimeToggle','travelTimeLabel',['Yes','No'])">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <div>
+        <label>Role Type: <span id="roleTypeLabel">Field</span></label>
+        <div class="toggle-switch">
+          <label class="switch">
+            <input type="checkbox" id="roleTypeToggle" onchange="toggleLabel('roleTypeToggle','roleTypeLabel',['Field','Office'])">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label for="rateInput">Hourly Rate (£)</label>
+        <input type="text" id="rateInput" placeholder="e.g. 12.00" />
+      </div>
+    </div>
+
+    <div class="form-group full-width">
+      <label for="deviceIdInput">Device ID</label>
+      <input type="text" id="deviceIdInput" placeholder="e.g. dev-8236745" />
+    </div>
+
+    <div class="form-group full-width">
+      <label for="postcodeInput">Home Postcode</label>
+      <input type="text" id="postcodeInput" placeholder="e.g. PO15 5RQ" />
+    </div>
+
+    <div class="form-group full-width">
+      <label for="sharepointInput">SharePoint Folder</label>
+      <input type="text" id="sharepointInput" placeholder="https://..." />
+    </div>
+
+    <div class="form-group full-width">
+      <label for="passwordInput">New Password (leave blank to keep current)</label>
+      <input type="password" id="passwordInput" placeholder="••••••••" />
+    </div>
+
+    <div class="form-group actions full-width">
+      <button onclick="addUser()">Add User</button>
+      <button onclick="saveChanges()">Save Changes</button>
+    </div>
+  </div>
+
+  <script>
+    const GITHUB_TOKEN = 'YOUR_GITHUB_TOKEN_HERE';
+    const REPO_OWNER = 'Mostlane';
+    const REPO_NAME = 'Test';
+    const BRANCH = 'main';
+
+    function toggleLabel(toggleId, labelId, values) {
+      const toggle = document.getElementById(toggleId);
+      const label = document.getElementById(labelId);
+      label.textContent = toggle.checked ? values[1] : values[0];
+    }
+
+    async function loadUsers() {
+      document.getElementById('userSelect').innerHTML = '<option>Loading...</option>';
+    }
+
+    async function saveChanges() {
+      alert('This will save updates to GitHub using the API.');
+    }
+
+    async function addUser() {
+      alert('This will prompt to add a new user with default fields.');
+    }
+
+    window.onload = loadUsers;
+  </script>
+</body>
+</html>
