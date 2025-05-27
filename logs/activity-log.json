@@ -4420,6 +4420,16 @@
   "Greg.Line": [
 {
   "type": "Check In",
+  "datetime": "2025-05-27T14:23:00Z",
+  "location": "Latitude: 50.874526628445516 Longitude: -1.2819104221619695",
+  "location_coords": {
+    "lat": 50.874526628445516,
+    "lon": -1.2819104221619695
+  },
+  "driver": false
+},
+{
+  "type": "Check In",
   "datetime": "2025-05-27T14:22:00Z",
   "location": "Latitude: 50.874526628445516 Longitude: -1.2819104221619695",
   "location_coords": {
