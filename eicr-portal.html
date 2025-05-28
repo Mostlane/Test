@@ -61,7 +61,7 @@
 
   <input type="text" id="searchBox" onkeyup="filterTable()" placeholder="Search for sites, addresses, or summaries...">
 
-  <table id="eicrTable">
+  <div style="max-height: 65vh; overflow-y: auto;"><table id="eicrTable">
     <thead>
       <tr>
         <th>Store Number</th>
@@ -74,7 +74,7 @@
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
-  </table>
+  </table></div>
 
   <script>
     async function loadData() {
