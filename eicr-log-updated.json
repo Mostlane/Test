@@ -1,0 +1,72 @@
+[
+  {
+    "storeNumber": "1000",
+    "siteName": "Lakeside Head Office",
+    "postcode": "SO51 8BW",
+    "nextDue": "11/12/2028",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "383",
+    "siteName": "Addlestone Church Road",
+    "postcode": "KT15 1RZ",
+    "nextDue": "02/11/2026",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "384",
+    "siteName": "Addlestone New Haw Road",
+    "postcode": "KT15 3HL",
+    "nextDue": "12/07/2026",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "216",
+    "siteName": "Alderholt Ringwood Road",
+    "postcode": "SP6 3BA",
+    "nextDue": "29/04/2026",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "330",
+    "siteName": "Aldershot Lower Farnham Road",
+    "postcode": "GU11 3EH",
+    "nextDue": "27/04/2026",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "110",
+    "siteName": "Alresford West Street",
+    "postcode": "SO24 9AE",
+    "nextDue": "31/05/2027",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "405",
+    "siteName": "Alton High Street",
+    "postcode": "GU34 1HL",
+    "nextDue": "12/07/2027",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "415",
+    "siteName": "Andover East Anton Farm Road",
+    "postcode": "SP11 6UF",
+    "nextDue": "28/01/2028",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "426",
+    "siteName": "Andover Picket Twenty",
+    "postcode": "SP11 6UF",
+    "nextDue": "12/11/2026",
+    "pdfURL": "Click Here"
+  },
+  {
+    "storeNumber": "220",
+    "siteName": "Angmering The Square",
+    "postcode": "BN16 4EA",
+    "nextDue": "06/06/2025",
+    "pdfURL": "Click Here"
+  }
+]
