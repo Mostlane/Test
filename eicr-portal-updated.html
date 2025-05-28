@@ -1,0 +1,145 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mostlane Compliance Portal</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') center center no-repeat;
+      background-size: cover;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .summary-boxes {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .summary-box {
+      background: #f5f5f5;
+      padding: 15px 25px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 10px;
+      text-align: left;
+    }
+    th {
+      background-color: #e0e0e0;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      margin: 10px 0;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <img src="mostlane-logo.jpeg" alt="Mostlane Logo" style="display:block;margin:0 auto;width:180px;">
+  <h1>Compliance Portal</h1>
+
+  <div class="summary-boxes" id="summary"></div>
+
+  <input type="text" id="searchBox" onkeyup="filterTable()" placeholder="Search for sites, addresses, or summaries...">
+
+  <div style="max-height: 65vh; overflow-y: auto;"><table id="eicrTable">
+    <thead>
+      <tr>
+        <th>Store Number</th>
+        <th>Site Name</th>
+        <th>Postcode</th>
+        <th>Date of Test</th>
+        <th>Next Due Date</th>
+        <th>Forecourt Due</th>
+        <th>5YR Due</th>
+        <th>EM Due</th>
+        <th>PAT Due</th>
+        <th>PV Due</th>
+        <th>EV Due</th>
+        <th>Status</th>
+        <th>Report</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table></div>
+
+  <script>
+    async function loadData() {
+      const response = await fetch('eicr-log-cleaned.json');
+      const data = await response.json();
+      let sat = 0, unsat = 0;
+      const now = new Date();
+      const days30 = new Date(); days30.setDate(now.getDate() + 30);
+      const days90 = new Date(); days90.setDate(now.getDate() + 90);
+      const days365 = new Date(); days365.setDate(now.getDate() + 365);
+      let due30 = 0, due90 = 0, due365 = 0;
+
+      data.forEach(item => {
+        const dueDate = new Date(item.nextDue);
+        const status = (item.c1 > 0 || item.c2 > 0) ? "Unsatisfactory" : "Satisfactory";
+        if (status === "Satisfactory") sat++; else unsat++;
+
+        if (dueDate <= days30) due30++;
+        if (dueDate <= days90) due90++;
+        if (dueDate <= days365) due365++;
+
+        const row = `
+          <tr>
+            <td>${item.storeNumber}</td>
+            <td>${item.siteName}</td>
+            <td>${item.postcode}</td>
+            <td>${item.testDate || '–'}</td>
+            <td>${item.nextDue || '–'}</td>
+            <td>${item.forecourtDue || '–'}</td>
+            <td>${item.fiveYrDue || '–'}</td>
+            <td>${item.emDue || '–'}</td>
+            <td>${item.patDue || '–'}</td>
+            <td>${item.pvDue || '–'}</td>
+            <td>${item.evDue || '–'}</td>
+            <td>${status}</td>
+            <td><a href="${item.pdfURL}" target="_blank">View</a></td>
+          </tr>`;
+        document.getElementById("tableBody").innerHTML += row;
+      });
+
+      document.getElementById("summary").innerHTML = `
+        <div class="summary-box"><strong>Satisfactory</strong><br>${sat}</div>
+        <div class="summary-box"><strong>Unsatisfactory</strong><br>${unsat}</div>
+        <div class="summary-box"><strong>Overall Status</strong><br>${Math.round(100 * sat / (sat + unsat))}% Satisfactory</div>
+        <div class="summary-box"><strong>Due in 30 Days</strong><br>${due30}</div>
+        <div class="summary-box"><strong>Due in 90 Days</strong><br>${due90}</div>
+        <div class="summary-box"><strong>Due in 365 Days</strong><br>${due365}</div>`;
+    }
+
+    function filterTable() {
+      const filter = document.getElementById("searchBox").value.toUpperCase();
+      const rows = document.getElementById("eicrTable").getElementsByTagName("tr");
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        row.style.display = row.innerText.toUpperCase().includes(filter) ? "" : "none";
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
