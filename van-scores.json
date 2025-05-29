@@ -6,7 +6,6 @@
     "trips": 7,
     "van_check": true,
     "score": 91,
-    "rank": 1,
     "trend": "flat"
   },
   {
@@ -16,7 +15,6 @@
     "trips": 7,
     "van_check": true,
     "score": 82,
-    "rank": 2,
     "trend": "up"
   },
   {
@@ -26,7 +24,6 @@
     "trips": 6,
     "van_check": true,
     "score": 78,
-    "rank": 3,
     "trend": "up"
   },
   {
@@ -36,7 +33,6 @@
     "trips": 8,
     "van_check": true,
     "score": 75,
-    "rank": 4,
     "trend": "flat"
   },
   {
@@ -46,7 +42,6 @@
     "trips": 9,
     "van_check": false,
     "score": 59,
-    "rank": 9,
     "trend": "down"
   },
   {
@@ -56,7 +51,6 @@
     "trips": 6,
     "van_check": true,
     "score": 85,
-    "rank": 5,
     "trend": "up"
   },
   {
@@ -66,7 +60,6 @@
     "trips": 5,
     "van_check": false,
     "score": 63,
-    "rank": 8,
     "trend": "down"
   },
   {
@@ -76,7 +69,6 @@
     "trips": 6,
     "van_check": true,
     "score": 70,
-    "rank": 6,
     "trend": "flat"
   },
   {
@@ -86,7 +78,6 @@
     "trips": 7,
     "van_check": true,
     "score": 77,
-    "rank": 4,
     "trend": "up"
   },
   {
@@ -96,7 +87,6 @@
     "trips": 8,
     "van_check": true,
     "score": 66,
-    "rank": 7,
     "trend": "flat"
   },
   {
@@ -106,7 +96,6 @@
     "trips": 0,
     "van_check": false,
     "score": 0,
-    "rank": 14,
     "trend": "flat"
   },
   {
@@ -116,7 +105,6 @@
     "trips": 0,
     "van_check": false,
     "score": 0,
-    "rank": 13,
     "trend": "flat"
   },
   {
@@ -126,7 +114,6 @@
     "trips": 0,
     "van_check": false,
     "score": 0,
-    "rank": 12,
     "trend": "flat"
   },
   {
@@ -136,7 +123,6 @@
     "trips": 6,
     "van_check": true,
     "score": 76,
-    "rank": 10,
     "trend": "up"
   }
 ]
