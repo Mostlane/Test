@@ -2,91 +2,96 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>EICR Portal</title>
+  <meta charset="UTF-8">
+  <title>EICR Compliance Portal</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
       margin: 0;
+      font-family: Arial, sans-serif;
       background: url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
     }
     .container {
-      background-color: rgba(255, 255, 255, 0.88);
+      background: rgba(255, 255, 255, 0.85); /* Increased transparency */
       margin: 40px auto;
       padding: 20px;
       border-radius: 12px;
-      max-width: 1400px;
-      box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+      max-width: 1200px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     }
     h1 {
       text-align: center;
+      margin-bottom: 20px;
+    }
+    .logo {
+      display: block;
+      margin: 0 auto 20px;
+      max-width: 160px;
     }
     .summary-buttons {
       display: flex;
-      justify-content: center;
-      gap: 20px;
-      flex-wrap: wrap;
+      justify-content: space-around;
       margin-bottom: 20px;
     }
-    .summary-button {
-      padding: 12px 20px;
+    .summary-buttons button {
+      padding: 10px 20px;
       border: none;
-      border-radius: 10px;
-      color: #fff;
+      border-radius: 20px;
       font-weight: bold;
       cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
-    .green { background-color: #28a745; }
-    .red { background-color: #dc3545; }
-    .yellow { background-color: #ffc107; color: #000; }
-    .blue { background-color: #007bff; }
-    .lightblue { background-color: #17a2b8; }
-
+    .search-bar {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    #searchInput {
+      padding: 8px;
+      width: 300px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 14px;
     }
     th, td {
-      border: 1px solid #ccc;
-      padding: 10px 8px;
-      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      text-align: center;
+      white-space: nowrap;
     }
     th {
-      background-color: #f0f0f0;
+      background-color: #f4f4f4;
     }
-    .clickable-section {
-      margin-top: 30px;
-    }
-    .clickable-section h3 {
-      margin-top: 20px;
-      color: #003366;
+    .hidden {
+      display: none;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Mostlane Compliance Overview</h1>
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
+    <h1>Compliance Tracker</h1>
     <div class="summary-buttons">
-      <button id="satisfactoryBtn" class="summary-button green">Satisfactory: <span id="satisfactoryCount">0</span></button>
-      <button id="unsatisfactoryBtn" class="summary-button red">Unsatisfactory: <span id="unsatisfactoryCount">0</span></button>
-      <button id="d30Btn" class="summary-button yellow">Due in 30 Days: <span id="d30Count">0</span></button>
-      <button id="d90Btn" class="summary-button blue">Due in 90 Days: <span id="d90Count">0</span></button>
-      <button id="d365Btn" class="summary-button lightblue">Due in 365 Days: <span id="d365Count">0</span></button>
+      <button onclick="filterByDays(30)" style="background-color: #ffe066;">Due in 30 Days</button>
+      <button onclick="filterByDays(90)" style="background-color: #ffd43b;">Due in 90 Days</button>
+      <button onclick="filterByDays(365)" style="background-color: #fab005;">Due in 365 Days</button>
+      <button onclick="clearFilter()" style="background-color: #e0e0e0;">Clear</button>
     </div>
-
+    <div class="search-bar">
+      <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Search for site name, postcode, or store number...">
+    </div>
     <table>
       <thead>
         <tr>
-          <th>Store #</th>
+          <th>Store Number</th>
           <th>Site Name</th>
           <th>Postcode</th>
           <th>5YR Due</th>
           <th>PAT Due</th>
-          <th>Forecourt Due</th>
           <th>EM Due</th>
+          <th>Forecourt Due</th>
           <th>EV Due</th>
           <th>PV Due</th>
           <th>Outcome</th>
@@ -95,77 +100,74 @@
       </thead>
       <tbody id="tableBody"></tbody>
     </table>
-
-    <div class="clickable-section">
-      <div id="filteredResults"></div>
-    </div>
   </div>
-
   <script>
+    let fullData = [];
     async function fetchData() {
       const res = await fetch('eicr-log.json');
       const data = await res.json();
-      const table = document.getElementById('tableBody');
-      const d30List = [], d90List = [], d365List = [];
-
-      let satisfactory = 0, unsatisfactory = 0, d30 = 0, d90 = 0, d365 = 0;
-      const today = new Date();
-
-      function renderRow(item) {
-        const formatDate = date => date ? date : "";
-        const reportLink = item.reportURL && item.reportURL !== "NaN" ? `<a href="${item.reportURL}" target="_blank">Click Here</a>` : "Click Here";
-        return `<tr>
-          <td>${String(item.storeNumber).padStart(4, '0')}</td>
-          <td>${item.siteName}</td>
-          <td>${item.postcode}</td>
-          <td>${formatDate(item.fiveYrDueDate)}</td>
-          <td>${formatDate(item.patDueDate)}</td>
-          <td>${formatDate(item.forecourtDueDate)}</td>
-          <td>${formatDate(item.emDueDate)}</td>
-          <td>${formatDate(item.evDueDate)}</td>
-          <td>${formatDate(item.pvDueDate)}</td>
-          <td>${item.outcome}</td>
-          <td>${reportLink}</td>
-        </tr>`;
-      }
-
-      function checkDue(dateStr, limitDays) {
-        if (!dateStr) return false;
-        const parts = dateStr.split("-");
-        const due = new Date(`${parts[1]} ${parts[0]}, ${parts[2]}`);
-        const diff = (due - today) / (1000 * 60 * 60 * 24);
-        return diff >= 0 && diff <= limitDays;
-      }
-
-      data.forEach(item => {
-        table.innerHTML += renderRow(item);
-        if (item.outcome.toLowerCase().includes("unsat")) unsatisfactory++;
-        else satisfactory++;
-
-        if (checkDue(item.fiveYrDueDate, 30)) { d30++; d30List.push(item); }
-        if (checkDue(item.fiveYrDueDate, 90)) { d90++; d90List.push(item); }
-        if (checkDue(item.fiveYrDueDate, 365)) { d365++; d365List.push(item); }
-      });
-
-      document.getElementById("satisfactoryCount").textContent = satisfactory;
-      document.getElementById("unsatisfactoryCount").textContent = unsatisfactory;
-      document.getElementById("d30Count").textContent = d30;
-      document.getElementById("d90Count").textContent = d90;
-      document.getElementById("d365Count").textContent = d365;
-
-      function showFiltered(list) {
-        const sorted = list.sort((a, b) => new Date(a.fiveYrDueDate) - new Date(b.fiveYrDueDate));
-        const html = "<h3>Matching Sites</h3><table><thead><tr><th>Store</th><th>Site</th><th>Due</th></tr></thead><tbody>" +
-          sorted.map(i => `<tr><td>${String(i.storeNumber).padStart(4, '0')}</td><td>${i.siteName}</td><td>${i.fiveYrDueDate}</td></tr>`).join("") +
-          "</tbody></table>";
-        document.getElementById("filteredResults").innerHTML = html;
-      }
-
-      document.getElementById("d30Btn").onclick = () => showFiltered(d30List);
-      document.getElementById("d90Btn").onclick = () => showFiltered(d90List);
-      document.getElementById("d365Btn").onclick = () => showFiltered(d365List);
+      fullData = data;
+      populateTable(data);
     }
-
+    function populateTable(data) {
+      const table = document.getElementById('tableBody');
+      table.innerHTML = '';
+      data.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${String(row.storeNumber).padStart(4, '0')}</td>
+          <td>${row.siteName}</td>
+          <td>${row.postcode}</td>
+          <td>${row.fiveYrDueDate || ''}</td>
+          <td>${row.patDueDate || ''}</td>
+          <td>${row.emDueDate || ''}</td>
+          <td>${row.forecourtDueDate || ''}</td>
+          <td>${row.evDueDate || ''}</td>
+          <td>${row.pvDueDate || ''}</td>
+          <td>${row.outcome}</td>
+          <td><a href="#">${row.reportURL}</a></td>
+        `;
+        table.appendChild(tr);
+      });
+    }
+    function parseDate(d) {
+      if (!d) return null;
+      const parts = d.split("-");
+      if (parts.length !== 3) return null;
+      const months = {
+        "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5,
+        "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11
+      };
+      return new Date(parts[2], months[parts[1]], parts[0]);
+    }
+    function filterByDays(days) {
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setDate(now.getDate() + days);
+      const filtered = fullData.filter(site => {
+        const dueDates = ['fiveYrDueDate','patDueDate','emDueDate','forecourtDueDate','evDueDate','pvDueDate'];
+        return dueDates.some(field => {
+          const date = parseDate(site[field]);
+          return date && date >= now && date <= cutoff;
+        });
+      }).sort((a, b) => {
+        const dateA = parseDate(a.fiveYrDueDate || a.patDueDate || a.emDueDate);
+        const dateB = parseDate(b.fiveYrDueDate || b.patDueDate || b.emDueDate);
+        return dateA - dateB;
+      });
+      populateTable(filtered);
+    }
+    function clearFilter() {
+      populateTable(fullData);
+    }
+    function searchTable() {
+      const input = document.getElementById("searchInput").value.toLowerCase();
+      const rows = document.getElementById("tableBody").getElementsByTagName("tr");
+      for (let i = 0; i < rows.length; i++) {
+        const rowText = rows[i].textContent.toLowerCase();
+        rows[i].style.display = rowText.includes(input) ? "" : "none";
+      }
+    }
     fetchData();
   </script>
 </body>
