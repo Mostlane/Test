@@ -1,104 +1,167 @@
 
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Mostlane Compliance Dashboard</title>
-<style>
-    body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
-    .header { background: #003366; color: white; padding: 20px; text-align: center; }
-    .header img { height: 50px; vertical-align: middle; }
-    .header h1 { display: inline; margin-left: 10px; font-size: 24px; vertical-align: middle; }
-    table { border-collapse: collapse; width: 100%; margin: 20px auto; background: white; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-    th { background-color: #003366; color: white; }
-    tr:nth-child(even) { background-color: #f2f2f2; }
-    .nowrap { white-space: nowrap; }
-  
-body {
-    background: url('mostlane-logo.jpg') no-repeat center center fixed;
-    background-size: cover;
-}
-.summary-container {
-    display: flex;
-    justify-content: space-around;
-    margin: 20px 0;
-}
-.summary-box {
-    background: rgba(255, 255, 255, 0.85);
-    border-radius: 12px;
-    padding: 20px;
-    width: 180px;
-    text-align: center;
-    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
-}
-.summary-box h3 {
-    margin: 0;
-    font-size: 1.2em;
-}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EICR Compliance Portal</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      background-color: rgba(255, 255, 255, 0.9);
+      margin: 20px auto;
+      padding: 20px;
+      max-width: 1200px;
+      border-radius: 10px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .summary-bubbles {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 20px;
+    }
+    .bubble {
+      flex: 1;
+      margin: 5px;
+      padding: 20px;
+      border-radius: 20px;
+      color: white;
+      text-align: center;
+      font-weight: bold;
+      font-size: 1.2em;
+    }
+    .satisfactory { background-color: #4CAF50; }
+    .unsatisfactory { background-color: #f44336; }
+    .d30 { background-color: #ff9800; }
+    .d90 { background-color: #ffcc00; color: #000; }
+    .d365 { background-color: #03a9f4; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+    th {
+      background-color: #003366;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+  </style>
 </head>
-<body><div class="summary-container" id="summary"></div>
-<div class="header">
-<img alt="Mostlane Logo" src="https://mostlane.github.io/Test/mostlane-logo.jpg"/>
-<h1>Compliance Due Dates</h1>
-</div>
-<table>
-<thead>
-<tr>
-<th>Store Number</th>
-<th>Site Name</th>
-<th>Postcode</th>
-<th>EICR Due</th>
-<th>PAT Due</th>
-<th>EM Lights Due</th>
-<th>PV Due</th>
-<th>EV Due</th>
-<th>Forecourt Due</th>
-<th>Report</th>
-<th>Outcome</th>
-</tr>
-</thead>
-<tbody id="tableBody"></tbody>
-</table>
-<script>
-    function formatDate(dateStr) {
-      if (!dateStr) return '';
+<body>
+  <div class="container">
+    <h1>Mostlane EICR Compliance Portal</h1>
+    <div class="summary-bubbles">
+      <div class="bubble satisfactory" id="satisfactoryCount">Satisfactory: 0</div>
+      <div class="bubble unsatisfactory" id="unsatisfactoryCount">Unsatisfactory: 0</div>
+      <div class="bubble d30" id="due30Count">Due in 30 Days: 0</div>
+      <div class="bubble d90" id="due90Count">Due in 90 Days: 0</div>
+      <div class="bubble d365" id="due365Count">Due in 365 Days: 0</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Store Number</th>
+          <th>Site Name</th>
+          <th>Postcode</th>
+          <th>Report</th>
+          <th>5YR Due</th>
+          <th>PAT Due</th>
+          <th>Forecourt Due</th>
+          <th>EM Due</th>
+          <th>EV Due</th>
+          <th>PV Due</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    function parseDate(dateStr) {
       const months = {
-        Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-        Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
+        Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+        Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
       };
-      const [day, mon, year] = dateStr.split("-");
-      return `${year}-${months[mon]}-${day.padStart(2, '0')}`;
+      const parts = dateStr.split("-");
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const month = months[parts[1]];
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day);
+      }
+      return null;
     }
 
-    async function fetchData() {
-      const res = await fetch("eicr-log.json");
-      const data = await res.json();
-      const tbody = document.getElementById("tableBody");
+    fetch('eicr-log.json')
+      .then(res => res.json())
+      .then(data => {
+        const table = document.getElementById('tableBody');
+        let satisfactory = 0, unsatisfactory = 0, d30 = 0, d90 = 0, d365 = 0;
+        const today = new Date();
 
-      data.forEach(item => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${item.storeNumber}</td>
-          <td>${item.siteName}</td>
-          <td>${item.postcode}</td>
-          <td class="nowrap" data-date="${formatDate(item.fiveYrDueDate)}">${item.fiveYrDueDate}</td>
-          <td class="nowrap" data-date="${formatDate(item.patDueDate)}">${item.patDueDate}</td>
-          <td class="nowrap" data-date="${formatDate(item.emDueDate)}">${item.emDueDate}</td>
-          <td class="nowrap" data-date="${formatDate(item.pvDueDate)}">${item.pvDueDate}</td>
-          <td class="nowrap" data-date="${formatDate(item.evDueDate)}">${item.evDueDate}</td>
-          <td class="nowrap" data-date="${formatDate(item.forecourtDueDate)}">${item.forecourtDueDate}</td>
-          <td><a href="${item.reportURL}" target="_blank">${item.reportURL === "Click Here" ? "Click Here" : "Report"}</a></td>
-          <td>${item.outcome}</td>
-        `;
-        tbody.appendChild(row);
+        data.forEach(item => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${item.storeNumber}</td>
+            <td>${item.siteName}</td>
+            <td>${item.postcode}</td>
+            <td><a href="${item.reportURL}" target="_blank">${item.reportURL}</a></td>
+            <td>${item.fiveYrDueDate}</td>
+            <td>${item.patDueDate}</td>
+            <td>${item.forecourtDueDate}</td>
+            <td>${item.emDueDate}</td>
+            <td>${item.evDueDate}</td>
+            <td>${item.pvDueDate}</td>
+            <td>${item.outcome}</td>
+          `;
+          table.appendChild(row);
+
+          if (item.outcome === 'Satisfactory') satisfactory++;
+          else if (item.outcome === 'Unsatisfactory') unsatisfactory++;
+
+          const dueDates = [
+            item.fiveYrDueDate,
+            item.patDueDate,
+            item.forecourtDueDate,
+            item.emDueDate,
+            item.evDueDate,
+            item.pvDueDate
+          ];
+
+          dueDates.forEach(d => {
+            const parsed = parseDate(d);
+            if (parsed) {
+              const diffDays = Math.ceil((parsed - today) / (1000 * 60 * 60 * 24));
+              if (diffDays > 0 && diffDays <= 30) d30++;
+              else if (diffDays <= 90) d90++;
+              else if (diffDays <= 365) d365++;
+            }
+          });
+        });
+
+        document.getElementById('satisfactoryCount').textContent = `Satisfactory: ${satisfactory}`;
+        document.getElementById('unsatisfactoryCount').textContent = `Unsatisfactory: ${unsatisfactory}`;
+        document.getElementById('due30Count').textContent = `Due in 30 Days: ${d30}`;
+        document.getElementById('due90Count').textContent = `Due in 90 Days: ${d90}`;
+        document.getElementById('due365Count').textContent = `Due in 365 Days: ${d365}`;
       });
-    }
-
-    fetchData();
   </script>
 </body>
 </html>
