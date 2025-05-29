@@ -1,58 +1,49 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Mostlane Compliance Portal</title>
+  <title>Compliance Portal</title>
   <style>
     body {
-      margin: 0;
       font-family: Arial, sans-serif;
-      background-image: url('Mostlane_Embossed.png');
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      background-attachment: fixed;
-      background-repeat: no-repeat;
-      background-position: center;
+      margin: 0;
+      padding: 20px;
+      color: #333;
     }
     .header {
-      background-color: rgba(0, 73, 133, 0.9);
-      padding: 20px;
-      text-align: center;
-      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 20px;
     }
-    .header img {
-      height: 60px;
+    .logo {
+      width: 180px;
+      margin-bottom: 10px;
     }
-    .header h1 {
-      color: white;
-      margin: 10px 0 0;
-      font-size: 28px;
+    .title {
+      font-size: 32px;
+      font-weight: bold;
+      color: #004080;
     }
-    .summary {
+    .stats {
       display: flex;
       justify-content: space-around;
-      flex-wrap: wrap;
-      padding: 20px;
-      background: rgba(255, 255, 255, 0.9);
+      margin: 20px 0;
     }
-    .summary div {
-      flex: 1;
-      min-width: 140px;
-      margin: 10px;
-      padding: 15px;
-      border-radius: 12px;
-      text-align: center;
-      font-weight: bold;
+    .stat-box {
+      padding: 10px 20px;
+      border-radius: 10px;
       color: white;
+      text-align: center;
+      min-width: 120px;
     }
-    .green { background-color: #4CAF50; }
-    .red { background-color: #F44336; }
-    .blue { background-color: #2196F3; }
-    .orange { background-color: #FF9800; }
-    .table-container {
-      padding: 20px;
-      background: rgba(255, 255, 255, 0.95);
-    }
+    .green { background: #4CAF50; }
+    .red { background: #F44336; }
+    .blue { background: #2196F3; }
+    .yellow { background: #FF9800; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -60,139 +51,121 @@
     }
     th, td {
       padding: 10px;
-      border-bottom: 1px solid #ddd;
       text-align: left;
-    }
-    th {
-      background-color: #004985;
-      color: white;
-      position: sticky;
-      top: 0;
-    }
-    tr:hover {
-      background-color: #f1f1f1;
-    }
-    .search-container {
-      text-align: center;
-      padding: 15px;
-    }
-    .search-container input {
-      padding: 10px;
-      width: 300px;
-      font-size: 16px;
-      border-radius: 6px;
       border: 1px solid #ccc;
     }
+    th {
+      background-color: #f2f2f2;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
     a {
-      color: #004985;
-      text-decoration: underline;
+      color: #2196F3;
+      text-decoration: none;
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <img src="mostlane-logo.jpeg" alt="Mostlane Logo" />
-    <h1>Compliance Portal</h1>
+    <img src="mostlane-logo.jpeg" class="logo" alt="Mostlane Logo">
+    <div class="title">Compliance Portal</div>
   </div>
 
-  <div class="summary" id="summary">
-    <!-- Summary boxes dynamically added -->
+  <div class="stats">
+    <div class="stat-box green" id="satisfactoryCount">Satisfactory: 0</div>
+    <div class="stat-box red" id="unsatisfactoryCount">Unsatisfactory: 0</div>
+    <div class="stat-box blue" id="overallStatus">Overall: OK</div>
   </div>
 
-  <div class="search-container">
-    <input type="text" id="searchBox" placeholder="Search by store number, site name, or postcode" />
+  <div class="stats">
+    <div class="stat-box yellow" id="due30">Due in 30 Days: 0</div>
+    <div class="stat-box yellow" id="due90">Due in 90 Days: 0</div>
+    <div class="stat-box yellow" id="due365">Due in 365 Days: 0</div>
   </div>
 
-  <div class="table-container">
-    <table id="complianceTable">
-      <thead>
-        <tr>
-          <th>Store Number</th>
-          <th>Site Name</th>
-          <th>Postcode</th>
-          <th>EICR Due</th>
-          <th>PAT Due</th>
-          <th>Forecourt Due</th>
-          <th>EM Lights Due</th>
-          <th>EV Due</th>
-          <th>PV Due</th>
-          <th>Outcome</th>
-          <th>Report</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
+  <input type="text" id="searchInput" placeholder="Search by store number, name or postcode..." onkeyup="filterTable()"/>
+
+  <table id="complianceTable">
+    <thead>
+      <tr>
+        <th>Store #</th>
+        <th>Site Name</th>
+        <th>Postcode</th>
+        <th>5YR Due</th>
+        <th>PAT Due</th>
+        <th>Forecourt Due</th>
+        <th>EM Due</th>
+        <th>EV Due</th>
+        <th>PV Due</th>
+        <th>Outcome</th>
+        <th>Report</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
 
   <script>
-    async function loadData() {
+    async function fetchData() {
       const res = await fetch('eicr-log.json');
       const data = await res.json();
-      const table = document.querySelector('#complianceTable tbody');
-      const summary = {
-        satisfactory: 0,
-        unsatisfactory: 0,
-        due30: 0,
-        due90: 0,
-        due365: 0
-      };
+      const table = document.getElementById('tableBody');
+      let satisfactory = 0, unsatisfactory = 0, d30 = 0, d90 = 0, d365 = 0;
       const today = new Date();
 
-      data.forEach(site => {
+      data.forEach(row => {
         const tr = document.createElement('tr');
-        const createDateCell = (dateStr) => {
-          if (!dateStr) return '';
-          const d = new Date(dateStr);
-          return `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()}`;
-        };
-        const dateCheck = (d) => {
-          if (!d) return;
-          const date = new Date(d);
-          const diff = (date - today) / (1000 * 60 * 60 * 24);
-          if (diff < 0) return;
-          if (diff <= 30) summary.due30++;
-          if (diff <= 90) summary.due90++;
-          if (diff <= 365) summary.due365++;
-        };
-
         tr.innerHTML = `
-          <td>${site.storeNumber}</td>
-          <td>${site.siteName}</td>
-          <td>${site.postcode || ''}</td>
-          <td>${createDateCell(site.fiveYrDueDate)}</td>
-          <td>${createDateCell(site.patDueDate)}</td>
-          <td>${createDateCell(site.forecourtDueDate)}</td>
-          <td>${createDateCell(site.emDueDate)}</td>
-          <td>${createDateCell(site.evDueDate)}</td>
-          <td>${createDateCell(site.pvDueDate)}</td>
-          <td>${site.outcome || ''}</td>
-          <td>${site.reportURL ? `<a href="${site.reportURL}" target="_blank">View</a>` : ''}</td>
+          <td>${row.storeNumber}</td>
+          <td>${row.siteName}</td>
+          <td>${row.postcode}</td>
+          <td>${row.fiveYrDueDate || ''}</td>
+          <td>${row.patDueDate || ''}</td>
+          <td>${row.forecourtDueDate || ''}</td>
+          <td>${row.emDueDate || ''}</td>
+          <td>${row.evDueDate || ''}</td>
+          <td>${row.pvDueDate || ''}</td>
+          <td>${row.outcome}</td>
+          <td><a href="${row.reportURL}" target="_blank">View</a></td>
         `;
-
-        ['fiveYrDueDate','patDueDate','forecourtDueDate','emDueDate','evDueDate','pvDueDate'].forEach(f => dateCheck(site[f]));
-        if (site.outcome?.toLowerCase().includes('satisfactory')) summary.satisfactory++;
-        if (site.outcome?.toLowerCase().includes('unsatisfactory')) summary.unsatisfactory++;
         table.appendChild(tr);
+
+        if (row.outcome === "Satisfactory") satisfactory++;
+        if (row.outcome === "Unsatisfactory") unsatisfactory++;
+
+        const dates = [row.fiveYrDueDate, row.patDueDate, row.forecourtDueDate, row.emDueDate, row.evDueDate, row.pvDueDate];
+        dates.forEach(dateStr => {
+          if (!dateStr) return;
+          const dueDate = new Date(dateStr);
+          const diffDays = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+          if (diffDays >= 0 && diffDays <= 30) d30++;
+          if (diffDays >= 0 && diffDays <= 90) d90++;
+          if (diffDays >= 0 && diffDays <= 365) d365++;
+        });
       });
 
-      document.getElementById('summary').innerHTML = `
-        <div class="green">Satisfactory: ${summary.satisfactory}</div>
-        <div class="red">Unsatisfactory: ${summary.unsatisfactory}</div>
-        <div class="blue">Due in 30 Days: ${summary.due30}</div>
-        <div class="orange">Due in 90 Days: ${summary.due90}</div>
-        <div class="blue">Due in 365 Days: ${summary.due365}</div>
-      `;
+      document.getElementById('satisfactoryCount').textContent = `Satisfactory: ${satisfactory}`;
+      document.getElementById('unsatisfactoryCount').textContent = `Unsatisfactory: ${unsatisfactory}`;
+      document.getElementById('overallStatus').textContent = `Overall: ${(unsatisfactory > 0) ? 'Action Needed' : 'OK'}`;
+      document.getElementById('due30').textContent = `Due in 30 Days: ${d30}`;
+      document.getElementById('due90').textContent = `Due in 90 Days: ${d90}`;
+      document.getElementById('due365').textContent = `Due in 365 Days: ${d365}`;
     }
 
-    document.getElementById('searchBox').addEventListener('input', function () {
-      const val = this.value.toLowerCase();
-      document.querySelectorAll('#complianceTable tbody tr').forEach(row => {
-        const match = [...row.children].some(td => td.textContent.toLowerCase().includes(val));
-        row.style.display = match ? '' : 'none';
+    function filterTable() {
+      const input = document.getElementById("searchInput").value.toLowerCase();
+      const rows = document.getElementById("tableBody").getElementsByTagName("tr");
+      Array.from(rows).forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(input) ? "" : "none";
       });
-    });
+    }
 
-    loadData();
+    fetchData();
   </script>
 </body>
 </html>
