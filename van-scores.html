@@ -83,39 +83,58 @@
           <th>Trend</th>
         </tr>
       </thead>
-      <tbody>
-        <tr class="gold">
-          <td>Tony Pelin</td>
-          <td>LG23 AWK</td>
-          <td>88.2</td>
-          <td>7</td>
-          <td class="tick">✔</td>
-          <td>91/100</td>
-          <td>🥇 1st</td>
-          <td class="trend-flat">➖</td>
-        </tr>
-        <tr>
-          <td>David Molloy</td>
-          <td>LE73 UHV</td>
-          <td>225.3</td>
-          <td>7</td>
-          <td class="tick">✔</td>
-          <td>82/100</td>
-          <td>2nd</td>
-          <td class="trend-up">📈</td>
-        </tr>
-        <tr>
-          <td>Chris Freeman</td>
-          <td>HY25 UTM</td>
-          <td>109.9</td>
-          <td>9</td>
-          <td class="cross">✘</td>
-          <td class="score-alert">59/100 ⚠️</td>
-          <td>9th</td>
-          <td class="trend-down">📉</td>
-        </tr>
+      <tbody id="van-scores-body">
+        <!-- Data rows will be inserted here -->
       </tbody>
     </table>
   </div>
+
+  <script>
+    async function loadData() {
+      const scoresRes = await fetch('https://mostlane.github.io/Test/van-scores.json');
+      const trendsRes = await fetch('https://mostlane.github.io/Test/van-trends.json');
+      const scores = await scoresRes.json();
+      const trends = await trendsRes.json();
+
+      const tbody = document.getElementById('van-scores-body');
+
+      scores.forEach(entry => {
+        const tr = document.createElement('tr');
+
+        if (entry.rank === 1) {
+          tr.classList.add('gold');
+        }
+
+        const trendIcon = (() => {
+          const history = trends[entry.driver] || [];
+          if (history.length < 2) return '<span class="trend-flat">➖</span>';
+          const last = history[history.length - 1];
+          const prev = history[history.length - 2];
+          if (last > prev) return '<span class="trend-up">📈</span>';
+          if (last < prev) return '<span class="trend-down">📉</span>';
+          return '<span class="trend-flat">➖</span>';
+        })();
+
+        const scoreDisplay = entry.score < 60 ?
+          '<span class="score-alert">' + entry.score + '/100 ⚠️</span>' :
+          entry.score + '/100';
+
+        tr.innerHTML = `
+          <td>${entry.driver}</td>
+          <td>${entry.van}</td>
+          <td>${entry.mileage}</td>
+          <td>${entry.trips}</td>
+          <td class="${entry.van_check ? 'tick' : 'cross'}">${entry.van_check ? '✔' : '✘'}</td>
+          <td>${scoreDisplay}</td>
+          <td>${entry.rank === 1 ? '🥇 1st' : entry.rank + 'th'}</td>
+          <td>${trendIcon}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    loadData();
+  </script>
 </body>
 </html>
