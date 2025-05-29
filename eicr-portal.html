@@ -2,172 +2,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>EICR Compliance Portal</title>
   <style>
     body {
-      margin: 0;
       font-family: Arial, sans-serif;
       background: url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
+      margin: 0;
+      padding: 20px;
     }
     .container {
-      background: rgba(255, 255, 255, 0.85); /* Increased transparency */
-      margin: 40px auto;
+      background: rgba(255, 255, 255, 0.7);
       padding: 20px;
-      border-radius: 12px;
-      max-width: 1200px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      border-radius: 15px;
+      max-width: 95%;
+      margin: auto;
     }
     h1 {
       text-align: center;
-      margin-bottom: 20px;
     }
     .logo {
       display: block;
       margin: 0 auto 20px;
-      max-width: 160px;
+      max-width: 200px;
     }
-    .summary-buttons {
+    .summary {
       display: flex;
-      justify-content: space-around;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
       margin-bottom: 20px;
     }
-    .summary-buttons button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 20px;
+    .summary div {
+      padding: 15px 20px;
+      border-radius: 30px;
+      color: #fff;
       font-weight: bold;
       cursor: pointer;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
+    .Satisfactory { background-color: #28a745; }
+    .Unsatisfactory { background-color: #dc3545; }
+    .Due30 { background-color: #ffc107; }
+    .Due90 { background-color: #17a2b8; }
+    .Due365 { background-color: #6f42c1; }
+    .Clear { background-color: #343a40; }
     .search-bar {
       text-align: center;
-      margin-bottom: 20px;
+      margin-bottom: 15px;
     }
     #searchInput {
-      padding: 8px;
-      width: 300px;
-      border-radius: 10px;
+      padding: 10px;
+      width: 80%;
       border: 1px solid #ccc;
+      border-radius: 5px;
     }
     table {
       width: 100%;
       border-collapse: collapse;
+      margin-top: 10px;
     }
     th, td {
-      padding: 8px 12px;
-      border-bottom: 1px solid #ddd;
-      text-align: center;
-      white-space: nowrap;
+      padding: 12px 8px;
+      border: 1px solid #ccc;
+      text-align: left;
+      word-break: break-word;
     }
     th {
-      background-color: #f4f4f4;
-    }
-    .hidden {
-      display: none;
+      background-color: #f8f9fa;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
-    <h1>Compliance Tracker</h1>
-    <div class="summary-buttons">
-      <button onclick="filterByDays(30)" style="background-color: #ffe066;">Due in 30 Days</button>
-      <button onclick="filterByDays(90)" style="background-color: #ffd43b;">Due in 90 Days</button>
-      <button onclick="filterByDays(365)" style="background-color: #fab005;">Due in 365 Days</button>
-      <button onclick="clearFilter()" style="background-color: #e0e0e0;">Clear</button>
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo"/>
+    <h1>Compliance Dashboard</h1>
+    <div class="summary">
+      <div class="Satisfactory" id="satisfactoryCount">Satisfactory: 0</div>
+      <div class="Unsatisfactory" id="unsatisfactoryCount">Unsatisfactory: 0</div>
+      <div class="Due30" onclick="filterByDue(30)">Due in 30 Days: 0</div>
+      <div class="Due90" onclick="filterByDue(90)">Due in 90 Days: 0</div>
+      <div class="Due365" onclick="filterByDue(365)">Due in 365 Days: 0</div>
+      <div class="Clear" onclick="resetTable()">Clear</div>
     </div>
     <div class="search-bar">
-      <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Search for site name, postcode, or store number...">
+      <input type="text" id="searchInput" placeholder="Search store or postcode..." onkeyup="searchTable()"/>
     </div>
     <table>
       <thead>
         <tr>
-          <th>Store Number</th>
+          <th>Store #</th>
           <th>Site Name</th>
           <th>Postcode</th>
+          <th>Report</th>
           <th>5YR Due</th>
           <th>PAT Due</th>
-          <th>EM Due</th>
           <th>Forecourt Due</th>
+          <th>EM Lights Due</th>
           <th>EV Due</th>
           <th>PV Due</th>
           <th>Outcome</th>
-          <th>Report</th>
         </tr>
       </thead>
       <tbody id="tableBody"></tbody>
     </table>
   </div>
   <script>
-    let fullData = [];
+    let originalData = [];
+
     async function fetchData() {
       const res = await fetch('eicr-log.json');
       const data = await res.json();
-      fullData = data;
+      originalData = data;
       populateTable(data);
+      updateSummaries(data);
     }
+
+    function padStore(storeNumber) {
+      return storeNumber.toString().padStart(4, '0');
+    }
+
     function populateTable(data) {
       const table = document.getElementById('tableBody');
       table.innerHTML = '';
-      data.forEach(row => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${String(row.storeNumber).padStart(4, '0')}</td>
-          <td>${row.siteName}</td>
-          <td>${row.postcode}</td>
-          <td>${row.fiveYrDueDate || ''}</td>
-          <td>${row.patDueDate || ''}</td>
-          <td>${row.emDueDate || ''}</td>
-          <td>${row.forecourtDueDate || ''}</td>
-          <td>${row.evDueDate || ''}</td>
-          <td>${row.pvDueDate || ''}</td>
-          <td>${row.outcome}</td>
-          <td><a href="#">${row.reportURL}</a></td>
+      data.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${padStore(item.storeNumber)}</td>
+          <td>${item.siteName}</td>
+          <td>${item.postcode}</td>
+          <td><a href="${item.reportURL}" target="_blank">${item.reportURL}</a></td>
+          <td>${item.fiveYrDueDate}</td>
+          <td>${item.patDueDate}</td>
+          <td>${item.forecourtDueDate}</td>
+          <td>${item.emDueDate}</td>
+          <td>${item.evDueDate}</td>
+          <td>${item.pvDueDate}</td>
+          <td>${item.outcome}</td>
         `;
-        table.appendChild(tr);
+        table.appendChild(row);
       });
     }
-    function parseDate(d) {
-      if (!d) return null;
-      const parts = d.split("-");
-      if (parts.length !== 3) return null;
-      const months = {
-        "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5,
-        "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11
-      };
-      return new Date(parts[2], months[parts[1]], parts[0]);
+
+    function updateSummaries(data) {
+      let today = new Date();
+      let d30 = 0, d90 = 0, d365 = 0, satisfactory = 0, unsatisfactory = 0;
+
+      data.forEach(site => {
+        const allDates = [site.fiveYrDueDate, site.patDueDate, site.forecourtDueDate, site.emDueDate, site.evDueDate, site.pvDueDate];
+        for (let date of allDates) {
+          if (date) {
+            const due = new Date(date);
+            const diff = (due - today) / (1000 * 60 * 60 * 24);
+            if (diff <= 30) d30++;
+            if (diff <= 90) d90++;
+            if (diff <= 365) d365++;
+          }
+        }
+        if (site.outcome === "Satisfactory") satisfactory++;
+        if (site.outcome === "Unsatisfactory") unsatisfactory++;
+      });
+
+      document.getElementById("satisfactoryCount").innerText = `Satisfactory: ${satisfactory}`;
+      document.getElementById("unsatisfactoryCount").innerText = `Unsatisfactory: ${unsatisfactory}`;
+      document.querySelector(".Due30").innerText = `Due in 30 Days: ${d30}`;
+      document.querySelector(".Due90").innerText = `Due in 90 Days: ${d90}`;
+      document.querySelector(".Due365").innerText = `Due in 365 Days: ${d365}`;
     }
-    function filterByDays(days) {
-      const now = new Date();
-      const cutoff = new Date();
-      cutoff.setDate(now.getDate() + days);
-      const filtered = fullData.filter(site => {
-        const dueDates = ['fiveYrDueDate','patDueDate','emDueDate','forecourtDueDate','evDueDate','pvDueDate'];
-        return dueDates.some(field => {
-          const date = parseDate(site[field]);
-          return date && date >= now && date <= cutoff;
+
+    function searchTable() {
+      let input = document.getElementById("searchInput").value.toLowerCase();
+      let filtered = originalData.filter(item =>
+        item.siteName.toLowerCase().includes(input) || item.postcode.toLowerCase().includes(input)
+      );
+      populateTable(filtered);
+    }
+
+    function filterByDue(days) {
+      const today = new Date();
+      const filtered = originalData.filter(site => {
+        const dueFields = ['fiveYrDueDate', 'patDueDate', 'forecourtDueDate', 'emDueDate', 'evDueDate', 'pvDueDate'];
+        return dueFields.some(field => {
+          const val = site[field];
+          if (!val) return false;
+          const due = new Date(val);
+          const diff = (due - today) / (1000 * 60 * 60 * 24);
+          return diff <= days;
         });
       }).sort((a, b) => {
-        const dateA = parseDate(a.fiveYrDueDate || a.patDueDate || a.emDueDate);
-        const dateB = parseDate(b.fiveYrDueDate || b.patDueDate || b.emDueDate);
-        return dateA - dateB;
+        const da = new Date(a.fiveYrDueDate || a.patDueDate);
+        const db = new Date(b.fiveYrDueDate || b.patDueDate);
+        return da - db;
       });
       populateTable(filtered);
     }
-    function clearFilter() {
-      populateTable(fullData);
+
+    function resetTable() {
+      populateTable(originalData);
     }
-    function searchTable() {
-      const input = document.getElementById("searchInput").value.toLowerCase();
-      const rows = document.getElementById("tableBody").getElementsByTagName("tr");
-      for (let i = 0; i < rows.length; i++) {
-        const rowText = rows[i].textContent.toLowerCase();
-        rows[i].style.display = rowText.includes(input) ? "" : "none";
-      }
-    }
+
     fetchData();
   </script>
 </body>
