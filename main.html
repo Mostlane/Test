@@ -112,6 +112,13 @@
         reference.insertAdjacentElement("afterend", viewBtn);
         viewBtn.insertAdjacentElement("afterend", addSite);
         addSite.insertAdjacentElement("afterend", addAsset);
+        const fleetBtn = document.createElement("a");
+        fleetBtn.className = "button";
+        fleetBtn.href = "van-scores.html";
+        fleetBtn.textContent = "Fleet Vehicles";
+
+        addAsset.insertAdjacentElement("afterend", fleetBtn);
+
       }
     });
 </script>
