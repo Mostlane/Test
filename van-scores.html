@@ -1,0 +1,121 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane – Van Scores</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #e6e8eb;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.85);
+      margin: 40px auto;
+      padding: 20px 40px;
+      border-radius: 12px;
+      max-width: 1000px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 25px;
+    }
+    th, td {
+      border: 1px solid #bbb;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background-color: #003366;
+      color: white;
+    }
+    tr:nth-child(even) {
+      background-color: #f2f2f2;
+    }
+    .tick {
+      color: green;
+      font-weight: bold;
+    }
+    .cross {
+      color: red;
+      font-weight: bold;
+    }
+    .trend-up {
+      color: green;
+    }
+    .trend-down {
+      color: red;
+    }
+    .trend-flat {
+      color: orange;
+    }
+    .score-alert {
+      color: red;
+      font-weight: bold;
+    }
+    .gold {
+      background-color: #ffd70033;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚐 Weekly Van Scores & Checks</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Driver</th>
+          <th>Van Reg</th>
+          <th>Mileage</th>
+          <th>Trips</th>
+          <th>Van Check</th>
+          <th>Driver Score</th>
+          <th>Rank</th>
+          <th>Trend</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="gold">
+          <td>Tony Pelin</td>
+          <td>LG23 AWK</td>
+          <td>88.2</td>
+          <td>7</td>
+          <td class="tick">✔</td>
+          <td>91/100</td>
+          <td>🥇 1st</td>
+          <td class="trend-flat">➖</td>
+        </tr>
+        <tr>
+          <td>David Molloy</td>
+          <td>LE73 UHV</td>
+          <td>225.3</td>
+          <td>7</td>
+          <td class="tick">✔</td>
+          <td>82/100</td>
+          <td>2nd</td>
+          <td class="trend-up">📈</td>
+        </tr>
+        <tr>
+          <td>Chris Freeman</td>
+          <td>HY25 UTM</td>
+          <td>109.9</td>
+          <td>9</td>
+          <td class="cross">✘</td>
+          <td class="score-alert">59/100 ⚠️</td>
+          <td>9th</td>
+          <td class="trend-down">📉</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
