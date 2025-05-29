@@ -1,11 +1,12 @@
 
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Mostlane Compliance Dashboard</title>
-  <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Mostlane Compliance Dashboard</title>
+<style>
     body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }
     .header { background: #003366; color: white; padding: 20px; text-align: center; }
     .header img { height: 50px; vertical-align: middle; }
@@ -15,33 +16,54 @@
     th { background-color: #003366; color: white; }
     tr:nth-child(even) { background-color: #f2f2f2; }
     .nowrap { white-space: nowrap; }
-  </style>
+  
+body {
+    background: url('mostlane-logo.jpg') no-repeat center center fixed;
+    background-size: cover;
+}
+.summary-container {
+    display: flex;
+    justify-content: space-around;
+    margin: 20px 0;
+}
+.summary-box {
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 12px;
+    padding: 20px;
+    width: 180px;
+    text-align: center;
+    box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+}
+.summary-box h3 {
+    margin: 0;
+    font-size: 1.2em;
+}
+</style>
 </head>
-<body>
-  <div class="header">
-    <img src="https://mostlane.github.io/Test/mostlane-logo.jpg" alt="Mostlane Logo">
-    <h1>Compliance Due Dates</h1>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>Store Number</th>
-        <th>Site Name</th>
-        <th>Postcode</th>
-        <th>EICR Due</th>
-        <th>PAT Due</th>
-        <th>EM Lights Due</th>
-        <th>PV Due</th>
-        <th>EV Due</th>
-        <th>Forecourt Due</th>
-        <th>Report</th>
-        <th>Outcome</th>
-      </tr>
-    </thead>
-    <tbody id="tableBody"></tbody>
-  </table>
-
-  <script>
+<body><div class="summary-container" id="summary"></div>
+<div class="header">
+<img alt="Mostlane Logo" src="https://mostlane.github.io/Test/mostlane-logo.jpg"/>
+<h1>Compliance Due Dates</h1>
+</div>
+<table>
+<thead>
+<tr>
+<th>Store Number</th>
+<th>Site Name</th>
+<th>Postcode</th>
+<th>EICR Due</th>
+<th>PAT Due</th>
+<th>EM Lights Due</th>
+<th>PV Due</th>
+<th>EV Due</th>
+<th>Forecourt Due</th>
+<th>Report</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+<script>
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const months = {
