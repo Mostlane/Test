@@ -98,14 +98,10 @@
 
       const tbody = document.getElementById('van-scores-body');
 
-      
-    scores.sort((a, b) => b.score - a.score);
-    scores.forEach((entry, index) => {
-        const rank = index + 1;
-    
+      scores.forEach(entry => {
         const tr = document.createElement('tr');
 
-        if (index === 0) {
+        if (entry.rank === 1) {
           tr.classList.add('gold');
         }
 
