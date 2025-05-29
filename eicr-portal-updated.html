@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,29 +6,52 @@
   <title>Mostlane Compliance Portal</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: url('Mostlane_Embossed.png') center center no-repeat;
-      background-size: cover;
       margin: 0;
+      font-family: Arial, sans-serif;
+      background-image: url('Mostlane_Embossed.png');
+      background-size: cover;
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      background-position: center;
+    }
+    .header {
+      background-color: rgba(0, 73, 133, 0.9);
       padding: 20px;
-    }
-    h1 {
       text-align: center;
-      margin-bottom: 10px;
+      position: relative;
     }
-    .summary-boxes {
+    .header img {
+      height: 60px;
+    }
+    .header h1 {
+      color: white;
+      margin: 10px 0 0;
+      font-size: 28px;
+    }
+    .summary {
       display: flex;
+      justify-content: space-around;
       flex-wrap: wrap;
-      justify-content: center;
-      gap: 20px;
-      margin-bottom: 20px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.9);
     }
-    .summary-box {
-      background: #f5f5f5;
-      padding: 15px 25px;
-      border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    .summary div {
+      flex: 1;
+      min-width: 140px;
+      margin: 10px;
+      padding: 15px;
+      border-radius: 12px;
       text-align: center;
+      font-weight: bold;
+      color: white;
+    }
+    .green { background-color: #4CAF50; }
+    .red { background-color: #F44336; }
+    .blue { background-color: #2196F3; }
+    .orange { background-color: #FF9800; }
+    .table-container {
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.95);
     }
     table {
       width: 100%;
@@ -37,107 +59,138 @@
       margin-top: 10px;
     }
     th, td {
-      border: 1px solid #ccc;
       padding: 10px;
+      border-bottom: 1px solid #ddd;
       text-align: left;
     }
     th {
-      background-color: #e0e0e0;
+      background-color: #004985;
+      color: white;
+      position: sticky;
+      top: 0;
     }
-    input {
-      width: 100%;
-      padding: 8px;
-      margin: 10px 0;
+    tr:hover {
+      background-color: #f1f1f1;
+    }
+    .search-container {
+      text-align: center;
+      padding: 15px;
+    }
+    .search-container input {
+      padding: 10px;
+      width: 300px;
+      font-size: 16px;
+      border-radius: 6px;
       border: 1px solid #ccc;
-      border-radius: 5px;
+    }
+    a {
+      color: #004985;
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <img src="mostlane-logo.jpeg" alt="Mostlane Logo" style="display:block;margin:0 auto;width:180px;">
-  <h1>Compliance Portal</h1>
+  <div class="header">
+    <img src="mostlane-logo.jpeg" alt="Mostlane Logo" />
+    <h1>Compliance Portal</h1>
+  </div>
 
-  <div class="summary-boxes" id="summary"></div>
+  <div class="summary" id="summary">
+    <!-- Summary boxes dynamically added -->
+  </div>
 
-  <input type="text" id="searchBox" onkeyup="filterTable()" placeholder="Search for sites, addresses, or summaries...">
+  <div class="search-container">
+    <input type="text" id="searchBox" placeholder="Search by store number, site name, or postcode" />
+  </div>
 
-  <div style="max-height: 65vh; overflow-y: auto;"><table id="eicrTable">
-    <thead>
-      <tr>
-        <th>Store Number</th>
-        <th>Site Name</th>
-        <th>Postcode</th>
-        <th>Date of Test</th>
-        <th>Next Due Date</th>
-        <th>Forecourt Due</th>
-        <th>5YR Due</th>
-        <th>EM Due</th>
-        <th>PAT Due</th>
-        <th>PV Due</th>
-        <th>EV Due</th>
-        <th>Status</th>
-        <th>Report</th>
-      </tr>
-    </thead>
-    <tbody id="tableBody"></tbody>
-  </table></div>
+  <div class="table-container">
+    <table id="complianceTable">
+      <thead>
+        <tr>
+          <th>Store Number</th>
+          <th>Site Name</th>
+          <th>Postcode</th>
+          <th>EICR Due</th>
+          <th>PAT Due</th>
+          <th>Forecourt Due</th>
+          <th>EM Lights Due</th>
+          <th>EV Due</th>
+          <th>PV Due</th>
+          <th>Outcome</th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <script>
     async function loadData() {
-      const response = await fetch('eicr-log-cleaned.json');
-      const data = await response.json();
-      let sat = 0, unsat = 0;
-      const now = new Date();
-      const days30 = new Date(); days30.setDate(now.getDate() + 30);
-      const days90 = new Date(); days90.setDate(now.getDate() + 90);
-      const days365 = new Date(); days365.setDate(now.getDate() + 365);
-      let due30 = 0, due90 = 0, due365 = 0;
+      const res = await fetch('eicr-log.json');
+      const data = await res.json();
+      const table = document.querySelector('#complianceTable tbody');
+      const summary = {
+        satisfactory: 0,
+        unsatisfactory: 0,
+        due30: 0,
+        due90: 0,
+        due365: 0
+      };
+      const today = new Date();
 
-      data.forEach(item => {
-        const dueDate = new Date(item.nextDue);
-        const status = (item.c1 > 0 || item.c2 > 0) ? "Unsatisfactory" : "Satisfactory";
-        if (status === "Satisfactory") sat++; else unsat++;
+      data.forEach(site => {
+        const tr = document.createElement('tr');
+        const createDateCell = (dateStr) => {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          return `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()}`;
+        };
+        const dateCheck = (d) => {
+          if (!d) return;
+          const date = new Date(d);
+          const diff = (date - today) / (1000 * 60 * 60 * 24);
+          if (diff < 0) return;
+          if (diff <= 30) summary.due30++;
+          if (diff <= 90) summary.due90++;
+          if (diff <= 365) summary.due365++;
+        };
 
-        if (dueDate <= days30) due30++;
-        if (dueDate <= days90) due90++;
-        if (dueDate <= days365) due365++;
+        tr.innerHTML = `
+          <td>${site.storeNumber}</td>
+          <td>${site.siteName}</td>
+          <td>${site.postcode || ''}</td>
+          <td>${createDateCell(site.fiveYrDueDate)}</td>
+          <td>${createDateCell(site.patDueDate)}</td>
+          <td>${createDateCell(site.forecourtDueDate)}</td>
+          <td>${createDateCell(site.emDueDate)}</td>
+          <td>${createDateCell(site.evDueDate)}</td>
+          <td>${createDateCell(site.pvDueDate)}</td>
+          <td>${site.outcome || ''}</td>
+          <td>${site.reportURL ? `<a href="${site.reportURL}" target="_blank">View</a>` : ''}</td>
+        `;
 
-        const row = `
-          <tr>
-            <td>${item.storeNumber}</td>
-            <td>${item.siteName}</td>
-            <td>${item.postcode}</td>
-            <td>${item.testDate || '–'}</td>
-            <td>${item.nextDue || '–'}</td>
-            <td>${item.forecourtDue || '–'}</td>
-            <td>${item.fiveYrDue || '–'}</td>
-            <td>${item.emDue || '–'}</td>
-            <td>${item.patDue || '–'}</td>
-            <td>${item.pvDue || '–'}</td>
-            <td>${item.evDue || '–'}</td>
-            <td>${status}</td>
-            <td><a href="${item.pdfURL}" target="_blank">View</a></td>
-          </tr>`;
-        document.getElementById("tableBody").innerHTML += row;
+        ['fiveYrDueDate','patDueDate','forecourtDueDate','emDueDate','evDueDate','pvDueDate'].forEach(f => dateCheck(site[f]));
+        if (site.outcome?.toLowerCase().includes('satisfactory')) summary.satisfactory++;
+        if (site.outcome?.toLowerCase().includes('unsatisfactory')) summary.unsatisfactory++;
+        table.appendChild(tr);
       });
 
-      document.getElementById("summary").innerHTML = `
-        <div class="summary-box"><strong>Satisfactory</strong><br>${sat}</div>
-        <div class="summary-box"><strong>Unsatisfactory</strong><br>${unsat}</div>
-        <div class="summary-box"><strong>Overall Status</strong><br>${Math.round(100 * sat / (sat + unsat))}% Satisfactory</div>
-        <div class="summary-box"><strong>Due in 30 Days</strong><br>${due30}</div>
-        <div class="summary-box"><strong>Due in 90 Days</strong><br>${due90}</div>
-        <div class="summary-box"><strong>Due in 365 Days</strong><br>${due365}</div>`;
+      document.getElementById('summary').innerHTML = `
+        <div class="green">Satisfactory: ${summary.satisfactory}</div>
+        <div class="red">Unsatisfactory: ${summary.unsatisfactory}</div>
+        <div class="blue">Due in 30 Days: ${summary.due30}</div>
+        <div class="orange">Due in 90 Days: ${summary.due90}</div>
+        <div class="blue">Due in 365 Days: ${summary.due365}</div>
+      `;
     }
 
-    function filterTable() {
-      const filter = document.getElementById("searchBox").value.toUpperCase();
-      const rows = document.getElementById("eicrTable").getElementsByTagName("tr");
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        row.style.display = row.innerText.toUpperCase().includes(filter) ? "" : "none";
-      }
-    }
+    document.getElementById('searchBox').addEventListener('input', function () {
+      const val = this.value.toLowerCase();
+      document.querySelectorAll('#complianceTable tbody tr').forEach(row => {
+        const match = [...row.children].some(td => td.textContent.toLowerCase().includes(val));
+        row.style.display = match ? '' : 'none';
+      });
+    });
 
     loadData();
   </script>
