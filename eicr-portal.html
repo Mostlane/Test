@@ -1,3 +1,180 @@
 
-<!-- Placeholder for the actual enhanced HTML content -->
-<!-- This should contain the final working version of the eicr-portal with advanced bubble filters -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EICR Portal</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+    }
+    .container {
+      background-color: rgba(255, 255, 255, 0.7);
+      margin: 20px auto;
+      padding: 20px;
+      border-radius: 15px;
+      max-width: 95%;
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+    }
+    .summary-bubbles, .filter-bubbles {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .bubble {
+      background-color: #003366;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      border-radius: 30px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .bubble.active {
+      background-color: #0059b3;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #999;
+      padding: 8px;
+      text-align: center;
+      font-size: 14px;
+    }
+    th {
+      background-color: #003366;
+      color: white;
+    }
+    .search-container {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .search-input {
+      padding: 8px;
+      width: 300px;
+      border-radius: 20px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mostlane EICR Compliance Portal</h1>
+    <div class="summary-bubbles">
+      <button class="bubble" onclick="filterByDays(30)">Due in 30 Days</button>
+      <button class="bubble" onclick="filterByDays(90)">Due in 90 Days</button>
+      <button class="bubble" onclick="filterByDays(365)">Due in 365 Days</button>
+      <button class="bubble" onclick="clearFilters()">Clear</button>
+    </div>
+    <div class="filter-bubbles">
+      <button class="bubble" onclick="setCategory('fiveYrDueDate', this)">EICR</button>
+      <button class="bubble" onclick="setCategory('patDueDate', this)">PAT</button>
+      <button class="bubble" onclick="setCategory('emDueDate', this)">Emergency Lighting</button>
+      <button class="bubble" onclick="setCategory('forecourtDueDate', this)">Forecourt</button>
+      <button class="bubble" onclick="setCategory('evDueDate', this)">EV Maintenance</button>
+      <button class="bubble" onclick="setCategory('pvDueDate', this)">PV Maintenance</button>
+    </div>
+    <div class="search-container">
+      <input class="search-input" type="text" id="searchBar" placeholder="Search stores..." onkeyup="searchTable()">
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Store Number</th>
+          <th>Site Name</th>
+          <th>Postcode</th>
+          <th>Report</th>
+          <th>5YR Due</th>
+          <th>PAT Due</th>
+          <th>EM Due</th>
+          <th>Forecourt</th>
+          <th>EV Due</th>
+          <th>PV Due</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+  <script>
+    let allData = [];
+    let activeCategory = 'fiveYrDueDate';
+    const bubbles = document.querySelectorAll(".filter-bubbles .bubble");
+
+    async function fetchData() {
+      const res = await fetch('eicr-log.json');
+      const data = await res.json();
+      allData = data;
+      renderTable(data);
+    }
+
+    function renderTable(data) {
+      const table = document.getElementById('tableBody');
+      table.innerHTML = '';
+      data.forEach(entry => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${entry.storeNumber.toString().padStart(4, '0')}</td>
+          <td>${entry.siteName}</td>
+          <td>${entry.postcode}</td>
+          <td><a href="${entry.reportURL}">${entry.reportURL || "Click Here"}</a></td>
+          <td>${entry.fiveYrDueDate || ""}</td>
+          <td>${entry.patDueDate || ""}</td>
+          <td>${entry.emDueDate || ""}</td>
+          <td>${entry.forecourtDueDate || ""}</td>
+          <td>${entry.evDueDate || ""}</td>
+          <td>${entry.pvDueDate || ""}</td>
+        `;
+        table.appendChild(row);
+      });
+    }
+
+    function filterByDays(days) {
+      const now = new Date();
+      const future = new Date(now);
+      future.setDate(now.getDate() + days);
+      const filtered = allData.filter(entry => {
+        const dateStr = entry[activeCategory];
+        if (!dateStr) return false;
+        const date = new Date(dateStr);
+        return date >= now && date <= future;
+      }).sort((a, b) => new Date(a[activeCategory]) - new Date(b[activeCategory]));
+      renderTable(filtered);
+    }
+
+    function clearFilters() {
+      renderTable(allData);
+      bubbles.forEach(btn => btn.classList.remove('active'));
+    }
+
+    function setCategory(field, btn) {
+      activeCategory = field;
+      bubbles.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
+    function searchTable() {
+      const query = document.getElementById('searchBar').value.toLowerCase();
+      const filtered = allData.filter(entry =>
+        entry.siteName.toLowerCase().includes(query) ||
+        entry.postcode.toLowerCase().includes(query) ||
+        entry.storeNumber.toString().includes(query)
+      );
+      renderTable(filtered);
+    }
+
+    fetchData();
+  </script>
+</body>
+</html>
