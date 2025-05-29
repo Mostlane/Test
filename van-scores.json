@@ -98,5 +98,45 @@
     "score": 66,
     "rank": 7,
     "trend": "flat"
+  },
+  {
+    "driver": "Fleet Vehicle",
+    "van": "BL12 DMZ",
+    "mileage": 0,
+    "trips": 0,
+    "van_check": false,
+    "score": 0,
+    "rank": 14,
+    "trend": "flat"
+  },
+  {
+    "driver": "Fleet Vehicle",
+    "van": "HN69 SYP",
+    "mileage": 0,
+    "trips": 0,
+    "van_check": false,
+    "score": 0,
+    "rank": 13,
+    "trend": "flat"
+  },
+  {
+    "driver": "Fleet Vehicle",
+    "van": "WM83 VFL",
+    "mileage": 0,
+    "trips": 0,
+    "van_check": false,
+    "score": 0,
+    "rank": 12,
+    "trend": "flat"
+  },
+  {
+    "driver": "Bradley Graham",
+    "van": "WP64 EJD",
+    "mileage": 144.8,
+    "trips": 6,
+    "van_check": true,
+    "score": 76,
+    "rank": 10,
+    "trend": "up"
   }
 ]
