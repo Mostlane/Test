@@ -100,6 +100,7 @@
           <th>Store Number</th>
           <th>Site Name</th>
           <th>Postcode</th>
+          <th>Status</th>
           <th>Report</th>
           <th>5YR Due</th>
           <th>PAT Due</th>
@@ -125,6 +126,19 @@
       renderTable(data);
     }
 
+    function getStatus(entry) {
+      const now = new Date();
+      let isRed = false;
+      let isAmber = false;
+      [entry.fiveYrDueDate, entry.patDueDate, entry.emDueDate, entry.forecourtDueDate, entry.evDueDate, entry.pvDueDate].forEach(dateStr => {
+        if (!dateStr) return;
+        const date = new Date(dateStr);
+        if (date < now) isRed = true;
+        else if ((date - now) / (1000 * 60 * 60 * 24) <= 30) isAmber = true;
+      });
+      return isRed ? '🔴' : isAmber ? '🟡' : '🟢';
+    }
+
     function renderTable(data) {
       const table = document.getElementById('tableBody');
       table.innerHTML = '';
@@ -134,6 +148,7 @@
           <td>${entry.storeNumber.toString().padStart(4, '0')}</td>
           <td>${entry.siteName}</td>
           <td>${entry.postcode}</td>
+          <td>${getStatus(entry)}</td>
           <td><a href="${entry.reportURL}">${entry.reportURL || "Click Here"}</a></td>
           <td>${entry.fiveYrDueDate || ""}</td>
           <td>${entry.patDueDate || ""}</td>
