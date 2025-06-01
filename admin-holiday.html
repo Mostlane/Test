@@ -1,15 +1,14 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Admin – Holiday Management</title>
+  <meta charset="UTF-8">
+  <title>Holiday Admin</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
-      margin: 0;
       padding: 40px 20px;
     }
     .container {
@@ -43,26 +42,15 @@
       margin-right: 5px;
       border: none;
       border-radius: 4px;
+      background-color: #004a99;
+      color: white;
       cursor: pointer;
     }
-    .approve { background-color: #4CAF50; color: white; }
-    .reject { background-color: #f44336; color: white; }
-    .delete { background-color: #888; color: white; }
   </style>
 </head>
 <body>
-  <script>
-    const allowedUsers = ["Jamie.Line", "Greg.Line", "Joe.Line"];
-    const currentUser = sessionStorage.getItem("mostlaneUser");
-    if (!allowedUsers.includes(currentUser)) {
-      document.body.innerHTML = "<h2 style='text-align:center;'>Access Denied</h2>";
-    }
-  </script>
-
   <div class="container">
     <h2>Holiday Admin Panel</h2>
-
-    <h3>Pending Holiday Requests</h3>
     <table>
       <thead>
         <tr>
@@ -71,48 +59,157 @@
           <th>End</th>
           <th>Type</th>
           <th>Notes</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="requestTable">
-        <tr>
-          <td>Chris.Freeman</td>
-          <td>2025-06-10</td>
-          <td>2025-06-12</td>
-          <td>Annual Leave</td>
-          <td>Family trip</td>
-          <td>
-            <button class="approve">Approve</button>
-            <button class="reject">Reject</button>
-            <button class="delete">Delete</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h3>Edit Holiday Allowance</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Engineer</th>
-          <th>Current Allowance</th>
-          <th>New Value</th>
           <th>Action</th>
         </tr>
       </thead>
-      <tbody>
-        <tr>
-          <td>Frazer.Miller</td>
-          <td>28</td>
-          <td><input type="number" value="28" style="width: 60px;"></td>
-          <td><button class="approve">Update</button></td>
-        </tr>
+      <tbody id="admin-rows">
+        <tr><td colspan="6">Loading...</td></tr>
       </tbody>
     </table>
-
-    <h3>Add Compulsory Shutdown Days</h3>
-    <input type="text" placeholder="e.g. 2025-12-24, 2025-12-31" style="width: 100%; padding: 8px; font-size: 16px;"/>
-    <button class="approve" style="margin-top:10px;">Save Dates</button>
   </div>
+  
+<script>
+const allowedUsers = ["Jamie.Line", "Greg.Line", "Joe.Line"];
+const currentUser = sessionStorage.getItem("mostlaneUser");
+if (!allowedUsers.includes(currentUser)) {
+  document.body.innerHTML = "<h2 style='text-align:center;'>Access Denied</h2>";
+}
+
+const GITHUB_TOKEN = "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";
+const REPO = "Mostlane/Test";
+const LOG_FILE = "holiday-log.json";
+const SUMMARY_FILE = "holiday-summary.json";
+
+async function fetchLog() {
+  const res = await fetch("https://raw.githubusercontent.com/" + REPO + "/main/" + LOG_FILE);
+  return res.json();
+}
+
+function format(dateStr) {
+  const date = new Date(dateStr);
+  return date.toISOString().split("T")[0];
+}
+
+function calcDays(start, end) {
+  const s = new Date(start);
+  const e = new Date(end);
+  return Math.round((e - s) / 86400000) + 1;
+}
+
+function buildSummary(log) {
+  const summary = {};
+  log.forEach(row => {
+    const { name, start, end, type, status } = row;
+    if (!summary[name]) {
+      summary[name] = {
+        available: 28,
+        used: 0,
+        booked: 0,
+        shutdown: 0,
+        bankholidays: 0,
+        accumulated: 0,
+        remaining: 28,
+        approved: [],
+        pending: [],
+        shutdownDates: [],
+        bankHolidayDates: []
+      };
+    }
+
+    const days = calcDays(start, end);
+    const today = new Date().toISOString().split("T")[0];
+
+    if (status === "Approved") {
+      if (type === "Bank Holiday") {
+        summary[name].bankholidays += days;
+        summary[name].bankHolidayDates.push(start);
+      } else if (type === "Compulsory Leave") {
+        summary[name].shutdown += days;
+        summary[name].shutdownDates.push(start);
+      } else if (type === "Annual Leave" || type === "Sick Leave") {
+        if (start >= today) {
+          summary[name].booked += days;
+          summary[name].approved.push({ date: start, type, duration: days });
+        } else {
+          summary[name].used += days;
+        }
+      }
+    } else if (status === "Pending") {
+      summary[name].pending.push({ date: start, type, duration: days });
+    }
+
+    summary[name].accumulated = summary[name].used + summary[name].booked + summary[name].shutdown + summary[name].bankholidays;
+    summary[name].remaining = summary[name].available - summary[name].accumulated;
+  });
+
+  return summary;
+}
+
+async function uploadToGitHub(path, contentObj, commitMessage) {
+  const getSHA = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + path, {
+    headers: { Authorization: "token " + GITHUB_TOKEN }
+  }).then(r => r.json()).then(d => d.sha);
+
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(contentObj, null, 2))));
+
+  return fetch("https://api.github.com/repos/" + REPO + "/contents/" + path, {
+    method: "PUT",
+    headers: {
+      Authorization: "token " + GITHUB_TOKEN,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: commitMessage,
+      committer: { name: "Mostlane Bot", email: "admin@mostlane.com" },
+      content,
+      sha: getSHA
+    })
+  });
+}
+
+async function approve(index) {
+  const log = await fetchLog();
+  log[index].status = "Approved";
+  await uploadToGitHub(LOG_FILE, log, "Approved request by admin");
+  const summary = buildSummary(log);
+  await uploadToGitHub(SUMMARY_FILE, summary, "Updated summary after approval");
+  alert("Approved and updated.");
+  location.reload();
+}
+
+async function reject(index) {
+  const log = await fetchLog();
+  log[index].status = "Rejected";
+  await uploadToGitHub(LOG_FILE, log, "Rejected request by admin");
+  alert("Rejected.");
+  location.reload();
+}
+
+async function populateTable() {
+  const table = document.getElementById("admin-rows");
+  const log = await fetchLog();
+  table.innerHTML = "";
+  log.forEach((row, i) => {
+    if (row.status === "Pending") {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${row.name}</td>
+        <td>${row.start}</td>
+        <td>${row.end}</td>
+        <td>${row.type}</td>
+        <td>${row.notes}</td>
+        <td>
+          <button onclick="approve(${i})">Approve</button>
+          <button onclick="reject(${i})">Reject</button>
+        </td>
+      `;
+      table.appendChild(tr);
+    }
+  });
+}
+
+document.addEventListener("DOMContentLoaded", populateTable);
+</script>
+
 </body>
 </html>

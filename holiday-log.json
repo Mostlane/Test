@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Chris.Freeman",
+    "start": "2025-06-10",
+    "end": "2025-06-12",
+    "type": "Annual Leave",
+    "status": "Pending",
+    "notes": "Family trip"
+  },
+  {
+    "name": "Frazer.Miller",
+    "start": "2025-08-01",
+    "end": "2025-08-02",
+    "type": "Sick Leave",
+    "status": "Approved",
+    "notes": "Medical"
+  },
+  {
+    "name": "Jamie.Line",
+    "start": "2025-12-24",
+    "end": "2025-12-24",
+    "type": "Compulsory Leave",
+    "status": "Approved",
+    "notes": ""
+  },
+  {
+    "name": "Greg.Line",
+    "start": "2025-01-01",
+    "end": "2025-01-01",
+    "type": "Bank Holiday",
+    "status": "Approved",
+    "notes": ""
+  }
+]
