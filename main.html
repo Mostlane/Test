@@ -124,10 +124,10 @@
 </script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-  const username = sessionStorage.getItem("mostlaneUsername");
+  const username = sessionStorage.getItem("mostlaneUser");
   if (!username) return;
 
-  fetch("https://mostlane.github.io/Test/Users.txt")
+  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt")
     .then(response => response.text())
     .then(data => {
       const rows = data.split("\n");
