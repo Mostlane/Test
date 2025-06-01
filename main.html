@@ -143,5 +143,23 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     });
 });
-</script></body>
+</script>
+<script>
+  fetch('role-type.txt')
+    .then(response => response.text())
+    .then(data => {
+      const user = sessionStorage.getItem("mostlaneUsername");
+      const roles = Object.fromEntries(data.trim().split("\n").map(line => line.split(" - ")));
+      if (roles[user] === "Office") {
+        const addDriver = document.createElement("a");
+        addDriver.className = "button";
+        addDriver.href = "add-driver.html";
+        addDriver.textContent = "Add Driver";
+        const fleetBtn = [...document.querySelectorAll('.button')].find(btn => btn.textContent.includes("Fleet Vehicles"));
+        if (fleetBtn) fleetBtn.insertAdjacentElement("afterend", addDriver);
+      }
+    });
+</script>
+
+</body>
 </html>
