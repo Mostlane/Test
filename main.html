@@ -160,5 +160,21 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     });
 </script>
+
+<script>
+  const holidayAdmins = ["Jamie.Line", "Greg.Line", "Joe.Line"];
+  const loggedInUser = sessionStorage.getItem("mostlaneUser");
+  if (holidayAdmins.includes(loggedInUser)) {
+    const adminBtn = document.createElement("a");
+    adminBtn.className = "button";
+    adminBtn.href = "admin-holiday.html";
+    adminBtn.textContent = "Holiday Admin";
+    const referenceBtn = document.querySelector("a[href='weekly.html']");
+    if (referenceBtn) {
+      referenceBtn.insertAdjacentElement("afterend", adminBtn);
+    }
+  }
+</script>
+
 </body>
 </html>
