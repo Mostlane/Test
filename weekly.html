@@ -431,6 +431,7 @@ showCorrectButton();
 <footer style="text-align:center; font-size:11px; color:#999; margin-top:40px;">Weekly version: 2024-05-27-FINALMostlane Portal – Weekly Summary • Version 1.0 • © Mostlane 2025</footer>
 
 
+
 <script>
 function updateMileageTotal() {
   let total = 0;
@@ -451,15 +452,15 @@ function updateMileageTotal() {
   }
 }
 
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    document.querySelectorAll(".claim-mileage").forEach(el => {
-      el.addEventListener("change", updateMileageTotal);
-    });
-    updateMileageTotal(); // initial load
-  }, 1000);
+const observer = new MutationObserver(() => {
+  document.querySelectorAll(".claim-mileage").forEach(el => {
+    el.removeEventListener("change", updateMileageTotal);
+    el.addEventListener("change", updateMileageTotal);
+  });
 });
+observer.observe(document.body, { childList: true, subtree: true });
 </script>
 </body>
 </html>
+
 
