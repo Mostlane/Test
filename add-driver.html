@@ -7,41 +7,40 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      background-color: #e6e8eb;
-      margin: 0;
-      padding: 0;
+      background-color: #f4f4f4;
+      padding: 40px;
     }
     .container {
       background: rgba(255,255,255,0.6);
-      max-width: 500px;
-      margin: 40px auto;
-      padding: 20px 30px;
-      border-radius: 12px;
+      padding: 30px;
+      border-radius: 10px;
+      max-width: 600px;
+      margin: auto;
     }
     h2 {
       text-align: center;
-      color: #003366;
     }
     label {
+      display: block;
+      margin-top: 15px;
       font-weight: bold;
     }
-    input, button {
+    input[type="text"], input[type="submit"] {
       width: 100%;
       padding: 10px;
-      margin: 6px 0 16px;
-      border: 1px solid #aaa;
-      border-radius: 6px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
     }
     #map {
       height: 300px;
-      width: 100%;
-      margin-bottom: 20px;
+      margin-top: 15px;
     }
-    .note {
-      font-size: 0.9em;
-      color: #555;
+    .success {
+      color: green;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 15px;
     }
   </style>
 </head>
@@ -49,83 +48,83 @@
   <div class="container">
     <h2>Add Driver</h2>
     <form id="driverForm">
-      <label for="name">Full Name:</label>
-      <input type="text" id="name" required>
+      <label for="fullName">Full Name</label>
+      <input type="text" id="fullName" name="fullName" required>
 
-      <label for="username">Portal Username:</label>
-      <input type="text" id="username" required>
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required>
 
-      <label for="postcode">Postcode:</label>
+      <label for="postcode">Postcode</label>
       <input type="text" id="postcode" required>
 
       <div id="map"></div>
 
-      <input type="hidden" id="lat">
-      <input type="hidden" id="lng">
-
-      <button type="submit">Save Driver</button>
-      <p class="note">Note: This will update your home-geofences.json file.</p>
+      <input type="submit" value="Submit">
     </form>
+    <div class="success" id="confirmation" style="display:none;">Driver added successfully!</div>
   </div>
 
   <script>
     let map, marker;
+    let latitude = 0, longitude = 0;
 
     function initMap() {
-      map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 50.861, lng: -1.273 },
-        zoom: 12
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 51.5074, lng: -0.1278 }, // London default
+        zoom: 10
       });
 
       marker = new google.maps.Marker({
-        map,
         position: map.getCenter(),
+        map: map,
         draggable: true
       });
 
-      marker.addListener("dragend", function () {
-        const pos = marker.getPosition();
-        document.getElementById("lat").value = pos.lat();
-        document.getElementById("lng").value = pos.lng();
+      latitude = marker.getPosition().lat();
+      longitude = marker.getPosition().lng();
+
+      marker.addListener("dragend", function() {
+        latitude = marker.getPosition().lat();
+        longitude = marker.getPosition().lng();
       });
     }
 
-    document.getElementById("postcode").addEventListener("change", function () {
+    document.getElementById("postcode").addEventListener("change", function() {
       const postcode = this.value;
       fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${postcode}&key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4`)
-        .then(response => response.json())
+        .then(res => res.json())
         .then(data => {
-          const location = data.results[0].geometry.location;
-          map.setCenter(location);
-          marker.setPosition(location);
-          document.getElementById("lat").value = location.lat;
-          document.getElementById("lng").value = location.lng;
+          if (data.results.length > 0) {
+            const loc = data.results[0].geometry.location;
+            map.setCenter(loc);
+            marker.setPosition(loc);
+            latitude = loc.lat;
+            longitude = loc.lng;
+          }
         });
     });
 
-    document.getElementById("driverForm").addEventListener("submit", function (e) {
+    document.getElementById("driverForm").addEventListener("submit", function(e) {
       e.preventDefault();
-      const name = document.getElementById("name").value.trim();
-      const username = document.getElementById("username").value.trim();
-      const lat = document.getElementById("lat").value;
-      const lng = document.getElementById("lng").value;
+      const fullName = document.getElementById("fullName").value;
+      const username = document.getElementById("username").value;
 
-      const driverEntry = {
-        [username]: {
-          name: name,
-          lat: parseFloat(lat),
-          lng: parseFloat(lng),
-          radius_m: 300
-        }
-      };
+      const formData = new URLSearchParams();
+      formData.append("fullName", fullName);
+      formData.append("username", username);
+      formData.append("latitude", latitude);
+      formData.append("longitude", longitude);
+      formData.append("radius", 300);
 
-      alert("Driver added: \n" + JSON.stringify(driverEntry, null, 2));
-      // Here you would normally POST to GitHub or trigger a Zap
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/2vd4dv4/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString()
+      }).then(() => {
+        document.getElementById("confirmation").style.display = "block";
+      });
     });
-
   </script>
-  <script async defer
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap">
-  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap" async defer></script>
 </body>
 </html>
