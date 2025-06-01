@@ -1,0 +1,127 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Weekly Summary</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+    }
+    .content-box {
+      background: rgba(255,255,255,0.6);
+      margin: 60px auto;
+      padding: 20px;
+      max-width: 900px;
+      border-radius: 10px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #004a99;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 6px;
+    }
+    .arrow {
+      font-size: 20px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .week-range {
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .activity {
+      background: white;
+      border-left: 5px solid #004a99;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 6px;
+    }
+    .mileage {
+      color: #004a99;
+      font-style: italic;
+      margin-top: 5px;
+    }
+    .portal-btn {
+      background-color: #004a99;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: bold;
+      font-size: 16px;
+      border: none;
+      cursor: pointer;
+    }
+    .portal-btn:hover {
+      background-color: #003366;
+    }
+    .unknown {
+      color: red;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
+    <a class="portal-btn" href="main.html">Main Menu</a>
+    <span id="actionButtons"></span>
+  </div>
+  <div class="content-box" id="contentBox">
+    <div class="header">
+      <div class="arrow" onclick="changeWeek(-1)">←</div>
+      <div class="week-range" id="weekRange">Loading…</div>
+      <div class="arrow" onclick="changeWeek(1)">→</div>
+    </div>
+    <div id="activityLog"></div>
+    <hr style="margin-top: 30px;" />
+    <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
+    <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
+    <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
+    <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
+  </div>
+  <footer style="text-align:center; font-size:11px; color:#999; margin-top:40px;">Weekly version: FINAL – Mostlane Portal • © Mostlane 2025</footer>
+  <script>
+    // Basic tickbox recalculation
+    function updateMileageTotal() {
+      let total = 0;
+      document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+        const miles = parseFloat(el.dataset.miles || "0");
+        const chargeable = Math.max(0, miles - 10);
+        total += chargeable;
+      });
+
+      const display = document.getElementById("mileageTotalDisplay");
+      if (display) {
+        display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
+      }
+
+      document.querySelectorAll(".mileage-claimed-text").forEach(div => {
+        const checkbox = div.previousElementSibling?.querySelector("input");
+        if (checkbox && checkbox.checked) {
+          div.style.display = "block";
+        } else {
+          div.style.display = "none";
+        }
+      });
+    }
+
+    window.addEventListener("load", () => {
+      setTimeout(() => {
+        document.querySelectorAll(".claim-mileage").forEach(el => {
+          el.addEventListener("change", updateMileageTotal);
+        });
+        updateMileageTotal(); // Initial run
+      }, 1000);
+    });
+  </script>
+</body>
+</html>
