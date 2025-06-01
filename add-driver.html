@@ -1,0 +1,131 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Add Driver</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      background-color: #e6e8eb;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      background: rgba(255,255,255,0.6);
+      max-width: 500px;
+      margin: 40px auto;
+      padding: 20px 30px;
+      border-radius: 12px;
+    }
+    h2 {
+      text-align: center;
+      color: #003366;
+    }
+    label {
+      font-weight: bold;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin: 6px 0 16px;
+      border: 1px solid #aaa;
+      border-radius: 6px;
+    }
+    #map {
+      height: 300px;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .note {
+      font-size: 0.9em;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Add Driver</h2>
+    <form id="driverForm">
+      <label for="name">Full Name:</label>
+      <input type="text" id="name" required>
+
+      <label for="username">Portal Username:</label>
+      <input type="text" id="username" required>
+
+      <label for="postcode">Postcode:</label>
+      <input type="text" id="postcode" required>
+
+      <div id="map"></div>
+
+      <input type="hidden" id="lat">
+      <input type="hidden" id="lng">
+
+      <button type="submit">Save Driver</button>
+      <p class="note">Note: This will update your home-geofences.json file.</p>
+    </form>
+  </div>
+
+  <script>
+    let map, marker;
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 50.861, lng: -1.273 },
+        zoom: 12
+      });
+
+      marker = new google.maps.Marker({
+        map,
+        position: map.getCenter(),
+        draggable: true
+      });
+
+      marker.addListener("dragend", function () {
+        const pos = marker.getPosition();
+        document.getElementById("lat").value = pos.lat();
+        document.getElementById("lng").value = pos.lng();
+      });
+    }
+
+    document.getElementById("postcode").addEventListener("change", function () {
+      const postcode = this.value;
+      fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${postcode}&key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4`)
+        .then(response => response.json())
+        .then(data => {
+          const location = data.results[0].geometry.location;
+          map.setCenter(location);
+          marker.setPosition(location);
+          document.getElementById("lat").value = location.lat;
+          document.getElementById("lng").value = location.lng;
+        });
+    });
+
+    document.getElementById("driverForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const name = document.getElementById("name").value.trim();
+      const username = document.getElementById("username").value.trim();
+      const lat = document.getElementById("lat").value;
+      const lng = document.getElementById("lng").value;
+
+      const driverEntry = {
+        [username]: {
+          name: name,
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          radius_m: 300
+        }
+      };
+
+      alert("Driver added: \n" + JSON.stringify(driverEntry, null, 2));
+      // Here you would normally POST to GitHub or trigger a Zap
+    });
+
+  </script>
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap">
+  </script>
+</body>
+</html>
