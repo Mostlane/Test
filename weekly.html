@@ -433,7 +433,7 @@ showCorrectButton();
 </html>
 <script>
 function updateMileageTotal() {
-    let checkboxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
+    const checkboxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
     let total = 0;
     checkboxes.forEach(cb => {
         if (cb.checked) {
@@ -443,11 +443,9 @@ function updateMileageTotal() {
     document.getElementById("mileageTotalDisplay").innerText = "Total Claimed Mileage: £" + total.toFixed(2);
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-    let checkboxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', updateMileageTotal);
-    });
+document.addEventListener("DOMContentLoaded", function() {
+    const boxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
+    boxes.forEach(cb => cb.addEventListener('change', updateMileageTotal));
     updateMileageTotal();
 });
 </script>
