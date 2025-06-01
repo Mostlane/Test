@@ -429,53 +429,25 @@ showCorrectButton();
 <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
 </div>
 <footer style="text-align:center; font-size:11px; color:#999; margin-top:40px;">Weekly version: 2024-05-27-FINAL</footer>
-<div style="position: fixed; bottom: 10px; right: 20px; font-size: 11px; color: #888;">Version: weekly.html - FIXED 2025-06-01</div></body>
+</body>
 </html>
 <script>
-
 function updateMileageTotal() {
     let checkboxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
     let total = 0;
     checkboxes.forEach(cb => {
         if (cb.checked) {
-            total += parseFloat(cb.getAttribute("data-miles"));
+            total += parseFloat(cb.getAttribute("data-miles")) || 0;
         }
     });
     document.getElementById("mileageTotalDisplay").innerText = "Total Claimed Mileage: £" + total.toFixed(2);
-
-  let total = 0;
-  const boxes = document.querySelectorAll(".claim-mileage:checked");
-  boxes.forEach(el => {
-    const raw = parseFloat(el.dataset.miles || "0");
-    const paid = Math.max(0, raw - 10);
-    total += paid;
-  });
-  const summary = document.getElementById("mileageTotalDisplay");
-  if (summary) {
-    summary.innerText = `Total Paid Mileage: ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
-  }
-}
-);
-  let display = document.getElementById("mileageTotalDisplay");
-  if (!display) {
-    display = document.createElement("div");
-    display.id = "mileageTotalDisplay";
-    display.style.marginTop = "20px";
-    document.querySelector(".content-box").appendChild(display);
-  }
-  if (total > 0) {
-    display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * 0.25).toFixed(2)}`;
-  } else {
-    display.innerHTML = ``;
-  }
 }
 
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    document.querySelectorAll(".claim-mileage").forEach(el => {
-      el.addEventListener("change", updateMileageTotal);
+document.addEventListener('DOMContentLoaded', function () {
+    let checkboxes = document.querySelectorAll('input[type="checkbox"][data-miles]');
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', updateMileageTotal);
     });
     updateMileageTotal();
-  }, 1000);
 });
 </script>
