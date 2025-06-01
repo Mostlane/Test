@@ -128,7 +128,7 @@ async function populateCategoryDropdown() {
 window.addEventListener("DOMContentLoaded", () => {
   populateDropdowns();
   populateCategoryDropdown();
-  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneEmail") || "Unknown";
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
   const now = new Date();
   const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
                         (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
