@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Weekly Summary</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      background-color: #e6e8eb;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      background-color: rgba(255, 255, 255, 0.6);
+      margin: 30px auto;
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 900px;
+    }
+    h1, h2 {
+      text-align: center;
+      color: #003366;
+    }
+    .summary, .day-section {
+      margin-top: 20px;
+    }
+    .day-header {
+      background-color: rgba(0, 51, 102, 0.7);
+      color: white;
+      font-weight: bold;
+      padding: 8px;
+      border-radius: 5px;
+    }
+    .log-entry {
+      background: rgba(255,255,255,0.9);
+      margin: 5px 0;
+      padding: 8px;
+      border-radius: 5px;
+    }
+    .claim-checkbox {
+      margin-left: 10px;
+    }
+    #mileageSummary {
+      font-weight: bold;
+      color: #003366;
+      margin-top: 15px;
+      font-size: 16px;
+    }
+    .footer {
+      text-align: center;
+      padding: 15px;
+      color: #555;
+      font-size: 13px;
+    }
+    button {
+      background-color: rgba(0, 51, 102, 0.7);
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Weekly Summary</h1>
+    <div id="userLogs"></div>
+    <div id="mileageSummary"></div>
+    <button onclick="createInvoice()">Create Invoice</button>
+    <div class="footer">Mostlane Portal – Weekly Summary © 2025</div>
+  </div>
+
+  <script>
+    let user = sessionStorage.getItem("mostlaneLoggedInUsername");
+    let employment = {};
+    let travelTime = {};
+    let roleType = {};
+    let claimedMileage = 0;
+    const ratePerMile = 0.25;
+
+    async function fetchTextFile(url) {
+      const res = await fetch(url);
+      const text = await res.text();
+      return text.trim().split('\n').reduce((acc, line) => {
+        const [name, value] = line.split('-').map(x => x.trim());
+        acc[name] = value;
+        return acc;
+      }, {});
+    }
+
+    async function loadData() {
+      [employment, travelTime, roleType] = await Promise.all([
+        fetchTextFile('https://mostlane.github.io/Test/employment.txt'),
+        fetchTextFile('https://mostlane.github.io/Test/travel-time.txt'),
+        fetchTextFile('https://mostlane.github.io/Test/role-type.txt')
+      ]);
+      displayLogs();
+    }
+
+    async function displayLogs() {
+      const res = await fetch('https://mostlane.github.io/Test/logs/activity-log.json');
+      const logs = await res.json();
+      const userLogs = logs[user] || [];
+      const container = document.getElementById("userLogs");
+      container.innerHTML = "";
+
+      let days = {};
+      for (let log of userLogs) {
+        let date = new Date(log.datetime);
+        let day = date.toLocaleDateString(undefined, { weekday: 'long' });
+        if (!days[day]) days[day] = [];
+        days[day].push(log);
+      }
+
+      for (let [day, entries] of Object.entries(days)) {
+        let dayDiv = document.createElement("div");
+        dayDiv.className = "day-section";
+        let header = document.createElement("div");
+        header.className = "day-header";
+        header.textContent = day;
+        dayDiv.appendChild(header);
+
+        for (let entry of entries) {
+          let entryDiv = document.createElement("div");
+          entryDiv.className = "log-entry";
+          let time = new Date(entry.datetime).toLocaleTimeString();
+          entryDiv.innerHTML = `${entry.type} at ${time}`;
+          if (entry.mileage && employment[user] === "SelfEmployed" && travelTime[user] === "No") {
+            let box = document.createElement("input");
+            box.type = "checkbox";
+            box.className = "claim-checkbox";
+            box.dataset.miles = entry.mileage;
+            box.addEventListener("change", updateMileageTotal);
+            entryDiv.appendChild(box);
+            entryDiv.innerHTML += ` — ${entry.mileage} miles`;
+          }
+          dayDiv.appendChild(entryDiv);
+        }
+
+        container.appendChild(dayDiv);
+      }
+    }
+
+    function updateMileageTotal() {
+      const checkboxes = document.querySelectorAll('.claim-checkbox:checked');
+      claimedMileage = 0;
+      checkboxes.forEach(box => claimedMileage += parseFloat(box.dataset.miles || 0));
+      const total = claimedMileage * ratePerMile;
+      document.getElementById("mileageSummary").textContent = `Claimed Mileage: ${claimedMileage.toFixed(1)} miles = £${total.toFixed(2)}`;
+    }
+
+    function createInvoice() {
+      const selected = Array.from(document.querySelectorAll('.claim-checkbox')).map(box => box.checked);
+      const payload = {
+        user,
+        claimedMileage,
+        totalClaim: (claimedMileage * ratePerMile).toFixed(2),
+        tickboxes: selected
+      };
+      fetch('https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(() => alert("Invoice submitted."));
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
