@@ -1,11 +1,12 @@
 
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Holiday Booking</title>
-  <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Holiday Booking</title>
+<style>
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -53,189 +54,63 @@
   </style>
 </head>
 <body>
+<div style="text-align: right; margin-bottom: 20px;">
+<button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
+</div>
+<div class="container">
+<div class="form-section">
+<h2>Holiday Request</h2>
+<form id="holidayForm">
+<label>Engineer Name:</label>
+<input id="engineer" name="engineer" readonly="" type="text"/>
+<label>Start Date:</label>
+<input id="start" name="start" required="" type="date"/>
+<label>End Date:</label>
+<input id="end" name="end" required="" type="date"/>
+<label>Leave Type:</label>
+<select id="type" name="type" required="">
+<option value="Annual Leave">Annual Leave</option>
+<option value="Sick Leave">Sick Leave</option>
+<option value="Bank Holiday">Bank Holiday</option>
+<option value="Compulsory Leave">Compulsory Leave</option>
+</select>
+<label>Notes:</label>
+<input id="notes" name="notes" placeholder="Optional" type="text"/>
+<button type="submit">Submit</button>
+</form>
 
-  <div style="text-align: right; margin-bottom: 20px;">
-    <button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
-  </div>
-
-  <div class="container">
-  <div class="form-section">
-      <h2>Holiday Request</h2>
-      <form id="holidayForm">
-        <label>Engineer Name:</label>
-        <input type="text" id="engineer" name="engineer" readonly>
-
-        <label>Start Date:</label>
-        <input type="date" id="start" name="start" required>
-
-        <label>End Date:</label>
-        <input type="date" id="end" name="end" required>
-
-        <label>Leave Type:</label>
-        <select id="type" name="type" required>
-          <option value="Annual Leave">Annual Leave</option>
-          <option value="Sick Leave">Sick Leave</option>
-          <option value="Bank Holiday">Bank Holiday</option>
-          <option value="Compulsory Leave">Compulsory Leave</option>
-        </select>
-
-        <label>Notes:</label>
-        <input type="text" id="notes" name="notes" placeholder="Optional">
-
-        <button type="submit">Submit</button>
-      </form>
-    </div>
-  <div class="summary-section">
-      <h2>Holiday Summary</h2>
-      <div id="summaryContent">
+</div>
+<div class="summary-section">
+<h2>Holiday Summary</h2>
+<div id="summaryContent">
 <div style="margin-top:20px; font-size: 13px; color: gray;">
-  <p>Last Update: <span id="lastUpdate">Loading...</span></p>
-  <p>Next Update: <span id="nextUpdate">Loading...</span></p>
+<p>Last Update: <span id="lastUpdate">Loading...</span></p>
+<p>Next Update: <span id="nextUpdate">Loading...</span></p>
+</div>
+<p><strong>Allowance:</strong> 28 Days</p>
+<p><strong>Used:</strong> -</p>
+<p><strong>Booked:</strong> -</p>
+<p><strong>Mandatory Days:</strong> -</p>
+<p><strong>Remaining:</strong> -</p>
+</div>
+<div class="summary-section">
+<h2>Approved Holidays</h2>
+<ul id="approvedList"></ul>
+</div>
+<div class="summary-section">
+<h2>Pending Requests</h2>
+<ul id="pendingList"></ul>
+<div class="summary-section">
+<h2>Compulsory Shutdown Days</h2>
+<ul id="shutdownList"></ul>
+</div>
+<div class="summary-section">
+<h2>Bank Holidays</h2>
+<ul id="bankHolidayList"></ul>
 </div>
 
-        <p><strong>Allowance:</strong> 28 Days</p>
-        <p><strong>Used:</strong> -</p>
-        <p><strong>Booked:</strong> -</p>
-        <p><strong>Mandatory Days:</strong> -</p>
-        <p><strong>Remaining:</strong> -</p>
-      </div>
-    
-    <div class="summary-section">
-      <h2>Approved Holidays</h2>
-      <ul id="approvedList"></ul>
-    </div>
-    <div class="summary-section">
-      <h2>Pending Requests</h2>
-      <ul id="pendingList"></ul>
-    
-    <div class="summary-section">
-      <h2>Compulsory Shutdown Days</h2>
-      <ul id="shutdownList"></ul>
-    </div>
-    <div class="summary-section">
-      <h2>Bank Holidays</h2>
-      <ul id="bankHolidayList"></ul>
-    </div>
 
-<script>
-document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
-
-document.getElementById("holidayForm").addEventListener("submit", function(e) {
-  e.preventDefault();
-
-  const data = {
-    engineer: document.getElementById("engineer").value,
-    start: document.getElementById("start").value,
-    end: document.getElementById("end").value,
-    type: document.getElementById("type").value,
-    notes: document.getElementById("notes").value
-  };
-
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/2nudfug/", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(data).toString()
-  }).then(() => {
-    alert("Request submitted!");
-    document.getElementById("holidayForm").reset();
-  });
-});
-</script>
-
-
-
-
-
-<script>
-function formatDateLabel(dateStr) {
-  const date = new Date(dateStr);
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const dayName = dayNames[date.getUTCDay()];
-  const day = date.getUTCDate();
-  const month = monthNames[date.getUTCMonth()];
-  const suffix = (d => {
-    if (d > 3 && d < 21) return "th";
-    switch (d % 10) {
-      case 1: return "st";
-      case 2: return "nd";
-      case 3: return "rd";
-      default: return "th";
-    }
-  })(day);
-  return `${dayName} ${day}${suffix} ${month}`;
-}
-
-document.addEventListener("DOMContentLoaded", function () {
-  const username = sessionStorage.getItem("mostlaneUser");
-  fetch("https://mostlane.github.io/Test/holiday-summary.json")
-    .then(response => response.json())
-    .then(data => {
-      const userData = data[username];
-      if (!userData) {
-        document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
-        return;
-      }
-
-      const pendingCount = (userData.pending || []).length;
-
-      document.getElementById("summaryContent").innerHTML = `
-        <p><strong>Allowance:</strong> ${userData.available} Days</p>
-        <p><strong>Used:</strong> ${userData.used}</p>
-        <p><strong>Approved Upcoming Holidays:</strong> ${userData.booked}</p>
-        <p><strong>Pending Requests:</strong> ${pendingCount}</p>
-        <p><strong>Mandatory Days:</strong> ${userData.shutdown + userData.bankholidays}</p>
-        <p><strong>Remaining:</strong> ${userData.remaining}</p>
-        <div style="margin-top:20px; font-size: 13px; color: gray;">
-          <p>Last Update: ${new Date().toLocaleString()}</p>
-          <p>Next Update: Auto-synced daily</p>
-        </div>
-      `;
-
-      const today = new Date().toISOString().split("T")[0];
-
-      (userData.approved || [])
-        .filter(h => h.date >= today)
-        .forEach(h => {
-          const li = document.createElement("li");
-          li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-          document.getElementById("approvedList").appendChild(li);
-        });
-
-      (userData.pending || []).forEach(h => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-        document.getElementById("pendingList").appendChild(li);
-      });
-
-      const bankSet = new Set(userData.bankHolidayDates || []);
-      const filteredShutdowns = (userData.shutdownDates || []).filter(d => !bankSet.has(d));
-
-      filteredShutdowns.forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("shutdownList").appendChild(li);
-      });
-
-      (userData.bankHolidayDates || []).forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("bankHolidayList").appendChild(li);
-      });
-    })
-    .catch(() => {
-      document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
-    });
-});
-</script>
-
-
-
-
-
-</body>
-</html>
-<script>
+</div></div></div><script>
 const GITHUB_TOKEN = "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";
 const REPO = "Mostlane/Test";
 const LOG_FILE = "holiday-log.json";
@@ -292,240 +167,5 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
     alert("Failed to submit request: " + err.message);
   });
 });
-</script>
-PE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Holiday Booking</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 40px 20px;
-    }
-    .container {
-      max-width: 1000px;
-      margin: auto;
-      display: block;
-    }
-    .form-section, .summary-section {
-      background: rgba(255,255,255,0.6);
-      padding: 30px;
-      border-radius: 8px;
-      flex: 1;
-    }
-    h2 {
-      text-align: center;
-      color: #003366;
-    }
-    label {
-      display: block;
-      margin-top: 15px;
-      font-weight: bold;
-    }
-    input, select {
-      width: 100%;
-      padding: 10px;
-      font-size: 16px;
-      margin-top: 5px;
-    }
-    button {
-      margin-top: 30px;
-      padding: 12px;
-      width: 100%;
-      background-color: rgba(0, 74, 153, 0.6);
-      color: white;
-      font-size: 18px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-
-  <div style="text-align: right; margin-bottom: 20px;">
-    <button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
-  </div>
-
-  <div class="container">
-  <div class="form-section">
-      <h2>Holiday Request</h2>
-      <form id="holidayForm">
-        <label>Engineer Name:</label>
-        <input type="text" id="engineer" name="engineer" readonly>
-
-        <label>Start Date:</label>
-        <input type="date" id="start" name="start" required>
-
-        <label>End Date:</label>
-        <input type="date" id="end" name="end" required>
-
-        <label>Leave Type:</label>
-        <select id="type" name="type" required>
-          <option value="Annual Leave">Annual Leave</option>
-          <option value="Sick Leave">Sick Leave</option>
-          <option value="Bank Holiday">Bank Holiday</option>
-          <option value="Compulsory Leave">Compulsory Leave</option>
-        </select>
-
-        <label>Notes:</label>
-        <input type="text" id="notes" name="notes" placeholder="Optional">
-
-        <button type="submit">Submit</button>
-      </form>
-    </div>
-  <div class="summary-section">
-      <h2>Holiday Summary</h2>
-      <div id="summaryContent">
-<div style="margin-top:20px; font-size: 13px; color: gray;">
-  <p>Last Update: <span id="lastUpdate">Loading...</span></p>
-  <p>Next Update: <span id="nextUpdate">Loading...</span></p>
-</div>
-
-        <p><strong>Allowance:</strong> 28 Days</p>
-        <p><strong>Used:</strong> -</p>
-        <p><strong>Booked:</strong> -</p>
-        <p><strong>Mandatory Days:</strong> -</p>
-        <p><strong>Remaining:</strong> -</p>
-      </div>
-    
-    <div class="summary-section">
-      <h2>Approved Holidays</h2>
-      <ul id="approvedList"></ul>
-    </div>
-    <div class="summary-section">
-      <h2>Pending Requests</h2>
-      <ul id="pendingList"></ul>
-    
-    <div class="summary-section">
-      <h2>Compulsory Shutdown Days</h2>
-      <ul id="shutdownList"></ul>
-    </div>
-    <div class="summary-section">
-      <h2>Bank Holidays</h2>
-      <ul id="bankHolidayList"></ul>
-    </div>
-
-<script>
-document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
-
-document.getElementById("holidayForm").addEventListener("submit", function(e) {
-  e.preventDefault();
-
-  const data = {
-    engineer: document.getElementById("engineer").value,
-    start: document.getElementById("start").value,
-    end: document.getElementById("end").value,
-    type: document.getElementById("type").value,
-    notes: document.getElementById("notes").value
-  };
-
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/2nudfug/", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(data).toString()
-  }).then(() => {
-    alert("Request submitted!");
-    document.getElementById("holidayForm").reset();
-  });
-});
-</script>
-
-
-
-
-
-<script>
-function formatDateLabel(dateStr) {
-  const date = new Date(dateStr);
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const dayName = dayNames[date.getUTCDay()];
-  const day = date.getUTCDate();
-  const month = monthNames[date.getUTCMonth()];
-  const suffix = (d => {
-    if (d > 3 && d < 21) return "th";
-    switch (d % 10) {
-      case 1: return "st";
-      case 2: return "nd";
-      case 3: return "rd";
-      default: return "th";
-    }
-  })(day);
-  return `${dayName} ${day}${suffix} ${month}`;
-}
-
-document.addEventListener("DOMContentLoaded", function () {
-  const username = sessionStorage.getItem("mostlaneUser");
-  fetch("https://mostlane.github.io/Test/holiday-summary.json")
-    .then(response => response.json())
-    .then(data => {
-      const userData = data[username];
-      if (!userData) {
-        document.getElementById("summaryContent").innerHTML = "<p>No summary data found for this user.</p>";
-        return;
-      }
-
-      const pendingCount = (userData.pending || []).length;
-
-      document.getElementById("summaryContent").innerHTML = `
-        <p><strong>Allowance:</strong> ${userData.available} Days</p>
-        <p><strong>Used:</strong> ${userData.used}</p>
-        <p><strong>Approved Upcoming Holidays:</strong> ${userData.booked}</p>
-        <p><strong>Pending Requests:</strong> ${pendingCount}</p>
-        <p><strong>Mandatory Days:</strong> ${userData.shutdown + userData.bankholidays}</p>
-        <p><strong>Remaining:</strong> ${userData.remaining}</p>
-        <div style="margin-top:20px; font-size: 13px; color: gray;">
-          <p>Last Update: ${new Date().toLocaleString()}</p>
-          <p>Next Update: Auto-synced daily</p>
-        </div>
-      `;
-
-      const today = new Date().toISOString().split("T")[0];
-
-      (userData.approved || [])
-        .filter(h => h.date >= today)
-        .forEach(h => {
-          const li = document.createElement("li");
-          li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-          document.getElementById("approvedList").appendChild(li);
-        });
-
-      (userData.pending || []).forEach(h => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(h.date)} — ${h.type} (${h.duration} day${h.duration > 1 ? 's' : ''})`;
-        document.getElementById("pendingList").appendChild(li);
-      });
-
-      const bankSet = new Set(userData.bankHolidayDates || []);
-      const filteredShutdowns = (userData.shutdownDates || []).filter(d => !bankSet.has(d));
-
-      filteredShutdowns.forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("shutdownList").appendChild(li);
-      });
-
-      (userData.bankHolidayDates || []).forEach(date => {
-        const li = document.createElement("li");
-        li.textContent = `${formatDateLabel(date)}`;
-        document.getElementById("bankHolidayList").appendChild(li);
-      });
-    })
-    .catch(() => {
-      document.getElementById("summaryContent").innerHTML = "<p>Could not load summary data.</p>";
-    });
-});
-</script>
-
-
-
-
-
-</body>
+</script></body>
 </html>
