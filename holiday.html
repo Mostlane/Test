@@ -131,14 +131,7 @@ document.getElementById("holidayForm").addEventListener("submit", function(e) {
     notes: document.getElementById("notes").value
   };
 
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/2nudfug/", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(data).toString()
-  }).then(() => {
-    alert("Request submitted!");
-    document.getElementById("holidayForm").reset();
-  });
+  
 });
 </script>
 
