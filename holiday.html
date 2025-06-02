@@ -78,7 +78,6 @@
 <input id="notes" name="notes" placeholder="Optional" type="text"/>
 <button type="submit">Submit</button>
 </form>
-
 </div>
 <div class="summary-section">
 <h2>Holiday Summary</h2>
@@ -145,27 +144,34 @@ async function appendToLog(newEntry) {
   });
 }
 
-document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+document.addEventListener("DOMContentLoaded", function () {
+  const engineerField = document.getElementById("engineer");
+  if (engineerField) engineerField.value = sessionStorage.getItem("mostlaneUser") || "Unknown";
 
-document.getElementById("holidayForm").addEventListener("submit", function(e) {
-  e.preventDefault();
+  const form = document.getElementById("holidayForm");
+  if (form) {
+    form.addEventListener("submit", async function(e) {
+      e.preventDefault();
 
-  const data = {
-    name: document.getElementById("engineer").value,
-    start: document.getElementById("start").value,
-    end: document.getElementById("end").value,
-    type: document.getElementById("type").value,
-    notes: document.getElementById("notes").value,
-    status: "Pending"
-  };
+      const data = {
+        name: engineerField.value,
+        start: document.getElementById("start").value,
+        end: document.getElementById("end").value,
+        type: document.getElementById("type").value,
+        notes: document.getElementById("notes").value,
+        status: "Pending"
+      };
 
-  appendToLog(data).then(() => {
-    alert("Request submitted!");
-    document.getElementById("holidayForm").reset();
-    location.reload();
-  }).catch((err) => {
-    alert("Failed to submit request: " + err.message);
-  });
+      try {
+        await appendToLog(data);
+        alert("Holiday request submitted successfully.");
+        form.reset();
+        location.reload();
+      } catch (err) {
+        alert("Error submitting request: " + err.message);
+      }
+    });
+  }
 });
 </script></body>
 </html>
