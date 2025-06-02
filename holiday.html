@@ -107,12 +107,18 @@
 <h2>Bank Holidays</h2>
 <ul id="bankHolidayList"></ul>
 </div>
-
-
 </div></div></div><script>
 const GITHUB_TOKEN = "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";
 const REPO = "Mostlane/Test";
 const LOG_FILE = "holiday-log.json";
+
+async function fetchSHA() {
+  const res = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
+    headers: { Authorization: "token " + GITHUB_TOKEN }
+  });
+  const data = await res.json();
+  return data.sha;
+}
 
 async function fetchLog() {
   const res = await fetch("https://raw.githubusercontent.com/" + REPO + "/main/" + LOG_FILE);
@@ -121,15 +127,11 @@ async function fetchLog() {
 
 async function appendToLog(newEntry) {
   const log = await fetchLog();
-
-  const getSHA = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
-    headers: { Authorization: "token " + GITHUB_TOKEN }
-  }).then(r => r.json()).then(d => d.sha);
-
+  const sha = await fetchSHA();
   log.push(newEntry);
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(log, null, 2))));
 
-  return fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(log, null, 2))));
+  const res = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
     method: "PUT",
     headers: {
       Authorization: "token " + GITHUB_TOKEN,
@@ -138,10 +140,11 @@ async function appendToLog(newEntry) {
     body: JSON.stringify({
       message: "New holiday request",
       committer: { name: "Mostlane Bot", email: "admin@mostlane.com" },
-      content,
-      sha: getSHA
+      content: content,
+      sha: sha
     })
   });
+  return res.json();
 }
 
 document.addEventListener("DOMContentLoaded", function () {
