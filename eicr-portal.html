@@ -180,6 +180,7 @@
     }
 
     function filterByDays(days) {
+      document.querySelector('.summary-bubbles .bubble:last-child').classList.add('active');
       const now = new Date();
       const future = new Date(now);
       future.setDate(now.getDate() + days);
@@ -187,7 +188,7 @@
         const dateStr = entry[activeCategory];
         if (!dateStr) return false;
         const date = new Date(dateStr);
-        return date >= now && date <= future;
+        return date <= future;
       }).sort((a, b) => new Date(a[activeCategory]) - new Date(b[activeCategory]));
       renderTable(filtered);
     }
@@ -196,6 +197,7 @@
       renderTable(allData);
       bubbles.forEach(btn => btn.classList.remove('active'));
       dueButtons.forEach(btn => btn.classList.remove('active'));
+      document.querySelector('.summary-bubbles .bubble:last-child').classList.remove('active');
     }
 
     function setCategory(field, btn) {
