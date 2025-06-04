@@ -1,17 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Forms</title>
-  <link rel="stylesheet" href="style.css" />
+<title>Main Menu</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="style.css" rel="stylesheet"/>
+<script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  </script>
 </head>
 <body class="main-body">
-  <div class="content-box">
-    <h2 style="text-align: center;">Forms</h2>
-    <a class="button" href="https://form.jotform.com/251462912929059">Van Checks</a>
-    <a class="button" href="https://form.jotform.com/250527511327047">Van Handover</a>
-    <a class="button" href="https://form.jotform.com/250527962516057">Tools</a>
-    <a class="button" href="compliance-forms.html">Compliance</a>
-    <a class="button" href="main.html">Main Menu</a>
-  </div>
+  <h2 style="text-align: center; color: #003366;">Forms</h2>
+  <a class="button" href="https://form.jotform.com/251462912929059">Van Checks</a>
+<a class="button" href="https://form.jotform.com/250527511327047">Van Handover</a>
+<a class="button" href="https://form.jotform.com/250527962516057">Tools</a>
+<a class="button" href="compliance-forms.html">Compliance</a>
+<a class="button" href="main.html">Main Menu</a>
 </body>
 </html>
