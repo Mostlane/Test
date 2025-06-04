@@ -71,7 +71,7 @@
 <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
 <a class="button" href="my-assets.html">Plant &amp; Equipment</a>
 <a class="button" href="#" id="my-documents-btn">My Documents</a><a class="button" href="weekly.html">Weekly Summary</a>
-<a class="button" href="forms.html">Forms</a><a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+<a class="button" href="forms.html">Forms</a><a class="button" href="compliance.html">Compliance</a><a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 <script>
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
     .then(r => r.text())
@@ -97,17 +97,17 @@
         const viewBtn = document.createElement("a");
         viewBtn.className = "button";
         viewBtn.href = "view-assets.html";
-        viewBtn.textContent = "📂 View All Assets";
+        viewBtn.textContent = "View All Assets";
 
         const addSite = document.createElement("a");
         addSite.className = "button";
         addSite.href = "add-site.html";
-        addSite.textContent = "➕🏗️ Add Site";
+        addSite.textContent = "Add Site";
 
         const addAsset = document.createElement("a");
         addAsset.className = "button";
         addAsset.href = "add-asset.html";
-        addAsset.textContent = "➕🔧 Add Asset";
+        addAsset.textContent = "Add Asset";
 
         reference.insertAdjacentElement("afterend", viewBtn);
         viewBtn.insertAdjacentElement("afterend", addSite);
@@ -115,7 +115,7 @@
         const fleetBtn = document.createElement("a");
         fleetBtn.className = "button";
         fleetBtn.href = "van-scores.html";
-        fleetBtn.textContent = "🚐 Fleet Vehicles";
+        fleetBtn.textContent = "Fleet Vehicles";
 
         addAsset.insertAdjacentElement("afterend", fleetBtn);
 
@@ -154,7 +154,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const addDriver = document.createElement("a");
         addDriver.className = "button";
         addDriver.href = "add-driver.html";
-        addDriver.textContent = "🧑‍✈️ Add Driver";
+        addDriver.textContent = "Add Driver";
         const fleetBtn = [...document.querySelectorAll('.button')].find(btn => btn.textContent.includes("Fleet Vehicles"));
         if (fleetBtn) fleetBtn.insertAdjacentElement("afterend", addDriver);
       }
@@ -167,7 +167,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const adminBtn = document.createElement("a");
     adminBtn.className = "button";
     adminBtn.href = "admin-holiday.html";
-    adminBtn.textContent = "🗂️ Holiday Admin";
+    adminBtn.textContent = "Holiday Admin";
     const referenceBtn = document.querySelector("a[href='weekly.html']");
     if (referenceBtn) {
       referenceBtn.insertAdjacentElement("afterend", adminBtn);
