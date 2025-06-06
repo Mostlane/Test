@@ -1,1 +1,15 @@
-
+[
+  { "vehicle": "LE73 UHV", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "HY25 UTR", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "LA70 FPJ", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "LB21 VZU", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "WP64 EJD", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "HX69 KHZ", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "HY25 UTM", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "LG23 AWK", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "KL07 YJK", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "HN73 KFO", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "BL12 DMZ", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "HN69 SYP", "status": "Missing", "date": null, "timestamp": null },
+  { "vehicle": "WM83 VFL", "status": "Missing", "date": null, "timestamp": null }
+]
