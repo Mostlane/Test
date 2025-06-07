@@ -460,6 +460,34 @@ const observer = new MutationObserver(() => {
 });
 observer.observe(document.body, { childList: true, subtree: true });
 </script>
+
+<script>
+document.getElementById("createTimesheetBtn")?.addEventListener("click", function () {
+  const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
+  const weekRange = document.getElementById("weekRange")?.textContent || "Current Week";
+
+  html2canvas(document.querySelector(".content-box")).then(canvas => {
+    const imageData = canvas.toDataURL("image/png");
+
+    fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        weekRange,
+        imageData,
+        type: "Timesheet"
+      })
+    }).then(() => {
+      alert("Timesheet sent!");
+    }).catch(err => {
+      alert("Failed to send timesheet.");
+      console.error(err);
+    });
+  });
+});
+</script>
+
 </body>
 </html>
 
