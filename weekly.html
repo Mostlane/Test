@@ -1,135 +1,123 @@
-
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Weekly Summary</title>
-<link href="style.css" rel="stylesheet"/>
-<style>
+  <meta charset="UTF-8" />
+  <title>Weekly Summary</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
+      font-family: Arial, sans-serif;
+      background-color: #f2f2f2;
       margin: 0;
       padding: 0;
     }
-    .content-box {
-      background: rgba(255,255,255,0.6);
-      margin: 60px auto;
-      padding: 20px;
-      max-width: 900px;
-      border-radius: 10px;
-    }
     .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background-color: #004a99;
-      color: white;
-      padding: 10px 20px;
-      border-radius: 6px;
-    }
-    .arrow {
-      font-size: 20px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .week-range {
-      font-size: 18px;
-      font-weight: bold;
-    }
-    .activity {
-      background: white;
-      border-left: 5px solid #004a99;
-      padding: 10px;
-      margin-top: 10px;
-      border-radius: 6px;
-    }
-    .mileage {
-      color: #004a99;
-      font-style: italic;
-      margin-top: 5px;
-    }
-    .portal-btn {
-      background-color: #004a99;
-      color: #fff;
-      padding: 10px 20px;
-      border-radius: 6px;
-      text-decoration: none;
-      font-weight: bold;
-      font-size: 16px;
-      border: none;
-      cursor: pointer;
-    }
-    .portal-btn:hover {
       background-color: #003366;
+      color: white;
+      padding: 20px;
+      text-align: center;
     }
-    .unknown {
-      color: red;
+    #username-display {
+      margin-top: 10px;
       font-weight: bold;
+    }
+    .content-box {
+      background-color: white;
+      margin: 20px auto;
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 800px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    button {
+      margin: 5px;
+      padding: 10px 15px;
+      font-size: 14px;
+      border: none;
+      border-radius: 5px;
+      background-color: #005bbb;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #004999;
+    }
+    #week-selector {
+      margin-top: 10px;
     }
   </style>
 </head>
 <body>
-<div style="display: flex; justify-content: center; gap: 15px; margin-bottom: 20px;">
-<a class="portal-btn" href="main.html">Main Menu</a>
-<span id="actionButtons"></span>
-</div>
-<div class="content-box">
-<div class="header">
-<div class="arrow" onclick="changeWeek(-1)">←</div>
-<div class="week-range" id="weekRange">Loading…</div>
-<div class="arrow" onclick="changeWeek(1)">→</div>
-</div>
-<div id="activityLog"></div>
-</div>
+  <div class="header">
+    <h1>Weekly Summary</h1>
+    <div id="username-display"></div>
+    <button onclick="goToMain()">Main Menu</button>
+    <button onclick="createInvoice()">Create Invoice</button>
+    <button onclick="createTimesheet()">Create Timesheet</button>
+    <div id="week-selector">
+      <button onclick="previousWeek()">←</button>
+      <span id="week-range">This Week</span>
+      <button onclick="nextWeek()">→</button>
+    </div>
+  </div>
 
+  <div class="content-box" id="summary-content">
+    <div id="summary-container">
+      <p><i>Summary will appear here...</i></p>
+    </div>
+    <div id="mileage-summary"></div>
+    <div id="earnings-summary"></div>
+  </div>
 
+  <script>
+    const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+    document.getElementById("username-display").innerText = "Logged in as: " + username.replace(".", " ");
 
-<script>
-window.addEventListener("load", function () {
-  const timesheetBtn = document.getElementById("createTimesheetBtn");
-  if (!timesheetBtn) return;
+    const invoiceWebhook = "https://hooks.zapier.com/hooks/catch/20261714/uy33k4e/";
+    const timesheetWebhook = "https://hooks.zapier.com/hooks/catch/20261714/273lt6z/";
 
-  timesheetBtn.addEventListener("click", function () {
-    const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
-    const week = document.getElementById("weekRange")?.textContent || "";
-    const contentBox = document.querySelector(".content-box");
-    if (!contentBox) {
-      alert("Content box not found.");
-      return;
+    function goToMain() {
+      window.location.href = "main.html";
     }
 
-    html2canvas(contentBox).then(canvas => {
-      const imageData = canvas.toDataURL("image/png");
-
-      const formData = new FormData();
-      formData.append("username", username);
-      formData.append("week", week);
-      formData.append("image", imageData);
-      formData.append("type", "Timesheet");
-
-      fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
-        method: "POST",
-        body: formData
-      }).then(response => {
-        if (response.ok) {
-          alert("Timesheet submitted!");
-        } else {
-          alert("Submission failed.");
-        }
-      }).catch(error => {
-        alert("Submission failed.");
-        console.error(error);
+    function captureAndSend(webhookUrl, type) {
+      html2canvas(document.querySelector("#summary-content")).then(canvas => {
+        const image = canvas.toDataURL("image/png");
+        fetch(webhookUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            username: username,
+            week: document.getElementById("week-range").innerText,
+            type: type,
+            screenshot: image
+          }),
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }).then(() => {
+          alert(`${type} sent successfully!`);
+        }).catch(() => {
+          alert(`Failed to send ${type}.`);
+        });
       });
-    });
-  });
-});
-</script>
+    }
 
+    function createInvoice() {
+      captureAndSend(invoiceWebhook, "Invoice");
+    }
+
+    function createTimesheet() {
+      captureAndSend(timesheetWebhook, "Timesheet");
+    }
+
+    function previousWeek() {
+      alert("← week scroll (placeholder)");
+    }
+
+    function nextWeek() {
+      alert("→ week scroll (placeholder)");
+    }
+  </script>
 </body>
 </html>
-
-
