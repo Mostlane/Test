@@ -143,29 +143,32 @@ fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
 }
 
 function createTimesheet() {
-const week = document.getElementById("weekRange")?.textContent || "Unknown";
-  const stdHours = document.getElementById("std-hours")?.textContent || "";
-  const stdRate = document.getElementById("std-rate")?.textContent || "";
-  const stdPay = document.getElementById("std-pay")?.textContent || "";
-  const otHours = document.getElementById("ot-hours")?.textContent || "";
-  const otRate = document.getElementById("ot-rate")?.textContent || "";
-  const otPay = document.getElementById("ot-pay")?.textContent || "";
-  const totalEarnings = document.getElementById("total-earnings")?.textContent || "";
-  const mileage = document.getElementById("total-mileage")?.textContent || "";
-  const mileagePay = document.getElementById("total-mileage-pay")?.textContent || "";
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const name = username.replace(".", " ");
+  const stdHours = document.getElementById("std-hours")?.textContent || "0";
+  const otHours = document.getElementById("ot-hours")?.textContent || "0";
+  const stdRate = document.getElementById("std-rate")?.textContent || "£0.00";
+  const otRate = document.getElementById("ot-rate")?.textContent || "£0.00";
+  const stdPay = document.getElementById("std-pay")?.textContent || "£0.00";
+  const otPay = document.getElementById("ot-pay")?.textContent || "£0.00";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "£0.00";
+  const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
+  const weekRange = document.getElementById("weekRange")?.textContent || "";
 
+  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
   const payload = {
-    user,
-    week,
-    stdHours,
-    stdRate,
-    stdPay,
-    otHours,
-    otRate,
-    otPay,
-    totalEarnings,
-    mileage,
-    mileagePay
+    screen_snapshot: screenSnapshot,
+    engineer: name,
+    username: username,
+    week_range: weekRange,
+    standard_hours: stdHours,
+    overtime_hours: otHours,
+    hourly_rate: stdRate,
+    overtime_rate: otRate,
+    std_pay: stdPay,
+    ot_pay: otPay,
+    total_earnings: totalEarnings,
+    mileage_summary: paidMileageText
   };
 
   fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
@@ -174,14 +177,15 @@ const week = document.getElementById("weekRange")?.textContent || "Unknown";
       "Content-Type": "application/x-www-form-urlencoded"
     },
     body: new URLSearchParams(payload).toString()
-  })
-  .then(res => {
-    if (!res.ok) throw new Error("Submission failed");
-    alert("Timesheet submitted successfully!");
-  })
-  .catch(err => {
-    console.error(err);
-    alert("Submission failed.");
+  }).then(response => {
+    if (response.ok) {
+      alert("Timesheet submitted successfully!");
+    } else {
+      alert("Failed to submit timesheet.");
+    }
+  }).catch(error => {
+    alert("Error sending timesheet.");
+    console.error(error);
   });
 }
 
