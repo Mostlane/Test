@@ -468,20 +468,27 @@ document.getElementById("createTimesheetBtn")?.addEventListener("click", functio
 
   html2canvas(document.querySelector(".content-box")).then(canvas => {
     const imageData = canvas.toDataURL("image/png");
-
     fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         username,
         weekRange,
         imageData,
         type: "Timesheet"
       })
-    }).then(() => {
-      alert("Timesheet sent!");
-    }).catch(err => {
-      alert("Failed to send timesheet.");
+    })
+    .then(response => {
+      if (response.ok) {
+        alert("Timesheet sent!");
+      } else {
+        alert("Submission failed.");
+      }
+    })
+    .catch(err => {
+      alert("Submission failed.");
       console.error(err);
     });
   });
