@@ -2,122 +2,149 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Weekly Summary</title>
-  <link rel="stylesheet" href="style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background-color: #f2f2f2;
+      background: url('Mostlane_Embossed.png') center center no-repeat;
+      background-size: cover;
       margin: 0;
       padding: 0;
     }
-    .header {
-      background-color: #003366;
-      color: white;
+    .content-box {
+      background: rgba(255,255,255,0.85);
       padding: 20px;
+      margin: 20px auto;
+      max-width: 900px;
+      border-radius: 10px;
+    }
+    h1, h2 {
       text-align: center;
     }
-    #username-display {
-      margin-top: 10px;
+    .summary {
+      margin-bottom: 20px;
       font-weight: bold;
     }
-    .content-box {
-      background-color: white;
-      margin: 20px auto;
-      padding: 20px;
-      border-radius: 10px;
-      max-width: 800px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    .day-header {
+      background-color: #f2f2f2;
+      padding: 10px;
+      margin-top: 20px;
+      font-size: 18px;
+      border-radius: 5px;
+    }
+    .entry {
+      margin-left: 20px;
+      padding: 5px 0;
+      border-bottom: 1px solid #ddd;
+    }
+    .button-group {
+      text-align: center;
+      margin-top: 30px;
     }
     button {
-      margin: 5px;
-      padding: 10px 15px;
-      font-size: 14px;
+      padding: 10px 20px;
+      margin: 0 10px;
+      font-size: 16px;
       border: none;
       border-radius: 5px;
-      background-color: #005bbb;
+      background-color: #003366;
       color: white;
       cursor: pointer;
     }
     button:hover {
-      background-color: #004999;
-    }
-    #week-selector {
-      margin-top: 10px;
+      background-color: #0055a5;
     }
   </style>
 </head>
 <body>
-  <div class="header">
+  <div class="content-box">
     <h1>Weekly Summary</h1>
-    <div id="username-display"></div>
-    <button onclick="goToMain()">Main Menu</button>
-    <button onclick="createInvoice()">Create Invoice</button>
-    <button onclick="createTimesheet()">Create Timesheet</button>
-    <div id="week-selector">
-      <button onclick="previousWeek()">←</button>
-      <span id="week-range">This Week</span>
-      <button onclick="nextWeek()">→</button>
-    </div>
-  </div>
 
-  <div class="content-box" id="summary-content">
-    <div id="summary-container">
-      <p><i>Summary will appear here...</i></p>
+    <div class="summary">
+      <p>Engineer: <span id="username">Loading...</span></p>
+      <p id="week-range">Week: </p>
     </div>
-    <div id="mileage-summary"></div>
-    <div id="earnings-summary"></div>
+
+    <div id="weekly-entries">
+      <!-- Dynamic content will be injected here -->
+    </div>
+
+    <div class="button-group">
+      <button id="createInvoice">Create Invoice</button>
+      <button id="createTimesheet">Create Timesheet</button>
+    </div>
   </div>
 
   <script>
-    const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
-    document.getElementById("username-display").innerText = "Logged in as: " + username.replace(".", " ");
+    // Set username
+    const username = sessionStorage.getItem("mostlaneUser") || "unknown";
+    document.getElementById("username").textContent = username;
 
-    const invoiceWebhook = "https://hooks.zapier.com/hooks/catch/20261714/uy33k4e/";
-    const timesheetWebhook = "https://hooks.zapier.com/hooks/catch/20261714/273lt6z/";
+    // Dummy date range
+    const today = new Date();
+    const day = today.getDay();
+    const monday = new Date(today.setDate(today.getDate() - day + 1));
+    const sunday = new Date(today.setDate(monday.getDate() + 6));
+    document.getElementById("week-range").textContent =
+      "Week: " + monday.toLocaleDateString() + " - " + sunday.toLocaleDateString();
 
-    function goToMain() {
-      window.location.href = "main.html";
-    }
+    // Dummy content (you’ll replace this with real data logic)
+    const sampleDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+    const weeklyContainer = document.getElementById("weekly-entries");
 
-    function captureAndSend(webhookUrl, type) {
-      html2canvas(document.querySelector("#summary-content")).then(canvas => {
-        const image = canvas.toDataURL("image/png");
-        fetch(webhookUrl, {
-          method: "POST",
-          body: JSON.stringify({
-            username: username,
-            week: document.getElementById("week-range").innerText,
-            type: type,
-            screenshot: image
-          }),
-          headers: {
-            "Content-Type": "application/json"
-          }
-        }).then(() => {
-          alert(`${type} sent successfully!`);
-        }).catch(() => {
-          alert(`Failed to send ${type}.`);
-        });
+    sampleDays.forEach(day => {
+      const header = document.createElement("div");
+      header.className = "day-header";
+      header.textContent = day;
+      weeklyContainer.appendChild(header);
+
+      const entry = document.createElement("div");
+      entry.className = "entry";
+      entry.textContent = `Check In @ ${day} 08:00`;
+      weeklyContainer.appendChild(entry);
+
+      const entry2 = document.createElement("div");
+      entry2.className = "entry";
+      entry2.textContent = `Check Out @ ${day} 17:00`;
+      weeklyContainer.appendChild(entry2);
+    });
+
+    // Invoice button
+    document.getElementById("createInvoice").addEventListener("click", function () {
+      const htmlContent = document.querySelector(".content-box").innerHTML;
+
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          htmlContent: htmlContent,
+          username: username,
+        }),
+      }).then(() => {
+        alert("Invoice sent successfully.");
       });
-    }
+    });
 
-    function createInvoice() {
-      captureAndSend(invoiceWebhook, "Invoice");
-    }
+    // Timesheet button
+    document.getElementById("createTimesheet").addEventListener("click", function () {
+      const htmlContent = document.querySelector(".content-box").innerHTML;
 
-    function createTimesheet() {
-      captureAndSend(timesheetWebhook, "Timesheet");
-    }
-
-    function previousWeek() {
-      alert("← week scroll (placeholder)");
-    }
-
-    function nextWeek() {
-      alert("→ week scroll (placeholder)");
-    }
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          htmlContent: htmlContent,
+          username: username,
+        }),
+      }).then(() => {
+        alert("Timesheet sent successfully.");
+      });
+    });
   </script>
 </body>
 </html>
