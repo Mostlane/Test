@@ -466,31 +466,47 @@ document.getElementById("createTimesheetBtn")?.addEventListener("click", functio
   const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
   const weekRange = document.getElementById("weekRange")?.textContent || "Current Week";
 
-  html2canvas(document.querySelector(".content-box")).then(canvas => {
-    const imageData = canvas.toDataURL("image/png");
-    fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        username,
-        weekRange,
-        imageData,
-        type: "Timesheet"
-      })
-    })
-    .then(response => {
-      if (response.ok) {
-        alert("Timesheet sent!");
-      } else {
-        alert("Submission failed.");
-      }
-    })
-    .catch(err => {
+  // Get summary values directly from DOM
+  const stdHours = document.getElementById("standard_hours")?.textContent || "0";
+  const stdRate = document.getElementById("stdRate")?.textContent || "0";
+  const stdPay = document.getElementById("stdPay")?.textContent || "0";
+  const otHours = document.getElementById("overtime_hours")?.textContent || "0";
+  const otRate = document.getElementById("otRate")?.textContent || "0";
+  const otPay = document.getElementById("otPay")?.textContent || "0";
+  const totalEarnings = document.getElementById("totalEarnings")?.textContent || "0";
+  const mileage = document.getElementById("mileage")?.textContent || "0";
+  const mileagePay = document.getElementById("mileagePay")?.textContent || "0";
+
+  const payload = {
+    username,
+    weekRange,
+    standard_hours: stdHours,
+    stdRate,
+    stdPay,
+    overtime_hours: otHours,
+    otRate,
+    otPay,
+    totalEarnings,
+    mileage,
+    mileagePay,
+    type: "Timesheet"
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  })
+  .then(response => {
+    if (response.ok) {
+      alert("Timesheet sent (no image).");
+    } else {
       alert("Submission failed.");
-      console.error(err);
-    });
+    }
+  })
+  .catch(err => {
+    alert("Submission failed.");
+    console.error(err);
   });
 });
 </script>
