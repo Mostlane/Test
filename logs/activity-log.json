@@ -23303,6 +23303,16 @@
   "Colby.Lunsford": [
 {
   "type": "Check In",
+  "datetime": "2025-06-16T13:50:00Z",
+  "location": "Latitude: 50.86165130846717 Longitude: -1.2476176043254692",
+  "location_coords": {
+    "lat": 50.86165130846717,
+    "lon": -1.2476176043254692
+  },
+  "driver": false
+},
+{
+  "type": "Check In",
   "datetime": "2025-06-10T12:39:00Z",
   "location": "Latitude: 51.054984377007486 Longitude: -1.8626252888430366",
   "location_coords": {
