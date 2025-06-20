@@ -19443,6 +19443,16 @@
   ],
   "Bradley.Graham": [
 {
+  "type": "Check Out",
+  "datetime": "2025-06-20T21:18:00Z",
+  "location": "Latitude: 50.874522843131324 Longitude: -1.281934738730303",
+  "location_coords": {
+    "lat": 50.874522843131324,
+    "lon": -1.281934738730303
+  },
+  "driver": false
+},
+{
   "type": "Check In",
   "datetime": "2025-06-17T07:20:00Z",
   "location": "Latitude: 50.831418291703535 Longitude: -0.7919632001729366",
