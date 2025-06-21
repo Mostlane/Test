@@ -7,19 +7,21 @@
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
       margin: 0;
       padding: 20px;
     }
     .container {
       max-width: 900px;
       margin: auto;
-      background: white;
+      background: rgba(255,255,255,0.85);
       padding: 20px;
       border-radius: 10px;
     }
-    h1 {
+    h1, h2 {
       text-align: center;
+      color: #003366;
     }
     .request {
       border: 1px solid #ccc;
@@ -27,6 +29,7 @@
       padding: 10px;
       margin-bottom: 10px;
       border-radius: 6px;
+      background: #fff;
     }
     .btn {
       padding: 6px 12px;
@@ -48,6 +51,7 @@
       padding: 10px;
       margin: 5px;
       border-radius: 6px;
+      vertical-align: top;
     }
     .holiday-entry {
       background: #004a99;
@@ -112,7 +116,7 @@ function renderRequests(logs) {
 
 function handleAction(name, start, end, action) {
   alert(`${action} ${name.replace('.', ' ')} for ${formatDate(start)} to ${formatDate(end)}`);
-  // Add your webhook or GitHub update logic here
+  // Future: GitHub or webhook writeback here
 }
 
 function renderCalendar(logs) {
@@ -130,6 +134,7 @@ function renderCalendar(logs) {
   });
 
   const calendar = document.getElementById("calendarView");
+  calendar.innerHTML = '';
   Object.keys(grouped).sort().forEach(date => {
     const div = document.createElement("div");
     div.className = "calendar-day";
