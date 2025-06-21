@@ -3,97 +3,119 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin – Holiday Approvals</title>
+  <title>Admin Holiday Panel</title>
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
+      background: #f5f5f5;
       margin: 0;
-      padding: 20px;
+      padding: 0;
     }
-    .content-box {
-      background: rgba(255,255,255,0.6);
-      padding: 20px;
-      max-width: 900px;
+    .container {
+      max-width: 1000px;
       margin: auto;
-      border-radius: 10px;
-    }
-    .holiday-entry {
-      background: #fff;
-      padding: 12px;
-      margin-bottom: 12px;
-      border-left: 5px solid #004a99;
-      border-radius: 6px;
-      box-shadow: 0 0 3px rgba(0,0,0,0.1);
-    }
-    .holiday-entry strong {
-      color: #004a99;
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 20px;
+      padding: 20px;
     }
     h1 {
       color: #004a99;
     }
+    .request {
+      background: white;
+      border: 1px solid #ccc;
+      border-left: 6px solid #004a99;
+      margin-bottom: 15px;
+      padding: 15px;
+      border-radius: 5px;
+    }
+    .calendar {
+      background: white;
+      margin-top: 30px;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      padding: 6px 12px;
+      margin-right: 10px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .approve {
+      background-color: #4CAF50;
+      color: white;
+    }
+    .decline {
+      background-color: #f44336;
+      color: white;
+    }
   </style>
 </head>
 <body>
-  <div class="content-box">
-    <div class="header">
-      <h1>Holiday Request Admin</h1>
-      <p>Showing live data from GitHub</p>
-    </div>
-    <div id="holidayLogContainer">Loading holiday data…</div>
+<div class="container">
+  <h1>Admin Holiday Panel</h1>
+  <div id="requests"></div>
+  <div class="calendar">
+    <h3>Calendar View (Preview)</h3>
+    <p>Approved holidays will be displayed here.</p>
+    <!-- Future enhancement: Full calendar JS integration -->
   </div>
+</div>
 
-  <script>
-    async function fetchHolidayData() {
-      const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
-      const summaryURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json";
+<script>
+  const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
 
-      try {
-        const [logRes, summaryRes] = await Promise.all([
-          fetch(logURL),
-          fetch(summaryURL)
-        ]);
+  function formatDate(isoDate) {
+    const d = new Date(isoDate);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
 
-        if (!logRes.ok || !summaryRes.ok) {
-          throw new Error("Failed to fetch one or both JSON files.");
-        }
-
-        const logData = await logRes.json();
-        const summaryData = await summaryRes.json();
-
-        displayHolidayLog(logData);
-      } catch (err) {
-        document.getElementById("holidayLogContainer").innerHTML = `<p style="color:red;">Error loading holiday data: ${err.message}</p>`;
-      }
-    }
-
-    function displayHolidayLog(log) {
-      const container = document.getElementById("holidayLogContainer");
+  fetch(logURL)
+    .then(res => res.json())
+    .then(data => {
+      const container = document.getElementById("requests");
       container.innerHTML = "";
 
-      if (!log || log.length === 0) {
-        container.innerHTML = "<p>No holiday entries found.</p>";
-        return;
-      }
-
-      log.forEach(entry => {
+      data.forEach(entry => {
         const div = document.createElement("div");
-        div.className = "holiday-entry";
+        div.className = "request";
+
+        const statusLabel = entry.status === "Approved" ? "✅ Approved" :
+                            entry.status === "Declined" ? "❌ Declined" :
+                            "⏳ Pending";
+
         div.innerHTML = `
-          <strong>${entry.name}</strong><br>
-          ${entry.type} from <strong>${entry.start}</strong> to <strong>${entry.end}</strong><br>
-          <em>Status:</em> ${entry.status} | <em>Notes:</em> ${entry.notes || "—"}
+          <p><strong>User:</strong> ${entry.user}</p>
+          <p><strong>From:</strong> ${formatDate(entry.startDate)} <strong>To:</strong> ${formatDate(entry.endDate)}</p>
+          <p><strong>Status:</strong> ${statusLabel}</p>
+          <button class="approve">Approve</button>
+          <button class="decline">Decline</button>
         `;
+
+        const approveBtn = div.querySelector(".approve");
+        const declineBtn = div.querySelector(".decline");
+
+        approveBtn.onclick = () => {
+          alert(`(Zapier/Webhook Needed) Approved holiday for ${entry.user}`);
+          // Add your webhook call or data update logic here
+        };
+
+        declineBtn.onclick = () => {
+          alert(`(Zapier/Webhook Needed) Declined holiday for ${entry.user}`);
+          // Add your webhook call or data update logic here
+        };
+
         container.appendChild(div);
       });
-    }
-
-    fetchHolidayData();
-  </script>
+    })
+    .catch(err => {
+      document.getElementById("requests").innerHTML = "<p style='color:red;'>Error loading holiday log.</p>";
+      console.error(err);
+    });
+</script>
 </body>
 </html>
