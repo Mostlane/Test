@@ -1,0 +1,118 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin – Holiday Management</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      background: rgba(255,255,255,0.6);
+      padding: 30px;
+      border-radius: 10px;
+    }
+    h2 {
+      color: #003366;
+      text-align: center;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      background-color: white;
+      border-bottom: 1px solid #ccc;
+    }
+    th {
+      background-color: #003366;
+      color: white;
+    }
+    button {
+      padding: 6px 10px;
+      margin-right: 5px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .approve { background-color: #4CAF50; color: white; }
+    .reject { background-color: #f44336; color: white; }
+    .delete { background-color: #888; color: white; }
+  </style>
+</head>
+<body>
+  <script>
+    const allowedUsers = ["Jamie.Line", "Greg.Line", "Joe.Line"];
+    const currentUser = sessionStorage.getItem("mostlaneUser");
+    if (!allowedUsers.includes(currentUser)) {
+      document.body.innerHTML = "<h2 style='text-align:center;'>Access Denied</h2>";
+    }
+  </script>
+
+  <div class="container">
+    <h2>Holiday Admin Panel</h2>
+
+    <h3>Pending Holiday Requests</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Engineer</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Type</th>
+          <th>Notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="requestTable">
+        <tr>
+          <td>Chris.Freeman</td>
+          <td>2025-06-10</td>
+          <td>2025-06-12</td>
+          <td>Annual Leave</td>
+          <td>Family trip</td>
+          <td>
+            <button class="approve">Approve</button>
+            <button class="reject">Reject</button>
+            <button class="delete">Delete</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Edit Holiday Allowance</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Engineer</th>
+          <th>Current Allowance</th>
+          <th>New Value</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Frazer.Miller</td>
+          <td>28</td>
+          <td><input type="number" value="28" style="width: 60px;"></td>
+          <td><button class="approve">Update</button></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Add Compulsory Shutdown Days</h3>
+    <input type="text" placeholder="e.g. 2025-12-24, 2025-12-31" style="width: 100%; padding: 8px; font-size: 16px;"/>
+    <button class="approve" style="margin-top:10px;">Save Dates</button>
+  </div>
+</body>
+</html>
