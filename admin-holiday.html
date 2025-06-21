@@ -1,158 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin Holiday Manager</title>
+  <meta charset="UTF-8" />
+  <title>Admin Holiday Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
       margin: 0;
-      padding: 20px;
+      padding: 0;
     }
     .container {
-      background: rgba(255, 255, 255, 0.6);
+      background-color: rgba(255, 255, 255, 0.7);
       padding: 20px;
-      border-radius: 10px;
-      max-width: 1000px;
-      margin: auto;
+      border-radius: 12px;
+      margin: 20px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
     }
     h1 {
       text-align: center;
-      color: #004a99;
+      color: #003366;
     }
-    .request {
+    .card {
       background: white;
-      border-left: 5px solid #004a99;
+      border-left: 5px solid #003366;
       margin-bottom: 15px;
       padding: 15px;
-      border-radius: 6px;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
-    .calendar {
-      margin-top: 30px;
-      background: #fff;
-      padding: 10px;
-      border-radius: 8px;
-    }
-    button {
-      margin: 5px;
-      padding: 8px 12px;
-      background-color: #004a99;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    button:hover {
-      background-color: #003366;
+    .card strong {
+      color: #003366;
     }
     .status {
+      margin-top: 10px;
+    }
+    .btn-group {
+      margin-top: 10px;
+    }
+    .btn-group button {
+      padding: 8px 12px;
+      margin-right: 10px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
       font-weight: bold;
-      margin-left: 10px;
+    }
+    .btn-approve {
+      background-color: #28a745;
+      color: white;
+    }
+    .btn-decline {
+      background-color: #dc3545;
+      color: white;
+    }
+    .error {
+      color: red;
+      text-align: center;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Holiday Requests – Admin</h1>
-    <div id="holidayRequests">Loading...</div>
-    <h2>Calendar View</h2>
-    <div id="calendar" class="calendar">Loading calendar…</div>
+    <h1>Admin Holiday Panel</h1>
+    <div id="holidayRequests"></div>
+    <div class="error" id="error"></div>
   </div>
 
   <script>
-    function formatDate(input) {
-      const d = new Date(input);
-      if (isNaN(d.getTime())) return "Invalid date";
-      const day = String(d.getDate()).padStart(2, '0');
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const year = d.getFullYear();
-      return `${day}-${month}-${year}`;
-    }
-
-    async function loadHolidayData() {
+    async function loadHolidayRequests() {
       try {
-        const logRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json');
-        const summaryRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json');
-        const holidayLog = await logRes.json();
-        const summary = await summaryRes.json();
-
-        const requestDiv = document.getElementById("holidayRequests");
-        requestDiv.innerHTML = '';
-
-        holidayLog.forEach((req, i) => {
-          const div = document.createElement("div");
-          div.className = "request";
-
-          const statusColor = req.status === 'Approved' ? 'green' : req.status === 'Declined' ? 'red' : '#666';
-          const startFormatted = formatDate(req.start);
-          const endFormatted = formatDate(req.end);
-
-          div.innerHTML = `
-            <p><strong>${(req.username || 'Unknown').replace('.', ' ')}</strong> requested: ${startFormatted} to ${endFormatted}</p>
-            <p><strong>Reason:</strong> ${req.reason || 'N/A'}<span class="status" style="color:${statusColor}">[${req.status || 'Pending'}]</span></p>
-            <button onclick="approve(${i})">Approve</button>
-            <button onclick="decline(${i})">Decline</button>
-          `;
-          requestDiv.appendChild(div);
-        });
-
-        drawCalendar(summary);
-      } catch (err) {
-        document.getElementById("holidayRequests").innerText = "Failed to load holiday data.";
-        console.error("Load error:", err);
+        const response = await fetch('https://mostlane.github.io/holiday-log.json');
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        displayRequests(data);
+      } catch (error) {
+        document.getElementById('error').innerText = 'Failed to load holiday log.';
       }
     }
 
-    function drawCalendar(summary) {
-      const container = document.getElementById("calendar");
+    function formatDate(dateStr) {
+      if (!dateStr) return 'N/A';
+      const date = new Date(dateStr);
+      if (isNaN(date)) return 'Invalid';
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
+    }
+
+    function displayRequests(data) {
+      const container = document.getElementById('holidayRequests');
       container.innerHTML = '';
-      const today = new Date();
-      const month = today.getMonth();
-      const year = today.getFullYear();
-
-      const calendarMap = {};
-
-      summary.forEach(user => {
-        (user.holidays || []).forEach(entry => {
-          const start = new Date(entry.start);
-          const end = new Date(entry.end);
-          if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
-
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            if (d.getMonth() === month && d.getFullYear() === year) {
-              const key = d.toISOString().split('T')[0];
-              if (!calendarMap[key]) calendarMap[key] = [];
-              calendarMap[key].push(user.name || 'Unknown');
-            }
-          }
-        });
+      data.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const statusIcon = item.status === 'Approved' ? '✅' : item.status === 'Declined' ? '❌' : '⏳';
+        card.innerHTML = `
+          <p><strong>User:</strong> ${item.name || 'Unknown'}</p>
+          <p><strong>From:</strong> ${formatDate(item.start)} <strong>To:</strong> ${formatDate(item.end)}</p>
+          <p class="status"><strong>Status:</strong> ${statusIcon} ${item.status}</p>
+          <div class="btn-group">
+            <button class="btn-approve" onclick="updateStatus(${index}, 'Approved')">Approve</button>
+            <button class="btn-decline" onclick="updateStatus(${index}, 'Declined')">Decline</button>
+          </div>
+        `;
+        container.appendChild(card);
       });
-
-      const ul = document.createElement("ul");
-      ul.style.listStyle = "none";
-      ul.style.padding = "0";
-
-      Object.entries(calendarMap).forEach(([date, users]) => {
-        const li = document.createElement("li");
-        li.innerHTML = `<strong>${formatDate(date)}</strong>: ${users.join(', ')}`;
-        ul.appendChild(li);
-      });
-
-      container.appendChild(ul);
     }
 
-    function approve(index) {
-      alert("Approved request #" + index + " (Webhook logic can go here)");
+    function updateStatus(index, newStatus) {
+      alert(`This would set request #${index + 1} to ${newStatus}. Full GitHub write-back will be added later.`);
     }
 
-    function decline(index) {
-      alert("Declined request #" + index + " (Webhook logic can go here)");
-    }
-
-    loadHolidayData();
+    loadHolidayRequests();
   </script>
 </body>
 </html>
