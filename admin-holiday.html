@@ -1,56 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
   <title>Admin Holiday Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
       font-family: Arial, sans-serif;
       background: url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      color: #003366;
+      margin: 0;
       padding: 20px;
     }
-
     h1 {
       text-align: center;
       color: #003366;
     }
-
     .holiday-card {
-      background-color: white;
-      padding: 15px;
-      margin: 10px 0;
+      background: white;
       border-left: 5px solid #003366;
+      margin: 15px 0;
+      padding: 15px;
       border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-
     .status {
       font-weight: bold;
+      margin-top: 8px;
     }
-
     .buttons {
       margin-top: 10px;
     }
-
     .approve {
-      background-color: #28a745;
+      background: #28a745;
       color: white;
       border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
+      padding: 8px 12px;
+      border-radius: 5px;
       margin-right: 8px;
       cursor: pointer;
     }
-
     .decline {
-      background-color: #dc3545;
+      background: #dc3545;
       color: white;
       border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
+      padding: 8px 12px;
+      border-radius: 5px;
       cursor: pointer;
     }
   </style>
@@ -61,14 +56,10 @@
 
   <script>
     function formatDate(dateStr) {
-      if (!dateStr) return 'NaN';
-      try {
-        const date = new Date(dateStr);
-        if (isNaN(date)) return 'NaN';
-        return date.toLocaleDateString('en-GB');
-      } catch {
-        return 'NaN';
-      }
+      if (!dateStr || typeof dateStr !== 'string') return 'NaN';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return 'NaN';
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
     }
 
     async function loadHolidayLog() {
@@ -78,33 +69,34 @@
         const data = await res.json();
 
         container.innerHTML = '';
-        data.forEach((req, index) => {
-          const fromDate = formatDate(req.from);
-          const toDate = formatDate(req.to);
+        data.forEach((entry, i) => {
+          const user = entry.user || 'undefined';
+          const from = formatDate(entry.from);
+          const to = formatDate(entry.to);
+          const status = entry.status || 'Pending';
 
-          const statusIcon = req.status === 'Approved' ? '✅' : req.status === 'Declined' ? '❌' : '⏳';
+          let emoji = '⏳';
+          if (status === 'Approved') emoji = '✅';
+          if (status === 'Declined') emoji = '❌';
 
           const card = document.createElement('div');
           card.className = 'holiday-card';
           card.innerHTML = `
-            <p><strong>User:</strong> ${req.user || 'undefined'}</p>
-            <p><strong>From:</strong> ${fromDate} <strong>To:</strong> ${toDate}</p>
-            <p class="status"><strong>Status:</strong> ${statusIcon} ${req.status}</p>
+            <p><strong>User:</strong> ${user}</p>
+            <p><strong>From:</strong> ${from} <strong>To:</strong> ${to}</p>
+            <p class="status"><strong>Status:</strong> ${emoji} ${status}</p>
             <div class="buttons">
-              <button class="approve" onclick="updateStatus(${index}, 'Approved')">Approve</button>
-              <button class="decline" onclick="updateStatus(${index}, 'Declined')">Decline</button>
+              <button class="approve" onclick="alert('Marking as Approved (index ${i})')">Approve</button>
+              <button class="decline" onclick="alert('Marking as Declined (index ${i})')">Decline</button>
             </div>
           `;
           container.appendChild(card);
         });
-      } catch (error) {
-        container.innerHTML = 'Failed to load holiday log.';
-        console.error('Fetch error:', error);
-      }
-    }
 
-    function updateStatus(index, newStatus) {
-      alert(`This would update entry ${index} to: ${newStatus}\n(Integration to GitHub commit or webhook required here)`);
+      } catch (err) {
+        container.innerHTML = '❌ Failed to load holiday log.';
+        console.error('Error:', err);
+      }
     }
 
     loadHolidayLog();
