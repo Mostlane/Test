@@ -7,21 +7,20 @@
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
       margin: 0;
       padding: 20px;
     }
     .container {
       max-width: 900px;
       margin: auto;
-      background: rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.7);
       padding: 20px;
       border-radius: 10px;
     }
-    h1, h2 {
+    h1 {
       text-align: center;
-      color: #003366;
     }
     .request {
       border: 1px solid #ccc;
@@ -29,7 +28,6 @@
       padding: 10px;
       margin-bottom: 10px;
       border-radius: 6px;
-      background: #fff;
     }
     .btn {
       padding: 6px 12px;
@@ -53,6 +51,9 @@
       border-radius: 6px;
       vertical-align: top;
     }
+    .calendar-day.clash {
+      background: #ffcccc;
+    }
     .holiday-entry {
       background: #004a99;
       color: white;
@@ -60,6 +61,20 @@
       margin-top: 5px;
       border-radius: 3px;
       font-size: 13px;
+    }
+    .month-nav {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .month-nav button {
+      margin: 0 10px;
+      padding: 8px 16px;
+      background: #004a99;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-weight: bold;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -70,11 +85,20 @@
 
   <div class="calendar">
     <h2>Calendar View</h2>
+    <div class="month-nav">
+      <button onclick="changeMonth(-1)">← Previous</button>
+      <span id="monthLabel"></span>
+      <button onclick="changeMonth(1)">Next →</button>
+    </div>
     <div id="calendarView"></div>
   </div>
 </div>
 
 <script>
+let currentMonth = new Date().getMonth();
+let currentYear = new Date().getFullYear();
+let holidayData = [];
+
 const formatDate = dateStr => {
   const d = new Date(dateStr);
   const day = String(d.getDate()).padStart(2, '0');
@@ -87,8 +111,9 @@ async function loadData() {
   const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
   const res = await fetch(logURL);
   const data = await res.json();
+  holidayData = data;
   renderRequests(data);
-  renderCalendar(data);
+  renderCalendar(data, currentMonth, currentYear);
 }
 
 function renderRequests(logs) {
@@ -98,7 +123,6 @@ function renderRequests(logs) {
   logs.forEach(entry => {
     const div = document.createElement("div");
     div.className = "request";
-
     div.innerHTML = `
       <strong>${entry.name.replace('.', ' ')}</strong><br>
       <strong>Type:</strong> ${entry.type}<br>
@@ -109,39 +133,63 @@ function renderRequests(logs) {
       <button class="btn approve" onclick="handleAction('${entry.name}','${entry.start}','${entry.end}','Approved')">Approve</button>
       <button class="btn decline" onclick="handleAction('${entry.name}','${entry.start}','${entry.end}','Declined')">Decline</button>
     `;
-
     container.appendChild(div);
   });
 }
 
 function handleAction(name, start, end, action) {
   alert(`${action} ${name.replace('.', ' ')} for ${formatDate(start)} to ${formatDate(end)}`);
-  // Future: GitHub or webhook writeback here
+  // Add webhook logic here
 }
 
-function renderCalendar(logs) {
+function renderCalendar(logs, month, year) {
+  const calendar = document.getElementById("calendarView");
+  const label = document.getElementById("monthLabel");
+  calendar.innerHTML = "";
+  const clashes = {};
+
+  label.textContent = `${new Date(year, month).toLocaleString('default', { month: 'long' })} ${year}`;
+
+  const startOfMonth = new Date(year, month, 1);
+  const endOfMonth = new Date(year, month + 1, 0);
+
   const grouped = {};
+
   logs.forEach(entry => {
     const start = new Date(entry.start);
     const end = new Date(entry.end);
     const current = new Date(start);
     while (current <= end) {
       const key = current.toISOString().split('T')[0];
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(`${entry.name.replace('.', ' ')} – ${entry.type}`);
+      const m = current.getMonth(), y = current.getFullYear();
+      if (m === month && y === year) {
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(entry.name.replace('.', ' ') + " – " + entry.type);
+      }
       current.setDate(current.getDate() + 1);
     }
   });
 
-  const calendar = document.getElementById("calendarView");
-  calendar.innerHTML = '';
   Object.keys(grouped).sort().forEach(date => {
     const div = document.createElement("div");
     div.className = "calendar-day";
+    if (grouped[date].length > 1) div.classList.add("clash");
     div.innerHTML = `<strong>${formatDate(date)}</strong><br>` +
       grouped[date].map(name => `<div class="holiday-entry">${name}</div>`).join("");
     calendar.appendChild(div);
   });
+}
+
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth < 0) {
+    currentMonth = 11;
+    currentYear--;
+  } else if (currentMonth > 11) {
+    currentMonth = 0;
+    currentYear++;
+  }
+  renderCalendar(holidayData, currentMonth, currentYear);
 }
 
 loadData();
