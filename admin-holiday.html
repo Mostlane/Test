@@ -70,9 +70,9 @@
 
         container.innerHTML = '';
         data.forEach((entry, i) => {
-          const user = entry.user || 'undefined';
-          const from = formatDate(entry.from);
-          const to = formatDate(entry.to);
+          const user = entry.name || 'undefined';
+          const from = formatDate(entry.startDate);
+          const to = formatDate(entry.endDate);
           const status = entry.status || 'Pending';
 
           let emoji = '⏳';
