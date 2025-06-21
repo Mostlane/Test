@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Admin Holiday Panel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -19,87 +19,91 @@
     .holiday-card {
       background: white;
       border-left: 5px solid #003366;
-      margin: 15px 0;
-      padding: 15px;
       border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 15px;
+      margin: 15px 0;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .holiday-card strong {
+      color: #003366;
     }
     .status {
       font-weight: bold;
-      margin-top: 8px;
-    }
-    .buttons {
       margin-top: 10px;
     }
-    .approve {
-      background: #28a745;
-      color: white;
+    .status.approved {
+      color: green;
+    }
+    .status.pending {
+      color: #b58900;
+    }
+    .status.declined {
+      color: red;
+    }
+    button {
+      margin-right: 10px;
+      padding: 6px 14px;
       border: none;
-      padding: 8px 12px;
       border-radius: 5px;
-      margin-right: 8px;
+      font-weight: bold;
       cursor: pointer;
     }
-    .decline {
-      background: #dc3545;
+    .approve {
+      background-color: #4CAF50;
       color: white;
-      border: none;
-      padding: 8px 12px;
-      border-radius: 5px;
-      cursor: pointer;
+    }
+    .decline {
+      background-color: #f44336;
+      color: white;
     }
   </style>
 </head>
 <body>
   <h1>Admin Holiday Panel</h1>
-  <div id="holidayContainer">Loading...</div>
+  <div id="holidayPanel"></div>
 
   <script>
+    async function loadHolidayData() {
+      const logRes = await fetch('https://mostlane.github.io/holiday-log.json');
+      const logData = await logRes.json();
+
+      const panel = document.getElementById('holidayPanel');
+      panel.innerHTML = '';
+
+      logData.forEach(entry => {
+        const user = entry.name || 'Unknown';
+        const start = formatDate(entry.startDate);
+        const end = formatDate(entry.endDate);
+        const status = entry.status || 'Pending';
+
+        const card = document.createElement('div');
+        card.className = 'holiday-card';
+
+        const statusClass = status.toLowerCase();
+        const statusIcon = status === 'Approved' ? '✅' : status === 'Declined' ? '❌' : '⏳';
+
+        card.innerHTML = `
+          <p><strong>User:</strong> ${user}</p>
+          <p><strong>From:</strong> ${start} <strong>To:</strong> ${end}</p>
+          <p class="status ${statusClass}"><strong>Status:</strong> ${statusIcon} ${status}</p>
+          <button class="approve">Approve</button>
+          <button class="decline">Decline</button>
+        `;
+
+        panel.appendChild(card);
+      });
+    }
+
     function formatDate(dateStr) {
-      if (!dateStr || typeof dateStr !== 'string') return 'NaN';
-      const parts = dateStr.split('-');
-      if (parts.length !== 3) return 'NaN';
-      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return 'NaN';
+      const dd = String(date.getDate()).padStart(2, '0');
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const yyyy = date.getFullYear();
+      return `${dd}-${mm}-${yyyy}`;
     }
 
-    async function loadHolidayLog() {
-      const container = document.getElementById('holidayContainer');
-      try {
-        const res = await fetch('https://mostlane.github.io/Test/holiday-log.json');
-        const data = await res.json();
-
-        container.innerHTML = '';
-        data.forEach((entry, i) => {
-          const user = entry.name || 'undefined';
-          const from = formatDate(entry.startDate);
-          const to = formatDate(entry.endDate);
-          const status = entry.status || 'Pending';
-
-          let emoji = '⏳';
-          if (status === 'Approved') emoji = '✅';
-          if (status === 'Declined') emoji = '❌';
-
-          const card = document.createElement('div');
-          card.className = 'holiday-card';
-          card.innerHTML = `
-            <p><strong>User:</strong> ${user}</p>
-            <p><strong>From:</strong> ${from} <strong>To:</strong> ${to}</p>
-            <p class="status"><strong>Status:</strong> ${emoji} ${status}</p>
-            <div class="buttons">
-              <button class="approve" onclick="alert('Marking as Approved (index ${i})')">Approve</button>
-              <button class="decline" onclick="alert('Marking as Declined (index ${i})')">Decline</button>
-            </div>
-          `;
-          container.appendChild(card);
-        });
-
-      } catch (err) {
-        container.innerHTML = '❌ Failed to load holiday log.';
-        console.error('Error:', err);
-      }
-    }
-
-    loadHolidayLog();
+    loadHolidayData();
   </script>
 </body>
 </html>
