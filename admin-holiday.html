@@ -3,143 +3,146 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin Holiday Page</title>
+  <title>Admin Holiday Manager</title>
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
       margin: 0;
       padding: 20px;
     }
     .container {
-      max-width: 900px;
-      margin: auto;
-      background: white;
+      background: rgba(255, 255, 255, 0.6);
       padding: 20px;
       border-radius: 10px;
+      max-width: 1000px;
+      margin: auto;
     }
     h1 {
       text-align: center;
+      color: #004a99;
     }
     .request {
-      border: 1px solid #ccc;
+      background: white;
       border-left: 5px solid #004a99;
-      padding: 10px;
-      margin-bottom: 10px;
+      margin-bottom: 15px;
+      padding: 15px;
       border-radius: 6px;
     }
-    .btn {
-      padding: 6px 12px;
+    .calendar {
+      margin-top: 30px;
+      background: #fff;
+      padding: 10px;
+      border-radius: 8px;
+    }
+    button {
       margin: 5px;
+      padding: 8px 12px;
+      background-color: #004a99;
+      color: white;
       border: none;
       border-radius: 5px;
       cursor: pointer;
+    }
+    button:hover {
+      background-color: #003366;
+    }
+    .status {
       font-weight: bold;
-    }
-    .approve { background-color: #4CAF50; color: white; }
-    .decline { background-color: #f44336; color: white; }
-    .calendar {
-      margin-top: 40px;
-    }
-    .calendar-day {
-      display: inline-block;
-      width: 130px;
-      background: #f0f0f0;
-      padding: 10px;
-      margin: 5px;
-      border-radius: 6px;
-    }
-    .holiday-entry {
-      background: #004a99;
-      color: white;
-      padding: 5px;
-      margin-top: 5px;
-      border-radius: 3px;
-      font-size: 13px;
+      margin-left: 10px;
     }
   </style>
 </head>
 <body>
-<div class="container">
-  <h1>Holiday Admin Panel</h1>
-  <div id="holidayRequests">Loading...</div>
-
-  <div class="calendar">
+  <div class="container">
+    <h1>Holiday Requests – Admin</h1>
+    <div id="holidayRequests">Loading...</div>
     <h2>Calendar View</h2>
-    <div id="calendarView"></div>
+    <div id="calendar" class="calendar">Loading calendar…</div>
   </div>
-</div>
 
-<script>
-const formatDate = dateStr => {
-  const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}-${month}-${year}`;
-};
-
-async function loadData() {
-  const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
-  const res = await fetch(logURL);
-  const data = await res.json();
-  renderRequests(data);
-  renderCalendar(data);
-}
-
-function renderRequests(logs) {
-  const container = document.getElementById("holidayRequests");
-  container.innerHTML = "";
-
-  logs.forEach(entry => {
-    const div = document.createElement("div");
-    div.className = "request";
-
-    div.innerHTML = `
-      <strong>${entry.name.replace('.', ' ')}</strong><br>
-      <strong>Type:</strong> ${entry.type}<br>
-      <strong>Start:</strong> ${formatDate(entry.start)}<br>
-      <strong>End:</strong> ${formatDate(entry.end)}<br>
-      <strong>Status:</strong> ${entry.status}<br>
-      <strong>Notes:</strong> ${entry.notes || "None"}<br><br>
-      <button class="btn approve" onclick="handleAction('${entry.name}','${entry.start}','${entry.end}','Approved')">Approve</button>
-      <button class="btn decline" onclick="handleAction('${entry.name}','${entry.start}','${entry.end}','Declined')">Decline</button>
-    `;
-
-    container.appendChild(div);
-  });
-}
-
-function handleAction(name, start, end, action) {
-  alert(`${action} ${name.replace('.', ' ')} for ${formatDate(start)} to ${formatDate(end)}`);
-  // Add your webhook or GitHub update logic here
-}
-
-function renderCalendar(logs) {
-  const grouped = {};
-  logs.forEach(entry => {
-    const start = new Date(entry.start);
-    const end = new Date(entry.end);
-    const current = new Date(start);
-    while (current <= end) {
-      const key = current.toISOString().split('T')[0];
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(`${entry.name.replace('.', ' ')} – ${entry.type}`);
-      current.setDate(current.getDate() + 1);
+  <script>
+    function formatDate(d) {
+      const date = new Date(d);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
     }
-  });
 
-  const calendar = document.getElementById("calendarView");
-  Object.keys(grouped).sort().forEach(date => {
-    const div = document.createElement("div");
-    div.className = "calendar-day";
-    div.innerHTML = `<strong>${formatDate(date)}</strong><br>` +
-      grouped[date].map(name => `<div class="holiday-entry">${name}</div>`).join("");
-    calendar.appendChild(div);
-  });
-}
+    async function loadHolidayData() {
+      const logRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json');
+      const summaryRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json');
+      const holidayLog = await logRes.json();
+      const summary = await summaryRes.json();
 
-loadData();
-</script>
+      const requestDiv = document.getElementById("holidayRequests");
+      requestDiv.innerHTML = '';
+
+      holidayLog.forEach((req, i) => {
+        const div = document.createElement("div");
+        div.className = "request";
+
+        const statusColor = req.status === 'Approved' ? 'green' : req.status === 'Declined' ? 'red' : '#666';
+
+        div.innerHTML = `
+          <p><strong>${req.username.replace('.', ' ')}</strong> requested: ${formatDate(req.start)} to ${formatDate(req.end)}</p>
+          <p><strong>Reason:</strong> ${req.reason || 'N/A'}<span class="status" style="color:${statusColor}">[${req.status}]</span></p>
+          <button onclick="approve(${i})">Approve</button>
+          <button onclick="decline(${i})">Decline</button>
+        `;
+        requestDiv.appendChild(div);
+      });
+
+      drawCalendar(summary);
+    }
+
+    function drawCalendar(summary) {
+      const container = document.getElementById("calendar");
+      container.innerHTML = '';
+      const today = new Date();
+      const currentMonth = today.getMonth();
+      const currentYear = today.getFullYear();
+
+      const calendarMap = {};
+      summary.forEach(user => {
+        if (!user.holidays) return;
+        user.holidays.forEach(entry => {
+          const start = new Date(entry.start);
+          const end = new Date(entry.end);
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const key = d.toISOString().split('T')[0];
+            if (!calendarMap[key]) calendarMap[key] = [];
+            calendarMap[key].push(user.name);
+          }
+        });
+      });
+
+      const ul = document.createElement("ul");
+      ul.style.listStyle = "none";
+      ul.style.padding = "0";
+
+      Object.entries(calendarMap).forEach(([date, users]) => {
+        const d = new Date(date);
+        if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return;
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>${formatDate(date)}</strong>: ${users.join(', ')}`;
+        ul.appendChild(li);
+      });
+
+      container.appendChild(ul);
+    }
+
+    function approve(index) {
+      alert("Approved request #" + index + " (Zapier update can be added here)");
+    }
+
+    function decline(index) {
+      alert("Declined request #" + index + " (Zapier update can be added here)");
+    }
+
+    loadHolidayData();
+  </script>
 </body>
 </html>
