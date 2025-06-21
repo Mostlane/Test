@@ -1,46 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
   <title>Admin Holiday Panel</title>
   <style>
     body {
-      font-family: "Segoe UI", sans-serif;
+      font-family: Arial, sans-serif;
       background: #f5f5f5;
       margin: 0;
-      padding: 0;
-    }
-    .container {
-      max-width: 1000px;
-      margin: auto;
       padding: 20px;
     }
     h1 {
-      color: #004a99;
+      text-align: center;
+      color: #003366;
     }
     .request {
-      background: white;
-      border: 1px solid #ccc;
-      border-left: 6px solid #004a99;
-      margin-bottom: 15px;
+      background: #fff;
+      border-left: 5px solid #003366;
       padding: 15px;
-      border-radius: 5px;
+      margin-bottom: 15px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
     }
-    .calendar {
-      background: white;
-      margin-top: 30px;
-      padding: 20px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
+    .request p {
+      margin: 5px 0;
     }
     button {
-      padding: 6px 12px;
       margin-right: 10px;
+      padding: 6px 12px;
+      font-size: 14px;
+      cursor: pointer;
       border: none;
       border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
     }
     .approve {
       background-color: #4CAF50;
@@ -53,69 +43,59 @@
   </style>
 </head>
 <body>
-<div class="container">
+
   <h1>Admin Holiday Panel</h1>
-  <div id="requests"></div>
-  <div class="calendar">
-    <h3>Calendar View (Preview)</h3>
-    <p>Approved holidays will be displayed here.</p>
-    <!-- Future enhancement: Full calendar JS integration -->
-  </div>
-</div>
+  <div id="requests">Loading...</div>
 
-<script>
-  const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
+  <script>
+    const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
 
-  function formatDate(isoDate) {
-    const d = new Date(isoDate);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}-${month}-${year}`;
-  }
+    function formatDate(isoDate) {
+      const d = new Date(isoDate);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    }
 
-  fetch(logURL)
-    .then(res => res.json())
-    .then(data => {
-      const container = document.getElementById("requests");
-      container.innerHTML = "";
+    fetch(logURL)
+      .then(res => res.json())
+      .then(data => {
+        const container = document.getElementById("requests");
+        container.innerHTML = "";
 
-      data.forEach(entry => {
-        const div = document.createElement("div");
-        div.className = "request";
+        data.forEach(entry => {
+          const div = document.createElement("div");
+          div.className = "request";
 
-        const statusLabel = entry.status === "Approved" ? "✅ Approved" :
-                            entry.status === "Declined" ? "❌ Declined" :
-                            "⏳ Pending";
+          const statusLabel = entry.status === "Approved" ? "✅ Approved" :
+                              entry.status === "Declined" ? "❌ Declined" :
+                              "⏳ Pending";
 
-        div.innerHTML = `
-          <p><strong>User:</strong> ${entry.user}</p>
-          <p><strong>From:</strong> ${formatDate(entry.startDate)} <strong>To:</strong> ${formatDate(entry.endDate)}</p>
-          <p><strong>Status:</strong> ${statusLabel}</p>
-          <button class="approve">Approve</button>
-          <button class="decline">Decline</button>
-        `;
+          div.innerHTML = `
+            <p><strong>User:</strong> ${entry.name}</p>
+            <p><strong>From:</strong> ${formatDate(entry.from)} <strong>To:</strong> ${formatDate(entry.to)}</p>
+            <p><strong>Status:</strong> ${statusLabel}</p>
+            <button class="approve">Approve</button>
+            <button class="decline">Decline</button>
+          `;
 
-        const approveBtn = div.querySelector(".approve");
-        const declineBtn = div.querySelector(".decline");
+          div.querySelector(".approve").onclick = () => {
+            alert(`(To be handled via webhook) Approved holiday for ${entry.name}`);
+          };
 
-        approveBtn.onclick = () => {
-          alert(`(Zapier/Webhook Needed) Approved holiday for ${entry.user}`);
-          // Add your webhook call or data update logic here
-        };
+          div.querySelector(".decline").onclick = () => {
+            alert(`(To be handled via webhook) Declined holiday for ${entry.name}`);
+          };
 
-        declineBtn.onclick = () => {
-          alert(`(Zapier/Webhook Needed) Declined holiday for ${entry.user}`);
-          // Add your webhook call or data update logic here
-        };
-
-        container.appendChild(div);
+          container.appendChild(div);
+        });
+      })
+      .catch(err => {
+        document.getElementById("requests").innerHTML = "<p style='color:red;'>Error loading holiday log.</p>";
+        console.error(err);
       });
-    })
-    .catch(err => {
-      document.getElementById("requests").innerHTML = "<p style='color:red;'>Error loading holiday log.</p>";
-      console.error(err);
-    });
-</script>
+  </script>
+
 </body>
 </html>
