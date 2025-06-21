@@ -1,118 +1,104 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Admin – Holiday Management</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin Holiday Panel</title>
   <style>
     body {
-      font-family: 'Segoe UI', sans-serif;
+      font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
       margin: 0;
-      padding: 40px 20px;
+      padding: 20px;
     }
-    .container {
-      max-width: 1000px;
-      margin: auto;
-      background: rgba(255,255,255,0.6);
-      padding: 30px;
+    .content-box {
+      background: rgba(255,255,255,0.8);
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
       border-radius: 10px;
     }
-    h2 {
-      color: #003366;
+    h1 {
       text-align: center;
+      color: #003366;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
+    .holiday-entry {
+      background: #fff;
+      margin-bottom: 15px;
+      padding: 15px;
+      border-left: 5px solid #004a99;
+      border-radius: 6px;
     }
-    th, td {
-      padding: 10px;
-      text-align: left;
-      background-color: white;
-      border-bottom: 1px solid #ccc;
+    #holidaySummary p {
+      margin: 4px 0;
+      font-size: 16px;
     }
-    th {
-      background-color: #003366;
-      color: white;
-    }
-    button {
-      padding: 6px 10px;
-      margin-right: 5px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .approve { background-color: #4CAF50; color: white; }
-    .reject { background-color: #f44336; color: white; }
-    .delete { background-color: #888; color: white; }
   </style>
 </head>
 <body>
-  <script>
-    const allowedUsers = ["Jamie.Line", "Greg.Line", "Joe.Line"];
-    const currentUser = sessionStorage.getItem("mostlaneUser");
-    if (!allowedUsers.includes(currentUser)) {
-      document.body.innerHTML = "<h2 style='text-align:center;'>Access Denied</h2>";
-    }
-  </script>
-
-  <div class="container">
-    <h2>Holiday Admin Panel</h2>
-
-    <h3>Pending Holiday Requests</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Engineer</th>
-          <th>Start</th>
-          <th>End</th>
-          <th>Type</th>
-          <th>Notes</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="requestTable">
-        <tr>
-          <td>Chris.Freeman</td>
-          <td>2025-06-10</td>
-          <td>2025-06-12</td>
-          <td>Annual Leave</td>
-          <td>Family trip</td>
-          <td>
-            <button class="approve">Approve</button>
-            <button class="reject">Reject</button>
-            <button class="delete">Delete</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h3>Edit Holiday Allowance</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Engineer</th>
-          <th>Current Allowance</th>
-          <th>New Value</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Frazer.Miller</td>
-          <td>28</td>
-          <td><input type="number" value="28" style="width: 60px;"></td>
-          <td><button class="approve">Update</button></td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h3>Add Compulsory Shutdown Days</h3>
-    <input type="text" placeholder="e.g. 2025-12-24, 2025-12-31" style="width: 100%; padding: 8px; font-size: 16px;"/>
-    <button class="approve" style="margin-top:10px;">Save Dates</button>
+  <div class="content-box">
+    <h1>Admin Holiday Summary</h1>
+    <div id="holidaySummary">Loading summary...</div>
+    <hr style="margin: 20px 0;">
+    <div id="holidayLog">Loading holiday log...</div>
   </div>
+
+  <script>
+    async function loadHolidayData() {
+      const logURL = 'https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json';
+      const summaryURL = 'https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json';
+
+      try {
+        const [logRes, summaryRes] = await Promise.all([
+          fetch(logURL),
+          fetch(summaryURL)
+        ]);
+
+        const logData = await logRes.json();
+        const summaryData = await summaryRes.json();
+
+        displayLog(logData);
+        displaySummary(summaryData);
+
+      } catch (err) {
+        console.error("Failed to load holiday data:", err);
+        document.getElementById('holidayLog').innerHTML = "<p style='color:red;'>Could not load holiday data.</p>";
+      }
+    }
+
+    function displayLog(logData) {
+      const container = document.getElementById('holidayLog');
+      container.innerHTML = '';
+
+      if (logData.length === 0) {
+        container.innerHTML = '<p>No holiday requests found.</p>';
+        return;
+      }
+
+      logData.forEach(entry => {
+        const div = document.createElement('div');
+        div.className = 'holiday-entry';
+        div.innerHTML = `
+          <strong>${entry.name}</strong> requested <strong>${entry.daysRequested}</strong> day(s)
+          from <em>${entry.startDate}</em> to <em>${entry.endDate}</em><br>
+          Status: <strong>${entry.status}</strong>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function displaySummary(summaryData) {
+      const container = document.getElementById('holidaySummary');
+      container.innerHTML = `
+        <p><strong>Total Allowance:</strong> ${summaryData.allowance} days</p>
+        <p><strong>Used:</strong> ${summaryData.used} days</p>
+        <p><strong>Upcoming Booked:</strong> ${summaryData.booked} days</p>
+        <p><strong>Remaining:</strong> ${summaryData.remaining} days</p>
+      `;
+    }
+
+    window.onload = loadHolidayData;
+  </script>
 </body>
 </html>
