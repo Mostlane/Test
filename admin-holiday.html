@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Admin Holiday Panel</title>
+  <title>Admin – Holiday Approvals</title>
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
@@ -13,41 +13,45 @@
       padding: 20px;
     }
     .content-box {
-      background: rgba(255,255,255,0.8);
-      max-width: 900px;
-      margin: 40px auto;
+      background: rgba(255,255,255,0.6);
       padding: 20px;
+      max-width: 900px;
+      margin: auto;
       border-radius: 10px;
-    }
-    h1 {
-      text-align: center;
-      color: #003366;
     }
     .holiday-entry {
       background: #fff;
-      margin-bottom: 15px;
-      padding: 15px;
+      padding: 12px;
+      margin-bottom: 12px;
       border-left: 5px solid #004a99;
       border-radius: 6px;
+      box-shadow: 0 0 3px rgba(0,0,0,0.1);
     }
-    #holidaySummary p {
-      margin: 4px 0;
-      font-size: 16px;
+    .holiday-entry strong {
+      color: #004a99;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    h1 {
+      color: #004a99;
     }
   </style>
 </head>
 <body>
   <div class="content-box">
-    <h1>Admin Holiday Summary</h1>
-    <div id="holidaySummary">Loading summary...</div>
-    <hr style="margin: 20px 0;">
-    <div id="holidayLog">Loading holiday log...</div>
+    <div class="header">
+      <h1>Holiday Request Admin</h1>
+      <p>Showing live data from GitHub</p>
+    </div>
+    <div id="holidayLogContainer">Loading holiday data…</div>
   </div>
 
   <script>
-    async function loadHolidayData() {
-      const logURL = 'https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json';
-      const summaryURL = 'https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json';
+    async function fetchHolidayData() {
+      const logURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json";
+      const summaryURL = "https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json";
 
       try {
         const [logRes, summaryRes] = await Promise.all([
@@ -55,50 +59,41 @@
           fetch(summaryURL)
         ]);
 
+        if (!logRes.ok || !summaryRes.ok) {
+          throw new Error("Failed to fetch one or both JSON files.");
+        }
+
         const logData = await logRes.json();
         const summaryData = await summaryRes.json();
 
-        displayLog(logData);
-        displaySummary(summaryData);
-
+        displayHolidayLog(logData);
       } catch (err) {
-        console.error("Failed to load holiday data:", err);
-        document.getElementById('holidayLog').innerHTML = "<p style='color:red;'>Could not load holiday data.</p>";
+        document.getElementById("holidayLogContainer").innerHTML = `<p style="color:red;">Error loading holiday data: ${err.message}</p>`;
       }
     }
 
-    function displayLog(logData) {
-      const container = document.getElementById('holidayLog');
-      container.innerHTML = '';
+    function displayHolidayLog(log) {
+      const container = document.getElementById("holidayLogContainer");
+      container.innerHTML = "";
 
-      if (logData.length === 0) {
-        container.innerHTML = '<p>No holiday requests found.</p>';
+      if (!log || log.length === 0) {
+        container.innerHTML = "<p>No holiday entries found.</p>";
         return;
       }
 
-      logData.forEach(entry => {
-        const div = document.createElement('div');
-        div.className = 'holiday-entry';
+      log.forEach(entry => {
+        const div = document.createElement("div");
+        div.className = "holiday-entry";
         div.innerHTML = `
-          <strong>${entry.name}</strong> requested <strong>${entry.daysRequested}</strong> day(s)
-          from <em>${entry.startDate}</em> to <em>${entry.endDate}</em><br>
-          Status: <strong>${entry.status}</strong>
+          <strong>${entry.name}</strong><br>
+          ${entry.type} from <strong>${entry.start}</strong> to <strong>${entry.end}</strong><br>
+          <em>Status:</em> ${entry.status} | <em>Notes:</em> ${entry.notes || "—"}
         `;
         container.appendChild(div);
       });
     }
 
-    function displaySummary(summaryData) {
-      const container = document.getElementById('holidaySummary');
-      container.innerHTML = `
-        <p><strong>Total Allowance:</strong> ${summaryData.allowance} days</p>
-        <p><strong>Used:</strong> ${summaryData.used} days</p>
-        <p><strong>Upcoming Booked:</strong> ${summaryData.booked} days</p>
-        <p><strong>Remaining:</strong> ${summaryData.remaining} days</p>
-      `;
-    }
-
-    window.onload = loadHolidayData;
+    fetchHolidayData();
   </script>
 </body>
 </html>
