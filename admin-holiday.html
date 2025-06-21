@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Admin Holiday Manager</title>
   <style>
@@ -63,58 +63,70 @@
   </div>
 
   <script>
-    function formatDate(d) {
-      const date = new Date(d);
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const year = date.getFullYear();
+    function formatDate(input) {
+      const d = new Date(input);
+      if (isNaN(d.getTime())) return "Invalid date";
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
       return `${day}-${month}-${year}`;
     }
 
     async function loadHolidayData() {
-      const logRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json');
-      const summaryRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json');
-      const holidayLog = await logRes.json();
-      const summary = await summaryRes.json();
+      try {
+        const logRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-log.json');
+        const summaryRes = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/holiday-summary.json');
+        const holidayLog = await logRes.json();
+        const summary = await summaryRes.json();
 
-      const requestDiv = document.getElementById("holidayRequests");
-      requestDiv.innerHTML = '';
+        const requestDiv = document.getElementById("holidayRequests");
+        requestDiv.innerHTML = '';
 
-      holidayLog.forEach((req, i) => {
-        const div = document.createElement("div");
-        div.className = "request";
+        holidayLog.forEach((req, i) => {
+          const div = document.createElement("div");
+          div.className = "request";
 
-        const statusColor = req.status === 'Approved' ? 'green' : req.status === 'Declined' ? 'red' : '#666';
+          const statusColor = req.status === 'Approved' ? 'green' : req.status === 'Declined' ? 'red' : '#666';
+          const startFormatted = formatDate(req.start);
+          const endFormatted = formatDate(req.end);
 
-        div.innerHTML = `
-          <p><strong>${req.username.replace('.', ' ')}</strong> requested: ${formatDate(req.start)} to ${formatDate(req.end)}</p>
-          <p><strong>Reason:</strong> ${req.reason || 'N/A'}<span class="status" style="color:${statusColor}">[${req.status}]</span></p>
-          <button onclick="approve(${i})">Approve</button>
-          <button onclick="decline(${i})">Decline</button>
-        `;
-        requestDiv.appendChild(div);
-      });
+          div.innerHTML = `
+            <p><strong>${(req.username || 'Unknown').replace('.', ' ')}</strong> requested: ${startFormatted} to ${endFormatted}</p>
+            <p><strong>Reason:</strong> ${req.reason || 'N/A'}<span class="status" style="color:${statusColor}">[${req.status || 'Pending'}]</span></p>
+            <button onclick="approve(${i})">Approve</button>
+            <button onclick="decline(${i})">Decline</button>
+          `;
+          requestDiv.appendChild(div);
+        });
 
-      drawCalendar(summary);
+        drawCalendar(summary);
+      } catch (err) {
+        document.getElementById("holidayRequests").innerText = "Failed to load holiday data.";
+        console.error("Load error:", err);
+      }
     }
 
     function drawCalendar(summary) {
       const container = document.getElementById("calendar");
       container.innerHTML = '';
       const today = new Date();
-      const currentMonth = today.getMonth();
-      const currentYear = today.getFullYear();
+      const month = today.getMonth();
+      const year = today.getFullYear();
 
       const calendarMap = {};
+
       summary.forEach(user => {
-        if (!user.holidays) return;
-        user.holidays.forEach(entry => {
+        (user.holidays || []).forEach(entry => {
           const start = new Date(entry.start);
           const end = new Date(entry.end);
+          if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+
           for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const key = d.toISOString().split('T')[0];
-            if (!calendarMap[key]) calendarMap[key] = [];
-            calendarMap[key].push(user.name);
+            if (d.getMonth() === month && d.getFullYear() === year) {
+              const key = d.toISOString().split('T')[0];
+              if (!calendarMap[key]) calendarMap[key] = [];
+              calendarMap[key].push(user.name || 'Unknown');
+            }
           }
         });
       });
@@ -124,8 +136,6 @@
       ul.style.padding = "0";
 
       Object.entries(calendarMap).forEach(([date, users]) => {
-        const d = new Date(date);
-        if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return;
         const li = document.createElement("li");
         li.innerHTML = `<strong>${formatDate(date)}</strong>: ${users.join(', ')}`;
         ul.appendChild(li);
@@ -135,11 +145,11 @@
     }
 
     function approve(index) {
-      alert("Approved request #" + index + " (Zapier update can be added here)");
+      alert("Approved request #" + index + " (Webhook logic can go here)");
     }
 
     function decline(index) {
-      alert("Declined request #" + index + " (Zapier update can be added here)");
+      alert("Declined request #" + index + " (Webhook logic can go here)");
     }
 
     loadHolidayData();
