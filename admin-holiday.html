@@ -64,39 +64,46 @@
 
   <script>
     async function loadHolidayData() {
-      const logRes = await fetch('https://mostlane.github.io/holiday-log.json');
-      const logData = await logRes.json();
+      try {
+        const logRes = await fetch('https://mostlane.github.io/holiday-log.json');
+        const logData = await logRes.json();
 
-      const panel = document.getElementById('holidayPanel');
-      panel.innerHTML = '';
+        const panel = document.getElementById('holidayPanel');
+        panel.innerHTML = '';
 
-      logData.forEach(entry => {
-        const user = entry.name || 'Unknown';
-        const start = formatDate(entry.startDate);
-        const end = formatDate(entry.endDate);
-        const status = entry.status || 'Pending';
+        logData.forEach(entry => {
+          const user = entry.name || 'Unknown';
+          const start = safeFormat(entry.startDate);
+          const end = safeFormat(entry.endDate);
+          const status = entry.status || 'Pending';
 
-        const card = document.createElement('div');
-        card.className = 'holiday-card';
+          const statusClass = status.toLowerCase();
+          const statusIcon = status === 'Approved' ? '✅' :
+                             status === 'Declined' ? '❌' : '⏳';
 
-        const statusClass = status.toLowerCase();
-        const statusIcon = status === 'Approved' ? '✅' : status === 'Declined' ? '❌' : '⏳';
+          const card = document.createElement('div');
+          card.className = 'holiday-card';
 
-        card.innerHTML = `
-          <p><strong>User:</strong> ${user}</p>
-          <p><strong>From:</strong> ${start} <strong>To:</strong> ${end}</p>
-          <p class="status ${statusClass}"><strong>Status:</strong> ${statusIcon} ${status}</p>
-          <button class="approve">Approve</button>
-          <button class="decline">Decline</button>
-        `;
+          card.innerHTML = `
+            <p><strong>User:</strong> ${user}</p>
+            <p><strong>From:</strong> ${start} <strong>To:</strong> ${end}</p>
+            <p class="status ${statusClass}"><strong>Status:</strong> ${statusIcon} ${status}</p>
+            <button class="approve">Approve</button>
+            <button class="decline">Decline</button>
+          `;
 
-        panel.appendChild(card);
-      });
+          panel.appendChild(card);
+        });
+      } catch (error) {
+        console.error('Error loading holiday-log.json:', error);
+        document.getElementById('holidayPanel').innerHTML = '<p style="color:red;">Failed to load holiday log.</p>';
+      }
     }
 
-    function formatDate(dateStr) {
+    function safeFormat(dateStr) {
+      if (!dateStr) return 'N/A';
       const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return 'NaN';
+      if (isNaN(date)) return 'N/A';
       const dd = String(date.getDate()).padStart(2, '0');
       const mm = String(date.getMonth() + 1).padStart(2, '0');
       const yyyy = date.getFullYear();
