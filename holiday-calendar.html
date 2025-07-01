@@ -37,7 +37,7 @@
     fetch('https://mostlane.github.io/Test/role-type.txt')
       .then(res => res.text())
       .then(text => {
-        const user = sessionStorage.getItem('mostlaneLoggedIn');
+        const user = sessionStorage.getItem('mostlaneUser');
         const lines = text.split('\n');
         const roleLine = lines.find(line => line.startsWith(user + ' - '));
         if (!roleLine || !roleLine.includes('Office')) {
