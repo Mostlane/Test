@@ -46,9 +46,9 @@ body.main-body {
             const events = [];
             for (const entry of data) {
               events.push({
-                title: (entry.user || 'Unknown').replace('.', ' '),
-                start: entry.startDate,
-                end: entry.endDate,
+                title: (entry.name || 'Unknown').replace('.', ' '),
+                start: entry.start,
+                end: entry.end,
                 color: '#3c82f4',
                 extendedProps: {
                   notes: entry.notes || ''
