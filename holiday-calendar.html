@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Holiday Calendar</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+    }
+    .calendar-body {
+      background: rgba(255,255,255,0.6);
+      margin: 20px;
+      padding: 20px;
+      border-radius: 16px;
+    }
+    #calendar {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .fc-event {
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body class="calendar-body">
+  <h2 style="text-align: center;">Holiday Calendar (Admin View)</h2>
+  <div id="calendar"></div>
+
+  <script>
+    // Restrict page to Office users only
+    fetch('https://mostlane.github.io/Test/role-type.txt')
+      .then(res => res.text())
+      .then(text => {
+        const user = sessionStorage.getItem('mostlaneLoggedIn');
+        const lines = text.split('\n');
+        const roleLine = lines.find(line => line.startsWith(user + ' - '));
+        if (!roleLine || !roleLine.includes('Office')) {
+          document.body.innerHTML = '<h3 style="text-align:center;margin-top:100px;">Access Denied</h3>';
+          return;
+        }
+
+        // Load calendar data
+        fetch('https://mostlane.github.io/Test/holiday-log.json')
+          .then(res => res.json())
+          .then(data => {
+            const events = [];
+            for (const entry of data) {
+              events.push({
+                title: entry.user.replace('.', ' '),
+                start: entry.startDate,
+                end: entry.endDate,
+                color: '#3c82f4',
+                extendedProps: {
+                  notes: entry.notes || ''
+                }
+              });
+            }
+            const calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+              initialView: 'dayGridMonth',
+              height: 'auto',
+              headerToolbar: {
+                left: 'prev,next today',
+                center: 'title',
+                right: ''
+              },
+              events: events,
+              eventDidMount: function(info) {
+                if (info.event.extendedProps.notes) {
+                  info.el.title = info.event.extendedProps.notes;
+                }
+              }
+            });
+            calendar.render();
+          });
+      });
+  </script>
+</body>
+</html>
