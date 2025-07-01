@@ -52,7 +52,7 @@
             const events = [];
             for (const entry of data) {
               events.push({
-                title: entry.user.replace('.', ' '),
+                title: (entry.user || 'Unknown').replace('.', ' '),
                 start: entry.startDate,
                 end: entry.endDate,
                 color: '#3c82f4',
