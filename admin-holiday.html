@@ -77,6 +77,14 @@
 </div>
 
 <script>
+
+let GITHUB_TOKEN = "";
+fetch("config/token.txt")
+  .then(r => r.text())
+  .then(token => {
+    GITHUB_TOKEN = token.trim();
+  });
+
 const token = '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';
 const username = 'Mostlane';
 const repo = 'Test';
