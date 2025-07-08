@@ -30,5 +30,13 @@
     "type": "Bank Holiday",
     "status": "Approved",
     "notes": ""
+  },
+  {
+    "name": "Jamie.Line",
+    "start": "2025-07-15",
+    "end": "2025-07-15",
+    "type": "Annual Leave",
+    "notes": "Barbados",
+    "status": "Pending"
   }
 ]
