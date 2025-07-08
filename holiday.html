@@ -109,20 +109,9 @@
 </div>
 </div></div></div><script>
 
-let encoded = "Z2l0aHViX3BhdF8xMUJST1BGUUEwZWhpeTJMQWlLbkJKX2Viczl5STlTM2N6cXp5V2hWbWhVYWRPZW52a2FrbDFNeDhZMUNDUWlNRWFaNEcyVlNPVlp6UWdrVFR4";
-let GITHUB_TOKEN = atob(encoded);
+let GITHUB_TOKEN = localStorage.getItem("mostlaneHolidayToken") || "";
 
-
-
-  });
-
-
-
-
-
-
-
-
+const GITHUB_TOKEN = "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";
 const REPO = "Mostlane/Test";
 const LOG_FILE = "holiday-log.json";
 

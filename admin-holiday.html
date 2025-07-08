@@ -78,20 +78,9 @@
 
 <script>
 
-let encoded = "Z2l0aHViX3BhdF8xMUJST1BGUUEwZWhpeTJMQWlLbkJKX2Viczl5STlTM2N6cXp5V2hWbWhVYWRPZW52a2FrbDFNeDhZMUNDUWlNRWFaNEcyVlNPVlp6UWdrVFR4";
-let GITHUB_TOKEN = atob(encoded);
+let GITHUB_TOKEN = localStorage.getItem("mostlaneHolidayToken") || "";
 
-
-
-  });
-
-
-
-
-
-
-
-const token = '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';
+const token = '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';
 const username = 'Mostlane';
 const repo = 'Test';
 const filePath = 'holiday-log.json';
