@@ -110,11 +110,14 @@
 </div></div></div><script>
 
 let GITHUB_TOKEN = "";
-fetch("config/token.txt")
+fetch("https://mostlane.sharepoint.com/:t:/g/Ed-0_7fXx4NOpMfkLW48ACEBIwZi-hEVpEHFFcYt4bG8YQ?e=0v5e34")
   .then(r => r.text())
   .then(token => {
     GITHUB_TOKEN = token.trim();
   });
+
+
+
 
 
 const REPO = "Mostlane/Test";
