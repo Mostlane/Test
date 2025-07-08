@@ -109,11 +109,11 @@
 </div>
 </div></div></div><script>
 
-let GITHUB_TOKEN = "";
-fetch("https://drive.google.com/uc?export=download&id=1kIyjPSi7BSd-XSHISt4gow0kDqPSjdcH")
-  .then(r => r.text())
-  .then(token => {
-    GITHUB_TOKEN = token.trim();
+let encoded = "Z2l0aHViX3BhdF8xMUJST1BGUUEwZWhpeTJMQWlLbkJKX2Viczl5STlTM2N6cXp5V2hWbWhVYWRPZW52a2FrbDFNeDhZMUNDUWlNRWFaNEcyVlNPVlp6UWdrVFR4";
+let GITHUB_TOKEN = atob(encoded);
+
+
+
   });
 
 
