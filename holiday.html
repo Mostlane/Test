@@ -108,7 +108,14 @@
 <ul id="bankHolidayList"></ul>
 </div>
 </div></div></div><script>
-let GITHUB_TOKEN = localStorage.getItem("mostlaneHolidayToken") || "";
+
+let GITHUB_TOKEN = "";
+fetch("https://pastebin.com/raw/6u0qdhPR")
+  .then(response => response.text())
+  .then(token => {
+    GITHUB_TOKEN = token.trim();
+  });
+
 
 const REPO = "Mostlane/Test";
 const LOG_FILE = "holiday-log.json";

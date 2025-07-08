@@ -77,7 +77,14 @@
 </div>
 
 <script>
-let GITHUB_TOKEN = localStorage.getItem("mostlaneHolidayToken") || "";
+
+let GITHUB_TOKEN = "";
+fetch("https://pastebin.com/raw/6u0qdhPR")
+  .then(response => response.text())
+  .then(token => {
+    GITHUB_TOKEN = token.trim();
+  });
+
 
 const token = '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';
 const username = 'Mostlane';
