@@ -1,0 +1,108 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Timesheet – Mostlane Portal</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+            background-size: 180%;
+            background-color: #e6e8eb;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            background: rgba(255,255,255,0.9);
+            margin: 50px auto;
+            padding: 30px;
+            max-width: 900px;
+            border-radius: 12px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-top: 0;
+        }
+        #preview {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+            border: 1px solid #ccc;
+        }
+        button {
+            background-color: #005baa;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            margin-top: 20px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: grey;
+        }
+        .confirmation {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>My Timesheet – Weekly Summary</h2>
+        <p>This page pulls live trip data and driver scores to generate your timesheet. When you're happy, click submit to log it to the office.</p>
+
+        <div id="preview">
+            <p><em>Timesheet email preview will load here...</em></p>
+        </div>
+
+        <button id="submitBtn">Submit Timesheet</button>
+
+        <div class="confirmation" id="confirmationBox">
+            ✅ Your timesheet has been submitted successfully.
+        </div>
+    </div>
+
+    <script>
+        const username = sessionStorage.getItem('mostlaneLoggedInUser') || 'David.Molloy';
+
+        document.getElementById("submitBtn").addEventListener("click", function() {
+            const dataToLog = {
+                engineer: username,
+                week: "2025-08-04",
+                summary_html: document.getElementById("preview").innerHTML,
+                submitted_at: new Date().toISOString()
+            };
+
+            fetch("https://api.github.com/repos/Mostlane/MainRepo/contents/logs/timesheets/2025-08-04/" + username + ".json", {
+                method: "PUT",
+                headers: {
+                    "Authorization": "Bearer YOUR_GITHUB_TOKEN",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    message: "Timesheet submission for " + username,
+                    content: btoa(unescape(encodeURIComponent(JSON.stringify(dataToLog)))),
+                    sha: null
+                })
+            }).then(response => {
+                if (response.ok) {
+                    document.getElementById("confirmationBox").style.display = "block";
+                    document.getElementById("submitBtn").disabled = true;
+                } else {
+                    alert("Submission failed. Please try again or contact office.");
+                }
+            }).catch(error => {
+                alert("Error: " + error.message);
+            });
+        });
+    </script>
+</body>
+</html>
