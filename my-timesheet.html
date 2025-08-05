@@ -2,140 +2,69 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>My Timesheet – Mostlane Portal</title>
+    <title>My Timesheet – Weekly Summary</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             background: url('Mostlane_Embossed.png') no-repeat center center fixed;
-            background-size: 180%;
-            background-color: #e6e8eb;
+            background-size: cover;
             margin: 0;
-            padding: 0;
+            padding: 40px;
+            color: #333;
         }
         .container {
-            background: rgba(255,255,255,0.9);
-            margin: 50px auto;
-            padding: 30px;
-            max-width: 900px;
-            border-radius: 12px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 25px;
+            border-radius: 10px;
+            max-width: 800px;
+            margin: 0 auto;
         }
-        h2 {
-            margin-top: 0;
+        h1 {
+            font-size: 22px;
         }
-        #preview {
-            background: #fff;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 30px;
-            border: 1px solid #ccc;
+        .error {
+            color: red;
+            margin-top: 15px;
         }
-        button {
-            background-color: #005baa;
+        #submitButton {
+            background-color: #555;
             color: white;
-            padding: 10px 20px;
+            padding: 10px 18px;
             border: none;
-            margin-top: 20px;
-            font-size: 16px;
-            border-radius: 6px;
+            border-radius: 5px;
             cursor: pointer;
         }
-        button:disabled {
-            background-color: grey;
-        }
-        .confirmation {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            display: none;
+        #submitButton:hover {
+            background-color: #333;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>My Timesheet – Weekly Summary</h2>
+        <h1>My Timesheet – Weekly Summary</h1>
         <p>This page pulls live trip data from your van tracker to generate a weekly timesheet summary. Please wait a moment while we fetch your data.</p>
-
-        <div id="preview">
-            <p><em>Loading data from Kinesis for LE73 UHV...</em></p>
-        </div>
-
-        <button id="submitBtn" disabled>Submit Timesheet</button>
-
-        <div class="confirmation" id="confirmationBox">
-            ✅ Your timesheet has been submitted successfully.
-        </div>
+        <div id="message" class="error">⛔ Failed to load trip data: Load failed</div>
+        <br>
+        <button id="submitButton">Submit Timesheet</button>
     </div>
-
     <script>
-        const apiKey = "77b111f7-e318-4439-9f20-ebc8593ebe39";
-        const registration = "LE73UHV";
-        const username = sessionStorage.getItem('mostlaneLoggedInUser') || 'David.Molloy';
-        const previewDiv = document.getElementById("preview");
+        async function loadTripData() {
+            const vehicleReg = "LE73UHV"; // Placeholder vehicle for now
+            const proxyURL = "https://wandering-feather-4b5a.jamie-def.workers.dev/?reg=" + vehicleReg;
 
-        async function fetchTrips() {
             try {
-                const response = await fetch("https://api.kinesisapi.com/v1/trips?registration=" + registration + "&range=7days", {
-                    method: "GET",
-                    headers: {
-                        "Authorization": "Bearer " + apiKey
-                    }
-                });
-
-                if (!response.ok) throw new Error("API request failed");
-
+                const response = await fetch(proxyURL);
                 const data = await response.json();
-                renderPreview(data);
-            } catch (error) {
-                previewDiv.innerHTML = "<p style='color:red;'>❌ Failed to load trip data: " + error.message + "</p>";
+                document.getElementById("message").innerHTML = "✅ Trip data loaded successfully!";
+                console.log(data);
+                // Proceed to build the summary table, calculate hours, driver score, etc.
+            } catch (err) {
+                console.error(err);
+                document.getElementById("message").innerHTML = "⛔ Failed to load trip data: Load failed";
             }
         }
 
-        function renderPreview(data) {
-            // Placeholder rendering for now
-            previewDiv.innerHTML = `
-                <p><strong>Engineer:</strong> ${username}</p>
-                <p><strong>Vehicle:</strong> ${registration}</p>
-                <p>✅ Fetched ${data.length || 0} trip entries from Kinesis API.</p>
-                <p>(The full timesheet preview will be built here next.)</p>
-            `;
-            document.getElementById("submitBtn").disabled = false;
-        }
-
-        document.getElementById("submitBtn").addEventListener("click", function() {
-            const payload = {
-                engineer: username,
-                vehicle: registration,
-                submitted_at: new Date().toISOString()
-            };
-
-            fetch("https://api.github.com/repos/Mostlane/MainRepo/contents/logs/timesheets/2025-08-04/" + username + ".json", {
-                method: "PUT",
-                headers: {
-                    "Authorization": "Bearer YOUR_GITHUB_TOKEN",
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    message: "Timesheet submission for " + username,
-                    content: btoa(unescape(encodeURIComponent(JSON.stringify(payload)))),
-                    sha: null
-                })
-            }).then(response => {
-                if (response.ok) {
-                    document.getElementById("confirmationBox").style.display = "block";
-                    document.getElementById("submitBtn").disabled = true;
-                } else {
-                    alert("Submission failed. Please try again.");
-                }
-            }).catch(error => {
-                alert("Error: " + error.message);
-            });
-        });
-
-        fetchTrips();
+        loadTripData();
     </script>
 </body>
 </html>
