@@ -57,13 +57,13 @@
 <body>
     <div class="container">
         <h2>My Timesheet – Weekly Summary</h2>
-        <p>This page pulls live trip data and driver scores to generate your timesheet. When you're happy, click submit to log it to the office.</p>
+        <p>This page pulls live trip data from your van tracker to generate a weekly timesheet summary. Please wait a moment while we fetch your data.</p>
 
         <div id="preview">
-            <p><em>Timesheet email preview will load here...</em></p>
+            <p><em>Loading data from Kinesis for LE73 UHV...</em></p>
         </div>
 
-        <button id="submitBtn">Submit Timesheet</button>
+        <button id="submitBtn" disabled>Submit Timesheet</button>
 
         <div class="confirmation" id="confirmationBox">
             ✅ Your timesheet has been submitted successfully.
@@ -71,13 +71,44 @@
     </div>
 
     <script>
+        const apiKey = "77b111f7-e318-4439-9f20-ebc8593ebe39";
+        const registration = "LE73UHV";
         const username = sessionStorage.getItem('mostlaneLoggedInUser') || 'David.Molloy';
+        const previewDiv = document.getElementById("preview");
+
+        async function fetchTrips() {
+            try {
+                const response = await fetch("https://api.kinesisapi.com/v1/trips?registration=" + registration + "&range=7days", {
+                    method: "GET",
+                    headers: {
+                        "Authorization": "Bearer " + apiKey
+                    }
+                });
+
+                if (!response.ok) throw new Error("API request failed");
+
+                const data = await response.json();
+                renderPreview(data);
+            } catch (error) {
+                previewDiv.innerHTML = "<p style='color:red;'>❌ Failed to load trip data: " + error.message + "</p>";
+            }
+        }
+
+        function renderPreview(data) {
+            // Placeholder rendering for now
+            previewDiv.innerHTML = `
+                <p><strong>Engineer:</strong> ${username}</p>
+                <p><strong>Vehicle:</strong> ${registration}</p>
+                <p>✅ Fetched ${data.length || 0} trip entries from Kinesis API.</p>
+                <p>(The full timesheet preview will be built here next.)</p>
+            `;
+            document.getElementById("submitBtn").disabled = false;
+        }
 
         document.getElementById("submitBtn").addEventListener("click", function() {
-            const dataToLog = {
+            const payload = {
                 engineer: username,
-                week: "2025-08-04",
-                summary_html: document.getElementById("preview").innerHTML,
+                vehicle: registration,
                 submitted_at: new Date().toISOString()
             };
 
@@ -89,7 +120,7 @@
                 },
                 body: JSON.stringify({
                     message: "Timesheet submission for " + username,
-                    content: btoa(unescape(encodeURIComponent(JSON.stringify(dataToLog)))),
+                    content: btoa(unescape(encodeURIComponent(JSON.stringify(payload)))),
                     sha: null
                 })
             }).then(response => {
@@ -97,12 +128,14 @@
                     document.getElementById("confirmationBox").style.display = "block";
                     document.getElementById("submitBtn").disabled = true;
                 } else {
-                    alert("Submission failed. Please try again or contact office.");
+                    alert("Submission failed. Please try again.");
                 }
             }).catch(error => {
                 alert("Error: " + error.message);
             });
         });
+
+        fetchTrips();
     </script>
 </body>
 </html>
