@@ -416,7 +416,7 @@ async function showCorrectButton() {
   if (type === 'SelfEmployed') {
     container.innerHTML = '<button onclick="createInvoice()" class="portal-btn">Create Invoice</button>';
   } else {
-    container.innerHTML = '<button onclick="createTimesheet()" class="portal-btn">Create Timesheet</button>';
+    container.innerHTML = '<button onclick="location.href=\'my-timesheet.html\'" class="portal-btn">Timesheet</button>';
   }
 }
 showCorrectButton();
@@ -462,5 +462,4 @@ observer.observe(document.body, { childList: true, subtree: true });
 </script>
 </body>
 </html>
-
 
