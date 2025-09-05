@@ -6685,6 +6685,16 @@
   ],
   "Jamie.Line": [
 {
+  "type": "Check Out",
+  "datetime": "2025-09-05T23:12:00Z",
+  "location": "Latitude: 50.874510297205454 Longitude: -1.2818928203695548",
+  "location_coords": {
+    "lat": 50.874510297205454,
+    "lon": -1.2818928203695548
+  },
+  "driver": false
+},
+{
   "type": "Check In",
   "datetime": "2025-09-05T22:57:00Z",
   "location": "Latitude: 50.87452570681955 Longitude: -1.2819075463921357",
