@@ -1,5 +1,4 @@
 
-<!-- my-timesheet-live.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -110,9 +109,141 @@
   </div>
 
   <script>
-    // Live data wiring to GitHub would go here
-    document.getElementById("weekLabel").innerText = "Week of [Dynamic]";
-    // TODO: Replace this with live JSON fetch from GitHub and apply full calculation logic
+    const username = localStorage.getItem("username");
+    const employmentURL = "https://mostlane.github.io/Test/employment.txt";
+    const travelTimeURL = "https://mostlane.github.io/Test/travel-time.txt";
+    const ratesURL = "https://mostlane.github.io/Test/rates.txt";
+    const logURL = "https://mostlane.github.io/Test/logs/activity-log.json";
+    const sitesURL = "https://mostlane.github.io/Test/assets/sites.json";
+
+    let currentWeekOffset = 0;
+
+    function getMonday(d) {
+      d = new Date(d);
+      const day = d.getDay(), diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      return new Date(d.setDate(diff));
+    }
+
+    function getWeekLabel(offset) {
+      const today = new Date();
+      const monday = new Date(getMonday(today));
+      monday.setDate(monday.getDate() + offset * 7);
+      return monday.toISOString().split("T")[0];
+    }
+
+    function changeWeek(offset) {
+      currentWeekOffset += offset;
+      updateTimesheet();
+    }
+
+    function submitTimesheet() {
+      const weekStart = getWeekLabel(currentWeekOffset);
+      localStorage.setItem("submitted_" + weekStart + "_" + username, "true");
+      document.getElementById("submittedStamp").style.display = "block";
+      document.getElementById("submitBtn").disabled = true;
+    }
+
+    function updateTimesheet() {
+      const weekStart = getWeekLabel(currentWeekOffset);
+      const startDate = new Date(weekStart);
+      document.getElementById("weekLabel").innerText = "Week of " + weekStart;
+
+      fetchAllData().then(data => {
+        const { logs, rates, travelMap, empMap, sites } = data;
+        const userRate = parseFloat(rates[username]) || 0;
+        const hasTravelTime = travelMap[username] === "Yes";
+        const isSelfEmployed = empMap[username] === "SelfEmployed";
+
+        const body = document.getElementById("timesheetBody");
+        body.innerHTML = "";
+        let submitted = localStorage.getItem("submitted_" + weekStart + "_" + username) === "true";
+        document.getElementById("submittedStamp").style.display = submitted ? "block" : "none";
+        document.getElementById("submitBtn").disabled = submitted;
+
+        for (let i = 0; i < 7; i++) {
+          const day = new Date(startDate);
+          day.setDate(day.getDate() + i);
+          const dateStr = day.toISOString().split("T")[0];
+          const entries = logs[username]?.filter(e => e.datetime.startsWith(dateStr)) || [];
+
+          if (entries.length < 2 && i >= 5) continue; // skip empty weekends
+
+          const checkIn = entries.find(e => e.type === "Start Day" || e.type === "Check In");
+          const checkOut = entries.find(e => e.type === "Finish Day" || e.type === "Check Out");
+
+          if (!checkIn || !checkOut) continue;
+
+          const start = new Date(checkIn.datetime);
+          const end = new Date(checkOut.datetime);
+          const hours = (end - start) / 36e5;
+          const stdHours = Math.min(hours, 10);
+          const otHours = Math.max(0, hours - 10);
+          const travel = hasTravelTime ? ((checkIn.travelDuration || 0) + (checkOut.travelDuration || 0)) / 60 : 0;
+          const site = findNearestSite(checkIn.location_coords, sites);
+          const miles = site?.mileageFromHQ || 0;
+          const fuel = (!hasTravelTime && isSelfEmployed) ? Math.max(0, miles - 10) * 0.25 * 2 : 0;
+
+          const stdPay = stdHours * userRate;
+          const otPay = otHours * userRate * 1.5;
+          const total = stdPay + otPay + fuel;
+
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${dateStr}</td>
+            <td>${stdHours.toFixed(2)}</td>
+            <td>${otHours.toFixed(2)}</td>
+            <td>${travel.toFixed(2)}</td>
+            <td>£${fuel.toFixed(2)}</td>
+            <td>£${stdPay.toFixed(2)}</td>
+            <td>£${otPay.toFixed(2)}</td>
+            <td>£${total.toFixed(2)}</td>
+            <td><input type="checkbox" ${isSelfEmployed && !hasTravelTime ? "checked" : "disabled"}></td>
+          `;
+          body.appendChild(tr);
+        }
+      });
+    }
+
+    function fetchAllData() {
+      return Promise.all([
+        fetch(logURL).then(r => r.json()),
+        fetch(ratesURL).then(r => r.text()),
+        fetch(travelTimeURL).then(r => r.text()),
+        fetch(employmentURL).then(r => r.text()),
+        fetch(sitesURL).then(r => r.json())
+      ]).then(([logs, ratesTxt, travelTxt, empTxt, sites]) => {
+        const rates = parseMap(ratesTxt);
+        const travelMap = parseMap(travelTxt);
+        const empMap = parseMap(empTxt);
+        return { logs, rates, travelMap, empMap, sites };
+      });
+    }
+
+    function parseMap(txt) {
+      const map = {};
+      txt.split("\n").forEach(line => {
+        const [k, v] = line.split(" - ");
+        if (k && v) map[k.trim()] = v.trim();
+      });
+      return map;
+    }
+
+    function findNearestSite(coords, sites) {
+      if (!coords || !sites) return null;
+      let closest = null, closestDist = Infinity;
+      for (const site of sites) {
+        const [lat1, lon1] = coords;
+        const [lat2, lon2] = site.location_coords;
+        const d = Math.sqrt((lat2 - lat1) ** 2 + (lon2 - lon1) ** 2);
+        if (d < closestDist) {
+          closestDist = d;
+          closest = site;
+        }
+      }
+      return closest;
+    }
+
+    updateTimesheet();
   </script>
 </body>
 </html>
