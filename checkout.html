@@ -87,6 +87,23 @@
   }
 </script>
 
+
+<style>
+.device-warning {
+  background-color: rgba(255, 255, 255, 0.9);
+  color: #d00000;
+  font-weight: bold;
+  border-radius: 10px;
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 500px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  font-size: 18px;
+  border: 2px solid #d00000;
+  display: none;
+}
+</style>
 </head>
 <body class="checkout-body">
 
@@ -137,6 +154,26 @@
 
   </style>
   <h1>Checking Out...</h1>
+
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  const loggedInUser = sessionStorage.getItem('mostlaneLoggedInUser');
+  const storedDeviceID = localStorage.getItem('deviceID');
+  fetch('Users.txt')
+    .then(response => response.text())
+    .then(data => {
+      const lines = data.split('\n');
+      const userLine = lines.find(line => line.includes(loggedInUser));
+      if (userLine) {
+        const expectedDeviceID = userLine.split(',')[1].trim();
+        if (expectedDeviceID !== storedDeviceID) {
+          document.getElementById('deviceWarning').style.display = 'block';
+        }
+      }
+    });
+});
+</script>
+
 </body>
 </html>
 
