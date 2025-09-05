@@ -12,10 +12,10 @@
       padding: 20px;
     }
     .container {
-      background: rgba(255,255,255,0.85);
+      background: rgba(255,255,255,0.9);
       padding: 20px;
       border-radius: 12px;
-      max-width: 800px;
+      max-width: 950px;
       margin: auto;
     }
     h2 {
@@ -44,26 +44,51 @@
       color: green;
       font-weight: bold;
       font-size: 16px;
+      margin-bottom: 10px;
     }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
+    .week-nav {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    .week-nav button {
       background-color: #003366;
       color: white;
       border: none;
+      padding: 8px 16px;
       border-radius: 6px;
+      font-size: 14px;
       cursor: pointer;
     }
-    button:disabled {
+    .submit-area {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .submit-area button {
+      background-color: #003366;
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .submit-area button:disabled {
       background-color: #999;
-      cursor: not-allowed;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <h2>Weekly Timesheet</h2>
-    <div id="submittedBanner" class="submitted" style="display:none;">✅ Submitted</div>
+    <div class="submitted" id="submittedStamp" style="display:none;">✅ Submitted</div>
+
+    <div class="week-nav">
+      <button onclick="changeWeek(-1)">← Previous Week</button>
+      <div id="weekLabel">Week of 2025-09-02</div>
+      <button onclick="changeWeek(1)">Next Week →</button>
+    </div>
+
     <table>
       <thead>
         <tr>
@@ -78,67 +103,87 @@
         </tr>
       </thead>
       <tbody id="timesheetBody">
-        <!-- JS inserts rows here -->
+        <!-- Populated by JS -->
       </tbody>
     </table>
-    <div style="text-align: center;">
+
+    <div class="submit-area">
       <button id="submitBtn" onclick="submitTimesheet()">Submit Timesheet</button>
     </div>
   </div>
 
-  <script>
+<script>
+  let currentWeekOffset = 0;
+
+  function getMonday(d) {
+    d = new Date(d);
+    const day = d.getDay(),
+          diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.setDate(diff));
+  }
+
+  function getWeekLabel(offset) {
+    const today = new Date();
+    const monday = new Date(getMonday(today));
+    monday.setDate(monday.getDate() + offset * 7);
+    return monday.toISOString().split("T")[0];
+  }
+
+  function updateWeekDisplay() {
+    const label = document.getElementById("weekLabel");
+    const weekStart = getWeekLabel(currentWeekOffset);
+    label.textContent = "Week of " + weekStart;
+    document.getElementById("submittedStamp").style.display = localStorage.getItem("submitted_" + weekStart) ? "block" : "none";
+    loadFakeData(weekStart);
+  }
+
+  function changeWeek(offset) {
+    currentWeekOffset += offset;
+    updateWeekDisplay();
+  }
+
+  function submitTimesheet() {
+    const weekStart = getWeekLabel(currentWeekOffset);
+    localStorage.setItem("submitted_" + weekStart, "true");
+    document.getElementById("submittedStamp").style.display = "block";
+    document.getElementById("submitBtn").disabled = true;
+  }
+
+  function loadFakeData(weekStart) {
     const data = [
-      { date: '2025-09-01', standard: 8, ot: 0, fuel: 7.50, stdPay: 96, otPay: 0, total: 103.50 },
-      { date: '2025-09-02', standard: 9, ot: 1, fuel: 11.25, stdPay: 108, otPay: 18, total: 137.25 },
-      { date: '2025-09-03', standard: 10, ot: 0, fuel: 2.50, stdPay: 120, otPay: 0, total: 122.50 },
-      { date: '2025-09-04', standard: 8, ot: 0, fuel: 5.00, stdPay: 96, otPay: 0, total: 101.00 },
-      { date: '2025-09-05', standard: 7, ot: 0, fuel: 6.25, stdPay: 84, otPay: 0, total: 90.25 }
+      { date: weekStart, standard: 8, ot: 0, fuel: 6.25, stdPay: 96, otPay: 0, total: 102.25 },
+      { date: addDays(weekStart, 1), standard: 9, ot: 1, fuel: 10, stdPay: 108, otPay: 18, total: 136 },
+      { date: addDays(weekStart, 2), standard: 10, ot: 0, fuel: 7.5, stdPay: 120, otPay: 0, total: 127.5 },
+      { date: addDays(weekStart, 3), standard: 8, ot: 0, fuel: 5, stdPay: 96, otPay: 0, total: 101 },
+      { date: addDays(weekStart, 4), standard: 7, ot: 0, fuel: 2.5, stdPay: 84, otPay: 0, total: 86.5 }
     ];
+    const tbody = document.getElementById("timesheetBody");
+    tbody.innerHTML = "";
+    data.forEach((entry, i) => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${entry.date}</td>
+        <td>${entry.standard}</td>
+        <td>${entry.ot}</td>
+        <td>£${entry.fuel.toFixed(2)}</td>
+        <td>£${entry.stdPay.toFixed(2)}</td>
+        <td>£${entry.otPay.toFixed(2)}</td>
+        <td>£${entry.total.toFixed(2)}</td>
+        <td><input type="checkbox" checked disabled></td>
+      `;
+      tbody.appendChild(row);
+    });
 
-    function loadTimesheet() {
-      const tbody = document.getElementById('timesheetBody');
-      data.forEach((entry, i) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${entry.date}</td>
-          <td>${entry.standard}</td>
-          <td>${entry.ot}</td>
-          <td>£${entry.fuel.toFixed(2)}</td>
-          <td>£${entry.stdPay.toFixed(2)}</td>
-          <td>£${entry.otPay.toFixed(2)}</td>
-          <td>£${entry.total.toFixed(2)}</td>
-          <td><input type="checkbox" id="claim${i}" checked></td>
-        `;
-        tbody.appendChild(row);
-      });
+    document.getElementById("submitBtn").disabled = localStorage.getItem("submitted_" + weekStart) === "true";
+  }
 
-      // Show submitted status if already submitted
-      if (localStorage.getItem("timesheetSubmitted") === "true") {
-        document.getElementById("submittedBanner").style.display = "block";
-        document.getElementById("submitBtn").disabled = true;
-      }
-    }
+  function addDays(dateStr, days) {
+    const date = new Date(dateStr);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split("T")[0];
+  }
 
-    function submitTimesheet() {
-      const payload = {
-        user: localStorage.getItem("username") || "Unknown",
-        week: "2025-09-01 to 2025-09-05",
-        data: data,
-        submittedAt: new Date().toISOString()
-      };
-
-      fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      }).then(() => {
-        localStorage.setItem("timesheetSubmitted", "true");
-        document.getElementById("submittedBanner").style.display = "block";
-        document.getElementById("submitBtn").disabled = true;
-      });
-    }
-
-    loadTimesheet();
-  </script>
+  updateWeekDisplay();
+</script>
 </body>
 </html>
