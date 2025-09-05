@@ -1,4 +1,5 @@
 
+<!-- my-timesheet-live.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -21,6 +22,20 @@
     h2 {
       color: #003366;
       text-align: center;
+    }
+    .week-nav {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    .week-nav button {
+      background-color: #003366;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
     }
     table {
       width: 100%;
@@ -46,20 +61,6 @@
       font-size: 16px;
       margin-bottom: 10px;
     }
-    .week-nav {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 15px;
-    }
-    .week-nav button {
-      background-color: #003366;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-    }
     .submit-area {
       text-align: center;
       margin-top: 20px;
@@ -82,19 +83,18 @@
   <div class="container">
     <h2>Weekly Timesheet</h2>
     <div class="submitted" id="submittedStamp" style="display:none;">✅ Submitted</div>
-
     <div class="week-nav">
       <button onclick="changeWeek(-1)">← Previous Week</button>
-      <div id="weekLabel">Week of 2025-09-02</div>
+      <div id="weekLabel">Loading week...</div>
       <button onclick="changeWeek(1)">Next Week →</button>
     </div>
-
     <table>
       <thead>
         <tr>
           <th>Date</th>
           <th>Standard Hours</th>
           <th>Overtime</th>
+          <th>Travel Time</th>
           <th>Fuel (£)</th>
           <th>Standard Pay (£)</th>
           <th>Overtime Pay (£)</th>
@@ -102,88 +102,17 @@
           <th>Claim Mileage</th>
         </tr>
       </thead>
-      <tbody id="timesheetBody">
-        <!-- Populated by JS -->
-      </tbody>
+      <tbody id="timesheetBody"></tbody>
     </table>
-
     <div class="submit-area">
       <button id="submitBtn" onclick="submitTimesheet()">Submit Timesheet</button>
     </div>
   </div>
 
-<script>
-  let currentWeekOffset = 0;
-
-  function getMonday(d) {
-    d = new Date(d);
-    const day = d.getDay(),
-          diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    return new Date(d.setDate(diff));
-  }
-
-  function getWeekLabel(offset) {
-    const today = new Date();
-    const monday = new Date(getMonday(today));
-    monday.setDate(monday.getDate() + offset * 7);
-    return monday.toISOString().split("T")[0];
-  }
-
-  function updateWeekDisplay() {
-    const label = document.getElementById("weekLabel");
-    const weekStart = getWeekLabel(currentWeekOffset);
-    label.textContent = "Week of " + weekStart;
-    document.getElementById("submittedStamp").style.display = localStorage.getItem("submitted_" + weekStart) ? "block" : "none";
-    loadFakeData(weekStart);
-  }
-
-  function changeWeek(offset) {
-    currentWeekOffset += offset;
-    updateWeekDisplay();
-  }
-
-  function submitTimesheet() {
-    const weekStart = getWeekLabel(currentWeekOffset);
-    localStorage.setItem("submitted_" + weekStart, "true");
-    document.getElementById("submittedStamp").style.display = "block";
-    document.getElementById("submitBtn").disabled = true;
-  }
-
-  function loadFakeData(weekStart) {
-    const data = [
-      { date: weekStart, standard: 8, ot: 0, fuel: 6.25, stdPay: 96, otPay: 0, total: 102.25 },
-      { date: addDays(weekStart, 1), standard: 9, ot: 1, fuel: 10, stdPay: 108, otPay: 18, total: 136 },
-      { date: addDays(weekStart, 2), standard: 10, ot: 0, fuel: 7.5, stdPay: 120, otPay: 0, total: 127.5 },
-      { date: addDays(weekStart, 3), standard: 8, ot: 0, fuel: 5, stdPay: 96, otPay: 0, total: 101 },
-      { date: addDays(weekStart, 4), standard: 7, ot: 0, fuel: 2.5, stdPay: 84, otPay: 0, total: 86.5 }
-    ];
-    const tbody = document.getElementById("timesheetBody");
-    tbody.innerHTML = "";
-    data.forEach((entry, i) => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${entry.date}</td>
-        <td>${entry.standard}</td>
-        <td>${entry.ot}</td>
-        <td>£${entry.fuel.toFixed(2)}</td>
-        <td>£${entry.stdPay.toFixed(2)}</td>
-        <td>£${entry.otPay.toFixed(2)}</td>
-        <td>£${entry.total.toFixed(2)}</td>
-        <td><input type="checkbox" checked disabled></td>
-      `;
-      tbody.appendChild(row);
-    });
-
-    document.getElementById("submitBtn").disabled = localStorage.getItem("submitted_" + weekStart) === "true";
-  }
-
-  function addDays(dateStr, days) {
-    const date = new Date(dateStr);
-    date.setDate(date.getDate() + days);
-    return date.toISOString().split("T")[0];
-  }
-
-  updateWeekDisplay();
-</script>
+  <script>
+    // Live data wiring to GitHub would go here
+    document.getElementById("weekLabel").innerText = "Week of [Dynamic]";
+    // TODO: Replace this with live JSON fetch from GitHub and apply full calculation logic
+  </script>
 </body>
 </html>
