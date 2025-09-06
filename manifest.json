@@ -1,0 +1,9 @@
+{
+  "name": "Mostlane FSM",
+  "short_name": "Mostlane",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#e6e8eb",
+  "theme_color": "#19518c",
+  "icons": []
+}

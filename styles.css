@@ -1,0 +1,102 @@
+
+:root{
+  --bg:#e6e8eb;
+  --blue:#19518c;
+  --text:#1c222b;
+  --muted:#5f6876;
+  --whiteTrans: rgba(255,255,255,0.60); /* translucent content boxes */
+  --cardTrans: rgba(255,255,255,0.70);
+  --radius:16px;
+  --shadow:0 8px 24px rgba(0,0,0,.10);
+}
+
+/* Scoped body class to avoid interference with other portal pages */
+body.fsm-body{
+  margin:0;
+  min-height:100vh;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,Helvetica,sans-serif;
+  color:var(--text);
+  background-color: var(--bg);
+  background-image: url('assets/Mostlane_Embossed.png');
+  background-size: 180% auto;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* Header with your logo */
+.header{
+  display:flex; align-items:center; gap:12px;
+  background: var(--whiteTrans);
+  padding:14px 16px;
+  position:sticky; top:0; z-index:10;
+  backdrop-filter: blur(4px);
+  border-bottom:1px solid rgba(0,0,0,.05);
+}
+.header img.logo{height:44px}
+.header h1{margin:0; font-size:20px; font-weight:700; letter-spacing:.2px}
+
+/* Translucent content box baseline */
+.box{
+  max-width:820px;
+  margin:16px auto;
+  background: var(--whiteTrans);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding:16px;
+}
+
+/* Cards inside a box */
+.card{
+  background: var(--cardTrans);
+  border-radius:14px;
+  box-shadow: var(--shadow);
+  padding:14px;
+  margin:12px 0;
+}
+
+/* Grid and layout */
+.kpi-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.kpi .value{font-size:28px; font-weight:800}
+.kpi .label{color:var(--muted); font-size:13px; margin-top:4px}
+
+/* Inputs & buttons — rounded, solid blue primary button */
+.input, select, textarea{
+  width:100%; padding:12px 14px; border-radius:12px;
+  background:#fff; border:1px solid #d6dbe1; color:var(--text); font-size:15px;
+}
+.label{font-size:13px; color:var(--muted); margin:6px 0}
+
+.btn{
+  appearance:none; border:none; border-radius:12px;
+  padding:12px 16px; font-weight:700; font-size:15px;
+  background:#ecf2fa; color:var(--blue); border:1px solid var(--blue);
+}
+.btn.primary{background:var(--blue); color:#fff}
+.btn.full{width:100%}
+.row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+.grid-2{display:grid; grid-template-columns:1fr; gap:12px}
+@media(min-width:700px){ .grid-2{ grid-template-columns:1fr 1fr } }
+
+/* Status chips (rounded) */
+.status{font-size:12px; padding:6px 10px; border-radius:999px; color:#fff; font-weight:800; display:inline-block}
+.status.New{background:#9aa7b6}
+.status.Assigned{background:#19518c}
+.status.InProgress{background:#f1a331}
+.status.Completed{background:#23966e}
+.status.OnHold{background:#7d8694}
+.status.Cancelled{background:#a1a7b2}
+
+.meta{color:var(--muted); font-size:12px; margin-top:6px}
+
+/* Footer tabs — translucent to match portal */
+.footer-tabs{
+  position:fixed; bottom:0; left:0; right:0;
+  background: var(--whiteTrans);
+  backdrop-filter: blur(8px);
+  border-top:1px solid rgba(0,0,0,.06);
+  display:flex; justify-content:space-around; padding:10px 8px; z-index:20;
+}
+.tab{display:flex; flex-direction:column; align-items:center; gap:4px; color:#2b3240; text-decoration:none; font-size:12px}
+.tab.active{color:var(--blue); font-weight:800}
+.small{font-size:12px; color:var(--muted)}
+.hidden{display:none}
