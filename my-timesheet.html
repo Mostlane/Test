@@ -108,146 +108,136 @@
     </div>
   </div>
 
-  <script>
-    let currentWeekOffset = 0;
+<script>
+let currentWeekOffset = 0;
 
-    const getMonday = (d) => {
-      d = new Date(d);
-      const day = d.getUTCDay(),
-            diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
-      d.setUTCDate(diff);
-      return d;
-    };
+function getMonday(d) {
+  d = new Date(d);
+  const day = d.getDay(),
+        diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
-    const getWeekStart = () => {
-      const today = new Date();
-      const monday = getMonday(today);
-      monday.setUTCDate(monday.getUTCDate() + currentWeekOffset * 7);
-      return monday;
-    };
+function changeWeek(offset) {
+  currentWeekOffset += offset;
+  renderTimesheet();
+}
 
-    const changeWeek = (offset) => {
-      currentWeekOffset += offset;
-      renderWeek();
-    };
+function submitTimesheet() {
+  const username = sessionStorage.getItem("mostlaneUser");
+  const monday = getMonday(new Date());
+  monday.setDate(monday.getDate() + (currentWeekOffset * 7));
+  const key = `${username}_${monday.toISOString().split("T")[0]}`;
+  localStorage.setItem("submitted_" + key, "true");
+  document.getElementById("submittedStamp").style.display = "block";
+  document.getElementById("submitBtn").disabled = true;
+}
 
-    const parseMap = (txt) => {
-      const map = {};
-      txt.split("\n").forEach(line => {
-        const [key, value] = line.split(" - ");
-        if (key && value) map[key.trim()] = value.trim();
-      });
-      return map;
-    };
+async function renderTimesheet() {
+  const rawUser = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const username = rawUser.replace(".", " ");
+  const weekStart = getMonday(new Date());
+  weekStart.setDate(weekStart.getDate() + (currentWeekOffset * 7));
+  const weekKey = `${rawUser}_${weekStart.toISOString().split("T")[0]}`;
+  const weekLabel = document.getElementById("weekLabel");
+  const submittedStamp = document.getElementById("submittedStamp");
+  const submitBtn = document.getElementById("submitBtn");
+  const body = document.getElementById("timesheetBody");
 
-    const submitTimesheet = () => {
-      const raw = sessionStorage.getItem("mostlaneUser");
-      const username = raw.replace(".", " ");
-      const weekKey = getWeekStart().toISOString().split("T")[0] + "_" + username;
-      localStorage.setItem("submitted_" + weekKey, "true");
-      document.getElementById("submittedStamp").style.display = "block";
-      document.getElementById("submitBtn").disabled = true;
-    };
+  weekLabel.innerText = `Week of ${weekStart.toISOString().split("T")[0]}`;
+  submittedStamp.style.display = localStorage.getItem("submitted_" + weekKey) ? "block" : "none";
+  submitBtn.disabled = localStorage.getItem("submitted_" + weekKey) ? true : false;
 
-    async function renderWeek() {
-      const raw = sessionStorage.getItem("mostlaneUser");
-      const username = raw.replace(".", " ");
-      const weekStart = getWeekStart();
-      const weekEnd = new Date(weekStart);
-      weekEnd.setUTCDate(weekStart.getUTCDate() + 7);
-      const weekStartStr = weekStart.toISOString().split("T")[0];
+  const [logs, ratesTxt, empTxt, travelTxt, rolesTxt, siteList] = await Promise.all([
+    fetch("https://mostlane.github.io/Test/logs/activity-log.json").then(r => r.json()),
+    fetch("https://mostlane.github.io/Test/rates.txt").then(r => r.text()),
+    fetch("https://mostlane.github.io/Test/employment.txt").then(r => r.text()),
+    fetch("https://mostlane.github.io/Test/travel-time.txt").then(r => r.text()),
+    fetch("https://mostlane.github.io/Test/role-type.txt").then(r => r.text()),
+    fetch("https://mostlane.github.io/Test/assets/sites.json").then(r => r.json())
+  ]);
 
-      document.getElementById("weekLabel").innerText = "Week of " + weekStartStr;
+  function parseMap(txt) {
+    const out = {};
+    txt.split("\n").forEach(line => {
+      const [k, v] = line.split(" - ");
+      if (k && v) out[k.trim()] = v.trim();
+    });
+    return out;
+  }
 
-      const weekKey = weekStartStr + "_" + username;
-      const isSubmitted = localStorage.getItem("submitted_" + weekKey) === "true";
-      document.getElementById("submittedStamp").style.display = isSubmitted ? "block" : "none";
-      document.getElementById("submitBtn").disabled = isSubmitted;
+  const allLogs = logs[username] || [];
+  const rateMap = parseMap(ratesTxt);
+  const empMap = parseMap(empTxt);
+  const travelMap = parseMap(travelTxt);
+  const roleMap = parseMap(rolesTxt);
 
-      try {
-        const [logData, rateTxt, travelTxt, empTxt, siteData] = await Promise.all([
-          fetch("https://mostlane.github.io/Test/logs/activity-log.json").then(r => r.json()),
-          fetch("https://mostlane.github.io/Test/rates.txt").then(r => r.text()),
-          fetch("https://mostlane.github.io/Test/travel-time.txt").then(r => r.text()),
-          fetch("https://mostlane.github.io/Test/employment.txt").then(r => r.text()),
-          fetch("https://mostlane.github.io/Test/assets/sites.json").then(r => r.json())
-        ]);
+  const rate = parseFloat(rateMap[username]) || 0;
+  const travelTime = travelMap[username] === "Yes";
+  const isSelfEmployed = empMap[username] === "SelfEmployed";
+  const isField = roleMap[username] !== "Office";
 
-        const logs = logData[username] || [];
-        const rateMap = parseMap(rateTxt);
-        const travelMap = parseMap(travelTxt);
-        const empMap = parseMap(empTxt);
+  body.innerHTML = "";
 
-        const rate = parseFloat(rateMap[username]) || 0;
-        const hasTravel = travelMap[username] === "Yes";
-        const isSE = empMap[username] === "SelfEmployed";
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(weekStart);
+    day.setDate(day.getDate() + i);
+    const dateStr = day.toISOString().split("T")[0];
 
-        const tbody = document.getElementById("timesheetBody");
-        tbody.innerHTML = "";
+    const entries = allLogs.filter(e => e.datetime.startsWith(dateStr));
+    const checkIn = entries.find(e => e.type === "Check In");
+    const checkOut = entries.find(e => e.type === "Check Out");
 
-        for (let i = 0; i < 7; i++) {
-          const date = new Date(Date.UTC(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate() + i));
-          const nextDate = new Date(date);
-          nextDate.setUTCDate(date.getUTCDate() + 1);
+    if (!checkIn || !checkOut) continue;
 
-          const dayLogs = logs.filter(entry => {
-            const time = new Date(entry.datetime);
-            return time >= date && time < nextDate;
-          });
+    const start = new Date(checkIn.datetime);
+    const end = new Date(checkOut.datetime);
+    const hoursWorked = (end - start) / 36e5;
+    const standard = Math.min(10, hoursWorked);
+    const overtime = Math.max(0, hoursWorked - 10);
+    const travelHrs = travelTime ? ((checkIn.travelDuration || 0) + (checkOut.travelDuration || 0)) / 60 : 0;
 
-          const checkIn = dayLogs.find(e => e.type === "Start Day");
-          const checkOut = dayLogs.find(e => e.type === "Finish Day");
-
-          if (!checkIn || !checkOut) continue;
-
-          const t1 = new Date(checkIn.datetime);
-          const t2 = new Date(checkOut.datetime);
-          const hours = (t2 - t1) / 36e5;
-          const std = Math.min(10, hours);
-          const ot = Math.max(0, hours - 10);
-          const travel = hasTravel ? ((checkIn.travelDuration || 0) + (checkOut.travelDuration || 0)) / 60 : 0;
-
-          const coords = checkIn.location_coords;
-          let miles = 0;
-          if (coords && Array.isArray(coords)) {
-            for (const site of siteData) {
-              const dist = Math.sqrt(
-                (coords[0] - site.location_coords[0])**2 +
-                (coords[1] - site.location_coords[1])**2
-              );
-              if (dist < 0.01) {
-                miles = site.mileageFromHQ || 0;
-                break;
-              }
-            }
-          }
-
-          const fuel = (!hasTravel && isSE) ? Math.max(0, miles - 10) * 0.25 * 2 : 0;
-          const stdPay = std * rate;
-          const otPay = ot * rate * 1.5;
-          const total = stdPay + otPay + fuel;
-
-          const row = document.createElement("tr");
-          row.innerHTML = `
-            <td>${date.toISOString().split("T")[0]}</td>
-            <td>${std.toFixed(2)}</td>
-            <td>${ot.toFixed(2)}</td>
-            <td>${travel.toFixed(2)}</td>
-            <td>£${fuel.toFixed(2)}</td>
-            <td>£${stdPay.toFixed(2)}</td>
-            <td>£${otPay.toFixed(2)}</td>
-            <td>£${total.toFixed(2)}</td>
-            <td><input type="checkbox" ${isSE && !hasTravel ? "checked" : "disabled"}></td>
-          `;
-          tbody.appendChild(row);
+    // Find site based on location match
+    let miles = 0;
+    if (checkIn.location_coords) {
+      for (const site of siteList) {
+        if (!site.location_coords) continue;
+        const dx = checkIn.location_coords[0] - site.location_coords[0];
+        const dy = checkIn.location_coords[1] - site.location_coords[1];
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.01) {
+          miles = site.mileageFromHQ || 0;
+          break;
         }
-
-      } catch (err) {
-        console.error("Timesheet load failed:", err);
       }
     }
 
-    renderWeek();
-  </script>
+    const mileagePaid = (!travelTime && isSelfEmployed && isField);
+    const fuelCost = mileagePaid ? Math.max(0, miles - 10) * 0.25 * 2 : 0;
+
+    const standardPay = standard * rate;
+    const overtimePay = overtime * rate * 1.5;
+    const totalPay = standardPay + overtimePay + fuelCost;
+
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${dateStr}</td>
+      <td>${standard.toFixed(2)}</td>
+      <td>${overtime.toFixed(2)}</td>
+      <td>${travelHrs.toFixed(2)}</td>
+      <td>£${fuelCost.toFixed(2)}</td>
+      <td>£${standardPay.toFixed(2)}</td>
+      <td>£${overtimePay.toFixed(2)}</td>
+      <td>£${totalPay.toFixed(2)}</td>
+      <td><input type="checkbox" ${mileagePaid ? "checked" : "disabled"}></td>
+    `;
+    body.appendChild(row);
+  }
+}
+
+renderTimesheet();
+</script>
 </body>
 </html>
