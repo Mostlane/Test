@@ -193,8 +193,8 @@
             return logDate.toISOString().split("T")[0] === dateStr;
           });
 
-          const checkIn = dayLogs.find(e => e.type === "Start Day" || e.type === "Check In");
-          const checkOut = dayLogs.find(e => e.type === "Finish Day" || e.type === "Check Out");
+          const checkIn = dayLogs.find(e => e.type === "Start Day");
+          const checkOut = dayLogs.find(e => e.type === "Finish Day");
 
           if (!checkIn || !checkOut) continue;
 
