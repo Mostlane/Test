@@ -149,7 +149,8 @@
     };
 
     const submitTimesheet = () => {
-      const username = sessionStorage.getItem("mostlaneUser");
+      const usernameRaw = sessionStorage.getItem("mostlaneUser");
+      const username = usernameRaw.replace(".", " ");
       const weekStart = getWeekStart();
       localStorage.setItem("submitted_" + weekStart + "_" + username, "true");
       document.getElementById("submittedStamp").style.display = "block";
@@ -164,7 +165,8 @@
     };
 
     async function renderWeek() {
-      const username = sessionStorage.getItem("mostlaneUser");
+      const usernameRaw = sessionStorage.getItem("mostlaneUser");
+      const username = usernameRaw.replace(".", " ");
       const weekStartStr = getWeekStart();
       const weekStart = new Date(weekStartStr);
       const weekEnd = new Date(weekStart);
