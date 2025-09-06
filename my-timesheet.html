@@ -114,14 +114,14 @@
     const getMonday = (d) => {
       d = new Date(d);
       const day = d.getUTCDay(),
-        diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+            diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
       d.setUTCDate(diff);
       return d;
     };
 
     const getWeekStart = () => {
       const today = new Date();
-      const monday = getMonday(new Date(today));
+      const monday = getMonday(today);
       monday.setUTCDate(monday.getUTCDate() + currentWeekOffset * 7);
       return monday;
     };
@@ -153,9 +153,10 @@
       const raw = sessionStorage.getItem("mostlaneUser");
       const username = raw.replace(".", " ");
       const weekStart = getWeekStart();
-      const weekStartStr = weekStart.toISOString().split("T")[0];
       const weekEnd = new Date(weekStart);
       weekEnd.setUTCDate(weekStart.getUTCDate() + 7);
+      const weekStartStr = weekStart.toISOString().split("T")[0];
+
       document.getElementById("weekLabel").innerText = "Week of " + weekStartStr;
 
       const weekKey = weekStartStr + "_" + username;
@@ -185,12 +186,13 @@
         tbody.innerHTML = "";
 
         for (let i = 0; i < 7; i++) {
-          const d = new Date(Date.UTC(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate() + i));
-          const dateStr = d.toISOString().split("T")[0];
+          const date = new Date(Date.UTC(weekStart.getUTCFullYear(), weekStart.getUTCMonth(), weekStart.getUTCDate() + i));
+          const nextDate = new Date(date);
+          nextDate.setUTCDate(date.getUTCDate() + 1);
 
-          const dayLogs = logs.filter(e => {
-            const logDate = new Date(e.datetime);
-            return logDate.toISOString().split("T")[0] === dateStr;
+          const dayLogs = logs.filter(entry => {
+            const time = new Date(entry.datetime);
+            return time >= date && time < nextDate;
           });
 
           const checkIn = dayLogs.find(e => e.type === "Start Day");
@@ -227,7 +229,7 @@
 
           const row = document.createElement("tr");
           row.innerHTML = `
-            <td>${dateStr}</td>
+            <td>${date.toISOString().split("T")[0]}</td>
             <td>${std.toFixed(2)}</td>
             <td>${ot.toFixed(2)}</td>
             <td>${travel.toFixed(2)}</td>
