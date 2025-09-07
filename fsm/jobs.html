@@ -61,6 +61,16 @@
 .fsm-New { background:#9aa7b6 } .fsm-Assigned { background:#003366 } .fsm-InProgress { background:#f1a331 }
 .fsm-Completed { background:#23966e } .fsm-OnHold { background:#7d8694 } .fsm-Cancelled { background:#a1a7b2 }
 .fsm-footer { text-align:center; padding-bottom: 40px; color:#5f6876; font-size:12px }
+
+.fsm-header .nav { margin-left:auto; display:flex; gap:8px; }
+.fsm-link { display:inline-block; padding:8px 12px; border-radius:8px; text-decoration:none;
+            background:#e6f0fa; color:#003366; border:1px solid #003366; font-weight:700; font-size:13px; }
+.fsm-link.primary { background:#003366; color:#fff; }
+.menu-buttons { display:grid; gap:12px; grid-template-columns:1fr; }
+@media(min-width:700px){ .menu-buttons{ grid-template-columns:1fr 1fr; } }
+.big-btn { display:block; text-align:center; padding:18px; font-size:16px; font-weight:800;
+           background:#e6f0fa; color:#003366; border:1px solid #003366; border-radius:12px; text-decoration:none; }
+
 </style>
   <script defer src="assets/app.js"></script>
   <script>
