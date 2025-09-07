@@ -1,7 +1,7 @@
 <!doctype html>
 <html><head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Vehicles Dashboard</title>
+  <title>My Vehicle</title>
   <link rel="stylesheet" href="../style.css"/>
   <link rel="icon" href="favicon.ico"><link rel="apple-touch-icon" href="icon-180.png"><link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#003366">
@@ -25,37 +25,38 @@
   <script defer src="assets/vehicles.js"></script>
 </head>
 <body class="v-body">
-  <div class="wrap">
+  <div class="wrap" id="wrap">
     <div class="hdr">
-      <img src="../mostlane-logo.jpg" alt="Mostlane logo"/><h2 class="t">Vehicles Dashboard</h2>
-      <div style="margin-left:auto"><a class="btn primary" href="../main.html">Return to Main Menu</a></div>
+      <img src="../mostlane-logo.jpg" alt="Mostlane logo"/><h2 class="t" id="title">My Vehicle</h2>
+      <div style="margin-left:auto"><a class="btn primary" href="index.html">Back</a></div>
     </div>
-
-    <div class="box"><div id="list"></div></div>
+    <div class="box">
+      <div id="summary"></div>
+      <div class="row" style="margin-top:10px">
+        <a id="vancheck" class="btn primary" target="_blank" rel="noopener">Open Van Check Form</a>
+      </div>
+    </div>
   </div>
 <script>
 function load(){
-  const list=document.getElementById('list'); list.innerHTML='';
+  const u=new URL(location.href);
+  const driverId=u.searchParams.get('driver')||'';
   const vs=v_loadVehicles();
-  if(vs.length===0){ list.innerHTML='<div class="card">No vehicles yet. Add them in Settings.</div>'; return; }
-  for(const v of vs){
-    const c=v_costs(v.reg), miles=v_miles(v.reg);
-    const d=document.createElement('div'); d.className='card';
-    d.innerHTML=`<div class="row" style="justify-content:space-between">
+  const v=vs.find(x=> (x.driverId||'')===driverId);
+  if(!v){ document.getElementById('wrap').innerHTML='<div class="box">No vehicle assigned.</div>'; return; }
+  const c=v_costs(v.reg), miles=v_miles(v.reg);
+  document.getElementById('title').textContent='My Vehicle · '+v.reg;
+  document.getElementById('summary').innerHTML=`
+    <div class="row" style="justify-content:space-between">
       <strong>${v.reg}</strong><span>${v.make||''} ${v.model||''}</span>
     </div>
-    <div class="meta">Driver: ${v.driverName||'—'} · Service interval: ${v.serviceInterval||'—'}</div>
-    <div class="row" style="margin-top:8px">
-      <div class="card" style="flex:1"><div class="meta">Mileage</div><div><strong>${miles.toLocaleString()}</strong> mi</div></div>
-      <div class="card" style="flex:1"><div class="meta">Running cost</div><div><strong>£${c.total.toFixed(2)}</strong></div>
-        <div class="meta">Fuel £${c.fuel.toFixed(2)} · Service £${c.serv.toFixed(2)} · Tyres £${c.tyre.toFixed(2)} · Claims £${c.claims.toFixed(2)}</div>
-      </div>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <a class="btn" href="vehicle.html?reg=${encodeURIComponent(v.reg)}">Manage</a>
-    </div>`;
-    list.appendChild(d);
-  }
+    <div class="meta">Service interval: ${v.serviceInterval||'—'}</div>
+    <div class="meta">Mileage: ${miles.toLocaleString()} mi</div>
+    <div class="meta">Costs: Fuel £${c.fuel.toFixed(2)} · Service £${c.serv.toFixed(2)} · Tyres £${c.tyre.toFixed(2)} · Claims £${c.claims.toFixed(2)}</div>`;
+  const s=v_settings();
+  const link=document.getElementById('vancheck');
+  if(s.jotformVanCheckURL){ link.href=s.jotformVanCheckURL + (s.jotformVanCheckURL.includes('?')?'&':'?') + 'reg='+encodeURIComponent(v.reg)+'&driver='+encodeURIComponent(driverId); }
+  else { link.textContent='Van Check form not configured'; link.style.opacity=0.6; link.style.pointerEvents='none'; }
 }
 document.addEventListener('DOMContentLoaded', load);
 </script>

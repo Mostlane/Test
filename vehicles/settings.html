@@ -1,0 +1,118 @@
+<!doctype html>
+<html><head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Vehicles Settings</title>
+  <link rel="stylesheet" href="../style.css"/>
+  <link rel="icon" href="favicon.ico"><link rel="apple-touch-icon" href="icon-180.png"><link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#003366">
+  <style>
+  .v-body{background:#e6e8eb url('../Mostlane_Embossed.png') no-repeat fixed center/180% auto; margin:0; min-height:100vh; font-family:Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:16px}
+  .hdr{background:#003366;color:#fff;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+  .hdr img{height:38px;width:auto} .hdr .t{font-size:18px;font-weight:700;margin:0}
+  .btn{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #003366;background:#e6f0fa;color:#003366;font-weight:700;text-decoration:none;white-space:nowrap}
+  .btn.primary{background:#003366;color:#fff}
+  .box{background:rgba(255,255,255,.60);border-radius:12px;padding:16px;margin:16px 0;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:rgba(255,255,255,.7);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .meta{color:#5f6876;font-size:12px}
+  .input,.select,.textarea{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #d6dbe1;background:#fff;font-size:15px}
+  table{width:100%;border-collapse:collapse;font-size:14px} th,td{padding:8px;border-bottom:1px dashed #dfe3ea;text-align:left}
+  </style>
+  <script>if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }</script>
+  <script defer src="assets/vehicles.js"></script>
+</head>
+<body class="v-body">
+  <div class="wrap">
+    <div class="hdr">
+      <img src="../mostlane-logo.jpg" alt="Mostlane logo"/><h2 class="t">Vehicles Settings</h2>
+      <div style="margin-left:auto"><a class="btn primary" href="index.html">Back</a></div>
+    </div>
+
+    <div class="box">
+      <div class="grid">
+        <div><div class="meta">Registration</div><input id="reg" class="input" placeholder="e.g., AB12 CDE"></div>
+        <div><div class="meta">Make</div><input id="make" class="input" placeholder="e.g., Ford"></div>
+        <div><div class="meta">Model</div><input id="model" class="input" placeholder="e.g., Transit Custom"></div>
+        <div><div class="meta">Service interval (e.g., 10,000 mi or 12 mo)</div><input id="interval" class="input" placeholder="e.g., 10,000 mi"></div>
+        <div><div class="meta">Driver ID</div><input id="driverId" class="input" placeholder="e.g., jamie.line"></div>
+        <div><div class="meta">Driver name</div><input id="driverName" class="input" placeholder="e.g., Jamie Line"></div>
+        <div style="grid-column:1 / -1"><div class="meta">Jotform Van Check URL (global)</div><input id="jotform" class="input" placeholder="https://form.jotform.com/...."></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <a class="btn primary" onclick="addOrUpdate()">Add / Update Vehicle</a>
+        <a class="btn" onclick="resetForm()">Clear</a>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Vehicles</h3>
+      <div id="vlist"></div>
+    </div>
+  </div>
+<script>
+function render(){
+  const box=document.getElementById('vlist'); box.innerHTML='';
+  const vs=v_loadVehicles();
+  if(vs.length===0){ box.innerHTML='<div class="card">No vehicles yet.</div>'; return; }
+  for(const v of vs){
+    const row=document.createElement('div'); row.className='card';
+    const driverParam=v.driverId? ('?driver='+encodeURIComponent(v.driverId)) : '';
+    row.innerHTML=`<div class="row" style="justify-content:space-between">
+      <strong>${v.reg}</strong><span class="meta">${v.make||''} ${v.model||''}</span>
+    </div>
+    <div class="meta">Driver: ${v.driverName||'—'} · Service interval: ${v.serviceInterval||'—'}</div>
+    <div class="row" style="margin-top:8px">
+      <a class="btn" href="vehicle.html?reg=${encodeURIComponent(v.reg)}">Manage</a>
+      <a class="btn" href="driver.html${driverParam}" target="_blank">Driver page</a>
+      <a class="btn" onclick="prefill('${v.reg}')">Prefill</a>
+      <a class="btn" onclick="delVeh('${v.reg}')">Delete</a>
+    </div>`;
+    box.appendChild(row);
+  }
+}
+function addOrUpdate(){
+  const reg=document.getElementById('reg').value.trim().toUpperCase();
+  if(!reg){ alert('Registration is required'); return; }
+  const make=document.getElementById('make').value.trim();
+  const model=document.getElementById('model').value.trim();
+  const serviceInterval=document.getElementById('interval').value.trim();
+  const driverId=document.getElementById('driverId').value.trim();
+  const driverName=document.getElementById('driverName').value.trim();
+  // Save global JotForm URL
+  const set=v_settings(); set.jotformVanCheckURL=document.getElementById('jotform').value.trim(); v_saveSettings(set);
+  // Upsert vehicle
+  const vs=v_loadVehicles();
+  const i=vs.findIndex(x=>x.reg===reg);
+  const obj={reg, make, model, serviceInterval, driverId, driverName};
+  if(i>=0) vs[i]=obj; else vs.push(obj);
+  v_saveVehicles(vs);
+  v_ensure(reg);
+  resetForm();
+  render();
+}
+function resetForm(){ ['reg','make','model','interval','driverId','driverName'].forEach(id=>document.getElementById(id).value=''); }
+function prefill(reg){
+  const v=v_loadVehicles().find(x=>x.reg===reg)||{};
+  document.getElementById('reg').value=v.reg||'';
+  document.getElementById('make').value=v.make||'';
+  document.getElementById('model').value=v.model||'';
+  document.getElementById('interval').value=v.serviceInterval||'';
+  document.getElementById('driverId').value=v.driverId||'';
+  document.getElementById('driverName').value=v.driverName||'';
+}
+function delVeh(reg){
+  if(!confirm('Delete '+reg+'?')) return;
+  const vs=v_loadVehicles().filter(x=>x.reg!==reg); v_saveVehicles(vs);
+  const recs=v_loadRecs(); delete recs[reg]; v_saveRecs(recs);
+  render();
+}
+// init jotform field
+document.addEventListener('DOMContentLoaded', ()=>{
+  const s=v_settings(); if(s.jotformVanCheckURL) document.getElementById('jotform').value=s.jotformVanCheckURL;
+  render();
+});
+</script>
+</body></html>

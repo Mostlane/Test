@@ -1,0 +1,138 @@
+<!doctype html>
+<html><head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Vehicle</title>
+  <link rel="stylesheet" href="../style.css"/>
+  <link rel="icon" href="favicon.ico"><link rel="apple-touch-icon" href="icon-180.png"><link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#003366">
+  <style>
+  .v-body{background:#e6e8eb url('../Mostlane_Embossed.png') no-repeat fixed center/180% auto; margin:0; min-height:100vh; font-family:Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:16px}
+  .hdr{background:#003366;color:#fff;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+  .hdr img{height:38px;width:auto} .hdr .t{font-size:18px;font-weight:700;margin:0}
+  .btn{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #003366;background:#e6f0fa;color:#003366;font-weight:700;text-decoration:none;white-space:nowrap}
+  .btn.primary{background:#003366;color:#fff}
+  .box{background:rgba(255,255,255,.60);border-radius:12px;padding:16px;margin:16px 0;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:rgba(255,255,255,.7);border-radius:12px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+  .meta{color:#5f6876;font-size:12px}
+  .input,.select,.textarea{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #d6dbe1;background:#fff;font-size:15px}
+  table{width:100%;border-collapse:collapse;font-size:14px} th,td{padding:8px;border-bottom:1px dashed #dfe3ea;text-align:left}
+  </style>
+  <script>if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }</script>
+  <script defer src="assets/vehicles.js"></script>
+</head>
+<body class="v-body">
+  <div class="wrap" id="wrap">
+    <div class="hdr">
+      <img src="../mostlane-logo.jpg" alt="Mostlane logo"/><h2 class="t" id="title">Vehicle</h2>
+      <div style="margin-left:auto"><a class="btn primary" href="index.html">Back</a></div>
+    </div>
+
+    <div class="box">
+      <div class="grid">
+        <div class="card"><div class="meta">Make</div><div id="vmake"></div></div>
+        <div class="card"><div class="meta">Model</div><div id="vmodel"></div></div>
+        <div class="card"><div class="meta">Driver</div><div id="vdriver"></div></div>
+        <div class="card"><div class="meta">Service interval</div><div id="vinterval"></div></div>
+        <div class="card"><div class="meta">Mileage</div><div id="miles"></div></div>
+        <div class="card"><div class="meta">Running costs</div><div id="totals"></div></div>
+      </div>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Add service</h3>
+      <form id="form-services" class="row" onsubmit="addRec('services');return false;">
+        <input class="input" name="date" type="date" placeholder="Date">
+        <input class="input" name="desc" placeholder="Description">
+        <input class="input" name="odo" type="number" placeholder="ODO">
+        <input class="input" name="cost" type="number" step="0.01" placeholder="Cost £">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <table id="tblService"></table>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Add fuel</h3>
+      <form id="form-fuel" class="row" onsubmit="addRec('fuel');return false;">
+        <input class="input" name="date" type="date" placeholder="Date">
+        <input class="input" name="litres" type="number" step="0.01" placeholder="Litres">
+        <input class="input" name="pricePerL" type="number" step="0.01" placeholder="£/L">
+        <input class="input" name="cost" type="number" step="0.01" placeholder="Cost £">
+        <input class="input" name="odo" type="number" placeholder="ODO">
+        <input class="input" name="distance" type="number" placeholder="Trip miles">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <table id="tblFuel"></table>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Add tyre</h3>
+      <form id="form-tyres" class="row" onsubmit="addRec('tyres');return false;">
+        <input class="input" name="date" type="date" placeholder="Date">
+        <input class="input" name="position" placeholder="e.g., NSF">
+        <input class="input" name="odo" type="number" placeholder="ODO">
+        <input class="input" name="cost" type="number" step="0.01" placeholder="Cost £">
+        <input class="input" name="notes" placeholder="Notes">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <table id="tblTyres"></table>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Add claim</h3>
+      <form id="form-claims" class="row" onsubmit="addRec('claims');return false;">
+        <input class="input" name="date" type="date" placeholder="Date">
+        <input class="input" name="claimNo" placeholder="Claim #">
+        <input class="input" name="cost" type="number" step="0.01" placeholder="Cost £">
+        <input class="input" name="desc" placeholder="Description">
+        <input class="input" name="notes" placeholder="Notes">
+        <button class="btn primary" type="submit">Add</button>
+      </form>
+      <table id="tblClaims"></table>
+    </div>
+  </div>
+<script>
+let reg='', veh=null, rec=null;
+function load(){
+  reg = new URL(location.href).searchParams.get('reg') || '';
+  if(!reg){ document.getElementById('wrap').innerHTML='<div class="box">Missing reg</div>'; return; }
+  veh = v_byReg(reg);
+  if(!veh){ document.getElementById('wrap').innerHTML='<div class="box">Vehicle not found</div>'; return; }
+  rec = v_ensure(reg);
+  document.getElementById('title').textContent = 'Vehicle · '+reg;
+  document.getElementById('vmake').textContent = veh.make||'';
+  document.getElementById('vmodel').textContent = veh.model||'';
+  document.getElementById('vdriver').textContent = veh.driverName||'—';
+  document.getElementById('vinterval').textContent = veh.serviceInterval||'—';
+  renderTable('tblService', rec.services, ['date','desc','cost','odo']);
+  renderTable('tblFuel', rec.fuel, ['date','litres','cost','pricePerL','odo','distance']);
+  renderTable('tblTyres', rec.tyres, ['date','position','cost','odo','notes']);
+  renderTable('tblClaims', rec.claims, ['date','desc','cost','claimNo','notes']);
+  const c = v_costs(reg);
+  document.getElementById('totals').textContent = `Fuel £${c.fuel.toFixed(2)} · Service £${c.serv.toFixed(2)} · Tyres £${c.tyre.toFixed(2)} · Claims £${c.claims.toFixed(2)} · Total £${c.total.toFixed(2)}`;
+  document.getElementById('miles').textContent = v_miles(reg).toLocaleString()+' mi';
+}
+function renderTable(id, arr, cols){
+  const tb=document.getElementById(id);
+  tb.innerHTML='<tr>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr>' + (arr||[]).map(r=>{
+    return '<tr>'+cols.map(c=>'<td>'+(r[c]||'')+'</td>').join('')+'</tr>';
+  }).join('');
+}
+function addRec(type){
+  const form=document.getElementById('form-'+type);
+  const data=Object.fromEntries(new FormData(form).entries());
+  data.date = data.date || new Date().toISOString().slice(0,10);
+  ['cost','odo','litres','pricePerL','distance'].forEach(k=>{{ if(data[k]) data[k]=Number(data[k]); }});
+  const recs=v_loadRecs();
+  recs[reg]=recs[reg]||{ services:[], fuel:[], tyres:[], claims:[], odolog:[] };
+  recs[reg][type].push(data);
+  if(data.odo) recs[reg].odolog.push({date:data.date, odo:data.odo});
+  v_saveRecs(recs);
+  form.reset(); load();
+}
+document.addEventListener('DOMContentLoaded', load);
+</script>
+</body></html>
