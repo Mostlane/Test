@@ -4,29 +4,27 @@
   <title>FSM Menu</title>
   <link rel="stylesheet" href="../style.css"/>
   <style>
-  .fsm-body { background:#e6e8eb url('../Mostlane_Embossed.png') no-repeat fixed; background-size:180% auto; margin:0; min-height:100vh; font-family: Arial, sans-serif; }
+  .fsm-body { background: #e6e8eb url('../Mostlane_Embossed.png') no-repeat fixed; background-size:180% auto; margin:0; min-height:100vh; font-family: Arial, sans-serif; }
   .fsm-wrap { max-width:820px; margin:0 auto; padding:16px; text-align:left; }
+  .fsm-header { background-color:#003366; color:#fff; border-radius:8px; padding:10px 14px; display:flex; align-items:center; gap:10px; }
+  .fsm-header img { height:38px; width:auto; }
+  .fsm-header .title { font-size:18px; font-weight:700; margin:0; }
+  .fsm-header .nav { margin-left:auto; display:flex; gap:8px; }
+  .fsm-link { display:inline-block; padding:8px 12px; border-radius:8px; text-decoration:none; background:#e6f0fa; color:#003366; border:1px solid #003366; font-weight:700; font-size:13px; }
+  .fsm-link.primary { background:#003366; color:#fff; }
   .fsm-box { background: rgba(255,255,255,0.60); border-radius:12px; padding:16px; margin:16px 0; box-shadow:0 8px 24px rgba(0,0,0,0.08); }
   .menu-buttons { display:grid; gap:12px; grid-template-columns:1fr; }
   @media(min-width:700px){ .menu-buttons{ grid-template-columns:1fr 1fr; } }
-  .big-btn { display:block; text-align:center; padding:18px; font-size:16px; font-weight:800; background:#e6f0fa; color:#00366; border:1px solid #003366; border-radius:12px; text-decoration:none; }
-  .fsm-link { display:inline-block; padding:8px 12px; border-radius:8px; text-decoration:none; background:#e6f0fa; color:#003366; border:1px solid #003366; font-weight:700; font-size:13px; }
-  .fsm-link.primary { background:#003366; color:#fff; }
+  .big-btn { display:block; text-align:center; padding:18px; font-size:16px; font-weight:800; background:#e6f0fa; color:#003366; border:1px solid #003366; border-radius:12px; text-decoration:none; }
   </style>
-  <link rel="icon" href="favicon.ico">
-  <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#003366">
-  <script>if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }</script>
 </head>
 <body class="fsm-body">
   <div class="fsm-wrap">
-    <div class="fsm-header" style="background-color:#003366;color:#fff;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
-      <a class="logo-link" href="menu.html" aria-label="FSM Menu"><img src="../mostlane-logo.jpg" alt="Mostlane logo" style="height:38px;width:auto"/></a>
-      <h2 class="title" style="margin:0;font-size:18px;font-weight:700">FSM Menu</h2>
-      <div class="nav" style="margin-left:auto;display:flex;gap:8px">
-        <a class="fsm-link" href="../index.html">Home</a>
-        <a class="fsm-link primary" href="#" onclick="if(history.length>1){history.back();}else{location.href='index.html';}return false;">Back</a>
+    <div class="fsm-header">
+      <img src="../mostlane-logo.jpg" alt="Mostlane logo"/><h2 class="title">FSM Menu</h2>
+      <div class="nav">
+        <a class="fsm-link" href="../main.html">Portal</a>
+        <a class="fsm-link primary" href="#" onclick="if(history.length>1){history.back();}else{location.href='index.html';} return false;">Back</a>
       </div>
     </div>
     <div class="fsm-box">
@@ -35,7 +33,7 @@
         <a class="big-btn" href="jobs.html">Jobs</a>
         <a class="big-btn" href="create.html">Create Job</a>
         <a class="big-btn" href="settings.html">Settings</a>
-        <a class="big-btn" href="../index.html">Return to Portal Home</a>
+        <a class="big-btn" href="../main.html">Return to Portal Main</a>
       </div>
     </div>
   </div>

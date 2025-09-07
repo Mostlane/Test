@@ -1,6 +1,6 @@
 {
   "name": "Mostlane FSM",
-  "short_name": "Mostlane",
+  "short_name": "Mostlane FSM",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#ffffff",
