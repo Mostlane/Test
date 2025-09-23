@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Engineer Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      background-color: #e6e8eb;
+      font-family: Arial, sans-serif;
+    }
+    .header {
+      background: rgba(0,51,102,0.9);
+      color: white;
+      padding: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { margin: 0; font-size: 20px; }
+    .header button {
+      background: white;
+      color: #003366;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .content-box {
+      background: rgba(255,255,255,0.7);
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    canvas {
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 id="engName">Engineer Report</h1>
+    <div>
+      <button onclick="window.location.href='hours-dashboard.html'">Back</button>
+      <button onclick="window.location.href='main.html'">Main Menu</button>
+    </div>
+  </div>
+  <div class="content-box">
+    <h2>Stats</h2>
+    <p id="stats"></p>
+    <h2>Daily Hours (Line Chart)</h2>
+    <canvas id="lineChart"></canvas>
+    <h2>Weekly Totals (Bar Chart)</h2>
+    <canvas id="barChart"></canvas>
+    <h2>Std vs OT Split (Pie Chart)</h2>
+    <canvas id="pieChart"></canvas>
+  </div>
+<script>
+async function loadReport() {
+  const params = new URLSearchParams(window.location.search);
+  const engineer = params.get('engineer');
+  document.getElementById('engName').innerText = engineer + ' Report';
+  const res = await fetch('timesheets.json');
+  const data = await res.json();
+  const logs = data.filter(d => d.Engineer === engineer);
+  // Calculate stats
+  let total = 0, ot = 0, days = logs.length;
+  const daily = [];
+  logs.forEach(l => {
+    const start = parseInt(l.Start.split(':')[0]);
+    const finish = parseInt(l.Finish.split(':')[0]);
+    let hours = finish - start;
+    if (l.LunchDeducted) hours -= 0.5;
+    if (hours > 10) { total += hours; ot += hours - 10; } else total += hours;
+    daily.push({date: l.Date, hours});
+  });
+  const avg = (total/days).toFixed(1);
+  document.getElementById('stats').innerText = `Average ${avg}h/day, Total ${total.toFixed(1)}h, Overtime ${ot.toFixed(1)}h`;
+  // Charts
+  const ctx1 = document.getElementById('lineChart');
+  new Chart(ctx1, {
+    type: 'line',
+    data: {
+      labels: daily.map(d=>d.date),
+      datasets: [{label:'Daily Hours', data: daily.map(d=>d.hours), borderColor:'#003366'}]
+    }
+  });
+  const ctx2 = document.getElementById('barChart');
+  const weeks = {};
+  logs.forEach(l=>{
+    const week = l.Date.substring(0,7);
+    if (!weeks[week]) weeks[week]={std:0, ot:0};
+    const start = parseInt(l.Start.split(':')[0]);
+    const finish = parseInt(l.Finish.split(':')[0]);
+    let hours = finish - start;
+    if (l.LunchDeducted) hours -= 0.5;
+    if (hours > 10) { weeks[week].std+=10; weeks[week].ot+=hours-10; } else weeks[week].std+=hours;
+  });
+  new Chart(ctx2, {
+    type:'bar',
+    data:{
+      labels:Object.keys(weeks),
+      datasets:[
+        {label:'Standard', data:Object.values(weeks).map(w=>w.std), backgroundColor:'#0055aa'},
+        {label:'Overtime', data:Object.values(weeks).map(w=>w.ot), backgroundColor:'#ff6600'}
+      ]
+    }
+  });
+  const ctx3 = document.getElementById('pieChart');
+  new Chart(ctx3, {
+    type:'pie',
+    data:{
+      labels:['Standard','Overtime'],
+      datasets:[{data:[total-ot, ot], backgroundColor:['#0055aa','#ff6600']}]
+    }
+  });
+}
+loadReport();
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hours Dashboard</title>
+  <style>
+    body {
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      background-color: #e6e8eb;
+      font-family: Arial, sans-serif;
+    }
+    .header {
+      background: rgba(0,51,102,0.9);
+      color: white;
+      padding: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { margin: 0; font-size: 20px; }
+    .header button {
+      background: white;
+      color: #003366;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .content-box {
+      background: rgba(255,255,255,0.7);
+      max-width: 1100px;
+      margin: 30px auto;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    tr:nth-child(even) {
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Hours Dashboard</h1>
+    <button onclick="window.location.href='main.html'">Main Menu</button>
+  </div>
+  <div class="content-box">
+    <table id="hoursTable">
+      <thead>
+        <tr>
+          <th>Engineer</th>
+          <th>Standard Hours</th>
+          <th>Overtime Hours</th>
+          <th>Total Hours</th>
+          <th>Projected Hours</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+<script>
+async function loadData() {
+  const res = await fetch('timesheets.json');
+  const data = await res.json();
+  const thisMonday = new Date();
+  thisMonday.setDate(thisMonday.getDate() - thisMonday.getDay() + 1);
+  const nextMonday = new Date(thisMonday);
+  nextMonday.setDate(thisMonday.getDate() + 7);
+  const engineers = [...new Set(data.map(d => d.Engineer))];
+  const tbody = document.querySelector('#hoursTable tbody');
+  tbody.innerHTML = '';
+  engineers.forEach(name => {
+    const logs = data.filter(d => d.Engineer === name && new Date(d.Date) >= thisMonday && new Date(d.Date) < nextMonday);
+    let stdHours = 0, otHours = 0;
+    logs.forEach(l => {
+      const start = parseInt(l.Start.split(':')[0]);
+      const finish = parseInt(l.Finish.split(':')[0]);
+      let hours = finish - start;
+      if (l.LunchDeducted) hours -= 0.5;
+      if (hours > 10) { stdHours += 10; otHours += hours - 10; }
+      else stdHours += hours;
+    });
+    const total = stdHours + otHours;
+    const daysWorked = logs.length || 1;
+    const avg = total / daysWorked;
+    const projected = avg * 5;
+    let status = '✅';
+    if (projected >= 40 && projected < 45) status = '⚠️';
+    if (projected >= 45) status = '🔴';
+    tbody.innerHTML += `<tr>
+      <td><a href="engineer-report.html?engineer=${encodeURIComponent(name)}">${name}</a></td>
+      <td>${stdHours.toFixed(1)}</td>
+      <td>${otHours.toFixed(1)}</td>
+      <td>${total.toFixed(1)}</td>
+      <td>${projected.toFixed(1)}</td>
+      <td>${status}</td>
+    </tr>`;
+  });
+}
+loadData();
+</script>
+</body>
+</html>
