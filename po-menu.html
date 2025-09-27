@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PO Menu</title>
   <style>
+    
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -13,48 +14,34 @@
       padding: 0;
     }
     .main-body {
-      max-width: 500px;
+      max-width: 600px;
       margin: 80px auto;
       background: rgba(255,255,255,0.6);
       padding: 30px;
       border-radius: 8px;
-      text-align: center;
     }
     .button {
       display: block;
       margin: 20px 0;
-      padding: 15px;
+      padding: 14px;
       background-color: rgba(0, 74, 153, 0.6);
       color: white;
-      font-size: 18px;
+      font-size: 16px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      text-align: center;
       text-decoration: none;
-    }
-    
-    .header-bar {
-      width: 100%;
-      background: #004a99;
-      padding: 10px 20px;
-      box-sizing: border-box;
-    }
-    .header-bar a {
-      color: white;
-      text-decoration: none;
-      font-size: 16px;
-      font-weight: bold;
     }
 
   </style>
 </head>
 <body>
-  <div class="header-bar">
-    <a href="main.html">⬅ Main Menu</a>
-  </div>
   <div class="main-body">
-    <a href="po-start.html" class="button">Create New</a>
+    <h1>Purchase Orders</h1>
+    <a href="po.html" class="button">Create New</a>
     <a href="my-pos.html" class="button">Previous Generated POs</a>
+    <a href="main.html" class="button">Back</a>
   </div>
 </body>
 </html>
