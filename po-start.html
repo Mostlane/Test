@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Start Purchase Order</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .main-body {
+      max-width: 500px;
+      margin: auto;
+      background: rgba(255,255,255,0.9);
+      padding: 40px 30px;
+      border-radius: 8px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #cc0000;
+      margin-bottom: 20px;
+    }
+    p {
+      font-size: 16px;
+      color: #003366;
+      margin-bottom: 30px;
+      line-height: 1.5;
+    }
+    .button {
+      padding: 14px 30px;
+      background-color: #004a99;
+      color: white;
+      font-size: 18px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-body">
+    <h1>⚠️ Before Creating a Purchase Order</h1>
+    <p>
+      Please ensure you are <strong>physically present at the supplier</strong> and that all order details
+      are correct at the time of raising the PO.<br><br>
+      This keeps our records accurate and avoids delays in processing.
+    </p>
+    <button class="button" onclick="window.location.href='po.html'">Continue</button>
+  </div>
+</body>
+</html>
