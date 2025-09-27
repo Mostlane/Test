@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PO Submitted</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .main-body {
+      max-width: 500px;
+      margin: auto;
+      background: rgba(255,255,255,0.9);
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+    }
+    .summary-box {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 8px;
+      background: #f4f6f8;
+      text-align: left;
+    }
+    .summary-box p {
+      margin: 6px 0;
+      font-weight: bold;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 25px;
+      padding: 10px 20px;
+      background: #004a99;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-body">
+    <h1>✅ PO Successfully Submitted</h1>
+    <p id="loadingMsg">Fetching PO details...</p>
+    <div class="summary-box" id="summaryBox" style="display:none;">
+      <p>📄 <strong>PO Number:</strong> <span id="poNumberText"></span></p>
+      <p>📍 <strong>Site:</strong> <span id="siteText"></span></p>
+      <p>🏢 <strong>Supplier:</strong> <span id="supplierText"></span></p>
+      <p>🧑 <strong>Engineer:</strong> <span id="engineerText"></span></p>
+      <p>💰 <strong>Cost:</strong> <span id="costText"></span></p>
+      <p>📝 <strong>Description:</strong> <span id="descText"></span></p>
+    </div>
+    <a href="main.html" class="btn">Return to Main Menu</a>
+  </div>
+
+<script>
+window.addEventListener("DOMContentLoaded", async () => {
+  const requestId = sessionStorage.getItem("lastRequestId") || "";
+  if (!requestId) {
+    alert("No request ID found.");
+    return;
+  }
+
+  const formData = new URLSearchParams();
+  formData.append("requestId", requestId);
+
+  try {
+    const res = await fetch("https://hooks.zapier.com/hooks/catch/20261714/u1093v6/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    });
+    const data = await res.json();
+
+    document.getElementById("loadingMsg").style.display = "none";
+    document.getElementById("summaryBox").style.display = "block";
+
+    document.getElementById("poNumberText").textContent = data.poNumber || "N/A";
+    document.getElementById("siteText").textContent = data.site || "N/A";
+    document.getElementById("supplierText").textContent = data.supplier || "N/A";
+    document.getElementById("engineerText").textContent = data.engineer || "N/A";
+    document.getElementById("costText").textContent = data.cost || "N/A";
+    document.getElementById("descText").textContent = data.desc || "N/A";
+  } catch (err) {
+    alert("Failed to fetch PO details.");
+    console.error(err);
+  }
+});
+</script>
+</body>
+</html>

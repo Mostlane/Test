@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Generate Purchase Order Reference</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .main-body {
+      max-width: 500px;
+      margin: auto;
+      background: rgba(255,255,255,0.6);
+      padding: 30px;
+      border-radius: 8px;
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+    }
+    label {
+      display: block;
+      margin-top: 20px;
+      font-weight: bold;
+      color: #003366;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      margin-top: 5px;
+    }
+    .button {
+      margin-top: 30px;
+      padding: 12px;
+      width: 100%;
+      background-color: rgba(0, 74, 153, 0.6);
+      color: white;
+      font-size: 18px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-body">
+    <h1>Generate Purchase Order Reference</h1>
+    <form id="poForm">
+      <label>Engineer:</label>
+      <input type="text" id="engineer" readonly />
+      <label>Date:</label>
+      <input type="text" id="date" readonly />
+
+      <label>Site:</label>
+      <select id="site"></select>
+
+      <label>Supplier:</label>
+      <select id="supplier"></select>
+
+      <label>Incident Number (if applicable):</label>
+      <input type="text" id="incident" />
+      <label>Short Description:</label>
+      <input type="text" id="desc" />
+      <label>Cost:</label>
+      <input type="text" id="cost" />
+      <button type="submit" class="button">Submit</button>
+    </form>
+  </div>
+
+<script>
+async function fetchJSON(url) {
+  const res = await fetch(url + "?v=" + Date.now());
+  return res.ok ? await res.json() : [];
+}
+
+async function populateSuppliers() {
+  const res = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt?v=" + Date.now());
+  const text = await res.text();
+  const suppliers = text.split("\n").filter(Boolean);
+  const supplierDropdown = document.getElementById("supplier");
+  supplierDropdown.innerHTML = "";
+  suppliers.forEach(supplier => {
+    const opt = document.createElement("option");
+    opt.value = supplier;
+    opt.textContent = supplier;
+    supplierDropdown.appendChild(opt);
+  });
+}
+
+async function populateSites() {
+  const sites = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
+  const siteDropdown = document.getElementById("site");
+  siteDropdown.innerHTML = "";
+  sites.forEach(site => {
+    const opt = document.createElement("option");
+    opt.value = site.siteName;
+    opt.textContent = site.jobNumber + " - " + site.siteName;
+    siteDropdown.appendChild(opt);
+  });
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  populateSuppliers();
+  populateSites();
+  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const now = new Date();
+  const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
+                        (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
+                        now.getFullYear();
+  document.getElementById("date").value = formattedDate;
+
+  document.getElementById("poForm").addEventListener("submit", async function(e) {
+    e.preventDefault();
+    const requestId = Date.now().toString();
+    sessionStorage.setItem("lastRequestId", requestId);
+
+    const formData = new URLSearchParams();
+    formData.append("requestId", requestId);
+    formData.append("engineer", document.getElementById("engineer").value);
+    formData.append("date", document.getElementById("date").value);
+    formData.append("site", document.getElementById("site").value);
+    formData.append("supplier", document.getElementById("supplier").value);
+    formData.append("incident", document.getElementById("incident").value);
+    formData.append("desc", document.getElementById("desc").value);
+    formData.append("cost", document.getElementById("cost").value);
+
+    await fetch("https://hooks.zapier.com/hooks/catch/20261714/u1093v6/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    });
+
+    window.location.href = "po-added.html";
+  });
+});
+</script>
+</body>
+</html>
