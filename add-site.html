@@ -101,19 +101,6 @@
 </div>
 
 <script>
-  const user = sessionStorage.getItem("mostlaneUser") || "";
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.split("\\n");
-      const roleLine = lines.find(line => line.includes(user));
-      const isOffice = roleLine && roleLine.includes("Office");
-      if (!isOffice) {
-        document.getElementById("formContainer").classList.add("hidden");
-        document.getElementById("blockedContainer").classList.remove("hidden");
-      }
-    });
-
   let map, marker = null, destination = null;
   let hq;
 
@@ -125,10 +112,10 @@
   function stripPostcodeFromAddress(formatted, postcode) {
     if (!postcode) return formatted;
     try {
-      const esc = postcode.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+      const esc = postcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re = new RegExp(esc, 'i');
-      let s = formatted.replace(re, '').replace(/\\s{2,}/g, ' ');
-      s = s.replace(/\\s,\\s/g, ', ').replace(/,\\s*,/g, ',').replace(/\\s*,\\s*$/,'').trim();
+      let s = formatted.replace(re, '').replace(/\s{2,}/g, ' ');
+      s = s.replace(/\s,\s/g, ', ').replace(/,\s*,/g, ',').replace(/\s*,\s*$/,'').trim();
       return s;
     } catch(e) {
       return formatted;
@@ -233,21 +220,24 @@
     formData.append("mileageFromHQ", mileage);
     formData.append("driveTime", driveTime);
 
-    sessionStorage.setItem("lastSiteName", siteName);
-    sessionStorage.setItem("lastStreetAddress", streetAddress);
-    sessionStorage.setItem("lastPostcode", postcode);
-    sessionStorage.setItem("lastLatitude", latitude);
-    sessionStorage.setItem("lastLongitude", longitude);
-    sessionStorage.setItem("lastMileage", mileage);
-    sessionStorage.setItem("lastDriveTime", driveTime);
-
     fetch("https://hooks.zapier.com/hooks/catch/20261714/2nxko8i/", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: formData.toString()
-    }).then(() => {
+    })
+    .then(r => r.json())
+    .then(data => {
+      sessionStorage.setItem("lastJobNumber", data.jobNumber || "N/A");
+      sessionStorage.setItem("lastSiteName", data.siteName || siteName);
+      sessionStorage.setItem("lastStreetAddress", data.streetAddress || streetAddress);
+      sessionStorage.setItem("lastPostcode", data.postcode || postcode);
+      sessionStorage.setItem("lastLatitude", data.latitude || latitude);
+      sessionStorage.setItem("lastLongitude", data.longitude || longitude);
+      sessionStorage.setItem("lastMileage", data.mileageFromHQ || mileage);
+      sessionStorage.setItem("lastDriveTime", data.driveTime || driveTime);
       window.location.href = "site-added.html";
-    }).catch(err => {
+    })
+    .catch(err => {
       alert("Failed to submit. Please try again.");
       console.error(err);
     });
