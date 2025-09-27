@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>My POs</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+    }
+    .main-body {
+      max-width: 600px;
+      margin: 80px auto;
+      background: rgba(255,255,255,0.6);
+      padding: 30px;
+      border-radius: 8px;
+    }
+    .po-item {
+      background: #fff;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .po-header {
+      padding: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      background: #004a99;
+      color: white;
+      border-radius: 6px 6px 0 0;
+    }
+    .po-details {
+      display: none;
+      padding: 12px;
+    }
+    .disclaimer {
+      margin-top: 20px;
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+    
+    .header-bar {
+      width: 100%;
+      background: #004a99;
+      padding: 10px 20px;
+      box-sizing: border-box;
+    }
+    .header-bar a {
+      color: white;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+  </style>
+</head>
+<body>
+  <div class="header-bar">
+    <a href="main.html">⬅ Main Menu</a>
+  </div>
+  <div class="main-body">
+    <h2>Previous Generated POs</h2>
+    <div id="poList"></div>
+    <p class="disclaimer">
+      This list only shows Purchase Orders generated on this device.<br/>
+      If cache has been cleared, older POs will no longer appear.<br/>
+      All PO numbers are securely stored in company systems.
+    </p>
+  </div>
+
+<script>
+function renderPOs() {
+  const poList = document.getElementById("poList");
+  poList.innerHTML = "";
+  const stored = JSON.parse(localStorage.getItem("myPOs") || "[]");
+  stored.reverse().forEach((po, idx) => {
+    const item = document.createElement("div");
+    item.className = "po-item";
+    const header = document.createElement("div");
+    header.className = "po-header";
+    header.textContent = po.poNumber + " - " + po.date + " (" + po.engineer + ")";
+    const details = document.createElement("div");
+    details.className = "po-details";
+    details.innerHTML = "<p><b>Site:</b> " + po.site +
+                        "<br/><b>Supplier:</b> " + po.supplier +
+                        "<br/><b>Description:</b> " + po.desc + "</p>";
+    header.addEventListener("click", () => {
+      details.style.display = details.style.display === "block" ? "none" : "block";
+    });
+    item.appendChild(header);
+    item.appendChild(details);
+    poList.appendChild(item);
+  });
+}
+window.addEventListener("DOMContentLoaded", renderPOs);
+</script>
+</body>
+</html>
