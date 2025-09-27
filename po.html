@@ -70,8 +70,17 @@
       <label>Supplier:</label>
       <select id="supplier"></select>
 
-      <label>Incident Number (if applicable):</label>
-      <input type="text" id="incident" />
+      <label>Work Type:</label>
+      <select id="workType" required>
+        <option value="">Select work type</option>
+        <option value="Reactive">Reactive</option>
+        <option value="Project">Project</option>
+      </select>
+
+      <div id="incidentRow" style="display:none;">
+        <label>Incident Number (if applicable):</label>
+        <input type="text" id="incident" />
+      </div>
 
       <label>Short Description:</label>
       <input type="text" id="desc" />
@@ -152,6 +161,12 @@ function requestLocation() {
   );
 }
 
+function toggleIncidentBox() {
+  const type = document.getElementById("workType").value;
+  const incidentRow = document.getElementById("incidentRow");
+  incidentRow.style.display = (type === "Reactive") ? "block" : "none";
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   populateSuppliers();
   populateSites();
@@ -163,6 +178,8 @@ window.addEventListener("DOMContentLoaded", () => {
   setToday();
   requestLocation();
 
+  document.getElementById("workType").addEventListener("change", toggleIncidentBox);
+
   document.getElementById("poForm").addEventListener("submit", async function(e) {
     e.preventDefault();
 
@@ -171,6 +188,13 @@ window.addEventListener("DOMContentLoaded", () => {
     const lon = document.getElementById("longitude").value;
     if (!lat || !lon) {
       document.getElementById("locationError").style.display = "block";
+      return;
+    }
+
+    // Ensure work type selected
+    const workType = document.getElementById("workType").value;
+    if (!workType) {
+      alert("Please select Work Type");
       return;
     }
 
@@ -184,7 +208,11 @@ window.addEventListener("DOMContentLoaded", () => {
     formData.append("date", document.getElementById("date").value);
     formData.append("site", document.getElementById("site").value);
     formData.append("supplier", document.getElementById("supplier").value);
-    formData.append("incident", document.getElementById("incident").value);
+    formData.append("workType", workType);
+    const incident = document.getElementById("incident").value;
+    if (workType === "Reactive") {
+      formData.append("incident", incident);
+    }
     formData.append("desc", document.getElementById("desc").value);
     formData.append("cost", document.getElementById("cost").value);
     formData.append("latitude", lat);
@@ -196,7 +224,7 @@ window.addEventListener("DOMContentLoaded", () => {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: formData.toString()
       });
-      // Redirect back to main menu (your confirmation will be handled by proxy later)
+      // Redirect back to main menu (confirmation will be handled by proxy/flow)
       window.location.href = "main.html";
     } catch (err) {
       alert("❌ Failed to submit PO. Please try again.");
