@@ -36,10 +36,12 @@
   }
 </script>
 <style>
+    html, body { height: 100%; }
+
   .main-body {
     font-family: "Segoe UI", sans-serif;
     background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
+    background-size: cover;
     margin: 0;
     padding: 40px 20px;
     min-height: 100vh;
@@ -74,7 +76,7 @@
 <a class="button" href="forms.html">Forms</a><a class="button" href="compliance.html">Compliance</a><a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
 <a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
 <a class="button" href="https://app.timetastic.co.uk/login/?_gl=1*1piblcu*_gcl_au*Mjk2Mjc2NTYuMTc1NDU5MDUzOA..*_ga*NTc2NjgwNjY5LjE3NTQ1OTA1Mzc.*_ga_6P6KNGTNP6*czE3NTQ1OTA1MzckbzEkZzEkdDE3NTQ1OTA1MzkkajU5JGwwJGgw">Holiday</a>
-<a class="button" href="po-menu.html">Purchase Orders</a>
+<a class="button" href="po-start.html">PO</a>
 <a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
 <script>
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
