@@ -62,7 +62,7 @@
 <div class="container" id="formContainer">
   <h2>Add New Site Location</h2>
   <form id="siteForm">
-    <!-- REMOVED Job Number -->
+    <!-- Job Number removed -->
 
     <label for="siteName">Site Name</label>
     <input type="text" name="siteName" id="siteName" required>
@@ -130,6 +130,14 @@
       destination = new google.maps.LatLng(parseFloat(lat), parseFloat(lng));
       placeMarker(destination);
       calculateDistance();
+
+      // Reverse geocode to update address
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode({ location: destination }, (results, status) => {
+        if (status === "OK" && results[0]) {
+          document.getElementById("streetAddress").value = results[0].formatted_address;
+        }
+      });
     });
   }
 
