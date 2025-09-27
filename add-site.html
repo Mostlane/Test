@@ -62,7 +62,6 @@
 <div class="container" id="formContainer">
   <h2>Add New Site Location</h2>
   <form id="siteForm">
-    <!-- Job Number removed -->
 
     <label for="siteName">Site Name</label>
     <input type="text" name="siteName" id="siteName" required>
@@ -73,6 +72,9 @@
 
     <label for="streetAddress">Street Address</label>
     <input type="text" name="streetAddress" id="streetAddress" readonly required>
+
+    <label for="postcodeField">Postcode</label>
+    <input type="text" name="postcode" id="postcodeField" readonly required>
 
     <label for="latitude">Latitude</label>
     <input type="text" name="latitude" id="latitude" readonly required>
@@ -103,7 +105,7 @@
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
     .then(r => r.text())
     .then(text => {
-      const lines = text.split("\n");
+      const lines = text.split("\\n");
       const roleLine = lines.find(line => line.includes(user));
       const isOffice = roleLine && roleLine.includes("Office");
       if (!isOffice) {
@@ -115,8 +117,25 @@
   let map, marker = null, destination = null;
   let hq;
 
+  function getPostcodeFromComponents(components) {
+    const pc = components.find(c => c.types && c.types.indexOf("postal_code") !== -1);
+    return pc ? pc.long_name : "";
+  }
+
+  function stripPostcodeFromAddress(formatted, postcode) {
+    if (!postcode) return formatted;
+    try {
+      const esc = postcode.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+      const re = new RegExp(esc, 'i');
+      let s = formatted.replace(re, '').replace(/\\s{2,}/g, ' ');
+      s = s.replace(/\\s,\\s/g, ', ').replace(/,\\s*,/g, ',').replace(/\\s*,\\s*$/,'').trim();
+      return s;
+    } catch(e) {
+      return formatted;
+    }
+  }
+
   function initMap() {
-    // Set HQ to exact office coordinates
     hq = new google.maps.LatLng(50.861735, -1.247463);
     map = new google.maps.Map(document.getElementById("map"), {
       center: hq,
@@ -133,11 +152,13 @@
       placeMarker(destination);
       calculateDistance();
 
-      // Reverse geocode to update address
       const geocoder = new google.maps.Geocoder();
       geocoder.geocode({ location: destination }, (results, status) => {
         if (status === "OK" && results[0]) {
-          document.getElementById("streetAddress").value = results[0].formatted_address;
+          const postcode = getPostcodeFromComponents(results[0].address_components);
+          document.getElementById("postcodeField").value = postcode;
+          const addr = stripPostcodeFromAddress(results[0].formatted_address, postcode);
+          document.getElementById("streetAddress").value = addr;
         }
       });
     });
@@ -157,8 +178,11 @@
         map.setCenter(result.geometry.location);
         map.setZoom(14);
 
-        // Fill street address + lat/lon automatically
-        document.getElementById("streetAddress").value = result.formatted_address;
+        const pc = getPostcodeFromComponents(result.address_components);
+        document.getElementById("postcodeField").value = pc;
+        const addr = stripPostcodeFromAddress(result.formatted_address, pc);
+        document.getElementById("streetAddress").value = addr;
+
         document.getElementById("latitude").value = result.geometry.location.lat().toFixed(6);
         document.getElementById("longitude").value = result.geometry.location.lng().toFixed(6);
       } else {
@@ -194,6 +218,7 @@
 
     const siteName = document.getElementById("siteName").value;
     const streetAddress = document.getElementById("streetAddress").value;
+    const postcode = document.getElementById("postcodeField").value;
     const latitude = document.getElementById("latitude").value;
     const longitude = document.getElementById("longitude").value;
     const mileage = document.getElementById("mileageFromHQ").value;
@@ -202,14 +227,15 @@
     const formData = new URLSearchParams();
     formData.append("siteName", siteName);
     formData.append("streetAddress", streetAddress);
+    formData.append("postcode", postcode);
     formData.append("latitude", latitude);
     formData.append("longitude", longitude);
     formData.append("mileageFromHQ", mileage);
     formData.append("driveTime", driveTime);
 
-    // Store in session for confirmation screen
     sessionStorage.setItem("lastSiteName", siteName);
     sessionStorage.setItem("lastStreetAddress", streetAddress);
+    sessionStorage.setItem("lastPostcode", postcode);
     sessionStorage.setItem("lastLatitude", latitude);
     sessionStorage.setItem("lastLongitude", longitude);
     sessionStorage.setItem("lastMileage", mileage);
