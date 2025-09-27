@@ -235,6 +235,7 @@
       sessionStorage.setItem("lastLongitude", data.longitude || longitude);
       sessionStorage.setItem("lastMileage", data.mileageFromHQ || mileage);
       sessionStorage.setItem("lastDriveTime", data.driveTime || driveTime);
+
       window.location.href = "site-added.html";
     })
     .catch(err => {
