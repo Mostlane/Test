@@ -155,7 +155,11 @@ function requestLocation() {
 window.addEventListener("DOMContentLoaded", () => {
   populateSuppliers();
   populateSites();
-  document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+
+  // Get username, replace '.' with ' '
+  let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  document.getElementById("engineer").value = user.replace(/\./g, " ");
+
   setToday();
   requestLocation();
 
