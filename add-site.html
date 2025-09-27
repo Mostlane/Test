@@ -115,7 +115,8 @@
   let hq;
 
   function initMap() {
-    hq = new google.maps.LatLng(50.8529, -1.2445);
+    // Set HQ to exact office coordinates
+    hq = new google.maps.LatLng(50.861735, -1.247463);
     map = new google.maps.Map(document.getElementById("map"), {
       center: hq,
       zoom: 8
