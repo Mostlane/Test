@@ -46,6 +46,12 @@
       border-radius: 6px;
       cursor: pointer;
     }
+    .error {
+      margin-top: 15px;
+      color: red;
+      font-weight: bold;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -54,6 +60,7 @@
     <form id="poForm">
       <label>Engineer:</label>
       <input type="text" id="engineer" readonly />
+
       <label>Date:</label>
       <input type="text" id="date" readonly />
 
@@ -65,24 +72,35 @@
 
       <label>Incident Number (if applicable):</label>
       <input type="text" id="incident" />
+
       <label>Short Description:</label>
       <input type="text" id="desc" />
+
       <label>Cost:</label>
       <input type="text" id="cost" />
-      <button type="submit" class="button">Submit</button>
+
+      <!-- Hidden fields for location -->
+      <input type="hidden" id="latitude" name="latitude" />
+      <input type="hidden" id="longitude" name="longitude" />
+
+      <button type="submit" id="submitBtn" class="button" disabled>Submit</button>
+      <p class="error" id="locationError">⚠️ Location is required to submit a PO. Please allow location access.</p>
     </form>
   </div>
 
 <script>
+async function fetchTextFile(url) {
+  const res = await fetch(url + "?v=" + Date.now());
+  return res.ok ? (await res.text()).split("\n").filter(Boolean) : [];
+}
+
 async function fetchJSON(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? await res.json() : [];
 }
 
 async function populateSuppliers() {
-  const res = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt?v=" + Date.now());
-  const text = await res.text();
-  const suppliers = text.split("\n").filter(Boolean);
+  const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
   const supplierDropdown = document.getElementById("supplier");
   supplierDropdown.innerHTML = "";
   suppliers.forEach(supplier => {
@@ -94,31 +112,67 @@ async function populateSuppliers() {
 }
 
 async function populateSites() {
+  // Expecting sites.json as an array of objects: [{ jobNumber: "S0001", siteName: "..." }, ...]
   const sites = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
   const siteDropdown = document.getElementById("site");
   siteDropdown.innerHTML = "";
-  sites.forEach(site => {
+  (sites || []).forEach(site => {
+    const label = (site.jobNumber ? site.jobNumber + " - " : "") + (site.siteName || site.name || "Unknown Site");
+    const value = site.siteName || site.name || label;
     const opt = document.createElement("option");
-    opt.value = site.siteName;
-    opt.textContent = site.jobNumber + " - " + site.siteName;
+    opt.value = value;
+    opt.textContent = label;
     siteDropdown.appendChild(opt);
   });
+}
+
+function setToday() {
+  const now = new Date();
+  const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
+                        (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
+                        now.getFullYear();
+  document.getElementById("date").value = formattedDate;
+}
+
+function requestLocation() {
+  if (!navigator.geolocation) {
+    document.getElementById("locationError").style.display = "block";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      document.getElementById("latitude").value = pos.coords.latitude.toFixed(6);
+      document.getElementById("longitude").value = pos.coords.longitude.toFixed(6);
+      document.getElementById("submitBtn").disabled = false;
+    },
+    err => {
+      document.getElementById("locationError").style.display = "block";
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   populateSuppliers();
   populateSites();
   document.getElementById("engineer").value = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const now = new Date();
-  const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
-                        (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
-                        now.getFullYear();
-  document.getElementById("date").value = formattedDate;
+  setToday();
+  requestLocation();
 
   document.getElementById("poForm").addEventListener("submit", async function(e) {
     e.preventDefault();
+
+    // Ensure location captured
+    const lat = document.getElementById("latitude").value;
+    const lon = document.getElementById("longitude").value;
+    if (!lat || !lon) {
+      document.getElementById("locationError").style.display = "block";
+      return;
+    }
+
+    // Generate a unique requestId (useful for later lookup flows)
     const requestId = Date.now().toString();
-    sessionStorage.setItem("lastRequestId", requestId);
+    sessionStorage.setItem("lastPORequestId", requestId);
 
     const formData = new URLSearchParams();
     formData.append("requestId", requestId);
@@ -129,14 +183,21 @@ window.addEventListener("DOMContentLoaded", () => {
     formData.append("incident", document.getElementById("incident").value);
     formData.append("desc", document.getElementById("desc").value);
     formData.append("cost", document.getElementById("cost").value);
+    formData.append("latitude", lat);
+    formData.append("longitude", lon);
 
-    await fetch("https://hooks.zapier.com/hooks/catch/20261714/u1093v6/", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString()
-    });
-
-    window.location.href = "po-added.html";
+    try {
+      await fetch("https://hooks.zapier.com/hooks/catch/20261714/u1093v6/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString()
+      });
+      // Redirect back to main menu (your confirmation will be handled by proxy later)
+      window.location.href = "main.html";
+    } catch (err) {
+      alert("❌ Failed to submit PO. Please try again.");
+      console.error(err);
+    }
   });
 });
 </script>
