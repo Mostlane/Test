@@ -36,6 +36,7 @@
       margin-top: 5px;
       border-radius: 6px;
       border: 1px solid #ccc;
+      box-sizing: border-box;
     }
     .button {
       margin-top: 30px;
@@ -50,20 +51,6 @@
       text-align: center;
       text-decoration: none;
     }
-    .small-button {
-      margin-top: 15px;
-      padding: 6px 10px;
-      font-size: 13px;
-      background-color: #ccc;
-      color: #333;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      width: auto;
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
-    }
     .error {
       color: #b30000;
       font-size: 14px;
@@ -76,7 +63,7 @@
   <div class="main-body">
     <h1>Generate Purchase Order Reference</h1>
     <form id="poForm" onsubmit="event.preventDefault(); validateAndSubmit();">
-      <!-- Engineer (input by default) -->
+      <!-- Engineer input (default for non-office) -->
       <div id="engineerInputRow">
         <label>Engineer:</label>
         <input type="text" id="engineer" readonly />
@@ -145,69 +132,66 @@ async function fetchJSON(url) {
   return res.ok ? await res.json() : [];
 }
 
+// Globals
 let isOfficeOrAdmin = false;
 let allVans = [];
 
+function setToday() {
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyy = now.getFullYear();
+  document.getElementById("date").value = dd + "/" + mm + "/" + yyyy;
+}
+
 async function loadRoleAndUsers() {
-  // Determine user + role
-  let userKey = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  // Determine role
+  const userKey = sessionStorage.getItem("mostlaneUser") || "";
   const roleLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt");
   const roleLine = roleLines.find(line => line.includes(userKey));
   isOfficeOrAdmin = !!(roleLine && (roleLine.includes("Office") || roleLine.includes("Admin")));
 
-  // Engineer field handling
   const engineerInputRow = document.getElementById("engineerInputRow");
   const engineerSelectRow = document.getElementById("engineerSelectRow");
 
   if (isOfficeOrAdmin) {
-    // Show dropdown populated from users.txt
+    // Office -> show dropdown populated from Users.txt
     engineerInputRow.style.display = "none";
     engineerSelectRow.style.display = "block";
 
     const users = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt");
-const sel = document.getElementById("engineerSelect");
-sel.innerHTML = "";
-// Build options from first field (username), replacing dots with spaces
-users.forEach(line => {
-  const parts = line.split("|");
-  if (parts.length >= 1) {
-    const usernameRaw = (parts[0] || "").trim();
-    if (!usernameRaw) return;
-    const display = usernameRaw.replace(/\./g, " ");
-    const opt = document.createElement("option");
-    opt.value = display;
-    opt.textContent = display;
-    sel.appendChild(opt);
-  }
-});
-// Auto-select current session user if present
-let userKey = sessionStorage.getItem("mostlaneUser") || "";
-const currentDisplay = userKey.replace(/\./g, " ");
-if (currentDisplay) {
-  const match = Array.from(sel.options).find(o => o.value.toLowerCase() === currentDisplay.toLowerCase());
-  if (match) sel.value = match.value; else if (sel.options.length) sel.selectedIndex = 0;
-} else if (sel.options.length) {
-  sel.selectedIndex = 0;
-}
-const parts = line.split("|");
-      if (parts.length >= 1) {
-        const username = parts[0] || "";
-        const display = (parts[3] && parts[3].trim().length) ? parts[3] : username.replace(/\./g, " ");
-        const opt = document.createElement("option");
-        opt.value = display;
-        opt.textContent = display;
-        sel.appendChild(opt);
-      if (display.toLowerCase() === currentDisplay.toLowerCase()) {
-        sel.value = display;
-      }
-      }
+    const sel = document.getElementById("engineerSelect");
+    sel.innerHTML = "";
+
+    users.forEach(line => {
+      const parts = line.split("|");
+      const usernameRaw = (parts[0] || "").trim();
+      if (!usernameRaw) return;
+      const display = usernameRaw.replace(/\./g, " ");
+      const opt = document.createElement("option");
+      opt.value = display;
+      opt.textContent = display;
+      sel.appendChild(opt);
     });
+
+    // Auto-select current session user (dot->space) if found; else default to first
+    const currentDisplay = (userKey || "").replace(/\./g, " ");
+    if (currentDisplay && sel.options.length) {
+      let matched = false;
+      for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value.toLowerCase() === currentDisplay.toLowerCase()) {
+          sel.selectedIndex = i;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) sel.selectedIndex = 0;
+    }
   } else {
-    // Keep readonly input with user display (dot -> space)
+    // Field -> readonly input with display name
     engineerInputRow.style.display = "block";
     engineerSelectRow.style.display = "none";
-    const displayUser = userKey.replace(/\./g, " ");
-    document.getElementById("engineer").value = displayUser;
+    document.getElementById("engineer").value = (userKey || "Unknown").replace(/\./g, " ");
   }
 }
 
@@ -246,15 +230,15 @@ async function loadVans() {
 
 function populateVansForUser() {
   const vanEl = document.getElementById("van");
-  // Clear current options except placeholder
+  // Clear options except placeholder
   vanEl.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
 
-  let userKey = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const userKey = sessionStorage.getItem("mostlaneUser") || "";
   const displayUser = userKey.replace(/\./g, " ");
 
   let candidates = [];
   if (isOfficeOrAdmin) {
-    candidates = allVans.slice(); // all
+    candidates = (allVans || []).slice();
   } else {
     candidates = (allVans || []).filter(v =>
       (v.driver && v.driver.toLowerCase() === displayUser.toLowerCase()) ||
@@ -264,16 +248,14 @@ function populateVansForUser() {
 
   const vanRow = document.getElementById("vanRow");
   if (!candidates.length) {
-    // Hide completely if none
     vanRow.style.display = "none";
     return;
   }
-  // Show and populate
   vanRow.style.display = "block";
   candidates.forEach(v => {
     const opt = document.createElement("option");
     opt.value = v.reg;
-    opt.textContent = v.reg; // reg only as requested
+    opt.textContent = v.reg; // reg only
     vanEl.appendChild(opt);
   });
 }
@@ -287,7 +269,6 @@ function toggleUI() {
   if (type === "Reactive") {
     incidentBox.style.display = "block";
     siteRow.style.display = "block";
-    // Setup site, hide van
     vanRow.style.display = "none";
   } else if (type === "Planned") {
     incidentBox.style.display = "none";
@@ -296,16 +277,14 @@ function toggleUI() {
   } else if (type === "Vehicle Maintenance") {
     incidentBox.style.display = "none";
     siteRow.style.display = "none";
-    // Show/load vans
     populateVansForUser();
   } else {
-    // default
     incidentBox.style.display = "none";
     siteRow.style.display = "block";
     vanRow.style.display = "none";
   }
 
-  // Hide related errors when switching
+  // Hide error messages when switching
   document.getElementById("incidentError").style.display = "none";
   document.getElementById("vanError").style.display = "none";
 }
@@ -325,7 +304,6 @@ function validateAndSubmit() {
     document.getElementById("descError").style.display = "none";
   }
 
-  // Conditional fields
   if (type === "Reactive") {
     if (!incidentVal) {
       document.getElementById("incidentError").style.display = "block";
@@ -345,30 +323,17 @@ function validateAndSubmit() {
 
   if (!valid) return;
 
-  // If valid, proceed (keep as-is to avoid changing other behaviours)
+  // Keep existing behaviour (no webhook changes requested)
   alert("Form is valid and ready to submit!");
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  // Date
-  const now = new Date();
-  const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
-                        (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
-                        now.getFullYear();
-  document.getElementById("date").value = formattedDate;
-
-  // Role + users
-  await loadRoleAndUsers();
-
-  // Suppliers / Sites
-  await populateSuppliers();
-  await populateSites();
-
-  // Vans
-  await loadVans();
-
-  // Initial UI state
-  toggleUI();
+  setToday();                 // Date auto-fill
+  await loadRoleAndUsers();   // Engineer field logic
+  await populateSuppliers();  // Suppliers from suppliers.txt
+  await populateSites();      // Sites from sites.json
+  await loadVans();           // Vans from vans.json
+  toggleUI();                 // Ensure correct initial visibility
 });
 </script>
 </body>
