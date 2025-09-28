@@ -2,23 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Purchase Order</title>
+  <title>Create Purchase Order</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
-      background-color: #e6e8eb;
       margin: 0;
       padding: 0;
     }
     .container {
-      background: rgba(255,255,255,0.85);
-      margin: 50px auto;
-      padding: 20px;
-      border-radius: 10px;
-      width: 90%;
       max-width: 600px;
+      margin: 40px auto;
+      background: rgba(255,255,255,0.6);
+      padding: 20px;
+      border-radius: 8px;
     }
     h1 {
       text-align: center;
@@ -29,74 +27,94 @@
       margin-top: 15px;
       font-weight: bold;
     }
-    select, input, textarea, button {
+    input, select, textarea, button {
       width: 100%;
-      padding: 10px;
+      padding: 8px;
       margin-top: 5px;
       border: 1px solid #ccc;
-      border-radius: 5px;
+      border-radius: 4px;
       font-size: 14px;
     }
     button {
-      background: #007bff;
+      background-color: #004080;
       color: white;
-      font-size: 16px;
+      font-weight: bold;
       cursor: pointer;
       margin-top: 20px;
     }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-    .hidden {
-      display: none;
+    button:hover {
+      background-color: #0066cc;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Purchase Order</h1>
+    <h1>Create Purchase Order</h1>
     <form id="poForm">
-      <label for="engineer">Engineer</label>
-      <select id="engineer" name="engineer"></select>
+      <label for="engineer">Engineer Name</label>
+      <input type="text" id="engineer" name="engineer" readonly>
+
+      <label for="date">Date</label>
+      <input type="date" id="date" name="date" readonly>
 
       <label for="workType">Work Type</label>
       <select id="workType" name="workType" required>
-        <option value="">-- Select --</option>
+        <option value="">-- Select Work Type --</option>
         <option value="Reactive">Reactive</option>
         <option value="Planned">Planned</option>
         <option value="Vehicle Maintenance">Vehicle Maintenance</option>
       </select>
 
-      <div id="incidentDiv" class="hidden">
-        <label for="incidentNumber">Incident Number</label>
-        <input type="text" id="incidentNumber" name="incidentNumber">
+      <div id="incidentField" style="display:none;">
+        <label for="incident">Incident Number</label>
+        <input type="text" id="incident" name="incident">
       </div>
 
-      <div id="siteDiv">
+      <div id="siteField">
         <label for="site">Site</label>
-        <select id="site" name="site"></select>
+        <select id="site" name="site" required>
+          <option value="">-- Select Site --</option>
+        </select>
       </div>
 
-      <div id="vehicleDiv" class="hidden">
-        <label for="vehicle">Vehicle Registration</label>
-        <select id="vehicle" name="vehicle"></select>
+      <div id="vehicleField" style="display:none;">
+        <label for="vehicle">Vehicle</label>
+        <select id="vehicle" name="vehicle">
+          <option value="">-- Select Vehicle --</option>
+        </select>
       </div>
 
       <label for="supplier">Supplier</label>
-      <select id="supplier" name="supplier" required></select>
+      <select id="supplier" name="supplier" required>
+        <option value="">-- Select Supplier --</option>
+      </select>
 
       <label for="description">Short Description</label>
       <textarea id="description" name="description" required></textarea>
 
-      <input type="hidden" id="lat" name="lat">
-      <input type="hidden" id="lon" name="lon">
-
-      <button type="submit" id="submitBtn" disabled>Submit</button>
+      <button type="submit">Submit</button>
     </form>
   </div>
 
   <script>
+    // Autofill engineer
+    const username = sessionStorage.getItem("mostlaneUsername");
+    if (username) {
+      document.getElementById("engineer").value = username.replace(".", " ");
+    }
+
+    // Autofill today's date
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById("date").value = today;
+
+    // Toggle incident/site/vehicle fields
+    document.getElementById("workType").addEventListener("change", function() {
+      const type = this.value;
+      document.getElementById("incidentField").style.display = (type === "Reactive") ? "block" : "none";
+      document.getElementById("siteField").style.display = (type === "Vehicle Maintenance") ? "none" : "block";
+      document.getElementById("vehicleField").style.display = (type === "Vehicle Maintenance") ? "block" : "none";
+    });
+
     // Fetch Sites
     fetch('https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + new Date().getTime())
       .then(res => res.json())
@@ -119,60 +137,40 @@
         supplierSelect.innerHTML = '<option value="">-- Select Supplier --</option>';
         data.forEach(s => {
           const opt = document.createElement('option');
-          opt.value = s.supplierNumber;
-          opt.textContent = s.supplierNumber + ' - ' + s.supplierName;
+          opt.value = s.supplierName; // only supplier name
+          opt.textContent = s.supplierName;
           supplierSelect.appendChild(opt);
         });
       });
 
-    // Work Type logic
-    document.getElementById('workType').addEventListener('change', function() {
-      const type = this.value;
-      document.getElementById('incidentDiv').classList.toggle('hidden', type !== 'Reactive');
-      document.getElementById('siteDiv').classList.toggle('hidden', type === 'Vehicle Maintenance');
-      document.getElementById('vehicleDiv').classList.toggle('hidden', type !== 'Vehicle Maintenance');
-    });
-
-    // Autofill Engineer from sessionStorage
-    const engineerSelect = document.getElementById('engineer');
-    const storedUser = sessionStorage.getItem('mostlaneUser');
-    if (storedUser) {
-      const displayName = storedUser.replace('.', ' ');
-      engineerSelect.innerHTML = '<option selected>' + displayName + '</option>';
-    } else {
-      engineerSelect.innerHTML = '<option selected>Engineer Name</option>';
-    }
-
-    // Geolocation capture
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        document.getElementById('lat').value = pos.coords.latitude;
-        document.getElementById('lon').value = pos.coords.longitude;
+    // Fetch Vehicles
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/vehicles.json?v=' + new Date().getTime())
+      .then(res => res.json())
+      .then(data => {
+        const vehicleSelect = document.getElementById('vehicle');
+        vehicleSelect.innerHTML = '<option value="">-- Select Vehicle --</option>';
+        data.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v.reg;
+          opt.textContent = v.reg;
+          vehicleSelect.appendChild(opt);
+        });
       });
-    }
 
-    // Enable Submit if required fields are completed
-    const form = document.getElementById('poForm');
-    form.addEventListener('input', () => {
-      const workType = document.getElementById('workType').value;
-      const description = document.getElementById('description').value.trim();
-      const incident = document.getElementById('incidentNumber').value.trim();
-      let valid = description && workType;
-      if (workType === 'Reactive') valid = valid && incident;
-      document.getElementById('submitBtn').disabled = !valid;
-    });
-
-    // Submit
-    form.addEventListener('submit', function(e) {
-      e.preventDefault();
-      const formData = new FormData(form);
-      fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
-        method: "POST",
-        body: new URLSearchParams(formData)
-      }).then(() => {
-        alert("Purchase Order submitted!");
-        form.reset();
-      });
+    // Form validation
+    document.getElementById("poForm").addEventListener("submit", function(e) {
+      const workType = document.getElementById("workType").value;
+      const incident = document.getElementById("incident").value.trim();
+      const description = document.getElementById("description").value.trim();
+      if (!description) {
+        alert("Short Description is required.");
+        e.preventDefault();
+        return;
+      }
+      if (workType === "Reactive" && !incident) {
+        alert("Incident Number is required for Reactive jobs.");
+        e.preventDefault();
+      }
     });
   </script>
 </body>
