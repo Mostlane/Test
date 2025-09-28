@@ -125,7 +125,7 @@
     function parseEmployment(txt) {
       // Lines like: "Jamie.Line - Employed"
       const map = {};
-      txt.split(/\\r?\\n/).forEach(line => {
+      txt.split(/\r?\n/).forEach(line => {
         const clean = line.trim();
         if (!clean) return;
         const parts = clean.split('-');
@@ -138,9 +138,9 @@
       return map;
     }
 
-    function detectAdminFromRoles(txt, username) {
-      // A line containing the username and containing "Admin" or "Office" counts as admin.
-      const lines = txt.split(/\\r?\\n/);
+    function isAdminOrOffice(roleTxt, username) {
+      // Treat lines containing the username and containing "Admin" or "Office" as having admin-like permissions.
+      const lines = roleTxt.split(/\r?\n/);
       for (const line of lines) {
         if (line.includes(username) && (/(Admin|Office)/i).test(line)) {
           return true;
@@ -149,7 +149,7 @@
       return false;
     }
 
-    function renderSites(sites, showSubbie, showMostlane) {
+    function renderSites(sites, vis) {
       const list = document.getElementById('siteList');
       list.innerHTML = '';
       if (!sites || !sites.length) {
@@ -169,12 +169,12 @@
         const driveTime = site.driveTime ?? '';
 
         let subbieHTML = '';
-        if (showSubbie) {
+        if (vis.showSubbie) {
           subbieHTML = `<p><strong>Sub-Contractor Daily Fuel:</strong> ${calcSubbieDailyFuel(mileage)}</p>`;
         }
 
         let mostlaneHTML = '';
-        if (showMostlane) {
+        if (vis.showMostlane) {
           mostlaneHTML = `<p><strong>Mostlane Fuel:</strong> ${calcMostlaneFuel(mileage)}</p>`;
         }
 
@@ -194,7 +194,7 @@
       }
     }
 
-    function filterAndSearch(allSites, showSubbie, showMostlane) {
+    function filterAndSearch(allSites, vis) {
       const q = document.getElementById('search').value.trim().toLowerCase();
       const activeTypes = Array.from(document.querySelectorAll('.filter:checked')).map(x => x.value);
       const out = allSites.filter(site => {
@@ -207,7 +207,7 @@
         const matchesType = activeTypes.length === 0 || (site.siteType && activeTypes.includes(site.siteType));
         return matchesText && matchesType;
       });
-      renderSites(out, showSubbie, showMostlane);
+      renderSites(out, vis);
     }
 
     (async () => {
@@ -220,24 +220,30 @@
           fetchText(ROLE_URL)
         ]);
 
-        // Determine employment and admin
+        // Determine employment and admin/office
         const empMap = parseEmployment(employmentTxt);
         const employmentType = empMap[username] || 'Employed'; // default to Employed
-        const isAdmin = detectAdminFromRoles(roleTxt, username);
+        const adminLike = isAdminOrOffice(roleTxt, username);   // Admin or Office
 
-        // Visibility rules
-        const showSubbie = employmentType !== 'Employed'; // hide for Employed
-        const showMostlane = isAdmin;                     // only admins
+        // Visibility rules per your spec:
+        // - Admin/Office: see BOTH
+        // - Employed (field): see NEITHER
+        // - SelfEmployed (field): see ONLY Sub-Contractor Daily Fuel
+        const visibility = {
+          showSubbie: adminLike || employmentType === 'SelfEmployed',
+          showMostlane: adminLike
+        };
 
         // Initial render + wire up UI
         window._allSites = sites;
-        renderSites(sites, showSubbie, showMostlane);
+        window._visibility = visibility;
+        renderSites(sites, visibility);
 
         document.getElementById('search').addEventListener('input', () => {
-          filterAndSearch(window._allSites, showSubbie, showMostlane);
+          filterAndSearch(window._allSites, window._visibility);
         });
         document.getElementById('filters').addEventListener('change', () => {
-          filterAndSearch(window._allSites, showSubbie, showMostlane);
+          filterAndSearch(window._allSites, window._visibility);
         });
       } catch (e) {
         document.getElementById('siteList').innerHTML = '<p class="muted">Unable to load sites at this time.</p>';
