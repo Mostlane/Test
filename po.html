@@ -57,6 +57,11 @@
     user = user.replace(/\./g, " "); // Replace dots with spaces
     document.getElementById("engineer").value = user;
   });
+
+async function fetchJSON(url) {
+  const res = await fetch(url + "?v=" + Date.now());
+  return res.ok ? await res.json() : [];
+}
 </script>
 
 </body>
