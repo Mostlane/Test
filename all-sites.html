@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>All Sites</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+    }
+    .container {
+      max-width: 900px;
+      margin: 40px auto;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    h1 {
+      text-align: center;
+      color: #004a99;
+      margin-bottom: 20px;
+    }
+    #search {
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    .site-list {
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .site-card {
+      background: #f4f6f8;
+      padding: 15px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .site-card p {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>All Sites</h1>
+    <input type="text" id="search" placeholder="Search sites...">
+    <div class="site-list" id="siteList"></div>
+  </div>
+
+  <script>
+    async function fetchSites() {
+      try {
+        const res = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + Date.now());
+        const data = await res.json();
+        window.allSites = data;
+        renderSites(data);
+      } catch (err) {
+        document.getElementById('siteList').innerHTML = '<p>Error loading sites.</p>';
+      }
+    }
+
+    function renderSites(sites) {
+      const list = document.getElementById('siteList');
+      list.innerHTML = '';
+      sites.forEach(site => {
+        const div = document.createElement('div');
+        div.className = 'site-card';
+        div.innerHTML = `
+          <p><strong>Job Number:</strong> ${site.jobNumber || ''}</p>
+          <p><strong>Site Name:</strong> ${site.siteName || ''}</p>
+          <p><strong>Site Type:</strong> ${site.siteType || ''}</p>
+          <p><strong>Address:</strong> ${site.address || ''}</p>
+          <p><strong>Lat:</strong> ${site.lat || ''}</p>
+          <p><strong>Lon:</strong> ${site.lon || ''}</p>
+          <p><strong>Mileage:</strong> ${site.mileage || ''}</p>
+          <p><strong>Drive Time:</strong> ${site.driveTime || ''}</p>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    document.getElementById('search').addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      const filtered = window.allSites.filter(site => 
+        (site.jobNumber || '').toLowerCase().includes(q) ||
+        (site.siteName || '').toLowerCase().includes(q) ||
+        (site.siteType || '').toLowerCase().includes(q) ||
+        (site.address || '').toLowerCase().includes(q) ||
+        (site.lat || '').toString().includes(q) ||
+        (site.lon || '').toString().includes(q) ||
+        (site.mileage || '').toString().includes(q) ||
+        (site.driveTime || '').toLowerCase().includes(q)
+      );
+      renderSites(filtered);
+    });
+
+    fetchSites();
+  </script>
+</body>
+</html>
