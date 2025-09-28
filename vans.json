@@ -1,0 +1,58 @@
+[
+  {
+    "reg": "LE73 UHV",
+    "driver": "David Molloy"
+  },
+  {
+    "reg": "LA70 FPJ",
+    "driver": "Chris Cooke"
+  },
+  {
+    "reg": "LB21 VZU",
+    "driver": "John Thorn"
+  },
+  {
+    "reg": "WP64 EJD",
+    "driver": "Bradley Graham"
+  },
+  {
+    "reg": "HY25 UTR",
+    "driver": "James Baczy\u0144ski"
+  },
+  {
+    "reg": "HY25 UTM",
+    "driver": "Chris Freeman"
+  },
+  {
+    "reg": "HX69 KHZ",
+    "driver": "Ciprian"
+  },
+  {
+    "reg": "LE73 UHX",
+    "driver": "Connor Brady"
+  },
+  {
+    "reg": "LG23 AWK",
+    "driver": "Tony Pelin"
+  },
+  {
+    "reg": "KL07 YJK",
+    "driver": "Frazer Miller"
+  },
+  {
+    "reg": "HN73 KFO",
+    "driver": "Ryan Diggens"
+  },
+  {
+    "reg": "BL12 DMZ",
+    "driver": "Fleet Vehicle"
+  },
+  {
+    "reg": "HN69 SYP",
+    "driver": "Fleet Vehicle"
+  },
+  {
+    "reg": "WM83 VFL",
+    "driver": "Fleet Vehicle"
+  }
+]

@@ -34,6 +34,8 @@
       padding: 10px;
       font-size: 16px;
       margin-top: 5px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
     }
     .button {
       margin-top: 30px;
@@ -45,6 +47,22 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+    }
+    .small-button {
+      margin-top: 15px;
+      padding: 6px 10px;
+      font-size: 13px;
+      background-color: #ccc;
+      color: #333;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      width: auto;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
     }
     .error {
       color: #b30000;
@@ -58,31 +76,56 @@
   <div class="main-body">
     <h1>Generate Purchase Order Reference</h1>
     <form id="poForm" onsubmit="event.preventDefault(); validateAndSubmit();">
-      <label>Engineer:</label>
-      <input type="text" id="engineer" readonly />
+      <!-- Engineer (input by default) -->
+      <div id="engineerInputRow">
+        <label>Engineer:</label>
+        <input type="text" id="engineer" readonly />
+      </div>
+      <!-- Engineer dropdown (Office/Admin only) -->
+      <div id="engineerSelectRow" style="display:none;">
+        <label>Engineer:</label>
+        <select id="engineerSelect"></select>
+      </div>
 
       <label>Date:</label>
       <input type="text" id="date" readonly />
 
       <label>Work Type:</label>
-      <select id="workType" onchange="toggleIncident()">
+      <select id="workType" onchange="toggleUI()">
         <option value="">Select type</option>
         <option value="Reactive">Reactive</option>
         <option value="Planned">Planned</option>
         <option value="Vehicle Maintenance">Vehicle Maintenance</option>
       </select>
 
+      <!-- Incident (Reactive only) -->
       <div id="incidentBox" style="display:none;">
         <label>Incident Number:</label>
         <input type="text" id="incident" />
         <div id="incidentError" class="error">Incident Number is required for Reactive jobs.</div>
       </div>
 
-      <label>Site Name:</label>
-      <select id="site"></select>
+      <!-- Site (Reactive/Planned) -->
+      <div id="siteRow">
+        <label>Site:</label>
+        <select id="site">
+          <option value="" disabled selected>Select a site…</option>
+        </select>
+      </div>
+
+      <!-- Van (Vehicle Maintenance only) -->
+      <div id="vanRow" style="display:none;">
+        <label>Van Registration:</label>
+        <select id="van">
+          <option value="" disabled selected>Select a van…</option>
+        </select>
+        <div id="vanError" class="error">Van registration is required for Vehicle Maintenance.</div>
+      </div>
 
       <label>Supplier:</label>
-      <select id="supplier"></select>
+      <select id="supplier">
+        <option value="" disabled selected>Select a supplier…</option>
+      </select>
 
       <label>Short Description:</label>
       <input type="text" id="desc" />
@@ -97,83 +140,211 @@ async function fetchTextFile(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? (await res.text()).split("\n").filter(Boolean) : [];
 }
-
-async function fetchJSONFile(url) {
+async function fetchJSON(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? await res.json() : [];
 }
 
-async function populateDropdowns() {
-  const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
-  const supplierDropdown = document.getElementById("supplier");
-  supplierDropdown.innerHTML = "";
-  suppliers.forEach(supplier => {
+let isOfficeOrAdmin = false;
+let allVans = [];
+
+async function loadRoleAndUsers() {
+  // Determine user + role
+  let userKey = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const roleLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt");
+  const roleLine = roleLines.find(line => line.includes(userKey));
+  isOfficeOrAdmin = !!(roleLine && (roleLine.includes("Office") || roleLine.includes("Admin")));
+
+  // Engineer field handling
+  const engineerInputRow = document.getElementById("engineerInputRow");
+  const engineerSelectRow = document.getElementById("engineerSelectRow");
+
+  if (isOfficeOrAdmin) {
+    // Show dropdown populated from users.txt
+    engineerInputRow.style.display = "none";
+    engineerSelectRow.style.display = "block";
+
+    const users = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/users.txt");
+    const sel = document.getElementById("engineerSelect");
+    sel.innerHTML = "";
+    users.forEach(line => {
+      const parts = line.split("|");
+      if (parts.length >= 1) {
+        const username = parts[0] || "";
+        const display = (parts[3] && parts[3].trim().length) ? parts[3] : username.replace(/\./g, " ");
+        const opt = document.createElement("option");
+        opt.value = display;
+        opt.textContent = display;
+        sel.appendChild(opt);
+      }
+    });
+  } else {
+    // Keep readonly input with user display (dot -> space)
+    engineerInputRow.style.display = "block";
+    engineerSelectRow.style.display = "none";
+    const displayUser = userKey.replace(/\./g, " ");
+    document.getElementById("engineer").value = displayUser;
+  }
+}
+
+async function populateSuppliers() {
+  const data = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
+  const el = document.getElementById("supplier");
+  if (!el) return;
+  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
+  (data || []).forEach(name => {
     const opt = document.createElement("option");
-    opt.value = supplier;
-    opt.textContent = supplier;
-    supplierDropdown.appendChild(opt);
+    opt.value = name;
+    opt.textContent = name;
+    el.appendChild(opt);
   });
 }
 
 async function populateSites() {
-  const siteDropdown = document.getElementById("site");
-  siteDropdown.innerHTML = "";
-  const sites = await fetchJSONFile("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
-  sites.forEach(site => {
+  const data = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
+  const el = document.getElementById("site");
+  if (!el) return;
+  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
+  (data || []).forEach(site => {
+    const num = site.siteNumber || site.jobNumber || site.code || "";
+    const name = site.siteName || site.name || "";
+    const label = (num ? (num + " – ") : "") + (name || "Unknown Site");
     const opt = document.createElement("option");
-    opt.value = site.siteName;
-    opt.textContent = site.jobNumber + " " + site.siteName;
-    siteDropdown.appendChild(opt);
+    opt.value = label;
+    opt.textContent = label;
+    el.appendChild(opt);
   });
 }
 
-function toggleIncident() {
-  const workType = document.getElementById("workType").value;
-  const incidentBox = document.getElementById("incidentBox");
-  if (workType === "Reactive") {
-    incidentBox.style.display = "block";
+async function loadVans() {
+  allVans = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/vans.json");
+}
+
+function populateVansForUser() {
+  const vanEl = document.getElementById("van");
+  // Clear current options except placeholder
+  vanEl.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
+
+  let userKey = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const displayUser = userKey.replace(/\./g, " ");
+
+  let candidates = [];
+  if (isOfficeOrAdmin) {
+    candidates = allVans.slice(); // all
   } else {
-    incidentBox.style.display = "none";
-    document.getElementById("incidentError").style.display = "none";
+    candidates = (allVans || []).filter(v =>
+      (v.driver && v.driver.toLowerCase() === displayUser.toLowerCase()) ||
+      (v.driver && v.driver.toLowerCase() === "fleet vehicle")
+    );
   }
+
+  const vanRow = document.getElementById("vanRow");
+  if (!candidates.length) {
+    // Hide completely if none
+    vanRow.style.display = "none";
+    return;
+  }
+  // Show and populate
+  vanRow.style.display = "block";
+  candidates.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v.reg;
+    opt.textContent = v.reg; // reg only as requested
+    vanEl.appendChild(opt);
+  });
+}
+
+function toggleUI() {
+  const type = document.getElementById("workType").value;
+  const incidentBox = document.getElementById("incidentBox");
+  const siteRow = document.getElementById("siteRow");
+  const vanRow = document.getElementById("vanRow");
+
+  if (type === "Reactive") {
+    incidentBox.style.display = "block";
+    siteRow.style.display = "block";
+    // Setup site, hide van
+    vanRow.style.display = "none";
+  } else if (type === "Planned") {
+    incidentBox.style.display = "none";
+    siteRow.style.display = "block";
+    vanRow.style.display = "none";
+  } else if (type === "Vehicle Maintenance") {
+    incidentBox.style.display = "none";
+    siteRow.style.display = "none";
+    // Show/load vans
+    populateVansForUser();
+  } else {
+    // default
+    incidentBox.style.display = "none";
+    siteRow.style.display = "block";
+    vanRow.style.display = "none";
+  }
+
+  // Hide related errors when switching
+  document.getElementById("incidentError").style.display = "none";
+  document.getElementById("vanError").style.display = "none";
 }
 
 function validateAndSubmit() {
   let valid = true;
-  const desc = document.getElementById("desc").value.trim();
-  const workType = document.getElementById("workType").value;
-  const incident = document.getElementById("incident").value.trim();
+  const descVal = document.getElementById("desc").value.trim();
+  const type = document.getElementById("workType").value;
+  const incidentVal = document.getElementById("incident").value.trim();
+  const vanVal = document.getElementById("van").value;
 
-  if (!desc) {
+  // Description required
+  if (!descVal) {
     document.getElementById("descError").style.display = "block";
     valid = false;
   } else {
     document.getElementById("descError").style.display = "none";
   }
 
-  if (workType === "Reactive" && !incident) {
-    document.getElementById("incidentError").style.display = "block";
-    valid = false;
-  } else {
-    document.getElementById("incidentError").style.display = "none";
+  // Conditional fields
+  if (type === "Reactive") {
+    if (!incidentVal) {
+      document.getElementById("incidentError").style.display = "block";
+      valid = false;
+    } else {
+      document.getElementById("incidentError").style.display = "none";
+    }
+  } else if (type === "Vehicle Maintenance") {
+    const vanRow = document.getElementById("vanRow");
+    if (vanRow.style.display !== "none" && !vanVal) {
+      document.getElementById("vanError").style.display = "block";
+      valid = false;
+    } else {
+      document.getElementById("vanError").style.display = "none";
+    }
   }
 
-  if (valid) {
-    // Replace with your submit logic
-    alert("Form is valid and ready to submit!");
-  }
+  if (!valid) return;
+
+  // If valid, proceed (keep as-is to avoid changing other behaviours)
+  alert("Form is valid and ready to submit!");
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  populateDropdowns();
-  populateSites();
-  let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  document.getElementById("engineer").value = user.replace(".", " ");
+window.addEventListener("DOMContentLoaded", async () => {
+  // Date
   const now = new Date();
   const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
                         (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
                         now.getFullYear();
   document.getElementById("date").value = formattedDate;
+
+  // Role + users
+  await loadRoleAndUsers();
+
+  // Suppliers / Sites
+  await populateSuppliers();
+  await populateSites();
+
+  // Vans
+  await loadVans();
+
+  // Initial UI state
+  toggleUI();
 });
 </script>
 </body>
