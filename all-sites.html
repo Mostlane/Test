@@ -6,103 +6,175 @@
   <title>All Sites</title>
   <style>
     body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
+      font-family: 'Segoe UI', Arial, sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
+      margin: 0;
+      color: #333;
     }
     .container {
-      max-width: 900px;
-      margin: 40px auto;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 20px;
+      max-width: 960px;
+      margin: 24px auto;
+      background: rgba(255,255,255,0.9);
       border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 20px;
     }
     h1 {
       text-align: center;
       color: #004a99;
-      margin-bottom: 20px;
+      margin-top: 4px;
+      margin-bottom: 16px;
+    }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
     }
     #search {
       width: 100%;
       padding: 10px;
       font-size: 16px;
-      margin-bottom: 20px;
       border: 1px solid #ccc;
       border-radius: 6px;
     }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px 18px;
+    }
+    .filters label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap; /* keep checkbox next to its text */
+      font-size: 15px;
+      cursor: pointer;
+    }
     .site-list {
-      max-height: 500px;
+      max-height: 60vh;
       overflow-y: auto;
     }
     .site-card {
       background: #f4f6f8;
-      padding: 15px;
-      margin-bottom: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
       border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
     .site-card p {
       margin: 4px 0;
     }
+    .muted { color: #666; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>All Sites</h1>
-    <input type="text" id="search" placeholder="Search sites...">
+
+    <div class="controls">
+      <input id="search" type="text" placeholder="Search by job number, name, type, address, mileage, drive time…">
+      <div class="filters" id="filters">
+        <label><input type="checkbox" class="filter" value="Retail">Retail</label>
+        <label><input type="checkbox" class="filter" value="ELS">ELS</label>
+        <label><input type="checkbox" class="filter" value="COBRA">COBRA</label>
+        <label><input type="checkbox" class="filter" value="Wenzel’s">Wenzel’s</label>
+        <label><input type="checkbox" class="filter" value="Site">Site</label>
+      </div>
+    </div>
+
     <div class="site-list" id="siteList"></div>
   </div>
 
   <script>
     async function fetchSites() {
-      try {
-        const res = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + Date.now());
-        const data = await res.json();
-        window.allSites = data;
-        renderSites(data);
-      } catch (err) {
-        document.getElementById('siteList').innerHTML = '<p>Error loading sites.</p>';
-      }
+      const url = 'https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + Date.now();
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load sites.json');
+      return await res.json();
+    }
+
+    function currency(n) {
+      return '£' + Number(n).toFixed(2);
+    }
+
+    function calcSubbieFuel(mileage) {
+      const m = Number(mileage);
+      if (isNaN(m)) return '';
+      const result = (m * 2 - 20) * 0.25;
+      return result > 0 ? currency(result) : 'Within 10 mile radius';
+    }
+
+    function calcChargeableMileage(mileage) {
+      const m = Number(mileage);
+      if (isNaN(m)) return '';
+      return currency(m * 2 * 0.25);
     }
 
     function renderSites(sites) {
       const list = document.getElementById('siteList');
       list.innerHTML = '';
-      sites.forEach(site => {
-        const div = document.createElement('div');
-        div.className = 'site-card';
-        div.innerHTML = `
-          <p><strong>Job Number:</strong> ${site.jobNumber || ''}</p>
-          <p><strong>Site Name:</strong> ${site.siteName || ''}</p>
-          <p><strong>Site Type:</strong> ${site.siteType || ''}</p>
-          <p><strong>Address:</strong> ${site.address || ''}</p>
-          <p><strong>Lat:</strong> ${site.lat || ''}</p>
-          <p><strong>Lon:</strong> ${site.lon || ''}</p>
-          <p><strong>Mileage:</strong> ${site.mileage || ''}</p>
-          <p><strong>Drive Time:</strong> ${site.driveTime || ''}</p>
+      if (!sites || !sites.length) {
+        list.innerHTML = '<p class="muted">No sites found.</p>';
+        return;
+      }
+      for (const site of sites) {
+        const card = document.createElement('div');
+        card.className = 'site-card';
+        const jobNumber = site.jobNumber ?? 'N/A';
+        const siteName = site.siteName ?? '';
+        const siteType = site.siteType ?? '';
+        const address = site.address ?? '';
+        const lat = (site.lat ?? '').toString();
+        const lon = (site.lon ?? '').toString();
+        const mileage = site.mileage ?? '';
+        const driveTime = site.driveTime ?? '';
+
+        card.innerHTML = `
+          <p><strong>Job Number:</strong> ${jobNumber}</p>
+          <p><strong>Site Name:</strong> ${siteName}</p>
+          <p><strong>Site Type:</strong> ${siteType}</p>
+          <p><strong>Address:</strong> ${address}</p>
+          <p><strong>Lat:</strong> ${lat}</p>
+          <p><strong>Lon:</strong> ${lon}</p>
+          <p><strong>Mileage:</strong> ${mileage !== '' ? mileage + ' miles' : ''}</p>
+          <p><strong>Drive Time:</strong> ${driveTime}</p>
+          <p><strong>Sub-Contractor Fuel Costs:</strong> ${calcSubbieFuel(mileage)}</p>
+          <p><strong>Chargeable Mileage:</strong> ${calcChargeableMileage(mileage)}</p>
         `;
-        list.appendChild(div);
-      });
+        list.appendChild(card);
+      }
     }
 
-    document.getElementById('search').addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      const filtered = window.allSites.filter(site => 
-        (site.jobNumber || '').toLowerCase().includes(q) ||
-        (site.siteName || '').toLowerCase().includes(q) ||
-        (site.siteType || '').toLowerCase().includes(q) ||
-        (site.address || '').toLowerCase().includes(q) ||
-        (site.lat || '').toString().includes(q) ||
-        (site.lon || '').toString().includes(q) ||
-        (site.mileage || '').toString().includes(q) ||
-        (site.driveTime || '').toLowerCase().includes(q)
-      );
-      renderSites(filtered);
-    });
+    function filterAndSearch(allSites) {
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      const activeTypes = Array.from(document.querySelectorAll('.filter:checked')).map(x => x.value);
+      const out = allSites.filter(site => {
+        const hay = [
+          site.jobNumber, site.siteName, site.siteType,
+          site.address, site.lat, site.lon, site.mileage, site.driveTime
+        ].map(v => (v ?? '').toString().toLowerCase()).join(' | ');
 
-    fetchSites();
+        const matchesText = hay.includes(q);
+        const matchesType = activeTypes.length === 0 || (site.siteType && activeTypes.includes(site.siteType));
+        return matchesText && matchesType;
+      });
+      renderSites(out);
+    }
+
+    (async () => {
+      try {
+        const allSites = await fetchSites();
+        window._allSites = allSites;
+        renderSites(allSites);
+        document.getElementById('search').addEventListener('input', () => filterAndSearch(allSites));
+        document.getElementById('filters').addEventListener('change', () => filterAndSearch(allSites));
+      } catch (e) {
+        document.getElementById('siteList').innerHTML = '<p class="muted">Unable to load sites at this time.</p>';
+      }
+    })();
   </script>
 </body>
 </html>
