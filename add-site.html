@@ -1,10 +1,11 @@
 <!DOCTYPE html>
+
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Add Site Location</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
+<meta charset="utf-8"/>
+<title>Add Site Location</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<style>
     body {
       margin: 0;
       padding: 0;
@@ -60,46 +61,34 @@
 </head>
 <body>
 <div class="container" id="formContainer">
-  <h2>Add New Site Location</h2>
-  <form id="siteForm">
-
-    <label for="siteName">Site Name</label>
-    <input type="text" name="siteName" id="siteName" required>
-
-    <label for="postcodeLookup">Search Postcode</label>
-    <input type="text" id="postcodeLookup" placeholder="e.g. PO15 5RQ">
-    <button type="button" onclick="lookupPostcode()">Find on Map</button>
-
-    <label for="streetAddress">Street Address</label>
-    <input type="text" name="streetAddress" id="streetAddress" readonly required>
-
-    <label for="postcodeField">Postcode</label>
-    <input type="text" name="postcode" id="postcodeField" readonly required>
-
-    <label for="latitude">Latitude</label>
-    <input type="text" name="latitude" id="latitude" readonly required>
-
-    <label for="longitude">Longitude</label>
-    <input type="text" name="longitude" id="longitude" readonly required>
-
-    <input type="hidden" name="mileageFromHQ" id="mileageFromHQ">
-    <input type="hidden" name="driveTime" id="driveTime">
-
-    <p style="margin-top:10px; font-weight:bold;">Starting Postcode: PO15 5RQ</p>
-    <div id="map" style="height:300px; min-height:300px; background:#f0f0f0; border-radius:6px;"></div>
-    <button type="button" onclick="calculateDistance()">Calculate Mileage</button>
-
-    <div class="distanceBox" id="distanceOutput"></div>
-
-    <button type="submit">Submit Site</button>
-  </form>
+<h2>Add New Site Location</h2>
+<form id="siteForm">
+<label for="siteName">Site Name</label>
+<input id="siteName" name="siteName" required="" type="text"/><label for="siteType">Site Type</label><select id="siteType" name="siteType" required=""><option value="Retail">Retail</option><option value="ELS">ELS</option><option value="COBRA">COBRA</option><option value="Wenzel’s">Wenzel’s</option><option value="Site">Site</option></select>
+<label for="postcodeLookup">Search Postcode</label>
+<input id="postcodeLookup" placeholder="e.g. PO15 5RQ" type="text"/>
+<button onclick="lookupPostcode()" type="button">Find on Map</button>
+<label for="streetAddress">Street Address</label>
+<input id="streetAddress" name="streetAddress" readonly="" required="" type="text"/>
+<label for="postcodeField">Postcode</label>
+<input id="postcodeField" name="postcode" readonly="" required="" type="text"/>
+<label for="latitude">Latitude</label>
+<input id="latitude" name="latitude" readonly="" required="" type="text"/>
+<label for="longitude">Longitude</label>
+<input id="longitude" name="longitude" readonly="" required="" type="text"/>
+<input id="mileageFromHQ" name="mileageFromHQ" type="hidden"/>
+<input id="driveTime" name="driveTime" type="hidden"/>
+<p style="margin-top:10px; font-weight:bold;">Starting Postcode: PO15 5RQ</p>
+<div id="map" style="height:300px; min-height:300px; background:#f0f0f0; border-radius:6px;"></div>
+<button onclick="calculateDistance()" type="button">Calculate Mileage</button>
+<div class="distanceBox" id="distanceOutput"></div>
+<button type="submit">Submit Site</button>
+</form>
 </div>
-
 <div class="container hidden" id="blockedContainer">
-  <h2>Access Denied</h2>
-  <p>This page is only available to office staff.</p>
+<h2>Access Denied</h2>
+<p>This page is only available to office staff.</p>
 </div>
-
 <script>
   let map, marker = null, destination = null;
   let hq;
@@ -204,6 +193,7 @@
     e.preventDefault();
 
     const siteName = document.getElementById("siteName").value;
+    const siteType = document.getElementById("siteType").value;
     const streetAddress = document.getElementById("streetAddress").value;
     const postcode = document.getElementById("postcodeField").value;
     const latitude = document.getElementById("latitude").value;
@@ -213,6 +203,7 @@
 
     const formData = new URLSearchParams();
     formData.append("siteName", siteName);
+    formData.append("siteType", siteType);
     formData.append("streetAddress", streetAddress);
     formData.append("postcode", postcode);
     formData.append("latitude", latitude);
@@ -235,7 +226,6 @@
       sessionStorage.setItem("lastLongitude", data.longitude || longitude);
       sessionStorage.setItem("lastMileage", data.mileageFromHQ || mileage);
       sessionStorage.setItem("lastDriveTime", data.driveTime || driveTime);
-
       window.location.href = "site-added.html";
     })
     .catch(err => {
@@ -244,8 +234,7 @@
     });
   });
 </script>
-<script async defer id="mapsScript"
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&callback=initMap">
+<script async="" defer="" id="mapsScript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&amp;callback=initMap">
 </script>
 </body>
 </html>
