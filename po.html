@@ -1,340 +1,179 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Generate Purchase Order Reference</title>
+  <meta charset="UTF-8">
+  <title>Purchase Order</title>
   <style>
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      font-family: Arial, sans-serif;
+      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
+      background-color: #e6e8eb;
       margin: 0;
-      padding: 40px 20px;
+      padding: 0;
     }
-    .main-body {
-      max-width: 500px;
-      margin: auto;
-      background: rgba(255,255,255,0.6);
-      padding: 30px;
-      border-radius: 8px;
+    .container {
+      background: rgba(255,255,255,0.85);
+      margin: 50px auto;
+      padding: 20px;
+      border-radius: 10px;
+      width: 90%;
+      max-width: 600px;
     }
     h1 {
       text-align: center;
-      color: #003366;
+      margin-bottom: 20px;
     }
     label {
       display: block;
-      margin-top: 20px;
+      margin-top: 15px;
       font-weight: bold;
-      color: #003366;
     }
-    input, select {
+    select, input, textarea, button {
       width: 100%;
       padding: 10px;
-      font-size: 16px;
       margin-top: 5px;
-      border-radius: 6px;
       border: 1px solid #ccc;
-      box-sizing: border-box;
-    }
-    .button {
-      margin-top: 30px;
-      padding: 12px;
-      width: 100%;
-      background-color: rgba(0, 74, 153, 0.6);
-      color: white;
-      font-size: 18px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      text-align: center;
-      text-decoration: none;
-    }
-    .error {
-      color: #b30000;
+      border-radius: 5px;
       font-size: 14px;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .hidden {
       display: none;
-      margin-top: 5px;
     }
   </style>
 </head>
 <body>
-  <div class="main-body">
-    <h1>Generate Purchase Order Reference</h1>
-    <form id="poForm" onsubmit="event.preventDefault(); validateAndSubmit();">
-      <!-- Engineer input (default for non-office) -->
-      <div id="engineerInputRow">
-        <label>Engineer:</label>
-        <input type="text" id="engineer" readonly />
-      </div>
-      <!-- Engineer dropdown (Office/Admin only) -->
-      <div id="engineerSelectRow" style="display:none;">
-        <label>Engineer:</label>
-        <select id="engineerSelect"></select>
-      </div>
+  <div class="container">
+    <h1>Purchase Order</h1>
+    <form id="poForm">
+      <label for="engineer">Engineer</label>
+      <select id="engineer" name="engineer"></select>
 
-      <label>Date:</label>
-      <input type="text" id="date" readonly />
-
-      <label>Work Type:</label>
-      <select id="workType" onchange="toggleUI()">
-        <option value="">Select type</option>
+      <label for="workType">Work Type</label>
+      <select id="workType" name="workType" required>
+        <option value="">-- Select --</option>
         <option value="Reactive">Reactive</option>
         <option value="Planned">Planned</option>
         <option value="Vehicle Maintenance">Vehicle Maintenance</option>
       </select>
 
-      <!-- Incident (Reactive only) -->
-      <div id="incidentBox" style="display:none;">
-        <label>Incident Number:</label>
-        <input type="text" id="incident" />
-        <div id="incidentError" class="error">Incident Number is required for Reactive jobs.</div>
+      <div id="incidentDiv" class="hidden">
+        <label for="incidentNumber">Incident Number</label>
+        <input type="text" id="incidentNumber" name="incidentNumber">
       </div>
 
-      <!-- Site (Reactive/Planned) -->
-      <div id="siteRow">
-        <label>Site:</label>
-        <select id="site">
-          <option value="" disabled selected>Select a site…</option>
-        </select>
+      <div id="siteDiv">
+        <label for="site">Site</label>
+        <select id="site" name="site"></select>
       </div>
 
-      <!-- Van (Vehicle Maintenance only) -->
-      <div id="vanRow" style="display:none;">
-        <label>Van Registration:</label>
-        <select id="van">
-          <option value="" disabled selected>Select a van…</option>
-        </select>
-        <div id="vanError" class="error">Van registration is required for Vehicle Maintenance.</div>
+      <div id="vehicleDiv" class="hidden">
+        <label for="vehicle">Vehicle Registration</label>
+        <select id="vehicle" name="vehicle"></select>
       </div>
 
-      <label>Supplier:</label>
-      <select id="supplier">
-        <option value="" disabled selected>Select a supplier…</option>
-      </select>
+      <label for="supplier">Supplier</label>
+      <select id="supplier" name="supplier" required></select>
 
-      <label>Short Description:</label>
-      <input type="text" id="desc" />
-      <div id="descError" class="error">Short Description is required.</div>
+      <label for="description">Short Description</label>
+      <textarea id="description" name="description" required></textarea>
 
-      <button type="submit" class="button">Submit</button>
+      <input type="hidden" id="lat" name="lat">
+      <input type="hidden" id="lon" name="lon">
+
+      <button type="submit" id="submitBtn" disabled>Submit</button>
     </form>
   </div>
 
-<script>
-async function fetchTextFile(url) {
-  const res = await fetch(url + "?v=" + Date.now());
-  return res.ok ? (await res.text()).split("\n").filter(Boolean) : [];
-}
-async function fetchJSON(url) {
-  const res = await fetch(url + "?v=" + Date.now());
-  return res.ok ? await res.json() : [];
-}
+  <script>
+    // Fetch Sites
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + new Date().getTime())
+      .then(res => res.json())
+      .then(data => {
+        const siteSelect = document.getElementById('site');
+        siteSelect.innerHTML = '<option value="">-- Select Site --</option>';
+        data.forEach(site => {
+          const opt = document.createElement('option');
+          opt.value = site.siteName;
+          opt.textContent = site.siteName;
+          siteSelect.appendChild(opt);
+        });
+      });
 
-// Globals
-let isOfficeOrAdmin = false;
-let allVans = [];
+    // Fetch Suppliers
+    fetch('https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.json?v=' + new Date().getTime())
+      .then(res => res.json())
+      .then(data => {
+        const supplierSelect = document.getElementById('supplier');
+        supplierSelect.innerHTML = '<option value="">-- Select Supplier --</option>';
+        data.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.supplierNumber;
+          opt.textContent = s.supplierNumber + ' - ' + s.supplierName;
+          supplierSelect.appendChild(opt);
+        });
+      });
 
-function setToday() {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, '0');
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  document.getElementById("date").value = dd + "/" + mm + "/" + yyyy;
-}
-
-async function loadRoleAndUsers() {
-  // Determine role
-  const userKey = sessionStorage.getItem("mostlaneUser") || "";
-  const roleLines = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt");
-  const roleLine = roleLines.find(line => line.includes(userKey));
-  isOfficeOrAdmin = !!(roleLine && (roleLine.includes("Office") || roleLine.includes("Admin")));
-
-  const engineerInputRow = document.getElementById("engineerInputRow");
-  const engineerSelectRow = document.getElementById("engineerSelectRow");
-
-  if (isOfficeOrAdmin) {
-    // Office -> show dropdown populated from Users.txt
-    engineerInputRow.style.display = "none";
-    engineerSelectRow.style.display = "block";
-
-    const users = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt");
-    const sel = document.getElementById("engineerSelect");
-    sel.innerHTML = "";
-
-    users.forEach(line => {
-      const parts = line.split("|");
-      const usernameRaw = (parts[0] || "").trim();
-      if (!usernameRaw) return;
-      const display = usernameRaw.replace(/\./g, " ");
-      const opt = document.createElement("option");
-      opt.value = display;
-      opt.textContent = display;
-      sel.appendChild(opt);
+    // Work Type logic
+    document.getElementById('workType').addEventListener('change', function() {
+      const type = this.value;
+      document.getElementById('incidentDiv').classList.toggle('hidden', type !== 'Reactive');
+      document.getElementById('siteDiv').classList.toggle('hidden', type === 'Vehicle Maintenance');
+      document.getElementById('vehicleDiv').classList.toggle('hidden', type !== 'Vehicle Maintenance');
     });
 
-    // Auto-select current session user (dot->space) if found; else default to first
-    const currentDisplay = (userKey || "").replace(/\./g, " ");
-    if (currentDisplay && sel.options.length) {
-      let matched = false;
-      for (let i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value.toLowerCase() === currentDisplay.toLowerCase()) {
-          sel.selectedIndex = i;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) sel.selectedIndex = 0;
-    }
-  } else {
-    // Field -> readonly input with display name
-    engineerInputRow.style.display = "block";
-    engineerSelectRow.style.display = "none";
-    document.getElementById("engineer").value = (userKey || "Unknown").replace(/\./g, " ");
-  }
-}
-
-async function populateSuppliers() {
-  const data = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
-  const el = document.getElementById("supplier");
-  if (!el) return;
-  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-  (data || []).forEach(name => {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    el.appendChild(opt);
-  });
-}
-
-async function populateSites() {
-  const data = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
-  const el = document.getElementById("site");
-  if (!el) return;
-  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-  (data || []).forEach(site => {
-    const num = site.siteNumber || site.jobNumber || site.code || "";
-    const name = site.siteName || site.name || "";
-    const label = (num ? (num + " – ") : "") + (name || "Unknown Site");
-    const opt = document.createElement("option");
-    opt.value = label;
-    opt.textContent = label;
-    el.appendChild(opt);
-  });
-}
-
-async function loadVans() {
-  allVans = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/vans.json");
-}
-
-function populateVansForUser() {
-  const vanEl = document.getElementById("van");
-  // Clear options except placeholder
-  vanEl.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-
-  const userKey = sessionStorage.getItem("mostlaneUser") || "";
-  const displayUser = userKey.replace(/\./g, " ");
-
-  let candidates = [];
-  if (isOfficeOrAdmin) {
-    candidates = (allVans || []).slice();
-  } else {
-    candidates = (allVans || []).filter(v =>
-      (v.driver && v.driver.toLowerCase() === displayUser.toLowerCase()) ||
-      (v.driver && v.driver.toLowerCase() === "fleet vehicle")
-    );
-  }
-
-  const vanRow = document.getElementById("vanRow");
-  if (!candidates.length) {
-    vanRow.style.display = "none";
-    return;
-  }
-  vanRow.style.display = "block";
-  candidates.forEach(v => {
-    const opt = document.createElement("option");
-    opt.value = v.reg;
-    opt.textContent = v.reg; // reg only
-    vanEl.appendChild(opt);
-  });
-}
-
-function toggleUI() {
-  const type = document.getElementById("workType").value;
-  const incidentBox = document.getElementById("incidentBox");
-  const siteRow = document.getElementById("siteRow");
-  const vanRow = document.getElementById("vanRow");
-
-  if (type === "Reactive") {
-    incidentBox.style.display = "block";
-    siteRow.style.display = "block";
-    vanRow.style.display = "none";
-  } else if (type === "Planned") {
-    incidentBox.style.display = "none";
-    siteRow.style.display = "block";
-    vanRow.style.display = "none";
-  } else if (type === "Vehicle Maintenance") {
-    incidentBox.style.display = "none";
-    siteRow.style.display = "none";
-    populateVansForUser();
-  } else {
-    incidentBox.style.display = "none";
-    siteRow.style.display = "block";
-    vanRow.style.display = "none";
-  }
-
-  // Hide error messages when switching
-  document.getElementById("incidentError").style.display = "none";
-  document.getElementById("vanError").style.display = "none";
-}
-
-function validateAndSubmit() {
-  let valid = true;
-  const descVal = document.getElementById("desc").value.trim();
-  const type = document.getElementById("workType").value;
-  const incidentVal = document.getElementById("incident").value.trim();
-  const vanVal = document.getElementById("van").value;
-
-  // Description required
-  if (!descVal) {
-    document.getElementById("descError").style.display = "block";
-    valid = false;
-  } else {
-    document.getElementById("descError").style.display = "none";
-  }
-
-  if (type === "Reactive") {
-    if (!incidentVal) {
-      document.getElementById("incidentError").style.display = "block";
-      valid = false;
+    // Autofill Engineer from sessionStorage
+    const engineerSelect = document.getElementById('engineer');
+    const storedUser = sessionStorage.getItem('mostlaneUser');
+    if (storedUser) {
+      const displayName = storedUser.replace('.', ' ');
+      engineerSelect.innerHTML = '<option selected>' + displayName + '</option>';
     } else {
-      document.getElementById("incidentError").style.display = "none";
+      engineerSelect.innerHTML = '<option selected>Engineer Name</option>';
     }
-  } else if (type === "Vehicle Maintenance") {
-    const vanRow = document.getElementById("vanRow");
-    if (vanRow.style.display !== "none" && !vanVal) {
-      document.getElementById("vanError").style.display = "block";
-      valid = false;
-    } else {
-      document.getElementById("vanError").style.display = "none";
+
+    // Geolocation capture
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('lat').value = pos.coords.latitude;
+        document.getElementById('lon').value = pos.coords.longitude;
+      });
     }
-  }
 
-  if (!valid) return;
+    // Enable Submit if required fields are completed
+    const form = document.getElementById('poForm');
+    form.addEventListener('input', () => {
+      const workType = document.getElementById('workType').value;
+      const description = document.getElementById('description').value.trim();
+      const incident = document.getElementById('incidentNumber').value.trim();
+      let valid = description && workType;
+      if (workType === 'Reactive') valid = valid && incident;
+      document.getElementById('submitBtn').disabled = !valid;
+    });
 
-  // Keep existing behaviour (no webhook changes requested)
-  alert("Form is valid and ready to submit!");
-}
-
-window.addEventListener("DOMContentLoaded", async () => {
-  setToday();                 // Date auto-fill
-  await loadRoleAndUsers();   // Engineer field logic
-  await populateSuppliers();  // Suppliers from suppliers.txt
-  await populateSites();      // Sites from sites.json
-  await loadVans();           // Vans from vans.json
-  toggleUI();                 // Ensure correct initial visibility
-});
-</script>
+    // Submit
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const formData = new FormData(form);
+      fetch("https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/", {
+        method: "POST",
+        body: new URLSearchParams(formData)
+      }).then(() => {
+        alert("Purchase Order submitted!");
+        form.reset();
+      });
+    });
+  </script>
 </body>
 </html>
