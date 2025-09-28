@@ -164,13 +164,32 @@ async function loadRoleAndUsers() {
     engineerInputRow.style.display = "none";
     engineerSelectRow.style.display = "block";
 
-    const users = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/users.txt");
-    const sel = document.getElementById("engineerSelect");
-    sel.innerHTML = "";
-    users.forEach(line => {
-      let userKey = sessionStorage.getItem("mostlaneUser") || "";
-      const currentDisplay = userKey.replace(/\./g, " ");
-      const parts = line.split("|");
+    const users = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt");
+const sel = document.getElementById("engineerSelect");
+sel.innerHTML = "";
+// Build options from first field (username), replacing dots with spaces
+users.forEach(line => {
+  const parts = line.split("|");
+  if (parts.length >= 1) {
+    const usernameRaw = (parts[0] || "").trim();
+    if (!usernameRaw) return;
+    const display = usernameRaw.replace(/\./g, " ");
+    const opt = document.createElement("option");
+    opt.value = display;
+    opt.textContent = display;
+    sel.appendChild(opt);
+  }
+});
+// Auto-select current session user if present
+let userKey = sessionStorage.getItem("mostlaneUser") || "";
+const currentDisplay = userKey.replace(/\./g, " ");
+if (currentDisplay) {
+  const match = Array.from(sel.options).find(o => o.value.toLowerCase() === currentDisplay.toLowerCase());
+  if (match) sel.value = match.value; else if (sel.options.length) sel.selectedIndex = 0;
+} else if (sel.options.length) {
+  sel.selectedIndex = 0;
+}
+const parts = line.split("|");
       if (parts.length >= 1) {
         const username = parts[0] || "";
         const display = (parts[3] && parts[3].trim().length) ? parts[3] : username.replace(/\./g, " ");
