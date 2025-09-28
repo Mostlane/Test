@@ -34,8 +34,6 @@
       padding: 10px;
       font-size: 16px;
       margin-top: 5px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
     }
     .button {
       margin-top: 30px;
@@ -47,119 +45,50 @@
       border: none;
       border-radius: 6px;
       cursor: pointer;
-      text-align: center;
-      text-decoration: none;
-    }
-    .small-button {
-      margin-top: 15px;
-      padding: 6px 10px;
-      font-size: 13px;
-      background-color: #ccc;
-      color: #333;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      width: auto;
-      display: block;
-      margin-left: auto;
-      margin-right: auto;
     }
     .error {
-      margin-top: 15px;
-      color: red;
-      font-weight: bold;
+      color: #b30000;
+      font-size: 14px;
       display: none;
-    }
-    .modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.5);
-      justify-content: center;
-      align-items: center;
-    }
-    .modal-content {
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      text-align: center;
-      max-width: 400px;
-    }
-    .modal-content h3 {
-      margin-bottom: 15px;
-      color: #003366;
-    }
-    .modal-content button {
-      margin: 10px;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .continue-btn {
-      background: #004a99;
-      color: white;
-    }
-    .cancel-btn {
-      background: #ccc;
-      color: black;
+      margin-top: 5px;
     }
   </style>
 </head>
 <body>
   <div class="main-body">
     <h1>Generate Purchase Order Reference</h1>
-    <form id="poForm">
+    <form id="poForm" onsubmit="event.preventDefault(); validateAndSubmit();">
       <label>Engineer:</label>
       <input type="text" id="engineer" readonly />
 
       <label>Date:</label>
       <input type="text" id="date" readonly />
 
-      <label>Site:</label>
-      <select id="site">
-        <option value="" disabled selected>Select a site…</option>
-      </select>
-
-      <label>Supplier:</label>
-      <select id="supplier">
-        <option value="" disabled selected>Select a supplier…</option>
-      </select>
-
       <label>Work Type:</label>
-      <select id="workType" required>
-        <option value="" disabled selected>Select work type…</option>
+      <select id="workType" onchange="toggleIncident()">
+        <option value="">Select type</option>
         <option value="Reactive">Reactive</option>
-        <option value="Project">Project</option>
+        <option value="Planned">Planned</option>
       </select>
 
-      <div id="incidentRow" style="display:none;">
+      <div id="incidentBox" style="display:none;">
         <label>Incident Number (if applicable):</label>
         <input type="text" id="incident" />
+        <div id="incidentError" class="error">Incident Number is required for Reactive jobs.</div>
       </div>
+
+      <label>Site Name:</label>
+      <select id="site"></select>
+
+      <label>Supplier:</label>
+      <select id="supplier"></select>
 
       <label>Short Description:</label>
       <input type="text" id="desc" />
+      <div id="descError" class="error">Short Description is required.</div>
 
-      <input type="hidden" id="latitude" name="latitude" />
-      <input type="hidden" id="longitude" name="longitude" />
-
-      <button type="submit" id="submitBtn" class="button" disabled>Submit</button>
-      <button type="button" id="personalBtn" class="small-button">Personal Purchase</button>
-      <p class="error" id="locationError">⚠️ Location is required to submit a PO. Please allow location access.</p>
+      <button type="submit" class="button">Submit</button>
     </form>
-  </div>
-
-  <div id="personalModal" class="modal">
-    <div class="modal-content">
-      <h3>Redirect to Personal Purchase Form</h3>
-      <p>You are being redirected to the form for personal purchases. Do you want to continue?</p>
-      <button class="continue-btn" id="continueBtn">Continue</button>
-      <button class="cancel-btn" id="cancelBtn">Back</button>
-    </div>
   </div>
 
 <script>
@@ -167,136 +96,83 @@ async function fetchTextFile(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? (await res.text()).split("\n").filter(Boolean) : [];
 }
-async function fetchJSON(url) {
+
+async function fetchJSONFile(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? await res.json() : [];
 }
 
-async function populateSuppliers() {
-  const data = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
-  const el = document.getElementById("supplier");
-  if (!el) return;
-  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-  (data || []).forEach(name => {
+async function populateDropdowns() {
+  const suppliers = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
+  const supplierDropdown = document.getElementById("supplier");
+  supplierDropdown.innerHTML = "";
+  suppliers.forEach(supplier => {
     const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    el.appendChild(opt);
+    opt.value = supplier;
+    opt.textContent = supplier;
+    supplierDropdown.appendChild(opt);
   });
 }
 
 async function populateSites() {
-  const data = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
-  const el = document.getElementById("site");
-  if (!el) return;
-  el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-  (data || []).forEach(site => {
-    const num = site.siteNumber || site.jobNumber || site.code || "";
-    const name = site.siteName || site.name || "";
-    const label = (num ? (num + " – ") : "") + (name || "Unknown Site");
+  const siteDropdown = document.getElementById("site");
+  siteDropdown.innerHTML = "";
+  const sites = await fetchJSONFile("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
+  sites.forEach(site => {
     const opt = document.createElement("option");
-    opt.value = label;
-    opt.textContent = label;
-    el.appendChild(opt);
+    opt.value = site.siteName;
+    opt.textContent = site.jobNumber + " " + site.siteName;
+    siteDropdown.appendChild(opt);
   });
 }
 
-function setToday() {
+function toggleIncident() {
+  const workType = document.getElementById("workType").value;
+  const incidentBox = document.getElementById("incidentBox");
+  if (workType === "Reactive") {
+    incidentBox.style.display = "block";
+  } else {
+    incidentBox.style.display = "none";
+    document.getElementById("incidentError").style.display = "none";
+  }
+}
+
+function validateAndSubmit() {
+  let valid = true;
+  const desc = document.getElementById("desc").value.trim();
+  const workType = document.getElementById("workType").value;
+  const incident = document.getElementById("incident").value.trim();
+
+  if (!desc) {
+    document.getElementById("descError").style.display = "block";
+    valid = false;
+  } else {
+    document.getElementById("descError").style.display = "none";
+  }
+
+  if (workType === "Reactive" && !incident) {
+    document.getElementById("incidentError").style.display = "block";
+    valid = false;
+  } else {
+    document.getElementById("incidentError").style.display = "none";
+  }
+
+  if (valid) {
+    // Replace with your submit logic
+    alert("Form is valid and ready to submit!");
+  }
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  populateDropdowns();
+  populateSites();
+  let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  document.getElementById("engineer").value = user.replace(".", " ");
   const now = new Date();
   const formattedDate = now.getDate().toString().padStart(2, '0') + '/' +
                         (now.getMonth() + 1).toString().padStart(2, '0') + '/' +
                         now.getFullYear();
   document.getElementById("date").value = formattedDate;
-}
-
-function requestLocation() {
-  if (!navigator.geolocation) {
-    document.getElementById("locationError").style.display = "block";
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    pos => {
-      document.getElementById("latitude").value = pos.coords.latitude.toFixed(6);
-      document.getElementById("longitude").value = pos.coords.longitude.toFixed(6);
-      document.getElementById("submitBtn").disabled = false;
-    },
-    err => {
-      document.getElementById("locationError").style.display = "block";
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
-}
-
-function toggleIncidentBox() {
-  const type = document.getElementById("workType").value;
-  document.getElementById("incidentRow").style.display = (type === "Reactive") ? "block" : "none";
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  user = user.replace(/\./g, " ");
-  document.getElementById("engineer").value = user;
-
-  populateSites();
-  populateSuppliers();
-
-  setToday();
-  requestLocation();
-
-  document.getElementById("workType").addEventListener("change", toggleIncidentBox);
-
-  document.getElementById("personalBtn").addEventListener("click", () => {
-    document.getElementById("personalModal").style.display = "flex";
-  });
-  document.getElementById("continueBtn").addEventListener("click", () => {
-    window.location.href = "https://form.jotform.com/250527962516057";
-  });
-  document.getElementById("cancelBtn").addEventListener("click", () => {
-    document.getElementById("personalModal").style.display = "none";
-  });
-
-  document.getElementById("poForm").addEventListener("submit", async function(e) {
-    e.preventDefault();
-    const lat = document.getElementById("latitude").value;
-    const lon = document.getElementById("longitude").value;
-    if (!lat || !lon) {
-      document.getElementById("locationError").style.display = "block";
-      return;
-    }
-    const workType = document.getElementById("workType").value;
-    if (!workType) {
-      alert("Please select Work Type");
-      return;
-    }
-    const requestId = Date.now().toString();
-    sessionStorage.setItem("lastPORequestId", requestId);
-
-    const formData = new URLSearchParams();
-    formData.append("requestId", requestId);
-    formData.append("engineer", document.getElementById("engineer").value);
-    formData.append("date", document.getElementById("date").value);
-    formData.append("site", document.getElementById("site").value);
-    formData.append("supplier", document.getElementById("supplier").value);
-    formData.append("workType", workType);
-    if (workType === "Reactive") {
-      formData.append("incident", document.getElementById("incident").value);
-    }
-    formData.append("desc", document.getElementById("desc").value);
-    formData.append("latitude", lat);
-    formData.append("longitude", lon);
-
-    try {
-      await fetch("https://hooks.zapier.com/hooks/catch/20261714/u1093v6/", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString()
-      });
-      window.location.href = "po-menu.html";
-    } catch (err) {
-      alert("❌ Failed to submit PO. Please try again.");
-      console.error(err);
-    }
-  });
 });
 </script>
 </body>
