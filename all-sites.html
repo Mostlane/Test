@@ -23,8 +23,7 @@
     h1 {
       text-align: center;
       color: #004a99;
-      margin-top: 4px;
-      margin-bottom: 16px;
+      margin: 6px 0 16px 0;
     }
     .controls {
       display: flex;
@@ -89,31 +88,68 @@
   </div>
 
   <script>
-    async function fetchSites() {
-      const url = 'https://raw.githubusercontent.com/Mostlane/Test/main/sites.json?v=' + Date.now();
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Failed to load sites.json');
-      return await res.json();
-    }
+    const GITHUB_BASE = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
+    const SITES_URL = GITHUB_BASE + 'sites.json';
+    const EMPLOYMENT_URL = GITHUB_BASE + 'employment.txt';
+    const ROLE_URL = GITHUB_BASE + 'role-type.txt';
 
     function currency(n) {
       return '£' + Number(n).toFixed(2);
     }
 
-    function calcSubbieFuel(mileage) {
+    function calcSubbieDailyFuel(mileage) {
       const m = Number(mileage);
       if (isNaN(m)) return '';
       const result = (m * 2 - 20) * 0.25;
       return result > 0 ? currency(result) : 'Within 10 mile radius';
     }
 
-    function calcChargeableMileage(mileage) {
+    function calcMostlaneFuel(mileage) {
       const m = Number(mileage);
       if (isNaN(m)) return '';
       return currency(m * 2 * 0.25);
     }
 
-    function renderSites(sites) {
+    async function fetchJSON(url) {
+      const res = await fetch(url + '?v=' + Date.now());
+      if (!res.ok) throw new Error('Failed to fetch ' + url);
+      return res.json();
+    }
+
+    async function fetchText(url) {
+      const res = await fetch(url + '?v=' + Date.now());
+      if (!res.ok) throw new Error('Failed to fetch ' + url);
+      return res.text();
+    }
+
+    function parseEmployment(txt) {
+      // Lines like: "Jamie.Line - Employed"
+      const map = {};
+      txt.split(/\\r?\\n/).forEach(line => {
+        const clean = line.trim();
+        if (!clean) return;
+        const parts = clean.split('-');
+        if (parts.length >= 2) {
+          const user = parts[0].trim();            // e.g., "Jamie.Line"
+          const type = parts[1].trim();            // e.g., "Employed" or "SelfEmployed"
+          map[user] = type;
+        }
+      });
+      return map;
+    }
+
+    function detectAdminFromRoles(txt, username) {
+      // A line containing the username and containing "Admin" or "Office" counts as admin.
+      const lines = txt.split(/\\r?\\n/);
+      for (const line of lines) {
+        if (line.includes(username) && (/(Admin|Office)/i).test(line)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function renderSites(sites, showSubbie, showMostlane) {
       const list = document.getElementById('siteList');
       list.innerHTML = '';
       if (!sites || !sites.length) {
@@ -132,6 +168,16 @@
         const mileage = site.mileage ?? '';
         const driveTime = site.driveTime ?? '';
 
+        let subbieHTML = '';
+        if (showSubbie) {
+          subbieHTML = `<p><strong>Sub-Contractor Daily Fuel:</strong> ${calcSubbieDailyFuel(mileage)}</p>`;
+        }
+
+        let mostlaneHTML = '';
+        if (showMostlane) {
+          mostlaneHTML = `<p><strong>Mostlane Fuel:</strong> ${calcMostlaneFuel(mileage)}</p>`;
+        }
+
         card.innerHTML = `
           <p><strong>Job Number:</strong> ${jobNumber}</p>
           <p><strong>Site Name:</strong> ${siteName}</p>
@@ -141,14 +187,14 @@
           <p><strong>Lon:</strong> ${lon}</p>
           <p><strong>Mileage:</strong> ${mileage !== '' ? mileage + ' miles' : ''}</p>
           <p><strong>Drive Time:</strong> ${driveTime}</p>
-          <p><strong>Sub-Contractor Fuel Costs:</strong> ${calcSubbieFuel(mileage)}</p>
-          <p><strong>Chargeable Mileage:</strong> ${calcChargeableMileage(mileage)}</p>
+          ${subbieHTML}
+          ${mostlaneHTML}
         `;
         list.appendChild(card);
       }
     }
 
-    function filterAndSearch(allSites) {
+    function filterAndSearch(allSites, showSubbie, showMostlane) {
       const q = document.getElementById('search').value.trim().toLowerCase();
       const activeTypes = Array.from(document.querySelectorAll('.filter:checked')).map(x => x.value);
       const out = allSites.filter(site => {
@@ -161,16 +207,38 @@
         const matchesType = activeTypes.length === 0 || (site.siteType && activeTypes.includes(site.siteType));
         return matchesText && matchesType;
       });
-      renderSites(out);
+      renderSites(out, showSubbie, showMostlane);
     }
 
     (async () => {
       try {
-        const allSites = await fetchSites();
-        window._allSites = allSites;
-        renderSites(allSites);
-        document.getElementById('search').addEventListener('input', () => filterAndSearch(allSites));
-        document.getElementById('filters').addEventListener('change', () => filterAndSearch(allSites));
+        const username = sessionStorage.getItem('mostlaneUser') || '';
+        // Load data
+        const [sites, employmentTxt, roleTxt] = await Promise.all([
+          fetchJSON(SITES_URL),
+          fetchText(EMPLOYMENT_URL),
+          fetchText(ROLE_URL)
+        ]);
+
+        // Determine employment and admin
+        const empMap = parseEmployment(employmentTxt);
+        const employmentType = empMap[username] || 'Employed'; // default to Employed
+        const isAdmin = detectAdminFromRoles(roleTxt, username);
+
+        // Visibility rules
+        const showSubbie = employmentType !== 'Employed'; // hide for Employed
+        const showMostlane = isAdmin;                     // only admins
+
+        // Initial render + wire up UI
+        window._allSites = sites;
+        renderSites(sites, showSubbie, showMostlane);
+
+        document.getElementById('search').addEventListener('input', () => {
+          filterAndSearch(window._allSites, showSubbie, showMostlane);
+        });
+        document.getElementById('filters').addEventListener('change', () => {
+          filterAndSearch(window._allSites, showSubbie, showMostlane);
+        });
       } catch (e) {
         document.getElementById('siteList').innerHTML = '<p class="muted">Unable to load sites at this time.</p>';
       }
