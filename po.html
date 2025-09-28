@@ -70,7 +70,6 @@
       font-weight: bold;
       display: none;
     }
-    /* Modal popup */
     .modal {
       display: none;
       position: fixed;
@@ -145,20 +144,15 @@
       <label>Short Description:</label>
       <input type="text" id="desc" />
 
-      <!-- Hidden fields for location -->
       <input type="hidden" id="latitude" name="latitude" />
       <input type="hidden" id="longitude" name="longitude" />
 
       <button type="submit" id="submitBtn" class="button" disabled>Submit</button>
-
-      <!-- Smaller Personal Purchase button -->
       <button type="button" id="personalBtn" class="small-button">Personal Purchase</button>
-
       <p class="error" id="locationError">⚠️ Location is required to submit a PO. Please allow location access.</p>
     </form>
   </div>
 
-  <!-- Modal popup -->
   <div id="personalModal" class="modal">
     <div class="modal-content">
       <h3>Redirect to Personal Purchase Form</h3>
@@ -169,21 +163,21 @@
   </div>
 
 <script>
+async function fetchTextFile(url) {
+  const res = await fetch(url + "?v=" + Date.now());
+  return res.ok ? (await res.text()).split("\n").filter(Boolean) : [];
+}
 async function fetchJSON(url) {
   const res = await fetch(url + "?v=" + Date.now());
   return res.ok ? await res.json() : [];
 }
 
 async function populateSuppliers() {
-  // suppliers.json: array of strings or objects with { name }
-  const data = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.json");
+  const data = await fetchTextFile("https://raw.githubusercontent.com/Mostlane/Test/main/suppliers.txt");
   const el = document.getElementById("supplier");
   if (!el) return;
-  // remove any placeholder except the first disabled option
   el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
-  (data || []).forEach(item => {
-    const name = (typeof item === "string") ? item : (item.name || item.supplier || "");
-    if (!name) return;
+  (data || []).forEach(name => {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
@@ -192,11 +186,9 @@ async function populateSuppliers() {
 }
 
 async function populateSites() {
-  // sites.json: [{ siteNumber or jobNumber or code, siteName or name }]
   const data = await fetchJSON("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json");
   const el = document.getElementById("site");
   if (!el) return;
-  // remove any placeholder except the first disabled option
   el.querySelectorAll("option:not([disabled])").forEach(o => o.remove());
   (data || []).forEach(site => {
     const num = site.siteNumber || site.jobNumber || site.code || "";
@@ -241,23 +233,18 @@ function toggleIncidentBox() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  // Fill engineer name from session
   let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
   user = user.replace(/\./g, " ");
   document.getElementById("engineer").value = user;
 
-  // Populate dropdowns from JSON
   populateSites();
   populateSuppliers();
 
-  // Date & location
   setToday();
   requestLocation();
 
-  // Toggle incident input
   document.getElementById("workType").addEventListener("change", toggleIncidentBox);
 
-  // Personal purchase modal
   document.getElementById("personalBtn").addEventListener("click", () => {
     document.getElementById("personalModal").style.display = "flex";
   });
@@ -268,23 +255,19 @@ window.addEventListener("DOMContentLoaded", () => {
     document.getElementById("personalModal").style.display = "none";
   });
 
-  // Submit
   document.getElementById("poForm").addEventListener("submit", async function(e) {
     e.preventDefault();
-
     const lat = document.getElementById("latitude").value;
     const lon = document.getElementById("longitude").value;
     if (!lat || !lon) {
       document.getElementById("locationError").style.display = "block";
       return;
     }
-
     const workType = document.getElementById("workType").value;
     if (!workType) {
       alert("Please select Work Type");
       return;
     }
-
     const requestId = Date.now().toString();
     sessionStorage.setItem("lastPORequestId", requestId);
 
