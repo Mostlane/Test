@@ -42,7 +42,7 @@
   <div class="main-body">
     <h1>Generate Purchase Order</h1>
     <form>
-      <label>Engineer:</label><input type="text" readonly value="Engineer Name"/>
+      <label>Engineer:</label><input type="text" id="engineer" readonly />
       <label>Site:</label><select><option>Site 1</option></select>
       <label>Supplier:</label><select><option>Supplier 1</option></select>
       <label>Short Description:</label><input type="text"/>
@@ -50,5 +50,14 @@
     </form>
     <a href="po-menu.html" class="button">Back</a>
   </div>
+
+<script>
+  window.addEventListener("DOMContentLoaded", () => {
+    let user = sessionStorage.getItem("mostlaneUser") || "Unknown";
+    user = user.replace(/\./g, " "); // Replace dots with spaces
+    document.getElementById("engineer").value = user;
+  });
+</script>
+
 </body>
 </html>
