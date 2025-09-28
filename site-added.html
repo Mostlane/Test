@@ -54,20 +54,20 @@
     <p>The following details have been submitted:</p>
     <div class="summary-box">
       <p>📍 <strong>Site Name:</strong> <span id="siteNameText"></span></p>
-      <p>🏠 <strong>Street Address:</strong> <span id="streetAddressText"></span></p>
-      <p>🏷️ <strong>Postcode:</strong> <span id="postcodeText"></span></p>
+      <p>🏢 <strong>Store Type:</strong> <span id="siteTypeText"></span></p>
+      <p>📌 <strong>Address:</strong> <span id="addressText"></span></p>
       <p>🌍 <strong>Latitude:</strong> <span id="latText"></span></p>
       <p>🌍 <strong>Longitude:</strong> <span id="lonText"></span></p>
       <p>🛣️ <strong>Distance from Mostlane Office:</strong> <span id="mileageText"></span> miles</p>
-      <p>⏱️ <strong>Estimated Drive Time:</strong> <span id="driveTimeText"></span></p>
+      <p>⏱️ <strong>Driving Time:</strong> <span id="driveTimeText"></span></p>
     </div>
     <a href="main.html" class="btn">Return to Main Menu</a>
   </div>
 
   <script>
     document.getElementById("siteNameText").textContent = sessionStorage.getItem("lastSiteName") || "N/A";
-    document.getElementById("streetAddressText").textContent = sessionStorage.getItem("lastStreetAddress") || "N/A";
-    document.getElementById("postcodeText").textContent = sessionStorage.getItem("lastPostcode") || "N/A";
+    document.getElementById("siteTypeText").textContent = sessionStorage.getItem("lastSiteType") || "N/A";
+    document.getElementById("addressText").textContent = sessionStorage.getItem("lastAddress") || "N/A";
     document.getElementById("latText").textContent = sessionStorage.getItem("lastLatitude") || "N/A";
     document.getElementById("lonText").textContent = sessionStorage.getItem("lastLongitude") || "N/A";
     document.getElementById("mileageText").textContent = sessionStorage.getItem("lastMileage") || "N/A";
