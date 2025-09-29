@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mostlane • Weekly Hours Watch (Simple)</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ml-blue:#1e66ff;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --ok:#10b981;
+    --warn:#f59e0b;
+    --bad:#ef4444;
+    --panel:rgba(255,255,255,0.9);
+  }
+  html,body{height:100%;margin:0;background:#e6e8eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .btn{appearance:none;border:1px solid rgba(0,0,0,.1);background:var(--ml-blue);color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+  .panel{background:var(--panel);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.06);}
+  .kpis{display:grid;gap:12px;grid-template-columns:repeat(4,1fr);margin-bottom:12px}
+  .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:24px;font-weight:700}
+  .grid{display:grid;gap:12px;grid-template-columns:2fr 1fr}
+  .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)} .grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h2>Weekly Hours Watch (Simple)</h2>
+      <a href="hours-dashboard-advanced-v2.html" class="btn">Advanced View</a>
+    </div>
+    <div class="kpis">
+      <div class="panel kpi"><div class="label">Engineers</div><div class="value" id="kpiCount">–</div></div>
+      <div class="panel kpi"><div class="label">Avg hours so far</div><div class="value" id="kpiAvg">–</div></div>
+      <div class="panel kpi"><div class="label">Projected over-cap</div><div class="value" id="kpiOver">–</div></div>
+      <div class="panel kpi"><div class="label">Total predicted</div><div class="value" id="kpiTotal">–</div></div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <canvas id="barByEngineer" height="150"></canvas>
+        <div class="legend">
+          <span><span class="dot" style="background:var(--ok)"></span>On track</span>
+          <span><span class="dot" style="background:var(--warn)"></span>Close</span>
+          <span><span class="dot" style="background:var(--bad)"></span>Over</span>
+        </div>
+      </div>
+      <div class="panel">
+        <canvas id="donutAtRisk" height="150"></canvas>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Dummy data for demo
+const ENGINEERS = [
+  { name: "Jamie Line", worked: 24, predicted: 44, cap: 40 },
+  { name: "Chris Cooke", worked: 22, predicted: 42, cap: 40 },
+  { name: "Bradley Graham", worked: 18, predicted: 39, cap: 40 },
+  { name: "Connor Brady", worked: 20, predicted: 38, cap: 40 },
+  { name: "Ciprian", worked: 17, predicted: 34, cap: 40 }
+];
+function colorFor(pred,cap){
+  if(pred>cap) return getVar('--bad');
+  if(pred>cap*0.9) return getVar('--warn');
+  return getVar('--ok');
+}
+function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+// KPIs
+document.getElementById('kpiCount').textContent = ENGINEERS.length;
+const avg = ENGINEERS.reduce((s,e)=>s+e.worked,0)/ENGINEERS.length;
+document.getElementById('kpiAvg').textContent = avg.toFixed(1)+'h';
+document.getElementById('kpiOver').textContent = ENGINEERS.filter(e=>e.predicted>e.cap).length;
+document.getElementById('kpiTotal').textContent = ENGINEERS.reduce((s,e)=>s+e.predicted,0).toFixed(1)+'h';
+
+// Bar
+new Chart(document.getElementById('barByEngineer').getContext('2d'),{
+  type:'bar',
+  data:{
+    labels:ENGINEERS.map(e=>e.name),
+    datasets:[{
+      label:'Predicted hours',
+      data:ENGINEERS.map(e=>e.predicted),
+      backgroundColor:ENGINEERS.map(e=>colorFor(e.predicted,e.cap))
+    },{
+      type:'line', label:'Cap', data:ENGINEERS.map(e=>e.cap),
+      borderColor:getVar('--ml-blue'), borderWidth:2, pointRadius:0
+    }]
+  }, options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:50}}}
+});
+
+// Donut
+const ok = ENGINEERS.filter(e=>e.predicted<=0.9*e.cap).length;
+const warn = ENGINEERS.filter(e=>e.predicted>0.9*e.cap && e.predicted<=e.cap).length;
+const bad = ENGINEERS.filter(e=>e.predicted>e.cap).length;
+new Chart(document.getElementById('donutAtRisk').getContext('2d'),{
+  type:'doughnut',
+  data:{labels:['On track','Close','Over'],datasets:[{data:[ok,warn,bad],backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')]}]},
+  options:{plugins:{legend:{position:'bottom'}}, cutout:'60%'}
+});
+</script>
+</body>
+</html>

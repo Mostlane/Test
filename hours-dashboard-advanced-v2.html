@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mostlane • Advanced Hours Dashboard</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a;
+    --panel:#111827;
+    --panelEdge:#0b1222;
+    --text:#e5e7eb;
+    --muted:#9ca3af;
+    --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
+    --blue:#3b82f6; --indigo:#6366f1; --cyan:#22d3ee; --yellow:#facc15;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0b132a,#0a0f1f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{display:grid;grid-template-columns: 1fr 320px; gap:16px; padding:16px}
+  .area{display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:16px}
+  .panel{background:var(--panel); border:1px solid #1f2937; border-radius:10px; padding:14px; box-shadow:inset 0 0 0 1px var(--panelEdge), 0 6px 16px rgba(0,0,0,.35)}
+  .title{font-weight:600; font-size:14px; color:var(--muted); margin-bottom:8px}
+  .kpiGrid{display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:16px}
+  .kpi .num{font-size:28px; font-weight:800}
+  .kpi .sub{color:var(--muted); font-size:12px}
+  .hbarWrap{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .leaderboard .row{display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed #334155}
+  .leaderboard .row:last-child{border-bottom:none}
+  .pill{display:inline-block; font-size:11px; border-radius:999px; padding:2px 8px}
+  .ok{background:#04281e;color:#34d399} .warn{background:#422d14;color:#fbbf24} .bad{background:#3b0e0e;color:#fca5a5}
+  .topbar{grid-column:1/3; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px}
+  .btn{appearance:none; border:1px solid #334155; background:#0b132a; color:#fff; padding:8px 10px; border-radius:8px; cursor:pointer}
+  @media(max-width:1100px){ .wrap{grid-template-columns:1fr} .area{grid-template-columns:1fr} .kpiGrid{grid-template-columns:repeat(2,1fr)} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="area">
+      <div class="topbar">
+        <div style="font-weight:700">Team Dash</div>
+        <a href="hours-dashboard-simple-v2.html" class="btn">Simple View</a>
+      </div>
+
+      <!-- KPI TILES -->
+      <div class="panel kpiGrid" style="grid-column:1/3">
+        <div class="panel kpi"><div class="num" id="kpi-engineers">–</div><div class="sub">Engineers</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-worked">–</div><div class="sub">Hours worked so far</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-pred">–</div><div class="sub">Predicted total this week</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-remaining">–</div><div class="sub">Team hours remaining</div></div>
+      </div>
+
+      <!-- Small progress tiles (like "My tasks this week") -->
+      <div class="panel">
+        <div class="title">Team progress towards capacity</div>
+        <canvas id="progressTeam" height="110"></canvas>
+      </div>
+      <div class="panel">
+        <div class="title">Average engineer vs 40h cap</div>
+        <canvas id="progressAvg" height="110"></canvas>
+      </div>
+
+      <!-- Donut Risk -->
+      <div class="panel">
+        <div class="title">Engineers by risk</div>
+        <canvas id="donutRisk" height="140"></canvas>
+      </div>
+
+      <!-- Bar by engineer stacked -->
+      <div class="panel">
+        <div class="title">Worked vs Remaining vs Over (by engineer)</div>
+        <canvas id="stackedByEngineer" height="160"></canvas>
+      </div>
+
+      <!-- By day stacked -->
+      <div class="panel" style="grid-column:1/3">
+        <div class="title">Hours by day (Mon–Fri)</div>
+        <canvas id="byDay" height="160"></canvas>
+      </div>
+    </div>
+
+    <!-- Right column leaderboard -->
+    <div class="panel leaderboard">
+      <div class="title">Leaderboard • Highest Average Weekly Hours</div>
+      <div id="lb"></div>
+      <div style="margin-top:10px; font-size:12px; color:var(--muted)">
+        * Averages are based on last 6 weeks per engineer. Cap = 40h/wk (Mon–Fri 8:00–16:30, 30m lunch).
+      </div>
+    </div>
+  </div>
+
+<script>
+// ===== Dummy source data (can be replaced with JSON later) =====
+const CAP = 40;
+const engineers = [
+  {name:"Jamie Line", worked:24, predicted:44, history:[41,43,45,44,42,46], daily:[8,8,8,10,10]},
+  {name:"Chris Cooke", worked:22, predicted:42, history:[40,41,43,42,42,40], daily:[7,8,9,9,9]},
+  {name:"Bradley Graham", worked:18, predicted:39, history:[37,39,38,40,39,37], daily:[6,7,8,9,9]},
+  {name:"Connor Brady", worked:20, predicted:38, history:[36,38,37,39,38,36], daily:[7,7,8,8,8]},
+  {name:"Ciprian", worked:17, predicted:34, history:[33,34,35,34,33,36], daily:[6,7,7,7,7]}
+];
+// Compute leaderboard averages
+const leaderboard = engineers.map(e=>({name:e.name, avg: (e.history.reduce((s,v)=>s+v,0)/e.history.length)}))
+                             .sort((a,b)=>b.avg-a.avg);
+
+// KPI values
+const teamWorked = engineers.reduce((s,e)=>s+e.worked,0);
+const teamPred   = engineers.reduce((s,e)=>s+e.predicted,0);
+const teamCapacity = engineers.length * CAP;
+const teamRemaining = Math.max(0, teamCapacity - teamPred);
+
+document.getElementById('kpi-engineers').textContent = engineers.length;
+document.getElementById('kpi-worked').textContent = teamWorked.toFixed(0) + "h";
+document.getElementById('kpi-pred').textContent = teamPred.toFixed(0) + "h";
+document.getElementById('kpi-remaining').textContent = teamRemaining.toFixed(0) + "h";
+
+// Leaderboard render
+const lb = document.getElementById('lb');
+leaderboard.forEach((row,i)=>{
+  const div = document.createElement('div');
+  div.className = 'row';
+  const risk = row.avg>CAP ? 'bad' : row.avg>CAP*0.9 ? 'warn' : 'ok';
+  div.innerHTML = `<span>${i+1}. ${row.name}</span><span><span class="pill ${risk}">${row.avg.toFixed(0)}h</span></span>`;
+  lb.appendChild(div);
+});
+
+// Helper colors
+const ok='#10b981', warn='#f59e0b', bad='#ef4444', blue=getComputedStyle(document.documentElement).getPropertyValue('--blue').trim();
+
+// Progress towards capacity (team)
+new Chart(document.getElementById('progressTeam').getContext('2d'),{
+  type:'bar',
+  data:{labels:['Team'],datasets:[
+    {label:'Worked', data:[teamWorked], backgroundColor:'#2563eb'},
+    {label:'Remaining to predicted', data:[Math.max(0,teamPred-teamWorked)], backgroundColor:'#22c55e'},
+    {label:'Over cap (if any)', data:[Math.max(0, teamPred-teamCapacity)], backgroundColor: bad }
+  ]},
+  options:{plugins:{legend:{display:false}}, indexAxis:'y', scales:{x:{beginAtZero:true, max:Math.max(teamCapacity, teamPred)+10}}}
+});
+
+// Avg engineer vs 40h
+const avgPred = teamPred / engineers.length;
+new Chart(document.getElementById('progressAvg').getContext('2d'),{
+  type:'bar',
+  data:{labels:['Avg engineer'],datasets:[
+    {label:'Predicted', data:[avgPred], backgroundColor: avgPred>CAP?bad:avgPred>CAP*0.9?warn:ok },
+    {type:'line', label:'Cap', data:[CAP], borderColor:blue, borderWidth:2, pointRadius:0}
+  ]},
+  options:{plugins:{legend:{display:false}}, indexAxis:'y', scales:{x:{beginAtZero:true, max:50}}}
+});
+
+// Donut Risk dist
+const cntOK = engineers.filter(e=>e.predicted<=CAP*0.9).length;
+const cntWN = engineers.filter(e=>e.predicted>CAP*0.9 && e.predicted<=CAP).length;
+const cntBD = engineers.filter(e=>e.predicted>CAP).length;
+new Chart(document.getElementById('donutRisk').getContext('2d'),{
+  type:'doughnut',
+  data:{labels:['On track','Close','Over'], datasets:[{data:[cntOK,cntWN,cntBD], backgroundColor:[ok,warn,bad]}]},
+  options:{plugins:{legend:{position:'bottom'}}, cutout:'60%'}
+});
+
+// Stacked by engineer (worked vs remaining vs over)
+new Chart(document.getElementById('stackedByEngineer').getContext('2d'),{
+  type:'bar',
+  data:{
+    labels: engineers.map(e=>e.name),
+    datasets:[
+      {label:'Worked so far', data: engineers.map(e=>e.worked), backgroundColor:'#3b82f6'},
+      {label:'Remaining to predicted', data: engineers.map(e=>Math.max(0, e.predicted - e.worked)), backgroundColor:'#22c55e'},
+      {label:'Over cap (if any)', data: engineers.map(e=>Math.max(0, e.predicted - CAP)), backgroundColor: bad}
+    ]
+  },
+  options:{
+    responsive:true, plugins:{legend:{position:'bottom'}},
+    scales:{y:{beginAtZero:true, stacked:true, max:60}, x:{stacked:true}}
+  }
+});
+
+// By day stacked
+const days=['Mon','Tue','Wed','Thu','Fri'];
+const ds = engineers.map((e,i)=>({label:e.name, data:e.daily, backgroundColor:['#3b82f6','#6366f1','#22d3ee','#facc15','#14b8a6'][i%5]}));
+new Chart(document.getElementById('byDay').getContext('2d'),{
+  type:'bar',
+  data:{labels:days, datasets: ds},
+  options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:true, max:24}}}
+});
+</script>
+</body>
+</html>
