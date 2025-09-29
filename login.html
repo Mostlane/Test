@@ -104,6 +104,13 @@
               sessionStorage.setItem("mostlaneLoggedIn", "true");
               sessionStorage.setItem("mostlaneUser", user);
               sessionStorage.setItem("mostlaneFolder", folder.trim());
+              
+              // also set localStorage with 12h expiry
+              localStorage.setItem("mostlaneLoggedIn", "true");
+              localStorage.setItem("mostlaneUser", user);
+              localStorage.setItem("mostlaneFolder", folder.trim());
+              localStorage.setItem("mostlaneExpiry", Date.now() + (12 * 60 * 60 * 1000));
+              
               window.location.href = "main.html";
               found = true;
               break;
