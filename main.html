@@ -186,5 +186,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 </script>
+
+<script>
+  // Replace first Testing button with Hours Dashboard for Admin only
+  document.addEventListener("DOMContentLoaded", function(){
+    const loggedUser = sessionStorage.getItem("mostlaneUser");
+    if(loggedUser === "admin"){
+      const testBtns = [...document.querySelectorAll("a.button")].filter(btn => btn.textContent.includes("Testing"));
+      if(testBtns.length){
+        testBtns[0].textContent = "Hours Dashboard";
+        testBtns[0].href = "hours-dashboard-simple-v2.html";
+      }
+    }
+  });
+</script>
+
 </body>
 </html>
