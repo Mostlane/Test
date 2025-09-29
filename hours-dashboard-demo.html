@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mostlane • Weekly Hours Watch (Demo)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body{font-family:sans-serif;background:#f0f2f5;padding:20px}
+  .panel{background:#fff;padding:15px;margin-bottom:20px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1)}
+</style>
+</head>
+<body>
+<h1>Weekly Hours Watch (Demo)</h1>
+<div class="panel">
+  <canvas id="barByEngineer" height="120"></canvas>
+</div>
+<div class="panel">
+  <canvas id="donutAtRisk" height="120"></canvas>
+</div>
+<script>
+const ENGINEERS = [
+  { name: "Jamie Line", predicted: 42, totalSoFar: 20, cap: 40 },
+  { name: "Chris Cooke", predicted: 38, totalSoFar: 19, cap: 40 },
+  { name: "Bradley Graham", predicted: 36, totalSoFar: 17, cap: 40 },
+  { name: "Connor Brady", predicted: 44, totalSoFar: 22, cap: 40 }
+];
+
+function getColor(pred,cap){
+  if(pred>cap) return "#ef4444"; // red
+  if(pred>cap*0.9) return "#f59e0b"; // amber
+  return "#10b981"; // green
+}
+
+function renderBar(){
+  const ctx = document.getElementById('barByEngineer').getContext('2d');
+  new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:ENGINEERS.map(e=>e.name),
+      datasets:[{
+        label:'Predicted hours',
+        data:ENGINEERS.map(e=>e.predicted),
+        backgroundColor:ENGINEERS.map(e=>getColor(e.predicted,e.cap))
+      },{
+        type:'line',
+        label:'Cap',
+        data:ENGINEERS.map(e=>e.cap),
+        borderColor:'#1e66ff',
+        borderWidth:2,
+        pointRadius:0
+      }]
+    },
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function renderDonut(){
+  const ok = ENGINEERS.filter(e=>e.predicted<=e.cap*0.9).length;
+  const warn = ENGINEERS.filter(e=>e.predicted>e.cap*0.9 && e.predicted<=e.cap).length;
+  const bad = ENGINEERS.filter(e=>e.predicted>e.cap).length;
+  const ctx = document.getElementById('donutAtRisk').getContext('2d');
+  new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:['On track','Close','Over'],
+      datasets:[{
+        data:[ok,warn,bad],
+        backgroundColor:['#10b981','#f59e0b','#ef4444']
+      }]
+    },
+    options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}
+  });
+}
+
+renderBar();
+renderDonut();
+</script>
+</body>
+</html>
