@@ -72,7 +72,7 @@
 <a class="button" href="purchase.html">Generate Purchase Order Reference</a>
 <a class="button" href="my-assets.html">Plant &amp; Equipment</a>
 <a class="button" href="#" id="my-documents-btn">My Documents</a><a class="button" href="weekly.html">Weekly Summary</a>
-<a class="button" href="forms.html">Forms</a><a class="button" href="compliance.html">Compliance</a><a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
+<a class="button" href="forms.html">Forms</a><a class="button" href="compliance.html">Compliance</a><a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
 <a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
 <a class="button" href="https://app.timetastic.co.uk/login/?_gl=1*1piblcu*_gcl_au*Mjk2Mjc2NTYuMTc1NDU5MDUzOA..*_ga*NTc2NjgwNjY5LjE3NTQ1OTA1Mzc.*_ga_6P6KNGTNP6*czE3NTQ1OTA1MzckbzEkZzEkdDE3NTQ1OTA1MzkkajU5JGwwJGgw">Holiday</a>
 <a class="button" href="po-menu.html">Purchase Orders</a>
@@ -188,15 +188,11 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 
 <script>
-  // Replace first Testing button with Hours Dashboard for Admin only
   document.addEventListener("DOMContentLoaded", function(){
     const loggedUser = sessionStorage.getItem("mostlaneUser");
-    if(loggedUser === "admin"){
-      const testBtns = [...document.querySelectorAll("a.button")].filter(btn => btn.textContent.includes("Testing"));
-      if(testBtns.length){
-        testBtns[0].textContent = "Hours Dashboard";
-        testBtns[0].href = "hours-dashboard-simple-v2.html";
-      }
+    if(loggedUser !== "admin"){
+      const dashBtn = document.getElementById("hours-dashboard-btn");
+      if(dashBtn) dashBtn.remove();
     }
   });
 </script>
