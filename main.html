@@ -188,13 +188,15 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 
 <script>
-  document.addEventListener("DOMContentLoaded", function(){
-    const loggedUser = sessionStorage.getItem("mostlaneUser");
-    if(loggedUser !== "admin"){
-      const dashBtn = document.getElementById("hours-dashboard-btn");
-      if(dashBtn) dashBtn.remove();
+  // Show Hours Dashboard only for specific admin users (Holiday Admin style)
+  (function(){
+    var hoursAdmins = ["Jamie.Line", "Greg.Line", "Joe.Line", "admin"];
+    var user = sessionStorage.getItem("mostlaneUser");
+    if (!hoursAdmins.includes(user)) {
+      var dashBtn = document.getElementById("hours-dashboard-btn");
+      if (dashBtn) dashBtn.remove();
     }
-  });
+  })();
 </script>
 
 </body>
