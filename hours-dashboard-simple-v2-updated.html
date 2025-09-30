@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mostlane • Weekly Hours Watch (Simple)</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ml-blue:#1e66ff;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --ok:#10b981;
+    --warn:#f59e0b;
+    --bad:#ef4444;
+    --panel:rgba(255,255,255,0.9);
+  }
+  html,body{height:100%;margin:0;background:#e6e8eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .btn{appearance:none;border:1px solid rgba(0,0,0,.1);background:var(--ml-blue);color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+  .panel{background:var(--panel);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.06);}
+  .kpis{display:grid;gap:12px;grid-template-columns:repeat(4,1fr);margin-bottom:12px}
+  .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:24px;font-weight:700}
+  .grid{display:grid;gap:12px;grid-template-columns:2fr 1fr}
+  .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)} .grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h2>Weekly Hours Watch (Simple)</h2>
+      <a href="hours-dashboard-advanced-v3.html" class="btn">Advanced View</a>
+    </div>
+    <div class="kpis">
+      <div class="panel kpi"><div class="label">Engineers</div><div class="value" id="kpiCount">–</div></div>
+      <div class="panel kpi"><div class="label">Avg hours so far</div><div class="value" id="kpiAvg">–</div></div>
+      <div class="panel kpi"><div class="label">Projected over-cap</div><div class="value" id="kpiOver">–</div></div>
+      <div class="panel kpi"><div class="label">Total predicted</div><div class="value" id="kpiTotal">–</div></div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <canvas id="barByEngineer" height="150"></canvas>
+        <div class="legend">
+          <span><span class="dot" style="background:var(--ok)"></span>On track</span>
+          <span><span class="dot" style="background:var(--warn)"></span>Close</span>
+          <span><span class="dot" style="background:var(--bad)"></span>Over</span>
+        </div>
+      </div>
+      <div class="panel">
+        <canvas id="donutAtRisk" height="150"></canvas>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Dummy data for demo
+const ENGINEERS = [
+  {
+    "name": "Bradley",
+    "worked": 37,
+    "predicted": 45,
+    "overtime": 1,
+    "efficiency": 89,
+    "drivingScore": 59,
+    "vanChecks": 0
+  },
+  {
+    "name": "Chris Cooke",
+    "worked": 43,
+    "predicted": 37,
+    "overtime": 4,
+    "efficiency": 92,
+    "drivingScore": 97,
+    "vanChecks": 0
+  },
+  {
+    "name": "Connor",
+    "worked": 25,
+    "predicted": 42,
+    "overtime": 7,
+    "efficiency": 95,
+    "drivingScore": 71,
+    "vanChecks": 1
+  },
+  {
+    "name": "David",
+    "worked": 35,
+    "predicted": 45,
+    "overtime": 3,
+    "efficiency": 80,
+    "drivingScore": 68,
+    "vanChecks": 0
+  },
+  {
+    "name": "James",
+    "worked": 31,
+    "predicted": 37,
+    "overtime": 3,
+    "efficiency": 64,
+    "drivingScore": 95,
+    "vanChecks": 0
+  },
+  {
+    "name": "Ryan",
+    "worked": 18,
+    "predicted": 35,
+    "overtime": 2,
+    "efficiency": 98,
+    "drivingScore": 78,
+    "vanChecks": 1
+  },
+  {
+    "name": "Tony",
+    "worked": 31,
+    "predicted": 37,
+    "overtime": 5,
+    "efficiency": 86,
+    "drivingScore": 69,
+    "vanChecks": 0
+  },
+  {
+    "name": "John",
+    "worked": 33,
+    "predicted": 37,
+    "overtime": 4,
+    "efficiency": 96,
+    "drivingScore": 96,
+    "vanChecks": 0
+  },
+  {
+    "name": "Chris F",
+    "worked": 28,
+    "predicted": 45,
+    "overtime": 5,
+    "efficiency": 93,
+    "drivingScore": 66,
+    "vanChecks": 0
+  },
+  {
+    "name": "Colby",
+    "worked": 21,
+    "predicted": 35,
+    "overtime": 4,
+    "efficiency": 78,
+    "drivingScore": 70,
+    "vanChecks": 0
+  }
+];
