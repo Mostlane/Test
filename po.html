@@ -95,6 +95,20 @@
         <input type="text" id="incident" placeholder="Enter incident number">
       </div>
 
+      <!-- NEW: Reactive-only Site Type filter -->
+      <div id="siteTypeRow" class="hidden">
+        <label for="siteType">Site Type</label>
+        <select id="siteType">
+          <option value="">Select a Site Type…</option>
+          <option value="Retail">Retail</option>
+          <option value="ELS">ELS</option>
+          <option value="COBRA">COBRA</option>
+          <option value="Wenzel’s">Wenzel’s</option>
+          <option value="FBC">FBC</option>
+        </select>
+      </div>
+      <!-- /NEW -->
+
       <div id="siteRow">
         <label for="site">Site</label>
         <select id="site"></select>
@@ -136,6 +150,10 @@
       return `${dd}/${mm}/${yy}`;
     }
 
+    // NEW: keep a copy of all sites and a helper to normalise strings
+    let allSites = []; // NEW
+    function norm(v){ return (v||'').toString().toLowerCase().replace(/\u2019/g,"'").trim(); } // NEW
+
     let geo = { lat: null, lon: null };
 
     async function init(){
@@ -154,8 +172,32 @@
         byId('incidentRow').style.display = isReactive ? '' : 'none';
         byId('siteRow').style.display = isVehicle ? 'none' : '';
         byId('vehicleRow').classList.toggle('hidden', !isVehicle);
+
+        // NEW: show Site Type filter only for Reactive (and not for Vehicle Maintenance)
+        const siteTypeRow = byId('siteTypeRow');
+        if (isReactive) {
+          siteTypeRow.classList.remove('hidden');
+          // filter sites immediately based on current selection
+          populateSites(byId('siteType').value);
+        } else {
+          siteTypeRow.classList.add('hidden');
+          byId('siteType').value = '';
+          populateSites(); // show all sites
+        }
+        // /NEW
       });
       byId('workType').dispatchEvent(new Event('change'));
+
+      // NEW: change handler for site type filter
+      byId('siteType').addEventListener('change', function(){
+        // only filter when Reactive is selected; otherwise show all
+        if (byId('workType').value === 'Reactive') {
+          populateSites(this.value);
+        } else {
+          populateSites();
+        }
+      });
+      // /NEW
 
       // Suppliers from suppliers.json (names only)
       try {
@@ -175,15 +217,8 @@
       // Sites from sites.json (label: JobNumber - SiteName)
       try {
         const sites = await fetchJSON(SITES_URL);
-        const sel = byId('site');
-        sel.innerHTML = '';
-        sites.forEach(s => {
-          const label = [s.jobNumber, s.siteName].filter(Boolean).join(' - ');
-          const opt = document.createElement('option');
-          opt.value = label || s.siteName || '';
-          opt.textContent = label || s.siteName || '';
-          sel.appendChild(opt);
-        });
+        allSites = Array.isArray(sites) ? sites : []; // NEW
+        populateSites(); // NEW: initial population (no filter)
       } catch {
         byId('site').innerHTML = '<option value="">(Unable to load sites)</option>';
       }
@@ -269,6 +304,34 @@
         }
       });
     }
+
+    // NEW: populateSites with optional filtering by Site Type (case-insensitive, handles curly apostrophes)
+    function populateSites(filterType){
+      const sel = byId('site');
+      sel.innerHTML = '';
+      let list = allSites;
+
+      const f = (filterType||'').trim();
+      if (f) {
+        list = allSites.filter(s => norm(s.siteType) === norm(f));
+      }
+
+      list.forEach(s => {
+        const label = [s.jobNumber, s.siteName].filter(Boolean).join(' - ');
+        const opt = document.createElement('option');
+        opt.value = label || s.siteName || '';
+        opt.textContent = label || s.siteName || '';
+        sel.appendChild(opt);
+      });
+
+      if (!list.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '(No sites match this type)';
+        sel.appendChild(opt);
+      }
+    }
+    // /NEW
 
     document.addEventListener('DOMContentLoaded', init);
   </script>
