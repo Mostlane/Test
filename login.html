@@ -77,8 +77,9 @@
     const usersJsonURL = "https://raw.githubusercontent.com/Mostlane/Test/main/users.json";
 
     async function hashPassword(password) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(password.trim());
+      const clean = password.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      const enc = new TextEncoder();
+      const data = enc.encode(clean);
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       return Array.from(new Uint8Array(hashBuffer))
                   .map(b => b.toString(16).padStart(2, '0'))
@@ -89,17 +90,23 @@
       e.preventDefault();
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
-      const hashedInput = await hashPassword(password);
       const errorBox = document.getElementById("error");
       errorBox.textContent = "";
 
+      if (!username || !password) {
+        errorBox.textContent = "Please enter both username and password.";
+        return;
+      }
+
+      const hashedInput = await hashPassword(password);
+
       try {
         const res = await fetch(usersJsonURL + "?v=" + Date.now());
-        if (!res.ok) throw new Error("Network error");
+        if (!res.ok) throw new Error("Network error loading user list");
         const data = await res.json();
         const users = data.Users || [];
 
-        // Match user exactly by Username (case sensitive)
+        // Find matching username (case-sensitive)
         const user = users.find(u => u.Username === username);
 
         if (!user) {
@@ -107,25 +114,42 @@
           return;
         }
 
-        // Compare hash
+        // Check if user is active
+        if (user.Status.toLowerCase() !== "active") {
+          errorBox.textContent = "Account is not active.";
+          return;
+        }
+
+        // Compare password hashes
         if (user.HashedPassword !== hashedInput) {
+          console.log("Expected:", user.HashedPassword);
+          console.log("Entered :", hashedInput);
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // ✅ Successful login
+        // ✅ Store session info
         sessionStorage.setItem("mostlaneLoggedIn", "true");
         sessionStorage.setItem("mostlaneUser", user.Username);
         sessionStorage.setItem("mostlaneFolder", user.SharePointPath || "");
+        sessionStorage.setItem("mostlaneEmployment", user.EmploymentType || "");
+        sessionStorage.setItem("mostlaneVehicle", user.VehicleAssigned || "");
+        sessionStorage.setItem("mostlanePermissions", JSON.stringify({
+          PurchaseOrders: user.PurchaseOrders,
+          CheckInOut: user.CheckInOut,
+          Holiday: user.Holiday,
+          Forms: user.Forms,
+          Assets: user.Assets,
+          AddSite: user.AddSite
+        }));
 
-        // also set localStorage with 12h expiry
         localStorage.setItem("mostlaneLoggedIn", "true");
         localStorage.setItem("mostlaneUser", user.Username);
         localStorage.setItem("mostlaneFolder", user.SharePointPath || "");
         localStorage.setItem("mostlaneExpiry", Date.now() + (12 * 60 * 60 * 1000));
 
+        // Redirect to main.html
         window.location.href = "main.html";
-
       } catch (err) {
         console.error(err);
         errorBox.textContent = "Could not load user list.";
