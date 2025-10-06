@@ -1,16 +1,16 @@
 <!DOCTYPE html>
-
 <html>
 <head>
 <title>Main Menu</title>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<link href="style.css" rel="stylesheet"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="style.css">
 <script>
-    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-      window.location.href = "login.html";
-    }
-  </script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+</script>
 </head>
+
 <body class="main-body">
 <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
 <script>
@@ -27,6 +27,7 @@
   }
   document.getElementById("statusBox").textContent = "Current Status: " + statusText;
 </script>
+
 <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
 <script>
   const user = sessionStorage.getItem("mostlaneUser");
@@ -34,12 +35,13 @@
     document.getElementById("user-display").textContent = "You are logged in as " + user;
   }
 </script>
-<style>
-    html, body { height: 100%; }
 
+<style>
+  html, body { height: 100%; }
   .main-body {
     font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed; background-size: cover;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: cover;
     margin: 0;
     padding: 40px 20px;
     min-height: 100vh;
@@ -66,6 +68,7 @@
     max-width: 300px;
   }
 </style>
+
 <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
 <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
 <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
@@ -75,155 +78,45 @@
 <a class="button" href="forms.html" id="formsBtn">Forms</a>
 <a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
 <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
-<a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
-<a class="button" href="https://app.timetastic.co.uk/login/?_gl=1*1piblcu*_gcl_au*Mjk2Mjc2NTYuMTc1NDU5MDUzOA..*_ga*NTc2NjgwNjY5LjE3NTQ1OTA1Mzc.*_ga_6P6KNGTNP6*czE3NTQ1OTA1MzckbzEkZzEkdDE3NTQ1OTA1MzkkajU5JGwwJGgw">Holiday</a>
 <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
-<a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+<a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
 
+<!-- ✅ NEW PERMISSION SYSTEM -->
 <script>
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.trim().split("\n");
-      const employment = Object.fromEntries(lines.map(line => line.split(" - ")));
-      const user = sessionStorage.getItem("mostlaneUser");
-      if (employment[user] === "SelfEmployed") {
-        const holidayBtn = document.querySelector("a[href='holiday.html']");
-        if (holidayBtn) holidayBtn.remove();
-      }
-    });
-
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt")
-    .then(r => r.text())
-    .then(text => {
-      const lines = text.trim().split("\n");
-      const roles = Object.fromEntries(lines.map(line => line.split(" - ")));
-      const user = sessionStorage.getItem("mostlaneUser");
-      if (roles[user] === "Office") {
-        const reference = document.querySelector("a[href='weekly.html']");
-
-        const viewBtn = document.createElement("a");
-        viewBtn.className = "button";
-        viewBtn.href = "view-assets.html";
-        viewBtn.textContent = "View All Assets";
-
-        const addSite = document.createElement("a");
-        addSite.className = "button";
-        addSite.href = "add-site.html";
-        addSite.textContent = "Add Site";
-        addSite.id = "addsiteBtn";
-
-        const addAsset = document.createElement("a");
-        addAsset.className = "button";
-        addAsset.href = "add-asset.html";
-        addAsset.textContent = "Add Asset";
-
-        reference.insertAdjacentElement("afterend", viewBtn);
-        viewBtn.insertAdjacentElement("afterend", addSite);
-        addSite.insertAdjacentElement("afterend", addAsset);
-
-        const fleetBtn = document.createElement("a");
-        fleetBtn.className = "button";
-        fleetBtn.href = "van-scores.html";
-        fleetBtn.textContent = "Fleet Vehicles";
-
-        addAsset.insertAdjacentElement("afterend", fleetBtn);
-
-        const holidayCal = document.createElement("a");
-        holidayCal.className = "button";
-        holidayCal.href = "holiday-calendar.html";
-        holidayCal.textContent = "Holiday Calendar";
-        fleetBtn.insertAdjacentElement("afterend", holidayCal);
-      }
-    });
-</script>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener('DOMContentLoaded', async () => {
   const username = sessionStorage.getItem("mostlaneUser");
   if (!username) return;
 
-  fetch("https://raw.githubusercontent.com/Mostlane/Test/main/Users.txt")
-    .then(response => response.text())
-    .then(data => {
-      const rows = data.split("\n");
-      const match = rows.find(row => row.startsWith(username + "|"));
-      if (!match) return;
+  try {
+    const res = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/users.json?v=" + Date.now());
+    const data = await res.json();
+    const users = data.Users || [];
+    const user = users.find(u => u.Username === username);
+    if (!user) return;
 
-      const parts = match.split("|");
-      const sharePointURL = parts[2];
+    const full = (user.FullAccess || "").toLowerCase() === "yes";
 
-      const btn = document.getElementById("my-documents-btn");
-      if (btn) {
-        btn.href = sharePointURL;
-      }
-    });
+    function toggle(id, key) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (full) return;
+      if ((user[key] || "").toLowerCase() !== "yes") el.style.display = "none";
+    }
+
+    // Hide/show based on permissions in users.json
+    toggle("purchaseBtn", "PurchaseOrders");
+    toggle("checkinBtn", "CheckInOut");
+    toggle("holidayBtn", "Holiday");
+    toggle("formsBtn", "Forms");
+    toggle("assetsBtn", "Assets");
+    toggle("poMenuBtn", "PurchaseOrders");
+    toggle("weeklyBtn", "Weekly");
+    toggle("hours-dashboard-btn", "Forms"); // example - tie to Forms if needed
+    toggle("complianceBtn", "Forms"); // can be tied to any key you prefer
+  } catch (err) {
+    console.error("Failed to load permissions", err);
+  }
 });
 </script>
-<script>
-  fetch('role-type.txt')
-    .then(response => response.text())
-    .then(data => {
-      const user = sessionStorage.getItem("mostlaneUsername");
-      const roles = Object.fromEntries(data.trim().split("\n").map(line => line.split(" - ")));
-      if (roles[user] === "Office") {
-        const addDriver = document.createElement("a");
-        addDriver.className = "button";
-        addDriver.href = "add-driver.html";
-        addDriver.textContent = "Add Driver";
-        const fleetBtn = [...document.querySelectorAll('.button')].find(btn => btn.textContent.includes("Fleet Vehicles"));
-        if (fleetBtn) fleetBtn.insertAdjacentElement("afterend", addDriver);
-      }
-    });
-</script>
-<script>
-  const holidayAdmins = ["Jamie.Line", "Greg.Line", "Joe.Line"];
-  const loggedInUser = sessionStorage.getItem("mostlaneUser");
-  if (holidayAdmins.includes(loggedInUser)) {
-    const adminBtn = document.createElement("a");
-    adminBtn.className = "button";
-    adminBtn.href = "admin-holiday.html";
-    adminBtn.textContent = "Holiday Admin";
-    const referenceBtn = document.querySelector("a[href='weekly.html']");
-    if (referenceBtn) {
-      referenceBtn.insertAdjacentElement("afterend", adminBtn);
-    }
-  }
-</script>
-
-<script>
-  // Show Hours Dashboard only for specific admin users (Holiday Admin style)
-  (function(){
-    var hoursAdmins = ["Jamie.Line", "Greg.Line", "Joe.Line", "admin"];
-    var user = sessionStorage.getItem("mostlaneUser");
-    if (!hoursAdmins.includes(user)) {
-      var dashBtn = document.getElementById("hours-dashboard-btn");
-      if (dashBtn) dashBtn.remove();
-    }
-  })();
-</script>
-
-<!-- ✅ PERMISSION CONTROL SCRIPT -->
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const perms = JSON.parse(sessionStorage.getItem('mostlanePermissions') || '{}');
-  const full = (perms.FullAccess || '').toLowerCase() === 'yes';
-
-  function hideIfNo(id, key) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (full) return; // FullAccess = everything visible
-    if ((perms[key] || '').toLowerCase() !== 'yes') el.style.display = 'none';
-  }
-
-  // Apply per-page permissions
-  hideIfNo('purchaseBtn', 'PurchaseOrders');
-  hideIfNo('checkinBtn', 'CheckInOut');
-  hideIfNo('holidayBtn', 'Holiday');
-  hideIfNo('formsBtn', 'Forms');
-  hideIfNo('assetsBtn', 'Assets');
-  hideIfNo('addsiteBtn', 'AddSite');
-});
-</script>
-
 </body>
 </html>
