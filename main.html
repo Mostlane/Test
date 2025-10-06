@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 
 <html>
@@ -67,16 +66,20 @@
     max-width: 300px;
   }
 </style>
-<a class="button" href="index.html">Check In / Out</a>
-<a class="button" href="holiday.html">Holiday Requests</a>
-<a class="button" href="purchase.html">Generate Purchase Order Reference</a>
-<a class="button" href="my-assets.html">Plant &amp; Equipment</a>
-<a class="button" href="#" id="my-documents-btn">My Documents</a><a class="button" href="weekly.html">Weekly Summary</a>
-<a class="button" href="forms.html">Forms</a><a class="button" href="compliance.html">Compliance</a><a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
+<a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
+<a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
+<a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
+<a class="button" href="my-assets.html" id="assetsBtn">Plant &amp; Equipment</a>
+<a class="button" href="#" id="my-documents-btn">My Documents</a>
+<a class="button" href="weekly.html" id="weeklyBtn">Weekly Summary</a>
+<a class="button" href="forms.html" id="formsBtn">Forms</a>
+<a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
+<a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
 <a class="button" href="https://form.jotform.com/your-form-id-here">Testing</a>
 <a class="button" href="https://app.timetastic.co.uk/login/?_gl=1*1piblcu*_gcl_au*Mjk2Mjc2NTYuMTc1NDU5MDUzOA..*_ga*NTc2NjgwNjY5LjE3NTQ1OTA1Mzc.*_ga_6P6KNGTNP6*czE3NTQ1OTA1MzckbzEkZzEkdDE3NTQ1OTA1MzkkajU5JGwwJGgw">Holiday</a>
-<a class="button" href="po-menu.html">Purchase Orders</a>
+<a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
 <a class="button" href="#" onclick="sessionStorage.removeItem('mostlaneLoggedIn'); window.location.href='login.html';">Logout</a>
+
 <script>
   fetch("https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt")
     .then(r => r.text())
@@ -108,6 +111,7 @@
         addSite.className = "button";
         addSite.href = "add-site.html";
         addSite.textContent = "Add Site";
+        addSite.id = "addsiteBtn";
 
         const addAsset = document.createElement("a");
         addAsset.className = "button";
@@ -117,6 +121,7 @@
         reference.insertAdjacentElement("afterend", viewBtn);
         viewBtn.insertAdjacentElement("afterend", addSite);
         addSite.insertAdjacentElement("afterend", addAsset);
+
         const fleetBtn = document.createElement("a");
         fleetBtn.className = "button";
         fleetBtn.href = "van-scores.html";
@@ -129,8 +134,6 @@
         holidayCal.href = "holiday-calendar.html";
         holidayCal.textContent = "Holiday Calendar";
         fleetBtn.insertAdjacentElement("afterend", holidayCal);
-
-
       }
     });
 </script>
@@ -197,6 +200,29 @@ document.addEventListener("DOMContentLoaded", function () {
       if (dashBtn) dashBtn.remove();
     }
   })();
+</script>
+
+<!-- ✅ PERMISSION CONTROL SCRIPT -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const perms = JSON.parse(sessionStorage.getItem('mostlanePermissions') || '{}');
+  const full = (perms.FullAccess || '').toLowerCase() === 'yes';
+
+  function hideIfNo(id, key) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (full) return; // FullAccess = everything visible
+    if ((perms[key] || '').toLowerCase() !== 'yes') el.style.display = 'none';
+  }
+
+  // Apply per-page permissions
+  hideIfNo('purchaseBtn', 'PurchaseOrders');
+  hideIfNo('checkinBtn', 'CheckInOut');
+  hideIfNo('holidayBtn', 'Holiday');
+  hideIfNo('formsBtn', 'Forms');
+  hideIfNo('assetsBtn', 'Assets');
+  hideIfNo('addsiteBtn', 'AddSite');
+});
 </script>
 
 </body>
