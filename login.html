@@ -74,7 +74,6 @@
   </div>
 
   <script>
-    // URL of your new users.json file on GitHub
     const usersJsonURL = "https://raw.githubusercontent.com/Mostlane/Test/main/users.json";
 
     async function hashPassword(password) {
@@ -97,34 +96,35 @@
       try {
         const res = await fetch(usersJsonURL + "?v=" + Date.now());
         if (!res.ok) throw new Error("Network error");
-        const users = await res.json();
+        const data = await res.json();
+        const users = data.Users || []; // unwrap "Users" array
 
-        const user = users.find(u => u.username === username);
+        const user = users.find(u => u.Username === username);
 
         if (!user) {
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        if (!user.active) {
+        if (!user.Status || user.Status.toLowerCase() !== "active") {
           errorBox.textContent = "Your account is inactive. Please contact admin.";
           return;
         }
 
-        if (user.passwordHash !== hashedInput) {
+        if (user.HashedPassword !== hashedInput) {
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
         // ✅ Successful login
         sessionStorage.setItem("mostlaneLoggedIn", "true");
-        sessionStorage.setItem("mostlaneUser", user.username);
-        sessionStorage.setItem("mostlaneFolder", user.sharePointPath || "");
+        sessionStorage.setItem("mostlaneUser", user.Username);
+        sessionStorage.setItem("mostlaneFolder", user.SharePointPath || "");
 
         // also set localStorage with 12h expiry
         localStorage.setItem("mostlaneLoggedIn", "true");
-        localStorage.setItem("mostlaneUser", user.username);
-        localStorage.setItem("mostlaneFolder", user.sharePointPath || "");
+        localStorage.setItem("mostlaneUser", user.Username);
+        localStorage.setItem("mostlaneFolder", user.SharePointPath || "");
         localStorage.setItem("mostlaneExpiry", Date.now() + (12 * 60 * 60 * 1000));
 
         window.location.href = "main.html";
