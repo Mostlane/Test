@@ -81,7 +81,7 @@
 <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
 <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
 
-<!-- ✅ NEW PERMISSION SYSTEM -->
+<!-- ✅ UNIVERSAL PERMISSION CONTROL -->
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
   const username = sessionStorage.getItem("mostlaneUser");
@@ -99,24 +99,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     function toggle(id, key) {
       const el = document.getElementById(id);
       if (!el) return;
-      if (full) return;
+      if (full) return; // show all if full access
       if ((user[key] || "").toLowerCase() !== "yes") el.style.display = "none";
     }
 
-    // Hide/show based on permissions in users.json
+    // Apply permissions from users.json
     toggle("purchaseBtn", "PurchaseOrders");
     toggle("checkinBtn", "CheckInOut");
     toggle("holidayBtn", "Holiday");
     toggle("formsBtn", "Forms");
     toggle("assetsBtn", "Assets");
     toggle("poMenuBtn", "PurchaseOrders");
-    toggle("weeklyBtn", "Weekly");
-    toggle("hours-dashboard-btn", "Forms"); // example - tie to Forms if needed
-    toggle("complianceBtn", "Forms"); // can be tied to any key you prefer
+    toggle("my-documents-btn", "MyDocuments");
+    toggle("complianceBtn", "Compliance");
+    toggle("hours-dashboard-btn", "HoursDashboard");
+    toggle("weeklyBtn", "Weekly"); // optional - leave if you later add Weekly field
   } catch (err) {
     console.error("Failed to load permissions", err);
   }
 });
 </script>
+
 </body>
 </html>
