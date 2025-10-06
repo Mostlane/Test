@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SHA-256 Hash Generator</title>
+</head>
+<body style="font-family:Segoe UI, sans-serif; margin:40px;">
+<h2>🔐 Generate SHA-256 (Mostlane Portal Compatible)</h2>
+<input id="p" placeholder="Enter password" style="padding:8px;width:240px">
+<button onclick="(async()=>{const e=new TextEncoder();const t=e.encode(p.value.trim());const h=await crypto.subtle.digest('SHA-256',t);const s=Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');out.textContent=s})();">Generate Hash</button>
+<pre id="out" style="margin-top:20px;font-size:16px;"></pre>
+</body>
+</html>
