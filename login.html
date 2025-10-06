@@ -97,8 +97,9 @@
         const res = await fetch(usersJsonURL + "?v=" + Date.now());
         if (!res.ok) throw new Error("Network error");
         const data = await res.json();
-        const users = data.Users || []; // unwrap "Users" array
+        const users = data.Users || [];
 
+        // Match user exactly by Username (case sensitive)
         const user = users.find(u => u.Username === username);
 
         if (!user) {
@@ -106,11 +107,7 @@
           return;
         }
 
-        if (!user.Status || user.Status.toLowerCase() !== "active") {
-          errorBox.textContent = "Your account is inactive. Please contact admin.";
-          return;
-        }
-
+        // Compare hash
         if (user.HashedPassword !== hashedInput) {
           errorBox.textContent = "Invalid login credentials.";
           return;
