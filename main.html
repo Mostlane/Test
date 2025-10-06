@@ -49,11 +49,6 @@
     flex-direction: column;
     align-items: center;
   }
-  h1 {
-    color: #003366;
-    margin-bottom: 30px;
-    text-align: center;
-  }
   .button {
     display: block;
     margin: 10px auto;
@@ -69,6 +64,7 @@
   }
 </style>
 
+<!-- ✅ BUTTONS -->
 <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
 <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
 <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
@@ -81,7 +77,7 @@
 <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
 <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
 
-<!-- ✅ UNIVERSAL PERMISSION CONTROL -->
+<!-- ✅ PERMISSION LOGIC -->
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
   const username = sessionStorage.getItem("mostlaneUser");
@@ -99,21 +95,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     function toggle(id, key) {
       const el = document.getElementById(id);
       if (!el) return;
-      if (full) return; // show all if full access
-      if ((user[key] || "").toLowerCase() !== "yes") el.style.display = "none";
+      if (full) {
+        el.style.display = "block"; // Show everything for FullAccess
+        return;
+      }
+      if ((user[key] || "").toLowerCase() !== "yes") {
+        el.style.display = "none";
+      }
     }
 
     // Apply permissions from users.json
-    toggle("purchaseBtn", "PurchaseOrders");
     toggle("checkinBtn", "CheckInOut");
     toggle("holidayBtn", "Holiday");
-    toggle("formsBtn", "Forms");
-    toggle("assetsBtn", "Assets");
+    toggle("purchaseBtn", "PurchaseOrders");
     toggle("poMenuBtn", "PurchaseOrders");
+    toggle("assetsBtn", "Assets");
+    toggle("formsBtn", "Forms");
     toggle("my-documents-btn", "MyDocuments");
     toggle("complianceBtn", "Compliance");
     toggle("hours-dashboard-btn", "HoursDashboard");
-    toggle("weeklyBtn", "Weekly"); // optional - leave if you later add Weekly field
+    toggle("weeklyBtn", "Weekly"); // Optional future expansion
+
+    // Optional: Auto-link My Documents button to user SharePointPath
+    const docBtn = document.getElementById("my-documents-btn");
+    if (docBtn && user.SharePointPath) {
+      docBtn.href = user.SharePointPath;
+    }
+
   } catch (err) {
     console.error("Failed to load permissions", err);
   }
