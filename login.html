@@ -62,88 +62,58 @@
 
   <script>
     const usersJsonURL = "https://raw.githubusercontent.com/Mostlane/Test/main/users.json";
-    const DEBUG = false; // set true temporarily if you want alerts with details
 
-    // Helpers
-    const utf8 = new TextEncoder();
-    function hex(buf){ return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join(""); }
-    function encodeUtf16LE(str){
-      const buf = new ArrayBuffer(str.length * 2);
-      const view = new Uint16Array(buf);
-      for (let i=0;i<str.length;i++) view[i] = str.charCodeAt(i);
-      return new Uint8Array(buf);
-    }
-    async function sha256Bytes(bytes){ return hex(await crypto.subtle.digest("SHA-256", bytes)); }
-    async function hashUtf8(s){ return sha256Bytes(utf8.encode(s)); }
-    async function hashUtf16LE(s){ return sha256Bytes(encodeUtf16LE(s)); }
-
-    async function hashVariants(raw) {
-      // remove zero-width chars Excel sometimes introduces
-      const cleaned = raw.replace(/[\u200B-\u200D\uFEFF]/g, "");
-      const variants = [
-        cleaned,                // as typed
-        cleaned.trim(),         // trimmed
-        cleaned.toLowerCase(),  // lowercase
-        cleaned.trim().toLowerCase()
-      ];
-      const results = new Set();
-      for (const v of variants) {
-        results.add(await hashUtf8(v));
-        results.add(await hashUtf16LE(v));
-      }
-      return Array.from(results);
+    async function hashPassword(password) {
+      const enc = new TextEncoder();
+      const data = enc.encode(password.trim());
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hashBuffer))
+                  .map(b => b.toString(16).padStart(2, '0'))
+                  .join('');
     }
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const userInput = document.getElementById('username').value.trim();
-      const passInput = document.getElementById('password').value;
+      const usernameInput = document.getElementById('username').value.trim();
+      const passwordInput = document.getElementById('password').value.trim();
       const errorBox = document.getElementById('error');
       errorBox.textContent = "";
 
-      if (!userInput || !passInput) {
-        errorBox.textContent = "Please enter both username and password.";
-        return;
-      }
-
       try {
-        const res = await fetch(usersJsonURL + "?v=" + Date.now());
-        if (!res.ok) throw new Error("Network error");
+        const res = await fetch(usersJsonURL + '?v=' + Date.now());
+        if (!res.ok) throw new Error('Network error');
         const data = await res.json();
-        const users = data.Users || data.users || [];
+        const users = data.Users || [];
 
-        // match username exactly, but ignore stray spaces in JSON
-        const user = users.find(u => (u.Username || "").trim() === userInput);
+        // Find user (case-insensitive just in case Excel capitalisation differs)
+        const user = users.find(u => u.Username.toLowerCase() === usernameInput.toLowerCase());
         if (!user) {
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // status check (only if present)
-        const status = (user.Status || user.status || "Active").toString().toLowerCase();
-        if (status !== "active") {
+        // Check status (if present)
+        if ((user.Status || '').toLowerCase() !== 'active') {
           errorBox.textContent = "Account is not active.";
           return;
         }
 
-        // try multiple hashing variants to align with Excel/browser differences
-        const hashes = await hashVariants(passInput);
-        const stored = (user.HashedPassword || user.passwordHash || "").toLowerCase();
-
-        const ok = hashes.some(h => h === stored);
-        if (!ok) {
-          if (DEBUG) alert("No hash match.\nStored:\n" + stored + "\nComputed variants:\n" + hashes.join("\n"));
+        // Compare hash
+        const hashedInput = await hashPassword(passwordInput);
+        if (hashedInput !== user.HashedPassword.toLowerCase()) {
+          console.log('Expected:', user.HashedPassword);
+          console.log('Entered :', hashedInput);
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // ✅ success
-        sessionStorage.setItem("mostlaneLoggedIn", "true");
-        sessionStorage.setItem("mostlaneUser", user.Username);
-        sessionStorage.setItem("mostlaneFolder", user.SharePointPath || "");
-        sessionStorage.setItem("mostlaneEmployment", user.EmploymentType || "");
-        sessionStorage.setItem("mostlaneVehicle", user.VehicleAssigned || "");
-        sessionStorage.setItem("mostlanePermissions", JSON.stringify({
+        // ✅ Success — store everything
+        sessionStorage.setItem('mostlaneLoggedIn', 'true');
+        sessionStorage.setItem('mostlaneUser', user.Username);
+        sessionStorage.setItem('mostlaneFolder', user.SharePointPath || '');
+        sessionStorage.setItem('mostlaneEmployment', user.EmploymentType || '');
+        sessionStorage.setItem('mostlaneVehicle', user.VehicleAssigned || '');
+        sessionStorage.setItem('mostlanePermissions', JSON.stringify({
           PurchaseOrders: user.PurchaseOrders,
           CheckInOut: user.CheckInOut,
           Holiday: user.Holiday,
@@ -152,15 +122,15 @@
           AddSite: user.AddSite
         }));
 
-        localStorage.setItem("mostlaneLoggedIn", "true");
-        localStorage.setItem("mostlaneUser", user.Username);
-        localStorage.setItem("mostlaneFolder", user.SharePointPath || "");
-        localStorage.setItem("mostlaneExpiry", Date.now() + (12 * 60 * 60 * 1000));
+        localStorage.setItem('mostlaneLoggedIn', 'true');
+        localStorage.setItem('mostlaneUser', user.Username);
+        localStorage.setItem('mostlaneFolder', user.SharePointPath || '');
+        localStorage.setItem('mostlaneExpiry', Date.now() + (12 * 60 * 60 * 1000));
 
-        window.location.href = "main.html";
+        window.location.href = 'main.html';
       } catch (err) {
         console.error(err);
-        errorBox.textContent = "Could not load user list.";
+        errorBox.textContent = 'Could not load user list.';
       }
     });
   </script>
