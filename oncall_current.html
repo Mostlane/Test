@@ -106,7 +106,7 @@
 
     async function loadCurrentData() {
       try {
-        const res = await fetch(jsonURL);
+        const res = await fetch(`${jsonURL}?t=${Date.now()}`);
         const data = await res.json();
 
         const currentManager = data.current_on_call_manager?.name || "Not set";
