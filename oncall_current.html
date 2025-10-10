@@ -58,7 +58,6 @@
     .status {
       margin-top: 20px;
       font-weight: bold;
-      color: #007700;
     }
   </style>
 </head>
@@ -70,7 +69,6 @@
       Loading current on-call data...
     </div>
 
-    <!-- Manager Dropdown -->
     <label for="manager">Select On-Call Manager:</label>
     <select id="manager">
       <option value="">-- Choose Manager --</option>
@@ -85,7 +83,6 @@
       <option value="On Call Phone">On Call Phone</option>
     </select>
 
-    <!-- Engineer Dropdown -->
     <label for="engineer">Select On-Call Engineer:</label>
     <select id="engineer">
       <option value="">-- Choose Engineer --</option>
@@ -138,30 +135,34 @@
         return;
       }
 
+      document.getElementById("status").style.color = "#333";
       document.getElementById("status").innerText = "Saving...";
 
-      const payload = {
+      const payload = new URLSearchParams({
         manager,
         engineer,
         updated_by: sessionStorage.getItem("mostlaneUser") || "Admin Portal",
         timestamp: new Date().toISOString()
-      };
+      });
 
       try {
         const res = await fetch(webhookURL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: payload.toString()
         });
 
         if (res.ok) {
+          document.getElementById("status").style.color = "green";
           document.getElementById("status").innerText =
             `✅ ${manager} (Manager) & ${engineer} (Engineer) are now On-Call`;
           loadCurrentData();
         } else {
+          document.getElementById("status").style.color = "red";
           document.getElementById("status").innerText = "❌ Failed to update settings.";
         }
       } catch (err) {
+        document.getElementById("status").style.color = "red";
         document.getElementById("status").innerText = "❌ Error connecting to Zapier.";
       }
     }
