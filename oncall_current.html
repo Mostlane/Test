@@ -101,13 +101,14 @@
   </div>
 
   <script>
-    const jsonURL = "https://raw.githubusercontent.com/Mostlane/Test/main/oncall.json";
+    const apiURL = "https://api.github.com/repos/Mostlane/Test/contents/oncall.json?ref=main";
     const webhookURL = "https://hooks.zapier.com/hooks/catch/20261714/u51954c/";
 
     async function loadCurrentData() {
       try {
-        const res = await fetch(`${jsonURL}?t=${Date.now()}`);
-        const data = await res.json();
+        const res = await fetch(apiURL);
+        const file = await res.json();
+        const data = JSON.parse(atob(file.content)); // Decode base64 -> JSON
 
         const currentManager = data.current_on_call_manager?.name || "Not set";
         const currentEngineer = data.current_on_call_engineer?.name || "Not set";
