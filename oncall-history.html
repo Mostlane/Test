@@ -1,28 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>On-Call History & Duration</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root{
-      --bg:#f6f8fa; --card:#fff; --ink:#0f2747; --muted:#6b7280; --acc:#1f6feb;
-      --ok:#0f9d58; --warn:#f59e0b; --line:#e5e7eb;
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 40px 20px;
+      color: #003366;
     }
-    body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;color:var(--ink);}
-    .wrap{max-width:1100px;margin:40px auto;padding:0 16px;}
-    .card{background:var(--card);border-radius:12px;box-shadow:0 6px 16px rgba(0,0,0,.06);padding:20px;}
-    h1{margin:0 0 8px;font-size:22px}
-    .sub{color:var(--muted);margin-bottom:18px}
+    .container {
+      max-width: 800px;
+      margin: auto;
+      background: rgba(255,255,255,0.95);
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    h1 { margin-top: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    th { background: #004a99; color: #fff; }
+    tr:hover { background: #f0f4fa; }
+    .back-btn {
+      background-color: #004a99;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+      margin-bottom: 15px;
+    }
+    .back-btn:hover { background-color: #003366; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h1>On-Call History & Duration</h1>
-      <div class="sub">Built from <code>json_logs/oncall/oncall-history.json</code></div>
-      <div id="status" class="muted">Loading...</div>
-    </div>
+  <div class="container">
+    <button class="back-btn" onclick="window.location.href='set-oncall.html'">← Back</button>
+    <h1>On-Call History & Duration</h1>
+    <p>Built from <code>json_logs/oncall/oncall-history.json</code></p>
+    <div id="output">Loading...</div>
   </div>
+
+  <script>
+    const apiUrl = "https://api.github.com/repos/Mostlane/Test/contents/json_logs/oncall/oncall-history.json?ref=main";
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(apiUrl + "&t=" + Date.now());
+        const file = await res.json();
+        if (!file.content) throw new Error("No content received");
+
+        // decode base64 content
+        const decoded = atob(file.content.replace(/(\r\n|\n|\r|\s)/g, ""));
+        const data = JSON.parse(decoded);
+        const history = data.history || [];
+
+        if (history.length === 0) {
+          document.getElementById("output").innerText = "No on-call history available.";
+          return;
+        }
+
+        // Sort newest first
+        history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        // Calculate durations
+        let rows = "";
+        for (let i = 0; i < history.length; i++) {
+          const current = history[i];
+          const next = history[i + 1];
+          let duration = "Active";
+          if (next) {
+            const diffMs = new Date(current.timestamp) - new Date(next.timestamp);
+            const diffHrs = (diffMs / 1000 / 60 / 60).toFixed(1);
+            duration = `${diffHrs} hrs`;
+          }
+
+          rows += `
+            <tr>
+              <td>${new Date(current.timestamp).toLocaleString("en-GB")}</td>
+              <td>${current.manager}</td>
+              <td>${current.engineer}</td>
+              <td>${current.updated_by}</td>
+              <td>${duration}</td>
+            </tr>
+          `;
+        }
+
+        document.getElementById("output").innerHTML = `
+          <table>
+            <tr>
+              <th>Timestamp</th>
+              <th>Manager</th>
+              <th>Engineer</th>
+              <th>Updated By</th>
+              <th>Duration (Until Next)</th>
+            </tr>
+            ${rows}
+          </table>
+        `;
+      } catch (err) {
+        document.getElementById("output").innerText = "⚠️ Failed to load history: " + err.message;
+      }
+    }
+
+    loadHistory();
+  </script>
 </body>
 </html>
