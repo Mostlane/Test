@@ -22,10 +22,7 @@
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       text-align: center;
     }
-    h1 {
-      margin-top: 0;
-      color: #003366;
-    }
+    h1 { margin-top: 0; color: #003366; }
     .current {
       background: #f5f7fa;
       border-radius: 10px;
@@ -51,16 +48,134 @@
       font-size: 16px;
       cursor: pointer;
       width: 100%;
+      margin-bottom: 12px;
     }
-    button:hover {
-      background-color: #003366;
-    }
-    .status {
-      margin-top: 20px;
+    button:hover { background-color: #003366; }
+    .history-btn {
+      background-color: #ffffff;
+      color: #004a99;
+      border: 2px solid #004a99;
       font-weight: bold;
     }
+    .history-btn:hover { background-color: #004a99; color: #ffffff; }
+    .status { margin-top: 20px; font-weight: bold; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Set On-Call Roles</h1>
+
+    <div class="current" id="currentSection">
+      Loading current on-call data...
+    </div>
+
+    <label for="manager">Select On-Call Manager:</label>
+    <select id="manager">
+      <option value="">-- Choose Manager --</option>
+      <option value="Joe Line">Joe Line</option>
+      <option value="Jamie Line">Jamie Line</option>
+      <option value="Greg Line">Greg Line</option>
+      <option value="Megan Line">Megan Line</option>
+      <option value="Chloe Molloy">Chloe Molloy</option>
+      <option value="Joanna Marcinkowska">Joanna Marcinkowska</option>
+      <option value="Tanya Chinnery">Tanya Chinnery</option>
+      <option value="Chris Freeman">Chris Freeman</option>
+      <option value="On Call Phone">On Call Phone</option>
+    </select>
+
+    <label for="engineer">Select On-Call Engineer:</label>
+    <select id="engineer">
+      <option value="">-- Choose Engineer --</option>
+      <option value="David Molloy">David Molloy</option>
+      <option value="Ryan Diggens">Ryan Diggens</option>
+      <option value="Chris Cooke">Chris Cooke</option>
+      <option value="Colby Lunsford">Colby Lunsford</option>
+      <option value="Connor Brady">Connor Brady</option>
+      <option value="Tony Pelin">Tony Pelin</option>
+      <option value="John Thorn">John Thorn</option>
+      <option value="Bradley Graham">Bradley Graham</option>
+    </select>
+
+    <button onclick="saveOnCall()">Save On-Call Settings</button>
+    <button class="history-btn" type="button" onclick="window.location.href='oncall-history.html'">View History</button>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const apiURL = "https://api.github.com/repos/Mostlane/Test/contents/json_logs/oncall/oncall-current.json?ref=main";
+    const webhookURL = "https://hooks.zapier.com/hooks/catch/20261714/u51954c/";
+
+    function safeAtob(b64) {
+      // remove newlines/spaces GitHub includes in base64
+      return atob((b64 || '').replace(/(\r\n|\n|\r|\s)/g, ''));
+    }
+
+    async function loadCurrentData() {
+      try {
+        const res = await fetch(apiURL + "&t=" + Date.now()); // cache-bust
+        const file = await res.json();
+        const data = JSON.parse(safeAtob(file.content));
+
+        const currentManager = data.current_on_call_manager?.name || "Not set";
+        const currentEngineer = data.current_on_call_engineer?.name || "Not set";
+        const lastUpdated = data.last_updated
+          ? new Date(data.last_updated).toLocaleString("en-GB")
+          : "Unknown";
+        const updatedBy = data.updated_by || "System";
+
+        document.getElementById("currentSection").innerHTML = `
+          🧑‍💼 <strong>Manager:</strong> ${currentManager}<br>
+          👷 <strong>Engineer:</strong> ${currentEngineer}<br>
+          🕓 <strong>Last Updated:</strong> ${lastUpdated} by ${updatedBy}
+        `;
+      } catch (error) {
+        document.getElementById("currentSection").innerText = "⚠️ Error loading on-call data.";
+      }
+    }
+
+    async function saveOnCall() {
+      const manager = document.getElementById("manager").value;
+      const engineer = document.getElementById("engineer").value;
+
+      if (!manager || !engineer) {
+        document.getElementById("status").innerText = "⚠️ Please select both a manager and an engineer.";
+        return;
+      }
+
+      document.getElementById("status").style.color = "#333";
+      document.getElementById("status").innerText = "Saving...";
+
+      const payload = new URLSearchParams({
+        manager,
+        engineer,
+        updated_by: sessionStorage.getItem("mostlaneUser") || "Admin Portal",
+        timestamp: new Date().toISOString()
+      });
+
+      try {
+        const res = await fetch(webhookURL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: payload.toString()
+        });
+
+        if (res.ok) {
+          document.getElementById("status").style.color = "green";
+          document.getElementById("status").innerText =
+            `✅ ${manager} (Manager) & ${engineer} (Engineer) are now On-Call`;
+          loadCurrentData();
+        } else {
+          document.getElementById("status").style.color = "red";
+          document.getElementById("status").innerText = "❌ Failed to update settings.";
+        }
+      } catch (err) {
+        document.getElementById("status").style.color = "red";
+        document.getElementById("status").innerText = "❌ Error connecting to Zapier.";
+      }
+    }
+
+    loadCurrentData();
+  </script>
+</body>
+</html>
