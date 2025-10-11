@@ -139,18 +139,6 @@
         <input type="text" id="incident" placeholder="Enter incident number">
       </div>
 
-      <div id="siteTypeRow" class="hidden">
-        <label for="siteType">Site Type</label>
-        <select id="siteType">
-          <option value="">Select a Site Type…</option>
-          <option value="Retail">Retail</option>
-          <option value="ELS">ELS</option>
-          <option value="COBRA">COBRA</option>
-          <option value="Wenzel’s">Wenzel’s</option>
-          <option value="Site">Site</option>
-        </select>
-      </div>
-
       <div id="siteRow">
         <label for="site">Site</label>
         <select id="site"></select>
@@ -194,7 +182,6 @@
   </div>
 
   <script>
-    // ---------- CONFIG ----------
     const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
     const USERS_URL = RAW + 'users.json';
     const SITES_URL = RAW + 'sites.json';
@@ -202,27 +189,22 @@
     const VEHICLES_URL = RAW + 'vehicles.json';
     const WEBHOOK_URL = 'https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/';
 
-    // ---------- HELPERS ----------
     const byId = id => document.getElementById(id);
     const cacheBust = url => url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
     const fetchJSON = url => fetch(cacheBust(url)).then(r => r.json());
-    function dotToSpace(s){ return (s||'').replace(/\./g,' '); }
-    function formatDateUK(d=new Date()){
+    const dotToSpace = s => (s || '').replace(/\./g, ' ');
+    const formatDateUK = (d = new Date()) => {
       const dd = String(d.getDate()).padStart(2,'0');
       const mm = String(d.getMonth()+1).padStart(2,'0');
       const yy = d.getFullYear();
       return `${dd}/${mm}/${yy}`;
-    }
+    };
     function norm(v){ return (v||'').toString().toLowerCase().trim(); }
 
-    // ---------- STATE ----------
-    let allSites = [];
-    let allSuppliers = [];
-    let engineerCode = '';
-    let engineerName = '';
+    let allSites = [], allSuppliers = [];
+    let engineerCode = '', engineerName = '';
     let geo = { lat: null, lon: null };
 
-    // ---------- PO GENERATION ----------
     function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
       const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
       let n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
@@ -230,7 +212,6 @@
       return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
     }
 
-    // ---------- UI POPULATORS ----------
     async function populateSuppliers(){
       try {
         allSuppliers = await fetchJSON(SUPPLIERS_URL);
@@ -247,20 +228,22 @@
       }
     }
 
-    function populateSites(filterType){
-      const sel = byId('site');
-      sel.innerHTML = '';
-      let list = allSites;
-      const f = (filterType||'').trim();
-      if (f) list = allSites.filter(s => norm(s.siteType) === norm(f));
-      list.forEach(s => {
-        const shown = [s.siteName, s.jobNumber].filter(Boolean).join(' — ');
-        const opt = document.createElement('option');
-        opt.value = s.jobNumber || '';
-        opt.textContent = shown;
-        opt.dataset.siteName = s.siteName || '';
-        sel.appendChild(opt);
-      });
+    async function populateSites(){
+      try {
+        const sites = await fetchJSON(SITES_URL);
+        const sel = byId('site');
+        sel.innerHTML = '';
+        (sites || []).forEach(s => {
+          const shown = [s.siteName, s.jobNumber].filter(Boolean).join(' — ');
+          const opt = document.createElement('option');
+          opt.value = s.jobNumber || '';
+          opt.textContent = shown;
+          opt.dataset.siteName = s.siteName || '';
+          sel.appendChild(opt);
+        });
+      } catch {
+        byId('site').innerHTML = '<option value="">(Unable to load sites)</option>';
+      }
     }
 
     async function populateVehicles(){
@@ -278,15 +261,12 @@
       } catch {}
     }
 
-    // ---------- MODAL ----------
     function showModal(poCode){
       byId('poCodeText').textContent = poCode;
       byId('modalBackdrop').style.display = 'flex';
     }
     function hideModal(){ byId('modalBackdrop').style.display = 'none'; }
-    function copyText(t){ navigator.clipboard?.writeText(t).catch(()=>{}); }
 
-    // ---------- INIT ----------
     async function init(){
       const username = sessionStorage.getItem('mostlaneUser') || '';
       engineerName = username ? dotToSpace(username) : 'Unknown';
@@ -302,22 +282,7 @@
         engineerCode = prefix + String(engNum || '').trim();
       } catch { engineerCode = 'E0'; }
 
-      byId('workType').addEventListener('change', e => {
-        const val = e.target.value;
-        const isReactive = val === 'Reactive';
-        const isVehicle = val === 'Vehicle Maintenance';
-        byId('incidentRow').style.display = isReactive ? '' : 'none';
-        byId('siteRow').style.display = isVehicle ? 'none' : '';
-        byId('vehicleRow').classList.toggle('hidden', !isVehicle);
-      });
-
-      try {
-        const sites = await fetchJSON(SITES_URL);
-        allSites = Array.isArray(sites) ? sites : [];
-        populateSites();
-      } catch {
-        byId('site').innerHTML = '<option value="">(Unable to load sites)</option>';
-      }
+      await populateSites();
       await populateSuppliers();
       await populateVehicles();
 
@@ -326,19 +291,27 @@
           pos => {
             geo.lat = pos.coords.latitude;
             geo.lon = pos.coords.longitude;
-            byId('geoStatus').textContent = `Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
+            byId('geoStatus').textContent = `📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
           },
-          () => byId('geoStatus').textContent = 'Location permission denied. You must allow location to submit a PO.',
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+          err => {
+            const msgs = {
+              1: '⚠️ Permission denied. Please allow location.',
+              2: '⚠️ Position unavailable.',
+              3: '⚠️ Request timed out.'
+            };
+            byId('geoStatus').textContent = msgs[err.code] || '⚠️ Unable to get location.';
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
-      } else byId('geoStatus').textContent = 'Geolocation not supported.';
+      } else {
+        byId('geoStatus').textContent = '❌ Geolocation not supported.';
+      }
 
-      byId('copyBtn').addEventListener('click', () => copyText(byId('poCodeText').textContent));
+      byId('copyBtn').addEventListener('click', () => navigator.clipboard.writeText(byId('poCodeText').textContent));
       byId('closeBtn').addEventListener('click', hideModal);
       byId('newBtn').addEventListener('click', () => {
         hideModal();
         byId('poForm').reset();
-        byId('workType').dispatchEvent(new Event('change'));
         byId('engineer').value = engineerName;
         byId('date').value = formatDateUK();
       });
@@ -346,26 +319,22 @@
       byId('personalBtn').addEventListener('click', () => {
         const eng = encodeURIComponent(byId('engineer').value || '');
         const date = encodeURIComponent(byId('date').value || '');
-        const formUrl = `https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`;
-        window.open(formUrl, '_blank');
+        window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`, '_blank');
       });
 
       byId('poForm').addEventListener('submit', onSubmit);
     }
 
-    // ---------- SUBMIT ----------
     async function onSubmit(e){
       e.preventDefault();
       const submitBtn = byId('submitBtn');
       submitBtn.disabled = true;
 
       const workType = byId('workType').value;
-      const isReactive = workType === 'Reactive';
       const isVehicle = workType === 'Vehicle Maintenance';
       const engineerVal = byId('engineer').value.trim();
       const dateVal = byId('date').value.trim();
       const siteNumber = byId('site').value;
-      const siteName = byId('site').selectedOptions[0]?.dataset?.siteName || '';
       const vehicleReg = byId('vehicleReg').value;
       const supplierNumber = byId('supplier').value;
       const supplierName = byId('supplier').selectedOptions[0]?.textContent || '';
@@ -397,43 +366,21 @@
       payload.append('latitude', String(geo.lat));
       payload.append('longitude', String(geo.lon));
 
-      // ---- GitHub append block ----
-      const newEntry = {
-        poNumber: poCode,
-        engineer: engineerVal,
-        engineerCode,
-        date: dateVal,
-        workType,
-        supplierName,
-        supplierNumber,
-        description: descVal,
-        gps: `${geo.lat},${geo.lon}`,
-        timestamp: new Date().toISOString(),
-        status: "Pending"
-      };
-
-      const repo = "Mostlane/Test";
-      const path = "purchase-orders/po-log.json";
-      const token = "YOUR_GITHUB_TOKEN_HERE"; // Replace with your secure token or proxy
-
       try {
-        // Append to GitHub JSON
-        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`);
-        const data = await res.json();
-        const sha = data.sha;
-        const content = atob(data.content || "");
-        const json = JSON.parse(content || '{"entries": []}');
-        json.entries.push(newEntry);
-        const updatedContent = btoa(JSON.stringify(json, null, 2));
+        await fetch(WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: payload.toString()
+        });
+        alert(`✅ Purchase Order ${poCode} submitted successfully.`);
+      } catch {
+        alert('⚠️ Failed to submit to server. Your PO was generated locally.');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
 
-        await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-          method: "PUT",
-          headers: {
-            "Authorization": `token ${token}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            message: `PO ${poCode} submitted by ${engineerVal}`,
-            content: updatedContent,
-            sha: sha
-         
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
