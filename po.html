@@ -364,7 +364,6 @@
       const isVehicle = workType === 'Vehicle Maintenance';
       const engineerVal = byId('engineer').value.trim();
       const dateVal = byId('date').value.trim();
-      const incidentVal = byId('incident').value.trim();
       const siteNumber = byId('site').value;
       const siteName = byId('site').selectedOptions[0]?.dataset?.siteName || '';
       const vehicleReg = byId('vehicleReg').value;
@@ -398,18 +397,43 @@
       payload.append('latitude', String(geo.lat));
       payload.append('longitude', String(geo.lon));
 
-      try {
-        await fetch(WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: payload.toString()
-        });
-      } catch {
-        alert('Failed to submit to server. Your PO was generated locally.');
-      } finally { submitBtn.disabled = false; }
-    }
+      // ---- GitHub append block ----
+      const newEntry = {
+        poNumber: poCode,
+        engineer: engineerVal,
+        engineerCode,
+        date: dateVal,
+        workType,
+        supplierName,
+        supplierNumber,
+        description: descVal,
+        gps: `${geo.lat},${geo.lon}`,
+        timestamp: new Date().toISOString(),
+        status: "Pending"
+      };
 
-    document.addEventListener('DOMContentLoaded', init);
-  </script>
-</body>
-</html>
+      const repo = "Mostlane/Test";
+      const path = "purchase-orders/po-log.json";
+      const token = "YOUR_GITHUB_TOKEN_HERE"; // Replace with your secure token or proxy
+
+      try {
+        // Append to GitHub JSON
+        const res = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`);
+        const data = await res.json();
+        const sha = data.sha;
+        const content = atob(data.content || "");
+        const json = JSON.parse(content || '{"entries": []}');
+        json.entries.push(newEntry);
+        const updatedContent = btoa(JSON.stringify(json, null, 2));
+
+        await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+          method: "PUT",
+          headers: {
+            "Authorization": `token ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            message: `PO ${poCode} submitted by ${engineerVal}`,
+            content: updatedContent,
+            sha: sha
+         
