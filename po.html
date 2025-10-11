@@ -21,7 +21,6 @@
       padding: 24px 24px 30px;
       border-radius: 12px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      position: relative;
     }
     h1 {
       text-align: center;
@@ -61,14 +60,9 @@
       cursor: pointer;
     }
     .button[disabled] { opacity: 0.6; cursor: not-allowed; }
-    .subtle {
-      margin-top: 8px;
-      font-size: 13px;
-      color: #666;
-    }
+    .subtle { margin-top: 8px; font-size: 13px; color: #666; }
     .hidden { display: none; }
 
-    /* Confirmation modal */
     .modal-backdrop {
       position: fixed; inset: 0;
       background: rgba(0,0,0,0.45);
@@ -85,28 +79,14 @@
       box-shadow: 0 10px 30px rgba(0,0,0,0.25);
       text-align: center;
     }
-    .modal h2 {
-      margin: 0 0 8px 0;
-      color: #003366;
-      font-size: 20px;
-    }
-    .modal .po-code {
-      font-weight: 700;
-      font-size: 20px;
-      color: #003366;
-      margin: 8px 0 16px;
-      word-break: break-all;
-    }
+    .modal h2 { color: #003366; margin: 0 0 8px 0; }
+    .modal .po-code { font-weight: 700; font-size: 20px; color: #003366; margin: 8px 0 16px; word-break: break-all; }
     .modal .actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 12px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
     }
     .modal button, .modal a {
       padding: 10px; border-radius: 8px; border: none;
-      background: rgba(0, 74, 153, 0.9); color: #fff; text-decoration: none;
-      font-size: 16px; display: inline-block;
+      background: rgba(0,74,153,0.9); color: #fff; text-decoration: none; font-size: 16px;
     }
     .modal .close-btn { background: #888; }
   </style>
@@ -139,6 +119,19 @@
         <input type="text" id="incident" placeholder="Enter incident number">
       </div>
 
+      <div id="siteTypeRow">
+        <label for="siteType">Site Type</label>
+        <select id="siteType">
+          <option value="">All Sites</option>
+          <option value="Retail">Retail</option>
+          <option value="ELS">ELS</option>
+          <option value="COBRA">COBRA</option>
+          <option value="Wenzel’s">Wenzel’s</option>
+          <option value="FBC">FBC</option>
+          <option value="Site">Site</option>
+        </select>
+      </div>
+
       <div id="siteRow">
         <label for="site">Site</label>
         <select id="site"></select>
@@ -158,20 +151,16 @@
       <textarea id="desc" placeholder="What is this PO for?" required></textarea>
 
       <button type="submit" class="button" id="submitBtn">Create PO</button>
-
-      <button type="button" id="personalBtn" class="button" style="background-color:#005bb5;margin-top:10px;">
-        Personal Purchase (Tools etc.)
-      </button>
+      <button type="button" id="personalBtn" class="button" style="background-color:#005bb5;margin-top:10px;">Personal Purchase (Tools etc.)</button>
 
       <div class="subtle" id="geoStatus">Attempting to get your location…</div>
     </form>
   </div>
 
-  <!-- Confirmation Modal -->
-  <div class="modal-backdrop" id="modalBackdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
-      <h2 id="modalTitle">✅ Purchase Order Created</h2>
-      <div class="po-code" id="poCodeText">E4-1031-S0001-R27</div>
+      <h2>✅ Purchase Order Created</h2>
+      <div class="po-code" id="poCodeText"></div>
       <div class="actions">
         <button id="copyBtn" type="button">Copy</button>
         <a id="viewAllBtn" href="view-pos.html">View All POs</a>
@@ -190,25 +179,17 @@
     const WEBHOOK_URL = 'https://hooks.zapier.com/hooks/catch/20261714/2xp7i3r/';
 
     const byId = id => document.getElementById(id);
-    const cacheBust = url => url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now();
-    const fetchJSON = url => fetch(cacheBust(url)).then(r => r.json());
+    const fetchJSON = url => fetch(url + '?v=' + Date.now()).then(r => r.json());
     const dotToSpace = s => (s || '').replace(/\./g, ' ');
-    const formatDateUK = (d = new Date()) => {
-      const dd = String(d.getDate()).padStart(2,'0');
-      const mm = String(d.getMonth()+1).padStart(2,'0');
-      const yy = d.getFullYear();
-      return `${dd}/${mm}/${yy}`;
-    };
-    function norm(v){ return (v||'').toString().toLowerCase().trim(); }
+    const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    const norm = v => (v||'').toString().toLowerCase().trim();
 
-    let allSites = [], allSuppliers = [];
-    let engineerCode = '', engineerName = '';
-    let geo = { lat: null, lon: null };
+    let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
 
     function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
       const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
-      let n = parseInt(localStorage.getItem(key) || "0", 10) + 1;
-      localStorage.setItem(key, n);
+      let n = parseInt(localStorage.getItem(key) || "0",10)+1;
+      localStorage.setItem(key,n);
       return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
     }
 
@@ -216,171 +197,150 @@
       try {
         allSuppliers = await fetchJSON(SUPPLIERS_URL);
         const sel = byId('supplier');
-        sel.innerHTML = '';
-        allSuppliers.forEach(s => {
-          const opt = document.createElement('option');
-          opt.value = s.supplierNumber;
-          opt.textContent = s.supplierName;
+        sel.innerHTML='';
+        allSuppliers.forEach(s=>{
+          const opt=document.createElement('option');
+          opt.value=s.supplierNumber;
+          opt.textContent=s.supplierName;
           sel.appendChild(opt);
         });
-      } catch {
-        byId('supplier').innerHTML = '<option value="">(Unable to load suppliers)</option>';
-      }
+      } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
     }
 
     async function populateSites(){
       try {
-        const sites = await fetchJSON(SITES_URL);
-        const sel = byId('site');
-        sel.innerHTML = '';
-        (sites || []).forEach(s => {
-          const shown = [s.siteName, s.jobNumber].filter(Boolean).join(' — ');
-          const opt = document.createElement('option');
-          opt.value = s.jobNumber || '';
-          opt.textContent = shown;
-          opt.dataset.siteName = s.siteName || '';
-          sel.appendChild(opt);
-        });
-      } catch {
-        byId('site').innerHTML = '<option value="">(Unable to load sites)</option>';
-      }
+        allSites = await fetchJSON(SITES_URL);
+        filterSites();
+      } catch { byId('site').innerHTML='<option>(Unable to load)</option>'; }
+    }
+
+    function filterSites(){
+      const sel=byId('site');
+      sel.innerHTML='';
+      const type=byId('siteType').value.trim();
+      const filtered = type ? allSites.filter(s => norm(s.siteType) === norm(type)) : allSites;
+      filtered.forEach(s=>{
+        const opt=document.createElement('option');
+        opt.value=s.jobNumber||'';
+        opt.textContent=[s.siteName,s.jobNumber].filter(Boolean).join(' — ');
+        opt.dataset.siteName=s.siteName||'';
+        sel.appendChild(opt);
+      });
     }
 
     async function populateVehicles(){
       try {
         const vehicles = await fetchJSON(VEHICLES_URL);
-        const sel = byId('vehicleReg');
-        sel.innerHTML = '';
-        (vehicles || []).forEach(v => {
-          const opt = document.createElement('option');
-          const reg = (v.reg || v.registration || '').toString().replace(/\s+/g,'');
-          opt.value = reg;
-          opt.textContent = v.reg || v.registration || reg;
+        const sel=byId('vehicleReg'); sel.innerHTML='';
+        (vehicles||[]).forEach(v=>{
+          const opt=document.createElement('option');
+          const reg=(v.reg||v.registration||'').toString().replace(/\s+/g,'');
+          opt.value=reg; opt.textContent=v.reg||v.registration||reg;
           sel.appendChild(opt);
         });
-      } catch {}
+      } catch{}
     }
 
-    function showModal(poCode){
-      byId('poCodeText').textContent = poCode;
-      byId('modalBackdrop').style.display = 'flex';
-    }
-    function hideModal(){ byId('modalBackdrop').style.display = 'none'; }
+    function showModal(po){ byId('poCodeText').textContent=po; byId('modalBackdrop').style.display='flex'; }
+    function hideModal(){ byId('modalBackdrop').style.display='none'; }
 
     async function init(){
-      const username = sessionStorage.getItem('mostlaneUser') || '';
-      engineerName = username ? dotToSpace(username) : 'Unknown';
-      byId('engineer').value = engineerName;
-      byId('date').value = formatDateUK();
+      const username=sessionStorage.getItem('mostlaneUser')||'';
+      engineerName=username?dotToSpace(username):'Unknown';
+      byId('engineer').value=engineerName;
+      byId('date').value=formatDateUK();
 
-      try {
-        const users = await fetchJSON(USERS_URL);
-        const record = (users || []).find(u => (u.Username === username) || (u.username === username));
-        const engNum = record?.EngineerNumber || record?.engineerNumber || '';
-        const empType = (record?.EmploymentType || record?.employmentType || 'Employed').toLowerCase();
-        const prefix = empType.includes('self') ? 'SE' : 'E';
-        engineerCode = prefix + String(engNum || '').trim();
-      } catch { engineerCode = 'E0'; }
+      try{
+        const users=await fetchJSON(USERS_URL);
+        const rec=(users||[]).find(u=>u.Username===username||u.username===username);
+        const engNum=rec?.EngineerNumber||rec?.engineerNumber||'';
+        const empType=(rec?.EmploymentType||rec?.employmentType||'Employed').toLowerCase();
+        const prefix=empType.includes('self')?'SE':'E';
+        engineerCode=prefix+String(engNum||'').trim();
+      }catch{engineerCode='E0';}
 
       await populateSites();
       await populateSuppliers();
       await populateVehicles();
 
-      if (navigator.geolocation) {
+      if(navigator.geolocation){
         navigator.geolocation.getCurrentPosition(
-          pos => {
-            geo.lat = pos.coords.latitude;
-            geo.lon = pos.coords.longitude;
-            byId('geoStatus').textContent = `📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
+          pos=>{
+            geo.lat=pos.coords.latitude; geo.lon=pos.coords.longitude;
+            byId('geoStatus').textContent=`📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
           },
-          err => {
-            const msgs = {
-              1: '⚠️ Permission denied. Please allow location.',
-              2: '⚠️ Position unavailable.',
-              3: '⚠️ Request timed out.'
-            };
-            byId('geoStatus').textContent = msgs[err.code] || '⚠️ Unable to get location.';
-          },
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+          ()=>{byId('geoStatus').textContent='⚠️ Location permission denied. Allow access.';},
+          {enableHighAccuracy:true,timeout:10000}
         );
-      } else {
-        byId('geoStatus').textContent = '❌ Geolocation not supported.';
-      }
+      } else byId('geoStatus').textContent='❌ Geolocation not supported.';
 
-      byId('copyBtn').addEventListener('click', () => navigator.clipboard.writeText(byId('poCodeText').textContent));
-      byId('closeBtn').addEventListener('click', hideModal);
-      byId('newBtn').addEventListener('click', () => {
-        hideModal();
-        byId('poForm').reset();
-        byId('engineer').value = engineerName;
-        byId('date').value = formatDateUK();
+      byId('workType').addEventListener('change', e=>{
+        const val=e.target.value;
+        const isReactive=val==='Reactive';
+        const isVehicle=val==='Vehicle Maintenance';
+        byId('incidentRow').style.display=isReactive?'':'none';
+        byId('siteTypeRow').style.display=isVehicle?'none':'';
+        byId('siteRow').style.display=isVehicle?'none':'';
+        byId('vehicleRow').classList.toggle('hidden',!isVehicle);
       });
 
-      byId('personalBtn').addEventListener('click', () => {
-        const eng = encodeURIComponent(byId('engineer').value || '');
-        const date = encodeURIComponent(byId('date').value || '');
-        window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`, '_blank');
-      });
+      byId('siteType').addEventListener('change', filterSites);
 
-      byId('poForm').addEventListener('submit', onSubmit);
+      byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
+      byId('closeBtn').onclick=hideModal;
+      byId('newBtn').onclick=()=>{hideModal();byId('poForm').reset();byId('engineer').value=engineerName;byId('date').value=formatDateUK();};
+
+      byId('personalBtn').onclick=()=>{
+        const eng=encodeURIComponent(byId('engineer').value||'');
+        const date=encodeURIComponent(byId('date').value||'');
+        window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`,'_blank');
+      };
+
+      byId('poForm').addEventListener('submit',onSubmit);
     }
 
     async function onSubmit(e){
       e.preventDefault();
-      const submitBtn = byId('submitBtn');
-      submitBtn.disabled = true;
+      const submitBtn=byId('submitBtn'); submitBtn.disabled=true;
+      const workType=byId('workType').value;
+      const isVehicle=workType==='Vehicle Maintenance';
+      const engineerVal=byId('engineer').value.trim();
+      const dateVal=byId('date').value.trim();
+      const siteNumber=byId('site').value;
+      const vehicleReg=byId('vehicleReg').value;
+      const supplierNumber=byId('supplier').value;
+      const supplierName=byId('supplier').selectedOptions[0]?.textContent||'';
+      const descVal=byId('desc').value.trim();
 
-      const workType = byId('workType').value;
-      const isVehicle = workType === 'Vehicle Maintenance';
-      const engineerVal = byId('engineer').value.trim();
-      const dateVal = byId('date').value.trim();
-      const siteNumber = byId('site').value;
-      const vehicleReg = byId('vehicleReg').value;
-      const supplierNumber = byId('supplier').value;
-      const supplierName = byId('supplier').selectedOptions[0]?.textContent || '';
-      const descVal = byId('desc').value.trim();
+      if(!engineerVal||!dateVal||!descVal||!supplierNumber){alert('All required fields must be completed.');submitBtn.disabled=false;return;}
+      if(geo.lat===null||geo.lon===null){alert('Location required. Enable location.');submitBtn.disabled=false;return;}
 
-      if (!engineerVal || !dateVal || !descVal || !supplierNumber) {
-        alert('All required fields must be completed.');
-        submitBtn.disabled = false; return;
-      }
-      if (geo.lat === null || geo.lon === null) {
-        alert('Location is required. Please allow location access and try again.');
-        submitBtn.disabled = false; return;
-      }
-
-      const typeLetter = (workType === 'Reactive') ? 'R' : (workType === 'Planned') ? 'P' : 'V';
-      const siteSegment = isVehicle ? (vehicleReg || '').replace(/\s+/g,'') : siteNumber;
-      const poCode = nextPO(engineerCode, supplierNumber, siteSegment, typeLetter);
+      const typeLetter=workType==='Reactive'?'R':workType==='Planned'?'P':'V';
+      const siteSegment=isVehicle?(vehicleReg||'').replace(/\s+/g,''):siteNumber;
+      const poCode=nextPO(engineerCode,supplierNumber,siteSegment,typeLetter);
       showModal(poCode);
 
-      const payload = new URLSearchParams();
-      payload.append('poNumber', poCode);
-      payload.append('engineer', engineerVal);
-      payload.append('engineerCode', engineerCode);
-      payload.append('date', dateVal);
-      payload.append('workType', workType);
-      payload.append('supplierName', supplierName);
-      payload.append('supplierNumber', supplierNumber);
-      payload.append('description', descVal);
-      payload.append('latitude', String(geo.lat));
-      payload.append('longitude', String(geo.lon));
+      const payload=new URLSearchParams();
+      payload.append('poNumber',poCode);
+      payload.append('engineer',engineerVal);
+      payload.append('engineerCode',engineerCode);
+      payload.append('date',dateVal);
+      payload.append('workType',workType);
+      payload.append('supplierName',supplierName);
+      payload.append('supplierNumber',supplierNumber);
+      payload.append('description',descVal);
+      payload.append('latitude',String(geo.lat));
+      payload.append('longitude',String(geo.lon));
 
-      try {
-        await fetch(WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: payload.toString()
-        });
+      try{
+        await fetch(WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:payload.toString()});
         alert(`✅ Purchase Order ${poCode} submitted successfully.`);
-      } catch {
+      }catch{
         alert('⚠️ Failed to submit to server. Your PO was generated locally.');
-      } finally {
-        submitBtn.disabled = false;
-      }
+      }finally{submitBtn.disabled=false;}
     }
 
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded',init);
   </script>
 </body>
 </html>
