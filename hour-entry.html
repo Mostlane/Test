@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hours Entry (v2) – Mostlane</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <!-- Optional auth guard -->
+  <!--
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  </script>
+  -->
+
+  <style>
+    :root{
+      --ml-blue:#003366;
+      --ml-accent:#1a73e8;
+      --ml-ink:#27313a;
+      --ml-bg:#e6e8eb;
+      --card:#ffffffee;
+      --muted:#718096;
+      --ok:#0c7d27;
+      --bad:#b00020;
+    }
+    body{
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+      background: var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180% auto;
+      margin:0; padding:40px; color: var(--ml-ink);
+    }
+    .shell{ max-width: 1100px; margin:0 auto; background: rgba(255,255,255,0.92);
+      border-radius:14px; box-shadow:0 12px 28px rgba(0,0,0,0.12); overflow:hidden;}
+    header{ display:flex; align-items:center; gap:16px; background:linear-gradient(90deg,#fff,#f7f9fc);
+      border-bottom:1px solid #e5e9f2; padding:18px 24px;}
+    header img{ height:42px; width:auto;}
+    header h1{ font-size:22px; margin:0; color:var(--ml-blue);}
+
+    .content{ padding:22px 24px 28px;}
+    .grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap:14px;}
+    .card{ background: var(--card); border:1px solid #e8edf3; border-radius:12px; padding:16px;}
+    .title{ font-weight:600; color:var(--ml-blue); margin-bottom:10px;}
+
+    label{ font-size:13px; color:#334155; display:block; margin-bottom:6px;}
+    input[type="text"], input[type="date"], input[type="time"], input[type="number"], select, textarea{
+      width:100%; box-sizing:border-box; font-size:15px; border:1px solid #cbd5e1;
+      border-radius:10px; padding:10px 12px; outline:none; background:#fff;
+    }
+    textarea{ min-height: 90px; resize: vertical; }
+    .row{ display:flex; align-items:center; gap:14px; flex-wrap: wrap;}
+    .muted{ color:var(--muted); font-size:12px;}
+    .divider{ height:1px; background:#edf2f7; margin:12px 0; }
+
+    .toggle-row{ display:flex; align-items:center; gap:10px; font-size:14px; user-select:none;}
+    .toggle-row input[type="checkbox"]{ transform: scale(1.2); }
+
+    .radio-group{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+
+    .totals{ display:flex; gap:10px; flex-wrap:wrap; font-weight:600;}
+    .pill{ padding:8px 12px; border-radius:999px; border:1px solid #d7e1ee; background:#f8fbff; color:#0f172a;}
+    .pill.ok{ border-color:#bfe7ca; background:#effaf3; color:#074e1a;}
+    .pill.bad{ border-color:#ffc7ce; background:#fff1f3; color:#6b0011;}
+
+    .actions{ display:flex; gap:14px; align-items:center; justify-content:flex-end; margin-top:10px;}
+    button{ font-size:15px; font-weight:600; border:0; border-radius:10px; padding:12px 18px; cursor:pointer;}
+    .btn-primary{ background:var(--ml-accent); color:#fff; box-shadow:0 6px 14px rgba(26,115,232,0.22);}
+    .btn-secondary{ background:#eef2f9; color:#0f172a; border:1px solid #d7e1ee;}
+    .btn-link{ background:transparent; color:var(--ml-accent); padding:8px 10px; }
+
+    .col-12{ grid-column: span 12; }
+    .col-8{ grid-column: span 8; }
+    .col-6{ grid-column: span 6; }
+    .col-4{ grid-column: span 4; }
+    .col-3{ grid-column: span 3; }
+
+    @media (max-width: 980px){
+      .col-8,.col-6,.col-4,.col-3{ grid-column: span 12; }
+    }
+
+    .date-controls{ display:flex; align-items:center; gap:8px; margin-top:8px;}
+    .date-controls button{ padding:8px 10px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <img src="Mostlane Logo - Copy.jpeg" alt="Mostlane">
+      <h1>Engineer Hours Entry</h1>
+    </header>
+
+    <div class="content">
+      <form id="hoursForm" class="grid" novalidate>
+        <!-- Date, Prev/Next & Engineer + Vehicle -->
+        <div class="card col-12">
+          <div class="title">Day & Engineer</div>
+
+          <div class="row">
+            <div style="min-width:260px;">
+              <label for="date">Date</label>
+              <input type="date" id="date" required />
+              <div class="date-controls">
+                <button type="button" class="btn-link" id="prevDayBtn">◀ Previous Day</button>
+                <button type="button" class="btn-link" id="nextDayBtn">Next Day ▶</button>
+                <span class="muted" id="dowHint"></span>
+              </div>
+            </div>
+
+            <div style="min-width:260px; flex:1">
+              <label for="engineer">Engineer</label>
+              <select id="engineer" required></select>
+              <div class="muted">Active users from users.json</div>
+            </div>
+
+            <div style="min-width:220px;">
+              <label for="vehicleUsed">Vehicle Used (auto-filled, editable)</label>
+              <input type="text" id="vehicleUsed" list="vehicleList" placeholder="e.g. LA70 FPJ" />
+              <datalist id="vehicleList"></datalist>
+              <div class="muted">Pick suggested reg or type a different one</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Times & Lunch -->
+        <div class="card col-6">
+          <div class="title">Times (24-hour)</div>
+          <div class="grid" style="grid-template-columns: repeat(12, 1fr); gap: 10px;">
+            <div style="grid-column: span 3;">
+              <label for="leaveHome">Leave Home</label>
+              <input type="time" id="leaveHome" required />
+            </div>
+            <div style="grid-column: span 3;">
+              <label for="arriveFirst">Arrive First Site</label>
+              <input type="time" id="arriveFirst" required />
+            </div>
+            <div style="grid-column: span 3;">
+              <label for="leaveLast">Leave Last Site</label>
+              <input type="time" id="leaveLast" required />
+            </div>
+            <div style="grid-column: span 3;">
+              <label for="arriveHome">Arrive Home</label>
+              <input type="time" id="arriveHome" required />
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="row">
+            <label class="toggle-row">
+              <input type="checkbox" id="deductLunch" checked />
+              Deduct 30 minutes for lunch
+            </label>
+            <span class="muted">Default ON</span>
+          </div>
+        </div>
+
+        <!-- Vehicle & Mileage (Monday/Friday logic) + Notes visibility -->
+        <div class="card col-6">
+          <div class="title">Vehicle, Mileage & Notes</div>
+
+          <div id="mondayBlock" style="display:none; margin-bottom:10px;">
+            <label>Monday: Van check completed?</label>
+            <div class="radio-group">
+              <label><input type="radio" name="vanCheck" value="Yes"> Yes</label>
+              <label><input type="radio" name="vanCheck" value="No"> No</label>
+              <label><input type="radio" name="vanCheck" value="N/A"> N/A</label>
+            </div>
+            <div class="muted">If "No", all hours are paid at standard rate (no enhanced OT).</div>
+          </div>
+
+          <div id="fridayBlock" style="display:none; margin-bottom:10px;">
+            <label for="vanScore">Friday: Van score (0–100)</label>
+            <input type="number" id="vanScore" min="0" max="100" placeholder="e.g. 92" />
+          </div>
+
+          <div style="margin-bottom:10px;">
+            <label for="personalMileage">Personal mileage (weekly)</label>
+            <input type="number" id="personalMileage" min="0" step="1" placeholder="e.g. 42" />
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="row" style="align-items:flex-start;">
+            <div style="flex:1 1 520px;">
+              <label for="notes">Office notes for this day</label>
+              <textarea id="notes" placeholder="e.g. Late ferry, M27 incident, extra tool collection, etc."></textarea>
+            </div>
+            <div style="min-width:260px;">
+              <label>Visibility</label>
+              <label class="toggle-row" title="If ticked, the note will be visible to the engineer in their portal">
+                <input type="checkbox" id="noteVisible" />
+                🪨 Visible to engineer
+              </label>
+              <div class="muted">Unticked = office/internal only</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live totals -->
+        <div class="card col-12">
+          <div class="title">Calculated Totals (pre-submission)</div>
+          <div class="totals" id="totalsDisplay">
+            <span class="pill">Total: <span id="t_total">0.00</span> h</span>
+            <span class="pill ok">Standard: <span id="t_std">0.00</span> h</span>
+            <span class="pill">Overtime: <span id="t_ot">0.00</span> h</span>
+            <span class="pill" id="enhPill">Enhanced OT Eligible: <span id="t_enh">Yes</span></span>
+          </div>
+          <div class="muted" id="logicNote" style="margin-top:8px;"></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="col-12 actions">
+          <span class="muted" id="statusMsg"></span>
+          <button type="button" class="btn-secondary" id="resetBtn">Clear</button>
+          <button type="submit" class="btn-primary" id="submitBtn">Submit to Payroll</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    /**************
+     * CONFIG
+     **************/
+    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/u5ibaoi/";
+    const USERS_JSON_PATH = "./users.json"; // root of repo as provided
+
+    /**************
+     * STATE
+     **************/
+    let USERS_RAW = [];
+    let ENGINEERS = [];      // flattened active users
+    let VEHICLE_SET = new Set();
+
+    /**************
+     * HELPERS
+     **************/
+    const $ = (id) => document.getElementById(id);
+
+    function setYesterdayDefault(){
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      $("date").value = fmtDate(d);
+      updateDayContext();
+    }
+    function fmtDate(d){
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const dd = String(d.getDate()).padStart(2,'0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    function shiftDate(delta){
+      const cur = $("date").value ? new Date($("date").value + "T12:00:00") : new Date();
+      cur.setDate(cur.getDate() + delta);
+      $("date").value = fmtDate(cur);
+      updateDayContext();
+    }
+    function dayOfWeekStr(dateStr){
+      const d = new Date(dateStr + "T12:00:00");
+      return d.toLocaleDateString(undefined, { weekday: 'long' });
+    }
+    function dayNumber(dateStr){
+      const d = new Date(dateStr + "T12:00:00");
+      return d.getDay(); // 0=Sun .. 6=Sat
+    }
+    function timeToMinutes(t){
+      if(!t || !/^\d{2}:\d{2}$/.test(t)) return null;
+      const [h,m] = t.split(":").map(Number);
+      return h*60 + m;
+    }
+    function minutesToHoursDec(mins){
+      return Math.round((mins/60)*100)/100;
+    }
+
+    function populateEngineers(){
+      const sel = $("engineer");
+      sel.innerHTML = "";
+      // Only Status: Active
+      ENGINEERS = USERS_RAW
+        .filter(u => (u.Status || "").toLowerCase() === "active")
+        .map(u => ({
+          name: `${u.FirstName} ${u.LastName}`.trim(),
+          username: u.Username,
+          vehicle: u.VehicleAssigned || ""
+        }))
+        .sort((a,b)=> a.name.localeCompare(b.name));
+
+      for(const e of ENGINEERS){
+        const opt = document.createElement("option");
+        opt.value = e.name;
+        opt.dataset.username = e.username;
+        opt.dataset.vehicle = e.vehicle || "";
+        sel.appendChild(opt);
+      }
+
+      // Vehicle list (datalist) from all VehicleAssigned across users
+      VEHICLE_SET = new Set(
+        USERS_RAW
+          .map(u => (u.VehicleAssigned || "").trim())
+          .filter(Boolean)
+      );
+      populateVehicleDatalist();
+    }
+
+    function populateVehicleDatalist(){
+      const dl = $("vehicleList");
+      dl.innerHTML = "";
+      // Add a blank/N/A suggestion too
+      const na = document.createElement("option");
+      na.value = "N/A";
+      dl.appendChild(na);
+
+      for(const reg of Array.from(VEHICLE_SET).sort()){
+        const opt = document.createElement("option");
+        opt.value = reg;
+        dl.appendChild(opt);
+      }
+    }
+
+    function onEngineerChange(){
+      const sel = $("engineer");
+      const chosen = sel.options[sel.selectedIndex];
+      if(!chosen){ return; }
+      const autoVehicle = (chosen.dataset.vehicle || "").trim();
+      $("vehicleUsed").value = autoVehicle; // can be empty; editable afterwards
+    }
+
+    function updateDayContext(){
+      const dateVal = $("date").value;
+      if(!dateVal) return;
+
+      $("dowHint").textContent = `Selected day: ${dayOfWeekStr(dateVal)}`;
+
+      const isMonday = dayNumber(dateVal) === 1;
+      const isFriday = dayNumber(dateVal) === 5;
+
+      $("mondayBlock").style.display = isMonday ? "block" : "none";
+      $("fridayBlock").style.display = isFriday ? "block" : "none";
+
+      calcTotals();
+    }
+
+    function calcTotals(){
+      const leaveHome = timeToMinutes($("leaveHome").value);
+      const arriveFirst = timeToMinutes($("arriveFirst").value);
+      const leaveLast = timeToMinutes($("leaveLast").value);
+      const arriveHome = timeToMinutes($("arriveHome").value);
+      const deductLunch = $("deductLunch").checked;
+      const dateVal = $("date").value;
+      const isMonday = dayNumber(dateVal) === 1;
+
+      let errorMsg = "";
+      if([leaveHome, arriveFirst, leaveLast, arriveHome].some(v=>v===null)){
+        renderTotals(0,0,0,true,true);
+        return;
+      }
+      if(!(leaveHome <= arriveFirst && arriveFirst <= leaveLast && leaveLast <= arriveHome)){
+        errorMsg = "Check the sequence of times (must be same-day and in order).";
+      }
+
+      let totalMins = (arriveHome - leaveHome);
+      if(deductLunch) totalMins -= 30;
+
+      if(totalMins < 0){ errorMsg = "Total hours cannot be negative."; }
+
+      let total = Math.max(0, minutesToHoursDec(totalMins));
+      let std = Math.min(10, total);
+      let ot = Math.max(0, Math.round((total - 10)*100)/100);
+
+      // Monday van check → affects enhanced overtime eligibility
+      let vanCheckVal = null;
+      if(isMonday){
+        const radios = document.querySelectorAll('input[name="vanCheck"]');
+        radios.forEach(r => { if(r.checked) vanCheckVal = r.value; });
+      }
+
+      let enhancedOvertime = true;
+      let logicMsg = "";
+      if(isMonday){
+        if(!vanCheckVal){ logicMsg = "Select Van Check status (required on Mondays)."; }
+        if(vanCheckVal === "No"){
+          enhancedOvertime = false; // all hours paid at standard rate
+          logicMsg = "Van Check = No → Overtime recorded but paid at standard rate.";
+        } else if (vanCheckVal === "N/A"){
+          enhancedOvertime = true; logicMsg = "Van Check = N/A → Enhanced overtime applies if > 10h.";
+        } else if (vanCheckVal === "Yes"){
+          enhancedOvertime = true; logicMsg = "Van Check = Yes → Enhanced overtime applies if > 10h.";
+        }
+      } else {
+        enhancedOvertime = true;
+        logicMsg = "Enhanced overtime applies if total > 10h.";
+      }
+
+      renderTotals(total, std, ot, false, enhancedOvertime, logicMsg, errorMsg);
+    }
+
+    function renderTotals(total, std, ot, waiting, enhanced, message="", errorMsg=""){
+      $("t_total").textContent = waiting ? "—" : total.toFixed(2);
+      $("t_std").textContent = waiting ? "—" : std.toFixed(2);
+      $("t_ot").textContent = waiting ? "—" : ot.toFixed(2);
+
+      $("t_enh").textContent = waiting ? "—" : (enhanced ? "Yes" : "No");
+      const enhPill = $("enhPill");
+      enhPill.classList.remove("ok","bad");
+      enhPill.classList.add(enhanced ? "ok" : "bad");
+
+      const logic = $("logicNote");
+      logic.textContent = errorMsg ? errorMsg : message;
+      logic.style.color = errorMsg ? "var(--bad)" : "#475569";
+    }
+
+    function formValidForSubmit(){
+      const req = ["date","engineer","leaveHome","arriveFirst","leaveLast","arriveHome"];
+      for(const id of req){ if(!$(id).value) return false; }
+      if(dayNumber($("date").value) === 1){
+        const radios = document.querySelectorAll('input[name="vanCheck"]');
+        let chosen = false; radios.forEach(r=>{ if(r.checked) chosen = true; });
+        if(!chosen) return false;
+      }
+      return true;
+    }
+
+    function gatherPayload(){
+      const dateVal = $("date").value;
+      const engineerName = $("engineer").value;
+      const leaveHome = $("leaveHome").value;
+      const arriveFirst = $("arriveFirst").value;
+      const leaveLast = $("leaveLast").value;
+      const arriveHome = $("arriveHome").value;
+      const deductLunch = $("deductLunch").checked;
+      const notes = $("notes").value.trim();
+      const noteVisible = $("noteVisible").checked;
+      const vanScore = $("vanScore").value ? Number($("vanScore").value) : null;
+      const personalMileage = $("personalMileage").value ? Number($("personalMileage").value) : null;
+
+      const totalHours = Number($("t_total").textContent) || 0;
+      const standardHours = Number($("t_std").textContent) || 0;
+      const overtimeHours = Number($("t_ot").textContent) || 0;
+      const enhancedOvertime = ($("t_enh").textContent.trim().toLowerCase() === "yes");
+
+      let vanCheck = null;
+      if(dayNumber(dateVal) === 1){
+        const radios = document.querySelectorAll('input[name="vanCheck"]');
+        radios.forEach(r => { if(r.checked) vanCheck = r.value; });
+      }
+
+      // vehicle used
+      const vehicleUsed = $("vehicleUsed").value.trim();
+
+      // try to include username (useful for joins later)
+      const sel = $("engineer");
+      let username = "";
+      if(sel.selectedIndex >= 0){
+        const chosen = sel.options[sel.selectedIndex];
+        const found = ENGINEERS.find(e => e.name === chosen.value);
+        username = found ? (found.username || "") : "";
+      }
+
+      return {
+        date: dateVal,
+        dayOfWeek: dayOfWeekStr(dateVal),
+        engineer: engineerName,
+        username,
+        vehicle: vehicleUsed,
+        leaveHome,
+        arriveFirstSite: arriveFirst,
+        leaveLastSite: leaveLast,
+        arriveHome,
+        deductLunch,
+        totalHours,
+        standardHours,
+        overtimeHours,
+        enhancedOvertime,
+        vanCheck,
+        vanScore,
+        personalMileage,
+        notes,
+        noteVisible,
+        submittedAtISO: new Date().toISOString()
+      };
+    }
+
+    async function submitForm(e){
+      e.preventDefault();
+      $("statusMsg").style.color = "#475569";
+      $("statusMsg").textContent = "Validating…";
+
+      if(!formValidForSubmit()){
+        $("statusMsg").style.color = "var(--bad)";
+        $("statusMsg").textContent = "Please complete all required fields (and Monday van check if applicable).";
+        return;
+      }
+
+      // re-check totals/sequencing
+      calcTotals();
+      const logicTxt = $("logicNote").textContent || "";
+      if (logicTxt.includes("sequence") || logicTxt.includes("negative")){
+        $("statusMsg").style.color = "var(--bad)";
+        $("statusMsg").textContent = "Time sequence issue. Please correct before submitting.";
+        return;
+      }
+
+      const data = gatherPayload();
+
+      $("submitBtn").disabled = true;
+      $("statusMsg").style.color = "#475569";
+      $("statusMsg").textContent = "Submitting…";
+
+      try{
+        const body = new URLSearchParams();
+        Object.entries(data).forEach(([k,v])=>{
+          body.append(k, v === null || v === undefined ? "" : String(v));
+        });
+
+        const res = await fetch(ZAPIER_WEBHOOK, {
+          method: "POST",
+          headers: { "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
+          body
+        });
+        if(!res.ok) throw new Error("Webhook response not OK");
+
+        $("statusMsg").style.color = "var(--ok)";
+        $("statusMsg").textContent = "✅ Submitted. You can enter the next engineer now.";
+        $("submitBtn").disabled = false;
+        // clearFormButKeepDate(); // uncomment if you want to auto-clear
+      }catch(err){
+        console.error(err);
+        $("statusMsg").style.color = "var(--bad)";
+        $("statusMsg").textContent = "❌ Submission failed. Check network and try again.";
+        $("submitBtn").disabled = false;
+      }
+    }
+
+    function clearFormButKeepDate(){
+      const keepDate = $("date").value;
+      $("hoursForm").reset();
+      $("date").value = keepDate;
+      $("vehicleUsed").value = "";
+      renderTotals(0,0,0,true,true,"","");
+      updateDayContext();
+      $("statusMsg").textContent = "";
+    }
+
+    /**************
+     * INIT
+     **************/
+    async function init(){
+      try{
+        const res = await fetch(USERS_JSON_PATH, { cache: "no-store" });
+        if(!res.ok) throw new Error("Failed to load users.json");
+        const json = await res.json();
+        USERS_RAW = Array.isArray(json) ? json : (json.Users || []);
+      }catch(e){
+        console.warn("users.json load failed or structure unexpected, falling back to empty list.", e);
+        USERS_RAW = [];
+      }
+
+      populateEngineers();
+      setYesterdayDefault();
+
+      // event wiring
+      $("engineer").addEventListener("change", onEngineerChange);
+      $("prevDayBtn").addEventListener("click", ()=>shiftDate(-1));
+      $("nextDayBtn").addEventListener("click", ()=>shiftDate(1));
+      $("date").addEventListener("change", updateDayContext);
+
+      ["leaveHome","arriveFirst","leaveLast","arriveHome","deductLunch"].forEach(id=>{
+        $(id).addEventListener("input", calcTotals);
+        $(id).addEventListener("change", calcTotals);
+      });
+      document.querySelectorAll('input[name="vanCheck"]').forEach(r=>{
+        r.addEventListener("change", calcTotals);
+      });
+
+      $("hoursForm").addEventListener("submit", submitForm);
+      $("resetBtn").addEventListener("click", clearFormButKeepDate);
+
+      // initial totals
+      calcTotals();
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
