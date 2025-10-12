@@ -56,6 +56,7 @@
   .col-6{grid-column:span 6;}
   @media(max-width:980px){.col-6{grid-column:span 12;}}
   .date-controls{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .banner{margin-top:8px;padding:8px 12px;border-radius:10px;border:1px solid #e5e9f2;background:#f7fbff;}
 </style>
 </head>
 <body>
@@ -80,10 +81,12 @@
         <button type="button" class="btn-link" id="nextDayBtn">Next ▶</button>
         <span class="muted" id="dowHint"></span>
       </div>
+      <div id="weekBanner" class="banner" style="display:none;"></div>
     </div>
     <div style="min-width:260px;flex:1;">
       <label>Engineer</label>
       <select id="engineer" required></select>
+      <div class="muted">Active users from users.json</div>
     </div>
     <div style="min-width:220px;">
       <label>Vehicle Used</label>
@@ -116,7 +119,7 @@
       <label><input type="radio" name="vanCheck" value="No">No</label>
       <label><input type="radio" name="vanCheck" value="N/A">N/A</label>
     </div>
-    <div class="muted">If “No”, all hours at standard rate.</div>
+    <div class="muted">If “No”, payroll will pay standard rate only for the whole week.</div>
   </div>
   <div id="fridayBlock" style="display:none;margin-bottom:10px;">
     <label>Friday – Van score (0–100)</label>
@@ -153,8 +156,8 @@
 <!-- Actions -->
 <div class="col-12 actions">
   <span class="muted" id="statusMsg"></span>
-  <button type="reset" class="btn-secondary">Clear</button>
-  <button type="submit" class="btn-primary">Submit to Payroll</button>
+  <button type="reset" class="btn-secondary" id="resetBtn">Clear</button>
+  <button type="submit" class="btn-primary" id="submitBtn">Submit to Payroll</button>
 </div>
 
 </form>
@@ -162,89 +165,243 @@
 </div>
 
 <script>
+/* ====== CONFIG ====== */
 const ZAPIER_WEBHOOK="https://hooks.zapier.com/hooks/catch/20261714/u5ibaoi/";
 const USERS_JSON_PATH="./users.json";
+
+/* ====== STATE ====== */
 let USERS_RAW=[],ENGINEERS=[],VEHICLE_SET=new Set();
+
+/* ====== HELPERS ====== */
 const $=id=>document.getElementById(id);
-function timeToMin(t){if(!t)return null;const[h,m]=t.split(":").map(Number);return h*60+m;}
+function timeToMin(t){if(!t||!t.includes(":"))return null;const[h,m]=t.split(":").map(Number);return h*60+m;}
 function minsToHr(m){return Math.round((m/60)*100)/100;}
 function fmtDate(d){return d.toISOString().split("T")[0];}
 function shiftDate(delta){const d=new Date($("date").value+"T12:00");d.setDate(d.getDate()+delta);$("date").value=fmtDate(d);updateDay();}
 function dow(d){return new Date(d+"T12:00").toLocaleDateString(undefined,{weekday:"long"});}
-function dayNum(d){return new Date(d+"T12:00").getDay();}
+function dayNum(d){return new Date(d+"T12:00").getDay();} // 0=Sun..6=Sat
+function getWeekKey(dateStr){
+  // Using Sunday-start week key
+  const d = new Date(dateStr+"T12:00");
+  const sunday = new Date(d);
+  sunday.setDate(d.getDate() - d.getDay());
+  return sunday.toISOString().split("T")[0];
+}
 
+/* ====== INIT ====== */
 async function init(){
- try{
-   const r=await fetch(USERS_JSON_PATH,{cache:"no-store"});
-   const j=await r.json();USERS_RAW=j.Users||j;
- }catch{USERS_RAW=[];}
- ENGINEERS=USERS_RAW.filter(u=>u.Status==="Active").map(u=>({name:`${u.FirstName} ${u.LastName}`,username:u.Username,vehicle:u.VehicleAssigned||""}));
- const sel=$("engineer");
- ENGINEERS.forEach(e=>{
-   const o=document.createElement("option");
-   o.value=e.name;o.textContent=e.name;
-   o.dataset.username=e.username;o.dataset.vehicle=e.vehicle;
-   sel.appendChild(o);
- });
- USERS_RAW.forEach(u=>{if(u.VehicleAssigned)VEHICLE_SET.add(u.VehicleAssigned);});
- const dl=$("vehicleList");VEHICLE_SET.forEach(v=>{const o=document.createElement("option");o.value=v;dl.appendChild(o);});
- $("engineer").onchange=()=>{const s=$("engineer");const v=s.options[s.selectedIndex].dataset.vehicle;$("vehicleUsed").value=v||"";};
- $("prevDayBtn").onclick=()=>shiftDate(-1);$("nextDayBtn").onclick=()=>shiftDate(1);
- ["leaveHome","arriveFirst","leaveLast","arriveHome","deductLunch"].forEach(i=>$(i).addEventListener("input",calcTotals));
- document.querySelectorAll('input[name="vanCheck"]').forEach(r=>r.addEventListener("change",calcTotals));
- $("hoursForm").onsubmit=submitForm;
- const y=new Date();y.setDate(y.getDate()-1);$("date").value=fmtDate(y);
- updateDay();calcTotals();
+  // Load users.json
+  try{
+    const r=await fetch(USERS_JSON_PATH,{cache:"no-store"});
+    const j=await r.json();USERS_RAW=j.Users||j;
+  }catch{USERS_RAW=[];}
+
+  // Populate engineers (Active)
+  ENGINEERS=USERS_RAW
+    .filter(u=>u.Status==="Active")
+    .map(u=>({name:`${u.FirstName} ${u.LastName}`.trim(),username:u.Username,vehicle:u.VehicleAssigned||""}))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+
+  const sel=$("engineer");
+  ENGINEERS.forEach(e=>{
+    const o=document.createElement("option");
+    o.value=e.name;
+    o.textContent=e.name; // visible name
+    o.dataset.username=e.username;
+    o.dataset.vehicle=e.vehicle;
+    sel.appendChild(o);
+  });
+
+  // Vehicle list datalist
+  USERS_RAW.forEach(u=>{if(u.VehicleAssigned)VEHICLE_SET.add(u.VehicleAssigned);});
+  const dl=$("vehicleList");
+  Array.from(VEHICLE_SET).sort().forEach(v=>{const o=document.createElement("option");o.value=v;dl.appendChild(o);});
+
+  // Events
+  $("engineer").onchange=()=>{const s=$("engineer");const v=s.options[s.selectedIndex]?.dataset.vehicle || "";$("vehicleUsed").value=v;};
+  $("prevDayBtn").onclick=()=>shiftDate(-1);
+  $("nextDayBtn").onclick=()=>shiftDate(1);
+  ["leaveHome","arriveFirst","leaveLast","arriveHome","deductLunch"].forEach(id=>{
+    $(id).addEventListener("input",calcTotals);
+    $(id).addEventListener("change",calcTotals);
+  });
+  document.querySelectorAll('input[name="vanCheck"]').forEach(r=>r.addEventListener("change",calcTotals));
+  $("hoursForm").onsubmit=submitForm;
+  $("resetBtn").onclick=()=>{$("statusMsg").textContent="";};
+
+  // Default to yesterday
+  const y=new Date();y.setDate(y.getDate()-1);$("date").value=fmtDate(y);
+  updateDay();calcTotals();
 }
 
+/* ====== UI DAY CONTEXT ====== */
 function updateDay(){
- const d=$("date").value;if(!d)return;
- const day=dayNum(d);
- $("dowHint").textContent="Selected: "+dow(d);
- $("mondayBlock").style.display=day===1?"block":"none";
- $("fridayBlock").style.display=day===5?"block":"none";
- calcTotals();
+  const d=$("date").value;if(!d)return;
+  const day=dayNum(d);
+  $("dowHint").textContent="Selected: "+dow(d);
+
+  // Monday block (van check)
+  $("mondayBlock").style.display = day===1 ? "block" : "none";
+
+  // Friday block (van score + mileage only on Fridays)
+  $("fridayBlock").style.display = day===5 ? "block" : "none";
+
+  // Banner reminder: On non-Mondays, OT is subject to weekly van-check rule handled in payroll
+  const banner = $("weekBanner");
+  if(day!==1){
+    banner.style.display="block";
+    banner.textContent = "Note: Enhanced overtime for this day will be confirmed by payroll based on this week's Monday van-check status.";
+  }else{
+    banner.style.display="none";
+    banner.textContent = "";
+  }
+
+  calcTotals();
 }
 
+/* ====== CALCULATIONS (client-side preview only) ====== */
 function calcTotals(){
- const t1=timeToMin($("leaveHome").value),t2=timeToMin($("arriveFirst").value),
-       t3=timeToMin($("leaveLast").value),t4=timeToMin($("arriveHome").value);
- if([t1,t2,t3,t4].some(v=>v==null))return;
- let total=t4-t1;if($("deductLunch").checked)total-=30;if(total<0)return;
- let h=minsToHr(total),std=Math.min(10,h),ot=Math.max(0,h-10);
- const d=$("date").value,isMon=dayNum(d)===1;
- let enh=true,msg="Enhanced overtime if >10h.";
- if(isMon){const v=document.querySelector('input[name="vanCheck"]:checked');
-   if(v){if(v.value==="No"){enh=false;msg="Van check No → all hours standard rate.";}else msg=`Van check ${v.value}`;}}
- $("t_total").textContent=h.toFixed(2);$("t_std").textContent=std.toFixed(2);
- $("t_ot").textContent=ot.toFixed(2);$("t_enh").textContent=enh?"Yes":"No";
- $("enhPill").className=enh?"pill ok":"pill bad";$("logicNote").textContent=msg;
+  const t1=timeToMin($("leaveHome").value),
+        t2=timeToMin($("arriveFirst").value),
+        t3=timeToMin($("leaveLast").value),
+        t4=timeToMin($("arriveHome").value);
+
+  if([t1,t2,t3,t4].some(v=>v==null)){
+    $("t_total").textContent="0.00";
+    $("t_std").textContent="0.00";
+    $("t_ot").textContent="0.00";
+    $("t_enh").textContent="Yes";
+    $("enhPill").className="pill ok";
+    $("logicNote").textContent="";
+    return;
+  }
+
+  let totalMins = t4 - t1;
+  if ($("deductLunch").checked) totalMins -= 30;
+  if (totalMins < 0) totalMins = 0;
+
+  const total = minsToHr(totalMins);
+  const std = Math.min(10, total);
+  const ot  = Math.max(0, +(total - 10).toFixed(2));
+
+  // Enhanced overtime logic preview:
+  const d=$("date").value;
+  const isMonday = dayNum(d)===1;
+
+  let enhanced = true;
+  let msg = "Enhanced overtime if total > 10h.";
+
+  if(isMonday){
+    const v = document.querySelector('input[name="vanCheck"]:checked');
+    if(v){
+      if(v.value==="No"){ enhanced=false; msg="Van check = No → this Monday paid at standard rate only."; }
+      if(v.value==="Yes"){ enhanced=true;  msg="Van check = Yes → enhanced OT applies if >10h."; }
+      if(v.value==="N/A"){ enhanced=true;  msg="Van check = N/A → enhanced OT applies if >10h."; }
+    } else {
+      msg="Select Monday van check status.";
+    }
+  } else {
+    // Non-Monday: payroll will enforce based on week flag stored in Zapier
+    msg="Overtime preview shown. Payroll will apply weekly van-check rule.";
+  }
+
+  $("t_total").textContent = total.toFixed(2);
+  $("t_std").textContent   = std.toFixed(2);
+  $("t_ot").textContent    = ot.toFixed(2);
+  $("t_enh").textContent   = enhanced ? "Yes" : "No";
+  $("enhPill").className   = enhanced ? "pill ok" : "pill bad";
+  $("logicNote").textContent = msg;
+}
+
+/* ====== GATHER + SUBMIT ====== */
+function gather(){
+  const d=$("date").value;
+  const engineer=$("engineer").value;
+  const vehicle=$("vehicleUsed").value;
+  const leaveHome=$("leaveHome").value;
+  const arriveFirst=$("arriveFirst").value;
+  const leaveLast=$("leaveLast").value;
+  const arriveHome=$("arriveHome").value;
+  const notes=$("notes").value.trim();
+  const noteVisible=$("noteVisible").checked;
+  const vanScore=$("vanScore").value || "";
+  const personalMileage = (dayNum(d)===5) ? ($("personalMileage").value || "") : "";
+
+  // Monday van-check → compute weekly flag to send to Zapier
+  let vanCheck=null;
+  let vanCheckWeekStatus="";
+  if(dayNum(d)===1){
+    const v=document.querySelector('input[name="vanCheck"]:checked');
+    vanCheck = v ? v.value : null;
+    if(v){
+      if(v.value==="No") vanCheckWeekStatus="Failed";
+      if(v.value==="Yes" || v.value==="N/A") vanCheckWeekStatus="Passed";
+    }
+  }
+
+  const payload = {
+    // Core
+    date: d,
+    day: dow(d),
+    weekKey: getWeekKey(d),          // <-- use this in Zap to look up/apply weekly rule
+    vanCheckWeekStatus,              // <-- "Passed"/"Failed" only when Monday; "" otherwise
+    engineer,
+    vehicle,
+    leaveHome,
+    arriveFirstSite: arriveFirst,
+    leaveLastSite: leaveLast,
+    arriveHome,
+    deductLunch: document.getElementById("deductLunch").checked,
+
+    // Calculated preview (Zap can recompute if desired)
+    totalHours: document.getElementById("t_total").textContent,
+    standardHours: document.getElementById("t_std").textContent,
+    overtimeHours: document.getElementById("t_ot").textContent,
+    enhancedOvertimePreview: document.getElementById("t_enh").textContent, // "Yes"/"No" preview
+
+    // Monday-only field for record
+    vanCheck,
+
+    // Friday-only data (else empty)
+    vanScore,
+    personalMileage,
+
+    // Notes
+    notes,
+    noteVisible,
+
+    // Audit
+    submittedAt: new Date().toISOString()
+  };
+
+  return payload;
 }
 
 async function submitForm(e){
- e.preventDefault();
- $("statusMsg").textContent="Submitting…";
- const data=gather();
- const body=new URLSearchParams();Object.entries(data).forEach(([k,v])=>body.append(k,v??""));
- try{
-   const r=await fetch(ZAPIER_WEBHOOK,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
-   $("statusMsg").textContent=r.ok?"✅ Submitted":"❌ Error";
- }catch{$("statusMsg").textContent="❌ Network error";}
+  e.preventDefault();
+  $("statusMsg").style.color="#475569";
+  $("statusMsg").textContent="Submitting…";
+
+  const data = gather();
+
+  const body=new URLSearchParams();
+  Object.entries(data).forEach(([k,v])=>body.append(k, v==null ? "" : String(v)));
+
+  try{
+    const r=await fetch(ZAPIER_WEBHOOK,{
+      method:"POST",
+      headers:{ "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
+      body
+    });
+    $("statusMsg").style.color = r.ok ? "var(--ok)" : "var(--bad)";
+    $("statusMsg").textContent = r.ok ? "✅ Submitted" : "❌ Error submitting";
+  }catch(err){
+    $("statusMsg").style.color = "var(--bad)";
+    $("statusMsg").textContent = "❌ Network error";
+  }
 }
 
-function gather(){
- const d=$("date").value,eng=$("engineer").value,veh=$("vehicleUsed").value;
- const l1=$("leaveHome").value,a1=$("arriveFirst").value,l2=$("leaveLast").value,a2=$("arriveHome").value;
- const n=$("notes").value,nv=$("noteVisible").checked,vs=$("vanScore").value;
- const pm=dayNum(d)===5?$("personalMileage").value:""; // Only include mileage on Friday
- let vc=null;if(dayNum(d)===1){const v=document.querySelector('input[name="vanCheck"]:checked');vc=v?v.value:null;}
- return{date:d,day:dow(d),engineer:eng,vehicle:veh,leaveHome:l1,arriveFirst:a1,leaveLast:l2,arriveHome:a2,
-   total:$("t_total").textContent,std:$("t_std").textContent,ot:$("t_ot").textContent,
-   enhanced:$("t_enh").textContent,vanCheck:vc,vanScore:vs,personalMileage:pm,
-   notes:n,noteVisible:nv,submittedAt:new Date().toISOString()};
-}
-
-window.onload=init;
+window.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
 </html>
