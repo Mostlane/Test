@@ -1,436 +1,539 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Engineer Hours Entry – Mostlane</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<style>
-  /* --- Layout stability baseline --- */
-  *, *::before, *::after { box-sizing: border-box; }
-  html, body { width:100%; max-width:100%; overflow-x:hidden; }
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Timesheet – Hours Entry (v3)</title>
 
-  :root{
-    --ml-blue:#003366;
-    --ml-accent:#1a73e8;
-    --ml-ink:#27313a;
-    --ml-bg:#e6e8eb;
-    --card:#ffffffee;
-    --muted:#718096;
-    --ok:#0c7d27;
-    --bad:#b00020;
-  }
-  body{
-    font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-    background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size:180% auto;
-    margin:0;padding:40px;color:var(--ml-ink);
-  }
-  .shell{max-width:1100px;margin:0 auto;background:rgba(255,255,255,0.92);
-    border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);min-width:0;}
-  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
-    background:linear-gradient(90deg,#fff,#f7f9fc);
-    border-bottom:1px solid #e5e9f2;padding:18px 24px;gap:10px;}
-  header h1{font-size:22px;margin:0;color:var(--ml-blue);}
-  header a{background:var(--ml-accent);color:#fff;text-decoration:none;
-    padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap;}
-  .content{padding:22px 24px 28px;}
-  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;min-width:0;}
-  .card{background:var(--card);border:1px solid #e8edf3;border-radius:12px;padding:16px;min-width:0;}
-  .title{font-weight:600;color:var(--ml-blue);margin-bottom:10px;}
-  label{font-size:13px;color:#334155;display:block;margin-bottom:6px;}
-  input,select,textarea{
-    width:100%; max-width:100%;
-    font-size:15px; border:1px solid #cbd5e1; border-radius:10px;
-    padding:10px 12px; background:#fff; line-height:1.2;
-  }
-  input[type="time"], input[type="date"] { height:40px; }
-  select { height:42px; }
-  textarea{min-height:90px;resize:vertical;}
-  .row{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;min-width:0;}
-  /* Make row children grow evenly but never shrink into overlap */
-  .row > div{flex:1 1 260px; min-width:240px; max-width:100%;}
+  <!-- Cache-busting asset loader (uses TODAY-YYYYMMDD-HHMMSS as version) -->
+  <script>
+    (function() {
+      const pad = n => (n < 10 ? "0" + n : "" + n);
+      const d = new Date();
+      const VERSION =
+        d.getFullYear().toString() +
+        pad(d.getMonth() + 1) +
+        pad(d.getDate()) +
+        "-" +
+        pad(d.getHours()) +
+        pad(d.getMinutes()) +
+        pad(d.getSeconds());
 
-  .muted{color:var(--muted);font-size:12px;}
-  .divider{height:1px;background:#edf2f7;margin:12px 0;}
-  .toggle-row{display:flex;align-items:center;gap:10px;font-size:14px;user-select:none;}
-  .radio-group{display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+      // Inject CSS with ?v=
+      const cssHref = "styles/timesheet.css?v=" + VERSION;
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = cssHref;
+      document.head.appendChild(link);
 
-  .totals{display:flex;gap:10px;flex-wrap:wrap;font-weight:600;}
-  .pill{padding:8px 12px;border-radius:999px;border:1px solid #d7e1ee;
-    background:#f8fbff;color:#0f172a;display:inline-flex;align-items:center;gap:6px;}
-  .pill.ok{border-color:#bfe7ca;background:#effaf3;color:#074e1a;}
-  .pill.bad{border-color:#ffc7ce;background:#fff1f3;color:#6b0011;}
+      // Expose a helper for later JS loads
+      window.__cacheBust = function(path) {
+        return path + (path.includes("?") ? "&" : "?") + "v=" + VERSION;
+      };
+    })();
+  </script>
 
-  .actions{display:flex;gap:14px;align-items:center;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;}
-  button{font-size:15px;font-weight:600;border:0;border-radius:10px;padding:12px 18px;cursor:pointer;}
-  .btn-primary{background:var(--ml-accent);color:#fff;}
-  .btn-secondary{background:#eef2f9;color:#0f172a;border:1px solid #d7e1ee;}
-  .btn-link{background:transparent;color:var(--ml-accent);padding:8px 10px;white-space:nowrap;}
-
-  .col-12{grid-column:span 12;}
-  .col-6{grid-column:span 6;}
-
-  /* Make nested grids resilient on smaller widths */
-  @media (max-width: 1120px){
-    .row > div{flex:1 1 300px;}
-  }
-  @media(max-width:980px){
-    .col-6{grid-column:span 12;}
-    .row > div{min-width:260px;flex:1 1 100%;}
-  }
-  .date-controls{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
-  .banner{margin-top:8px;padding:8px 12px;border-radius:10px;border:1px solid #e5e9f2;background:#f7fbff;}
-
-  /* Keep long helper text from pushing layout */
-  #dowHint, .muted { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; display:inline-block; }
-
-  /* Prevent nested grid overflow in time section */
-  .card .grid { min-width:0; }
-</style>
+  <style>
+    /* Minimal inline safety styles; your full theme should be in styles/timesheet.css (cache-busted above). */
+    :root {
+      --ml-primary: #003366;
+      --ml-bg: #e6e8eb;
+      --ml-card: rgba(255, 255, 255, 0.9);
+      --ml-accent: #0a66c2;
+      --ml-ok: #1f9d55;
+      --ml-warn: #b7791f;
+      --ml-danger: #c53030;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--ml-bg) url("Mostlane_Embossed.png") no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      color: var(--ml-primary);
+    }
+    .container {
+      max-width: 980px;
+      margin: 60px auto 100px;
+      background: var(--ml-card);
+      padding: 28px 28px 34px;
+      border-radius: 16px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      backdrop-filter: blur(2px);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .title img {
+      height: 38px;
+      width: auto;
+      border-radius: 6px;
+    }
+    h1 {
+      font-size: 1.35rem;
+      margin: 0;
+      letter-spacing: 0.2px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button, .btn {
+      appearance: none;
+      border: none;
+      background: var(--ml-accent);
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(10,102,194,0.25);
+      transition: transform .05s ease, box-shadow .2s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button:hover, .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(10,102,194,0.25);
+    }
+    .btn-secondary {
+      background: #fff;
+      color: var(--ml-primary);
+      border: 1px solid #cfd6df;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 12px;
+      margin: 6px 0 18px;
+      align-items: center;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    input[type="week"], input[type="text"], input[type="time"], input[type="number"] {
+      border: 1px solid #cfd6df;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+      color: #1d2a3a;
+      outline: none;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid #d9e0ea;
+      border-radius: 12px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 820px;
+    }
+    thead th {
+      background: #f3f6fb;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    th, td {
+      text-align: left;
+      padding: 12px 10px;
+      border-bottom: 1px solid #eef2f7;
+      font-size: 0.95rem;
+    }
+    tfoot td {
+      font-weight: 700;
+      background: #f9fbff;
+    }
+    .totals {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 12px;
+      margin: 16px 0 8px;
+    }
+    .chip {
+      background: #fff;
+      border: 1px solid #d9e0ea;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-weight: 600;
+    }
+    .status {
+      margin-top: 10px;
+      font-size: 0.9rem;
+    }
+    .muted { opacity: 0.8; font-weight: 500; }
+    .fine { color: var(--ml-ok); }
+    .warn { color: var(--ml-warn); }
+    .danger { color: var(--ml-danger); }
+    .note {
+      font-size: 0.86rem;
+      margin-top: 8px;
+      opacity: 0.9;
+    }
+    .footer {
+      margin-top: 28px;
+      font-size: 0.85rem;
+      text-align: center;
+      opacity: 0.75;
+    }
+    .right { text-align: right; }
+    .center { text-align: center; }
+  </style>
 </head>
 <body>
-<div class="shell">
-<header>
-  <h1>Engineer Hours Entry</h1>
-  <a href="main.html">Main Menu</a>
-</header>
-
-<div class="content">
-<form id="hoursForm" class="grid" novalidate>
-
-<!-- Day & Engineer -->
-<div class="card col-12">
-  <div class="title">Day & Engineer</div>
-  <div class="row">
-    <div>
-      <label>Date</label>
-      <input type="date" id="date" required />
-      <div class="date-controls">
-        <button type="button" class="btn-link" id="prevDayBtn">◀ Previous</button>
-        <button type="button" class="btn-link" id="nextDayBtn">Next ▶</button>
-        <span class="muted" id="dowHint"></span>
+  <div class="container">
+    <header>
+      <div class="title">
+        <img src="Mostlane Logo - Copy.jpeg" alt="Mostlane" />
+        <h1>Timesheet – Hours Entry (v3)</h1>
       </div>
-      <div id="weekBanner" class="banner" style="display:none;"></div>
+      <div class="actions">
+        <a class="btn-secondary" href="main.html">Main Menu</a>
+        <button id="createTimesheetBtn" title="Sends summary to Zapier for PDF (per your existing Zap)">
+          Create Timesheet
+        </button>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="field">
+        <label for="weekPicker">Week (Mon–Sun)</label>
+        <input id="weekPicker" type="week" />
+      </div>
+      <div class="field">
+        <label for="employeeName">Employee</label>
+        <input id="employeeName" type="text" placeholder="Auto from login (e.g., Jamie Line)" />
+      </div>
+      <div class="field">
+        <label for="deviceId">Device ID</label>
+        <input id="deviceId" type="text" placeholder="dev-xxxxxxx (from onboarding)" />
+      </div>
     </div>
-    <div>
-      <label>Engineer</label>
-      <select id="engineer" required></select>
-      <div class="muted">Active users from users.json</div>
+
+    <div class="table-wrap">
+      <table id="hoursTable" aria-label="Timesheet Hours">
+        <thead>
+          <tr>
+            <th style="width:140px;">Day</th>
+            <th>Start Time</th>
+            <th>End Time</th>
+            <th>Unpaid Break (mins)</th>
+            <th>Notes</th>
+            <th class="right">Hours</th>
+          </tr>
+        </thead>
+        <tbody id="hoursBody">
+          <!-- Rows injected by JS for Mon–Sun -->
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5" class="right">Total (hh:mm)</td>
+            <td class="right" id="totalHoursCell">00:00</td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
-    <div>
-      <label>Vehicle Used</label>
-      <input type="text" id="vehicleUsed" list="vehicleList" placeholder="e.g. LA70 FPJ" />
-      <datalist id="vehicleList"></datalist>
+
+    <div class="totals">
+      <div class="chip">Days Counted: <span id="daysCount">0</span></div>
+      <div class="chip">Total Hours: <span id="totalHoursChip">00:00</span></div>
+      <div class="chip">Std Hours (<=10h/day): <span id="stdHours">00:00</span></div>
+      <div class="chip">Overtime (>10h/day): <span id="otHours">00:00</span></div>
+    </div>
+
+    <div class="status muted" id="saveStatus">Autosaved.</div>
+    <div class="note">
+      Note: Page autosaves locally. “Create Timesheet” compiles this week’s data and sends it to your existing Zapier flow for PDF generation (as per your <em>Create Timesheet</em> Zap).
+    </div>
+
+    <div class="footer">
+      © Mostlane — Styled with embossed background. Cache-busting enabled for CSS/JS.
     </div>
   </div>
-</div>
 
-<!-- Times -->
-<div class="card col-6">
-  <div class="title">Times (24h)</div>
-  <div class="grid" style="grid-template-columns:repeat(12,1fr);gap:10px;">
-    <div style="grid-column:span 3;"><label>Leave Home</label><input type="time" id="leaveHome" required></div>
-    <div style="grid-column:span 3;"><label>Arrive First</label><input type="time" id="arriveFirst" required></div>
-    <div style="grid-column:span 3;"><label>Leave Last</label><input type="time" id="leaveLast" required></div>
-    <div style="grid-column:span 3;"><label>Arrive Home</label><input type="time" id="arriveHome" required></div>
-  </div>
-  <div class="divider"></div>
-  <label class="toggle-row"><input type="checkbox" id="deductLunch" checked> Deduct 30m lunch</label>
-</div>
+  <!-- Core logic (cache-busted load) -->
+  <script>
+    (function attachScript() {
+      const s = document.createElement("script");
+      s.type = "module";
+      s.src = window.__cacheBust ? window.__cacheBust("scripts/timesheet-core.js") : "scripts/timesheet-core.js";
+      document.body.appendChild(s);
+    })();
+  </script>
 
-<!-- Vehicle / Notes -->
-<div class="card col-6">
-  <div class="title">Vehicle, Mileage & Notes</div>
-  <div id="mondayBlock" style="display:none;margin-bottom:10px;">
-    <label>Monday – Van check?</label>
-    <div class="radio-group">
-      <label><input type="radio" name="vanCheck" value="Yes">Yes</label>
-      <label><input type="radio" name="vanCheck" value="No">No</label>
-      <label><input type="radio" name="vanCheck" value="N/A">N/A</label>
-    </div>
-    <div class="muted">If “No”, payroll will pay standard rate only for the whole week.</div>
-  </div>
-  <div id="fridayBlock" style="display:none;margin-bottom:10px;">
-    <label>Friday – Van score (0–100)</label>
-    <input type="number" id="vanScore" min="0" max="100">
-    <label style="margin-top:8px;">Personal mileage (weekly)</label>
-    <input type="number" id="personalMileage" min="0" step="1">
-  </div>
-  <div class="divider"></div>
-  <div class="row" style="align-items:flex-start;">
-    <div>
-      <label>Office notes</label>
-      <textarea id="notes" placeholder="e.g. traffic delay, extra stop..."></textarea>
-    </div>
-    <div style="max-width:360px;">
-      <label>Visibility</label>
-      <label class="toggle-row"><input type="checkbox" id="noteVisible"> 🪨 Visible to engineer</label>
-      <div class="muted">Default off</div>
-    </div>
-  </div>
-</div>
+  <!-- Inline fallback core (in case external JS not found). Remove if you provide scripts/timesheet-core.js -->
+  <script type="module">
+    // ======== CONFIG ========
+    const ZAP_TIMESHEET_URL = "https://hooks.zapier.com/hooks/catch/20261714/273lt6z/"; // Your confirmed Zap for Create Timesheet
+    const STORAGE_KEY = "mostlane.hoursEntry.v3";
 
-<!-- Totals -->
-<div class="card col-12">
-  <div class="title">Calculated Totals</div>
-  <div class="totals">
-    <span class="pill">Total: <span id="t_total">0.00</span> h</span>
-    <span class="pill ok">Standard: <span id="t_std">0.00</span> h</span>
-    <span class="pill">Overtime: <span id="t_ot">0.00</span> h</span>
-    <span class="pill" id="enhPill">Enhanced OT: <span id="t_enh">Yes</span></span>
-  </div>
-  <div class="muted" id="logicNote" style="margin-top:6px;"></div>
-</div>
+    // ======== UTIL ========
+    const qs = sel => document.querySelector(sel);
+    const qsa = sel => Array.from(document.querySelectorAll(sel));
+    const toMinutes = (hhmm) => {
+      if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return 0;
+      const [h, m] = hhmm.split(":").map(Number);
+      return h * 60 + m;
+    };
+    const minutesToHHMM = (mins) => {
+      const sign = mins < 0 ? "-" : "";
+      mins = Math.abs(mins);
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${sign}${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+    };
+    const dayNames = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-<!-- Actions -->
-<div class="col-12 actions">
-  <span class="muted" id="statusMsg"></span>
-  <button type="reset" class="btn-secondary" id="resetBtn">Clear</button>
-  <button type="submit" class="btn-primary" id="submitBtn">Submit to Payroll</button>
-</div>
-
-</form>
-</div>
-</div>
-
-<script>
-/* ====== CONFIG ====== */
-const ZAPIER_WEBHOOK="https://hooks.zapier.com/hooks/catch/20261714/u5ibaoi/";
-const USERS_JSON_PATH="./users.json";
-
-/* ====== STATE ====== */
-let USERS_RAW=[],ENGINEERS=[],VEHICLE_SET=new Set();
-
-/* ====== HELPERS ====== */
-const $=id=>document.getElementById(id);
-function timeToMin(t){if(!t||!t.includes(":"))return null;const[h,m]=t.split(":").map(Number);return h*60+m;}
-function minsToHr(m){return Math.round((m/60)*100)/100;}
-function fmtDate(d){return d.toISOString().split("T")[0];}
-function shiftDate(delta){const d=new Date($("date").value+"T12:00");d.setDate(d.getDate()+delta);$("date").value=fmtDate(d);updateDay();}
-function dow(d){return new Date(d+"T12:00").toLocaleDateString(undefined,{weekday:"long"});}
-function dayNum(d){return new Date(d+"T12:00").getDay();} // 0=Sun..6=Sat
-function getWeekKey(dateStr){
-  // Using Sunday-start week key
-  const d = new Date(dateStr+"T12:00");
-  const sunday = new Date(d);
-  sunday.setDate(d.getDate() - d.getDay());
-  return sunday.toISOString().split("T")[0];
-}
-
-/* ====== INIT ====== */
-async function init(){
-  // Load users.json
-  try{
-    const r=await fetch(USERS_JSON_PATH,{cache:"no-store"});
-    const j=await r.json();USERS_RAW=j.Users||j;
-  }catch{USERS_RAW=[];}
-
-  // Populate engineers (Active)
-  ENGINEERS=USERS_RAW
-    .filter(u=>u.Status==="Active")
-    .map(u=>({name:`${u.FirstName} ${u.LastName}`.trim(),username:u.Username,vehicle:u.VehicleAssigned||""}))
-    .sort((a,b)=>a.name.localeCompare(b.name));
-
-  const sel=$("engineer");
-  ENGINEERS.forEach(e=>{
-    const o=document.createElement("option");
-    o.value=e.name;
-    o.textContent=e.name; // visible name
-    o.dataset.username=e.username;
-    o.dataset.vehicle=e.vehicle;
-    sel.appendChild(o);
-  });
-
-  // Vehicle list datalist
-  USERS_RAW.forEach(u=>{if(u.VehicleAssigned)VEHICLE_SET.add(u.VehicleAssigned);});
-  const dl=$("vehicleList");
-  Array.from(VEHICLE_SET).sort().forEach(v=>{const o=document.createElement("option");o.value=v;dl.appendChild(o);});
-
-  // Events
-  $("engineer").onchange=()=>{const s=$("engineer");const v=s.options[s.selectedIndex]?.dataset.vehicle || "";$("vehicleUsed").value=v;};
-  $("prevDayBtn").onclick=()=>shiftDate(-1);
-  $("nextDayBtn").onclick=()=>shiftDate(1);
-  ["leaveHome","arriveFirst","leaveLast","arriveHome","deductLunch"].forEach(id=>{
-    $(id).addEventListener("input",calcTotals);
-    $(id).addEventListener("change",calcTotals);
-  });
-  document.querySelectorAll('input[name="vanCheck"]').forEach(r=>r.addEventListener("change",calcTotals));
-  $("hoursForm").onsubmit=submitForm;
-  $("resetBtn").onclick=()=>{$("statusMsg").textContent="";};
-
-  // Default to yesterday
-  const y=new Date();y.setDate(y.getDate()-1);$("date").value=fmtDate(y);
-  updateDay();calcTotals();
-}
-
-/* ====== UI DAY CONTEXT ====== */
-function updateDay(){
-  const d=$("date").value;if(!d)return;
-  const day=dayNum(d);
-  $("dowHint").textContent="Selected: "+dow(d);
-
-  // Monday block (van check)
-  $("mondayBlock").style.display = day===1 ? "block" : "none";
-
-  // Friday block (van score + mileage only on Fridays)
-  $("fridayBlock").style.display = day===5 ? "block" : "none";
-
-  // Banner reminder: On non-Mondays, OT is subject to weekly van-check rule handled in payroll
-  const banner = $("weekBanner");
-  if(day!==1){
-    banner.style.display="block";
-    banner.textContent = "Note: Enhanced overtime for this day will be confirmed by payroll based on this week's Monday van-check status.";
-  }else{
-    banner.style.display="none";
-    banner.textContent = "";
-  }
-
-  calcTotals();
-}
-
-/* ====== CALCULATIONS (client-side preview only) ====== */
-function calcTotals(){
-  const t1=timeToMin($("leaveHome").value),
-        t2=timeToMin($("arriveFirst").value),
-        t3=timeToMin($("leaveLast").value),
-        t4=timeToMin($("arriveHome").value);
-
-  if([t1,t2,t3,t4].some(v=>v==null)){
-    $("t_total").textContent="0.00";
-    $("t_std").textContent="0.00";
-    $("t_ot").textContent="0.00";
-    $("t_enh").textContent="Yes";
-    $("enhPill").className="pill ok";
-    $("logicNote").textContent="";
-    return;
-  }
-
-  let totalMins = t4 - t1;
-  if ($("deductLunch").checked) totalMins -= 30;
-  if (totalMins < 0) totalMins = 0;
-
-  const total = minsToHr(totalMins);
-  const std = Math.min(10, total);
-  const ot  = Math.max(0, +(total - 10).toFixed(2));
-
-  // Enhanced overtime logic preview:
-  const d=$("date").value;
-  const isMonday = dayNum(d)===1;
-
-  let enhanced = true;
-  let msg = "Enhanced overtime if total > 10h.";
-
-  if(isMonday){
-    const v = document.querySelector('input[name="vanCheck"]:checked');
-    if(v){
-      if(v.value==="No"){ enhanced=false; msg="Van check = No → this Monday paid at standard rate only."; }
-      if(v.value==="Yes"){ enhanced=true;  msg="Van check = Yes → enhanced OT applies if >10h."; }
-      if(v.value==="N/A"){ enhanced=true;  msg="Van check = N/A → enhanced OT applies if >10h."; }
-    } else {
-      msg="Select Monday van check status.";
+    // ======== DOM BUILD ========
+    const tbody = qs("#hoursBody");
+    function buildRows() {
+      tbody.innerHTML = "";
+      dayNames.forEach((name, i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>${name}</strong></td>
+          <td><input type="time" class="start" aria-label="${name} start time"></td>
+          <td><input type="time" class="end" aria-label="${name} end time"></td>
+          <td><input type="number" class="break" min="0" step="5" placeholder="0" aria-label="${name} unpaid break minutes" style="max-width:120px"></td>
+          <td><input type="text" class="note" placeholder="Notes (optional)"></td>
+          <td class="right"><span class="dayTotal">00:00</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
     }
-  } else {
-    // Non-Monday: payroll will enforce based on week flag stored in Zapier
-    msg="Overtime preview shown. Payroll will apply weekly van-check rule.";
-  }
+    buildRows();
 
-  $("t_total").textContent = total.toFixed(2);
-  $("t_std").textContent   = std.toFixed(2);
-  $("t_ot").textContent    = ot.toFixed(2);
-  $("t_enh").textContent   = enhanced ? "Yes" : "No";
-  $("enhPill").className   = enhanced ? "pill ok" : "pill bad";
-  $("logicNote").textContent = msg;
-}
+    // ======== AUTOFILL WEEK + EMPLOYEE ========
+    const weekPicker = qs("#weekPicker");
+    const employeeName = qs("#employeeName");
+    const deviceId = qs("#deviceId");
 
-/* ====== GATHER + SUBMIT ====== */
-function gather(){
-  const d=$("date").value;
-  const engineer=$("engineer").value;
-  const vehicle=$("vehicleUsed").value;
-  const leaveHome=$("leaveHome").value;
-  const arriveFirst=$("arriveFirst").value;
-  const leaveLast=$("leaveLast").value;
-  const arriveHome=$("arriveHome").value;
-  const notes=$("notes").value.trim();
-  const noteVisible=$("noteVisible").checked;
-  const vanScore=$("vanScore").value || "";
-  const personalMileage = (dayNum(d)===5) ? ($("personalMileage").value || "") : "";
-
-  // Monday van-check → compute weekly flag to send to Zapier
-  let vanCheck=null;
-  let vanCheckWeekStatus="";
-  if(dayNum(d)===1){
-    const v=document.querySelector('input[name="vanCheck"]:checked');
-    vanCheck = v ? v.value : null;
-    if(v){
-      if(v.value==="No") vanCheckWeekStatus="Failed";
-      if(v.value==="Yes" || v.value==="N/A") vanCheckWeekStatus="Passed";
+    // Try default week = current week (ISO)
+    if (!weekPicker.value) {
+      const now = new Date();
+      const firstThursday = new Date(now.getFullYear(), 0, 4);
+      const dayOfYear = (date) => Math.floor((date - new Date(date.getFullYear(),0,1)) / 86400000) + 1;
+      const week = (date) => {
+        const d = new Date(date);
+        d.setHours(0,0,0,0);
+        d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+        const week1 = new Date(d.getFullYear(),0,4);
+        return 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6)%7)) / 7);
+      };
+      const w = week(now);
+      weekPicker.value = `${now.getFullYear()}-W${String(w).padStart(2,"0")}`;
     }
-  }
 
-  const payload = {
-    // Core
-    date: d,
-    day: dow(d),
-    weekKey: getWeekKey(d),
-    vanCheckWeekStatus,
-    engineer,
-    vehicle,
-    leaveHome,
-    arriveFirstSite: arriveFirst,
-    leaveLastSite: leaveLast,
-    arriveHome,
-    deductLunch: document.getElementById("deductLunch").checked,
+    // Pull login name & device from session/local if present (per your portal pattern)
+    try {
+      const login = sessionStorage.getItem("mostlaneUsername");
+      if (login && !employeeName.value) employeeName.value = login.replace(".", " ");
+    } catch {}
+    try {
+      const dev = localStorage.getItem("mostlaneDeviceId");
+      if (dev && !deviceId.value) deviceId.value = dev;
+    } catch {}
 
-    // Calculated preview
-    totalHours: document.getElementById("t_total").textContent,
-    standardHours: document.getElementById("t_std").textContent,
-    overtimeHours: document.getElementById("t_ot").textContent,
-    enhancedOvertimePreview: document.getElementById("t_enh").textContent,
+    // ======== CALC & SAVE ========
+    const status = qs("#saveStatus");
+    const totalHoursCell = qs("#totalHoursCell");
+    const totalHoursChip = qs("#totalHoursChip");
+    const daysCountEl = qs("#daysCount");
+    const stdHoursEl = qs("#stdHours");
+    const otHoursEl = qs("#otHours");
 
-    // Monday-only field
-    vanCheck,
+    function calc() {
+      let totalMins = 0;
+      let dayCount = 0;
+      let stdMins = 0;
+      let otMins = 0;
 
-    // Friday-only data
-    vanScore,
-    personalMileage,
+      qsa("#hoursBody tr").forEach((tr) => {
+        const start = tr.querySelector(".start").value;
+        const end = tr.querySelector(".end").value;
+        const brk = parseInt(tr.querySelector(".break").value || "0", 10);
+        const out = tr.querySelector(".dayTotal");
 
-    // Notes
-    notes,
-    noteVisible,
+        let mins = 0;
+        if (start && end) {
+          let s = toMinutes(start);
+          let e = toMinutes(end);
+          if (e < s) e += 24*60; // cross midnight support
+          mins = Math.max(0, e - s - (isNaN(brk) ? 0 : brk));
+          if (mins > 0) {
+            dayCount++;
+            // Split std vs overtime using your 10h/day rule (as referenced in prior chats)
+            const tenH = 10 * 60;
+            stdMins += Math.min(tenH, mins);
+            otMins  += Math.max(0, mins - tenH);
+          }
+        }
+        out.textContent = minutesToHHMM(mins);
+        totalMins += mins;
+      });
 
-    // Audit
-    submittedAt: new Date().toISOString()
-  };
+      totalHoursCell.textContent = minutesToHHMM(totalMins);
+      totalHoursChip.textContent = minutesToHHMM(totalMins);
+      daysCountEl.textContent = String(dayCount);
+      stdHoursEl.textContent = minutesToHHMM(stdMins);
+      otHoursEl.textContent = minutesToHHMM(otMins);
+    }
 
-  return payload;
-}
+    function save() {
+      const rows = qsa("#hoursBody tr").map((tr, idx) => ({
+        day: dayNames[idx],
+        start: tr.querySelector(".start").value || "",
+        end: tr.querySelector(".end").value || "",
+        breakMins: tr.querySelector(".break").value || "",
+        note: tr.querySelector(".note").value || "",
+      }));
+      const payload = {
+        week: weekPicker.value || "",
+        employee: employeeName.value || "",
+        deviceId: deviceId.value || "",
+        rows,
+        metaVersion: "hours-entry-v3",
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      status.textContent = "Autosaved.";
+      status.className = "status muted";
+    }
 
-async function submitForm(e){
-  e.preventDefault();
-  $("statusMsg").style.color="#475569";
-  $("statusMsg").textContent="Submitting…";
+    function load() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      try {
+        const data = JSON.parse(raw);
+        if (data.week) weekPicker.value = data.week;
+        if (data.employee) employeeName.value = data.employee;
+        if (data.deviceId) deviceId.value = data.deviceId;
+        if (Array.isArray(data.rows)) {
+          const trs = qsa("#hoursBody tr");
+          data.rows.forEach((row, i) => {
+            const tr = trs[i];
+            if (!tr) return;
+            tr.querySelector(".start").value = row.start || "";
+            tr.querySelector(".end").value = row.end || "";
+            tr.querySelector(".break").value = row.breakMins || "";
+            tr.querySelector(".note").value = row.note || "";
+          });
+        }
+      } catch {}
+    }
 
-  const data = gather();
+    function bind() {
+      document.addEventListener("input", (e) => {
+        if (e.target.matches(".start, .end, .break, #weekPicker, #employeeName, #deviceId, .note")) {
+          calc();
+          save();
+        }
+      });
+      document.addEventListener("change", (e) => {
+        if (e.target.matches("input")) {
+          calc();
+          save();
+        }
+      });
+    }
 
-  const body=new URLSearchParams();
-  Object.entries(data).forEach(([k,v])=>body.append(k, v==null ? "" : String(v)));
+    // ======== SUBMIT TO ZAPIER ("Create Timesheet") ========
+    async function submitToZapier() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      let payload;
+      try {
+        payload = JSON.parse(raw || "{}");
+      } catch {
+        payload = {};
+      }
 
-  try{
-    const r=await fetch(ZAPIER_WEBHOOK,{
-      method:"POST",
-      headers:{ "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
-      body
-    });
-    $("statusMsg").style.color = r.ok ? "var(--ok)" : "var(--bad)";
-    $("statusMsg").textContent = r.ok ? "✅ Submitted" : "❌ Error submitting";
-  }catch(err){
-    $("statusMsg").style.color = "var(--bad)";
-    $("statusMsg").textContent = "❌ Network error";
-  }
-}
+      // Basic validation
+      if (!payload.employee || !payload.week) {
+        status.textContent = "Please set Employee and Week before creating timesheet.";
+        status.className = "status danger";
+        return;
+      }
 
-window.addEventListener("DOMContentLoaded", init);
-</script>
+      // Compose a lean summary (Zap builds PDF)
+      const summary = {
+        employee: payload.employee,
+        week: payload.week,
+        deviceId: payload.deviceId || "",
+        totals: {
+          daysCount: Number(qs("#daysCount").textContent || 0),
+          totalHours: qs("#totalHoursChip").textContent || "00:00",
+          stdHours: qs("#stdHours").textContent || "00:00",
+          otHours: qs("#otHours").textContent || "00:00",
+        },
+        rows: qsa("#hoursBody tr").map((tr, idx) => ({
+          day: dayNames[idx],
+          start: tr.querySelector(".start").value || "",
+          end: tr.querySelector(".end").value || "",
+          breakMins: tr.querySelector(".break").value || "0",
+          note: tr.querySelector(".note").value || "",
+          total: tr.querySelector(".dayTotal").textContent || "00:00",
+        })),
+        submittedAt: new Date().toISOString(),
+        source: "hours-entry-v3.html",
+      };
+
+      try {
+        status.textContent = "Submitting…";
+        status.className = "status muted";
+
+        const form = new URLSearchParams();
+        form.append("employee", summary.employee);
+        form.append("week", summary.week);
+        form.append("deviceId", summary.deviceId);
+        form.append("totals", JSON.stringify(summary.totals));
+        form.append("rows", JSON.stringify(summary.rows));
+        form.append("submittedAt", summary.submittedAt);
+        form.append("source", summary.source);
+
+        const res = await fetch(ZAP_TIMESHEET_URL, {
+          method: "POST",
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body: form.toString(),
+        });
+
+        if (!res.ok) throw new Error("Non-200 from Zapier");
+        status.textContent = "Timesheet sent to Zapier successfully.";
+        status.className = "status fine";
+      } catch (err) {
+        status.textContent = "Failed to submit. Please try again.";
+        status.className = "status danger";
+        console.error(err);
+      }
+    }
+
+    // ======== INIT ========
+    load();
+    calc();
+    bind();
+    qs("#createTimesheetBtn").addEventListener("click", submitToZapier);
+  </script>
 </body>
 </html>
