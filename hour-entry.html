@@ -332,11 +332,18 @@ function addEngineerLog(initial={}){
   $(`${id}_toggleBtn`).onclick=()=>{ wrapper.classList.toggle("collapsed"); $(`${id}_toggleBtn`).textContent = wrapper.classList.contains("collapsed") ? "Expand" : "Collapse"; };
   engSel.onchange=()=>{ const v=engSel.options[engSel.selectedIndex]?.dataset.vehicle||""; $(`${id}_vehicle`).value=v; $(`${id}_engLabel`).textContent = "– " + engSel.value; saveDraft(); renderChecklistForDate($("date").value); };
 
-  [ "_leaveHome","_arriveFirst","_leaveLast","_arriveHome","_deductLunch","_manualOTHours","_vanScore","_personalMileage","_notes","_noteVisible" ]
-    .forEach(suffix=>{
-      $(`${id}${suffix}`).addEventListener("input", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
-      $(`${id}${suffix}`).addEventListener("change", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
-    });
+[
+  "_leaveHome","_arriveFirst","_leaveLast","_arriveHome",
+  "_deductLunch","_manualOTHours","_vanScore","_personalMileage",
+  "_notes","_noteVisible"
+].forEach(suffix=>{
+  const el = $(`${id}${suffix}`);
+  if(!el) return;
+  // Trigger autosave & recalculation on both input & change
+  el.addEventListener("input", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
+  el.addEventListener("change", ()=>{ calcTotalsFor(id); saveDraft(); });
+});
+
   Array.from(wrapper.querySelectorAll(`input[name="${id}_vanCheck"]`)).forEach(r=>{
     r.addEventListener("change", ()=>{ calcTotalsFor(id); saveDraft(); });
   });
