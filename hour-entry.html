@@ -6,11 +6,11 @@
     name="viewport"
     content="width=device-width, initial-scale=1.0"
   />
-  <title>Timesheet – Hours Entry (v3)</title>
+  <title>Hours Entry – Day by Day (v3)</title>
 
-  <!-- Cache-busting asset loader (uses TODAY-YYYYMMDD-HHMMSS as version) -->
+  <!-- Cache-busting version helper -->
   <script>
-    (function() {
+    (function () {
       const pad = n => (n < 10 ? "0" + n : "" + n);
       const d = new Date();
       const VERSION =
@@ -22,30 +22,28 @@
         pad(d.getMinutes()) +
         pad(d.getSeconds());
 
-      // Inject CSS with ?v=
-      const cssHref = "styles/timesheet.css?v=" + VERSION;
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = cssHref;
-      document.head.appendChild(link);
-
-      // Expose a helper for later JS loads
-      window.__cacheBust = function(path) {
+      window.__cacheBust = function (path) {
         return path + (path.includes("?") ? "&" : "?") + "v=" + VERSION;
       };
+      // If you create an external CSS, uncomment:
+      // const link = document.createElement("link");
+      // link.rel = "stylesheet";
+      // link.href = __cacheBust("styles/hours-entry-daily.css");
+      // document.head.appendChild(link);
     })();
   </script>
 
   <style>
-    /* Minimal inline safety styles; your full theme should be in styles/timesheet.css (cache-busted above). */
     :root {
       --ml-primary: #003366;
       --ml-bg: #e6e8eb;
-      --ml-card: rgba(255, 255, 255, 0.9);
+      --ml-card: rgba(255,255,255,0.92);
       --ml-accent: #0a66c2;
+      --ml-border: #d9e0ea;
+      --ml-soft: #f3f6fb;
       --ml-ok: #1f9d55;
       --ml-warn: #b7791f;
-      --ml-danger: #c53030;
+      --ml-bad: #c53030;
     }
     * { box-sizing: border-box; }
     body {
@@ -56,151 +54,70 @@
       color: var(--ml-primary);
     }
     .container {
-      max-width: 980px;
+      max-width: 1100px;
       margin: 60px auto 100px;
       background: var(--ml-card);
-      padding: 28px 28px 34px;
+      padding: 28px;
       border-radius: 16px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.12);
       backdrop-filter: blur(2px);
     }
     header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px;
     }
-    .title {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .title img {
-      height: 38px;
-      width: auto;
-      border-radius: 6px;
-    }
-    h1 {
-      font-size: 1.35rem;
-      margin: 0;
-      letter-spacing: 0.2px;
-    }
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    button, .btn {
-      appearance: none;
-      border: none;
-      background: var(--ml-accent);
-      color: #fff;
-      padding: 10px 14px;
-      border-radius: 10px;
-      font-weight: 600;
-      cursor: pointer;
+    .title { display: flex; align-items: center; gap: 12px; }
+    .title img { height: 36px; border-radius: 6px; }
+    h1 { font-size: 1.28rem; margin: 0; letter-spacing: 0.2px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    a.btn, button.btn {
+      appearance: none; border: none; background: var(--ml-accent); color: #fff;
+      padding: 10px 14px; border-radius: 10px; font-weight: 600; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
       box-shadow: 0 2px 8px rgba(10,102,194,0.25);
-      transition: transform .05s ease, box-shadow .2s ease;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
     }
-    button:hover, .btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 14px rgba(10,102,194,0.25);
-    }
-    .btn-secondary {
-      background: #fff;
-      color: var(--ml-primary);
-      border: 1px solid #cfd6df;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-    }
+    .btn.secondary { background: #fff; color: var(--ml-primary); border: 1px solid var(--ml-border); }
     .toolbar {
+      display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: end;
+      margin: 10px 0 18px;
+    }
+    .field { display: grid; gap: 6px; }
+    label { font-size: 0.92rem; font-weight: 650; }
+    input[type="date"], select, input[type="time"], textarea {
+      border: 1px solid var(--ml-border); border-radius: 10px; padding: 10px 12px; background: #fff; color: #1d2a3a;
+    }
+    textarea { min-height: 44px; resize: vertical; }
+    .note-check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.92rem; }
+    .card {
+      border: 1px solid var(--ml-border); border-radius: 12px; background: #fff;
+      padding: 14px; margin-bottom: 14px;
+    }
+    .row-grid {
       display: grid;
-      grid-template-columns: 1fr auto auto;
-      gap: 12px;
-      margin: 6px 0 18px;
-      align-items: center;
+      grid-template-columns: 220px 160px repeat(4, 140px) 120px 1fr 160px;
+      gap: 10px; align-items: center;
     }
-    .field {
-      display: grid;
-      gap: 6px;
+    .row-grid .remove {
+      justify-self: end;
+      background: #fff; color: var(--ml-bad); border: 1px solid #f0c7c7;
     }
-    .field label {
-      font-size: 0.9rem;
-      font-weight: 600;
+    .subtle {
+      font-size: 0.85rem; color: #335; opacity: 0.85; margin: 2px 0 10px;
     }
-    input[type="week"], input[type="text"], input[type="time"], input[type="number"] {
-      border: 1px solid #cfd6df;
-      border-radius: 10px;
-      padding: 10px 12px;
-      background: #fff;
-      color: #1d2a3a;
-      outline: none;
-    }
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid #d9e0ea;
-      border-radius: 12px;
-      background: #fff;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 820px;
-    }
-    thead th {
-      background: #f3f6fb;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }
-    th, td {
-      text-align: left;
-      padding: 12px 10px;
-      border-bottom: 1px solid #eef2f7;
-      font-size: 0.95rem;
-    }
-    tfoot td {
-      font-weight: 700;
-      background: #f9fbff;
-    }
-    .totals {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0,1fr));
-      gap: 12px;
-      margin: 16px 0 8px;
-    }
-    .chip {
-      background: #fff;
-      border: 1px solid #d9e0ea;
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-weight: 600;
-    }
-    .status {
-      margin-top: 10px;
-      font-size: 0.9rem;
-    }
-    .muted { opacity: 0.8; font-weight: 500; }
-    .fine { color: var(--ml-ok); }
+    .status { margin-top: 8px; font-size: 0.9rem; }
+    .ok { color: var(--ml-ok); }
     .warn { color: var(--ml-warn); }
-    .danger { color: var(--ml-danger); }
-    .note {
-      font-size: 0.86rem;
-      margin-top: 8px;
-      opacity: 0.9;
+    .bad { color: var(--ml-bad); }
+    .footer { margin-top: 24px; text-align: center; font-size: 0.86rem; opacity: 0.8; }
+    .table-legend {
+      display: grid; grid-template-columns: 220px 160px repeat(4, 140px) 120px 1fr 160px; gap: 10px;
+      font-size: 0.85rem; padding: 8px 12px; background: var(--ml-soft); border-radius: 10px; border: 1px solid var(--ml-border);
+      font-weight: 650; margin-bottom: 8px;
     }
-    .footer {
-      margin-top: 28px;
-      font-size: 0.85rem;
-      text-align: center;
-      opacity: 0.75;
+    .total-cell { font-weight: 700; text-align: center; }
+    @media (max-width: 1100px) {
+      .row-grid, .table-legend { grid-template-columns: 1fr; }
+      .row-grid > * { width: 100%; }
     }
-    .right { text-align: right; }
-    .center { text-align: center; }
   </style>
 </head>
 <body>
@@ -208,332 +125,361 @@
     <header>
       <div class="title">
         <img src="Mostlane Logo - Copy.jpeg" alt="Mostlane" />
-        <h1>Timesheet – Hours Entry (v3)</h1>
+        <h1>Hours Entry – Day by Day (v3)</h1>
       </div>
       <div class="actions">
-        <a class="btn-secondary" href="main.html">Main Menu</a>
-        <button id="createTimesheetBtn" title="Sends summary to Zapier for PDF (per your existing Zap)">
-          Create Timesheet
-        </button>
+        <a class="btn secondary" href="main.html">Main Menu</a>
+        <button class="btn" id="submitAll">Submit Day’s Entries</button>
       </div>
     </header>
 
     <div class="toolbar">
       <div class="field">
-        <label for="weekPicker">Week (Mon–Sun)</label>
-        <input id="weekPicker" type="week" />
+        <label for="dayDate">Date</label>
+        <input id="dayDate" type="date" />
       </div>
       <div class="field">
-        <label for="employeeName">Employee</label>
-        <input id="employeeName" type="text" placeholder="Auto from login (e.g., Jamie Line)" />
+        <label>&nbsp;</label>
+        <button class="btn" id="addEngineer">+ Add another engineer</button>
       </div>
       <div class="field">
-        <label for="deviceId">Device ID</label>
-        <input id="deviceId" type="text" placeholder="dev-xxxxxxx (from onboarding)" />
+        <label>&nbsp;</label>
+        <button class="btn secondary" id="clearAll">Clear All</button>
       </div>
     </div>
 
-    <div class="table-wrap">
-      <table id="hoursTable" aria-label="Timesheet Hours">
-        <thead>
-          <tr>
-            <th style="width:140px;">Day</th>
-            <th>Start Time</th>
-            <th>End Time</th>
-            <th>Unpaid Break (mins)</th>
-            <th>Notes</th>
-            <th class="right">Hours</th>
-          </tr>
-        </thead>
-        <tbody id="hoursBody">
-          <!-- Rows injected by JS for Mon–Sun -->
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="5" class="right">Total (hh:mm)</td>
-            <td class="right" id="totalHoursCell">00:00</td>
-          </tr>
-        </tfoot>
-      </table>
+    <div class="subtle">Tip: Select the date, add engineers, fill times (Leave Home → Arrive First Site → Leave Last Site → Arrive Home). Totals calculate automatically. Notes are internal by default; tick “visible” if engineers should see them.</div>
+
+    <div class="table-legend">
+      <div>Engineer</div>
+      <div>Van</div>
+      <div>Leave Home</div>
+      <div>Arrive First Site</div>
+      <div>Leave Last Site</div>
+      <div>Arrive Home</div>
+      <div class="total-cell">Total</div>
+      <div>Notes</div>
+      <div>Visibility / Actions</div>
     </div>
 
-    <div class="totals">
-      <div class="chip">Days Counted: <span id="daysCount">0</span></div>
-      <div class="chip">Total Hours: <span id="totalHoursChip">00:00</span></div>
-      <div class="chip">Std Hours (<=10h/day): <span id="stdHours">00:00</span></div>
-      <div class="chip">Overtime (>10h/day): <span id="otHours">00:00</span></div>
-    </div>
+    <div id="rows"></div>
 
-    <div class="status muted" id="saveStatus">Autosaved.</div>
-    <div class="note">
-      Note: Page autosaves locally. “Create Timesheet” compiles this week’s data and sends it to your existing Zapier flow for PDF generation (as per your <em>Create Timesheet</em> Zap).
-    </div>
-
-    <div class="footer">
-      © Mostlane — Styled with embossed background. Cache-busting enabled for CSS/JS.
-    </div>
+    <div class="status" id="saveStatus">Autosave ready.</div>
+    <div class="footer">© Mostlane — Embossed theme • Cache-busting enabled</div>
   </div>
 
-  <!-- Core logic (cache-busted load) -->
+  <template id="rowTemplate">
+    <div class="card engineer-row">
+      <div class="row-grid">
+        <select class="engineer"></select>
+        <select class="van"></select>
+
+        <input type="time" class="leaveHome" />
+        <input type="time" class="arriveFirst" />
+        <input type="time" class="leaveLast" />
+        <input type="time" class="arriveHome" />
+
+        <div class="total total-cell">00:00</div>
+
+        <textarea class="notes" placeholder="Notes (internal by default)"></textarea>
+
+        <div class="controls">
+          <label class="note-check">
+            <input type="checkbox" class="notesVisible" />
+            Make notes visible to engineers
+          </label>
+          <div style="height:8px"></div>
+          <button class="btn remove">Remove</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <script>
-    (function attachScript() {
-      const s = document.createElement("script");
-      s.type = "module";
-      s.src = window.__cacheBust ? window.__cacheBust("scripts/timesheet-core.js") : "scripts/timesheet-core.js";
-      document.body.appendChild(s);
-    })();
-  </script>
-
-  <!-- Inline fallback core (in case external JS not found). Remove if you provide scripts/timesheet-core.js -->
-  <script type="module">
     // ======== CONFIG ========
-    const ZAP_TIMESHEET_URL = "https://hooks.zapier.com/hooks/catch/20261714/273lt6z/"; // Your confirmed Zap for Create Timesheet
-    const STORAGE_KEY = "mostlane.hoursEntry.v3";
+    const USERS_JSON_URL = "users.json"; // <-- adjust if needed (e.g. "data/users.json")
+    const ZAP_URL = "https://hooks.zapier.com/hooks/catch/20261714/u5ibaoi/";
+    const STORAGE_KEY = "mostlane.hoursEntry.daily.v3";
 
-    // ======== UTIL ========
-    const qs = sel => document.querySelector(sel);
-    const qsa = sel => Array.from(document.querySelectorAll(sel));
-    const toMinutes = (hhmm) => {
-      if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return 0;
-      const [h, m] = hhmm.split(":").map(Number);
-      return h * 60 + m;
-    };
-    const minutesToHHMM = (mins) => {
-      const sign = mins < 0 ? "-" : "";
-      mins = Math.abs(mins);
+    // ======== STATE ========
+    let users = [];
+    let engineerOptions = []; // [{label, value, van}]
+    let vanOptions = []; // unique vans from users.json, non-empty
+
+    // ======== HELPERS ========
+    const qs = (sel, el) => (el || document).querySelector(sel);
+    const qsa = (sel, el) => Array.from((el || document).querySelectorAll(sel));
+
+    function timeToMinutes(t) {
+      if (!t || !/^\d{2}:\d{2}$/.test(t)) return null;
+      const [hh, mm] = t.split(":").map(Number);
+      return hh * 60 + mm;
+    }
+    function minutesToHHMM(mins) {
+      mins = Math.max(0, Math.floor(mins || 0));
       const h = Math.floor(mins / 60);
       const m = mins % 60;
-      return `${sign}${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-    };
-    const dayNames = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+    }
+    function spanMinutes(t1, t2) {
+      // Supports cross-midnight: if t2 < t1, assume next day
+      const m1 = timeToMinutes(t1);
+      const m2 = timeToMinutes(t2);
+      if (m1 == null || m2 == null) return 0;
+      return m2 >= m1 ? (m2 - m1) : (m2 + 24*60 - m1);
+    }
+    function calcTotalRow(rowEl) {
+      const leaveHome = qs(".leaveHome", rowEl).value;
+      const arriveFirst = qs(".arriveFirst", rowEl).value;
+      const leaveLast = qs(".leaveLast", rowEl).value;
+      const arriveHome = qs(".arriveHome", rowEl).value;
 
-    // ======== DOM BUILD ========
-    const tbody = qs("#hoursBody");
-    function buildRows() {
-      tbody.innerHTML = "";
-      dayNames.forEach((name, i) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td><strong>${name}</strong></td>
-          <td><input type="time" class="start" aria-label="${name} start time"></td>
-          <td><input type="time" class="end" aria-label="${name} end time"></td>
-          <td><input type="number" class="break" min="0" step="5" placeholder="0" aria-label="${name} unpaid break minutes" style="max-width:120px"></td>
-          <td><input type="text" class="note" placeholder="Notes (optional)"></td>
-          <td class="right"><span class="dayTotal">00:00</span></td>
-        `;
-        tbody.appendChild(tr);
+      // Total day span: Leave Home -> Arrive Home
+      const total = spanMinutes(leaveHome, arriveHome);
+      qs(".total", rowEl).textContent = minutesToHHMM(total);
+    }
+    function setStatus(text, cls = "") {
+      const el = qs("#saveStatus");
+      el.textContent = text;
+      el.className = "status " + cls;
+    }
+
+    // ======== USERS.json LOAD ========
+    async function loadUsers() {
+      const res = await fetch(USERS_JSON_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error("Failed to load users.json");
+      const data = await res.json();
+      users = Array.isArray(data.Users) ? data.Users : [];
+
+      engineerOptions = users
+        .filter(u => (u.Status || "").toLowerCase() === "active")
+        .map(u => ({
+          label: (u.FirstName + " " + u.LastName).trim(),
+          value: u.Username,
+          van: (u.VehicleAssigned || "").trim(),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      const vans = new Set(
+        users
+          .map(u => (u.VehicleAssigned || "").trim())
+          .filter(Boolean)
+      );
+      // Add a blank/none option
+      vanOptions = ["", ...Array.from(vans).sort()];
+    }
+
+    function buildEngineerSelect(selectEl, selectedValue = "") {
+      selectEl.innerHTML = "";
+      const opt0 = document.createElement("option");
+      opt0.value = "";
+      opt0.textContent = "Select engineer…";
+      selectEl.appendChild(opt0);
+
+      engineerOptions.forEach(o => {
+        const opt = document.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (o.value === selectedValue) opt.selected = true;
+        selectEl.appendChild(opt);
       });
     }
-    buildRows();
 
-    // ======== AUTOFILL WEEK + EMPLOYEE ========
-    const weekPicker = qs("#weekPicker");
-    const employeeName = qs("#employeeName");
-    const deviceId = qs("#deviceId");
-
-    // Try default week = current week (ISO)
-    if (!weekPicker.value) {
-      const now = new Date();
-      const firstThursday = new Date(now.getFullYear(), 0, 4);
-      const dayOfYear = (date) => Math.floor((date - new Date(date.getFullYear(),0,1)) / 86400000) + 1;
-      const week = (date) => {
-        const d = new Date(date);
-        d.setHours(0,0,0,0);
-        d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-        const week1 = new Date(d.getFullYear(),0,4);
-        return 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6)%7)) / 7);
-      };
-      const w = week(now);
-      weekPicker.value = `${now.getFullYear()}-W${String(w).padStart(2,"0")}`;
+    function buildVanSelect(selectEl, selectedVan = "") {
+      selectEl.innerHTML = "";
+      vanOptions.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v || "—";
+        if (v === selectedVan) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
     }
 
-    // Pull login name & device from session/local if present (per your portal pattern)
-    try {
-      const login = sessionStorage.getItem("mostlaneUsername");
-      if (login && !employeeName.value) employeeName.value = login.replace(".", " ");
-    } catch {}
-    try {
-      const dev = localStorage.getItem("mostlaneDeviceId");
-      if (dev && !deviceId.value) deviceId.value = dev;
-    } catch {}
+    function addRow(prefill = {}) {
+      const tpl = qs("#rowTemplate");
+      const node = tpl.content.cloneNode(true);
+      const row = node.querySelector(".engineer-row");
 
-    // ======== CALC & SAVE ========
-    const status = qs("#saveStatus");
-    const totalHoursCell = qs("#totalHoursCell");
-    const totalHoursChip = qs("#totalHoursChip");
-    const daysCountEl = qs("#daysCount");
-    const stdHoursEl = qs("#stdHours");
-    const otHoursEl = qs("#otHours");
+      const engineerSel = qs(".engineer", row);
+      const vanSel = qs(".van", row);
 
-    function calc() {
-      let totalMins = 0;
-      let dayCount = 0;
-      let stdMins = 0;
-      let otMins = 0;
+      buildEngineerSelect(engineerSel, prefill.username || "");
+      // If prefilled username has a known van, use that; else prefill provided van
+      let autoVan = "";
+      if (prefill.username) {
+        const found = engineerOptions.find(e => e.value === prefill.username);
+        autoVan = found?.van || "";
+      }
+      buildVanSelect(vanSel, autoVan || prefill.van || "");
 
-      qsa("#hoursBody tr").forEach((tr) => {
-        const start = tr.querySelector(".start").value;
-        const end = tr.querySelector(".end").value;
-        const brk = parseInt(tr.querySelector(".break").value || "0", 10);
-        const out = tr.querySelector(".dayTotal");
+      // Times
+      qs(".leaveHome", row).value = prefill.leaveHome || "";
+      qs(".arriveFirst", row).value = prefill.arriveFirst || "";
+      qs(".leaveLast", row).value = prefill.leaveLast || "";
+      qs(".arriveHome", row).value = prefill.arriveHome || "";
+      qs(".notes", row).value = prefill.notes || "";
+      qs(".notesVisible", row).checked = !!prefill.notesVisible;
 
-        let mins = 0;
-        if (start && end) {
-          let s = toMinutes(start);
-          let e = toMinutes(end);
-          if (e < s) e += 24*60; // cross midnight support
-          mins = Math.max(0, e - s - (isNaN(brk) ? 0 : brk));
-          if (mins > 0) {
-            dayCount++;
-            // Split std vs overtime using your 10h/day rule (as referenced in prior chats)
-            const tenH = 10 * 60;
-            stdMins += Math.min(tenH, mins);
-            otMins  += Math.max(0, mins - tenH);
+      // Events
+      engineerSel.addEventListener("change", () => {
+        const selUser = engineerOptions.find(e => e.value === engineerSel.value);
+        if (selUser) {
+          // Auto-fill van to the engineer's assigned one IF current van is blank
+          if (!vanSel.value) {
+            buildVanSelect(vanSel, selUser.van || "");
           }
         }
-        out.textContent = minutesToHHMM(mins);
-        totalMins += mins;
+        saveAll();
       });
 
-      totalHoursCell.textContent = minutesToHHMM(totalMins);
-      totalHoursChip.textContent = minutesToHHMM(totalMins);
-      daysCountEl.textContent = String(dayCount);
-      stdHoursEl.textContent = minutesToHHMM(stdMins);
-      otHoursEl.textContent = minutesToHHMM(otMins);
+      qsa("input[type='time']", row).forEach(inp => {
+        inp.addEventListener("input", () => {
+          calcTotalRow(row);
+          saveAll();
+        });
+      });
+      vanSel.addEventListener("change", saveAll);
+      qs(".notes", row).addEventListener("input", saveAll);
+      qs(".notesVisible", row).addEventListener("change", saveAll);
+
+      qs(".remove", row).addEventListener("click", () => {
+        row.remove();
+        saveAll();
+      });
+
+      calcTotalRow(row);
+      qs("#rows").appendChild(row);
     }
 
-    function save() {
-      const rows = qsa("#hoursBody tr").map((tr, idx) => ({
-        day: dayNames[idx],
-        start: tr.querySelector(".start").value || "",
-        end: tr.querySelector(".end").value || "",
-        breakMins: tr.querySelector(".break").value || "",
-        note: tr.querySelector(".note").value || "",
-      }));
-      const payload = {
-        week: weekPicker.value || "",
-        employee: employeeName.value || "",
-        deviceId: deviceId.value || "",
-        rows,
-        metaVersion: "hours-entry-v3",
-        savedAt: new Date().toISOString(),
-      };
+    function collect() {
+      const date = qs("#dayDate").value;
+      const rows = qsa(".engineer-row").map(row => {
+        const username = qs(".engineer", row).value;
+        const engineerLabel = qs(".engineer", row).selectedOptions[0]?.textContent || "";
+        return {
+          date,
+          username,
+          engineer: engineerLabel,
+          van: qs(".van", row).value || "",
+          leaveHome: qs(".leaveHome", row).value || "",
+          arriveFirst: qs(".arriveFirst", row).value || "",
+          leaveLast: qs(".leaveLast", row).value || "",
+          arriveHome: qs(".arriveHome", row).value || "",
+          total: qs(".total", row).textContent || "00:00",
+          notes: qs(".notes", row).value || "",
+          notesVisible: qs(".notesVisible", row).checked ? "Yes" : "No",
+        };
+      });
+      return { date, rows };
+    }
+
+    function saveAll() {
+      const payload = collect();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      status.textContent = "Autosaved.";
-      status.className = "status muted";
+      setStatus("Autosaved.", "ok");
     }
 
-    function load() {
+    function loadAll() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       try {
         const data = JSON.parse(raw);
-        if (data.week) weekPicker.value = data.week;
-        if (data.employee) employeeName.value = data.employee;
-        if (data.deviceId) deviceId.value = data.deviceId;
-        if (Array.isArray(data.rows)) {
-          const trs = qsa("#hoursBody tr");
-          data.rows.forEach((row, i) => {
-            const tr = trs[i];
-            if (!tr) return;
-            tr.querySelector(".start").value = row.start || "";
-            tr.querySelector(".end").value = row.end || "";
-            tr.querySelector(".break").value = row.breakMins || "";
-            tr.querySelector(".note").value = row.note || "";
-          });
-        }
-      } catch {}
-    }
-
-    function bind() {
-      document.addEventListener("input", (e) => {
-        if (e.target.matches(".start, .end, .break, #weekPicker, #employeeName, #deviceId, .note")) {
-          calc();
-          save();
-        }
-      });
-      document.addEventListener("change", (e) => {
-        if (e.target.matches("input")) {
-          calc();
-          save();
-        }
-      });
-    }
-
-    // ======== SUBMIT TO ZAPIER ("Create Timesheet") ========
-    async function submitToZapier() {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      let payload;
-      try {
-        payload = JSON.parse(raw || "{}");
+        if (data.date) qs("#dayDate").value = data.date;
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        if (!rows.length) return;
+        rows.forEach(r => addRow({
+          username: r.username || "",
+          van: r.van || "",
+          leaveHome: r.leaveHome || "",
+          arriveFirst: r.arriveFirst || "",
+          leaveLast: r.leaveLast || "",
+          arriveHome: r.arriveHome || "",
+          notes: r.notes || "",
+          notesVisible: r.notesVisible === "Yes",
+        }));
+        setStatus("Loaded from autosave.", "ok");
       } catch {
-        payload = {};
+        /* ignore */
       }
+    }
 
-      // Basic validation
-      if (!payload.employee || !payload.week) {
-        status.textContent = "Please set Employee and Week before creating timesheet.";
-        status.className = "status danger";
+    async function submitAll() {
+      const { date, rows } = collect();
+      if (!date) {
+        setStatus("Please select a Date first.", "bad");
+        return;
+      }
+      if (!rows.length) {
+        setStatus("Please add at least one engineer row.", "bad");
+        return;
+      }
+      // Basic validation (engineer + minimal times)
+      const invalid = rows.find(r => !r.username || !r.leaveHome || !r.arriveHome);
+      if (invalid) {
+        setStatus("Each row needs an Engineer, Leave Home and Arrive Home time.", "warn");
         return;
       }
 
-      // Compose a lean summary (Zap builds PDF)
-      const summary = {
-        employee: payload.employee,
-        week: payload.week,
-        deviceId: payload.deviceId || "",
-        totals: {
-          daysCount: Number(qs("#daysCount").textContent || 0),
-          totalHours: qs("#totalHoursChip").textContent || "00:00",
-          stdHours: qs("#stdHours").textContent || "00:00",
-          otHours: qs("#otHours").textContent || "00:00",
-        },
-        rows: qsa("#hoursBody tr").map((tr, idx) => ({
-          day: dayNames[idx],
-          start: tr.querySelector(".start").value || "",
-          end: tr.querySelector(".end").value || "",
-          breakMins: tr.querySelector(".break").value || "0",
-          note: tr.querySelector(".note").value || "",
-          total: tr.querySelector(".dayTotal").textContent || "00:00",
-        })),
-        submittedAt: new Date().toISOString(),
-        source: "hours-entry-v3.html",
-      };
-
       try {
-        status.textContent = "Submitting…";
-        status.className = "status muted";
-
+        setStatus("Submitting…");
         const form = new URLSearchParams();
-        form.append("employee", summary.employee);
-        form.append("week", summary.week);
-        form.append("deviceId", summary.deviceId);
-        form.append("totals", JSON.stringify(summary.totals));
-        form.append("rows", JSON.stringify(summary.rows));
-        form.append("submittedAt", summary.submittedAt);
-        form.append("source", summary.source);
+        form.append("date", date);
+        form.append("entries", JSON.stringify(rows));
+        form.append("source", "hours-entry-daily-v3");
+        form.append("submittedAt", new Date().toISOString());
 
-        const res = await fetch(ZAP_TIMESHEET_URL, {
+        const res = await fetch(ZAP_URL, {
           method: "POST",
-          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: form.toString(),
         });
-
         if (!res.ok) throw new Error("Non-200 from Zapier");
-        status.textContent = "Timesheet sent to Zapier successfully.";
-        status.className = "status fine";
-      } catch (err) {
-        status.textContent = "Failed to submit. Please try again.";
-        status.className = "status danger";
-        console.error(err);
+
+        setStatus("Submitted successfully.", "ok");
+      } catch (e) {
+        console.error(e);
+        setStatus("Failed to submit. Please try again.", "bad");
       }
     }
 
     // ======== INIT ========
-    load();
-    calc();
-    bind();
-    qs("#createTimesheetBtn").addEventListener("click", submitToZapier);
+    (async function init() {
+      // Default date today
+      const dateEl = qs("#dayDate");
+      if (!dateEl.value) {
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, "0");
+        const d = String(today.getDate()).padStart(2, "0");
+        dateEl.value = `${y}-${m}-${d}`;
+      }
+
+      try {
+        await loadUsers();
+      } catch (e) {
+        console.error(e);
+        setStatus("Could not load users.json. Engineer/van lists may be empty.", "bad");
+      }
+
+      // Preload one row (optionally set logged-in username if available)
+      const login = (() => {
+        try { return sessionStorage.getItem("mostlaneUsername"); } catch { return null; }
+      })();
+      addRow({ username: login || "" });
+
+      // Load autosaved (overrides the single default row if present)
+      loadAll();
+
+      // Events
+      qs("#addEngineer").addEventListener("click", () => addRow());
+      qs("#clearAll").addEventListener("click", () => {
+        qs("#rows").innerHTML = "";
+        saveAll();
+      });
+      qs("#dayDate").addEventListener("change", saveAll);
+      qs("#submitAll").addEventListener("click", submitAll);
+    })();
   </script>
 </body>
 </html>
