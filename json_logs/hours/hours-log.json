@@ -1,33 +1,6 @@
 {
   "entries": [
     {
-      "id": "1760388875801-pr12yn",
-      "receivedAt": "2025-10-13T20:54:35.819Z",
-      "vehicle": "",
-      "leaveHome": "",
-      "arriveFirstSite": "",
-      "leaveLastSite": "",
-      "arriveHome": "",
-      "deductLunch": false,
-      "totalHours": null,
-      "standardHours": null,
-      "overtimeHours": null,
-      "travelToHours": null,
-      "travelFromHours": null,
-      "totalTravelHours": null,
-      "enhancedOvertimePreview": "",
-      "excludeFromPay": false,
-      "forceEnhanced": false,
-      "manualOvertimeApplied": false,
-      "manualOvertimeHours": null,
-      "vanCheck": "",
-      "vanScore": null,
-      "personalMileage": null,
-      "notes": "",
-      "noteVisible": false,
-      "submittedAt": "2025-10-13T20:54:35.819Z"
-    },
-    {
       "id": "1760389917446-ywadqb",
       "receivedAt": "2025-10-13T21:11:57.463Z",
       "date": "2025-10-06",
