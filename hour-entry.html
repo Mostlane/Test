@@ -153,6 +153,17 @@ let HOURS_LOG_CACHE = {}; // { "YYYY-MM-DD": ["Name", ...] }
 let LOG_COUNTER = 0;
 const $ = id => document.getElementById(id);
 
+/* === Office staff blocklist (exclude from engineers & checklist) === */
+const OFFICE_BLOCKLIST = new Set([
+  "Chloe Line",
+  "Greg Line",
+  "Jamie Line",
+  "Joanna Marcinkowska",
+  "Joe Line",
+  "Megan Line",
+  "Tanya Chinnery"
+]);
+
 /* ====== HELPERS ====== */
 function timeToMin(t){ if(!t||!t.includes(":")) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
 function minsToHr(m){ return Math.round((m/60)*100)/100; }
@@ -170,9 +181,14 @@ async function init(){
     const r=await fetch(USERS_JSON_PATH + "?t=" + Date.now(), {cache:"no-store"});
     const j=await r.json(); USERS_RAW=j.Users||j;
   }catch{ USERS_RAW=[]; }
-  ENGINEERS = USERS_RAW.filter(u=>u.Status==="Active")
+
+  // Build ENGINEERS list: Active and NOT in office blocklist
+  ENGINEERS = USERS_RAW
+    .filter(u=>u.Status==="Active")
     .map(u=>({name:`${u.FirstName} ${u.LastName}`.trim(), username:u.Username, vehicle:u.VehicleAssigned||""}))
+    .filter(e=>!OFFICE_BLOCKLIST.has(e.name))
     .sort((a,b)=>a.name.localeCompare(b.name));
+
   USERS_RAW.forEach(u=>{ if(u.VehicleAssigned) VEHICLE_SET.add(u.VehicleAssigned); });
 
   // Default date = yesterday
@@ -303,7 +319,6 @@ function addEngineerLog(initial={}){
     </div>
   `;
 
-  // Append and wire up
   $("logsContainer").appendChild(wrapper);
 
   // Fill engineer select and vehicle datalist
@@ -316,7 +331,7 @@ function addEngineerLog(initial={}){
   $(`${id}_removeBtn`).onclick=()=>{ wrapper.remove(); saveDraft(); renderChecklistForDate($("date").value); };
   $(`${id}_toggleBtn`).onclick=()=>{ wrapper.classList.toggle("collapsed"); $(`${id}_toggleBtn`).textContent = wrapper.classList.contains("collapsed") ? "Expand" : "Collapse"; };
   engSel.onchange=()=>{ const v=engSel.options[engSel.selectedIndex]?.dataset.vehicle||""; $(`${id}_vehicle`).value=v; $(`${id}_engLabel`).textContent = "– " + engSel.value; saveDraft(); renderChecklistForDate($("date").value); };
-  // All inputs recalc + save
+
   [ "_leaveHome","_arriveFirst","_leaveLast","_arriveHome","_deductLunch","_manualOTHours","_vanScore","_personalMileage","_notes","_noteVisible" ]
     .forEach(suffix=>{
       $(`${id}${suffix}`).addEventListener("input", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
@@ -329,6 +344,12 @@ function addEngineerLog(initial={}){
   $(`${id}_btnOneOff`).onclick=()=>{ toggleOverrideBtn(`${id}_btnOneOff`); calcTotalsFor(id); saveDraft(); };
   $(`${id}_btnForceEnh`).onclick=()=>{ toggleOverrideBtn(`${id}_btnForceEnh`); calcTotalsFor(id); saveDraft(); };
   $(`${id}_btnExclude`).onclick=()=>{ toggleOverrideBtn(`${id}_btnExclude`); calcTotalsFor(id); saveDraft(); };
+
+  // --- NEW: Default first engineer auto-select (unless initial provided) + auto-populate vehicle ---
+  if (!initial.engineer && engSel.options.length) {
+    engSel.selectedIndex = 0;
+    engSel.dispatchEvent(new Event("change")); // sets vehicle & label immediately
+  }
 
   // Init values (if provided)
   if(initial.engineer){ engSel.value = initial.engineer; engSel.dispatchEvent(new Event("change")); }
@@ -442,7 +463,6 @@ function updateDayForAll(){
   if(day!==1){ banner.style.display="block"; banner.textContent="Enhanced overtime for this day is automatically calculated if the engineer qualifies by the van check being completed on Monday’s submission."; }
   else { banner.style.display="none"; banner.textContent=""; }
 
-  // Show/Hide mon/fri blocks in each log
   document.querySelectorAll(".elog").forEach(el=>{
     const id = el.id;
     $(`${id}_mondayBlock`).style.display = day===1 ? "block" : "none";
@@ -450,7 +470,6 @@ function updateDayForAll(){
     calcTotalsFor(id);
   });
 
-  // Checklist
   renderChecklistForDate(d);
 }
 
@@ -476,6 +495,7 @@ function renderChecklistForDate(dateStr){
 
   ul.innerHTML = "";
   let done=0;
+  // Use ENGINEERS (already filtered – office excluded)
   ENGINEERS.forEach(e=>{
     const match = Array.from(logged).find(n=>n===e.name.toLowerCase() || n===e.name.toLowerCase()+" (draft)");
     const isDone = Boolean(match);
@@ -508,7 +528,6 @@ function restoreDraftIfAny(){
   try{
     const draft = JSON.parse(raw);
     if(!draft || !draft.entries || !draft.entries.length) return;
-    // reset UI
     $("logsContainer").innerHTML = "";
     LOG_COUNTER = 0;
     $("date").value = draft.date || $("date").value;
@@ -535,25 +554,21 @@ function serializeAllLogs(){
     if(!engineer) return; // skip incomplete
     const vehicle = get("vehicle").value;
 
-    // times
     const leaveHome = get("leaveHome").value;
     const arriveFirst = get("arriveFirst").value;
     const leaveLast = get("leaveLast").value;
     const arriveHome = get("arriveHome").value;
 
-    // travel
     const t1=timeToMin(leaveHome), t2=timeToMin(arriveFirst), t3=timeToMin(leaveLast), t4=timeToMin(arriveHome);
     const travelTo = (t1!=null && t2!=null) ? minsToHr(Math.max(0, t2 - t1)) : 0;
     const travelFrom = (t3!=null && t4!=null) ? minsToHr(Math.max(0, t4 - t3)) : 0;
     const travelTotal = +(travelTo + travelFrom).toFixed(2);
 
-    // totals preview
     const totalHours = get("t_total").textContent;
     const standardHours = get("t_std").textContent;
     const overtimeHours = get("t_ot").textContent;
     const enhancedOvertimePreview = get("t_enh").textContent;
 
-    // Mon/Friday fields
     let vanCheck=null, vanCheckWeekStatus="";
     if(dayNum(d)===1){
       const v = document.querySelector(`input[name="${id}_vanCheck"]:checked`);
@@ -566,11 +581,9 @@ function serializeAllLogs(){
     const vanScore = get("vanScore")?.value || "";
     const personalMileage = (dayNum(d)===5) ? (get("personalMileage")?.value || "") : "";
 
-    // notes & visibility
     const notes = get("notes").value.trim();
     const noteVisible = get("noteVisible").checked;
 
-    // overrides
     const manualOvertimeApplied = get("manualOverride").checked || get("btnOneOff").classList.contains("active");
     const manualOvertimeHours = get("btnOneOff").classList.contains("active")
       ? totalHours
@@ -623,7 +636,6 @@ async function submitAll(){
     return;
   }
 
-  // Validate each entry minimal fields
   const invalid = entries.find(e=>!e.engineer || !e.leaveHome || !e.arriveFirstSite || !e.leaveLastSite || !e.arriveHome);
   if(invalid){
     $("statusMsg").style.color="var(--bad)";
@@ -633,7 +645,6 @@ async function submitAll(){
 
   $("statusMsg").textContent="Submitting…";
 
-  // Single POST with array
   const payload = new URLSearchParams();
   payload.append("entries", JSON.stringify(entries));
 
@@ -646,7 +657,6 @@ async function submitAll(){
     if(r.ok){
       $("statusMsg").style.color="var(--ok)";
       $("statusMsg").textContent="✅ Submitted all logs";
-      // Clear draft & optimistically add to checklist cache
       const d = $("date").value;
       if(!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
       entries.forEach(e=>{
