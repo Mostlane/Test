@@ -2,14 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Engineer Hours Entry – Mostlane (v3.1)</title>
+<title>Engineer Hours Entry – Mostlane (v4)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
   *,*::before,*::after{box-sizing:border-box}
   :root{
     --ml-blue:#003366;--ml-accent:#1a73e8;--ml-ink:#27313a;--ml-bg:#e6e8eb;
-    --card:#ffffffee;--muted:#718096;--ok:#0c7d27;--bad:#b00020;--warn:#b36b00;
-    --border:#e8edf3;
+    --card:#ffffffee;--muted:#718096;--ok:#0c7d27;--bad:#b00020;--warn:#b36b00;--border:#e8edf3;
   }
   html,body{width:100%;max-width:100%;overflow-x:hidden;}
   body{
@@ -20,24 +19,19 @@
   .shell{max-width:1200px;margin:0 auto;background:rgba(255,255,255,0.94);
     border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);overflow:hidden;}
   header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
-    background:linear-gradient(90deg,#fff,#f7f9fc);
-    border-bottom:1px solid var(--border);padding:18px 24px;gap:10px;}
+    background:linear-gradient(90deg,#fff,#f7f9fc);border-bottom:1px solid var(--border);padding:18px 24px;gap:10px;}
   header h1{font-size:22px;margin:0;color:var(--ml-blue);}
-  header a{background:var(--ml-accent);color:#fff;text-decoration:none;
-    padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap;}
-  .contentWrap{
-    display:grid;grid-template-columns: 1fr 300px;gap:18px;align-items:start;
-  }
+  header a{background:var(--ml-accent);color:#fff;text-decoration:none;padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap;}
+
+  .contentWrap{display:grid;grid-template-columns: 1fr 300px;gap:18px;align-items:start;}
   .content{padding:22px 24px 28px;}
-  .sidebar{padding:22px 18px;border-left:1px solid var(--border);background:#fcfdff;position:sticky;top:0;max-height:calc(100vh - 0px);overflow:auto;}
+  .sidebar{padding:22px 18px;border-left:1px solid var(--border);background:#fcfdff;position:sticky;top:0;max-height:100vh;overflow:auto;}
   .sidebar h3{margin:0 0 10px 0;color:var(--ml-blue);font-size:16px;}
   .side-muted{color:var(--muted);font-size:12px;margin-bottom:10px;}
   .checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;}
-  .check-item{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);
-    border-radius:8px;padding:8px 10px;background:#fff;}
+  .check-item{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fff;}
   .check-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;}
-  .tick{font-size:16px;}
-  .tick.ok{color:#198754;} .tick.missing{color:#94a3b8;}
+  .tick{font-size:16px;} .tick.ok{color:#198754;} .tick.missing{color:#94a3b8;}
   .side-bar-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
   .side-badge{font-size:12px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 8px;}
   .side-refresh{background:#eef2f9;border:1px solid var(--border);border-radius:8px;padding:6px 8px;cursor:pointer;font-size:12px;}
@@ -47,41 +41,48 @@
   .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;}
   .title{font-weight:600;color:var(--ml-blue);margin-bottom:10px;}
   label{font-size:13px;color:#334155;display:block;margin-bottom:6px;}
-  input,select,textarea{width:100%;font-size:15px;border:1px solid #cbd5e1;
-    border-radius:10px;padding:10px 12px;background:#fff;}
+  input,select,textarea{width:100%;font-size:15px;border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;background:#fff;}
   input[type="time"],input[type="date"],select{height:40px;}
   textarea{min-height:90px;resize:vertical;}
   .row{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;}
   .row>div{flex:1 1 260px;min-width:240px;}
   .toggle-row{display:flex;align-items:center;gap:8px;font-size:15px;cursor:pointer;line-height:1.4;}
-  .toggle-row input[type="checkbox"],.toggle-row input[type="radio"]{
-    width:18px;height:18px;accent-color:var(--ml-accent);margin:0;
-  }
+  .toggle-row input[type="checkbox"],.toggle-row input[type="radio"]{width:18px;height:18px;accent-color:var(--ml-accent);margin:0;}
   .muted{color:var(--muted);font-size:12px;}
   .divider{height:1px;background:#edf2f7;margin:12px 0;}
   .radio-group{display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+
   .totals{display:flex;flex-wrap:wrap;gap:10px;font-weight:600;align-items:center;}
   .pill{padding:8px 12px;border-radius:999px;border:1px solid #d7e1ee;background:#f8fbff;color:#0f172a;display:inline-flex;align-items:center;gap:6px;}
   .pill.ok{border-color:#bfe7ca;background:#effaf3;color:#074e1a;}
   .pill.bad{border-color:#ffc7ce;background:#fff1f3;color:#6b0011;}
   .pill.warn{border-color:#ffd18b;background:#fff6e5;color:#5c3a00;}
+
   .actions{display:flex;gap:14px;align-items:center;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;}
   button{font-size:15px;font-weight:600;border:0;border-radius:10px;padding:12px 18px;cursor:pointer;}
   .btn-primary{background:var(--ml-accent);color:#fff;}
   .btn-secondary{background:#eef2f9;color:#0f172a;border:1px solid #d7e1ee;}
   .btn-link{background:transparent;color:var(--ml-accent);padding:8px 10px;white-space:nowrap;}
+
   .col-12{grid-column:span 12;}
   .col-6{grid-column:span 6;}
   @media(max-width:980px){.col-6{grid-column:span 12;}}
-  @media(max-width:900px){
-    .contentWrap{grid-template-columns: 1fr;}
-    .sidebar{display:none;}
-  }
+  @media(max-width:900px){.contentWrap{grid-template-columns: 1fr;} .sidebar{display:none;}}
+
   .banner{margin-top:8px;padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:#f7fbff;}
   .overrides{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;}
-  .override-btn{flex:1 1 30%;min-width:160px;text-align:center;padding:10px 12px;
-    border:1px solid #d7e1ee;border-radius:8px;background:#f9fafb;cursor:pointer;font-weight:500;}
+  .override-btn{flex:1 1 30%;min-width:160px;text-align:center;padding:10px 12px;border:1px solid #d7e1ee;border-radius:8px;background:#f9fafb;cursor:pointer;font-weight:500;user-select:none;}
   .override-btn.active{background:#eaf1ff;border-color:var(--ml-accent);color:var(--ml-accent);}
+
+  /* Engineer log wrapper (collapsible) */
+  .elog{border:1px dashed #e2e8f0;border-radius:12px;margin-bottom:16px;padding:10px;}
+  .elog-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;}
+  .elog-title{font-weight:600;color:#0f172a;}
+  .elog-actions{display:flex;gap:8px;}
+  .elog-actions button{padding:6px 10px;border-radius:8px;font-size:13px;}
+  .elog-body{transition:max-height .2s ease;overflow:hidden;}
+  .elog.collapsed .elog-body{max-height:0;padding-top:0;padding-bottom:0;border:0;}
+  .elog .small-muted{font-size:12px;color:#6b7280;}
 </style>
 </head>
 <body>
@@ -92,124 +93,41 @@
   </header>
 
   <div class="contentWrap">
-    <!-- LEFT: MAIN FORM -->
+    <!-- LEFT -->
     <div class="content">
-      <form id="hoursForm" class="grid" novalidate>
-
-        <!-- Day & Engineer -->
-        <div class="card col-12">
-          <div class="title">Day & Engineer</div>
-          <div class="row">
-            <div>
-              <label>Date</label>
-              <input type="date" id="date" required />
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                <button type="button" class="btn-link" id="prevDayBtn">◀ Previous</button>
-                <button type="button" class="btn-link" id="nextDayBtn">Next ▶</button>
-                <span class="muted" id="dowHint"></span>
-              </div>
-              <div id="weekBanner" class="banner" style="display:none;"></div>
+      <!-- Date & Navigation -->
+      <div class="card col-12" id="dateCard">
+        <div class="title">Day</div>
+        <div class="row">
+          <div>
+            <label>Date</label>
+            <input type="date" id="date" required />
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button type="button" class="btn-link" id="prevDayBtn">◀ Previous</button>
+              <button type="button" class="btn-link" id="nextDayBtn">Next ▶</button>
+              <span class="muted" id="dowHint"></span>
             </div>
-            <div>
-              <label>Engineer</label>
-              <select id="engineer" required></select>
-              <div class="muted">Active users from users.json</div>
-            </div>
-            <div>
-              <label>Vehicle Used</label>
-              <input type="text" id="vehicleUsed" list="vehicleList" placeholder="e.g. LA70 FPJ" />
-              <datalist id="vehicleList"></datalist>
-            </div>
+            <div id="weekBanner" class="banner" style="display:none;"></div>
           </div>
         </div>
+      </div>
 
-        <!-- Times -->
-        <div class="card col-6">
-          <div class="title">Times (24h)</div>
-          <div class="grid" style="grid-template-columns:repeat(12,1fr);gap:10px;">
-            <div style="grid-column:span 3;"><label>Leave Home</label><input type="time" id="leaveHome" required></div>
-            <div style="grid-column:span 3;"><label>Arrive First</label><input type="time" id="arriveFirst" required></div>
-            <div style="grid-column:span 3;"><label>Leave Last</label><input type="time" id="leaveLast" required></div>
-            <div style="grid-column:span 3;"><label>Arrive Home</label><input type="time" id="arriveHome" required></div>
-          </div>
-          <div class="divider"></div>
-          <label class="toggle-row"><input type="checkbox" id="deductLunch" checked> Deduct 30m lunch</label>
-        </div>
+      <!-- Engineer Logs container -->
+      <div id="logsContainer"></div>
 
-        <!-- Vehicle / Notes -->
-        <div class="card col-6">
-          <div class="title">Vehicle, Mileage & Notes</div>
-          <div id="mondayBlock" style="display:none;margin-bottom:10px;">
-            <label>Monday – Van check?</label>
-            <div class="radio-group">
-              <label class="toggle-row"><input type="radio" name="vanCheck" value="Yes">Yes</label>
-              <label class="toggle-row"><input type="radio" name="vanCheck" value="No">No</label>
-              <label class="toggle-row"><input type="radio" name="vanCheck" value="N/A">N/A</label>
-            </div>
-            <div class="muted">If “No”, payroll will pay standard rate only for the whole week.</div>
-          </div>
-          <div id="fridayBlock" style="display:none;margin-bottom:10px;">
-            <label>Friday – Van score (0–100)</label>
-            <input type="number" id="vanScore" min="0" max="100">
-            <label style="margin-top:8px;">Personal mileage (weekly)</label>
-            <input type="number" id="personalMileage" min="0" step="1">
-          </div>
-          <div class="divider"></div>
-          <div class="row" style="align-items:flex-start;">
-            <div>
-              <label>Office notes</label>
-              <textarea id="notes" placeholder="e.g. traffic delay, extra stop..."></textarea>
-            </div>
-            <div style="max-width:360px;">
-              <label>Visibility</label>
-              <label class="toggle-row"><input type="checkbox" id="noteVisible"> Visible to engineer</label>
-              <div class="muted">Default off</div>
-            </div>
-          </div>
-        </div>
+      <!-- Add / Submit -->
+      <div class="actions">
+        <button type="button" class="btn-secondary" id="addLogBtn">+ Add Engineer Log</button>
+        <span class="muted" id="statusMsg"></span>
+        <button type="button" class="btn-primary" id="submitAllBtn">Submit All to Payroll</button>
+      </div>
 
-        <!-- Totals + Overrides -->
-        <div class="card col-12">
-          <div class="title">Calculated Totals</div>
-          <div class="totals" id="totalsRow">
-            <span class="pill">Total: <span id="t_total">0.00</span>h</span>
-            <span class="pill ok">Standard: <span id="t_std">0.00</span>h</span>
-            <span class="pill" id="otPill">Overtime: <span id="t_ot">0.00</span>h</span>
-            <span class="pill" id="enhPill">Enhanced OT: <span id="t_enh">Yes</span></span>
-            <span class="pill">Travel ➜ <span id="t_travel">0.00</span>h <span class="muted" id="t_travel_parts"></span></span>
-          </div>
-
-          <!-- Manual overtime adjustment -->
-          <div class="divider"></div>
-          <label class="toggle-row"><input type="checkbox" id="manualOverride"> Override automatic overtime</label>
-          <div id="manualEntry" style="display:none;margin-top:6px;">
-            <label>Enter manual overtime hours</label>
-            <input type="number" id="manualOTHours" min="0" step="0.25" placeholder="e.g. 2.0">
-            <div class="muted">Standard hours will adjust to keep Total = Standard + Overtime.</div>
-          </div>
-
-          <div class="divider"></div>
-          <div class="title" style="font-size:15px;">Override Options</div>
-          <div class="overrides">
-            <div class="override-btn" id="btnOneOff">One-Off Overtime</div>
-            <div class="override-btn" id="btnForceEnh">Force Enhanced OT</div>
-            <div class="override-btn" id="btnExclude">Exclude from Pay</div>
-          </div>
-
-          <div class="muted" id="logicNote" style="margin-top:8px;"></div>
-        </div>
-
-        <!-- Actions -->
-        <div class="col-12 actions">
-          <span class="muted" id="statusMsg"></span>
-          <button type="reset" class="btn-secondary" id="resetBtn">Clear</button>
-          <button type="submit" class="btn-primary" id="submitBtn">Submit to Payroll</button>
-        </div>
-
-      </form>
+      <div class="muted" id="restoreBanner" style="margin-top:10px;display:none;">
+        ⚠️ Restored unsent entries from last session. These will clear after a successful submission.
+      </div>
     </div>
 
-    <!-- RIGHT: DAILY CHECKLIST -->
+    <!-- RIGHT: CHECKLIST -->
     <aside class="sidebar">
       <div class="side-bar-top">
         <h3>📋 Daily Checklist</h3>
@@ -227,178 +145,282 @@
 const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/u5ibaoi/";
 const USERS_JSON_PATH = "./users.json";
 const HOURS_LOG_URL = "https://raw.githubusercontent.com/Mostlane/Test/main/json_logs/hours/hours-log.json";
+const DRAFT_KEY = "hourEntryDraft_v4";
 
 /* ====== STATE ====== */
 let USERS_RAW = [], ENGINEERS = [], VEHICLE_SET = new Set();
-let HOURS_LOG_CACHE = {}; // date -> [names]
+let HOURS_LOG_CACHE = {}; // { "YYYY-MM-DD": ["Name", ...] }
+let LOG_COUNTER = 0;
 const $ = id => document.getElementById(id);
 
 /* ====== HELPERS ====== */
 function timeToMin(t){ if(!t||!t.includes(":")) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
 function minsToHr(m){ return Math.round((m/60)*100)/100; }
 function fmtDate(d){ return d.toISOString().split("T")[0]; }
-function shiftDate(delta){ const d=new Date($("date").value+"T12:00"); d.setDate(d.getDate()+delta); $("date").value=fmtDate(d); updateDay(); }
+function shiftDate(delta){ const d=new Date($("date").value+"T12:00"); d.setDate(d.getDate()+delta); $("date").value=fmtDate(d); updateDayForAll(); }
 function dow(d){ return new Date(d+"T12:00").toLocaleDateString(undefined,{weekday:"long"}); }
-function dayNum(d){ return new Date(d+"T12:00").getDay(); } // 0..6 (Sun..Sat)
+function dayNum(d){ return new Date(d+"T12:00").getDay(); }
 function getWeekKey(dateStr){ const d=new Date(dateStr+"T12:00"); const sun=new Date(d); sun.setDate(d.getDate()-d.getDay()); return sun.toISOString().split("T")[0]; }
-function safeAtob(b64){ return atob((b64||"").replace(/(\r\n|\n|\r|\s)/g,"")); }
+function debounce(fn,ms=300){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); }; }
 
 /* ====== INIT ====== */
 async function init(){
-  // Load users.json with cache bust
+  // Load users.json cache-busted
   try{
     const r=await fetch(USERS_JSON_PATH + "?t=" + Date.now(), {cache:"no-store"});
     const j=await r.json(); USERS_RAW=j.Users||j;
   }catch{ USERS_RAW=[]; }
-
-  // Populate engineers (Active)
-  ENGINEERS = USERS_RAW
-    .filter(u=>u.Status==="Active")
+  ENGINEERS = USERS_RAW.filter(u=>u.Status==="Active")
     .map(u=>({name:`${u.FirstName} ${u.LastName}`.trim(), username:u.Username, vehicle:u.VehicleAssigned||""}))
     .sort((a,b)=>a.name.localeCompare(b.name));
-
-  const sel = $("engineer");
-  ENGINEERS.forEach(e=>{
-    const o=document.createElement("option");
-    o.value=e.name; o.textContent=e.name; o.dataset.vehicle=e.vehicle;
-    sel.appendChild(o);
-  });
-
-  // Vehicle datalist
   USERS_RAW.forEach(u=>{ if(u.VehicleAssigned) VEHICLE_SET.add(u.VehicleAssigned); });
-  const dl=$("vehicleList");
-  Array.from(VEHICLE_SET).sort().forEach(v=>{ const o=document.createElement("option"); o.value=v; dl.appendChild(o); });
-
-  // Events
-  $("engineer").onchange=()=>{ const s=$("engineer"); $("vehicleUsed").value=s.options[s.selectedIndex]?.dataset.vehicle || ""; };
-  $("prevDayBtn").onclick=()=>shiftDate(-1);
-  $("nextDayBtn").onclick=()=>shiftDate(1);
-  ["leaveHome","arriveFirst","leaveLast","arriveHome","deductLunch","manualOTHours"].forEach(id=>{
-    $(id).addEventListener("input",calcTotals); $(id).addEventListener("change",calcTotals);
-  });
-  document.querySelectorAll('input[name="vanCheck"]').forEach(r=>r.addEventListener("change",calcTotals));
-  $("manualOverride").onchange=()=>{ $("manualEntry").style.display = $("manualOverride").checked ? "block" : "none"; calcTotals(); }
-  $("btnOneOff").onclick=()=>toggleOverride("btnOneOff");
-  $("btnForceEnh").onclick=()=>toggleOverride("btnForceEnh");
-  $("btnExclude").onclick=()=>toggleOverride("btnExclude");
-  $("hoursForm").onsubmit=submitForm;
-  $("resetBtn").onclick=()=>{ $("statusMsg").textContent=""; };
-  $("refreshChecklistBtn").onclick=()=>refreshChecklist();
 
   // Default date = yesterday
   const y=new Date(); y.setDate(y.getDate()-1); $("date").value=fmtDate(y);
+  document.getElementById("prevDayBtn").onclick=()=>shiftDate(-1);
+  document.getElementById("nextDayBtn").onclick=()=>shiftDate(1);
+  document.getElementById("date").addEventListener("change", ()=>{ updateDayForAll(); saveDraft(); });
 
-  updateDay();
-  calcTotals();
-  await refreshChecklist();
+  // Add first log
+  addEngineerLog();
+  // Restore draft if exists
+  restoreDraftIfAny();
+
+  // Checklist hooks
+  $("refreshChecklistBtn").onclick=()=>refreshChecklist();
+  await refreshChecklist(); // initial
+
+  // Submission
+  $("addLogBtn").onclick=()=>addEngineerLog();
+  $("submitAllBtn").onclick=()=>submitAll();
+
+  // Initial banner
+  updateDayForAll();
 }
 
-/* ====== OVERRIDES ====== */
-function toggleOverride(id){ $(id).classList.toggle("active"); calcTotals(); }
+/* ====== CREATE A LOG BLOCK ====== */
+function addEngineerLog(initial={}){
+  LOG_COUNTER++;
+  const id = "elog_" + LOG_COUNTER;
 
-/* ====== DAY CONTEXT ====== */
-function updateDay(){
-  const d = $("date").value; if(!d) return;
-  const day = dayNum(d);
-  $("dowHint").textContent = "Selected: " + dow(d);
+  const wrapper = document.createElement("div");
+  wrapper.className = "elog";
+  wrapper.id = id;
 
-  // Monday block (van check)
-  $("mondayBlock").style.display = day===1 ? "block" : "none";
+  wrapper.innerHTML = `
+    <div class="elog-head">
+      <div class="elog-title">Engineer Log #${LOG_COUNTER} <span class="small-muted" id="${id}_engLabel"></span></div>
+      <div class="elog-actions">
+        <button type="button" class="btn-secondary" id="${id}_toggleBtn">Collapse</button>
+        <button type="button" class="btn-secondary" id="${id}_removeBtn">Remove</button>
+      </div>
+    </div>
+    <div class="elog-body">
+      <div class="card">
+        <div class="title">Engineer & Vehicle</div>
+        <div class="row">
+          <div>
+            <label>Engineer</label>
+            <select id="${id}_engineer" required></select>
+            <div class="muted">Active users from users.json</div>
+          </div>
+          <div>
+            <label>Vehicle Used</label>
+            <input type="text" id="${id}_vehicle" list="${id}_vehicleList" placeholder="e.g. LA70 FPJ" />
+            <datalist id="${id}_vehicleList"></datalist>
+          </div>
+        </div>
+      </div>
 
-  // Friday block (van score + mileage only on Fridays)
-  $("fridayBlock").style.display = day===5 ? "block" : "none";
+      <div class="card">
+        <div class="title">Times (24h)</div>
+        <div class="grid" style="grid-template-columns:repeat(12,1fr);gap:10px;">
+          <div style="grid-column:span 3;"><label>Leave Home</label><input type="time" id="${id}_leaveHome" required></div>
+          <div style="grid-column:span 3;"><label>Arrive First</label><input type="time" id="${id}_arriveFirst" required></div>
+          <div style="grid-column:span 3;"><label>Leave Last</label><input type="time" id="${id}_leaveLast" required></div>
+          <div style="grid-column:span 3;"><label>Arrive Home</label><input type="time" id="${id}_arriveHome" required></div>
+        </div>
+        <div class="divider"></div>
+        <label class="toggle-row"><input type="checkbox" id="${id}_deductLunch" checked> Deduct 30m lunch</label>
+      </div>
 
-  // Banner text (your wording)
-  const banner = $("weekBanner");
-  if(day!==1){
-    banner.style.display="block";
-    banner.textContent = "Enhanced overtime for this day is automatically calculated if the engineer qualifies by the van check being completed on Monday’s submission.";
-  }else{
-    banner.style.display="none"; banner.textContent="";
-  }
+      <div class="card">
+        <div class="title">Vehicle, Mileage & Notes</div>
+        <div id="${id}_mondayBlock" style="display:none;margin-bottom:10px;">
+          <label>Monday – Van check?</label>
+          <div class="radio-group">
+            <label class="toggle-row"><input type="radio" name="${id}_vanCheck" value="Yes">Yes</label>
+            <label class="toggle-row"><input type="radio" name="${id}_vanCheck" value="No">No</label>
+            <label class="toggle-row"><input type="radio" name="${id}_vanCheck" value="N/A">N/A</label>
+          </div>
+          <div class="muted">If “No”, payroll will pay standard rate only for the whole week.</div>
+        </div>
+        <div id="${id}_fridayBlock" style="display:none;margin-bottom:10px;">
+          <label>Friday – Van score (0–100)</label>
+          <input type="number" id="${id}_vanScore" min="0" max="100">
+          <label style="margin-top:8px;">Personal mileage (weekly)</label>
+          <input type="number" id="${id}_personalMileage" min="0" step="1">
+        </div>
+        <div class="divider"></div>
+        <div class="row" style="align-items:flex-start;">
+          <div>
+            <label>Office notes</label>
+            <textarea id="${id}_notes" placeholder="e.g. traffic delay, extra stop..."></textarea>
+          </div>
+          <div style="max-width:360px;">
+            <label>Visibility</label>
+            <label class="toggle-row"><input type="checkbox" id="${id}_noteVisible"> Visible to engineer</label>
+            <div class="muted">Default off</div>
+          </div>
+        </div>
+      </div>
 
-  // Update checklist panel for this day
-  renderChecklistForDate(d);
-  calcTotals();
+      <div class="card">
+        <div class="title">Calculated Totals</div>
+        <div class="totals">
+          <span class="pill">Total: <span id="${id}_t_total">0.00</span>h</span>
+          <span class="pill ok">Standard: <span id="${id}_t_std">0.00</span>h</span>
+          <span class="pill" id="${id}_otPill">Overtime: <span id="${id}_t_ot">0.00</span>h</span>
+          <span class="pill" id="${id}_enhPill">Enhanced OT: <span id="${id}_t_enh">Yes</span></span>
+          <span class="pill">Travel ➜ <span id="${id}_t_travel">0.00</span>h <span class="muted" id="${id}_t_travel_parts"></span></span>
+        </div>
+        <div class="divider"></div>
+        <label class="toggle-row"><input type="checkbox" id="${id}_manualOverride"> Override automatic overtime</label>
+        <div id="${id}_manualEntry" style="display:none;margin-top:6px;">
+          <label>Enter manual overtime hours</label>
+          <input type="number" id="${id}_manualOTHours" min="0" step="0.25" placeholder="e.g. 2.0">
+          <div class="muted">Standard hours will adjust to keep Total = Standard + Overtime.</div>
+        </div>
+        <div class="divider"></div>
+        <div class="title" style="font-size:15px;">Override Options</div>
+        <div class="overrides">
+          <div class="override-btn" id="${id}_btnOneOff">One-Off Overtime</div>
+          <div class="override-btn" id="${id}_btnForceEnh">Force Enhanced OT</div>
+          <div class="override-btn" id="${id}_btnExclude">Exclude from Pay</div>
+        </div>
+        <div class="muted" id="${id}_logicNote" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  `;
+
+  // Append and wire up
+  $("logsContainer").appendChild(wrapper);
+
+  // Fill engineer select and vehicle datalist
+  const engSel = $(`${id}_engineer`);
+  ENGINEERS.forEach(e=>{ const o=document.createElement("option"); o.value=e.name; o.textContent=e.name; o.dataset.vehicle=e.vehicle; engSel.appendChild(o); });
+  const vdl = $(`${id}_vehicleList`);
+  Array.from(VEHICLE_SET).sort().forEach(v=>{ const o=document.createElement("option"); o.value=v; vdl.appendChild(o); });
+
+  // Events
+  $(`${id}_removeBtn`).onclick=()=>{ wrapper.remove(); saveDraft(); renderChecklistForDate($("date").value); };
+  $(`${id}_toggleBtn`).onclick=()=>{ wrapper.classList.toggle("collapsed"); $(`${id}_toggleBtn`).textContent = wrapper.classList.contains("collapsed") ? "Expand" : "Collapse"; };
+  engSel.onchange=()=>{ const v=engSel.options[engSel.selectedIndex]?.dataset.vehicle||""; $(`${id}_vehicle`).value=v; $(`${id}_engLabel`).textContent = "– " + engSel.value; saveDraft(); renderChecklistForDate($("date").value); };
+  // All inputs recalc + save
+  [ "_leaveHome","_arriveFirst","_leaveLast","_arriveHome","_deductLunch","_manualOTHours","_vanScore","_personalMileage","_notes","_noteVisible" ]
+    .forEach(suffix=>{
+      $(`${id}${suffix}`).addEventListener("input", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
+      $(`${id}${suffix}`).addEventListener("change", ()=>{ calcTotalsFor(id); saveDraftDebounced(); });
+    });
+  Array.from(wrapper.querySelectorAll(`input[name="${id}_vanCheck"]`)).forEach(r=>{
+    r.addEventListener("change", ()=>{ calcTotalsFor(id); saveDraft(); });
+  });
+  $(`${id}_manualOverride`).onchange=()=>{ $(`${id}_manualEntry`).style.display = $(`${id}_manualOverride`).checked ? "block" : "none"; calcTotalsFor(id); saveDraft(); };
+  $(`${id}_btnOneOff`).onclick=()=>{ toggleOverrideBtn(`${id}_btnOneOff`); calcTotalsFor(id); saveDraft(); };
+  $(`${id}_btnForceEnh`).onclick=()=>{ toggleOverrideBtn(`${id}_btnForceEnh`); calcTotalsFor(id); saveDraft(); };
+  $(`${id}_btnExclude`).onclick=()=>{ toggleOverrideBtn(`${id}_btnExclude`); calcTotalsFor(id); saveDraft(); };
+
+  // Init values (if provided)
+  if(initial.engineer){ engSel.value = initial.engineer; engSel.dispatchEvent(new Event("change")); }
+  if(initial.vehicle){ $(`${id}_vehicle`).value = initial.vehicle; }
+  ["leaveHome","arriveFirst","leaveLast","arriveHome","notes","vanScore","personalMileage","manualOTHours"].forEach(k=>{
+    if(initial[k]!=null) $(`${id}_${k}`).value = initial[k];
+  });
+  if(initial.noteVisible) $(`${id}_noteVisible`).checked = true;
+  if(initial.deductLunch===false) $(`${id}_deductLunch`).checked = false;
+  if(initial.manualOverride) $(`${id}_manualOverride`).checked = true, $(`${id}_manualEntry`).style.display="block";
+  if(initial.oneOff) $(`${id}_btnOneOff`).classList.add("active");
+  if(initial.forceEnhanced) $(`${id}_btnForceEnh`).classList.add("active");
+  if(initial.excludeFromPay) $(`${id}_btnExclude`).classList.add("active");
+  if(initial.vanCheck){ const r=wrapper.querySelector(`input[name="${id}_vanCheck"][value="${initial.vanCheck}"]`); if(r) r.checked = true; }
+
+  // Show/hide Mon/Fri sections
+  toggleMonFriForLog(id);
+  // Calc once
+  calcTotalsFor(id);
+  // Update checklist with draft engineer
+  renderChecklistForDate($("date").value);
 }
 
-/* ====== CALCULATIONS ====== */
-function calcTotals(){
-  const t1=timeToMin($("leaveHome").value),
-        t2=timeToMin($("arriveFirst").value),
-        t3=timeToMin($("leaveLast").value),
-        t4=timeToMin($("arriveHome").value);
+function toggleOverrideBtn(domId){ $(domId).classList.toggle("active"); }
+
+/* ====== PER-LOG CALC ====== */
+function calcTotalsFor(id){
+  const get = s => $(`${id}_${s}`);
+
+  const t1=timeToMin(get("leaveHome").value),
+        t2=timeToMin(get("arriveFirst").value),
+        t3=timeToMin(get("leaveLast").value),
+        t4=timeToMin(get("arriveHome").value);
 
   if([t1,t2,t3,t4].some(v=>v==null)){
-    ["t_total","t_std","t_ot","t_travel"].forEach(id=>$(id).textContent="0.00");
-    $("t_travel_parts").textContent="";
-    $("t_enh").textContent="Yes";
-    $("enhPill").className="pill";
-    $("logicNote").textContent="";
-    return;
+    get("t_total").textContent="0.00"; get("t_std").textContent="0.00"; get("t_ot").textContent="0.00";
+    get("t_travel").textContent="0.00"; get("t_travel_parts").textContent=""; get("t_enh").textContent="Yes";
+    get("enhPill").className="pill"; get("logicNote").textContent=""; return;
   }
 
   // Core totals
   let totalMins = t4 - t1;
-  if ($("deductLunch").checked) totalMins -= 30;
+  if (get("deductLunch").checked) totalMins -= 30;
   if (totalMins < 0) totalMins = 0;
 
   let total = minsToHr(totalMins);
   let std   = Math.min(10, total);
   let ot    = Math.max(0, +(total - 10).toFixed(2));
 
-  // Travel time
+  // Travel
   const toMins = Math.max(0, t2 - t1);
   const fromMins = Math.max(0, t4 - t3);
   const travelTo = minsToHr(toMins);
   const travelFrom = minsToHr(fromMins);
   const travelTotal = minsToHr(toMins + fromMins);
 
-  // Enhanced OT rule (preview)
+  // Enhanced OT (preview)
   const d=$("date").value; const isMonday = dayNum(d)===1;
   let enhanced = true, msg="Enhanced overtime if total > 10h.";
   if(isMonday){
-    const v=document.querySelector('input[name="vanCheck"]:checked');
+    const v = document.querySelector(`input[name="${id}_vanCheck"]:checked`);
     if(v){
       if(v.value==="No"){ enhanced=false; msg="Van check = No → this Monday paid at standard rate only."; }
       if(v.value==="Yes" || v.value==="N/A"){ enhanced=true; msg="Van check completed → enhanced OT applies if >10h."; }
-    }else{
-      msg="Select Monday van check status.";
-    }
+    }else{ msg="Select Monday van check status."; }
   }else{
     msg="Overtime preview shown. Payroll will apply weekly van-check rule.";
   }
 
-  // Manual override
-  const manualOn = $("manualOverride").checked;
-  const manualVal = parseFloat($("manualOTHours").value);
-  const oneOff = $("btnOneOff").classList.contains("active");
-  const forceEnh = $("btnForceEnh").classList.contains("active");
-  const exclude = $("btnExclude").classList.contains("active");
+  // Overrides
+  const oneOff = get("btnOneOff").classList.contains("active");
+  const forceEnh = get("btnForceEnh").classList.contains("active");
+  const exclude = get("btnExclude").classList.contains("active");
+  const manualOn = get("manualOverride").checked;
+  const manualVal = parseFloat(get("manualOTHours").value);
 
-  if (oneOff) {
-    // all hours as overtime
-    ot = total;
-    std = 0;
-  } else if (manualOn && !isNaN(manualVal)) {
-    ot = Math.max(0, Math.min(total, +manualVal));
-    std = Math.max(0, +(total - ot).toFixed(2));
-  }
+  if (oneOff) { ot = total; std = 0; }
+  else if (manualOn && !isNaN(manualVal)) { ot = Math.max(0, Math.min(total, +manualVal)); std = Math.max(0, +(total - ot).toFixed(2)); }
 
   if (forceEnh) enhanced = true;
 
   // Display
-  $("t_total").textContent = total.toFixed(2);
-  $("t_std").textContent   = std.toFixed(2);
-  $("t_ot").textContent    = ot.toFixed(2);
-  $("t_travel").textContent = travelTotal.toFixed(2);
-  $("t_travel_parts").textContent = `(${travelTo.toFixed(2)}h to • ${travelFrom.toFixed(2)}h from)`;
+  get("t_total").textContent = total.toFixed(2);
+  get("t_std").textContent   = std.toFixed(2);
+  get("t_ot").textContent    = ot.toFixed(2);
+  get("t_travel").textContent = travelTotal.toFixed(2);
+  get("t_travel_parts").textContent = `(${travelTo.toFixed(2)}h to • ${travelFrom.toFixed(2)}h from)`;
 
   // Pill styles & note
-  const otPill = $("otPill");
+  const otPill = get("otPill");
   if (exclude) {
-    otPill.className = "pill warn";
-    $("enhPill").className = "pill warn";
+    otPill.className = "pill warn"; get("enhPill").className = "pill warn";
     msg = "Day marked to be excluded from pay. Totals shown for reference only.";
   } else if (oneOff || manualOn) {
     otPill.className = "pill warn";
@@ -406,171 +428,247 @@ function calcTotals(){
   } else {
     otPill.className = "pill";
   }
-  $("t_enh").textContent = enhanced ? "Yes" : "No";
-  $("enhPill").className = enhanced ? "pill ok" : "pill bad";
-  $("logicNote").textContent = msg;
+  get("t_enh").textContent = enhanced ? "Yes" : "No";
+  get("enhPill").className = enhanced ? "pill ok" : "pill bad";
+  get("logicNote").textContent = msg;
+}
+
+/* ====== DAY CHANGES (apply to all logs) ====== */
+function updateDayForAll(){
+  const d = $("date").value; if(!d) return;
+  $("dowHint").textContent = "Selected: " + dow(d);
+  const day = dayNum(d);
+  const banner = $("weekBanner");
+  if(day!==1){ banner.style.display="block"; banner.textContent="Enhanced overtime for this day is automatically calculated if the engineer qualifies by the van check being completed on Monday’s submission."; }
+  else { banner.style.display="none"; banner.textContent=""; }
+
+  // Show/Hide mon/fri blocks in each log
+  document.querySelectorAll(".elog").forEach(el=>{
+    const id = el.id;
+    $(`${id}_mondayBlock`).style.display = day===1 ? "block" : "none";
+    $(`${id}_fridayBlock`).style.display = day===5 ? "block" : "none";
+    calcTotalsFor(id);
+  });
+
+  // Checklist
+  renderChecklistForDate(d);
 }
 
 /* ====== CHECKLIST ====== */
 async function refreshChecklist(){
   try{
     const res = await fetch(HOURS_LOG_URL + "?t=" + Date.now(), {cache:"no-store"});
-    // Direct JSON file expected; if using GitHub API, we'd decode base64. Here it's raw JSON.
     HOURS_LOG_CACHE = await res.json();
-  }catch{
-    HOURS_LOG_CACHE = {};
-  }
+  }catch{ HOURS_LOG_CACHE = {}; }
   renderChecklistForDate($("date").value);
 }
-
 function renderChecklistForDate(dateStr){
   const ul = $("checklist");
   const dateNice = new Date(dateStr+"T12:00").toLocaleDateString("en-GB",{weekday:"short", day:"2-digit", month:"short"});
   $("checklistDate").textContent = `For: ${dateNice} (${dateStr})`;
 
-  // Names who have submission on that date from log
-  const doneList = new Set((HOURS_LOG_CACHE?.[dateStr] || []).map(n=>String(n).trim().toLowerCase()));
+  // From log
+  const logged = new Set((HOURS_LOG_CACHE?.[dateStr] || []).map(n=>String(n).trim().toLowerCase()));
+  // From current draft (engineers selected)
+  document.querySelectorAll(".elog select[id$='_engineer']").forEach(sel=>{
+    const val = sel.value?.trim().toLowerCase(); if(val) logged.add(val+" (draft)");
+  });
+
   ul.innerHTML = "";
-
-  let done=0, total=0;
+  let done=0;
   ENGINEERS.forEach(e=>{
-    const isDone = doneList.has(e.name.toLowerCase());
-    if(isDone) done++; total++;
-
+    const match = Array.from(logged).find(n=>n===e.name.toLowerCase() || n===e.name.toLowerCase()+" (draft)");
+    const isDone = Boolean(match);
+    if(isDone) done++;
     const li = document.createElement("li");
     li.className = "check-item";
     const left = document.createElement("div");
     left.className = "check-name";
-    left.textContent = e.name;
+    left.textContent = e.name + (match && match.endsWith("(draft)") ? " • draft" : "");
     const right = document.createElement("div");
     right.className = "tick " + (isDone ? "ok" : "missing");
     right.textContent = isDone ? "✅" : "⚪";
     li.appendChild(left); li.appendChild(right);
     ul.appendChild(li);
   });
-
   $("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
 }
 
-/* ====== GATHER + SUBMIT ====== */
-function gather(){
-  const d=$("date").value;
-  const engineer=$("engineer").value;
-  const vehicle=$("vehicleUsed").value;
-  const leaveHome=$("leaveHome").value;
-  const arriveFirst=$("arriveFirst").value;
-  const leaveLast=$("leaveLast").value;
-  const arriveHome=$("arriveHome").value;
+/* ====== AUTOSAVE (localStorage) ====== */
+const saveDraftDebounced = debounce(saveDraft, 400);
+function saveDraft(){
+  const date = $("date").value;
+  const entries = serializeAllLogs();
+  const draft = { date, entries, savedAt:new Date().toISOString() };
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+}
+function restoreDraftIfAny(){
+  const raw = localStorage.getItem(DRAFT_KEY);
+  if(!raw) return;
+  try{
+    const draft = JSON.parse(raw);
+    if(!draft || !draft.entries || !draft.entries.length) return;
+    // reset UI
+    $("logsContainer").innerHTML = "";
+    LOG_COUNTER = 0;
+    $("date").value = draft.date || $("date").value;
+    draft.entries.forEach(ent=>{
+      addEngineerLog(ent);
+    });
+    $("restoreBanner").style.display = "block";
+    updateDayForAll();
+  }catch(e){}
+}
+function clearDraft(){ localStorage.removeItem(DRAFT_KEY); $("restoreBanner").style.display="none"; }
 
-  // travel
-  const t1=timeToMin(leaveHome), t2=timeToMin(arriveFirst), t3=timeToMin(leaveLast), t4=timeToMin(arriveHome);
-  const travelTo = (t1!=null && t2!=null) ? minsToHr(Math.max(0, t2 - t1)) : 0;
-  const travelFrom = (t3!=null && t4!=null) ? minsToHr(Math.max(0, t4 - t3)) : 0;
-  const travelTotal = +(travelTo + travelFrom).toFixed(2);
+/* ====== GATHER / SUBMIT ====== */
+function serializeAllLogs(){
+  const d = $("date").value;
+  const weekKey = getWeekKey(d);
+  const day = dow(d);
+  const arr = [];
+  document.querySelectorAll(".elog").forEach(el=>{
+    const id = el.id;
+    const get = s => $(`${id}_${s}`);
 
-  const notes=$("notes").value.trim();
-  const noteVisible=$("noteVisible").checked;
-  const vanScore=$("vanScore").value || "";
-  const personalMileage = (dayNum(d)===5) ? ($("personalMileage").value || "") : "";
+    const engineer = get("engineer").value;
+    if(!engineer) return; // skip incomplete
+    const vehicle = get("vehicle").value;
 
-  // Monday van check -> weekly flag
-  let vanCheck=null, vanCheckWeekStatus="";
-  if(dayNum(d)===1){
-    const v=document.querySelector('input[name="vanCheck"]:checked');
-    vanCheck = v ? v.value : null;
-    if(v){
-      if(v.value==="No") vanCheckWeekStatus="Failed";
-      if(v.value==="Yes" || v.value==="N/A") vanCheckWeekStatus="Passed";
+    // times
+    const leaveHome = get("leaveHome").value;
+    const arriveFirst = get("arriveFirst").value;
+    const leaveLast = get("leaveLast").value;
+    const arriveHome = get("arriveHome").value;
+
+    // travel
+    const t1=timeToMin(leaveHome), t2=timeToMin(arriveFirst), t3=timeToMin(leaveLast), t4=timeToMin(arriveHome);
+    const travelTo = (t1!=null && t2!=null) ? minsToHr(Math.max(0, t2 - t1)) : 0;
+    const travelFrom = (t3!=null && t4!=null) ? minsToHr(Math.max(0, t4 - t3)) : 0;
+    const travelTotal = +(travelTo + travelFrom).toFixed(2);
+
+    // totals preview
+    const totalHours = get("t_total").textContent;
+    const standardHours = get("t_std").textContent;
+    const overtimeHours = get("t_ot").textContent;
+    const enhancedOvertimePreview = get("t_enh").textContent;
+
+    // Mon/Friday fields
+    let vanCheck=null, vanCheckWeekStatus="";
+    if(dayNum(d)===1){
+      const v = document.querySelector(`input[name="${id}_vanCheck"]:checked`);
+      vanCheck = v ? v.value : null;
+      if(v){
+        if(v.value==="No") vanCheckWeekStatus="Failed";
+        if(v.value==="Yes" || v.value==="N/A") vanCheckWeekStatus="Passed";
+      }
     }
-  }
+    const vanScore = get("vanScore")?.value || "";
+    const personalMileage = (dayNum(d)===5) ? (get("personalMileage")?.value || "") : "";
 
-  // Overrides
-  const manualOvertimeApplied = $("manualOverride").checked || $("btnOneOff").classList.contains("active");
-  const manualOvertimeHours = $("btnOneOff").classList.contains("active")
-      ? $("t_total").textContent
-      : ($("manualOverride").checked ? ($("manualOTHours").value || "") : "");
-  const forceEnhanced = $("btnForceEnh").classList.contains("active");
-  const excludeFromPay = $("btnExclude").classList.contains("active");
+    // notes & visibility
+    const notes = get("notes").value.trim();
+    const noteVisible = get("noteVisible").checked;
 
-  const payload = {
-    // Core
-    date: d,
-    day: dow(d),
-    weekKey: getWeekKey(d),
-    vanCheckWeekStatus,
-    engineer,
-    vehicle,
-    leaveHome,
-    arriveFirstSite: arriveFirst,
-    leaveLastSite: leaveLast,
-    arriveHome,
-    deductLunch: document.getElementById("deductLunch").checked,
+    // overrides
+    const manualOvertimeApplied = get("manualOverride").checked || get("btnOneOff").classList.contains("active");
+    const manualOvertimeHours = get("btnOneOff").classList.contains("active")
+      ? totalHours
+      : (get("manualOverride").checked ? (get("manualOTHours").value || "") : "");
+    const forceEnhanced = get("btnForceEnh").classList.contains("active");
+    const excludeFromPay = get("btnExclude").classList.contains("active");
 
-    // Calculated preview
-    totalHours: document.getElementById("t_total").textContent,
-    standardHours: document.getElementById("t_std").textContent,
-    overtimeHours: document.getElementById("t_ot").textContent,
-    enhancedOvertimePreview: document.getElementById("t_enh").textContent,
-
-    // Travel
-    travelToHours: travelTo,
-    travelFromHours: travelFrom,
-    totalTravelHours: travelTotal,
-
-    // Monday-only field
-    vanCheck,
-
-    // Friday-only data
-    vanScore,
-    personalMileage,
-
-    // Notes
-    notes,
-    noteVisible,
-
-    // Overrides
-    manualOvertimeApplied,
-    manualOvertimeHours,
-    forceEnhanced,
-    excludeFromPay,
-
-    // Audit
-    submittedAt: new Date().toISOString()
-  };
-
-  return payload;
+    arr.push({
+      date: d,
+      day,
+      weekKey,
+      vanCheckWeekStatus,
+      engineer,
+      vehicle,
+      leaveHome,
+      arriveFirstSite: arriveFirst,
+      leaveLastSite: leaveLast,
+      arriveHome,
+      deductLunch: get("deductLunch").checked,
+      totalHours,
+      standardHours,
+      overtimeHours,
+      enhancedOvertimePreview,
+      travelToHours: travelTo,
+      travelFromHours: travelFrom,
+      totalTravelHours: travelTotal,
+      vanCheck,
+      vanScore,
+      personalMileage,
+      notes,
+      noteVisible,
+      manualOvertimeApplied,
+      manualOvertimeHours,
+      forceEnhanced,
+      excludeFromPay,
+      submittedAt: new Date().toISOString()
+    });
+  });
+  return arr;
 }
 
-async function submitForm(e){
-  e.preventDefault();
+async function submitAll(){
   $("statusMsg").style.color="#475569";
+  $("statusMsg").textContent="Validating…";
+
+  const entries = serializeAllLogs();
+  if(entries.length===0){
+    $("statusMsg").style.color="var(--bad)";
+    $("statusMsg").textContent="❌ No complete engineer logs to submit.";
+    return;
+  }
+
+  // Validate each entry minimal fields
+  const invalid = entries.find(e=>!e.engineer || !e.leaveHome || !e.arriveFirstSite || !e.leaveLastSite || !e.arriveHome);
+  if(invalid){
+    $("statusMsg").style.color="var(--bad)";
+    $("statusMsg").textContent="❌ Some logs are incomplete. Please fill all time fields and engineer.";
+    return;
+  }
+
   $("statusMsg").textContent="Submitting…";
 
-  const data = gather();
-  const body = new URLSearchParams();
-  Object.entries(data).forEach(([k,v])=>body.append(k, v==null ? "" : String(v)));
+  // Single POST with array
+  const payload = new URLSearchParams();
+  payload.append("entries", JSON.stringify(entries));
 
   try{
     const r=await fetch(ZAPIER_WEBHOOK,{
       method:"POST",
       headers:{ "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
-      body
+      body: payload
     });
-    $("statusMsg").style.color = r.ok ? "var(--ok)" : "var(--bad)";
-    $("statusMsg").textContent = r.ok ? "✅ Submitted" : "❌ Error submitting";
-
-    // Optimistically tick this engineer in the checklist for the selected date
     if(r.ok){
+      $("statusMsg").style.color="var(--ok)";
+      $("statusMsg").textContent="✅ Submitted all logs";
+      // Clear draft & optimistically add to checklist cache
       const d = $("date").value;
-      const name = $("engineer").value;
       if(!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
-      if(!HOURS_LOG_CACHE[d].includes(name)) HOURS_LOG_CACHE[d].push(name);
+      entries.forEach(e=>{
+        if(!HOURS_LOG_CACHE[d].includes(e.engineer)) HOURS_LOG_CACHE[d].push(e.engineer);
+      });
       renderChecklistForDate(d);
+      clearDraft();
+    }else{
+      $("statusMsg").style.color="var(--bad)";
+      $("statusMsg").textContent="❌ Submission failed — data kept locally.";
     }
   }catch(err){
-    $("statusMsg").style.color = "var(--bad)";
-    $("statusMsg").textContent = "❌ Network error";
+    $("statusMsg").style.color="var(--bad)";
+    $("statusMsg").textContent="❌ Network error — data kept locally.";
   }
+}
+
+/* ====== UTIL ====== */
+function toggleMonFriForLog(id){
+  const day = dayNum($("date").value);
+  $(`${id}_mondayBlock`).style.display = day===1 ? "block" : "none";
+  $(`${id}_fridayBlock`).style.display = day===5 ? "block" : "none";
 }
 
 /* ====== BOOT ====== */
