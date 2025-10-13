@@ -5,6 +5,10 @@
 <title>Engineer Hours Entry – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <style>
+  /* --- Layout stability baseline --- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { width:100%; max-width:100%; overflow-x:hidden; }
+
   :root{
     --ml-blue:#003366;
     --ml-accent:#1a73e8;
@@ -22,41 +26,66 @@
     margin:0;padding:40px;color:var(--ml-ink);
   }
   .shell{max-width:1100px;margin:0 auto;background:rgba(255,255,255,0.92);
-    border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);}
-  header{display:flex;align-items:center;justify-content:space-between;
+    border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);min-width:0;}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
     background:linear-gradient(90deg,#fff,#f7f9fc);
-    border-bottom:1px solid #e5e9f2;padding:18px 24px;}
+    border-bottom:1px solid #e5e9f2;padding:18px 24px;gap:10px;}
   header h1{font-size:22px;margin:0;color:var(--ml-blue);}
   header a{background:var(--ml-accent);color:#fff;text-decoration:none;
-    padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;}
+    padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap;}
   .content{padding:22px 24px 28px;}
-  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;}
-  .card{background:var(--card);border:1px solid #e8edf3;border-radius:12px;padding:16px;}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;min-width:0;}
+  .card{background:var(--card);border:1px solid #e8edf3;border-radius:12px;padding:16px;min-width:0;}
   .title{font-weight:600;color:var(--ml-blue);margin-bottom:10px;}
   label{font-size:13px;color:#334155;display:block;margin-bottom:6px;}
-  input,select,textarea{width:100%;font-size:15px;border:1px solid #cbd5e1;
-    border-radius:10px;padding:10px 12px;background:#fff;}
+  input,select,textarea{
+    width:100%; max-width:100%;
+    font-size:15px; border:1px solid #cbd5e1; border-radius:10px;
+    padding:10px 12px; background:#fff; line-height:1.2;
+  }
+  input[type="time"], input[type="date"] { height:40px; }
+  select { height:42px; }
   textarea{min-height:90px;resize:vertical;}
-  .row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .row{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;min-width:0;}
+  /* Make row children grow evenly but never shrink into overlap */
+  .row > div{flex:1 1 260px; min-width:240px; max-width:100%;}
+
   .muted{color:var(--muted);font-size:12px;}
   .divider{height:1px;background:#edf2f7;margin:12px 0;}
-  .toggle-row{display:flex;align-items:center;gap:10px;font-size:14px;}
+  .toggle-row{display:flex;align-items:center;gap:10px;font-size:14px;user-select:none;}
   .radio-group{display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
+
   .totals{display:flex;gap:10px;flex-wrap:wrap;font-weight:600;}
   .pill{padding:8px 12px;border-radius:999px;border:1px solid #d7e1ee;
-    background:#f8fbff;color:#0f172a;}
+    background:#f8fbff;color:#0f172a;display:inline-flex;align-items:center;gap:6px;}
   .pill.ok{border-color:#bfe7ca;background:#effaf3;color:#074e1a;}
   .pill.bad{border-color:#ffc7ce;background:#fff1f3;color:#6b0011;}
-  .actions{display:flex;gap:14px;align-items:center;justify-content:flex-end;margin-top:10px;}
+
+  .actions{display:flex;gap:14px;align-items:center;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;}
   button{font-size:15px;font-weight:600;border:0;border-radius:10px;padding:12px 18px;cursor:pointer;}
   .btn-primary{background:var(--ml-accent);color:#fff;}
   .btn-secondary{background:#eef2f9;color:#0f172a;border:1px solid #d7e1ee;}
-  .btn-link{background:transparent;color:var(--ml-accent);padding:8px 10px;}
+  .btn-link{background:transparent;color:var(--ml-accent);padding:8px 10px;white-space:nowrap;}
+
   .col-12{grid-column:span 12;}
   .col-6{grid-column:span 6;}
-  @media(max-width:980px){.col-6{grid-column:span 12;}}
-  .date-controls{display:flex;align-items:center;gap:8px;margin-top:8px;}
+
+  /* Make nested grids resilient on smaller widths */
+  @media (max-width: 1120px){
+    .row > div{flex:1 1 300px;}
+  }
+  @media(max-width:980px){
+    .col-6{grid-column:span 12;}
+    .row > div{min-width:260px;flex:1 1 100%;}
+  }
+  .date-controls{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
   .banner{margin-top:8px;padding:8px 12px;border-radius:10px;border:1px solid #e5e9f2;background:#f7fbff;}
+
+  /* Keep long helper text from pushing layout */
+  #dowHint, .muted { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; display:inline-block; }
+
+  /* Prevent nested grid overflow in time section */
+  .card .grid { min-width:0; }
 </style>
 </head>
 <body>
@@ -73,7 +102,7 @@
 <div class="card col-12">
   <div class="title">Day & Engineer</div>
   <div class="row">
-    <div style="min-width:260px;">
+    <div>
       <label>Date</label>
       <input type="date" id="date" required />
       <div class="date-controls">
@@ -83,12 +112,12 @@
       </div>
       <div id="weekBanner" class="banner" style="display:none;"></div>
     </div>
-    <div style="min-width:260px;flex:1;">
+    <div>
       <label>Engineer</label>
       <select id="engineer" required></select>
       <div class="muted">Active users from users.json</div>
     </div>
-    <div style="min-width:220px;">
+    <div>
       <label>Vehicle Used</label>
       <input type="text" id="vehicleUsed" list="vehicleList" placeholder="e.g. LA70 FPJ" />
       <datalist id="vehicleList"></datalist>
@@ -129,11 +158,11 @@
   </div>
   <div class="divider"></div>
   <div class="row" style="align-items:flex-start;">
-    <div style="flex:1;">
+    <div>
       <label>Office notes</label>
       <textarea id="notes" placeholder="e.g. traffic delay, extra stop..."></textarea>
     </div>
-    <div style="min-width:220px;">
+    <div style="max-width:360px;">
       <label>Visibility</label>
       <label class="toggle-row"><input type="checkbox" id="noteVisible"> 🪨 Visible to engineer</label>
       <div class="muted">Default off</div>
@@ -343,8 +372,8 @@ function gather(){
     // Core
     date: d,
     day: dow(d),
-    weekKey: getWeekKey(d),          // <-- use this in Zap to look up/apply weekly rule
-    vanCheckWeekStatus,              // <-- "Passed"/"Failed" only when Monday; "" otherwise
+    weekKey: getWeekKey(d),
+    vanCheckWeekStatus,
     engineer,
     vehicle,
     leaveHome,
@@ -353,16 +382,16 @@ function gather(){
     arriveHome,
     deductLunch: document.getElementById("deductLunch").checked,
 
-    // Calculated preview (Zap can recompute if desired)
+    // Calculated preview
     totalHours: document.getElementById("t_total").textContent,
     standardHours: document.getElementById("t_std").textContent,
     overtimeHours: document.getElementById("t_ot").textContent,
-    enhancedOvertimePreview: document.getElementById("t_enh").textContent, // "Yes"/"No" preview
+    enhancedOvertimePreview: document.getElementById("t_enh").textContent,
 
-    // Monday-only field for record
+    // Monday-only field
     vanCheck,
 
-    // Friday-only data (else empty)
+    // Friday-only data
     vanScore,
     personalMileage,
 
