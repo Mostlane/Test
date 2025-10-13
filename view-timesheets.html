@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Timesheets – Mostlane</title>
+<title>Engineer Timesheets – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   *,*::before,*::after{box-sizing:border-box}
   :root{
     --ml-blue:#003366;--ml-accent:#1a73e8;--ml-ink:#1f2937;--ml-bg:#e6e8eb;
     --card:#ffffffee;--muted:#64748b;--ok:#0c7d27;--bad:#b00020;--border:#e7edf5;
+    --blue-1:#0c3a6b; --blue-2:#19579b; --blue-3:#1f6fce;
   }
   html,body{height:100%}
   body{
@@ -36,11 +37,34 @@
   .btn-primary{background:var(--ml-accent);color:#fff;border:0}
   .badge{font-size:12px;border:1px solid var(--border);padding:4px 8px;border-radius:999px;background:#fff}
   main{padding:16px 18px}
-  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
-  .stats{display:flex;gap:10px;flex-wrap:wrap}
-  .pill{padding:8px 12px;border-radius:999px;border:1px solid #d7e1ee;background:#f8fbff;display:inline-flex;gap:6px;align-items:center}
-  .pill.ok{background:#effaf3;border-color:#bfe7ca}
-  .pill.warn{background:#fff6e5;border-color:#ffd18b}
+  /* ===== Blue Stat Cards ===== */
+  .statsRow{
+    display:grid;grid-template-columns:repeat(8,1fr);gap:10px;margin-bottom:14px
+  }
+  @media (max-width:1100px){.statsRow{grid-template-columns:repeat(4,1fr)}}
+  @media (max-width:650px){.statsRow{grid-template-columns:repeat(2,1fr)}}
+  .stat{
+    position:relative;border-radius:12px;padding:12px 12px 10px 12px;color:#fff;
+    background:linear-gradient(145deg,var(--blue-1),var(--blue-3));
+    border:1px solid rgba(255,255,255,.18);
+    box-shadow:0 10px 20px rgba(0,0,0,.18);
+  }
+  .stat .label{font-size:12px;opacity:.95;letter-spacing:.02em}
+  .stat .value{font-size:20px;font-weight:800;margin-top:4px}
+  .stat .sub{font-size:11px;opacity:.9;margin-top:2px}
+  .stat:hover{filter:brightness(1.03)}
+  .stat .i{position:absolute;top:8px;right:8px;cursor:help;font-weight:700;background:rgba(255,255,255,.18);
+    border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center}
+  .tooltip{position:relative;display:inline-block}
+  .tooltip .tip{
+    visibility:hidden;opacity:0;transition:opacity .15s ease;
+    position:absolute;z-index:10;right:0;top:26px;min-width:220px;max-width:360px;
+    background:#0b1f39;color:#fff;font-size:12px;padding:8px 10px;border-radius:8px;box-shadow:0 10px 16px rgba(0,0,0,.25)
+  }
+  .tooltip:hover .tip{visibility:visible;opacity:1}
+
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:8px 0 12px}
+  .muted{color:var(--muted)}
   .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
   table{width:100%;border-collapse:separate;border-spacing:0;min-width:980px}
   thead th{
@@ -51,32 +75,25 @@
   tfoot td{padding:12px 8px;font-weight:700;background:#fafcff;border-top:1px solid var(--border)}
   .center{text-align:center}
   .right{text-align:right}
-  .muted{color:var(--muted)}
   .flag{font-weight:700}
-  .flag.enh{color:var(--ok)}
-  .flag.no{color:var(--bad)}
+  .flag.enh{color:#0c7d27}
+  .flag.no{color:#b00020}
   .note-dot{
     display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;
     border:1px solid #d7e1ee;background:#fff;cursor:pointer
   }
   .note-dot.has{background:#fff2c2;border-color:#ffd18b}
-  .tooltip{
-    position:relative;display:inline-block
-  }
-  .tooltip .tip{
-    visibility:hidden;opacity:0;transition:opacity .15s ease;
-    position:absolute;z-index:10;left:50%;transform:translateX(-50%);
-    bottom:28px;min-width:220px;max-width:420px;background:#0f172a;color:#fff;font-size:12px;
-    padding:8px 10px;border-radius:8px;box-shadow:0 10px 16px rgba(0,0,0,.25)
-  }
-  .tooltip:hover .tip{visibility:visible;opacity:1}
   .empty{padding:16px;border:1px dashed #d8dee9;border-radius:10px;background:#fff}
   .footer{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fcfdff}
   a.link{color:var(--ml-accent);text-decoration:none}
-  @media (max-width:800px){
-    .stats .pill{padding:6px 10px}
-    table{min-width:860px}
-  }
+
+  /* Notes list */
+  .notes-panel{margin-top:14px;border:1px solid var(--border);border-radius:12px;background:#fff}
+  .notes-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:#f7fbff}
+  .notes-body{padding:12px}
+  .note-item{padding:10px 12px;border:1px solid #eef2f7;border-radius:10px;margin-bottom:8px;background:#fff}
+  .note-meta{display:flex;gap:10px;align-items:center;font-size:12px;color:#516075}
+  .badge-vis{font-size:11px;border-radius:999px;padding:2px 8px;border:1px solid #d7e1ee;background:#f7fbff}
 </style>
 </head>
 <body>
@@ -84,7 +101,7 @@
   <div class="panel">
     <header>
       <div class="left">
-        <h1>Timesheets</h1>
+        <h1>Engineer Timesheets</h1>
         <span class="badge" id="badgeWeek">Week: –</span>
         <span class="badge" id="badgeRole">Role: Engineer</span>
       </div>
@@ -102,16 +119,60 @@
     </header>
 
     <main>
+      <!-- ===== Weekly Summary (blue cards) ===== -->
+      <section class="statsRow" aria-label="Weekly summary statistics">
+        <div class="stat">
+          <div class="label">Total Hours</div>
+          <div class="value" id="st_total">0.00h</div>
+          <div class="sub" id="st_days">0 days logged</div>
+          <div class="tooltip i">i<span class="tip">Sum of Standard + Overtime for the selected week.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Standard Hours</div>
+          <div class="value" id="st_std">0.00h</div>
+          <div class="sub">Before overtime</div>
+          <div class="tooltip i">i<span class="tip">Total non-overtime hours recorded.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Overtime Hours</div>
+          <div class="value" id="st_ot">0.00h</div>
+          <div class="sub" id="st_otp">0%</div>
+          <div class="tooltip i">i<span class="tip">All hours beyond standard for the week.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Travel Hours</div>
+          <div class="value" id="st_travel">0.00h</div>
+          <div class="sub" id="st_travelParts">to / from</div>
+          <div class="tooltip i">i<span class="tip">Combined travel to first site + from last site.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Avg Hours / Day</div>
+          <div class="value" id="st_avg">0.00h</div>
+          <div class="sub">Based on worked days</div>
+          <div class="tooltip i">i<span class="tip">Total hours divided by number of worked days this week.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Enhanced OT Days</div>
+          <div class="value" id="st_enhDays">0</div>
+          <div class="sub" id="st_enhPct">0%</div>
+          <div class="tooltip i">i<span class="tip">Count of days with Enhanced Overtime active.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Productivity</div>
+          <div class="value" id="st_prod">0%</div>
+          <div class="sub">vs 50h baseline</div>
+          <div class="tooltip i">i<span class="tip">Total hours compared to a 50h weekly baseline.</span></div>
+        </div>
+        <div class="stat">
+          <div class="label">Entries in File</div>
+          <div class="value" id="st_records">0</div>
+          <div class="sub">All-time count</div>
+          <div class="tooltip i">i<span class="tip">Total number of records loaded from the JSON file.</span></div>
+        </div>
+      </section>
+
       <div class="toolbar">
         <div class="muted" id="dataHint">Loading logs…</div>
-        <div class="stats" id="statsRow">
-          <span class="pill">Days: <strong id="s_days">0</strong></span>
-          <span class="pill">Total: <strong id="s_total">0.00h</strong></span>
-          <span class="pill">Standard: <strong id="s_std">0.00h</strong></span>
-          <span class="pill">Overtime: <strong id="s_ot">0.00h</strong></span>
-          <span class="pill">Travel: <strong id="s_travel">0.00h</strong></span>
-          <span class="pill ok">Enhanced OT Days: <strong id="s_enhDays">0</strong></span>
-        </div>
       </div>
 
       <div class="table-wrap" id="tableWrap" style="display:none;">
@@ -150,94 +211,85 @@
       <div id="emptyState" class="empty" style="display:none;">
         No times logged for this engineer in the selected week.
       </div>
+
+      <!-- ===== Notes Summary ===== -->
+      <section class="notes-panel" id="notesPanel" style="display:none;">
+        <div class="notes-head">
+          <strong>Notes Summary</strong>
+          <span class="muted" id="notesMeta">–</span>
+        </div>
+        <div class="notes-body" id="notesBody"></div>
+      </section>
     </main>
 
     <div class="footer">
       <div class="muted">Source: json_logs/hours/hours-log.json</div>
-      <a class="link" id="compareLink" href="timesheet-summary.html">Open comparison page ↗</a>
+      <a class="link" id="compareLink" href="view-timesheet-summary.html">Open comparison page ↗</a>
     </div>
   </div>
 </div>
 
 <script>
-/* ===== Config ===== */
+/* ===== Config / Utils ===== */
 const HOURS_URL = "https://raw.githubusercontent.com/Mostlane/Test/main/json_logs/hours/hours-log.json";
-
-/* ===== Utilities ===== */
-const $ = (id) => document.getElementById(id);
-const toISO = (d) => d.toISOString().split("T")[0];
-const parseNum = (v) => v==null || v==="" ? 0 : (isNaN(+v) ? 0 : +v);
+const $ = (id)=>document.getElementById(id);
+const toISO=(d)=>d.toISOString().split("T")[0];
+const parseNum=(v)=>v==null||v===""?0:(isNaN(+v)?0:+v);
 
 function mondayOf(dateStr){
-  const d = dateStr ? new Date(dateStr+"T12:00:00") : new Date();
-  const day = (d.getDay()+6)%7; // Mon=0..Sun=6
-  d.setDate(d.getDate()-day);
-  d.setHours(12,0,0,0);
-  return d;
+  const d = dateStr? new Date(dateStr+"T12:00:00"): new Date();
+  const day = (d.getDay()+6)%7; d.setDate(d.getDate()-day); d.setHours(12,0,0,0); return d;
 }
-function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
-function fmtDateNice(dateStr){
-  const d = new Date(dateStr+"T12:00:00");
-  return d.toLocaleDateString("en-GB",{weekday:"short", day:"2-digit", month:"short"});
-}
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function fmtDateNice(dateStr){const d=new Date(dateStr+"T12:00:00");return d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});}
 
 /* ===== State ===== */
-let ALL = { entries: [] };
-let ENGINEERS = [];
-let state = {
-  role: "engineer",
-  engineer: "",
-  weekStart: mondayOf().toISOString().split("T")[0]
-};
+let ALL={entries:[]}, ENGINEERS=[];
+let state={role:"engineer", engineer:"", weekStart:mondayOf().toISOString().split("T")[0]};
 
-/* ===== Fetch & Bootstrap ===== */
+/* ===== Data ===== */
 async function fetchLogs(){
   $("dataHint").textContent = "Loading logs…";
   try{
-    const r = await fetch(HOURS_URL, {cache:"no-store"});
+    const r = await fetch(HOURS_URL,{cache:"no-store"});
     ALL = await r.json();
-    if(!Array.isArray(ALL.entries)) ALL.entries = [];
+    if(!Array.isArray(ALL.entries)) ALL.entries=[];
     $("dataHint").textContent = `Loaded ${ALL.entries.length} records`;
+    $("st_records").textContent = ALL.entries.length;
   }catch(e){
     $("dataHint").textContent = "Could not load logs.";
-    ALL = { entries: [] };
+    ALL = {entries:[]};
+    $("st_records").textContent = 0;
   }
 }
 
 function buildEngineerList(){
   const set = new Set();
-  ALL.entries.forEach(e => { if(e.engineer) set.add(e.engineer.trim()); });
+  ALL.entries.forEach(e=>{ if(e.engineer) set.add(e.engineer.trim()); });
   ENGINEERS = Array.from(set).sort((a,b)=>a.localeCompare(b));
   const sel = $("engineerSelect");
   sel.innerHTML = "";
   ENGINEERS.forEach(name=>{
-    const o = document.createElement("option");
-    o.value = name; o.textContent = name;
-    sel.appendChild(o);
+    const o=document.createElement("option"); o.value=name; o.textContent=name; sel.appendChild(o);
   });
-  // Default: first engineer (or keep current if present)
-  const existing = ENGINEERS.includes(state.engineer) ? state.engineer : ENGINEERS[0] || "";
-  state.engineer = existing;
-  sel.value = state.engineer;
+  const existing = ENGINEERS.includes(state.engineer)? state.engineer : ENGINEERS[0] || "";
+  state.engineer = existing; sel.value = state.engineer;
 }
 
 function setWeekUI(){
-  const d = new Date(state.weekStart+"T12:00:00");
-  const weekEnd = addDays(d, 6);
+  const d=new Date(state.weekStart+"T12:00:00"); const weekEnd=addDays(d,6);
   $("weekPicker").value = toISO(d);
   $("badgeWeek").textContent = `Week: ${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})} – ${weekEnd.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`;
 }
-
 function setRoleUI(){
   $("roleSelect").value = state.role;
-  $("badgeRole").textContent = `Role: ${state.role === "office" ? "Office" : "Engineer"}`;
+  $("badgeRole").textContent = `Role: ${state.role==="office"?"Office":"Engineer"}`;
 }
 
-/* ===== Filtering / Rendering ===== */
+/* ===== Filtering ===== */
 function entriesForEngineerWeek(name, weekStart){
   const start = new Date(weekStart+"T12:00:00");
   const dates = Array.from({length:7}, (_,i)=> toISO(addDays(start,i)));
-  // Build a map by date
   const byDate = new Map();
   ALL.entries.forEach(e=>{
     if(!e || !e.engineer || !e.date) return;
@@ -247,12 +299,13 @@ function entriesForEngineerWeek(name, weekStart){
   return { dates, byDate };
 }
 
-function renderTable(){
+/* ===== Render Table + Stats + Notes ===== */
+function renderAll(){
   const { dates, byDate } = entriesForEngineerWeek(state.engineer, state.weekStart);
-  const tb = $("tbody");
-  tb.innerHTML = "";
+  const tb = $("tbody"); tb.innerHTML = "";
 
-  let sumStd=0, sumOT=0, sumTravel=0, enhDays=0, worked=0;
+  let sumStd=0, sumOT=0, sumTravel=0, sumTravelTo=0, sumTravelFrom=0, enhDays=0, worked=0;
+  const notesVisible = []; // for notes panel (respecting role)
 
   dates.forEach(dateStr=>{
     const e = byDate.get(dateStr);
@@ -261,15 +314,24 @@ function renderTable(){
     if(e){
       const lunch = e.deductLunch ? "30m" : "—";
       const enh = String(e.enhancedOvertimePreview||"").toLowerCase().startsWith("y");
-      const travelTxt = `${parseNum(e.travelToHours).toFixed(2)} / ${parseNum(e.travelFromHours).toFixed(2)} / ${parseNum(e.totalTravelHours).toFixed(2)}`;
-      const noteOK = state.role === "office" || !!e.noteVisible;
-      const hasNote = (e.notes||"").trim().length>0 && noteOK;
 
-      sumStd += parseNum(e.standardHours);
-      sumOT  += parseNum(e.overtimeHours);
-      sumTravel += parseNum(e.totalTravelHours);
-      enhDays += enh ? 1 : 0;
-      worked += 1;
+      const std = parseNum(e.standardHours);
+      const ot = parseNum(e.overtimeHours);
+      const tTo = parseNum(e.travelToHours);
+      const tFrom = parseNum(e.travelFromHours);
+      const tTot = parseNum(e.totalTravelHours);
+
+      sumStd += std; sumOT += ot; sumTravel += tTot; sumTravelTo += tTo; sumTravelFrom += tFrom;
+      enhDays += enh ? 1 : 0; worked += 1;
+
+      const noteOK = (state.role === "office") || !!e.noteVisible;
+      const hasNote = (e.notes||"").trim().length>0 && noteOK;
+      if(hasNote){
+        notesVisible.push({
+          date: e.date, day: e.day||dayNice, text: e.notes.trim(),
+          visible: !!e.noteVisible
+        });
+      }
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
@@ -281,15 +343,12 @@ function renderTable(){
         <td>${e.leaveLastSite||""}</td>
         <td>${e.arriveHome||""}</td>
         <td class="center">${lunch}</td>
-        <td class="right">${parseNum(e.standardHours).toFixed(2)}</td>
-        <td class="right">${parseNum(e.overtimeHours).toFixed(2)}</td>
-        <td class="right">${travelTxt}</td>
+        <td class="right">${std.toFixed(2)}</td>
+        <td class="right">${ot.toFixed(2)}</td>
+        <td class="right">${tTo.toFixed(2)} / ${tFrom.toFixed(2)} / ${tTot.toFixed(2)}</td>
         <td class="center"><span class="flag ${enh?'enh':'no'}">${enh?'✓':'—'}</span></td>
         <td class="center">
-          <span class="tooltip">
-            <span class="note-dot ${hasNote?'has':''}" title="${hasNote?'Click to view note':'No visible note'}">📝</span>
-            <span class="tip">${hasNote ? (e.notes||'').replace(/</g,"&lt;") : 'Note is hidden for engineers'}</span>
-          </span>
+          <span class="note-dot ${hasNote?'has':''}" title="${hasNote?'Click to view note':'No visible note'}">📝</span>
         </td>
       `;
       tb.appendChild(tr);
@@ -304,66 +363,75 @@ function renderTable(){
     }
   });
 
-  // Totals row & header stats
+  // Totals (table footer)
   $("t_std").textContent = sumStd.toFixed(2);
-  $("t_ot").textContent  = sumOT.toFixed(2);
+  $("t_ot").textContent = sumOT.toFixed(2);
   $("t_travel").textContent = sumTravel.toFixed(2);
   $("t_enh").textContent = enhDays;
 
-  $("s_days").textContent = worked.toString();
-  $("s_std").textContent = sumStd.toFixed(2)+"h";
-  $("s_ot").textContent = sumOT.toFixed(2)+"h";
-  $("s_travel").textContent = sumTravel.toFixed(2)+"h";
-  $("s_total").textContent = (sumStd+sumOT).toFixed(2)+"h";
-  $("s_enhDays").textContent = enhDays.toString();
-
-  // Visibility
   const hasAny = worked>0;
   $("tableWrap").style.display = hasAny ? "block" : "none";
   $("emptyState").style.display = hasAny ? "none" : "block";
 
-  // Comparison link (passes weekStart via query)
-  $("compareLink").href = `timesheet-summary.html?week=${encodeURIComponent(state.weekStart)}`;
+  // ===== Summary Stats (blue cards)
+  const totalH = sumStd + sumOT;
+  $("st_total").textContent = totalH.toFixed(2) + "h";
+  $("st_days").textContent = worked + " " + (worked===1?"day":"days") + " logged";
+  $("st_std").textContent = sumStd.toFixed(2) + "h";
+  $("st_ot").textContent = sumOT.toFixed(2) + "h";
+  $("st_otp").textContent = (totalH>0 ? ((sumOT/totalH)*100).toFixed(0) : 0) + "%";
+  $("st_travel").textContent = sumTravel.toFixed(2) + "h";
+  $("st_travelParts").textContent = `${sumTravelTo.toFixed(2)}h to • ${sumTravelFrom.toFixed(2)}h from`;
+  $("st_avg").textContent = (worked>0 ? (totalH/worked) : 0).toFixed(2) + "h";
+  $("st_enhDays").textContent = enhDays;
+  $("st_enhPct").textContent = (worked>0 ? ((enhDays/worked)*100).toFixed(0) : 0) + "%";
+  $("st_prod").textContent = ((totalH/50)*100).toFixed(0) + "%";
+
+  // ===== Notes panel
+  const notesPanel = $("notesPanel");
+  const notesBody = $("notesBody");
+  const notesMeta = $("notesMeta");
+  notesBody.innerHTML = "";
+  if(notesVisible.length){
+    notesPanel.style.display = "block";
+    notesMeta.textContent = `${notesVisible.length} note${notesVisible.length>1?'s':''} this week`;
+    notesVisible.sort((a,b)=> a.date.localeCompare(b.date));
+    notesVisible.forEach(n=>{
+      const div = document.createElement("div");
+      div.className = "note-item";
+      div.innerHTML = `
+        <div class="note-meta">
+          <strong>${n.day}</strong>
+          <span class="muted">${n.date}</span>
+          <span class="badge-vis">${n.visible ? "👁 Visible to engineer" : "🔒 Office only"}</span>
+        </div>
+        <div style="margin-top:6px;white-space:pre-wrap">${(n.text||"").replace(/</g,"&lt;")}</div>
+      `;
+      notesBody.appendChild(div);
+    });
+  }else{
+    notesPanel.style.display = "none";
+  }
+
+  // Comparison page link
+  $("compareLink").href = `view-timesheet-summary.html?week=${encodeURIComponent(state.weekStart)}&engineer=${encodeURIComponent(state.engineer)}`;
 }
 
 /* ===== Events ===== */
-$("prevWeek").onclick = ()=>{
-  const d = addDays(new Date(state.weekStart+"T12:00:00"), -7);
-  state.weekStart = toISO(d);
-  setWeekUI(); renderTable();
-};
-$("nextWeek").onclick = ()=>{
-  const d = addDays(new Date(state.weekStart+"T12:00:00"), +7);
-  state.weekStart = toISO(d);
-  setWeekUI(); renderTable();
-};
-$("weekPicker").addEventListener("change", ()=>{
-  const monday = mondayOf($("weekPicker").value);
-  state.weekStart = toISO(monday);
-  setWeekUI(); renderTable();
-});
-$("engineerSelect").addEventListener("change", ()=>{
-  state.engineer = $("engineerSelect").value;
-  renderTable();
-});
-$("roleSelect").addEventListener("change", ()=>{
-  state.role = $("roleSelect").value;
-  setRoleUI(); renderTable();
-});
-$("refreshBtn").onclick = async ()=>{
-  await fetchLogs();
-  buildEngineerList();
-  renderTable();
-};
+$("prevWeek").onclick=()=>{const d=addDays(new Date(state.weekStart+"T12:00:00"),-7);state.weekStart=toISO(d);setWeekUI();renderAll();};
+$("nextWeek").onclick=()=>{const d=addDays(new Date(state.weekStart+"T12:00:00"),+7);state.weekStart=toISO(d);setWeekUI();renderAll();};
+$("weekPicker").addEventListener("change",()=>{const monday=mondayOf($("weekPicker").value);state.weekStart=toISO(monday);setWeekUI();renderAll();});
+$("engineerSelect").addEventListener("change",()=>{state.engineer=$("engineerSelect").value;renderAll();});
+$("roleSelect").addEventListener("change",()=>{state.role=$("roleSelect").value;setRoleUI();renderAll();});
+$("refreshBtn").onclick=async()=>{await fetchLogs();buildEngineerList();renderAll();};
 
 /* ===== Boot ===== */
 (async function init(){
-  // Default week start = last Monday (if today Monday, keep today)
   state.weekStart = toISO(mondayOf());
   setWeekUI(); setRoleUI();
   await fetchLogs();
   buildEngineerList();
-  renderTable();
+  renderAll();
 })();
 </script>
 </body>
