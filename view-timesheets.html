@@ -1,1 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Timesheets – Mostlane</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --ml-blue:#003366;--ml-accent:#1a73e8;--ml-ink:#1f2937;--ml-bg:#e6e8eb;
+    --card:#ffffffee;--muted:#64748b;--ok:#0c7d27;--bad:#b00020;--border:#e7edf5;
+  }
+  html,body{height:100%}
+  body{
+    margin:0;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--ml-ink);
+    background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:180% auto;
+  }
+  .shell{max-width:1200px;margin:34px auto;padding:0 16px}
+  .panel{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    box-shadow:0 12px 28px rgba(0,0,0,.12);overflow:hidden;
+  }
+  header{
+    display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;
+    padding:14px 18px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,#fff,#f7f9fc);
+  }
+  header .left{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  h1{font-size:18px;color:var(--ml-blue);margin:0 10px 0 0}
+  .ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  select,input,button{
+    font-size:14px;border:1px solid #cfd7e3;border-radius:10px;padding:8px 10px;background:#fff
+  }
+  input[type="date"]{height:36px}
+  .btn{cursor:pointer;font-weight:600}
+  .btn-ghost{background:#eef2f9;border-color:#d7e1ee}
+  .btn-primary{background:var(--ml-accent);color:#fff;border:0}
+  .badge{font-size:12px;border:1px solid var(--border);padding:4px 8px;border-radius:999px;background:#fff}
+  main{padding:16px 18px}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .stats{display:flex;gap:10px;flex-wrap:wrap}
+  .pill{padding:8px 12px;border-radius:999px;border:1px solid #d7e1ee;background:#f8fbff;display:inline-flex;gap:6px;align-items:center}
+  .pill.ok{background:#effaf3;border-color:#bfe7ca}
+  .pill.warn{background:#fff6e5;border-color:#ffd18b}
+  .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
+  table{width:100%;border-collapse:separate;border-spacing:0;min-width:980px}
+  thead th{
+    position:sticky;top:0;background:#f7fbff;border-bottom:1px solid var(--border);
+    font-size:12px;text-transform:uppercase;letter-spacing:.02em;color:#324055;padding:10px 8px;text-align:left
+  }
+  tbody td{padding:10px 8px;border-bottom:1px solid #f0f3f8;vertical-align:top;font-size:14px}
+  tfoot td{padding:12px 8px;font-weight:700;background:#fafcff;border-top:1px solid var(--border)}
+  .center{text-align:center}
+  .right{text-align:right}
+  .muted{color:var(--muted)}
+  .flag{font-weight:700}
+  .flag.enh{color:var(--ok)}
+  .flag.no{color:var(--bad)}
+  .note-dot{
+    display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;
+    border:1px solid #d7e1ee;background:#fff;cursor:pointer
+  }
+  .note-dot.has{background:#fff2c2;border-color:#ffd18b}
+  .tooltip{
+    position:relative;display:inline-block
+  }
+  .tooltip .tip{
+    visibility:hidden;opacity:0;transition:opacity .15s ease;
+    position:absolute;z-index:10;left:50%;transform:translateX(-50%);
+    bottom:28px;min-width:220px;max-width:420px;background:#0f172a;color:#fff;font-size:12px;
+    padding:8px 10px;border-radius:8px;box-shadow:0 10px 16px rgba(0,0,0,.25)
+  }
+  .tooltip:hover .tip{visibility:visible;opacity:1}
+  .empty{padding:16px;border:1px dashed #d8dee9;border-radius:10px;background:#fff}
+  .footer{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fcfdff}
+  a.link{color:var(--ml-accent);text-decoration:none}
+  @media (max-width:800px){
+    .stats .pill{padding:6px 10px}
+    table{min-width:860px}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="panel">
+    <header>
+      <div class="left">
+        <h1>Timesheets</h1>
+        <span class="badge" id="badgeWeek">Week: –</span>
+        <span class="badge" id="badgeRole">Role: Engineer</span>
+      </div>
+      <div class="ctrl">
+        <button class="btn btn-ghost" id="prevWeek">◀ Prev</button>
+        <input type="date" id="weekPicker" />
+        <button class="btn btn-ghost" id="nextWeek">Next ▶</button>
+        <select id="engineerSelect" title="Engineer"></select>
+        <select id="roleSelect" title="Role">
+          <option value="engineer" selected>Engineer</option>
+          <option value="office">Office</option>
+        </select>
+        <button class="btn btn-primary" id="refreshBtn">Refresh</button>
+      </div>
+    </header>
 
+    <main>
+      <div class="toolbar">
+        <div class="muted" id="dataHint">Loading logs…</div>
+        <div class="stats" id="statsRow">
+          <span class="pill">Days: <strong id="s_days">0</strong></span>
+          <span class="pill">Total: <strong id="s_total">0.00h</strong></span>
+          <span class="pill">Standard: <strong id="s_std">0.00h</strong></span>
+          <span class="pill">Overtime: <strong id="s_ot">0.00h</strong></span>
+          <span class="pill">Travel: <strong id="s_travel">0.00h</strong></span>
+          <span class="pill ok">Enhanced OT Days: <strong id="s_enhDays">0</strong></span>
+        </div>
+      </div>
+
+      <div class="table-wrap" id="tableWrap" style="display:none;">
+        <table id="timesTable" aria-label="Weekly timesheet table">
+          <thead>
+            <tr>
+              <th style="min-width:110px;">Day</th>
+              <th>Date</th>
+              <th>Vehicle</th>
+              <th>Leave&nbsp;Home</th>
+              <th>Arrive&nbsp;First</th>
+              <th>Leave&nbsp;Last</th>
+              <th>Arrive&nbsp;Home</th>
+              <th class="center">Lunch</th>
+              <th class="right">Std&nbsp;h</th>
+              <th class="right">OT&nbsp;h</th>
+              <th class="right">Travel&nbsp;(to/from/total)</th>
+              <th class="center">Enhanced</th>
+              <th class="center">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="8" class="right">Totals</td>
+              <td class="right" id="t_std">0.00</td>
+              <td class="right" id="t_ot">0.00</td>
+              <td class="right" id="t_travel">0.00</td>
+              <td class="center" id="t_enh">0</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div id="emptyState" class="empty" style="display:none;">
+        No times logged for this engineer in the selected week.
+      </div>
+    </main>
+
+    <div class="footer">
+      <div class="muted">Source: json_logs/hours/hours-log.json</div>
+      <a class="link" id="compareLink" href="timesheet-summary.html">Open comparison page ↗</a>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== Config ===== */
+const HOURS_URL = "https://raw.githubusercontent.com/Mostlane/Test/main/json_logs/hours/hours-log.json";
+
+/* ===== Utilities ===== */
+const $ = (id) => document.getElementById(id);
+const toISO = (d) => d.toISOString().split("T")[0];
+const parseNum = (v) => v==null || v==="" ? 0 : (isNaN(+v) ? 0 : +v);
+
+function mondayOf(dateStr){
+  const d = dateStr ? new Date(dateStr+"T12:00:00") : new Date();
+  const day = (d.getDay()+6)%7; // Mon=0..Sun=6
+  d.setDate(d.getDate()-day);
+  d.setHours(12,0,0,0);
+  return d;
+}
+function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function fmtDateNice(dateStr){
+  const d = new Date(dateStr+"T12:00:00");
+  return d.toLocaleDateString("en-GB",{weekday:"short", day:"2-digit", month:"short"});
+}
+
+/* ===== State ===== */
+let ALL = { entries: [] };
+let ENGINEERS = [];
+let state = {
+  role: "engineer",
+  engineer: "",
+  weekStart: mondayOf().toISOString().split("T")[0]
+};
+
+/* ===== Fetch & Bootstrap ===== */
+async function fetchLogs(){
+  $("dataHint").textContent = "Loading logs…";
+  try{
+    const r = await fetch(HOURS_URL, {cache:"no-store"});
+    ALL = await r.json();
+    if(!Array.isArray(ALL.entries)) ALL.entries = [];
+    $("dataHint").textContent = `Loaded ${ALL.entries.length} records`;
+  }catch(e){
+    $("dataHint").textContent = "Could not load logs.";
+    ALL = { entries: [] };
+  }
+}
+
+function buildEngineerList(){
+  const set = new Set();
+  ALL.entries.forEach(e => { if(e.engineer) set.add(e.engineer.trim()); });
+  ENGINEERS = Array.from(set).sort((a,b)=>a.localeCompare(b));
+  const sel = $("engineerSelect");
+  sel.innerHTML = "";
+  ENGINEERS.forEach(name=>{
+    const o = document.createElement("option");
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+  // Default: first engineer (or keep current if present)
+  const existing = ENGINEERS.includes(state.engineer) ? state.engineer : ENGINEERS[0] || "";
+  state.engineer = existing;
+  sel.value = state.engineer;
+}
+
+function setWeekUI(){
+  const d = new Date(state.weekStart+"T12:00:00");
+  const weekEnd = addDays(d, 6);
+  $("weekPicker").value = toISO(d);
+  $("badgeWeek").textContent = `Week: ${d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})} – ${weekEnd.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})}`;
+}
+
+function setRoleUI(){
+  $("roleSelect").value = state.role;
+  $("badgeRole").textContent = `Role: ${state.role === "office" ? "Office" : "Engineer"}`;
+}
+
+/* ===== Filtering / Rendering ===== */
+function entriesForEngineerWeek(name, weekStart){
+  const start = new Date(weekStart+"T12:00:00");
+  const dates = Array.from({length:7}, (_,i)=> toISO(addDays(start,i)));
+  // Build a map by date
+  const byDate = new Map();
+  ALL.entries.forEach(e=>{
+    if(!e || !e.engineer || !e.date) return;
+    if(e.engineer.trim() !== name.trim()) return;
+    if(dates.includes(e.date)) byDate.set(e.date, e);
+  });
+  return { dates, byDate };
+}
+
+function renderTable(){
+  const { dates, byDate } = entriesForEngineerWeek(state.engineer, state.weekStart);
+  const tb = $("tbody");
+  tb.innerHTML = "";
+
+  let sumStd=0, sumOT=0, sumTravel=0, enhDays=0, worked=0;
+
+  dates.forEach(dateStr=>{
+    const e = byDate.get(dateStr);
+    const dayNice = fmtDateNice(dateStr);
+
+    if(e){
+      const lunch = e.deductLunch ? "30m" : "—";
+      const enh = String(e.enhancedOvertimePreview||"").toLowerCase().startsWith("y");
+      const travelTxt = `${parseNum(e.travelToHours).toFixed(2)} / ${parseNum(e.travelFromHours).toFixed(2)} / ${parseNum(e.totalTravelHours).toFixed(2)}`;
+      const noteOK = state.role === "office" || !!e.noteVisible;
+      const hasNote = (e.notes||"").trim().length>0 && noteOK;
+
+      sumStd += parseNum(e.standardHours);
+      sumOT  += parseNum(e.overtimeHours);
+      sumTravel += parseNum(e.totalTravelHours);
+      enhDays += enh ? 1 : 0;
+      worked += 1;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${dayNice}</strong></td>
+        <td class="muted">${e.date}</td>
+        <td>${e.vehicle||""}</td>
+        <td>${e.leaveHome||""}</td>
+        <td>${e.arriveFirstSite||""}</td>
+        <td>${e.leaveLastSite||""}</td>
+        <td>${e.arriveHome||""}</td>
+        <td class="center">${lunch}</td>
+        <td class="right">${parseNum(e.standardHours).toFixed(2)}</td>
+        <td class="right">${parseNum(e.overtimeHours).toFixed(2)}</td>
+        <td class="right">${travelTxt}</td>
+        <td class="center"><span class="flag ${enh?'enh':'no'}">${enh?'✓':'—'}</span></td>
+        <td class="center">
+          <span class="tooltip">
+            <span class="note-dot ${hasNote?'has':''}" title="${hasNote?'Click to view note':'No visible note'}">📝</span>
+            <span class="tip">${hasNote ? (e.notes||'').replace(/</g,"&lt;") : 'Note is hidden for engineers'}</span>
+          </span>
+        </td>
+      `;
+      tb.appendChild(tr);
+    } else {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${dayNice}</strong></td>
+        <td class="muted">${dateStr}</td>
+        <td colspan="11" class="muted">– no entry –</td>
+      `;
+      tb.appendChild(tr);
+    }
+  });
+
+  // Totals row & header stats
+  $("t_std").textContent = sumStd.toFixed(2);
+  $("t_ot").textContent  = sumOT.toFixed(2);
+  $("t_travel").textContent = sumTravel.toFixed(2);
+  $("t_enh").textContent = enhDays;
+
+  $("s_days").textContent = worked.toString();
+  $("s_std").textContent = sumStd.toFixed(2)+"h";
+  $("s_ot").textContent = sumOT.toFixed(2)+"h";
+  $("s_travel").textContent = sumTravel.toFixed(2)+"h";
+  $("s_total").textContent = (sumStd+sumOT).toFixed(2)+"h";
+  $("s_enhDays").textContent = enhDays.toString();
+
+  // Visibility
+  const hasAny = worked>0;
+  $("tableWrap").style.display = hasAny ? "block" : "none";
+  $("emptyState").style.display = hasAny ? "none" : "block";
+
+  // Comparison link (passes weekStart via query)
+  $("compareLink").href = `timesheet-summary.html?week=${encodeURIComponent(state.weekStart)}`;
+}
+
+/* ===== Events ===== */
+$("prevWeek").onclick = ()=>{
+  const d = addDays(new Date(state.weekStart+"T12:00:00"), -7);
+  state.weekStart = toISO(d);
+  setWeekUI(); renderTable();
+};
+$("nextWeek").onclick = ()=>{
+  const d = addDays(new Date(state.weekStart+"T12:00:00"), +7);
+  state.weekStart = toISO(d);
+  setWeekUI(); renderTable();
+};
+$("weekPicker").addEventListener("change", ()=>{
+  const monday = mondayOf($("weekPicker").value);
+  state.weekStart = toISO(monday);
+  setWeekUI(); renderTable();
+});
+$("engineerSelect").addEventListener("change", ()=>{
+  state.engineer = $("engineerSelect").value;
+  renderTable();
+});
+$("roleSelect").addEventListener("change", ()=>{
+  state.role = $("roleSelect").value;
+  setRoleUI(); renderTable();
+});
+$("refreshBtn").onclick = async ()=>{
+  await fetchLogs();
+  buildEngineerList();
+  renderTable();
+};
+
+/* ===== Boot ===== */
+(async function init(){
+  // Default week start = last Monday (if today Monday, keep today)
+  state.weekStart = toISO(mondayOf());
+  setWeekUI(); setRoleUI();
+  await fetchLogs();
+  buildEngineerList();
+  renderTable();
+})();
+</script>
+</body>
+</html>
