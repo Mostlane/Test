@@ -532,19 +532,56 @@ function saveDraft(){
 function restoreDraftIfAny(){
   const raw = localStorage.getItem(DRAFT_KEY);
   if(!raw) return;
+
   try{
     const draft = JSON.parse(raw);
     if(!draft || !draft.entries || !draft.entries.length) return;
+
     $("logsContainer").innerHTML = "";
     LOG_COUNTER = 0;
     $("date").value = draft.date || $("date").value;
-    draft.entries.forEach(ent=>{
-      addEngineerLog(ent);
+
+    // Rebuild each engineer block fully and then apply stored values
+    draft.entries.forEach(saved => {
+      addEngineerLog(); // create a fresh log
+      const id = "elog_" + LOG_COUNTER; // matches the most recent one
+      const get = s => $(`${id}_${s}`);
+      if(!get("engineer")) return;
+
+      get("engineer").value = saved.engineer || "";
+      get("engineer").dispatchEvent(new Event("change"));
+      get("vehicle").value = saved.vehicle || "";
+
+      ["leaveHome","arriveFirstSite","leaveLastSite","arriveHome"].forEach(k=>{
+        if(saved[k]) get(k.replace("Site","")).value = saved[k];
+      });
+
+      if(saved.notes) get("notes").value = saved.notes;
+      if(saved.noteVisible) get("noteVisible").checked = true;
+      if(saved.deductLunch === false) get("deductLunch").checked = false;
+      if(saved.vanCheck){
+        const r=document.querySelector(`input[name="${id}_vanCheck"][value="${saved.vanCheck}"]`);
+        if(r) r.checked = true;
+      }
+      if(saved.vanScore) get("vanScore").value = saved.vanScore;
+      if(saved.personalMileage) get("personalMileage").value = saved.personalMileage;
+      if(saved.manualOvertimeHours) get("manualOTHours").value = saved.manualOvertimeHours;
+      if(saved.manualOvertimeApplied) get("manualOverride").checked = true, get("manualEntry").style.display="block";
+      if(saved.forceEnhanced) get("btnForceEnh").classList.add("active");
+      if(saved.excludeFromPay) get("btnExclude").classList.add("active");
+      if(saved.oneOff) get("btnOneOff").classList.add("active");
+
+      calcTotalsFor(id);
     });
+
     $("restoreBanner").style.display = "block";
+    $("restoreBanner").innerHTML = `<span style="color:green;">✅ Restored unsent entries from last session.</span>`;
     updateDayForAll();
-  }catch(e){}
+  }catch(e){
+    console.error("Restore error:", e);
+  }
 }
+
 function clearDraft(){ localStorage.removeItem(DRAFT_KEY); $("restoreBanner").style.display="none"; }
 
 /* ====== GATHER / SUBMIT ====== */
