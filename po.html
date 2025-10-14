@@ -150,10 +150,6 @@
       <label for="desc">Short Description</label>
       <textarea id="desc" placeholder="What is this PO for?" required></textarea>
 
-      <!-- 🆕 Added Notes field -->
-      <label for="notes">Additional Notes</label>
-      <textarea id="notes" placeholder="Enter any additional notes..."></textarea>
-
       <button type="submit" class="button" id="submitBtn">Create PO</button>
       <button type="button" id="personalBtn" class="button" style="background-color:#005bb5;margin-top:10px;">Personal Purchase (Tools etc.)</button>
 
@@ -181,6 +177,7 @@
     const SUPPLIERS_URL = RAW + 'suppliers.json';
     const VEHICLES_URL = RAW + 'vehicles.json';
     const WEBHOOK_URL = 'https://hooks.zapier.com/hooks/catch/20261714/u59i821/';
+    const JSON_FILE_PATH = 'json_logs/json_logs/po/purchase_log.json'; // ✅ Correct JSON file path
 
     const byId = id => document.getElementById(id);
     const fetchJSON = url => fetch(url + '?v=' + Date.now()).then(r => r.json());
@@ -315,8 +312,7 @@
       const supplierNumber=byId('supplier').value;
       const supplierName=byId('supplier').selectedOptions[0]?.textContent||'';
       const descVal=byId('desc').value.trim();
-      const incidentVal=byId('incident').value.trim(); // 🆕 capture incident
-      const notesVal=byId('notes').value.trim();       // 🆕 capture notes
+      const incidentVal=byId('incident').value.trim(); // ✅ added to send to webhook
 
       if(!engineerVal||!dateVal||!descVal||!supplierNumber){alert('All required fields must be completed.');submitBtn.disabled=false;return;}
       if(geo.lat===null||geo.lon===null){alert('Location required. Enable location.');submitBtn.disabled=false;return;}
@@ -337,8 +333,8 @@
       payload.append('description',descVal);
       payload.append('latitude',String(geo.lat));
       payload.append('longitude',String(geo.lon));
-      payload.append('incidentNumber',incidentVal); // 🆕 send to webhook
-      payload.append('notes',notesVal);             // 🆕 send to webhook
+      payload.append('incidentNumber',incidentVal); // ✅ added incident number
+      payload.append('notes',descVal); // ✅ send existing notes/description
 
       try{
         await fetch(WEBHOOK_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:payload.toString()});
