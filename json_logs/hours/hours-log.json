@@ -149,6 +149,36 @@
       "notes": "Lunch deducted is ticked",
       "noteVisible": false,
       "submittedAt": "2025-10-15T21:53:28.733Z"
+    },
+    {
+      "id": "1760565255446-tscrlu",
+      "receivedAt": "2025-10-15T21:54:15.462Z",
+      "date": "2025-10-17",
+      "day": "Friday",
+      "engineer": "Ryan Diggens",
+      "vehicle": "HN73 KFO",
+      "leaveHome": "07:30",
+      "arriveFirstSite": "08:15",
+      "leaveLastSite": "15:45",
+      "arriveHome": "16:53",
+      "deductLunch": false,
+      "totalHours": 9.38,
+      "standardHours": 9.38,
+      "overtimeHours": null,
+      "travelToHours": 0.75,
+      "travelFromHours": 1.13,
+      "totalTravelHours": 1.88,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "Lunch deducted is NOT ticked",
+      "noteVisible": false,
+      "submittedAt": "2025-10-15T21:54:15.463Z"
     }
   ]
 }
