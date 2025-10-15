@@ -690,6 +690,10 @@ async function submitAll(){
   $("statusMsg").textContent="Submitting…";
 
   const payload = new URLSearchParams();
+ // Ensure booleans remain booleans (not strings)
+entries.forEach(e => {
+  e.deductLunch = !!e.deductLunch;
+});
   payload.append("entries", JSON.stringify(entries));
 
   try{
