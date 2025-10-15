@@ -1,1 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timesheet Viewer</title>
+  <style>
+    :root{
+      --brand:#004a99;
+      --ink:#1f2937;
+      --muted:#6b7280;
+      --bg:#f3f4f6;
+      --card:#ffffff;
+      --ok:#10b981;
+      --warn:#f59e0b;
+      --bad:#ef4444;
+      --payx:#f3f4f6;
+      --enh:#e8fff3;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+      color:var(--ink);
+      background:var(--bg);
+    }
+    header{
+      padding:16px;
+      background:var(--card);
+      position:sticky; top:0; z-index:5;
+      box-shadow:0 2px 8px rgba(0,0,0,.06);
+    }
+    h1{margin:0 0 8px; font-size:20px; color:var(--brand)}
+    .filters{
+      display:grid;
+      gap:10px;
+      grid-template-columns:1fr 1fr;
+    }
+    .filters .row{
+      display:flex; gap:8px; align-items:center;
+    }
+    label{font-size:12px; color:var(--muted)}
+    select, input, button{
+      width:100%;
+      padding:10px 12px;
+      border:1px solid #d1d5db;
+      border-radius:8px;
+      background:#fff;
+      font-size:14px;
+    }
+    select[multiple]{min-height:46px}
+    .actions{display:flex; gap:8px}
+    .btn{
+      background:var(--brand); color:#fff; border:none; cursor:pointer;
+      border-radius:8px; padding:10px 14px; font-weight:600;
+    }
+    .btn.ghost{background:#fff; color:var(--brand); border:1px solid var(--brand)}
+    main{padding:16px}
+    .card{
+      background:var(--card);
+      border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06);
+      overflow:hidden;
+    }
+    .table-wrap{overflow:auto}
+    table{width:100%; border-collapse:collapse; font-size:14px}
+    thead th{
+      position:sticky; top:0; z-index:2; background:#f8fafc; color:#334155;
+      text-align:left; font-weight:700; padding:10px 12px; border-bottom:1px solid #e5e7eb;
+      white-space:nowrap;
+    }
+    tbody td{padding:8px 12px; border-bottom:1px solid #eef2f7; vertical-align:top}
+    tbody tr.excluded{background:var(--payx); color:#6b7280; font-style:italic}
+    tbody tr.enhanced{background:var(--enh)}
+    .note{
+      max-width:38ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .meta{
+      padding:12px; border-top:1px solid #e5e7eb; color:var(--muted); font-size:13px;
+      display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;
+    }
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px; border-radius:999px; font-size:12px; background:#f1f5f9; color:#334155;
+      white-space:nowrap;
+    }
+    .pill.ok{background:#ecfdf5; color:#065f46}
+    .pill.bad{background:#fef2f2; color:#991b1b}
+    details.summary{
+      margin-top:16px; background:var(--card); border-radius:12px; overflow:hidden;
+      box-shadow:0 2px 10px rgba(0,0,0,.06);
+    }
+    details.summary > summary{
+      list-style:none; cursor:pointer; padding:12px 16px; font-weight:700;
+      background:#f8fafc; border-bottom:1px solid #e5e7eb;
+    }
+    details.summary[open] > summary{border-bottom-color:#e5e7eb}
+    .engineer-sum{padding:10px 16px; border-top:1px dashed #e5e7eb; display:grid; gap:8px}
+    .sum-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+    .muted{color:var(--muted)}
+    @media (max-width: 900px){
+      .filters{grid-template-columns:1fr}
+      thead th, tbody td{padding:8px 10px}
+      .sum-grid{grid-template-columns:repeat(2,1fr)}
+      .note{max-width:24ch}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Timesheet Viewer</h1>
+    <div class="filters">
+      <div class="row">
+        <div style="flex:1">
+          <label for="weekSelect">Week (Mon–Sun)</label>
+          <select id="weekSelect"></select>
+        </div>
+        <div style="flex:1">
+          <label for="daySelect">Day</label>
+          <select id="daySelect">
+            <option value="">All days</option>
+            <option>Monday</option><option>Tuesday</option><option>Wednesday</option>
+            <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <label for="engSelect">Engineers (multi)</label>
+          <select id="engSelect" multiple></select>
+        </div>
+        <div class="actions" style="flex:1; align-self:end">
+          <button id="applyBtn" class="btn" type="button">Apply</button>
+          <button id="clearBtn" class="btn ghost" type="button">Clear</button>
+          <button id="csvBtn" class="btn ghost" type="button">Export CSV</button>
+        </div>
+      </div>
+    </div>
+  </header>
 
+  <main>
+    <div class="card">
+      <div class="table-wrap">
+        <table id="tbl">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Engineer</th>
+              <th>Leave Home</th>
+              <th>Arrive First Site</th>
+              <th>Leave Last Site</th>
+              <th>Arrive Home</th>
+              <th>Travel Time (Total)</th>
+              <th>Lunch Deducted</th>
+              <th>Total Hours</th>
+              <th>Overtime Hours</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="meta" id="meta">
+        <span id="count">0 rows</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <span class="pill ok" title="Enhanced overtime rows highlighted">Enhanced OT</span>
+          <span class="pill" title="Rows excluded from pay are greyed out">Exclude from pay</span>
+        </div>
+      </div>
+    </div>
+
+    <details class="summary" open>
+      <summary>Weekly per-engineer summary</summary>
+      <div id="engSummaries"></div>
+    </details>
+  </main>
+
+  <script>
+    // ---- CONFIG ----
+    const HOURS_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/json_logs/hours/hours-log.json';
+
+    // ---- HELPERS ----
+    const byId = id => document.getElementById(id);
+    const fmtNum = (n) => (n === null || n === undefined || Number.isNaN(n)) ? '' : Number(n).toFixed(2).replace(/\.00$/,'');
+    const parseNum = (v) => (v===null||v===undefined||v==='') ? 0 : Number(v);
+    const toISODate = (d) => new Date(d).toISOString().slice(0,10);
+    const mondayOf = (dStr) => {
+      const d = new Date(dStr + 'T00:00:00');
+      const day = (d.getDay()+6)%7; // 0=Mon
+      d.setDate(d.getDate()-day);
+      return toISODate(d);
+    };
+    const unique = (arr) => [...new Set(arr)];
+    const sum = (arr) => arr.reduce((a,b)=>a+parseNum(b),0);
+
+    // ---- STATE ----
+    let all = [];           // raw entries
+    let weeks = [];         // distinct monday strings
+    let engineers = [];     // distinct engineers
+
+    // ---- FETCH + INIT ----
+    fetch(HOURS_URL + '?v=' + Date.now())
+      .then(r => r.json())
+      .then(json => {
+        all = (json?.entries || []).map(e => ({
+          ...e,
+          week: mondayOf(e.date)
+        }));
+        weeks = unique(all.map(e => e.week)).sort().reverse();
+        engineers = unique(all.map(e => e.engineer).filter(Boolean)).sort((a,b)=>a.localeCompare(b));
+
+        populateFilters();
+        render(); // initial
+      })
+      .catch(err => {
+        console.error('Load error', err);
+        alert('Could not load hours-log.json');
+      });
+
+    function populateFilters(){
+      // Week select
+      const weekSel = byId('weekSelect');
+      weekSel.innerHTML = weeks.map(w => {
+        const end = toISODate(new Date(new Date(w).setDate(new Date(w).getDate()+6)));
+        return `<option value="${w}">${w} → ${end}</option>`;
+      }).join('');
+      // Default to most recent week
+      if (weeks.length) weekSel.value = weeks[0];
+
+      // Engineers multi
+      const engSel = byId('engSelect');
+      engSel.innerHTML = engineers.map(e=>`<option>${e}</option>`).join('');
+    }
+
+    // ---- FILTER + RENDER ----
+    function currentFilters(){
+      const week = byId('weekSelect').value || weeks[0] || '';
+      const day = byId('daySelect').value;
+      const selectedEngs = [...byId('engSelect').selectedOptions].map(o=>o.value);
+      return {week, day, selectedEngs};
+    }
+
+    function applyFilters(data, {week, day, selectedEngs}){
+      let rows = data.filter(e => e.week === week);
+      if (day) rows = rows.filter(e => e.day === day);
+      if (selectedEngs.length) rows = rows.filter(e => selectedEngs.includes(e.engineer));
+      // sort by date then engineer then leaveHome
+      rows.sort((a,b)=> (a.date===b.date ? (a.engineer===b.engineer ? String(a.leaveHome).localeCompare(String(b.leaveHome)) : a.engineer.localeCompare(b.engineer)) : a.date.localeCompare(b.date)));
+      return rows;
+    }
+
+    function render(){
+      const filters = currentFilters();
+      const rows = applyFilters(all, filters);
+
+      const tbody = byId('tbl').querySelector('tbody');
+      tbody.innerHTML = rows.map(r=>{
+        const travelTotal = parseNum(r.travelToHours) + parseNum(r.travelFromHours);
+        const lunchTxt = r.deductLunch ? 'Yes' : 'No';
+        const ot = (r.overtimeHours===null || r.overtimeHours===undefined) ? '' : fmtNum(r.overtimeHours);
+        const note = r.notes || '';
+        const trClass = [
+          r.excludeFromPay ? 'excluded':'',
+          (String(r.enhancedOvertimePreview).toLowerCase()==='yes') ? 'enhanced':''
+        ].join(' ').trim();
+
+        return `<tr class="${trClass}">
+          <td>${r.date} <div class="muted" style="font-size:12px">${r.day||''}</div></td>
+          <td>${r.engineer||''}</td>
+          <td>${r.leaveHome||''}</td>
+          <td>${r.arriveFirstSite||''}</td>
+          <td>${r.leaveLastSite||''}</td>
+          <td>${r.arriveHome||''}</td>
+          <td>${fmtNum(travelTotal)}</td>
+          <td>${lunchTxt}</td>
+          <td>${fmtNum(r.totalHours)}</td>
+          <td>${ot}</td>
+          <td title="${note.replace(/"/g,'&quot;')}"><span class="note">${note}</span></td>
+        </tr>`;
+      }).join('');
+
+      byId('count').textContent = `${rows.length} row${rows.length===1?'':'s'}`;
+
+      renderSummaries(rows, filters.week);
+    }
+
+    function renderSummaries(rows, week){
+      const wrap = byId('engSummaries');
+      if (!rows.length){ wrap.innerHTML = '<div class="engineer-sum muted">No data for the current filters.</div>'; return; }
+
+      // group by engineer
+      const byEng = {};
+      rows.forEach(r=>{
+        (byEng[r.engineer] ||= []).push(r);
+      });
+
+      const blocks = Object.entries(byEng).sort(([a],[b])=>a.localeCompare(b)).map(([eng, list])=>{
+        const total = sum(list.map(r=>r.totalHours));
+        const ot = sum(list.map(r=>r.overtimeHours ?? 0));
+        const travel = sum(list.map(r=> parseNum(r.travelToHours)+parseNum(r.travelFromHours) ));
+        const lunchCount = list.filter(r=>r.deductLunch).length;
+
+        // Van check: treat as complete if ANY day is "Yes"
+        const anyCheckYes = list.some(r => String(r.vanCheck).toLowerCase() === 'yes');
+        const vanCheckBadge = anyCheckYes
+            ? `<span class="pill ok">Van Check: Complete</span>`
+            : `<span class="pill bad">Van Check: Incomplete</span>`;
+
+        // Van score: average of numeric, ignoring nulls
+        const scores = list.map(r=>r.vanScore).filter(v=>v!==null && v!==undefined && v!=='');
+        const avgScore = scores.length ? (sum(scores)/scores.length) : null;
+
+        // Private mileage: sum
+        const mileage = sum(list.map(r=>r.personalMileage ?? 0));
+
+        return `<div class="engineer-sum">
+          <div class="row" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
+            <div><strong>${eng}</strong> <span class="muted">• Week starting ${week}</span></div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap">
+              ${vanCheckBadge}
+              <span class="pill">Van Score: ${avgScore===null?'Pending':fmtNum(avgScore)}</span>
+              <span class="pill">Private Mileage: ${fmtNum(mileage)}</span>
+            </div>
+          </div>
+          <div class="sum-grid">
+            <div class="pill">Total Hours: <strong>&nbsp;${fmtNum(total)}</strong></div>
+            <div class="pill">Overtime: <strong>&nbsp;${fmtNum(ot)}</strong></div>
+            <div class="pill">Travel (hrs): <strong>&nbsp;${fmtNum(travel)}</strong></div>
+            <div class="pill">Lunch Deducted: <strong>&nbsp;${lunchCount}</strong> day(s)</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      wrap.innerHTML = blocks;
+    }
+
+    // ---- EVENTS ----
+    byId('applyBtn').addEventListener('click', render);
+    byId('daySelect').addEventListener('change', render);
+    byId('weekSelect').addEventListener('change', render);
+    byId('engSelect').addEventListener('change', ()=>{}); // changed via Apply
+    byId('clearBtn').addEventListener('click', ()=>{
+      byId('daySelect').value = '';
+      [...byId('engSelect').options].forEach(o=>o.selected=false);
+      render();
+    });
+    byId('csvBtn').addEventListener('click', ()=>{
+      const rows = applyFilters(all, currentFilters());
+      const header = ["Date","Day","Engineer","Vehicle","Leave Home","Arrive First Site","Leave Last Site","Arrive Home","Travel To","Travel From","Travel Total","Lunch Deducted","Total Hours","Overtime Hours","Notes"];
+      const lines = [header.join(",")];
+      rows.forEach(r=>{
+        const travelTo = parseNum(r.travelToHours);
+        const travelFrom = parseNum(r.travelFromHours);
+        const travelTot = travelTo + travelFrom;
+        const vals = [
+          r.date, r.day||'', r.engineer||'', r.vehicle||'',
+          r.leaveHome||'', r.arriveFirstSite||'', r.leaveLastSite||'', r.arriveHome||'',
+          fmtNum(travelTo), fmtNum(travelFrom), fmtNum(travelTot),
+          r.deductLunch?'Yes':'No',
+          fmtNum(r.totalHours),
+          (r.overtimeHours===null||r.overtimeHours===undefined)?'':fmtNum(r.overtimeHours),
+          (r.notes||'').replace(/"/g,'""') // will quote next
+        ];
+        // CSV escape
+        const escaped = vals.map(v => (/,|\n|"/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v));
+        lines.push(escaped.join(","));
+      });
+      const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `timesheets_${byId('weekSelect').value}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
