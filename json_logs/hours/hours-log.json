@@ -179,6 +179,36 @@
       "notes": "Lunch deducted is NOT ticked",
       "noteVisible": false,
       "submittedAt": "2025-10-15T21:54:15.463Z"
+    },
+    {
+      "id": "1760565722229-x495q8",
+      "receivedAt": "2025-10-15T22:02:02.247Z",
+      "date": "2025-10-14",
+      "day": "Tuesday",
+      "engineer": "David Molloy",
+      "vehicle": "LE73 UHV",
+      "leaveHome": "06:40",
+      "arriveFirstSite": "07:21",
+      "leaveLastSite": "15:48",
+      "arriveHome": "16:50",
+      "deductLunch": false,
+      "totalHours": 9.67,
+      "standardHours": 9.67,
+      "overtimeHours": null,
+      "travelToHours": 0.68,
+      "travelFromHours": 1.03,
+      "totalTravelHours": 1.71,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "Lunch deducted is ticked",
+      "noteVisible": false,
+      "submittedAt": "2025-10-15T22:02:02.247Z"
     }
   ]
 }
