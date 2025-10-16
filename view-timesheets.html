@@ -132,6 +132,8 @@
           <button id="applyBtn" class="btn" type="button">Apply</button>
           <button id="clearBtn" class="btn ghost" type="button">Clear</button>
           <button id="csvBtn" class="btn ghost" type="button">Export CSV</button>
+          <!-- 🔄 Refresh Button Added -->
+          <button id="refreshBtn" class="btn ghost" type="button">🔄 Refresh</button>
         </div>
       </div>
     </div>
@@ -194,9 +196,9 @@
     const sum = (arr) => arr.reduce((a,b)=>a+parseNum(b),0);
 
     // ---- STATE ----
-    let all = [];           // raw entries
-    let weeks = [];         // distinct monday strings
-    let engineers = [];     // distinct engineers
+    let all = [];           
+    let weeks = [];         
+    let engineers = [];     
 
     // ---- FETCH + INIT ----
     fetch(HOURS_URL + '?v=' + Date.now())
@@ -210,7 +212,7 @@
         engineers = unique(all.map(e => e.engineer).filter(Boolean)).sort((a,b)=>a.localeCompare(b));
 
         populateFilters();
-        render(); // initial
+        render(); 
       })
       .catch(err => {
         console.error('Load error', err);
@@ -218,21 +220,16 @@
       });
 
     function populateFilters(){
-      // Week select
       const weekSel = byId('weekSelect');
       weekSel.innerHTML = weeks.map(w => {
         const end = toISODate(new Date(new Date(w).setDate(new Date(w).getDate()+6)));
         return `<option value="${w}">${w} → ${end}</option>`;
       }).join('');
-      // Default to most recent week
       if (weeks.length) weekSel.value = weeks[0];
-
-      // Engineers multi
       const engSel = byId('engSelect');
       engSel.innerHTML = engineers.map(e=>`<option>${e}</option>`).join('');
     }
 
-    // ---- FILTER + RENDER ----
     function currentFilters(){
       const week = byId('weekSelect').value || weeks[0] || '';
       const day = byId('daySelect').value;
@@ -244,7 +241,6 @@
       let rows = data.filter(e => e.week === week);
       if (day) rows = rows.filter(e => e.day === day);
       if (selectedEngs.length) rows = rows.filter(e => selectedEngs.includes(e.engineer));
-      // sort by date then engineer then leaveHome
       rows.sort((a,b)=> (a.date===b.date ? (a.engineer===b.engineer ? String(a.leaveHome).localeCompare(String(b.leaveHome)) : a.engineer.localeCompare(b.engineer)) : a.date.localeCompare(b.date)));
       return rows;
     }
@@ -252,7 +248,6 @@
     function render(){
       const filters = currentFilters();
       const rows = applyFilters(all, filters);
-
       const tbody = byId('tbl').querySelector('tbody');
       tbody.innerHTML = rows.map(r=>{
         const travelTotal = parseNum(r.travelToHours) + parseNum(r.travelFromHours);
@@ -278,41 +273,29 @@
           <td title="${note.replace(/"/g,'&quot;')}"><span class="note">${note}</span></td>
         </tr>`;
       }).join('');
-
       byId('count').textContent = `${rows.length} row${rows.length===1?'':'s'}`;
-
       renderSummaries(rows, filters.week);
     }
 
     function renderSummaries(rows, week){
       const wrap = byId('engSummaries');
       if (!rows.length){ wrap.innerHTML = '<div class="engineer-sum muted">No data for the current filters.</div>'; return; }
-
-      // group by engineer
       const byEng = {};
       rows.forEach(r=>{
         (byEng[r.engineer] ||= []).push(r);
       });
-
       const blocks = Object.entries(byEng).sort(([a],[b])=>a.localeCompare(b)).map(([eng, list])=>{
         const total = sum(list.map(r=>r.totalHours));
         const ot = sum(list.map(r=>r.overtimeHours ?? 0));
         const travel = sum(list.map(r=> parseNum(r.travelToHours)+parseNum(r.travelFromHours) ));
         const lunchCount = list.filter(r=>r.deductLunch).length;
-
-        // Van check: treat as complete if ANY day is "Yes"
         const anyCheckYes = list.some(r => String(r.vanCheck).toLowerCase() === 'yes');
         const vanCheckBadge = anyCheckYes
             ? `<span class="pill ok">Van Check: Complete</span>`
             : `<span class="pill bad">Van Check: Incomplete</span>`;
-
-        // Van score: average of numeric, ignoring nulls
         const scores = list.map(r=>r.vanScore).filter(v=>v!==null && v!==undefined && v!=='');
         const avgScore = scores.length ? (sum(scores)/scores.length) : null;
-
-        // Private mileage: sum
         const mileage = sum(list.map(r=>r.personalMileage ?? 0));
-
         return `<div class="engineer-sum">
           <div class="row" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
             <div><strong>${eng}</strong> <span class="muted">• Week starting ${week}</span></div>
@@ -330,7 +313,6 @@
           </div>
         </div>`;
       }).join('');
-
       wrap.innerHTML = blocks;
     }
 
@@ -338,7 +320,7 @@
     byId('applyBtn').addEventListener('click', render);
     byId('daySelect').addEventListener('change', render);
     byId('weekSelect').addEventListener('change', render);
-    byId('engSelect').addEventListener('change', ()=>{}); // changed via Apply
+    byId('engSelect').addEventListener('change', ()=>{});
     byId('clearBtn').addEventListener('click', ()=>{
       byId('daySelect').value = '';
       [...byId('engSelect').options].forEach(o=>o.selected=false);
@@ -359,9 +341,8 @@
           r.deductLunch?'Yes':'No',
           fmtNum(r.totalHours),
           (r.overtimeHours===null||r.overtimeHours===undefined)?'':fmtNum(r.overtimeHours),
-          (r.notes||'').replace(/"/g,'""') // will quote next
+          (r.notes||'').replace(/"/g,'""')
         ];
-        // CSV escape
         const escaped = vals.map(v => (/,|\n|"/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v));
         lines.push(escaped.join(","));
       });
@@ -371,6 +352,11 @@
       a.href = url; a.download = `timesheets_${byId('weekSelect').value}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
+    });
+
+    // ---- REFRESH BUTTON ----
+    byId('refreshBtn').addEventListener('click', () => {
+      location.reload(true);
     });
   </script>
 </body>
