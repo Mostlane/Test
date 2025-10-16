@@ -132,7 +132,6 @@
           <button id="applyBtn" class="btn" type="button">Apply</button>
           <button id="clearBtn" class="btn ghost" type="button">Clear</button>
           <button id="csvBtn" class="btn ghost" type="button">Export CSV</button>
-          <!-- 🔄 Refresh Button Added -->
           <button id="refreshBtn" class="btn ghost" type="button">🔄 Refresh</button>
         </div>
       </div>
@@ -178,29 +177,32 @@
   </main>
 
   <script>
-    // ---- CONFIG ----
     const HOURS_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/json_logs/hours/hours-log.json';
 
-    // ---- HELPERS ----
+    // 🆕 Date formatter for UK-style (DD-MM-YYYY or DD-MM-YY)
+    function formatDateUK(dateStr, short=false){
+      if(!dateStr) return "";
+      const [y,m,d] = dateStr.split("-");
+      return short ? `${d}-${m}-${y.slice(-2)}` : `${d}-${m}-${y}`;
+    }
+
     const byId = id => document.getElementById(id);
     const fmtNum = (n) => (n === null || n === undefined || Number.isNaN(n)) ? '' : Number(n).toFixed(2).replace(/\.00$/,'');
     const parseNum = (v) => (v===null||v===undefined||v==='') ? 0 : Number(v);
     const toISODate = (d) => new Date(d).toISOString().slice(0,10);
     const mondayOf = (dStr) => {
       const d = new Date(dStr + 'T00:00:00');
-      const day = (d.getDay()+6)%7; // 0=Mon
+      const day = (d.getDay()+6)%7;
       d.setDate(d.getDate()-day);
       return toISODate(d);
     };
     const unique = (arr) => [...new Set(arr)];
     const sum = (arr) => arr.reduce((a,b)=>a+parseNum(b),0);
 
-    // ---- STATE ----
     let all = [];           
     let weeks = [];         
     let engineers = [];     
 
-    // ---- FETCH + INIT ----
     fetch(HOURS_URL + '?v=' + Date.now())
       .then(r => r.json())
       .then(json => {
@@ -223,7 +225,7 @@
       const weekSel = byId('weekSelect');
       weekSel.innerHTML = weeks.map(w => {
         const end = toISODate(new Date(new Date(w).setDate(new Date(w).getDate()+6)));
-        return `<option value="${w}">${w} → ${end}</option>`;
+        return `<option value="${w}">${formatDateUK(w)} → ${formatDateUK(end)}</option>`;
       }).join('');
       if (weeks.length) weekSel.value = weeks[0];
       const engSel = byId('engSelect');
@@ -260,7 +262,7 @@
         ].join(' ').trim();
 
         return `<tr class="${trClass}">
-          <td>${r.date} <div class="muted" style="font-size:12px">${r.day||''}</div></td>
+          <td>${formatDateUK(r.date)} <div class="muted" style="font-size:12px">${r.day||''}</div></td>
           <td>${r.engineer||''}</td>
           <td>${r.leaveHome||''}</td>
           <td>${r.arriveFirstSite||''}</td>
@@ -298,7 +300,7 @@
         const mileage = sum(list.map(r=>r.personalMileage ?? 0));
         return `<div class="engineer-sum">
           <div class="row" style="display:flex; justify-content:space-between; gap:10px; align-items:center">
-            <div><strong>${eng}</strong> <span class="muted">• Week starting ${week}</span></div>
+            <div><strong>${eng}</strong> <span class="muted">• Week starting ${formatDateUK(week)}</span></div>
             <div style="display:flex; gap:8px; flex-wrap:wrap">
               ${vanCheckBadge}
               <span class="pill">Van Score: ${avgScore===null?'Pending':fmtNum(avgScore)}</span>
@@ -316,7 +318,6 @@
       wrap.innerHTML = blocks;
     }
 
-    // ---- EVENTS ----
     byId('applyBtn').addEventListener('click', render);
     byId('daySelect').addEventListener('change', render);
     byId('weekSelect').addEventListener('change', render);
@@ -354,7 +355,6 @@
       URL.revokeObjectURL(url);
     });
 
-    // ---- REFRESH BUTTON ----
     byId('refreshBtn').addEventListener('click', () => {
       location.reload(true);
     });
