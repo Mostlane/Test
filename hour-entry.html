@@ -141,7 +141,6 @@ function addEngineerLog(initial={}) {
           </div>
         </div>
       </div>
-
       <div class="card">
         <div class="title">Times (24h)</div>
         <div class="grid" style="grid-template-columns:repeat(12,1fr);gap:10px;">
@@ -153,7 +152,6 @@ function addEngineerLog(initial={}) {
         <div class="divider"></div>
         <label class="toggle-row"><input type="checkbox" id="${id}_deductLunch" checked> Deduct 30 m lunch</label>
       </div>
-
       <div class="card">
         <div class="title">Vehicle, Mileage & Notes</div>
         <div id="${id}_mondayBlock" style="display:none;margin-bottom:10px;">
@@ -184,7 +182,6 @@ function addEngineerLog(initial={}) {
           </div>
         </div>
       </div>
-
       <div class="card">
         <div class="title">Calculated Totals</div>
         <div class="totals">
@@ -230,7 +227,6 @@ function addEngineerLog(initial={}) {
   if(!initial.engineer&&engSel.options.length){engSel.selectedIndex=0;engSel.dispatchEvent(new Event("change"));}
   toggleMonFriForLog(id);calcTotalsFor(id);renderChecklistForDate($("date").value);
 }
-
 /* ====== UPDATED calcTotalsFor() WITH WEEKLY VAN-CHECK RULE ====== */
 function calcTotalsFor(id){
   const get=s=>$(`${id}_${s}`);
@@ -303,7 +299,6 @@ function updateDayForAll(){
   });
   renderChecklistForDate(d);
 }
-
 /* ====== CHECKLIST ====== */
 async function refreshChecklist(){
   try{
@@ -330,7 +325,6 @@ function renderChecklistForDate(dateStr){
   });
   $("checklistCounts").textContent=`${done} of ${ENGINEERS.length} submitted`;
 }
-
 /* ====== AUTOSAVE ====== */
 const saveDraftDebounced=debounce(saveDraft,400);
 function saveDraft(){
@@ -368,7 +362,6 @@ function restoreDraftIfAny(){
   }catch(e){console.error("Restore error:",e);}
 }
 function clearDraft(){localStorage.removeItem(DRAFT_KEY);$("restoreBanner").style.display="none";}
-
 /* ====== SUBMIT ====== */
 function serializeAllLogs(){
   const d=$("date").value,weekKey=getWeekKey(d),day=dow(d),arr=[];
@@ -400,7 +393,6 @@ function serializeAllLogs(){
   });
   return arr;
 }
-
 async function submitAll(){
   $("statusMsg").style.color="#475569";$("statusMsg").textContent="Validating…";
   const entries=serializeAllLogs();
@@ -418,7 +410,6 @@ async function submitAll(){
     }else{$("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Submission failed.";}
   }catch{ $("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Network error."; }
 }
-
 /* ====== FINAL ====== */
 function toggleMonFriForLog(id){
   const day=dayNum($("date").value);
