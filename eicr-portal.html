@@ -38,8 +38,6 @@
     th{background:#0071CE;color:#fff;position:sticky;top:0;z-index:5}
     tr:nth-child(even){background:rgba(255,255,255,0.7)}
     tr:nth-child(odd){background:rgba(255,255,255,0.5)}
-
-    /* ---------- Popup Modals ---------- */
     .modal{
       display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
       background:rgba(0,0,0,0.5);
@@ -61,8 +59,6 @@
       border-radius:6px;cursor:pointer;transition:0.2s;
     }
     .range-btn.active{background:#0071CE;color:#fff}
-
-    /* ✅ summary boxes */
     .summary-box{
       border:1px solid #ddd;border-radius:10px;margin:10px 0;padding:10px;background:#fff;
     }
@@ -75,7 +71,6 @@
     }
     .compliance-card h3{margin:0;font-size:24px;font-weight:bold;color:#004a00;}
     .compliance-card p{margin:4px 0 0 0;font-size:14px;color:#004a00;}
-
     @media(max-width:768px){
       .search-input{width:90%;font-size:16px}
       th,td{font-size:12px;padding:6px}
@@ -124,7 +119,6 @@
     </div>
   </div>
 
-  <!-- export modal -->
   <div id="exportModal" class="modal">
     <div class="modal-content">
       <h2>Export Options</h2>
@@ -153,7 +147,6 @@
     </div>
   </div>
 
-  <!-- ✅ summary modal -->
   <div id="summaryModal" class="modal">
     <div class="modal-content" style="max-height:80vh;overflow-y:auto;position:relative;">
       <button class="close-x" onclick="closeSummaryModal()" 
@@ -193,32 +186,13 @@
       <td>${e.em}</td><td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td></tr>`});
   }
 
-  /* ✅ Toggle-on / toggle-off range selection */
   function selectRange(days, el) {
     const buttons = document.querySelectorAll('.range-btn');
     const isAlreadyActive = el.classList.contains('active');
-
-    // reset all buttons
-    buttons.forEach(b => {
-      b.classList.remove('active');
-      b.style.background = '#e6e8eb';
-      b.style.color = '#000';
-    });
-
-    if (isAlreadyActive) {
-      // user clicked same active button → deselect
-      rangeDays = null;
-    } else {
-      // activate this one
-      el.classList.add('active');
-      el.style.background = '#0071CE';
-      el.style.color = '#fff';
-      rangeDays = days;
-    }
-
-    // clear manual dates
-    document.getElementById('exportFrom').value = "";
-    document.getElementById('exportTo').value = "";
+    buttons.forEach(b => {b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
+    if (isAlreadyActive) {rangeDays = null;} 
+    else {el.classList.add('active');el.style.background='#0071CE';el.style.color='#fff';rangeDays = days;}
+    document.getElementById('exportFrom').value = "";document.getElementById('exportTo').value = "";
   }
 
   function openExportModal(){exportModal.style.display='block'}
@@ -231,26 +205,39 @@
     runExport();
   }
 
-  function runExport(){
-    const cols=[...document.querySelectorAll('.exportCheck:checked')].map(c=>c.value);
-    if(!cols.length)return alert('Please select at least one compliance type.');
-    let f=parseDate(exportFrom.value.split('-').reverse().join('/'));
-    let t=parseDate(exportTo.value.split('-').reverse().join('/'));
-    if(rangeDays){f=new Date();t=new Date();t.setDate(f.getDate()+rangeDays);}
-    let data=currentData;
-    if(f||t)data=data.filter(e=>cols.some(k=>{const d=parseDate(e[k]);return d&&(!f||d>=f)&&(!t||d<=t);}));  
-    const headers=["Store Code","Site Name","Postcode","Status",...cols.map(c=>c.toUpperCase())];
-    const sheet=[headers];
-    data.forEach(e=>{
-      const r=[e.storeCode.toString().padStart(4,'0'),e.siteName,e.postcode,getStatus(e)];
-      cols.forEach(c=>r.push(e[c]||""));sheet.push(r);
+  /* ✅ Updated Excel Export: wider Site Name + centered text */
+  function runExport() {
+    const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
+    if (!cols.length) return alert('Please select at least one compliance type.');
+    let f = parseDate(exportFrom.value.split('-').reverse().join('/'));
+    let t = parseDate(exportTo.value.split('-').reverse().join('/'));
+    if (rangeDays) { f = new Date(); t = new Date(); t.setDate(f.getDate() + rangeDays); }
+    let data = currentData;
+    if (f || t)
+      data = data.filter(e =>
+        cols.some(k => { const d = parseDate(e[k]); return d && (!f || d >= f) && (!t || d <= t); })
+      );
+    const headers = ["Store Code", "Site Name", "Postcode", "Status", ...cols.map(c => c.toUpperCase())];
+    const sheet = [headers];
+    data.forEach(e => {
+      const r = [e.storeCode.toString().padStart(4, '0'), e.siteName, e.postcode, getStatus(e)];
+      cols.forEach(c => r.push(e[c] || "")); sheet.push(r);
     });
-    const ws=XLSX.utils.aoa_to_sheet(sheet);
-    ws['!cols']=headers.map(h=>({wch:Math.min(Math.max(h.length+2,14),30)}));
-    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Compliance Export");
-    const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    XLSX.writeFile(wb,`Mostlane_Compliance_Export_${ts}.xlsx`);
-    exportModal.style.display='none';
+    const ws = XLSX.utils.aoa_to_sheet(sheet);
+    const colWidths = headers.map((h, i) => { if (i === 1) return { wch: 30 }; return { wch: Math.min(Math.max(h.length + 2, 14), 22) }; });
+    ws['!cols'] = colWidths;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; ++R)
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const ref = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[ref]) continue;
+        if (!ws[ref].s) ws[ref].s = {};
+        ws[ref].s.alignment = { horizontal: "center", vertical: "center", wrapText: true };
+      }
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    XLSX.writeFile(wb, `Mostlane_Compliance_Export_${ts}.xlsx`);
+    exportModal.style.display = 'none';
   }
 
   function setDueActive(b){document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
