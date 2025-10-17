@@ -147,16 +147,6 @@
     </div>
   </div>
 
-  <div id="summaryModal" class="modal">
-    <div class="modal-content" style="max-height:80vh;overflow-y:auto;position:relative;">
-      <button class="close-x" onclick="closeSummaryModal()" 
-        style="position:absolute;top:10px;right:14px;background:none;border:none;
-               font-size:24px;font-weight:bold;color:#0071CE;cursor:pointer;">×</button>
-      <h2 style="margin-top:0;text-align:center;color:#0071CE;">Compliance Summary</h2>
-      <div id="summaryContent"></div>
-    </div>
-  </div>
-
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
   let allData=[],activeCategory='fiveYear',currentData=[],rangeDays=null;
@@ -205,7 +195,7 @@
     runExport();
   }
 
-  /* ✅ Updated Excel Export: wider Site Name + centered text */
+  /* ✅ Excel Export: centered cell contents + wider Site Name */
   function runExport() {
     const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
     if (!cols.length) return alert('Please select at least one compliance type.');
@@ -224,17 +214,21 @@
       cols.forEach(c => r.push(e[c] || "")); sheet.push(r);
     });
     const ws = XLSX.utils.aoa_to_sheet(sheet);
-    const colWidths = headers.map((h, i) => { if (i === 1) return { wch: 30 }; return { wch: Math.min(Math.max(h.length + 2, 14), 22) }; });
+    const colWidths = headers.map((h, i) => i === 1 ? { wch: 30 } : { wch: 20 });
     ws['!cols'] = colWidths;
+
+    // ✅ Center text alignment for all cells
     const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let R = range.s.r; R <= range.e.r; ++R)
+    for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
-        const ref = XLSX.utils.encode_cell({ r: R, c: C });
-        if (!ws[ref]) continue;
-        if (!ws[ref].s) ws[ref].s = {};
-        ws[ref].s.alignment = { horizontal: "center", vertical: "center", wrapText: true };
+        const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[cellRef]) continue;
+        ws[cellRef].s = { alignment: { horizontal: "center", vertical: "center" } };
       }
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
     const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     XLSX.writeFile(wb, `Mostlane_Compliance_Export_${ts}.xlsx`);
     exportModal.style.display = 'none';
@@ -249,26 +243,6 @@
     const q=document.getElementById('searchBar').value.toLowerCase();
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
-
-  function openSummaryModal(){
-    const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
-    const now=new Date();let html='';
-    types.forEach(([key,label])=>{
-      const scoped=allData.filter(e=>{const d=parseDate(e[key]);return d instanceof Date&&!isNaN(d);});
-      if(scoped.length===0)return;
-      const total=scoped.length,up=scoped.filter(e=>{const d=parseDate(e[key]);return d&&d>=now;}).length;
-      const pct=total?((up/total)*100).toFixed(1):'0.0',num=parseFloat(pct);
-      let colour='#b6f2c1';if(num<75)colour='#ffb3b3';else if(num<80)colour='#ffe0b3';else if(num<95)colour='#fff6b3';
-      html+=`<div class="summary-box"><div class="summary-title">${label}</div>
-      <div class="compliance-card" style="background:${colour};"><div>Compliance</div>
-      <h3>${pct}%</h3><p>${up} of ${total} up to date</p></div></div>`;
-    });
-    document.getElementById('summaryContent').innerHTML=html||'<p style="text-align:center;color:#555;">No compliance data available</p>';
-    summaryModal.style.display='block';
-  }
-
-  function closeSummaryModal(){summaryModal.style.display='none'}
-  window.addEventListener('click',e=>{if(e.target===summaryModal)summaryModal.style.display='none'});
 
   fetchData();
   </script>
