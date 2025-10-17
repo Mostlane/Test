@@ -201,14 +201,17 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ summary modal box layout + close fix */
+  /* ✅ summary modal with PUMP fix */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
     types.forEach(([key,label])=>{
-      const scoped=allData.filter(e=>(e[key]&&String(e[key]).trim()!==''));
+      const scoped=allData.filter(e => e.hasOwnProperty(key)); // include all, even empty
       const total=scoped.length;
-      const up=scoped.filter(e=>{const d=parseDate(e[key]);return d&&d>=now}).length;
+      const up=scoped.filter(e=>{
+        const d=parseDate(e[key]);
+        return d && d >= now;
+      }).length;
       const pct=total?((up/total)*100).toFixed(1):'0.0';
       html+=`
         <div class="summary-box">
