@@ -154,7 +154,7 @@
     <button class="close-btn" onclick="closeExportModal()">Cancel</button>
   </div></div>
 
-  <!-- ✅ summary modal redesigned -->
+  <!-- summary modal -->
   <div id="summaryModal" class="modal">
     <div class="modal-content">
       <h2>Compliance Summary</h2>
@@ -201,7 +201,7 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ new summary modal box layout */
+  /* ✅ summary modal box layout + close fix */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
@@ -223,7 +223,16 @@
     document.getElementById('summaryContent').innerHTML=html;
     document.getElementById('summaryModal').style.display='block';
   }
-  const closeSummaryModal=()=>summaryModal.style.display='none';
+
+  function closeSummaryModal(){
+    document.getElementById('summaryModal').style.display='none';
+  }
+
+  // ✅ also close when clicking outside
+  window.addEventListener('click', function(e) {
+    const modal = document.getElementById('summaryModal');
+    if (e.target === modal) modal.style.display = 'none';
+  });
 
   function runDateSearch(){
     const f=parseDate(fromDate.value.split('-').reverse().join('/'));
