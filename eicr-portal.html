@@ -81,7 +81,7 @@
       <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
       <button class="bubble" onclick="openExportModal()">Export to Excel</button>
-      <!-- ✅ New % Button -->
+      <!-- % Button -->
       <button class="bubble" onclick="openSummaryModal()">%</button>
     </div>
 
@@ -111,7 +111,7 @@
     </div>
   </div>
 
-  <!-- existing modals kept identical -->
+  <!-- search modal -->
   <div id="searchModal" class="modal"><div class="modal-content">
     <h2>Search by Date / Type</h2>
     <label><input type="checkbox" class="typeCheck" value="fiveYear"> 5 Year</label>
@@ -126,6 +126,7 @@
     <button class="close-btn" onclick="closeModal()">Close</button>
   </div></div>
 
+  <!-- export modal -->
   <div id="exportModal" class="modal"><div class="modal-content">
     <h2>Export Options</h2>
     <p>Select which columns to include and an optional date range:</p>
@@ -141,7 +142,7 @@
     <button class="close-btn" onclick="closeExportModal()">Cancel</button>
   </div></div>
 
-  <!-- ✅ New Summary Modal -->
+  <!-- summary modal -->
   <div id="summaryModal" class="modal">
     <div class="modal-content">
       <h2>Compliance Summary</h2>
@@ -188,22 +189,29 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
   const openModal=()=>summaryModal.style.display='block';
+
+  /* ✅ UPDATED: Summary uses only sites that have that compliance populated */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
     types.forEach(([key,label])=>{
-      const total=allData.length;
-      const upToDate=allData.filter(e=>{
-        const d=parseDate(e[key]);return !d||d>=now;
+      // consider only sites with a value for this compliance
+      const scoped = allData.filter(e => (e[key] && String(e[key]).trim() !== ''));
+      const total = scoped.length;
+      const upToDate = scoped.filter(e => {
+        const d = parseDate(e[key]);
+        return d && d >= now; // up to date: due today or in the future
       }).length;
-      const pct=((upToDate/total)*100).toFixed(1);
+      const pct = total ? ((upToDate/total)*100).toFixed(1) : '0.0';
       html+=`<div class="progress-row"><strong>${label}</strong> – ${pct}% (${upToDate} of ${total})
-        <div class="bar"><div class="fill" style="width:${pct}%;"></div></div></div>`;
+        <div class="bar"><div class="fill" style="width:${total?pct:0}%;"></div></div></div>`;
     });
     document.getElementById('summaryContent').innerHTML=html;
     document.getElementById('summaryModal').style.display='block';
   }
+
   const closeSummaryModal=()=>summaryModal.style.display='none';
+
   function runDateSearch(){
     const f=parseDate(fromDate.value.split('-').reverse().join('/'));
     const t=parseDate(toDate.value.split('-').reverse().join('/'));
@@ -212,6 +220,10 @@
     renderTable(allData.filter(e=>sel.some(k=>{const d=parseDate(e[k]);return d&&(!f||d>=f)&&(!t||d<=t);})));
     searchModal.style.display='none';
   }
+
+  function openExportModal(){exportModal.style.display='block'}
+  function closeExportModal(){exportModal.style.display='none'}
+
   function runExport(){
     const cols=[...document.querySelectorAll('.exportCheck:checked')].map(c=>c.value);
     const f=parseDate(exportFrom.value.split('-').reverse().join('/'));
@@ -231,6 +243,7 @@
     XLSX.writeFile(wb,`Mostlane_Compliance_Export_${ts}.xlsx`);
     exportModal.style.display='none';
   }
+
   fetchData();
   </script>
 </body>
