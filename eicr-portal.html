@@ -2,227 +2,239 @@
 <html lang="en">
 <head>
 <script src="auth.js"></script>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EICR Portal</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-    }
-    .container {
-      background-color: rgba(255, 255, 255, 0.6);
-      margin: 20px auto;
-      padding: 20px;
-      border-radius: 15px;
-      max-width: 95%;
-    }
-    h1 {
-      text-align: center;
-      color: #0071CE;
-    }
-    .summary-bubbles, .filter-bubbles {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 20px;
-    }
-    .bubble {
-      background-color: #0071CE;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      margin: 5px;
-      border-radius: 30px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    .bubble.active {
-      background-color: #28a745;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-    }
-    th, td {
-      border: 1px solid #999;
-      padding: 8px;
-      text-align: center;
-      font-size: 14px;
-    }
-    th {
-      background-color: #0071CE;
-      color: white;
-    }
-    .search-container {
-      text-align: center;
-      margin-bottom: 10px;
-    }
-    .search-input {
-      padding: 8px;
-      width: 300px;
-      border-radius: 20px;
-      border: 1px solid #ccc;
-    }
-    .logo {
-      display: block;
-      margin: 10px auto 20px auto;
-      max-height: 60px;
-    }
-  
-    .table-wrapper {
-      overflow-x: auto;
-      width: 100%;
-    }
-    @media (max-width: 768px) {
-      .search-input {
-        width: 90%;
-        font-size: 16px;
-      }
-      th, td {
-        font-size: 12px;
-        padding: 6px;
-      }
-    }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Retail Compliance Portal</title>
+<style>
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    color: #1f2937;
+    background-color: #e6e8eb;
+    background-image: url('Mostlane_Embossed.png');
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-position: center;
+    background-size: 180%;
+  }
+  .container {
+    background-color: rgba(255, 255, 255, 0.6);
+    margin: 20px auto;
+    padding: 20px;
+    border-radius: 15px;
+    max-width: 95%;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  }
+  h1 {
+    text-align: center;
+    color: #0071CE;
+    margin-top: 0;
+  }
+  .summary-bubbles, .filter-bubbles {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 20px;
+  }
+  .bubble {
+    background-color: #0071CE;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    margin: 5px;
+    border-radius: 30px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.2s;
+  }
+  .bubble:hover { opacity: 0.85; }
+  .bubble.active { background-color: #28a745; }
 
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+  }
+  th, td {
+    border: 1px solid #999;
+    padding: 8px;
+    text-align: center;
+    font-size: 14px;
+  }
+  th {
+    background-color: #0071CE;
+    color: white;
+  }
+  tr:nth-child(even) { background-color: rgba(255,255,255,0.7); }
+  tr:nth-child(odd) { background-color: rgba(255,255,255,0.5); }
+
+  .search-container {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .search-input {
+    padding: 8px;
+    width: 300px;
+    border-radius: 20px;
+    border: 1px solid #ccc;
+  }
+  .logo {
+    display: block;
+    margin: 10px auto 20px auto;
+    max-height: 60px;
+  }
+  .table-wrapper {
+    overflow-x: auto;
+    width: 100%;
+  }
+  @media (max-width: 768px) {
+    .search-input { width: 90%; font-size: 16px; }
+    th, td { font-size: 12px; padding: 6px; }
+  }
 </style>
 </head>
+
 <body>
   <div class="container">
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
-    <h1>Mostlane EICR Compliance Portal</h1>
+    <h1>Mostlane Retail Compliance Portal</h1>
+
     <div class="summary-bubbles">
       <button class="bubble" onclick="setDueActive(this);filterByDays(30)">Due in 30 Days</button>
       <button class="bubble" onclick="setDueActive(this);filterByDays(90)">Due in 90 Days</button>
       <button class="bubble" onclick="setDueActive(this);filterByDays(365)">Due in 365 Days</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
     </div>
-    <div class="filter-bubbles">
-      <button class="bubble" onclick="setCategory('fiveYrDueDate', this)">EICR</button>
-      <button class="bubble" onclick="setCategory('patDueDate', this)">PAT</button>
-      <button class="bubble" onclick="setCategory('emDueDate', this)">Emergency Lighting</button>
-      <button class="bubble" onclick="setCategory('forecourtDueDate', this)">Forecourt</button>
-      <button class="bubble" onclick="setCategory('evDueDate', this)">EV Maintenance</button>
-      <button class="bubble" onclick="setCategory('pvDueDate', this)">PV Maintenance</button>
-    </div>
-    <div class="search-container">
-      <input class="search-input" type="text" id="searchBar" placeholder="Search stores..." onkeyup="searchTable()">
-    </div>
-    <div class="table-wrapper">
-<table>
-      <thead>
-        <tr>
-          <th>Store Number</th>
-          <th>Site Name</th>
-          <th>Postcode</th>
-          <th>Status</th>
-          <th>Report</th>
-          <th>5YR Due</th>
-          <th>PAT Due</th>
-          <th>EM Due</th>
-          <th>Forecourt</th>
-          <th>EV Due</th>
-          <th>PV Due</th>
-        </tr>
-      </thead>
-      <tbody id="tableBody"></tbody>
-    </table>
-</div>
-  </div>
-  <script>
-    let allData = [];
-    let activeCategory = 'fiveYrDueDate';
-    const bubbles = document.querySelectorAll(".filter-bubbles .bubble");
-    const dueButtons = document.querySelectorAll(".summary-bubbles .bubble");
 
-    async function fetchData() {
-      const res = await fetch('eicr-log.json');
+    <div class="filter-bubbles">
+      <button class="bubble" onclick="setCategory('fiveYear', this)">5 Year</button>
+      <button class="bubble" onclick="setCategory('pat', this)">PAT</button>
+      <button class="bubble" onclick="setCategory('em', this)">EM</button>
+      <button class="bubble" onclick="setCategory('pv', this)">PV</button>
+      <button class="bubble" onclick="setCategory('ev', this)">EV</button>
+      <button class="bubble" onclick="setCategory('pump', this)">Pump Maintenance</button>
+    </div>
+
+    <div class="search-container">
+      <input class="search-input" type="text" id="searchBar" placeholder="Search store name, number or postcode..." onkeyup="searchTable()">
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Store Code</th>
+            <th>Site Name</th>
+            <th>Postcode</th>
+            <th>Status</th>
+            <th>Report</th>
+            <th>5 Year</th>
+            <th>PAT</th>
+            <th>EM</th>
+            <th>PV</th>
+            <th>EV</th>
+            <th>Pump</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  let allData = [];
+  let activeCategory = 'fiveYear';
+  const filterBubbles = document.querySelectorAll(".filter-bubbles .bubble");
+  const dueButtons = document.querySelectorAll(".summary-bubbles .bubble");
+
+  // 🔗 Fetch data directly from your GitHub JSON
+  async function fetchData() {
+    try {
+      const res = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json');
       const data = await res.json();
       allData = data;
       renderTable(data);
+    } catch (e) {
+      console.error("Error loading data:", e);
     }
+  }
 
-    function getStatus(entry) {
-      const now = new Date();
-      let isRed = false;
-      let isAmber = false;
-      [entry.fiveYrDueDate, entry.patDueDate, entry.emDueDate, entry.forecourtDueDate, entry.evDueDate, entry.pvDueDate].forEach(dateStr => {
-        if (!dateStr) return;
-        const date = new Date(dateStr);
-        if (date < now) isRed = true;
-        else if ((date - now) / (1000 * 60 * 60 * 24) <= 30) isAmber = true;
-      });
-      return isRed ? '🔴' : isAmber ? '🟡' : '🟢';
-    }
+  function getStatus(entry) {
+    const now = new Date();
+    const dates = [entry.fiveYear, entry.pat, entry.em, entry.pv, entry.ev, entry.pump];
+    let isRed = false, isAmber = false;
+    dates.forEach(d => {
+      if (!d) return;
+      const date = new Date(d);
+      if (date < now) isRed = true;
+      else if ((date - now)/(1000*60*60*24) <= 30) isAmber = true;
+    });
+    return isRed ? '🔴' : isAmber ? '🟡' : '🟢';
+  }
 
-    function renderTable(data) {
-      const table = document.getElementById('tableBody');
-      table.innerHTML = '';
-      data.forEach(entry => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${entry.storeNumber.toString().padStart(4, '0')}</td>
-          <td>${entry.siteName}</td>
-          <td>${entry.postcode}</td>
-          <td>${getStatus(entry)}</td>
-          <td><a href="${entry.reportURL}">${entry.reportURL || "Click Here"}</a></td>
-          <td>${entry.fiveYrDueDate || ""}</td>
-          <td>${entry.patDueDate || ""}</td>
-          <td>${entry.emDueDate || ""}</td>
-          <td>${entry.forecourtDueDate || ""}</td>
-          <td>${entry.evDueDate || ""}</td>
-          <td>${entry.pvDueDate || ""}</td>
-        `;
-        table.appendChild(row);
-      });
-    }
+  function renderTable(data) {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+    data.forEach(entry => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${entry.storeCode.toString().padStart(4,'0')}</td>
+        <td>${entry.siteName}</td>
+        <td>${entry.postcode}</td>
+        <td>${getStatus(entry)}</td>
+        <td>${entry.reportURL ? `<a href="${entry.reportURL}" target="_blank">View</a>` : ''}</td>
+        <td>${entry.fiveYear || ''}</td>
+        <td>${entry.pat || ''}</td>
+        <td>${entry.em || ''}</td>
+        <td>${entry.pv || ''}</td>
+        <td>${entry.ev || ''}</td>
+        <td>${entry.pump || ''}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
 
-    function filterByDays(days) {
-      document.querySelector('.summary-bubbles .bubble:last-child').classList.add('active');
-      const now = new Date();
-      const future = new Date(now);
-      future.setDate(now.getDate() + days);
-      const filtered = allData.filter(entry => {
-        const dateStr = entry[activeCategory];
-        if (!dateStr) return false;
-        const date = new Date(dateStr);
-        return date <= future;
-      }).sort((a, b) => new Date(a[activeCategory]) - new Date(b[activeCategory]));
-      renderTable(filtered);
-    }
+  function filterByDays(days) {
+    const now = new Date();
+    const future = new Date(now);
+    future.setDate(now.getDate() + days);
+    const filtered = allData.filter(entry => {
+      const d = entry[activeCategory];
+      if (!d) return false;
+      const date = new Date(d);
+      return date <= future;
+    }).sort((a,b)=>new Date(a[activeCategory]) - new Date(b[activeCategory]));
+    renderTable(filtered);
+  }
 
-    function clearFilters() {
-      renderTable(allData);
-      bubbles.forEach(btn => btn.classList.remove('active'));
-      dueButtons.forEach(btn => btn.classList.remove('active'));
-      document.querySelector('.summary-bubbles .bubble:last-child').classList.remove('active');
-    }
+  function clearFilters() {
+    renderTable(allData);
+    filterBubbles.forEach(b=>b.classList.remove('active'));
+    dueButtons.forEach(b=>b.classList.remove('active'));
+  }
 
-    function setCategory(field, btn) {
-      activeCategory = field;
-      bubbles.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    }
+  function setCategory(field, btn) {
+    activeCategory = field;
+    filterBubbles.forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
 
-    function setDueActive(btn) {
-      dueButtons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    }
+  function setDueActive(btn) {
+    dueButtons.forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
 
-    function searchTable() {
-      const query = document.getElementById('searchBar').value.toLowerCase();
-      const filtered = allData.filter(entry =>
-        entry.siteName.toLowerCase().includes(query) ||
-        entry.postcode.toLowerCase().includes(query) ||
-        entry.storeNumber.toString().includes(query)
-      );
-      renderTable(filtered);
-    }
+  function searchTable() {
+    const q = document.getElementById('searchBar').value.toLowerCase();
+    const filtered = allData.filter(e =>
+      e.siteName.toLowerCase().includes(q) ||
+      e.postcode.toLowerCase().includes(q) ||
+      e.storeCode.toString().includes(q)
+    );
+    renderTable(filtered);
+  }
 
-    fetchData();
+  fetchData();
   </script>
 </body>
 </html>
