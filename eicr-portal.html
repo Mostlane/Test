@@ -56,7 +56,10 @@
       cursor:pointer;margin-top:10px;font-weight:bold;
     }
     .modal .close-btn{background:#ccc;color:#000;margin-left:10px}
-    .range-btn{background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;border-radius:6px;cursor:pointer}
+    .range-btn{
+      background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;
+      border-radius:6px;cursor:pointer;transition:0.2s;
+    }
     .range-btn.active{background:#0071CE;color:#fff}
 
     /* ✅ summary boxes */
@@ -70,12 +73,8 @@
     .compliance-card{
       border-radius:8px;padding:12px;text-align:center;
     }
-    .compliance-card h3{
-      margin:0;font-size:24px;font-weight:bold;color:#004a00;
-    }
-    .compliance-card p{
-      margin:4px 0 0 0;font-size:14px;color:#004a00;
-    }
+    .compliance-card h3{margin:0;font-size:24px;font-weight:bold;color:#004a00;}
+    .compliance-card p{margin:4px 0 0 0;font-size:14px;color:#004a00;}
 
     @media(max-width:768px){
       .search-input{width:90%;font-size:16px}
@@ -140,11 +139,11 @@
       <label><input type="checkbox" class="exportCheck" value="pump" checked> Pump</label>
       <br><p><b>Predefined Ranges:</b></p>
       <div id="rangeButtons">
-        <button class="range-btn" onclick="selectRange(7)">7 Days</button>
-        <button class="range-btn" onclick="selectRange(14)">14 Days</button>
-        <button class="range-btn" onclick="selectRange(30)">30 Days</button>
-        <button class="range-btn" onclick="selectRange(60)">60 Days</button>
-        <button class="range-btn" onclick="selectRange(90)">90 Days</button>
+        <button class="range-btn" onclick="selectRange(7,this)">7 Days</button>
+        <button class="range-btn" onclick="selectRange(14,this)">14 Days</button>
+        <button class="range-btn" onclick="selectRange(30,this)">30 Days</button>
+        <button class="range-btn" onclick="selectRange(60,this)">60 Days</button>
+        <button class="range-btn" onclick="selectRange(90,this)">90 Days</button>
       </div>
       <br>
       <label>From:<input type="date" id="exportFrom"></label>
@@ -193,30 +192,21 @@
       <td>${getStatus(e)}</td><td>${e.fiveYear}</td><td>${e.pat}</td>
       <td>${e.em}</td><td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td></tr>`});
   }
-  function setDueActive(b){document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
-  function setCategory(f,b){activeCategory=f;document.querySelectorAll('.filter-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
-  function filterByDays(d){const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
-    renderTable(allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f}))}
-  function clearFilters(){renderTable(allData)}
-  function searchTable(){
-    const q=document.getElementById('searchBar').value.toLowerCase();
-    renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
-  }
 
-  /* Range button logic */
-  function selectRange(days){
-    rangeDays=days;
+  function selectRange(days,el){
     document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
-    event.target.classList.add('active');
-    exportFrom.value="";exportTo.value="";
+    el.classList.add('active');
+    rangeDays=days;
+    document.getElementById('exportFrom').value="";
+    document.getElementById('exportTo').value="";
   }
 
-  /* Export Modals */
   function openExportModal(){exportModal.style.display='block'}
   function closeExportModal(){exportModal.style.display='none'}
 
   function runFullExport(){
-    rangeDays=null;document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+    rangeDays=null;
+    document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
     runExport();
   }
@@ -226,9 +216,7 @@
     if(!cols.length)return alert('Please select at least one compliance type.');
     let f=parseDate(exportFrom.value.split('-').reverse().join('/'));
     let t=parseDate(exportTo.value.split('-').reverse().join('/'));
-    if(rangeDays){
-      f=new Date();t=new Date();t.setDate(f.getDate()+rangeDays);
-    }
+    if(rangeDays){f=new Date();t=new Date();t.setDate(f.getDate()+rangeDays);}
     let data=currentData;
     if(f||t)data=data.filter(e=>cols.some(k=>{const d=parseDate(e[k]);return d&&(!f||d>=f)&&(!t||d<=t);}));  
     const headers=["Store Code","Site Name","Postcode","Status",...cols.map(c=>c.toUpperCase())];
@@ -245,7 +233,16 @@
     exportModal.style.display='none';
   }
 
-  /* Summary Modal */
+  function setDueActive(b){document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
+  function setCategory(f,b){activeCategory=f;document.querySelectorAll('.filter-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
+  function filterByDays(d){const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
+    renderTable(allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f}))}
+  function clearFilters(){renderTable(allData)}
+  function searchTable(){
+    const q=document.getElementById('searchBar').value.toLowerCase();
+    renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
+  }
+
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
@@ -262,6 +259,7 @@
     document.getElementById('summaryContent').innerHTML=html||'<p style="text-align:center;color:#555;">No compliance data available</p>';
     summaryModal.style.display='block';
   }
+
   function closeSummaryModal(){summaryModal.style.display='none'}
   window.addEventListener('click',e=>{if(e.target===summaryModal)summaryModal.style.display='none'});
 
