@@ -6,17 +6,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Retail Compliance Portal</title>
   <style>
+    /* ✅ Embossed background stays fixed at all times */
     body {
       margin: 0;
       font-family: Arial, sans-serif;
       color: #1f2937;
       background-color: #e6e8eb;
+      position: relative;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
       background-image: url('Mostlane_Embossed.png');
       background-repeat: no-repeat;
-      background-attachment: fixed;
       background-position: center;
       background-size: 180%;
+      opacity: 1;
+      z-index: -1; /* sits behind everything */
     }
+
     .container {
       background-color: rgba(255, 255, 255, 0.6);
       margin: 20px auto;
@@ -42,10 +54,28 @@
     .search-input {
       padding: 8px; width: 300px; border-radius: 20px; border: 1px solid #ccc;
     }
-    .table-wrapper { overflow-x: auto; width: 100%; }
+
+    /* ✅ Make table header fixed and scroll inside wrapper */
+    .table-wrapper {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 70vh; /* adjust if you want more or less scroll space */
+      width: 100%;
+    }
+
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     th, td { border: 1px solid #999; padding: 8px; text-align: center; font-size: 14px; }
     th { background-color: #0071CE; color: white; }
+
+    /* ✅ Sticky header */
+    thead th {
+      position: sticky;
+      top: 0;
+      background-color: #0071CE;
+      color: white;
+      z-index: 5;
+    }
+
     tr:nth-child(even) { background-color: rgba(255,255,255,0.7); }
     tr:nth-child(odd) { background-color: rgba(255,255,255,0.5); }
 
@@ -254,7 +284,6 @@
       renderTable(filtered);
     }
 
-    // ---------- Popup Search Logic ----------
     function openModal() { document.getElementById('searchModal').style.display = 'block'; }
     function closeModal() { document.getElementById('searchModal').style.display = 'none'; }
 
