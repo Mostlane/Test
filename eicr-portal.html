@@ -117,7 +117,6 @@
       <button class="bubble" onclick="setDueActive(this);filterByDays(365)">Due in 365 Days</button>
       <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
-      <!-- ✅ Export button -->
       <button class="bubble" onclick="openExportModal()">Export to CSV</button>
     </div>
 
@@ -157,7 +156,6 @@
     </div>
   </div>
 
-  <!-- Existing Search Modal (untouched) -->
   <div id="searchModal" class="modal">
     <div class="modal-content">
       <h2>Search by Date / Type</h2>
@@ -176,7 +174,6 @@
     </div>
   </div>
 
-  <!-- ✅ New Export Modal -->
   <div id="exportModal" class="modal">
     <div class="modal-content">
       <h2>Export Options</h2>
@@ -306,7 +303,6 @@
 
     function openModal() { document.getElementById('searchModal').style.display = 'block'; }
     function closeModal() { document.getElementById('searchModal').style.display = 'none'; }
-
     function openExportModal() { document.getElementById('exportModal').style.display = 'block'; }
     function closeExportModal() { document.getElementById('exportModal').style.display = 'none'; }
 
@@ -314,31 +310,20 @@
       const from = parseDate(document.getElementById('fromDate').value.split('-').reverse().join('/'));
       const to = parseDate(document.getElementById('toDate').value.split('-').reverse().join('/'));
       const selectedTypes = Array.from(document.querySelectorAll('.typeCheck:checked')).map(c => c.value);
-
-      if (selectedTypes.length === 0) {
-        alert('Please select at least one compliance type.');
-        return;
-      }
-
-      const filtered = allData.filter(entry => {
-        return selectedTypes.some(type => {
-          const d = parseDate(entry[type]);
-          return d && (!from || d >= from) && (!to || d <= to);
-        });
-      });
-
-      closeModal();
-      renderTable(filtered);
+      if (selectedTypes.length === 0) { alert('Please select at least one compliance type.'); return; }
+      const filtered = allData.filter(entry =>
+        selectedTypes.some(type => { const d = parseDate(entry[type]); return d && (!from || d >= from) && (!to || d <= to); })
+      );
+      closeModal(); renderTable(filtered);
     }
 
-    /* ✅ Export logic with selectable columns + date filter */
+    /* ✅ UPDATED EXPORT FUNCTION */
     function runExport() {
       const selectedCols = Array.from(document.querySelectorAll('.exportCheck:checked')).map(c => c.value);
       const from = parseDate(document.getElementById('exportFrom').value.split('-').reverse().join('/'));
       const to = parseDate(document.getElementById('exportTo').value.split('-').reverse().join('/'));
 
       let dataToExport = currentData;
-
       if (from || to) {
         dataToExport = dataToExport.filter(entry =>
           selectedCols.some(col => {
@@ -350,8 +335,17 @@
 
       const headers = ["Store Code","Site Name","Postcode","Status",...selectedCols.map(c=>c.toUpperCase())];
       const rows = dataToExport.map(e => {
-        const row = [e.storeCode, e.siteName, e.postcode, getStatus(e)];
-        selectedCols.forEach(c => row.push(e[c] || ""));
+        const row = [
+          `="${e.storeCode.toString().padStart(4,'0')}"`,
+          e.siteName,
+          e.postcode,
+          getStatus(e)
+        ];
+        selectedCols.forEach(c => {
+          const val = e[c] || "";
+          const dateFormatted = /^\d{2}\/\d{2}\/\d{4}$/.test(val) ? val : val.replace(/[^0-9/]/g, "");
+          row.push(dateFormatted);
+        });
         return row;
       });
 
@@ -361,7 +355,7 @@
       };
 
       const csv = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
-      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+      const blob = new Blob(["\uFEFF" + csv], { type: "application/vnd.ms-excel;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
