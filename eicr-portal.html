@@ -193,18 +193,30 @@
       <td>${e.em}</td><td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td></tr>`});
   }
 
-  /* ✅ Fixed toggle highlight for iPhone/Safari */
+  /* ✅ Toggle-on / toggle-off range selection */
   function selectRange(days, el) {
     const buttons = document.querySelectorAll('.range-btn');
+    const isAlreadyActive = el.classList.contains('active');
+
+    // reset all buttons
     buttons.forEach(b => {
       b.classList.remove('active');
       b.style.background = '#e6e8eb';
       b.style.color = '#000';
     });
-    el.classList.add('active');
-    el.style.background = '#0071CE';
-    el.style.color = '#fff';
-    rangeDays = days;
+
+    if (isAlreadyActive) {
+      // user clicked same active button → deselect
+      rangeDays = null;
+    } else {
+      // activate this one
+      el.classList.add('active');
+      el.style.background = '#0071CE';
+      el.style.color = '#fff';
+      rangeDays = days;
+    }
+
+    // clear manual dates
     document.getElementById('exportFrom').value = "";
     document.getElementById('exportTo').value = "";
   }
