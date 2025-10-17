@@ -25,69 +25,55 @@
       max-width: 95%;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     }
-    h1 {
-      text-align: center;
-      color: #0071CE;
-      margin-top: 0;
-    }
-    .logo {
-      display: block;
-      margin: 10px auto 20px auto;
-      max-height: 60px;
-    }
+    h1 { text-align: center; color: #0071CE; margin-top: 0; }
+    .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
     .summary-bubbles, .filter-bubbles {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 20px;
+      display: flex; flex-wrap: wrap; justify-content: center; margin-bottom: 20px;
     }
     .bubble {
-      background-color: #0071CE;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      margin: 5px;
-      border-radius: 30px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: 0.2s;
+      background-color: #0071CE; color: white; border: none;
+      padding: 10px 20px; margin: 5px; border-radius: 30px;
+      cursor: pointer; font-weight: bold; transition: 0.2s;
     }
     .bubble:hover { opacity: 0.85; }
     .bubble.active { background-color: #28a745; }
-    .search-container {
-      text-align: center;
-      margin-bottom: 10px;
-    }
+
+    .search-container { text-align: center; margin-bottom: 10px; }
     .search-input {
-      padding: 8px;
-      width: 300px;
-      border-radius: 20px;
-      border: 1px solid #ccc;
+      padding: 8px; width: 300px; border-radius: 20px; border: 1px solid #ccc;
     }
-    .table-wrapper {
-      overflow-x: auto;
-      width: 100%;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-    }
-    th, td {
-      border: 1px solid #999;
-      padding: 8px;
-      text-align: center;
-      font-size: 14px;
-    }
-    th {
-      background-color: #0071CE;
-      color: white;
-    }
+    .table-wrapper { overflow-x: auto; width: 100%; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #999; padding: 8px; text-align: center; font-size: 14px; }
+    th { background-color: #0071CE; color: white; }
     tr:nth-child(even) { background-color: rgba(255,255,255,0.7); }
     tr:nth-child(odd) { background-color: rgba(255,255,255,0.5); }
-    @media (max-width: 768px) {
-      .search-input { width: 90%; font-size: 16px; }
-      th, td { font-size: 12px; padding: 6px; }
+
+    /* ---------- Popup Modal ---------- */
+    .modal {
+      display: none; position: fixed; z-index: 999;
+      left: 0; top: 0; width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.5);
+    }
+    .modal-content {
+      background-color: white; border-radius: 10px;
+      max-width: 400px; margin: 10% auto; padding: 20px;
+      text-align: left; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .modal h2 { margin-top: 0; color: #0071CE; text-align: center; }
+    .modal label { display: block; margin: 6px 0; }
+    .modal input[type="date"] {
+      width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 5px;
+    }
+    .modal button {
+      background-color: #0071CE; color: white; border: none;
+      padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      margin-top: 10px; font-weight: bold;
+    }
+    .modal .close-btn { background-color: #ccc; color: #000; margin-left: 10px; }
+    @media (max-width:768px){
+      .search-input{width:90%;font-size:16px}
+      th,td{font-size:12px;padding:6px}
     }
   </style>
 </head>
@@ -101,6 +87,7 @@
       <button class="bubble" onclick="setDueActive(this);filterByDays(30)">Due in 30 Days</button>
       <button class="bubble" onclick="setDueActive(this);filterByDays(90)">Due in 90 Days</button>
       <button class="bubble" onclick="setDueActive(this);filterByDays(365)">Due in 365 Days</button>
+      <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
     </div>
 
@@ -141,6 +128,25 @@
     </div>
   </div>
 
+  <!-- Modal -->
+  <div id="searchModal" class="modal">
+    <div class="modal-content">
+      <h2>Search by Date / Type</h2>
+      <label><input type="checkbox" class="typeCheck" value="fiveYear"> 5 Year</label>
+      <label><input type="checkbox" class="typeCheck" value="pat"> PAT</label>
+      <label><input type="checkbox" class="typeCheck" value="em"> EM</label>
+      <label><input type="checkbox" class="typeCheck" value="pv"> PV</label>
+      <label><input type="checkbox" class="typeCheck" value="ev"> EV</label>
+      <label><input type="checkbox" class="typeCheck" value="pump"> Pump</label>
+      <br>
+      <label>From: <input type="date" id="fromDate"></label>
+      <label>To: <input type="date" id="toDate"></label>
+      <br>
+      <button onclick="runDateSearch()">Search</button>
+      <button class="close-btn" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
   <script>
     let allData = [];
     let activeCategory = 'fiveYear';
@@ -150,11 +156,7 @@
     async function fetchData() {
       const res = await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json');
       const raw = await res.json();
-
-      // Convert object-of-objects into array
-      const arr = Object.values(raw);
-
-      allData = arr.map(r => ({
+      allData = Object.values(raw).map(r => ({
         storeCode: r.branchCode,
         siteName: r.storeName,
         postcode: r.postcode,
@@ -166,7 +168,6 @@
         pump: r["PUMP"] || "",
         sharePointURL: r.sharePointURL || ""
       }));
-
       renderTable(allData);
     }
 
@@ -250,6 +251,31 @@
         e.postcode.toLowerCase().includes(q) ||
         e.storeCode.toString().includes(q)
       );
+      renderTable(filtered);
+    }
+
+    // ---------- Popup Search Logic ----------
+    function openModal() { document.getElementById('searchModal').style.display = 'block'; }
+    function closeModal() { document.getElementById('searchModal').style.display = 'none'; }
+
+    function runDateSearch() {
+      const from = parseDate(document.getElementById('fromDate').value.split('-').reverse().join('/'));
+      const to = parseDate(document.getElementById('toDate').value.split('-').reverse().join('/'));
+      const selectedTypes = Array.from(document.querySelectorAll('.typeCheck:checked')).map(c => c.value);
+
+      if (selectedTypes.length === 0) {
+        alert('Please select at least one compliance type.');
+        return;
+      }
+
+      const filtered = allData.filter(entry => {
+        return selectedTypes.some(type => {
+          const d = parseDate(entry[type]);
+          return d && (!from || d >= from) && (!to || d <= to);
+        });
+      });
+
+      closeModal();
       renderTable(filtered);
     }
 
