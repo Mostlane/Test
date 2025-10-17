@@ -154,12 +154,14 @@
     <button class="close-btn" onclick="closeExportModal()">Cancel</button>
   </div></div>
 
-  <!-- summary modal -->
+  <!-- ✅ summary modal -->
   <div id="summaryModal" class="modal">
-    <div class="modal-content">
-      <h2>Compliance Summary</h2>
+    <div class="modal-content" style="max-height:80vh;overflow-y:auto;position:relative;">
+      <button class="close-x" onclick="closeSummaryModal()" 
+        style="position:absolute;top:10px;right:14px;background:none;border:none;
+               font-size:24px;font-weight:bold;color:#0071CE;cursor:pointer;">×</button>
+      <h2 style="margin-top:0;text-align:center;color:#0071CE;">Compliance Summary</h2>
       <div id="summaryContent"></div>
-      <button class="close-btn" onclick="closeSummaryModal()">Close</button>
     </div>
   </div>
 
@@ -201,12 +203,16 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ summary modal with PUMP fix */
+  /* ✅ summary modal with accurate counting + scroll + X close */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
     types.forEach(([key,label])=>{
-      const scoped=allData.filter(e => e.hasOwnProperty(key)); // include all, even empty
+      // only include valid date entries
+      const scoped=allData.filter(e=>{
+        const d=parseDate(e[key]);
+        return d instanceof Date && !isNaN(d);
+      });
       const total=scoped.length;
       const up=scoped.filter(e=>{
         const d=parseDate(e[key]);
@@ -231,10 +237,10 @@
     document.getElementById('summaryModal').style.display='none';
   }
 
-  // ✅ also close when clicking outside
-  window.addEventListener('click', function(e) {
-    const modal = document.getElementById('summaryModal');
-    if (e.target === modal) modal.style.display = 'none';
+  // close when clicking outside modal
+  window.addEventListener('click', function(e){
+    const modal=document.getElementById('summaryModal');
+    if(e.target===modal) modal.style.display='none';
   });
 
   function runDateSearch(){
