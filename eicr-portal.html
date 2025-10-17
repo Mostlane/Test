@@ -66,7 +66,7 @@
       color:#0071CE;text-transform:capitalize;
     }
     .compliance-card{
-      background:#b6f2c1;border-radius:8px;padding:12px;text-align:center;
+      border-radius:8px;padding:12px;text-align:center;
     }
     .compliance-card h3{
       margin:0;font-size:24px;font-weight:bold;color:#004a00;
@@ -203,12 +203,11 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ summary modal with accurate counting + scroll + X close */
+  /* ✅ summary modal with colour logic */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
     types.forEach(([key,label])=>{
-      // only include valid date entries
       const scoped=allData.filter(e=>{
         const d=parseDate(e[key]);
         return d instanceof Date && !isNaN(d);
@@ -219,10 +218,15 @@
         return d && d >= now;
       }).length;
       const pct=total?((up/total)*100).toFixed(1):'0.0';
+      const num=parseFloat(pct);
+      let colour='#b6f2c1';
+      if(num<75) colour='#ffb3b3';
+      else if(num<80) colour='#ffe0b3';
+      else if(num<95) colour='#fff6b3';
       html+=`
         <div class="summary-box">
           <div class="summary-title">${label}</div>
-          <div class="compliance-card">
+          <div class="compliance-card" style="background:${colour};">
             <div>Compliance</div>
             <h3>${pct}%</h3>
             <p>${up} of ${total} up to date</p>
@@ -237,8 +241,7 @@
     document.getElementById('summaryModal').style.display='none';
   }
 
-  // close when clicking outside modal
-  window.addEventListener('click', function(e){
+  window.addEventListener('click',function(e){
     const modal=document.getElementById('summaryModal');
     if(e.target===modal) modal.style.display='none';
   });
