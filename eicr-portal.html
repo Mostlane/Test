@@ -203,7 +203,7 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ summary modal with colour logic */
+  /* ✅ summary modal with colour + conditional logic */
   function openSummaryModal(){
     const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
     const now=new Date();let html='';
@@ -212,6 +212,7 @@
         const d=parseDate(e[key]);
         return d instanceof Date && !isNaN(d);
       });
+      if(scoped.length===0) return; // Skip types with no valid data
       const total=scoped.length;
       const up=scoped.filter(e=>{
         const d=parseDate(e[key]);
@@ -233,7 +234,7 @@
           </div>
         </div>`;
     });
-    document.getElementById('summaryContent').innerHTML=html;
+    document.getElementById('summaryContent').innerHTML=html||'<p style="text-align:center;color:#555;">No compliance data available</p>';
     document.getElementById('summaryModal').style.display='block';
   }
 
