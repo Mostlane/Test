@@ -117,7 +117,7 @@
       <button class="bubble" onclick="setDueActive(this);filterByDays(365)">Due in 365 Days</button>
       <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
-      <button class="bubble" onclick="openExportModal()">Export to CSV</button>
+      <button class="bubble" onclick="openExportModal()">Export to Excel</button>
     </div>
 
     <div class="filter-bubbles">
@@ -193,6 +193,9 @@
       <button class="close-btn" onclick="closeExportModal()">Cancel</button>
     </div>
   </div>
+
+  <!-- ✅ Add SheetJS Library -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <script>
     let allData = [];
@@ -317,7 +320,7 @@
       closeModal(); renderTable(filtered);
     }
 
-    /* ✅ UPDATED EXPORT FUNCTION */
+    /* ✅ UPDATED EXPORT FUNCTION (to XLSX) */
     function runExport() {
       const selectedCols = Array.from(document.querySelectorAll('.exportCheck:checked')).map(c => c.value);
       const from = parseDate(document.getElementById('exportFrom').value.split('-').reverse().join('/'));
@@ -334,37 +337,33 @@
       }
 
       const headers = ["Store Code","Site Name","Postcode","Status",...selectedCols.map(c=>c.toUpperCase())];
-      const rows = dataToExport.map(e => {
+      const sheetData = [headers];
+
+      dataToExport.forEach(e => {
         const row = [
-          `="${e.storeCode.toString().padStart(4,'0')}"`,
+          e.storeCode.toString().padStart(4,'0'),
           e.siteName,
           e.postcode,
           getStatus(e)
         ];
-        selectedCols.forEach(c => {
-          const val = e[c] || "";
-          const dateFormatted = /^\d{2}\/\d{2}\/\d{4}$/.test(val) ? val : val.replace(/[^0-9/]/g, "");
-          row.push(dateFormatted);
-        });
-        return row;
+        selectedCols.forEach(c => row.push(e[c] || ""));
+        sheetData.push(row);
       });
 
-      const esc = (v) => {
-        const s = String(v ?? "");
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-      };
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-      const csv = [headers.map(esc).join(','), ...rows.map(r => r.map(esc).join(','))].join('\n');
-      const blob = new Blob(["\uFEFF" + csv], { type: "application/vnd.ms-excel;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
+      // Auto-fit column widths
+      const colWidths = headers.map((h,i) => {
+        let maxLen = Math.max(h.length, ...sheetData.slice(1).map(r => (r[i] ? r[i].toString().length : 0)));
+        return { wch: Math.min(Math.max(maxLen + 2, 12), 30) };
+      });
+      ws['!cols'] = colWidths;
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
+
       const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-      a.download = `Mostlane_Compliance_Export_${ts}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      XLSX.writeFile(wb, `Mostlane_Compliance_Export_${ts}.xlsx`);
       closeExportModal();
     }
 
