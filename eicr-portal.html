@@ -56,6 +56,8 @@
       cursor:pointer;margin-top:10px;font-weight:bold;
     }
     .modal .close-btn{background:#ccc;color:#000;margin-left:10px}
+    .range-btn{background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;border-radius:6px;cursor:pointer}
+    .range-btn.active{background:#0071CE;color:#fff}
 
     /* ✅ summary boxes */
     .summary-box{
@@ -123,36 +125,34 @@
     </div>
   </div>
 
-  <!-- search modal -->
-  <div id="searchModal" class="modal"><div class="modal-content">
-    <h2>Search by Date / Type</h2>
-    <label><input type="checkbox" class="typeCheck" value="fiveYear"> 5 Year</label>
-    <label><input type="checkbox" class="typeCheck" value="pat"> PAT</label>
-    <label><input type="checkbox" class="typeCheck" value="em"> EM</label>
-    <label><input type="checkbox" class="typeCheck" value="pv"> PV</label>
-    <label><input type="checkbox" class="typeCheck" value="ev"> EV</label>
-    <label><input type="checkbox" class="typeCheck" value="pump"> Pump</label>
-    <br><label>From:<input type="date" id="fromDate"></label>
-    <label>To:<input type="date" id="toDate"></label><br>
-    <button onclick="runDateSearch()">Search</button>
-    <button class="close-btn" onclick="closeModal()">Close</button>
-  </div></div>
-
   <!-- export modal -->
-  <div id="exportModal" class="modal"><div class="modal-content">
-    <h2>Export Options</h2>
-    <p>Select which columns to include and an optional date range:</p>
-    <label><input type="checkbox" class="exportCheck" value="fiveYear" checked> 5 Year</label>
-    <label><input type="checkbox" class="exportCheck" value="pat" checked> PAT</label>
-    <label><input type="checkbox" class="exportCheck" value="em" checked> EM</label>
-    <label><input type="checkbox" class="exportCheck" value="pv" checked> PV</label>
-    <label><input type="checkbox" class="exportCheck" value="ev" checked> EV</label>
-    <label><input type="checkbox" class="exportCheck" value="pump" checked> Pump</label>
-    <br><label>From:<input type="date" id="exportFrom"></label>
-    <label>To:<input type="date" id="exportTo"></label><br>
-    <button onclick="runExport()">Export</button>
-    <button class="close-btn" onclick="closeExportModal()">Cancel</button>
-  </div></div>
+  <div id="exportModal" class="modal">
+    <div class="modal-content">
+      <h2>Export Options</h2>
+      <button onclick="runFullExport()">Full Export</button>
+      <hr>
+      <p><b>Select Compliance Types:</b></p>
+      <label><input type="checkbox" class="exportCheck" value="fiveYear" checked> 5 Year</label>
+      <label><input type="checkbox" class="exportCheck" value="pat" checked> PAT</label>
+      <label><input type="checkbox" class="exportCheck" value="em" checked> EM</label>
+      <label><input type="checkbox" class="exportCheck" value="pv" checked> PV</label>
+      <label><input type="checkbox" class="exportCheck" value="ev" checked> EV</label>
+      <label><input type="checkbox" class="exportCheck" value="pump" checked> Pump</label>
+      <br><p><b>Predefined Ranges:</b></p>
+      <div id="rangeButtons">
+        <button class="range-btn" onclick="selectRange(7)">7 Days</button>
+        <button class="range-btn" onclick="selectRange(14)">14 Days</button>
+        <button class="range-btn" onclick="selectRange(30)">30 Days</button>
+        <button class="range-btn" onclick="selectRange(60)">60 Days</button>
+        <button class="range-btn" onclick="selectRange(90)">90 Days</button>
+      </div>
+      <br>
+      <label>From:<input type="date" id="exportFrom"></label>
+      <label>To:<input type="date" id="exportTo"></label><br>
+      <button onclick="runExport()">Export Selected</button>
+      <button class="close-btn" onclick="closeExportModal()">Cancel</button>
+    </div>
+  </div>
 
   <!-- ✅ summary modal -->
   <div id="summaryModal" class="modal">
@@ -167,7 +167,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
-  let allData=[],activeCategory='fiveYear',currentData=[];
+  let allData=[],activeCategory='fiveYear',currentData=[],rangeDays=null;
   const parseDate=d=>{if(!d)return null;const p=d.split('/');return p.length===3?new Date(+p[2],p[1]-1,+p[0]):new Date(d)};
   const getStatus=e=>{
     const now=new Date();let red=false,amber=false;
@@ -203,66 +203,32 @@
     renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
   }
 
-  /* ✅ summary modal with colour + conditional logic */
-  function openSummaryModal(){
-    const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
-    const now=new Date();let html='';
-    types.forEach(([key,label])=>{
-      const scoped=allData.filter(e=>{
-        const d=parseDate(e[key]);
-        return d instanceof Date && !isNaN(d);
-      });
-      if(scoped.length===0) return; // Skip types with no valid data
-      const total=scoped.length;
-      const up=scoped.filter(e=>{
-        const d=parseDate(e[key]);
-        return d && d >= now;
-      }).length;
-      const pct=total?((up/total)*100).toFixed(1):'0.0';
-      const num=parseFloat(pct);
-      let colour='#b6f2c1';
-      if(num<75) colour='#ffb3b3';
-      else if(num<80) colour='#ffe0b3';
-      else if(num<95) colour='#fff6b3';
-      html+=`
-        <div class="summary-box">
-          <div class="summary-title">${label}</div>
-          <div class="compliance-card" style="background:${colour};">
-            <div>Compliance</div>
-            <h3>${pct}%</h3>
-            <p>${up} of ${total} up to date</p>
-          </div>
-        </div>`;
-    });
-    document.getElementById('summaryContent').innerHTML=html||'<p style="text-align:center;color:#555;">No compliance data available</p>';
-    document.getElementById('summaryModal').style.display='block';
+  /* Range button logic */
+  function selectRange(days){
+    rangeDays=days;
+    document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+    event.target.classList.add('active');
+    exportFrom.value="";exportTo.value="";
   }
 
-  function closeSummaryModal(){
-    document.getElementById('summaryModal').style.display='none';
-  }
-
-  window.addEventListener('click',function(e){
-    const modal=document.getElementById('summaryModal');
-    if(e.target===modal) modal.style.display='none';
-  });
-
-  function runDateSearch(){
-    const f=parseDate(fromDate.value.split('-').reverse().join('/'));
-    const t=parseDate(toDate.value.split('-').reverse().join('/'));
-    const sel=[...document.querySelectorAll('.typeCheck:checked')].map(c=>c.value);
-    if(!sel.length)return alert('Select at least one type');
-    renderTable(allData.filter(e=>sel.some(k=>{const d=parseDate(e[k]);return d&&(!f||d>=f)&&(!t||d<=t);})));
-    searchModal.style.display='none';
-  }
-
+  /* Export Modals */
   function openExportModal(){exportModal.style.display='block'}
   function closeExportModal(){exportModal.style.display='none'}
 
+  function runFullExport(){
+    rangeDays=null;document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
+    runExport();
+  }
+
   function runExport(){
     const cols=[...document.querySelectorAll('.exportCheck:checked')].map(c=>c.value);
-    const f=parseDate(exportFrom.value.split('-').reverse().join('/'));
-    const t=parseDate(exportTo.value.split('-').reverse().join('/'));
+    if(!cols.length)return alert('Please select at least one compliance type.');
+    let f=parseDate(exportFrom.value.split('-').reverse().join('/'));
+    let t=parseDate(exportTo.value.split('-').reverse().join('/'));
+    if(rangeDays){
+      f=new Date();t=new Date();t.setDate(f.getDate()+rangeDays);
+    }
     let data=currentData;
     if(f||t)data=data.filter(e=>cols.some(k=>{const d=parseDate(e[k]);return d&&(!f||d>=f)&&(!t||d<=t);}));  
     const headers=["Store Code","Site Name","Postcode","Status",...cols.map(c=>c.toUpperCase())];
@@ -272,12 +238,32 @@
       cols.forEach(c=>r.push(e[c]||""));sheet.push(r);
     });
     const ws=XLSX.utils.aoa_to_sheet(sheet);
-    ws['!cols']=headers.map((h,i)=>({wch:Math.min(Math.max(h.length+2,12),30)}));
+    ws['!cols']=headers.map(h=>({wch:Math.min(Math.max(h.length+2,14),30)}));
     const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Compliance Export");
     const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
     XLSX.writeFile(wb,`Mostlane_Compliance_Export_${ts}.xlsx`);
     exportModal.style.display='none';
   }
+
+  /* Summary Modal */
+  function openSummaryModal(){
+    const types=[['fiveYear','5 Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','Pump']];
+    const now=new Date();let html='';
+    types.forEach(([key,label])=>{
+      const scoped=allData.filter(e=>{const d=parseDate(e[key]);return d instanceof Date&&!isNaN(d);});
+      if(scoped.length===0)return;
+      const total=scoped.length,up=scoped.filter(e=>{const d=parseDate(e[key]);return d&&d>=now;}).length;
+      const pct=total?((up/total)*100).toFixed(1):'0.0',num=parseFloat(pct);
+      let colour='#b6f2c1';if(num<75)colour='#ffb3b3';else if(num<80)colour='#ffe0b3';else if(num<95)colour='#fff6b3';
+      html+=`<div class="summary-box"><div class="summary-title">${label}</div>
+      <div class="compliance-card" style="background:${colour};"><div>Compliance</div>
+      <h3>${pct}%</h3><p>${up} of ${total} up to date</p></div></div>`;
+    });
+    document.getElementById('summaryContent').innerHTML=html||'<p style="text-align:center;color:#555;">No compliance data available</p>';
+    summaryModal.style.display='block';
+  }
+  function closeSummaryModal(){summaryModal.style.display='none'}
+  window.addEventListener('click',e=>{if(e.target===summaryModal)summaryModal.style.display='none'});
 
   fetchData();
   </script>
