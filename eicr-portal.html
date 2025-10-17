@@ -193,12 +193,20 @@
       <td>${e.em}</td><td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td></tr>`});
   }
 
-  function selectRange(days,el){
-    document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+  /* ✅ Fixed toggle highlight for iPhone/Safari */
+  function selectRange(days, el) {
+    const buttons = document.querySelectorAll('.range-btn');
+    buttons.forEach(b => {
+      b.classList.remove('active');
+      b.style.background = '#e6e8eb';
+      b.style.color = '#000';
+    });
     el.classList.add('active');
-    rangeDays=days;
-    document.getElementById('exportFrom').value="";
-    document.getElementById('exportTo').value="";
+    el.style.background = '#0071CE';
+    el.style.color = '#fff';
+    rangeDays = days;
+    document.getElementById('exportFrom').value = "";
+    document.getElementById('exportTo').value = "";
   }
 
   function openExportModal(){exportModal.style.display='block'}
@@ -206,7 +214,7 @@
 
   function runFullExport(){
     rangeDays=null;
-    document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.range-btn').forEach(b=>{b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
     document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
     runExport();
   }
