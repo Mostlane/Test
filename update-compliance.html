@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Update Compliance – Mostlane Portal</title>
+  <title>Retail Compliance Editor – Mostlane Portal</title>
   <style>
     body{
       margin:0; font-family:Arial,Helvetica,sans-serif; color:#1f2937;
@@ -26,6 +26,7 @@
     input[type="text"],input[type="date"]{
       width:100%;padding:8px;border:1px solid #cfd3d8;border-radius:8px;font-size:14px;background:#fff;
     }
+    input[readonly]{background:#f3f4f6;}
     .btn{background:#0071CE;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:bold;cursor:pointer;}
     .btn:hover{background:#0062b5;}
     .btn.secondary{background:#e5e7eb;color:#111;}
@@ -50,31 +51,34 @@
     .modal pre{background:#0b1021;color:#d0f0ff;padding:12px;border-radius:8px;overflow:auto;font-size:12px;}
     .closeX{background:#e5e7eb;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-weight:bold;}
     .topbar{display:flex;gap:10px;align-items:end;margin:12px 0 18px;flex-wrap:wrap;}
+    #reviewChangesBtn{display:none;margin-top:30px;text-align:center;}
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <img src="mostlane-logo.jpg" class="logo" alt="Mostlane Logo">
-      <h1>Update Retail Compliance</h1>
-      <p class="note">Search by store code, name, or postcode. Open multiple stores, adjust dates, preview changes, then submit.</p>
+      <h1>Retail Compliance Editor</h1>
+      <p class="note">Search stores, adjust due dates, then review and submit changes.</p>
     </div>
 
     <div class="topbar">
       <div class="field" style="max-width:280px;">
-        <label for="operatorName">Operator Name (for audit)</label>
-        <input id="operatorName" type="text" placeholder="e.g. A. Smith">
+        <label for="operatorName">Operator</label>
+        <input id="operatorName" type="text" readonly>
       </div>
       <div class="field" style="max-width:420px; position:relative;">
         <label for="searchInput">Search Store</label>
         <input id="searchInput" type="text" placeholder="Enter store code, name or postcode…">
-        <button id="searchBtn" class="btn small" style="position:absolute;right:6px;bottom:7px;">🔍</button>
+        <button id="searchBtn" class="btn small" style="position:absolute;right:6px;bottom:7px;">Search</button>
       </div>
-      <button class="btn" id="btnPreview">👀 Preview JSON Changes</button>
       <button class="btn secondary" id="btnClear">Clear All</button>
     </div>
 
     <div id="results"></div>
+    <div id="reviewChangesBtn" class="status">
+      <button class="btn" onclick="openPreview()">👀 Review Changes</button>
+    </div>
     <div class="status" id="statusMsg"></div>
   </div>
 
@@ -99,13 +103,12 @@
     const DATA_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json';
     const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/20261714/urh99ln/';
 
-    let allData = {}, originalSnapshot = {}, openStores = new Set();
+    let allData = {}, originalSnapshot = {}, openStores = new Set(), changesMade = false;
 
     const toISO = d => { if(!d||!d.includes('/'))return''; const[p,q,r]=d.split('/');return`${r}-${q.padStart(2,'0')}-${p.padStart(2,'0')}`; };
     const fromISO = d => { if(!d)return''; const[p,q,r]=d.split('-');return`${r}/${q}/${p}`; };
     const addMonths=(dt,m)=>{let d=new Date(dt);d.setMonth(d.getMonth()+m);return d;};
     const addYears=(dt,y)=>addMonths(dt,y*12);
-    const parseDDMMYYYY=s=>{if(!s||!s.includes('/'))return null;const[d,m,y]=s.split('/').map(Number);return new Date(y,m-1,d);};
 
     function buildSharePointURL(store){
       const folder=`${store.branchCode} ${store.storeName}`.trim();
@@ -139,6 +142,9 @@
       </div>`;
       el.querySelectorAll('button[data-role="add"]').forEach(btn=>btn.addEventListener('click',()=>applyShortcut(btn)));
       el.querySelector('button[data-role="remove-store"]').addEventListener('click',()=>{openStores.delete(code);el.remove();});
+      el.querySelectorAll('input[type="date"]').forEach(inp=>{
+        inp.addEventListener('change',()=>{changesMade=true;document.getElementById('reviewChangesBtn').style.display='block';});
+      });
       document.getElementById('results').appendChild(el);
     }
 
@@ -162,6 +168,7 @@
       let [y,m,d]=baseISO.split('-').map(Number);let dt=new Date(y,m-1,d);
       dt=(type==='years')?addYears(dt,amt):addMonths(dt,amt);
       input.value=dt.toISOString().slice(0,10);
+      changesMade=true;document.getElementById('reviewChangesBtn').style.display='block';
     }
 
     function searchAndAdd(q){
@@ -212,9 +219,14 @@
 
     document.getElementById('searchBtn').addEventListener('click',()=>searchAndAdd(document.getElementById('searchInput').value));
     document.getElementById('searchInput').addEventListener('keyup',e=>{if(e.key==='Enter')searchAndAdd(e.target.value);});
-    document.getElementById('btnPreview').addEventListener('click',openPreview);
-    document.getElementById('btnClear').addEventListener('click',()=>{document.getElementById('results').innerHTML='';openStores.clear();});
+    document.getElementById('btnClear').addEventListener('click',()=>{document.getElementById('results').innerHTML='';openStores.clear();document.getElementById('reviewChangesBtn').style.display='none';});
     (async()=>{try{const res=await fetch(DATA_URL);allData=await res.json();}catch{document.getElementById('statusMsg').textContent='Failed to load compliance data.';}})();
+
+    // Auto-fill operator
+    window.addEventListener('DOMContentLoaded',()=>{
+      const user=sessionStorage.getItem('mostlaneUser')||'Unknown';
+      document.getElementById('operatorName').value=user.replace('.', ' ');
+    });
   </script>
 </body>
 </html>
