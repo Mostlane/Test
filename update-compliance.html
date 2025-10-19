@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Update Compliance – Mostlane Portal</title>
   <style>
-    /* ---- Portal background & container ---- */
     body{
       margin:0; font-family:Arial,Helvetica,sans-serif; color:#1f2937;
       background-color:#e6e8eb; position:relative; min-height:100vh; overflow-x:hidden;
@@ -13,74 +12,44 @@
     body::before{
       content:""; position:fixed; inset:0; z-index:-1;
       background:url('Mostlane_Embossed.png') no-repeat center/180%;
-      filter:none;
     }
     .container{
       background:rgba(255,255,255,0.6); margin:24px auto; padding:20px;
       border-radius:15px; max-width:960px; box-shadow:0 4px 10px rgba(0,0,0,0.1);
     }
-    .header{
-      text-align:center; margin-bottom:10px;
+    .header{text-align:center;margin-bottom:10px;}
+    .logo{max-height:60px;display:block;margin:0 auto 8px auto;}
+    h1{margin:6px 0 0 0;color:#0071CE;font-size:24px;}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+    .field{flex:1 1 220px;min-width:220px;}
+    label{font-weight:bold;display:block;margin:6px 0 4px;}
+    input[type="text"],input[type="date"]{
+      width:100%;padding:8px;border:1px solid #cfd3d8;border-radius:8px;font-size:14px;background:#fff;
     }
-    .logo{ max-height:60px; display:block; margin:0 auto 8px auto; }
-    h1{ margin:6px 0 0 0; color:#0071CE; font-size:24px; }
-
-    /* ---- Controls ---- */
-    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .field{ flex:1 1 220px; min-width:220px; }
-    label{ font-weight:bold; display:block; margin:6px 0 4px; }
-    input[type="text"], input[type="date"]{
-      width:100%; padding:8px; border:1px solid #cfd3d8; border-radius:8px; font-size:14px;
-      background:#fff;
-    }
-    .btn{
-      background:#0071CE; color:#fff; border:none; border-radius:8px;
-      padding:10px 14px; font-weight:bold; cursor:pointer;
-    }
-    .btn:hover{ background:#0062b5; }
-    .btn.secondary{ background:#e5e7eb; color:#111; }
-    .btn.secondary:hover{ background:#d7dbe1; }
-    .btn.small{ padding:6px 10px; font-size:12px; border-radius:6px; }
-    .btn.link{ background:transparent; color:#0071CE; text-decoration:underline; padding:0; }
-    .note{ color:#6b7280; font-size:12px; }
-
-    /* ---- Store cards ---- */
+    .btn{background:#0071CE;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:bold;cursor:pointer;}
+    .btn:hover{background:#0062b5;}
+    .btn.secondary{background:#e5e7eb;color:#111;}
+    .btn.secondary:hover{background:#d7dbe1;}
+    .btn.small{padding:6px 10px;font-size:12px;border-radius:6px;}
+    .note{color:#6b7280;font-size:12px;}
     details.store{
-      background:#ffffffcc; border:1px solid #e5e7eb; border-radius:10px; margin:12px 0; padding:10px 12px;
+      background:#ffffffcc;border:1px solid #e5e7eb;border-radius:10px;margin:12px 0;padding:10px 12px;
     }
-    details.store[open]{ box-shadow:0 2px 10px rgba(0,0,0,0.08); }
-    summary{
-      list-style:none; cursor:pointer; font-weight:bold; color:#111827; outline:none;
-      display:flex; justify-content:space-between; align-items:center;
-    }
-    summary::-webkit-details-marker{ display:none; }
-    .summary-meta{ font-weight:normal; color:#374151; font-size:13px; }
-    .grid{
-      display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      margin-top:10px;
-    }
-    .line{
-      background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:10px;
-    }
-    .line h4{ margin:0 0 8px; font-size:13px; color:#374151; display:flex; justify-content:space-between; align-items:center; }
-    .shortcuts{ display:flex; gap:6px; flex-wrap:wrap; }
-    .status{ text-align:center; font-weight:bold; color:#0071CE; margin-top:12px; }
-
-    /* ---- Modal ---- */
-    .modal{
-      display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:999;
-      align-items:center; justify-content:center; padding:16px;
-    }
-    .modal .box{
-      background:#fff; border-radius:12px; max-width:760px; width:100%;
-      box-shadow:0 10px 30px rgba(0,0,0,0.25); padding:18px; max-height:85vh; overflow:auto;
-    }
-    .modal .head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-    .modal pre{
-      background:#0b1021; color:#d0f0ff; padding:12px; border-radius:8px; overflow:auto; font-size:12px;
-    }
-    .closeX{ background:#e5e7eb; border:none; border-radius:50%; width:34px; height:34px; cursor:pointer; font-weight:bold; }
-    .topbar{ display:flex; gap:10px; align-items:end; margin:12px 0 18px; flex-wrap:wrap; }
+    details.store[open]{box-shadow:0 2px 10px rgba(0,0,0,0.08);}
+    summary{list-style:none;cursor:pointer;font-weight:bold;color:#111827;display:flex;justify-content:space-between;align-items:center;}
+    summary::-webkit-details-marker{display:none;}
+    .summary-meta{font-weight:normal;color:#374151;font-size:13px;}
+    .grid{display:grid;gap:12px;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));margin-top:10px;}
+    .line{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px;}
+    .line h4{margin:0 0 8px;font-size:13px;color:#374151;display:flex;justify-content:space-between;align-items:center;}
+    .shortcuts{display:flex;gap:6px;flex-wrap:wrap;}
+    .status{text-align:center;font-weight:bold;color:#0071CE;margin-top:12px;}
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:16px;}
+    .modal .box{background:#fff;border-radius:12px;max-width:760px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;max-height:85vh;overflow:auto;}
+    .modal .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+    .modal pre{background:#0b1021;color:#d0f0ff;padding:12px;border-radius:8px;overflow:auto;font-size:12px;}
+    .closeX{background:#e5e7eb;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-weight:bold;}
+    .topbar{display:flex;gap:10px;align-items:end;margin:12px 0 18px;flex-wrap:wrap;}
   </style>
 </head>
 <body>
@@ -91,36 +60,34 @@
       <p class="note">Search by store code, name, or postcode. Open multiple stores, adjust dates, preview changes, then submit.</p>
     </div>
 
-    <!-- Operator metadata -->
     <div class="topbar">
       <div class="field" style="max-width:280px;">
         <label for="operatorName">Operator Name (for audit)</label>
         <input id="operatorName" type="text" placeholder="e.g. A. Smith">
       </div>
-      <div class="field" style="max-width:420px;">
+      <div class="field" style="max-width:420px; position:relative;">
         <label for="searchInput">Search Store</label>
         <input id="searchInput" type="text" placeholder="Enter store code, name or postcode…">
+        <button id="searchBtn" class="btn small" style="position:absolute;right:6px;bottom:7px;">🔍</button>
       </div>
       <button class="btn" id="btnPreview">👀 Preview JSON Changes</button>
       <button class="btn secondary" id="btnClear">Clear All</button>
     </div>
 
-    <!-- Results -->
     <div id="results"></div>
-
     <div class="status" id="statusMsg"></div>
   </div>
 
   <!-- Preview Modal -->
-  <div class="modal" id="previewModal" role="dialog" aria-modal="true">
+  <div class="modal" id="previewModal">
     <div class="box">
       <div class="head">
         <h3 style="margin:0;color:#0071CE;">Preview JSON Changes</h3>
-        <button class="closeX" aria-label="Close preview" onclick="closePreview()">✕</button>
+        <button class="closeX" onclick="closePreview()">✕</button>
       </div>
       <div id="previewMeta" class="note" style="margin-bottom:8px;"></div>
       <pre id="previewJSON">{ }</pre>
-      <div style="display:flex; gap:10px; margin-top:12px;">
+      <div style="display:flex;gap:10px;margin-top:12px;">
         <button class="btn" onclick="sendToZapier()">📤 Send to Zapier</button>
         <button class="btn secondary" onclick="closePreview()">Cancel</button>
       </div>
@@ -129,334 +96,125 @@
   </div>
 
   <script>
-    // ========= Config =========
     const DATA_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json';
-    // Replace with your webhook when ready:
-    const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/xxxxxx/yyyyyy/';
+    const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/20261714/urh99ln/';
 
-    // ========= State =========
-    let allData = {};                 // full JSON loaded
-    let originalSnapshot = {};        // keep original values (per store) to detect changes
-    let openStores = new Set();       // storeCodes opened/added to page
+    let allData = {}, originalSnapshot = {}, openStores = new Set();
 
-    // ========= Helpers =========
-    const toISO = (ddmmyyyy) => {
-      if (!ddmmyyyy || !ddmmyyyy.includes('/')) return '';
-      const [d, m, y] = ddmmyyyy.split('/');
-      return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
-    };
-    const fromISO = (yyyymmdd) => {
-      if (!yyyymmdd) return '';
-      const [y, m, d] = yyyymmdd.split('-');
-      return `${d}/${m}/${y}`;
-    };
+    const toISO = d => { if(!d||!d.includes('/'))return''; const[p,q,r]=d.split('/');return`${r}-${q.padStart(2,'0')}-${p.padStart(2,'0')}`; };
+    const fromISO = d => { if(!d)return''; const[p,q,r]=d.split('-');return`${r}/${q}/${p}`; };
+    const addMonths=(dt,m)=>{let d=new Date(dt);d.setMonth(d.getMonth()+m);return d;};
+    const addYears=(dt,y)=>addMonths(dt,y*12);
+    const parseDDMMYYYY=s=>{if(!s||!s.includes('/'))return null;const[d,m,y]=s.split('/').map(Number);return new Date(y,m-1,d);};
 
-    // Add months/years (safe for end-of-month)
-    function addMonths(date, months){
-      const d = new Date(date.getTime());
-      const day = d.getDate();
-      d.setMonth(d.getMonth() + months);
-      if (d.getDate() < day) d.setDate(0); // clamp to month end
-      return d;
-    }
-    const addYears = (date, years) => addMonths(date, years * 12);
-
-    const parseDDMMYYYY = (s) => {
-      if (!s || !s.includes('/')) return null;
-      const [d, m, y] = s.split('/').map(Number);
-      return new Date(y, m - 1, d);
-    };
-
-    // SharePoint link: prefer explicit field; else build from code + name
     function buildSharePointURL(store){
-      if (store.photoFolderURL) return store.photoFolderURL;
-      const folder = `${store.branchCode} ${store.storeName}`.trim();
-      const enc = encodeURIComponent(folder).replace(/%20/g,'+');
-      // Adjust base path to your actual library/folder path if needed:
-      return `https://mostlane.sharepoint.com/Mostlane%20Shared%20Documents/Mostlane%20Construction/TSC%20Compliance/Retail/${enc}`;
+      const folder=`${store.branchCode} ${store.storeName}`.trim();
+      const encoded=encodeURIComponent(folder);
+      const base="https://mostlane.sharepoint.com/sites/Mostlane/Shared%20Documents/Forms/AllItems.aspx";
+      const path=`/sites/Mostlane/Shared%20Documents/Mostlane%20Construction/TSC%20Compliance/Retail/${encoded}`;
+      const viewId="4117cdaf-c4e7-42e6-8458-29aabc3bec69";
+      return `${base}?id=${path}&viewid=${viewId}`;
     }
 
-    // ========= Render =========
     function renderStoreCard(store){
-      const code = store.branchCode;
-      const current = {
-        five: store['5_Year'] || '',
-        pat:  store['PAT']    || '',
-        em:   store['EM']     || '',
-        pv:   store['PV']     || '',
-        ev:   store['EV']     || '',
-        pump: store['PUMP']   || ''
-      };
-      // Save original on first render
-      if (!originalSnapshot[code]) originalSnapshot[code] = { ...current };
-
-      const spURL = buildSharePointURL(store);
-
-      // Card element
-      const el = document.createElement('details');
-      el.className = 'store';
-      el.open = true;
-      el.id = `store-${code}`;
-
-      el.innerHTML = `
-        <summary>
-          <span>${code} — ${store.storeName}</span>
-          <span class="summary-meta">${store.postcode || ''}</span>
-        </summary>
-
-        <div class="grid">
-
-          <div class="line">
-            <h4>
-              <span>5 Year</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="five" data-type="years" data-amt="5">+5y</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.five}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="five-${code}" value="${toISO(current.five)}">
-          </div>
-
-          <div class="line">
-            <h4>
-              <span>PAT</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="pat" data-type="months" data-amt="12">+12m</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.pat}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="pat-${code}" value="${toISO(current.pat)}">
-          </div>
-
-          <div class="line">
-            <h4>
-              <span>EM</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="em" data-type="months" data-amt="12">+12m</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.em}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="em-${code}" value="${toISO(current.em)}">
-          </div>
-
-          <div class="line">
-            <h4>
-              <span>PV</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="pv" data-type="months" data-amt="12">+12m</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.pv}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="pv-${code}" value="${toISO(current.pv)}">
-          </div>
-
-          <div class="line">
-            <h4>
-              <span>EV</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="ev" data-type="months" data-amt="12">+12m</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.ev}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="ev-${code}" value="${toISO(current.ev)}">
-          </div>
-
-          <div class="line">
-            <h4>
-              <span>Pump</span>
-              <span class="shortcuts">
-                <button class="btn small" data-role="add" data-target="${code}" data-field="pump" data-type="months" data-amt="1">+1m</button>
-              </span>
-            </h4>
-            <label>Current</label>
-            <input type="text" value="${current.pump}" data-readonly readonly>
-            <label>New</label>
-            <input type="date" id="pump-${code}" value="${toISO(current.pump)}">
-          </div>
-
-        </div>
-
-        <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
-          <a class="btn secondary" href="${spURL}" target="_blank" rel="noopener">📂 Open SharePoint Folder</a>
-          <button class="btn" data-role="mark-store" data-code="${code}">✔ Mark for Update</button>
-          <button class="btn secondary" data-role="remove-store" data-code="${code}">Remove</button>
-        </div>
-      `;
-
-      // Wire shortcut buttons
-      el.querySelectorAll('button[data-role="add"]').forEach(btn=>{
-        btn.addEventListener('click', () => applyShortcut(btn));
-      });
-
-      // Wire remove
-      el.querySelector('button[data-role="remove-store"]').addEventListener('click', (e)=>{
-        openStores.delete(code);
-        el.remove();
-      });
-
-      // Wire mark-for-update (visual only, changes are captured on Preview)
-      el.querySelector('button[data-role="mark-store"]').addEventListener('click', ()=>{
-        el.style.outline = '2px solid #00b894';
-        el.style.outlineOffset = '2px';
-        setTimeout(()=>{ el.style.outline='none'; }, 1200);
-      });
-
+      const code=store.branchCode;
+      const current={five:store['5_Year']||'',pat:store['PAT']||'',em:store['EM']||'',pv:store['PV']||'',ev:store['EV']||'',pump:store['PUMP']||''};
+      if(!originalSnapshot[code])originalSnapshot[code]={...current};
+      const spURL=buildSharePointURL(store);
+      const el=document.createElement('details');
+      el.className='store'; el.open=true; el.id=`store-${code}`;
+      el.innerHTML=`
+      <summary><span>${code} — ${store.storeName}</span><span class="summary-meta">${store.postcode||''}</span></summary>
+      <div class="grid">
+        ${buildLine('5 Year','five',code,current.five,'years',5)}
+        ${buildLine('PAT','pat',code,current.pat,'months',12)}
+        ${buildLine('EM','em',code,current.em,'months',12)}
+        ${buildLine('PV','pv',code,current.pv,'months',12)}
+        ${buildLine('EV','ev',code,current.ev,'months',12)}
+        ${buildLine('Pump','pump',code,current.pump,'months',1)}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <a class="btn secondary" href="${spURL}" target="_blank" rel="noopener">📂 Open SharePoint Folder</a>
+        <button class="btn secondary" data-role="remove-store" data-code="${code}">Remove</button>
+      </div>`;
+      el.querySelectorAll('button[data-role="add"]').forEach(btn=>btn.addEventListener('click',()=>applyShortcut(btn)));
+      el.querySelector('button[data-role="remove-store"]').addEventListener('click',()=>{openStores.delete(code);el.remove();});
       document.getElementById('results').appendChild(el);
     }
 
+    function buildLine(label,key,code,val,type,amt){
+      return `
+      <div class="line">
+        <h4><span>${label}</span><span class="shortcuts">
+        <button class="btn small" data-role="add" data-target="${code}" data-field="${key}" data-type="${type}" data-amt="${amt}">+${amt}${type==='years'?'y':'m'}</button></span></h4>
+        <label>Current</label><input type="text" value="${val}" readonly>
+        <label>New</label><input type="date" id="${key}-${code}" value="${toISO(val)}">
+      </div>`;
+    }
+
     function applyShortcut(btn){
-      const code = btn.dataset.target;
-      const field = btn.dataset.field;   // five | pat | em | pv | ev | pump
-      const type  = btn.dataset.type;    // months | years
-      const amt   = parseInt(btn.dataset.amt, 10);
-
-      const input = document.getElementById(`${field}-${code}`);
-      // base date: current New value or Current (from snapshot) or today
-      let baseISO = input.value;
-      if (!baseISO) {
-        const current = originalSnapshot[code];
-        const fallback = (
-          field==='five' ? current.five :
-          field==='pat'  ? current.pat  :
-          field==='em'   ? current.em   :
-          field==='pv'   ? current.pv   :
-          field==='ev'   ? current.ev   : current.pump
-        );
-        baseISO = toISO(fallback) || (new Date()).toISOString().slice(0,10);
+      const code=btn.dataset.target,field=btn.dataset.field,type=btn.dataset.type,amt=parseInt(btn.dataset.amt);
+      const input=document.getElementById(`${field}-${code}`);
+      let baseISO=input.value;
+      if(!baseISO){
+        const cur=originalSnapshot[code];baseISO=toISO(cur[field])||new Date().toISOString().slice(0,10);
       }
-      const [y,m,d] = baseISO.split('-').map(Number);
-      let dt = new Date(y, m-1, d);
-
-      dt = (type === 'years') ? addYears(dt, amt) : addMonths(dt, amt);
-      const newISO = dt.toISOString().slice(0,10);
-      input.value = newISO;
+      let [y,m,d]=baseISO.split('-').map(Number);let dt=new Date(y,m-1,d);
+      dt=(type==='years')?addYears(dt,amt):addMonths(dt,amt);
+      input.value=dt.toISOString().slice(0,10);
     }
 
-    // ========= Search & Add =========
-    function searchAndAdd(query){
-      const q = query.trim().toLowerCase();
-      if (!q) return;
-
-      // find *all* matches; append cards for each (multi-store editing)
-      const matches = Object.values(allData).filter(st =>
-        (st.branchCode && String(st.branchCode).toLowerCase().includes(q)) ||
-        (st.storeName && st.storeName.toLowerCase().includes(q)) ||
-        (st.postcode  && st.postcode.toLowerCase().includes(q))
-      );
-
-      if (!matches.length) {
-        document.getElementById('statusMsg').textContent = 'No matching stores found.';
-        return;
-      }
-      document.getElementById('statusMsg').textContent = '';
-
-      matches.forEach(store=>{
-        const code = store.branchCode;
-        if (openStores.has(code)) return; // avoid duplicate card
-        openStores.add(code);
-        renderStoreCard(store);
-      });
+    function searchAndAdd(q){
+      q=q.trim().toLowerCase();if(!q)return;
+      const matches=Object.values(allData).filter(s=>
+        (s.branchCode&&s.branchCode.toLowerCase().includes(q))||
+        (s.storeName&&s.storeName.toLowerCase().includes(q))||
+        (s.postcode&&s.postcode.toLowerCase().includes(q)));
+      if(!matches.length){document.getElementById('statusMsg').textContent='No matching stores found.';return;}
+      document.getElementById('statusMsg').textContent='';
+      matches.forEach(s=>{if(openStores.has(s.branchCode))return;openStores.add(s.branchCode);renderStoreCard(s);});
     }
 
-    // ========= Preview & Send =========
     function buildChangesPayload(){
-      // For each open store, compare new dates vs original; include only changed fields
-      const updates = [];
-      openStores.forEach(code=>{
-        const orig = originalSnapshot[code] || {};
-        const getNew = (id) => document.getElementById(`${id}-${code}`)?.value || '';
-
-        const changed = {};
-        const fiveISO = getNew('five'); if (fiveISO && fromISO(fiveISO) !== (orig.five||'')) changed['5_Year'] = fromISO(fiveISO);
-        const patISO  = getNew('pat');  if (patISO  && fromISO(patISO)  !== (orig.pat||''))  changed['PAT']    = fromISO(patISO);
-        const emISO   = getNew('em');   if (emISO   && fromISO(emISO)   !== (orig.em||''))   changed['EM']     = fromISO(emISO);
-        const pvISO   = getNew('pv');   if (pvISO   && fromISO(pvISO)   !== (orig.pv||''))   changed['PV']     = fromISO(pvISO);
-        const evISO   = getNew('ev');   if (evISO   && fromISO(evISO)   !== (orig.ev||''))   changed['EV']     = fromISO(evISO);
-        const pumpISO = getNew('pump'); if (pumpISO && fromISO(pumpISO) !== (orig.pump||'')) changed['PUMP']   = fromISO(pumpISO);
-
-        if (Object.keys(changed).length){
-          updates.push({ storeCode: code, updates: changed });
-        }
+      const updates=[];openStores.forEach(code=>{
+        const orig=originalSnapshot[code]||{};const getNew=id=>document.getElementById(`${id}-${code}`)?.value||'';
+        const changed={};
+        const map=[['five','5_Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','PUMP']];
+        map.forEach(([k,kk])=>{const iso=getNew(k);if(iso&&fromISO(iso)!==(orig[k]||''))changed[kk]=fromISO(iso);});
+        if(Object.keys(changed).length)updates.push({storeCode:code,updates:changed});
       });
-
-      // Metadata
-      const meta = {
-        operator: (document.getElementById('operatorName').value || '').trim() || 'Unknown',
-        deviceId: (localStorage.getItem('ml_device_id') ||
-                   (()=>{ const id='dev-'+Math.random().toString(36).slice(2); localStorage.setItem('ml_device_id', id); return id; })()),
-        userAgent: navigator.userAgent,
-        timestamp: new Date().toISOString()
+      const meta={
+        operator:(document.getElementById('operatorName').value||'').trim()||'Unknown',
+        deviceId:(localStorage.getItem('ml_device_id')||(function(){const id='dev-'+Math.random().toString(36).slice(2);localStorage.setItem('ml_device_id',id);return id;})()),
+        timestamp:new Date().toISOString()
       };
-
-      return { meta, updates };
+      return{meta,updates};
     }
 
     function openPreview(){
-      const { meta, updates } = buildChangesPayload();
-
-      const modal = document.getElementById('previewModal');
-      const pre   = document.getElementById('previewJSON');
-      const metaBox = document.getElementById('previewMeta');
-      const sendStatus = document.getElementById('sendStatus');
-      sendStatus.textContent = '';
-
-      if (!updates.length){
-        pre.textContent = '// No changes detected. Edit some dates or use the shortcut buttons, then preview again.';
-      } else {
-        pre.textContent = JSON.stringify({ meta, updates }, null, 2);
-      }
-      metaBox.textContent = `Operator: ${meta.operator}  |  Device: ${meta.deviceId}  |  ${new Date(meta.timestamp).toLocaleString()}`;
-      modal.style.display = 'flex';
+      const {meta,updates}=buildChangesPayload();const pre=document.getElementById('previewJSON');const metaBox=document.getElementById('previewMeta');
+      const sendStatus=document.getElementById('sendStatus');sendStatus.textContent='';
+      pre.textContent=updates.length?JSON.stringify({meta,updates},null,2):'// No changes detected.';
+      metaBox.textContent=`Operator: ${meta.operator}  |  Device: ${meta.deviceId}  |  ${new Date(meta.timestamp).toLocaleString()}`;
+      document.getElementById('previewModal').style.display='flex';
     }
-    function closePreview(){ document.getElementById('previewModal').style.display='none'; }
+    function closePreview(){document.getElementById('previewModal').style.display='none';}
 
     async function sendToZapier(){
-      const sendStatus = document.getElementById('sendStatus');
-      const { meta, updates } = buildChangesPayload();
-      if (!updates.length){ sendStatus.textContent = 'No changes to send.'; return; }
-
+      const {meta,updates}=buildChangesPayload();const s=document.getElementById('sendStatus');
+      if(!updates.length){s.textContent='No changes to send.';return;}
       try{
-        const res = await fetch(ZAPIER_WEBHOOK, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ meta, updates })
-        });
-        if (!res.ok) throw new Error('Non-200 status: '+res.status);
-        sendStatus.textContent = '✅ Sent successfully.';
-      }catch(err){
-        sendStatus.textContent = '❌ Failed to send: ' + err.message;
-      }
+        const res=await fetch(ZAPIER_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({meta,updates})});
+        if(!res.ok)throw new Error(res.statusText);
+        s.textContent='✅ Sent successfully.';
+      }catch(e){s.textContent='❌ Failed to send: '+e.message;}
     }
 
-    // ========= Events =========
-    document.getElementById('searchInput').addEventListener('keyup', (e)=>{
-      if (e.key === 'Enter'){ searchAndAdd(e.target.value); e.target.select(); }
-    });
-    document.getElementById('btnPreview').addEventListener('click', openPreview);
-    document.getElementById('btnClear').addEventListener('click', ()=>{
-      document.getElementById('results').innerHTML = '';
-      openStores.clear();
-      document.getElementById('statusMsg').textContent = '';
-    });
-
-    // ========= Init =========
-    (async function init(){
-      try{
-        const res = await fetch(DATA_URL);
-        allData = await res.json();
-      }catch(e){
-        document.getElementById('statusMsg').textContent = 'Failed to load compliance data.';
-      }
-    })();
+    document.getElementById('searchBtn').addEventListener('click',()=>searchAndAdd(document.getElementById('searchInput').value));
+    document.getElementById('searchInput').addEventListener('keyup',e=>{if(e.key==='Enter')searchAndAdd(e.target.value);});
+    document.getElementById('btnPreview').addEventListener('click',openPreview);
+    document.getElementById('btnClear').addEventListener('click',()=>{document.getElementById('results').innerHTML='';openStores.clear();});
+    (async()=>{try{const res=await fetch(DATA_URL);allData=await res.json();}catch{document.getElementById('statusMsg').textContent='Failed to load compliance data.';}})();
   </script>
 </body>
 </html>
