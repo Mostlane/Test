@@ -23,8 +23,6 @@
     .banner{background:#e0f7ec;border:1px solid #00a14b;color:#006636;
       font-weight:bold;padding:8px 12px;text-align:center;border-radius:8px;
       margin-bottom:10px;display:none;}
-    .topbar{display:flex;gap:10px;align-items:end;margin:12px 0 18px;flex-wrap:wrap;}
-    .field{flex:1 1 220px;min-width:220px;}
     label{font-weight:bold;display:block;margin:6px 0 4px;}
     input[type="text"],input[type="date"]{
       width:100%;padding:8px;border:1px solid #cfd3d8;border-radius:8px;
@@ -33,16 +31,24 @@
     input[readonly]{background:#f3f4f6;}
     .btn{background:#0071CE;color:#fff;border:none;border-radius:8px;
       padding:10px 14px;font-weight:bold;cursor:pointer;}
-    .btn.small{padding:6px 10px;font-size:12px;border-radius:6px;}
     .btn.secondary{background:#e5e7eb;color:#111;}
     .btn.secondary:hover{background:#d7dbe1;}
-    .search-container{position:relative;max-width:420px;width:100%;}
-    .search-container input{padding-right:40px;}
+
+    /* --- fixed search layout --- */
+    .topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;}
+    .field{flex:1 1 220px;min-width:220px;}
+    .search-container{position:relative;flex:1 1 320px;min-width:240px;}
+    .search-container input{padding-right:38px;}
     .search-icon{
       position:absolute;right:10px;top:50%;transform:translateY(-50%);
-      background:none;border:none;cursor:pointer;font-size:18px;
-      color:#0071CE;
+      background:none;border:none;cursor:pointer;font-size:18px;color:#0071CE;
+      padding:0;line-height:1;
     }
+    @media(max-width:600px){
+      .topbar{flex-direction:column;align-items:stretch;}
+      .btn.secondary{width:100%;}
+    }
+
     details.store{background:#ffffffcc;border:1px solid #e5e7eb;
       border-radius:10px;margin:12px 0;padding:10px 12px;}
     details.store[open]{box-shadow:0 2px 10px rgba(0,0,0,0.08);}
@@ -81,7 +87,7 @@
         <input id="operatorName" type="text" readonly>
       </div>
 
-      <div class="search-container field">
+      <div class="search-container">
         <label for="searchInput">Search Store</label>
         <input id="searchInput" type="text" placeholder="Enter store code, name or postcode…">
         <button id="searchIcon" class="search-icon" title="Search">🔍</button>
