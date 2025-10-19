@@ -6,20 +6,25 @@
   <title>Retail Compliance Editor – Mostlane Portal</title>
   <style>
     body{
-      margin:0; font-family:Arial,Helvetica,sans-serif; color:#1f2937;
-      background-color:#e6e8eb; position:relative; min-height:100vh; overflow-x:hidden;
+      margin:0;font-family:Arial,Helvetica,sans-serif;color:#1f2937;
+      background-color:#e6e8eb;position:relative;min-height:100vh;overflow-x:hidden;
     }
     body::before{
-      content:""; position:fixed; inset:0; z-index:-1;
+      content:"";position:fixed;inset:0;z-index:-1;
       background:url('Mostlane_Embossed.png') no-repeat center/180%;
     }
     .container{
-      background:rgba(255,255,255,0.6); margin:24px auto; padding:20px;
-      border-radius:15px; max-width:960px; box-shadow:0 4px 10px rgba(0,0,0,0.1);
+      background:rgba(255,255,255,0.6);margin:24px auto;padding:20px;
+      border-radius:15px;max-width:960px;box-shadow:0 4px 10px rgba(0,0,0,0.1);
     }
     .header{text-align:center;margin-bottom:10px;}
     .logo{max-height:60px;display:block;margin:0 auto 8px auto;}
     h1{margin:6px 0 0 0;color:#0071CE;font-size:24px;}
+    .banner{
+      background:#e0f7ec;border:1px solid #00a14b;
+      color:#006636;font-weight:bold;padding:8px 12px;
+      text-align:center;border-radius:8px;margin-bottom:10px;display:none;
+    }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
     .field{flex:1 1 220px;min-width:220px;}
     label{font-weight:bold;display:block;margin:6px 0 4px;}
@@ -40,7 +45,7 @@
     summary{list-style:none;cursor:pointer;font-weight:bold;color:#111827;display:flex;justify-content:space-between;align-items:center;}
     summary::-webkit-details-marker{display:none;}
     .summary-meta{font-weight:normal;color:#374151;font-size:13px;}
-    .grid{display:grid;gap:12px;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));margin-top:10px;}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:10px;}
     .line{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px;}
     .line h4{margin:0 0 8px;font-size:13px;color:#374151;display:flex;justify-content:space-between;align-items:center;}
     .shortcuts{display:flex;gap:6px;flex-wrap:wrap;}
@@ -61,6 +66,8 @@
       <h1>Retail Compliance Editor</h1>
       <p class="note">Search stores, adjust due dates, then review and submit changes.</p>
     </div>
+
+    <div id="dataBanner" class="banner">✅ Data loaded successfully.</div>
 
     <div class="topbar">
       <div class="field" style="max-width:280px;">
@@ -100,7 +107,8 @@
   </div>
 
   <script>
-    const DATA_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json';
+    const DATA_URL_COMP = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json';
+    const DATA_URL_SITES = 'https://raw.githubusercontent.com/Mostlane/Test/main/Sites/retail.json';
     const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/20261714/urh99ln/';
 
     let allData = {}, originalSnapshot = {}, openStores = new Set(), changesMade = false;
@@ -110,20 +118,11 @@
     const addMonths=(dt,m)=>{let d=new Date(dt);d.setMonth(d.getMonth()+m);return d;};
     const addYears=(dt,y)=>addMonths(dt,y*12);
 
-    function buildSharePointURL(store){
-      const folder=`${store.branchCode} ${store.storeName}`.trim();
-      const encoded=encodeURIComponent(folder);
-      const base="https://mostlane.sharepoint.com/sites/Mostlane/Shared%20Documents/Forms/AllItems.aspx";
-      const path=`/sites/Mostlane/Shared%20Documents/Mostlane%20Construction/TSC%20Compliance/Retail/${encoded}`;
-      const viewId="4117cdaf-c4e7-42e6-8458-29aabc3bec69";
-      return `${base}?id=${path}&viewid=${viewId}`;
-    }
-
     function renderStoreCard(store){
       const code=store.branchCode;
       const current={five:store['5_Year']||'',pat:store['PAT']||'',em:store['EM']||'',pv:store['PV']||'',ev:store['EV']||'',pump:store['PUMP']||''};
       if(!originalSnapshot[code])originalSnapshot[code]={...current};
-      const spURL=buildSharePointURL(store);
+      const spURL=store.sharePointURL||'#';
       const el=document.createElement('details');
       el.className='store'; el.open=true; el.id=`store-${code}`;
       el.innerHTML=`
@@ -199,7 +198,8 @@
     }
 
     function openPreview(){
-      const {meta,updates}=buildChangesPayload();const pre=document.getElementById('previewJSON');const metaBox=document.getElementById('previewMeta');
+      const {meta,updates}=buildChangesPayload();
+      const pre=document.getElementById('previewJSON');const metaBox=document.getElementById('previewMeta');
       const sendStatus=document.getElementById('sendStatus');sendStatus.textContent='';
       pre.textContent=updates.length?JSON.stringify({meta,updates},null,2):'// No changes detected.';
       metaBox.textContent=`Operator: ${meta.operator}  |  Device: ${meta.deviceId}  |  ${new Date(meta.timestamp).toLocaleString()}`;
@@ -220,9 +220,29 @@
     document.getElementById('searchBtn').addEventListener('click',()=>searchAndAdd(document.getElementById('searchInput').value));
     document.getElementById('searchInput').addEventListener('keyup',e=>{if(e.key==='Enter')searchAndAdd(e.target.value);});
     document.getElementById('btnClear').addEventListener('click',()=>{document.getElementById('results').innerHTML='';openStores.clear();document.getElementById('reviewChangesBtn').style.display='none';});
-    (async()=>{try{const res=await fetch(DATA_URL);allData=await res.json();}catch{document.getElementById('statusMsg').textContent='Failed to load compliance data.';}})();
 
-    // Auto-fill operator
+    // Load both JSONs and merge SharePoint URLs
+    (async()=>{
+      try{
+        const [compRes, siteRes] = await Promise.all([fetch(DATA_URL_COMP), fetch(DATA_URL_SITES)]);
+        const [compData, siteData] = await Promise.all([compRes.json(), siteRes.json()]);
+        const siteURLs = {};
+        Object.values(siteData).forEach(site=>{
+          if(site.branchCode && site.sharePointURL){siteURLs[site.branchCode]=site.sharePointURL;}
+        });
+        Object.values(compData).forEach(site=>{
+          const code=site.branchCode;
+          if(siteURLs[code]) site.sharePointURL=siteURLs[code];
+        });
+        allData = compData;
+        document.getElementById('dataBanner').style.display='block';
+      }catch(e){
+        console.error(e);
+        document.getElementById('statusMsg').textContent='❌ Failed to load site or compliance data.';
+      }
+    })();
+
+    // Auto-fill operator name
     window.addEventListener('DOMContentLoaded',()=>{
       const user=sessionStorage.getItem('mostlaneUser')||'Unknown';
       document.getElementById('operatorName').value=user.replace('.', ' ');
