@@ -9,7 +9,6 @@
       margin:0;font-family:Arial,Helvetica,sans-serif;color:#1f2937;
       background-color:#e6e8eb;position:relative;min-height:100vh;overflow-x:hidden;
     }
-    /* Fixed embossed background layer */
     body::before{
       content:"";position:fixed;inset:0;z-index:-1;
       background:url('Mostlane_Embossed.png') no-repeat center/180%;
@@ -21,45 +20,46 @@
     .header{text-align:center;margin-bottom:10px;}
     .logo{max-height:60px;display:block;margin:0 auto 8px auto;}
     h1{margin:6px 0 0 0;color:#0071CE;font-size:24px;}
-
-    .banner{
-      background:#e0f7ec;border:1px solid #00a14b;color:#006636;
+    .banner{background:#e0f7ec;border:1px solid #00a14b;color:#006636;
       font-weight:bold;padding:8px 12px;text-align:center;border-radius:8px;
-      margin-bottom:10px;display:none;
-    }
-
+      margin-bottom:10px;display:none;}
     .topbar{display:flex;gap:10px;align-items:end;margin:12px 0 18px;flex-wrap:wrap;}
     .field{flex:1 1 220px;min-width:220px;}
     label{font-weight:bold;display:block;margin:6px 0 4px;}
     input[type="text"],input[type="date"]{
-      width:100%;padding:8px;border:1px solid #cfd3d8;border-radius:8px;font-size:14px;background:#fff;
+      width:100%;padding:8px;border:1px solid #cfd3d8;border-radius:8px;
+      font-size:14px;background:#fff;
     }
     input[readonly]{background:#f3f4f6;}
-    .btn{background:#0071CE;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:bold;cursor:pointer;}
-    .btn:hover{background:#0062b5;}
+    .btn{background:#0071CE;color:#fff;border:none;border-radius:8px;
+      padding:10px 14px;font-weight:bold;cursor:pointer;}
+    .btn.small{padding:6px 10px;font-size:12px;border-radius:6px;}
     .btn.secondary{background:#e5e7eb;color:#111;}
     .btn.secondary:hover{background:#d7dbe1;}
-    .btn.small{padding:6px 10px;font-size:12px;border-radius:6px;}
-
-    details.store{
-      background:#ffffffcc;border:1px solid #e5e7eb;border-radius:10px;margin:12px 0;padding:10px 12px;
+    .search-container{position:relative;max-width:420px;width:100%;}
+    .search-container input{padding-right:40px;}
+    .search-icon{
+      position:absolute;right:10px;top:50%;transform:translateY(-50%);
+      background:none;border:none;cursor:pointer;font-size:18px;
+      color:#0071CE;
     }
+    details.store{background:#ffffffcc;border:1px solid #e5e7eb;
+      border-radius:10px;margin:12px 0;padding:10px 12px;}
     details.store[open]{box-shadow:0 2px 10px rgba(0,0,0,0.08);}
-    summary{list-style:none;cursor:pointer;font-weight:bold;color:#111827;display:flex;justify-content:space-between;align-items:center;}
+    summary{list-style:none;cursor:pointer;font-weight:bold;color:#111827;
+      display:flex;justify-content:space-between;align-items:center;}
     summary::-webkit-details-marker{display:none;}
     .summary-meta{font-weight:normal;color:#374151;font-size:13px;}
-
-    .grid{display:grid;gap:12px;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));margin-top:10px;}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:10px;}
     .line{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px;}
     .line h4{margin:0 0 8px;font-size:13px;color:#374151;display:flex;justify-content:space-between;align-items:center;}
     .shortcuts{display:flex;gap:6px;flex-wrap:wrap;}
-
     .status{text-align:center;font-weight:bold;color:#0071CE;margin-top:12px;}
     #reviewChangesWrap{display:none;margin-top:30px;text-align:center;}
-
-    /* Modal */
-    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:999;align-items:center;justify-content:center;padding:16px;}
-    .modal .box{background:#fff;border-radius:12px;max-width:760px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;max-height:85vh;overflow:auto;}
+    .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);
+      z-index:999;align-items:center;justify-content:center;padding:16px;}
+    .modal .box{background:#fff;border-radius:12px;max-width:760px;width:100%;
+      box-shadow:0 10px 30px rgba(0,0,0,0.25);padding:18px;max-height:85vh;overflow:auto;}
     .modal .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
     .modal pre{background:#0b1021;color:#d0f0ff;padding:12px;border-radius:8px;overflow:auto;font-size:12px;}
     .closeX{background:#e5e7eb;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-weight:bold;}
@@ -81,26 +81,22 @@
         <input id="operatorName" type="text" readonly>
       </div>
 
-      <!-- Search field with 🔍 and Search button -->
-      <div class="field" style="max-width:420px; position:relative;">
+      <div class="search-container field">
         <label for="searchInput">Search Store</label>
         <input id="searchInput" type="text" placeholder="Enter store code, name or postcode…">
-        <button id="searchIcon" class="btn small" title="Search" style="position:absolute;right:100px;bottom:7px;">🔍</button>
+        <button id="searchIcon" class="search-icon" title="Search">🔍</button>
       </div>
-      <button class="btn" id="btnSearch">Search</button>
 
       <button class="btn secondary" id="btnClear">Clear All</button>
     </div>
 
     <div id="results"></div>
 
-    <!-- 👀 Review Changes (only appears after edits) -->
     <div id="reviewChangesWrap">
       <button class="btn" id="btnReview">👀 Review Changes</button>
     </div>
   </div>
 
-  <!-- Preview Modal -->
   <div class="modal" id="previewModal">
     <div class="box">
       <div class="head">
@@ -121,34 +117,22 @@
     const DATA_URL_COMP = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json';
     const DATA_URL_SITES = 'https://raw.githubusercontent.com/Mostlane/Test/main/Sites/retail.json';
     const ZAPIER_WEBHOOK = 'https://hooks.zapier.com/hooks/catch/20261714/urh99ln/';
+    let allData={},originalSnapshot={},openStores=new Set();
 
-    let allData = {}, originalSnapshot = {}, openStores = new Set();
+    const toISO=d=>{if(!d||!d.includes('/'))return'';const[p,q,r]=d.split('/');return`${r}-${q.padStart(2,'0')}-${p.padStart(2,'0')}`;};
+    const fromISO=d=>{if(!d)return'';const[p,q,r]=d.split('-');return`${r}/${q}/${p}`;};
+    const addMonths=(dt,m)=>{let d=new Date(dt);d.setMonth(d.getMonth()+m);return d;};
+    const addYears=(dt,y)=>addMonths(dt,y*12);
 
-    // --- utils ---
-    const toISO = d => { if(!d||!d.includes('/'))return''; const[p,q,r]=d.split('/');return `${r}-${q.padStart(2,'0')}-${p.padStart(2,'0')}`; };
-    const fromISO = d => { if(!d)return''; const[p,q,r]=d.split('-');return `${r}/${q}/${p}`; };
-    const addMonths = (dt,m)=>{let d=new Date(dt);d.setMonth(d.getMonth()+m);return d;};
-    const addYears  = (dt,y)=>addMonths(dt,y*12);
-
-    // --- render a store card ---
     function renderStoreCard(store){
-      const code = store.branchCode;
+      const code=store.branchCode;
       const current={five:store['5_Year']||'',pat:store['PAT']||'',em:store['EM']||'',pv:store['PV']||'',ev:store['EV']||'',pump:store['PUMP']||''};
-      if(!originalSnapshot[code]) originalSnapshot[code] = {...current};
-
-      const spURL = store.sharePointURL || '#';
-
-      const el = document.createElement('details');
-      el.className = 'store';
-      el.open = true;
-      el.id = `store-${code}`;
-
-      el.innerHTML = `
-        <summary>
-          <span>${code} — ${store.storeName}</span>
-          <span class="summary-meta">${store.postcode || ''}</span>
-        </summary>
-
+      if(!originalSnapshot[code])originalSnapshot[code]={...current};
+      const spURL=store.sharePointURL||'#';
+      const el=document.createElement('details');
+      el.className='store';el.open=true;el.id=`store-${code}`;
+      el.innerHTML=`
+        <summary><span>${code} — ${store.storeName}</span><span class="summary-meta">${store.postcode||''}</span></summary>
         <div class="grid">
           ${buildLine('5 Year','five',code,current.five,'years',5)}
           ${buildLine('PAT','pat',code,current.pat,'months',12)}
@@ -157,183 +141,55 @@
           ${buildLine('EV','ev',code,current.ev,'months',12)}
           ${buildLine('Pump','pump',code,current.pump,'months',1)}
         </div>
-
         <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;">
           <a class="btn secondary" href="${spURL}" target="_blank" rel="noopener">📂 Open SharePoint Folder</a>
           <button class="btn secondary" data-role="remove-store" data-code="${code}">Remove</button>
-        </div>
-      `;
-
-      el.querySelectorAll('button[data-role="add"]').forEach(btn=>btn.addEventListener('click',()=>applyShortcut(btn)));
+        </div>`;
+      el.querySelectorAll('button[data-role="add"]').forEach(b=>b.addEventListener('click',()=>applyShortcut(b)));
       el.querySelector('button[data-role="remove-store"]').addEventListener('click',()=>{openStores.delete(code);el.remove();toggleReviewBtn();});
-      el.querySelectorAll('input[type="date"]').forEach(inp=>{
-        inp.addEventListener('change',()=>{toggleReviewBtn(true);});
-      });
-
+      el.querySelectorAll('input[type="date"]').forEach(inp=>inp.addEventListener('change',()=>toggleReviewBtn(true)));
       document.getElementById('results').appendChild(el);
     }
-
     function buildLine(label,key,code,val,type,amt){
-      return `
-        <div class="line">
-          <h4>
-            <span>${label}</span>
-            <span class="shortcuts">
-              <button class="btn small" data-role="add" data-target="${code}" data-field="${key}" data-type="${type}" data-amt="${amt}">+${amt}${type==='years'?'y':'m'}</button>
-            </span>
-          </h4>
-          <label>Current</label>
-          <input type="text" value="${val}" readonly>
-          <label>New</label>
-          <input type="date" id="${key}-${code}" value="${toISO(val)}">
-        </div>
-      `;
+      return `<div class="line">
+        <h4><span>${label}</span><span class="shortcuts"><button class="btn small" data-role="add" data-target="${code}" data-field="${key}" data-type="${type}" data-amt="${amt}">+${amt}${type==='years'?'y':'m'}</button></span></h4>
+        <label>Current</label><input type="text" value="${val}" readonly>
+        <label>New</label><input type="date" id="${key}-${code}" value="${toISO(val)}">
+      </div>`;
     }
-
     function applyShortcut(btn){
-      const code=btn.dataset.target, field=btn.dataset.field, type=btn.dataset.type, amt=parseInt(btn.dataset.amt);
+      const code=btn.dataset.target,field=btn.dataset.field,type=btn.dataset.type,amt=parseInt(btn.dataset.amt);
       const input=document.getElementById(`${field}-${code}`);
-      let baseISO=input.value;
-      if(!baseISO){
-        const cur=originalSnapshot[code]; baseISO=toISO(cur[field]) || new Date().toISOString().slice(0,10);
-      }
-      let [y,m,d]=baseISO.split('-').map(Number); let dt=new Date(y,m-1,d);
-      dt = (type==='years') ? addYears(dt,amt) : addMonths(dt,amt);
-      input.value = dt.toISOString().slice(0,10);
-      toggleReviewBtn(true);
+      let baseISO=input.value;if(!baseISO){const cur=originalSnapshot[code];baseISO=toISO(cur[field])||new Date().toISOString().slice(0,10);}
+      let [y,m,d]=baseISO.split('-').map(Number);let dt=new Date(y,m-1,d);
+      dt=(type==='years')?addYears(dt,amt):addMonths(dt,amt);
+      input.value=dt.toISOString().slice(0,10);toggleReviewBtn(true);
     }
-
-    function toggleReviewBtn(show=false){
-      document.getElementById('reviewChangesWrap').style.display = show ? 'block' : (hasAnyChanges()? 'block':'none');
-    }
-
-    function hasAnyChanges(){
-      let changed=false;
-      openStores.forEach(code=>{
-        const orig=originalSnapshot[code]||{};
-        ['five','pat','em','pv','ev','pump'].forEach(k=>{
-          const iso=document.getElementById(`${k}-${code}`)?.value||'';
-          if(iso && fromISO(iso)!==(orig[k]||'')) changed=true;
-        });
-      });
-      return changed;
-    }
-
+    function toggleReviewBtn(show=false){document.getElementById('reviewChangesWrap').style.display=show?'block':(hasAnyChanges()?'block':'none');}
+    function hasAnyChanges(){let changed=false;openStores.forEach(code=>{const orig=originalSnapshot[code]||{};['five','pat','em','pv','ev','pump'].forEach(k=>{const iso=document.getElementById(`${k}-${code}`)?.value||'';if(iso&&fromISO(iso)!==(orig[k]||''))changed=true;});});return changed;}
     function searchAndAdd(query){
-      const q = (query||'').trim().toLowerCase();
-      if(!q) return;
-      const matches = Object.values(allData).filter(st =>
-        (st.branchCode && String(st.branchCode).toLowerCase().includes(q)) ||
-        (st.storeName && st.storeName.toLowerCase().includes(q)) ||
-        (st.postcode  && st.postcode.toLowerCase().includes(q))
-      );
-      if(!matches.length){
-        const s=document.getElementById('statusMsg'); s.style.display='block'; s.textContent='No matching stores found.'; return;
-      }
-      document.getElementById('statusMsg').style.display='none';
-      matches.forEach(store=>{
-        if(openStores.has(store.branchCode)) return;
-        openStores.add(store.branchCode);
-        renderStoreCard(store);
-      });
+      const q=(query||'').trim().toLowerCase();if(!q)return;
+      const matches=Object.values(allData).filter(st=>(st.branchCode&&String(st.branchCode).toLowerCase().includes(q))||(st.storeName&&st.storeName.toLowerCase().includes(q))||(st.postcode&&st.postcode.toLowerCase().includes(q)));
+      const res=document.getElementById('results');const s=document.getElementById('statusMsg');
+      if(!matches.length){s.style.display='block';s.textContent='No matching stores found.';return;}
+      s.style.display='none';
+      matches.forEach(store=>{if(openStores.has(store.branchCode))return;openStores.add(store.branchCode);renderStoreCard(store);});
     }
-
     function buildChangesPayload(){
-      const updates=[];
-      openStores.forEach(code=>{
-        const orig=originalSnapshot[code]||{};
-        const getNew=id=>document.getElementById(`${id}-${code}`)?.value||'';
-        const changed={};
-        const map=[['five','5_Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','PUMP']];
-        map.forEach(([k,kk])=>{
-          const iso=getNew(k);
-          if(iso && fromISO(iso)!==(orig[k]||'')) changed[kk]=fromISO(iso);
-        });
-        if(Object.keys(changed).length) updates.push({storeCode:code,updates:changed});
-      });
-
-      const meta={
-        operator:(document.getElementById('operatorName').value||'').trim()||'Unknown',
-        deviceId:(localStorage.getItem('ml_device_id')||(function(){const id='dev-'+Math.random().toString(36).slice(2);localStorage.setItem('ml_device_id',id);return id;})()),
-        timestamp:new Date().toISOString()
-      };
-      return {meta, updates};
+      const updates=[];openStores.forEach(code=>{const orig=originalSnapshot[code]||{};const getNew=id=>document.getElementById(`${id}-${code}`)?.value||'';const changed={};[['five','5_Year'],['pat','PAT'],['em','EM'],['pv','PV'],['ev','EV'],['pump','PUMP']].forEach(([k,kk])=>{const iso=getNew(k);if(iso&&fromISO(iso)!==(orig[k]||''))changed[kk]=fromISO(iso);});if(Object.keys(changed).length)updates.push({storeCode:code,updates:changed});});
+      const meta={operator:(document.getElementById('operatorName').value||'').trim()||'Unknown',deviceId:(localStorage.getItem('ml_device_id')||(function(){const id='dev-'+Math.random().toString(36).slice(2);localStorage.setItem('ml_device_id',id);return id;})()),timestamp:new Date().toISOString()};
+      return{meta,updates};
     }
-
-    function openPreview(){
-      const {meta,updates}=buildChangesPayload();
-      const pre=document.getElementById('previewJSON');
-      const metaBox=document.getElementById('previewMeta');
-      const sendStatus=document.getElementById('sendStatus'); sendStatus.textContent='';
-      pre.textContent = updates.length ? JSON.stringify({meta,updates},null,2) : '// No changes detected.';
-      metaBox.textContent = `Operator: ${meta.operator}  |  Device: ${meta.deviceId}  |  ${new Date(meta.timestamp).toLocaleString()}`;
-      document.getElementById('previewModal').style.display='flex';
-    }
-    function closePreview(){ document.getElementById('previewModal').style.display='none'; }
-
-    // --- Send to Zapier using no-cors so GitHub Pages won't block it ---
-    async function sendToZapier(){
-      const {meta,updates} = buildChangesPayload();
-      const s = document.getElementById('sendStatus');
-      if(!updates.length){ s.textContent='No changes to send.'; return; }
-
-      try{
-        const payload = JSON.stringify({meta,updates});
-        await fetch(ZAPIER_WEBHOOK, {
-          method:'POST',
-          mode:'no-cors',                 // <- key to avoid “Load failed” from browser
-          headers:{'Content-Type':'application/json'},
-          body: payload
-        });
-        s.textContent = '✅ Sent to Zapier (check Zap history)';
-      }catch(err){
-        s.textContent = '❌ Failed to send: ' + err.message;
-      }
-    }
-
-    // --- events ---
-    document.getElementById('btnSearch').addEventListener('click', ()=>searchAndAdd(document.getElementById('searchInput').value));
-    document.getElementById('searchIcon').addEventListener('click', ()=>searchAndAdd(document.getElementById('searchInput').value));
-    document.getElementById('searchInput').addEventListener('keyup', e=>{ if(e.key==='Enter') searchAndAdd(e.target.value); });
-
-    document.getElementById('btnClear').addEventListener('click', ()=>{
-      document.getElementById('results').innerHTML='';
-      openStores.clear();
-      toggleReviewBtn(false);
-      const s=document.getElementById('statusMsg'); s.style.display='none'; s.textContent='';
-    });
-
-    document.getElementById('btnReview').addEventListener('click', openPreview);
-    document.getElementById('btnSend').addEventListener('click', sendToZapier);
-
-    // --- load both JSONs; merge SharePoint URLs into compliance data ---
-    (async()=>{
-      try{
-        const [compRes, siteRes] = await Promise.all([fetch(DATA_URL_COMP), fetch(DATA_URL_SITES)]);
-        const [compData, siteData] = await Promise.all([compRes.json(), siteRes.json()]);
-
-        const siteURLs = {};
-        Object.values(siteData).forEach(site=>{
-          if(site.branchCode && site.sharePointURL){ siteURLs[site.branchCode] = site.sharePointURL; }
-        });
-
-        Object.values(compData).forEach(site=>{
-          const code = site.branchCode;
-          if(siteURLs[code]) site.sharePointURL = siteURLs[code];
-        });
-
-        allData = compData;
-        document.getElementById('dataBanner').style.display='block';
-      }catch(e){
-        const s=document.getElementById('statusMsg'); s.style.display='block'; s.textContent='❌ Failed to load site or compliance data.';
-      }
-    })();
-
-    // --- auto-fill operator name (read-only) ---
-    window.addEventListener('DOMContentLoaded', ()=>{
-      const user = (sessionStorage.getItem('mostlaneUser') || 'Unknown').replace('.', ' ');
-      document.getElementById('operatorName').value = user;
-    });
+    function openPreview(){const{meta,updates}=buildChangesPayload();const pre=document.getElementById('previewJSON');const metaBox=document.getElementById('previewMeta');const s=document.getElementById('sendStatus');s.textContent='';pre.textContent=updates.length?JSON.stringify({meta,updates},null,2):'// No changes detected.';metaBox.textContent=`Operator: ${meta.operator} | Device: ${meta.deviceId} | ${new Date(meta.timestamp).toLocaleString()}`;document.getElementById('previewModal').style.display='flex';}
+    function closePreview(){document.getElementById('previewModal').style.display='none';}
+    async function sendToZapier(){const{meta,updates}=buildChangesPayload();const s=document.getElementById('sendStatus');if(!updates.length){s.textContent='No changes to send.';return;}try{const payload=JSON.stringify({meta,updates});await fetch(ZAPIER_WEBHOOK,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:payload});s.textContent='✅ Sent to Zapier (check Zap history)';}catch(err){s.textContent='❌ Failed to send: '+err.message;}}
+    document.getElementById('searchIcon').addEventListener('click',()=>searchAndAdd(document.getElementById('searchInput').value));
+    document.getElementById('searchInput').addEventListener('keyup',e=>{if(e.key==='Enter')searchAndAdd(e.target.value);});
+    document.getElementById('btnClear').addEventListener('click',()=>{document.getElementById('results').innerHTML='';openStores.clear();toggleReviewBtn(false);const s=document.getElementById('statusMsg');s.style.display='none';s.textContent='';});
+    document.getElementById('btnReview').addEventListener('click',openPreview);
+    document.getElementById('btnSend').addEventListener('click',sendToZapier);
+    (async()=>{try{const[compRes,siteRes]=await Promise.all([fetch(DATA_URL_COMP),fetch(DATA_URL_SITES)]);const[compData,siteData]=await Promise.all([compRes.json(),siteRes.json()]);const siteURLs={};Object.values(siteData).forEach(site=>{if(site.branchCode&&site.sharePointURL){siteURLs[site.branchCode]=site.sharePointURL;}});Object.values(compData).forEach(site=>{const code=site.branchCode;if(siteURLs[code])site.sharePointURL=siteURLs[code];});allData=compData;document.getElementById('dataBanner').style.display='block';}catch(e){const s=document.getElementById('statusMsg');s.style.display='block';s.textContent='❌ Failed to load site or compliance data.';}})();
+    window.addEventListener('DOMContentLoaded',()=>{const user=(sessionStorage.getItem('mostlaneUser')||'Unknown').replace('.', ' ');document.getElementById('operatorName').value=user;});
   </script>
 </body>
 </html>
