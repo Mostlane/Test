@@ -697,11 +697,22 @@
     updatedRecords: entries
   };
 
- fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/", {
+const formBody = new URLSearchParams();
+formBody.append("file", `Test/Compliance/${fileMap[type]}`);
+formBody.append("updatedBy", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
+formBody.append("timestamp", new Date().toISOString());
+formBody.append("data", JSON.stringify(entries));
+
+fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/", {
   method: "POST",
-  mode: "no-cors",   // ✅ disables preflight
-  body: JSON.stringify(payload)
+  headers: {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  body: formBody.toString()
 })
+.then(() => console.log(`✅ ${type} data sent`))
+.catch(err => console.error("❌ Fetch error:", err));
+
 .then(() => {
   console.log(`✅ Sent update for ${type}`);
 })
