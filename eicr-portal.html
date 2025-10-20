@@ -713,13 +713,6 @@ fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/", {
 .then(() => console.log(`✅ ${type} data sent`))
 .catch(err => console.error("❌ Fetch error:", err));
 
-.then(() => {
-  console.log(`✅ Sent update for ${type}`);
-})
-.catch(err => console.error("❌ Fetch error:", err));
-});
-
-
       alert("Changes sent for update.");
       enableEditing(false);
       saveBtn.style.display="none";
