@@ -378,7 +378,8 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
-    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/urh99ln/";
+    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
+    const USE_JSON = false; // Set to true to test JSON payload with Catch Raw Hook
     let allData = [], currentData = [], activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
     const EDIT_PIN = "2025";
     let editMode = false, originalDataSnapshot = [];
@@ -820,6 +821,7 @@
         console.log("Save button clicked");
         const rows = [...document.querySelectorAll("tbody tr")];
         const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+        console.log("Table rows:", rows.length, "Headers:", headers);
         const changes = rows
           .map((r, i) => {
             const cells = [...r.children].map(td => td.textContent.trim());
@@ -832,6 +834,7 @@
           })
           .filter(Boolean);
 
+        console.log("Detected changes:", changes);
         if (!changes.length) {
           console.log("No changes detected");
           return alert("No changes detected.");
@@ -843,6 +846,7 @@
           if (!grouped[type]) grouped[type] = [];
           grouped[type].push(rec);
         }
+        console.log("Grouped changes by store type:", grouped);
 
         const fileMap = {
           "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
@@ -853,25 +857,49 @@
         };
 
         const promises = Object.entries(grouped).map(async ([type, entries]) => {
-          const formBody = new URLSearchParams();
-          formBody.append('fileURL', fileMap[type] || `Test/Compliance/${type.toLowerCase().replace(' ', '_')}_compliance.json`);
-          formBody.append('operator', (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase()));
-          formBody.append('timestamp', new Date().toISOString());
-          formBody.append('updatedRecords', JSON.stringify(entries));
-          console.log(`Sending webhook for ${type}, payload:`, formBody.toString());
-
-          try {
-            const response = await fetch(ZAPIER_WEBHOOK, {
-              method: "POST",
-              mode: "no-cors",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: formBody.toString()
-            });
-            console.log(`✅ Sent update for ${type}`);
-            return { type, status: "success" };
-          } catch (err) {
-            console.error(`❌ Failed for ${type}:`, err);
-            return { type, status: "error", error: err.message };
+          if (USE_JSON) {
+            // JSON payload for Catch Raw Hook (optional, uncomment if needed)
+            const payload = {
+              fileURL: fileMap[type] || `Test/Compliance/${type.toLowerCase().replace(' ', '_')}_compliance.json`,
+              operator: (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+              timestamp: new Date().toISOString(),
+              updatedRecords: entries
+            };
+            console.log(`Sending JSON webhook for ${type}, payload:`, JSON.stringify(payload));
+            try {
+              const response = await fetch(ZAPIER_WEBHOOK, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              const responseText = await response.text();
+              console.log(`Response for ${type}:`, response.status, responseText);
+              return { type, status: response.ok ? "success" : "error", response: responseText };
+            } catch (err) {
+              console.error(`Failed for ${type}:`, err);
+              return { type, status: "error", error: err.message };
+            }
+          } else {
+            // Form data for Catch Hook (Instant)
+            const formBody = new URLSearchParams();
+            formBody.append('fileURL', fileMap[type] || `Test/Compliance/${type.toLowerCase().replace(' ', '_')}_compliance.json`);
+            formBody.append('operator', (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase()));
+            formBody.append('timestamp', new Date().toISOString());
+            formBody.append('updatedRecords', JSON.stringify(entries));
+            console.log(`Sending form webhook for ${type}, payload:`, formBody.toString());
+            try {
+              await fetch(ZAPIER_WEBHOOK, {
+                method: "POST",
+                mode: "no-cors",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: formBody.toString()
+              });
+              console.log(`✅ Sent update for ${type}`);
+              return { type, status: "success" };
+            } catch (err) {
+              console.error(`❌ Failed for ${type}:`, err);
+              return { type, status: "error", error: err.message };
+            }
           }
         });
 
