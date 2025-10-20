@@ -43,15 +43,15 @@
       text-decoration:none;font-weight:bold;border:0;cursor:pointer
     }
     .sp-btn:hover{opacity:.9}
-    .backbar{
-      display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;
-    }
+
+    .backbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;}
     .backlink{
       display:inline-flex;align-items:center;gap:8px;
       background:#0071CE;color:#fff;text-decoration:none;
       padding:8px 14px;border-radius:30px;font-weight:bold;
     }
     .backlink:hover{opacity:.9}
+
     .modal{
       display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
       background:rgba(0,0,0,0.5);
@@ -82,6 +82,17 @@
       font-weight:bold;border-bottom:1px solid #ddd;padding-bottom:6px;margin-bottom:10px;
       color:#0071CE;text-transform:capitalize;
     }
+
+    /* Filter summary bar */
+    .filter-summary{
+      background:rgba(255,255,255,0.8);
+      border:1px solid #e5e7eb;border-radius:10px;
+      padding:8px 12px;margin:10px auto;max-width:95%;
+      text-align:center;color:#1f2937;font-size:14px;
+      opacity:0;transition:opacity .5s ease;pointer-events:none;
+    }
+    .filter-summary.visible{opacity:1;pointer-events:auto;}
+
     @media(max-width:768px){
       .search-input{width:90%;font-size:16px}
       th,td{font-size:12px;padding:6px}
@@ -103,9 +114,9 @@
 
     <!-- Row 1: Summary buttons -->
     <div class="summary-bubbles">
-      <button class="bubble" onclick="setDueActive(this);filterByDays(30)">Due in 30 Days</button>
-      <button class="bubble" onclick="setDueActive(this);filterByDays(90)">Due in 90 Days</button>
-      <button class="bubble" onclick="setDueActive(this);filterByDays(365)">Due in 365 Days</button>
+      <button class="bubble" onclick="toggleDue(this,30)">Due in 30 Days</button>
+      <button class="bubble" onclick="toggleDue(this,90)">Due in 90 Days</button>
+      <button class="bubble" onclick="toggleDue(this,365)">Due in 365 Days</button>
       <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
       <button class="bubble" onclick="openExportModal()">Export to Excel</button>
@@ -123,14 +134,17 @@
     </div>
 
     <!-- Row 3: Compliance Type filters -->
-    <div class="filter-bubbles">
-      <button class="bubble" onclick="setCategory('fiveYear',this)">5 Year</button>
-      <button class="bubble" onclick="setCategory('pat',this)">PAT</button>
-      <button class="bubble" onclick="setCategory('em',this)">EM</button>
-      <button class="bubble" onclick="setCategory('pv',this)">PV</button>
-      <button class="bubble" onclick="setCategory('ev',this)">EV</button>
-      <button class="bubble" onclick="setCategory('pump',this)">Pump</button>
+    <div class="filter-bubbles" id="complianceFilters">
+      <button class="bubble" onclick="toggleCategory('fiveYear',this)">5 Year</button>
+      <button class="bubble" onclick="toggleCategory('pat',this)">PAT</button>
+      <button class="bubble" onclick="toggleCategory('em',this)">EM</button>
+      <button class="bubble" onclick="toggleCategory('pv',this)">PV</button>
+      <button class="bubble" onclick="toggleCategory('ev',this)">EV</button>
+      <button class="bubble" onclick="toggleCategory('pump',this)">Pump</button>
     </div>
+
+    <!-- Live Filter Summary (appears only when filtered) -->
+    <div id="filterSummary" class="filter-summary"></div>
 
     <!-- Row 4: Search -->
     <div class="search-container">
@@ -203,7 +217,12 @@
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
-  let allData=[],activeCategory='fiveYear',currentData=[],rangeDays=null,activeStoreType='ALL';
+  let allData=[],
+      currentData=[],
+      activeStoreType='ALL',
+      activeCategory='fiveYear', // default
+      rangeDays=null,
+      searchActive=false;
 
   const parseDate=d=>{
     if(!d) return null;
@@ -279,17 +298,64 @@
     }));
 
     allData = results.flat();
-    renderTable(allData);
+    applyFilters(); // initial render with defaults
   }
 
-  function applyStoreTypeFilter(data){
-    if(activeStoreType==='ALL') return data;
-    return data.filter(e=>e.storeType===activeStoreType);
+  /* ---------- FILTERING CORE ---------- */
+  function applyFilters(opts={}) {
+    // If search is active, ignore filters and show search results across all store types
+    if (searchActive && opts.fromSearch) {
+      renderTable(opts.dataset, { bypassStoreType:true });
+      updateFilterSummaryBar(); // hide if not filtered
+      return;
+    }
+
+    let data = allData.slice();
+
+    // 1) Store Type
+    if (activeStoreType !== 'ALL') {
+      data = data.filter(e=>e.storeType===activeStoreType);
+    }
+
+    // 2) Compliance Category (only rows with date in that column)
+    if (activeCategory) {
+      data = data.filter(e=>{
+        const v = e[activeCategory];
+        return v && String(v).trim()!=='';
+      });
+    }
+
+    // 3) Due-in-X filter
+    if (rangeDays) {
+      const now=new Date(); const to=new Date(); to.setDate(now.getDate()+rangeDays);
+      if (activeCategory) {
+        // due filter against the selected category
+        data = data.filter(e=>{
+          const d=parseDate(e[activeCategory]); return d && d>=now && d<=to;
+        });
+      } else {
+        // no category selected: due across ANY compliance date
+        data = data.filter(e=>{
+          return ['fiveYear','pat','em','pv','ev','pump'].some(k=>{
+            const d=parseDate(e[k]); return d && d>=now && d<=to;
+          });
+        });
+      }
+    }
+
+    renderTable(data);
+    updateFilterSummaryBar();
   }
 
-  function renderTable(d){
-    // Chain store type filter here so compliance/date filters also respect it
-    const data = applyStoreTypeFilter(d);
+  function renderTable(d, options={}) {
+    const bypassStoreType = options.bypassStoreType || false;
+    let data = d.slice();
+
+    // If we’re rendering a non-search view and a store type is active, ensure it stays applied
+    if (!bypassStoreType && activeStoreType!=='ALL') {
+      data = data.filter(e=>e.storeType===activeStoreType);
+    }
+
     currentData = data.slice();
     const tb=document.getElementById('tableBody');tb.innerHTML='';
     data.forEach(e=>{
@@ -312,16 +378,92 @@
     });
   }
 
-  function selectRange(days, el) {
-    const buttons = document.querySelectorAll('.range-btn');
-    const isAlreadyActive = el.classList.contains('active');
-    buttons.forEach(b => {b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
-    if (isAlreadyActive) {rangeDays = null;} 
-    else {el.classList.add('active');el.style.background='#0071CE';el.style.color='#fff';rangeDays = days;}
-    document.getElementById('exportFrom').value = "";
-    document.getElementById('exportTo').value = "";
+  /* ---------- BUTTON HANDLERS & TOGGLING ---------- */
+  function setActiveClass(containerSelector, btn) {
+    const buttons = document.querySelectorAll(containerSelector + ' .bubble');
+    buttons.forEach(b=>b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
   }
 
+  function setStoreType(type, btn){
+    // toggle: clicking the active one returns to ALL
+    if (activeStoreType===type) {
+      activeStoreType='ALL';
+      setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
+    } else {
+      activeStoreType = type;
+      setActiveClass('#storeTypeFilters', btn);
+    }
+    searchActive=false; // leaving search mode
+    applyFilters();
+  }
+
+  function toggleCategory(field, btn){
+    if (activeCategory===field) {
+      activeCategory=null; // unselect
+      // unhighlight all compliance buttons
+      document.querySelectorAll('#complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
+    } else {
+      activeCategory = field;
+      setActiveClass('#complianceFilters', btn);
+    }
+    searchActive=false;
+    applyFilters();
+  }
+
+  function toggleDue(btn, days){
+    const isActive = btn.classList.contains('active');
+    // unhighlight all due buttons
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>{
+      if (b.textContent.startsWith('Due in')) b.classList.remove('active');
+    });
+    if (isActive) {
+      rangeDays = null; // unselect
+    } else {
+      rangeDays = days;
+      btn.classList.add('active');
+    }
+    searchActive=false;
+    applyFilters();
+  }
+
+  function clearFilters(){
+    // Clear due buttons
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>{
+      if (b.textContent.startsWith('Due in')) b.classList.remove('active');
+    });
+    // Reset store type
+    activeStoreType='ALL';
+    setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
+    // Reset compliance category
+    activeCategory='fiveYear'; // restore default choice (not highlighted)
+    document.querySelectorAll('#complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
+    // Reset range
+    rangeDays=null;
+    // Reset search
+    searchActive=false;
+    document.getElementById('searchBar').value='';
+    applyFilters();
+  }
+
+  /* ---------- SEARCH (independent across ALL store types) ---------- */
+  function searchTable(){
+    const q=document.getElementById('searchBar').value.toLowerCase().trim();
+    if (!q) {
+      searchActive=false;
+      applyFilters();
+      return;
+    }
+    const base = allData.filter(e=>
+      (e.siteName??'').toLowerCase().includes(q) ||
+      (e.postcode??'').toLowerCase().includes(q) ||
+      (e.storeCode??'').toString().includes(q)
+    );
+    searchActive=true;
+    applyFilters({fromSearch:true, dataset:base});
+  }
+
+  /* ---------- EXPORT ---------- */
   function openExportModal(){
     // preselect active store type
     const sel = document.getElementById('exportStoreType');
@@ -336,6 +478,16 @@
     document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
     document.getElementById('exportStoreType').value='ALL';
     runExport();
+  }
+
+  function selectRange(days, el) {
+    const buttons = document.querySelectorAll('.range-btn');
+    const isAlreadyActive = el.classList.contains('active');
+    buttons.forEach(b => {b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
+    if (isAlreadyActive) {rangeDays = null;} 
+    else {el.classList.add('active');el.style.background='#0071CE';el.style.color='#fff';rangeDays = days;}
+    document.getElementById('exportFrom').value = "";
+    document.getElementById('exportTo').value = "";
   }
 
   // Excel Export (includes optional Store Type + SharePoint) and store-type dropdown filter
@@ -400,53 +552,7 @@
     exportModal.style.display = 'none';
   }
 
-  function setDueActive(b){
-    document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active')
-  }
-
-  function setCategory(f,b){
-    activeCategory=f;
-    document.querySelectorAll('.filter-bubbles:nth-of-type(3) .bubble').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active')
-  }
-
-  function setStoreType(type, btn){
-    activeStoreType = type;
-    document.querySelectorAll('#storeTypeFilters .bubble').forEach(x=>x.classList.remove('active'));
-    btn.classList.add('active');
-    // when the store type changes, re-render full set (compliance filters will apply inside calls)
-    renderTable(allData);
-  }
-
-  function filterByDays(d){
-    const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
-    const base = allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f});
-    renderTable(base); // renderTable chains store type filter
-  }
-
-  function clearFilters(){
-    document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
-    activeStoreType = 'ALL';
-    const stBtns = document.querySelectorAll('#storeTypeFilters .bubble');
-    stBtns.forEach(b=>b.classList.remove('active'));
-    stBtns[0].classList.add('active'); // Show All
-    renderTable(allData);
-    document.getElementById('searchBar').value='';
-  }
-
-  // Search across ALL store types (doesn't chain with filters)
-  function searchTable(){
-    const q=document.getElementById('searchBar').value.toLowerCase();
-    const base = allData.filter(e=>
-      (e.siteName??'').toLowerCase().includes(q) ||
-      (e.postcode??'').toLowerCase().includes(q) ||
-      (e.storeCode??'').toString().includes(q)
-    );
-    renderTable(base);
-  }
-
-  // % Summary modal (per store type; uses currentData view)
+  /* ---------- SUMMARY MODALS ---------- */
   function openSummaryModal(){
     const groups = {};
     const now = new Date();
@@ -486,9 +592,28 @@
   }
   function closeSummaryModal(){document.getElementById('summaryModal').style.display='none'}
 
-  // Placeholder for advanced search modal (kept untouched)
+  // Placeholder for advanced search modal (unchanged)
   function openModal(){
     alert('Date/Type search modal can be implemented here (left unchanged as requested).');
+  }
+
+  /* ---------- FILTER SUMMARY BAR (fade .5s) ---------- */
+  function updateFilterSummaryBar(){
+    const bar = document.getElementById('filterSummary');
+    const parts = [];
+    if (activeStoreType !== 'ALL') parts.push(`Store Type = ${activeStoreType}`);
+    if (activeCategory) {
+      const map = {fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', pump:'Pump'};
+      parts.push(`Category = ${map[activeCategory]||activeCategory}`);
+    }
+    if (rangeDays) parts.push(`Range = ${rangeDays} Days`);
+    if (parts.length) {
+      bar.textContent = 'Filter: ' + parts.join(' | ');
+      bar.classList.add('visible');
+    } else {
+      bar.classList.remove('visible');
+      bar.textContent = '';
+    }
   }
 
   fetchData();
