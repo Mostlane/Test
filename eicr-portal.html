@@ -728,5 +728,111 @@
 
   fetchData();
   </script>
+  <script>
+/* -----------------------
+   COMPLIANCE EDIT SYSTEM
+   ----------------------- */
+const EDIT_PIN = "2025"; // Change this if needed
+let editMode = false;
+let originalDataSnapshot = [];
+
+document.addEventListener("DOMContentLoaded", () => {
+  // Add Edit/Save buttons to your backbar dynamically
+  const backbar = document.querySelector(".backbar");
+  if (backbar && !document.getElementById("editBtn")) {
+    const editBtn = document.createElement("button");
+    editBtn.id = "editBtn";
+    editBtn.textContent = "Edit";
+    editBtn.style.cssText = "margin-left:10px;background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:bold;";
+    const saveBtn = document.createElement("button");
+    saveBtn.id = "saveBtn";
+    saveBtn.textContent = "Save Changes";
+    saveBtn.style.cssText = "margin-left:10px;background:#28a745;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:bold;display:none;";
+    backbar.append(editBtn, saveBtn);
+
+    editBtn.addEventListener("click", () => {
+      const pin = prompt("Enter edit PIN:");
+      if (pin === EDIT_PIN) {
+        editMode = true;
+        originalDataSnapshot = [...document.querySelectorAll("tbody tr")].map(tr => [...tr.children].map(td => td.textContent));
+        enableEditing(true);
+        editBtn.style.display = "none";
+        saveBtn.style.display = "inline-block";
+        alert("✅ Edit mode enabled. You can now edit compliance dates.");
+      } else alert("❌ Incorrect PIN");
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const rows = [...document.querySelectorAll("tbody tr")];
+      const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+      const changes = [];
+
+      rows.forEach((r, i) => {
+        const cells = [...r.children].map(td => td.textContent.trim());
+        if (JSON.stringify(cells) !== JSON.stringify(originalDataSnapshot[i])) {
+          const record = {};
+          headers.forEach((h, idx) => record[h] = cells[idx]);
+          changes.push(record);
+        }
+      });
+
+      if (!changes.length) return alert("No changes detected.");
+
+      // Group changes by Store Type
+      const grouped = {};
+      for (const rec of changes) {
+        const type = rec["Store Type"];
+        if (!grouped[type]) grouped[type] = [];
+        grouped[type].push(rec);
+      }
+
+      const fileMap = {
+        "Retail": "retail_compliance.json",
+        "ELS": "els_compliance.json",
+        "ELS Private": "els_private_compliance.json",
+        "Cobra": "cobra_compliance.json",
+        "Wenzel's": "wenzels_compliance.json"
+      };
+
+      Object.entries(grouped).forEach(([type, entries]) => {
+        const formBody = new URLSearchParams();
+        formBody.append("file", `Test/Compliance/${fileMap[type]}`);
+        formBody.append("updatedBy", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
+        formBody.append("timestamp", new Date().toISOString());
+        formBody.append("changes", JSON.stringify(entries));
+
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formBody.toString()
+        })
+          .then(() => console.log(`✅ ${type} changes sent`))
+          .catch(err => console.error("❌ Error sending changes:", err));
+      });
+
+      alert("✅ Changes sent for update.");
+      enableEditing(false);
+      editBtn.style.display = "inline-block";
+      saveBtn.style.display = "none";
+      editMode = false;
+    });
+  }
+});
+
+function enableEditing(state) {
+  const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
+  document.querySelectorAll("table tbody tr").forEach(row => {
+    [...row.children].forEach((td, i) => {
+      const header = document.querySelectorAll("table thead th")[i].textContent.trim();
+      if (state && editableCols.includes(header)) td.contentEditable = true;
+      else td.contentEditable = false;
+    });
+  });
+  document.querySelectorAll("[contenteditable='true']").forEach(td => {
+    td.style.background = state ? "#fff6d1" : "";
+  });
+}
+</script>
+
 </body>
 </html>
