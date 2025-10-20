@@ -6,318 +6,166 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Southern Co-op Compliance Portal</title>
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      color: #1f2937;
-      background-color: #e6e8eb;
-      position: relative;
-      min-height: 100vh;
-      overflow-x: hidden;
+    body{
+      margin:0;font-family:Arial,sans-serif;color:#1f2937;
+      background-color:#e6e8eb;position:relative;min-height:100vh;overflow-x:hidden;
     }
-    body::before {
-      content: "";
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: url('Mostlane_Embossed.png') no-repeat center/180%;
-      z-index: -1;
+    body::before{
+      content:"";position:fixed;top:0;left:0;right:0;bottom:0;
+      background:url('Mostlane_Embossed.png') no-repeat center/180%;z-index:-1;
     }
-    .container {
-      background-color: rgba(255, 255, 255, 0.6);
-      margin: 20px auto;
-      padding: 20px;
-      border-radius: 15px;
-      max-width: 95%;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    .container{
+      background-color:rgba(255,255,255,0.6);margin:20px auto;padding:20px;
+      border-radius:15px;max-width:95%;box-shadow:0 4px 10px rgba(0,0,0,0.1);
     }
-    h1 {
-      text-align: center;
-      color: #0071CE;
-      margin-top: 0;
+    h1{text-align:center;color:#0071CE;margin-top:0}
+    .logo{display:block;margin:10px auto 20px auto;max-height:60px}
+    .summary-bubbles,.filter-bubbles{
+      display:flex;flex-wrap:wrap;justify-content:center;margin-bottom:20px;
     }
-    .logo {
-      display: block;
-      margin: 10px auto 20px auto;
-      max-height: 60px;
+    .bubble{
+      background-color:#0071CE;color:white;border:none;
+      padding:10px 20px;margin:5px;border-radius:30px;
+      cursor:pointer;font-weight:bold;transition:0.2s;
     }
-    .summary-bubbles, .filter-bubbles {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 20px;
+    .bubble:hover{opacity:0.85}
+    .bubble.active{background-color:#28a745}
+    .search-container{text-align:center;margin-bottom:10px}
+    .search-input{padding:8px;width:300px;border-radius:20px;border:1px solid #ccc}
+    .table-wrapper{overflow-x:auto;overflow-y:auto;max-height:70vh;width:100%}
+    table{width:100%;border-collapse:collapse;margin-top:20px}
+    th,td{border:1px solid #999;padding:8px;text-align:center;font-size:14px}
+    th{background:#0071CE;color:#fff;position:sticky;top:0;z-index:5}
+    tr:nth-child(even){background:rgba(255,255,255,0.7)}
+    tr:nth-child(odd){background:rgba(255,255,255,0.5)}
+    .sp-btn{
+      display:inline-block;padding:6px 10px;border-radius:6px;background:#0071CE;color:#fff;
+      text-decoration:none;font-weight:bold;border:0;cursor:pointer
     }
-    .bubble {
-      background-color: #0071CE;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      margin: 5px;
-      border-radius: 30px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: 0.2s;
+    .sp-btn:hover{opacity:.9}
+
+    .backbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;}
+    .backlink{
+      display:inline-flex;align-items:center;gap:8px;
+      background:#0071CE;color:#fff;text-decoration:none;
+      padding:8px 14px;border-radius:30px;font-weight:bold;
     }
-    .bubble:hover {
-      opacity: 0.85;
+    .backlink:hover{opacity:.9}
+    /* 🔧 NEW: Edit/Save Buttons */
+#editBtn,#saveBtn{
+  background:#0071CE;
+  color:#fff;
+  border:none;
+  padding:8px 16px;
+  border-radius:20px;
+  cursor:pointer;
+  font-weight:bold;
+  margin-left:10px;
+}
+#editBtn:hover,#saveBtn:hover{opacity:.9;}
+[contenteditable="true"]{background:#fff6d1;}
+    .modal{
+      display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.5);
     }
-    .bubble.active {
-      background-color: #28a745;
+    .modal-content{
+      background:#fff;border-radius:10px;max-width:420px;margin:6% auto;padding:20px;
+      box-shadow:0 4px 10px rgba(0,0,0,0.3);
     }
-    .search-container {
-      text-align: center;
-      margin-bottom: 10px;
+    .modal h2{margin-top:0;color:#0071CE;text-align:center}
+    .modal label{display:block;margin:6px 0}
+    .modal input[type="date"], .modal select{
+      width:100%;padding:6px;border:1px solid #ccc;border-radius:5px
     }
-    .search-input {
-      padding: 8px;
-      width: 300px;
-      border-radius: 20px;
-      border: 1px solid #ccc;
+    .modal button{
+      background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:6px;
+      cursor:pointer;margin-top:10px;font-weight:bold;
     }
-    .table-wrapper {
-      overflow-x: auto;
-      overflow-y: auto;
-      max-height: 70vh;
-      width: 100%;
+    .modal .close-btn{background:#ccc;color:#000;margin-left:10px}
+    .range-btn{
+      background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;
+      border-radius:6px;cursor:pointer;transition:0.2s;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
+    .range-btn.active{background:#0071CE;color:#fff}
+    .summary-box{
+      border:1px solid #ddd;border-radius:10px;margin:10px 0;padding:10px;background:#fff;
     }
-    th, td {
-      border: 1px solid #999;
-      padding: 8px;
-      text-align: center;
-      font-size: 14px;
+    .summary-title{
+      font-weight:bold;border-bottom:1px solid #ddd;padding-bottom:6px;margin-bottom:10px;
+      color:#0071CE;text-transform:capitalize;
     }
-    th {
-      background: #0071CE;
-      color: #fff;
-      position: sticky;
-      top: 0;
-      z-index: 5;
+
+    /* Filter summary bar */
+    .filter-summary{
+      background:rgba(255,255,255,0.8);
+      border:1px solid #e5e7eb;border-radius:10px;
+      padding:8px 12px;margin:10px auto;max-width:95%;
+      text-align:center;color:#1f2937;font-size:14px;
+      opacity:0;transition:opacity .5s ease;pointer-events:none;
     }
-    tr:nth-child(even) {
-      background: rgba(255, 255, 255, 0.7);
-    }
-    tr:nth-child(odd) {
-      background: rgba(255, 255, 255, 0.5);
-    }
-    .sp-btn {
-      display: inline-block;
-      padding: 6px 10px;
-      border-radius: 6px;
-      background: #0071CE;
-      color: #fff;
-      text-decoration: none;
-      font-weight: bold;
-      border: 0;
-      cursor: pointer;
-    }
-    .sp-btn:hover {
-      opacity: .9;
-    }
-    .backbar {
-      display: flex;
-      justify-content: flex-start;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    .backlink {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #0071CE;
-      color: #fff;
-      text-decoration: none;
-      padding: 8px 14px;
-      border-radius: 30px;
-      font-weight: bold;
-    }
-    .backlink:hover {
-      opacity: .9;
-    }
-    #editBtn, #saveBtn {
-      background: #0071CE;
-      color: #fff;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 20px;
-      cursor: pointer;
-      font-weight: bold;
-      margin-left: 10px;
-    }
-    #editBtn:hover, #saveBtn:hover {
-      opacity: .9;
-    }
-    [contenteditable="true"] {
-      background: #fff6d1;
-    }
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 999;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.5);
-    }
-    .modal-content {
-      background: #fff;
-      border-radius: 10px;
-      max-width: 420px;
-      margin: 6% auto;
-      padding: 20px;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-    }
-    .modal h2 {
-      margin-top: 0;
-      color: #0071CE;
-      text-align: center;
-    }
-    .modal label {
-      display: block;
-      margin: 6px 0;
-    }
-    .modal input[type="date"], .modal select {
-      width: 100%;
-      padding: 6px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    .modal button {
-      background: #0071CE;
-      color: #fff;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-top: 10px;
-      font-weight: bold;
-    }
-    .modal .close-btn {
-      background: #ccc;
-      color: #000;
-      margin-left: 10px;
-    }
-    .range-btn {
-      background: #e6e8eb;
-      color: #000;
-      margin: 3px;
-      padding: 6px 10px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: 0.2s;
-    }
-    .range-btn.active {
-      background: #0071CE;
-      color: #fff;
-    }
-    .summary-box {
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      margin: 10px 0;
-      padding: 10px;
-      background: #fff;
-    }
-    .summary-title {
-      font-weight: bold;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 6px;
-      margin-bottom: 10px;
-      color: #0071CE;
-      text-transform: capitalize;
-    }
-    .filter-summary {
-      background: rgba(255, 255, 255, 0.8);
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      padding: 8px 12px;
-      margin: 10px auto;
-      max-width: 95%;
-      text-align: center;
-      color: #1f2937;
-      font-size: 14px;
-      opacity: 0;
-      transition: opacity .5s ease;
-      pointer-events: none;
-    }
-    .filter-summary.visible {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .loading {
-      text-align: center;
-      padding: 20px;
-      font-size: 16px;
-      color: #0071CE;
-    }
-    .error {
-      text-align: center;
-      padding: 20px;
-      font-size: 16px;
-      color: #ff0000;
-    }
-    @media (max-width: 768px) {
-      .search-input {
-        width: 90%;
-        font-size: 16px;
-      }
-      th, td {
-        font-size: 12px;
-        padding: 6px;
-      }
-      .modal-content {
-        max-width: 90%;
-      }
+    .filter-summary.visible{opacity:1;pointer-events:auto;}
+
+    @media(max-width:768px){
+      .search-input{width:90%;font-size:16px}
+      th,td{font-size:12px;padding:6px}
+      .modal-content{max-width:90%}
     }
   </style>
 </head>
 <body>
   <div class="container">
+
     <div class="backbar">
       <a class="backlink" href="https://mostlane.github.io/Test/compliance.html">
         <span aria-hidden="true">←</span> Back
       </a>
-      <button id="editBtn">Edit</button>
-      <button id="saveBtn" style="display:none;">Save Changes</button>
+        <button id="editBtn">Edit</button>
+  <button id="saveBtn" style="display:none;">Save Changes</button>
     </div>
+
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
+
+    <!-- Row 1: Summary buttons -->
     <div class="summary-bubbles">
-      <button class="bubble" onclick="toggleDue(this, 30)" aria-label="Filter stores due in 30 days">Due in 30 Days</button>
-      <button class="bubble" onclick="toggleDue(this, 90)" aria-label="Filter stores due in 90 days">Due in 90 Days</button>
-      <button class="bubble" onclick="toggleDue(this, 365)" aria-label="Filter stores due in 365 days">Due in 365 Days</button>
-      <button class="bubble" onclick="openModal()" aria-label="Search by date or type">Search by Date/Type</button>
-      <button class="bubble" onclick="clearFilters()" aria-label="Clear all filters">Clear</button>
-      <button class="bubble" onclick="openExportModal()" aria-label="Export to Excel">Export to Excel</button>
-      <button class="bubble" onclick="openSummaryModal()" aria-label="View compliance summary">%</button>
+      <button class="bubble" onclick="toggleDue(this,30)">Due in 30 Days</button>
+      <button class="bubble" onclick="toggleDue(this,90)">Due in 90 Days</button>
+      <button class="bubble" onclick="toggleDue(this,365)">Due in 365 Days</button>
+      <button class="bubble" onclick="openModal()">Search by Date/Type</button>
+      <button class="bubble" onclick="clearFilters()">Clear</button>
+      <button class="bubble" onclick="openExportModal()">Export to Excel</button>
+      <button class="bubble" onclick="openSummaryModal()">%</button>
     </div>
+
+    <!-- Row 2: Store Type filter row -->
     <div class="filter-bubbles" id="storeTypeFilters">
-      <button class="bubble active" onclick="setStoreType('ALL', this)" aria-label="Show all store types">Show All</button>
-      <button class="bubble" onclick="setStoreType('Retail', this)" aria-label="Filter Retail stores">Retail</button>
-      <button class="bubble" onclick="setStoreType('ELS', this)" aria-label="Filter ELS stores">ELS</button>
-      <button class="bubble" onclick="setStoreType('ELS Private', this)" aria-label="Filter ELS Private stores">ELS Private</button>
-      <button class="bubble" onclick="setStoreType('Cobra', this)" aria-label="Filter Cobra stores">Cobra</button>
-      <button class="bubble" onclick="setStoreType('Wenzel\\'s', this)" aria-label="Filter Wenzel's stores">Wenzel's</button>
+      <button class="bubble active" onclick="setStoreType('ALL', this)">Show All</button>
+      <button class="bubble" onclick="setStoreType('Retail', this)">Retail</button>
+      <button class="bubble" onclick="setStoreType('ELS', this)">ELS</button>
+      <button class="bubble" onclick="setStoreType('ELS Private', this)">ELS Private</button>
+      <button class="bubble" onclick="setStoreType('Cobra', this)">Cobra</button>
+      <button class="bubble" onclick="setStoreType('Wenzel\'s', this)">Wenzel's</button>
     </div>
+
+    <!-- Row 3: Compliance Type filters -->
     <div class="filter-bubbles" id="complianceFilters">
-      <button class="bubble" onclick="toggleCategory('fiveYear', this)" aria-label="Filter 5 Year compliance">5 Year</button>
-      <button class="bubble" onclick="toggleCategory('pat', this)" aria-label="Filter PAT compliance">PAT</button>
-      <button class="bubble" onclick="toggleCategory('em', this)" aria-label="Filter EM compliance">EM</button>
-      <button class="bubble" onclick="toggleCategory('pv', this)" aria-label="Filter PV compliance">PV</button>
-      <button class="bubble" onclick="toggleCategory('ev', this)" aria-label="Filter EV compliance">EV</button>
-      <button class="bubble" onclick="toggleCategory('pump', this)" aria-label="Filter Pump compliance">Pump</button>
+      <button class="bubble" onclick="toggleCategory('fiveYear',this)">5 Year</button>
+      <button class="bubble" onclick="toggleCategory('pat',this)">PAT</button>
+      <button class="bubble" onclick="toggleCategory('em',this)">EM</button>
+      <button class="bubble" onclick="toggleCategory('pv',this)">PV</button>
+      <button class="bubble" onclick="toggleCategory('ev',this)">EV</button>
+      <button class="bubble" onclick="toggleCategory('pump',this)">Pump</button>
     </div>
+
+    <!-- Live Filter Summary (appears only when filtered) -->
     <div id="filterSummary" class="filter-summary"></div>
+
+    <!-- Row 4: Search -->
     <div class="search-container">
-      <input class="search-input" id="searchBar" placeholder="Search store name, number or postcode..." onkeyup="searchTable()" aria-label="Search stores">
+      <input class="search-input" id="searchBar" placeholder="Search store name, number or postcode..." onkeyup="searchTable()">
     </div>
+
+    <!-- Row 5: Table -->
     <div class="table-wrapper">
       <table>
         <thead>
@@ -330,13 +178,15 @@
       </table>
     </div>
   </div>
-  <div id="exportModal" class="modal" role="dialog" aria-labelledby="exportModalTitle">
+
+  <!-- Export Modal -->
+  <div id="exportModal" class="modal">
     <div class="modal-content">
-      <h2 id="exportModalTitle">Export Options</h2>
+      <h2>Export Options</h2>
       <button onclick="runFullExport()">Full Export</button>
       <hr>
       <p><b>Filter by Store Type:</b></p>
-      <select id="exportStoreType" aria-label="Select store type for export">
+      <select id="exportStoreType">
         <option value="ALL">All Stores</option>
         <option value="Retail">Retail</option>
         <option value="ELS">ELS</option>
@@ -356,560 +206,636 @@
       <label><input type="checkbox" class="exportCheck" value="sharePoint" checked> SharePoint</label>
       <br><p><b>Predefined Ranges:</b></p>
       <div id="rangeButtons">
-        <button class="range-btn" onclick="selectRange(7, this)" aria-label="Export data for 7 days">7 Days</button>
-        <button class="range-btn" onclick="selectRange(14, this)" aria-label="Export data for 14 days">14 Days</button>
-        <button class="range-btn" onclick="selectRange(30, this)" aria-label="Export data for 30 days">30 Days</button>
-        <button class="range-btn" onclick="selectRange(60, this)" aria-label="Export data for 60 days">60 Days</button>
-        <button class="range-btn" onclick="selectRange(90, this)" aria-label="Export data for 90 days">90 Days</button>
+        <button class="range-btn" onclick="selectRange(7,this)">7 Days</button>
+        <button class="range-btn" onclick="selectRange(14,this)">14 Days</button>
+        <button class="range-btn" onclick="selectRange(30,this)">30 Days</button>
+        <button class="range-btn" onclick="selectRange(60,this)">60 Days</button>
+        <button class="range-btn" onclick="selectRange(90,this)">90 Days</button>
       </div>
       <br>
-      <label>From:<input type="date" id="exportFrom" aria-label="Export start date"></label>
-      <label>To:<input type="date" id="exportTo" aria-label="Export end date"></label><br>
-      <button onclick="runExport()" aria-label="Export selected data">Export Selected</button>
-      <button class="close-btn" onclick="closeExportModal()" aria-label="Cancel export">Cancel</button>
+      <label>From:<input type="date" id="exportFrom"></label>
+      <label>To:<input type="date" id="exportTo"></label><br>
+      <button onclick="runExport()">Export Selected</button>
+      <button class="close-btn" onclick="closeExportModal()">Cancel</button>
     </div>
   </div>
-  <div id="summaryModal" class="modal" role="dialog" aria-labelledby="summaryModalTitle">
+
+  <!-- % Summary Modal -->
+  <div id="summaryModal" class="modal">
     <div class="modal-content">
-      <h2 id="summaryModalTitle">Compliance Summary</h2>
+      <h2>Compliance Summary</h2>
       <div id="summaryBody" style="font-size:14px; line-height:1.5;"></div>
-      <button class="close-btn" onclick="closeSummaryModal()" aria-label="Close summary">Close</button>
+      <button class="close-btn" onclick="closeSummaryModal()">Close</button>
     </div>
   </div>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
-    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/urh99ln/";
-    let allData = [], currentData = [], activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
-    const EDIT_PIN = "2025";
-    let editMode = false, originalDataSnapshot = [];
+  let allData=[],
+      currentData=[],
+      activeStoreType='ALL',
+      activeCategory=null, // changed to null to show all by default
+      rangeDays=null,
+      searchActive=false;
 
-    const parseDate = d => {
-      if (!d || (typeof d === 'string' && d.trim() === '')) return null;
-      const s = String(d).replace(/^\*/, ''); // Remove leading * in some Cobra dates
-      if (s.includes('/')) {
-        const p = s.split('/');
-        return p.length === 3 ? new Date(+p[2], p[1] - 1, +p[0]) : new Date(s);
-      }
-      return new Date(s);
-    };
+  const parseDate=d=>{
+    if(!d) return null;
+    if(typeof d === 'string' && d.trim()==='') return null;
+    // supports DD/MM/YYYY and ISO YYYY-MM-DD
+    const s = String(d).replace(/^\*/, ''); // remove leading * if present
+    if (s.includes('/')) {
+      const p = s.split('/'); return p.length===3 ? new Date(+p[2],p[1]-1,+p[0]) : new Date(s);
+    }
+    return new Date(s);
+  };
 
-    const getStatus = e => {
-      const now = new Date();
-      let red = false, amber = false;
-      [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump].map(parseDate).filter(Boolean)
-        .forEach(dt => {
-          if (dt < now) red = true;
-          else if ((dt - now) / (1e3 * 60 * 60 * 24) <= 30) amber = true;
-        });
-      return red ? '🔴' : amber ? '🟡' : '🟢';
-    };
+  const getStatus=e=>{
+    const now=new Date();let red=false,amber=false;
+    [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean)
+      .forEach(dt=>{if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true});
+    return red?'🔴':amber?'🟡':'🟢';
+  };
 
-    async function fetchData() {
-      console.log("Starting fetchData...");
-      document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
-      const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
-      const sources = [
-        { file: 'retail_compliance%20(1).json', label: 'Retail' },
-        { file: 'els_compliance.json', label: 'ELS' },
-        { file: 'els_private_compliance.json', label: 'ELS Private' },
-        { file: 'cobra_compliance.json', label: 'Cobra' },
-        { file: 'wenzels_compliance.json', label: "Wenzel's" },
-      ];
+  // Fetch & merge all JSONs (handles object maps and array structures)
+  async function fetchData(){
+    const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
+    const sources = [
+      {file:'retail_compliance.json',     label:'Retail'},
+      {file:'els_compliance.json',        label:'ELS'},
+      {file:'els_private_compliance.json',label:'ELS Private'},
+      {file:'cobra_compliance.json',      label:'Cobra'},
+      {file:'wenzels_compliance.json',    label:"Wenzel's"},
+    ];
 
-      const results = await Promise.all(sources.map(async s => {
-        try {
-          console.log(`Fetching ${base}${s.file}...`);
-          const r = await fetch(base + s.file);
-          if (!r.ok) throw new Error(`HTTP ${r.status} for ${s.file}`);
-          const j = await r.json();
-          console.log(`Fetched ${s.file}, data:`, j);
-          if (Object.keys(j).length === 0) {
-            console.log(`Empty data in ${s.file}, skipping.`);
-            return [];
-          }
-          if (Array.isArray(j)) {
-            const parsed = j.map(rw => ({
-              storeCode: (rw["Branch Code"] !== undefined ? String(rw["Branch Code"]) : "").padStart(4, '0'),
-              siteName: rw["Store Name"] || "",
-              postcode: rw["Postcode"] || "",
-              storeType: s.label,
-              fiveYear: rw["5_Year"] || "",
-              pat: rw["PAT"] || "",
-              em: rw["EM"] || "",
-              pv: rw["PV"] || "",
-              ev: rw["EV"] || "",
-              pump: rw["PUMP"] || "",
-              sharePoint: rw["SharePoint"] || ""
-            }));
-            console.log(`Parsed ${s.file}:`, parsed);
-            return parsed;
-          } else if (j && typeof j === 'object') {
-            const parsed = Object.values(j).map(rw => ({
-              storeCode: (rw.branchCode !== undefined ? String(rw.branchCode) : "").padStart(4, '0'),
-              siteName: rw.storeName || "",
-              postcode: rw.postcode || "",
-              storeType: s.label,
-              fiveYear: rw["5_Year"] || "",
-              pat: rw["PAT"] || "",
-              em: rw["EM"] || "",
-              pv: rw["PV"] || "",
-              ev: rw["EV"] || "",
-              pump: rw["PUMP"] || "",
-              sharePoint: rw.sharePointURL || rw["SharePoint"] || ""
-            }));
-            console.log(`Parsed ${s.file}:`, parsed);
-            return parsed;
-          }
-          console.warn(`No valid data in ${s.file}`);
-          return [];
-        } catch (e) {
-          console.error(`Failed to load ${s.file}:`, e);
-          document.getElementById('tableBody').innerHTML = `<tr><td colspan="12" class="error">Failed to load ${s.file}: ${e.message}</td></tr>`;
-          return [];
+    const results = await Promise.all(sources.map(async s=>{
+      try{
+        const r = await fetch(base + s.file);
+        if(!r.ok) return [];
+        const j = await r.json();
+
+        // detect format
+        if (Array.isArray(j)) {
+          // ELS-style array with title-case keys
+          return j.map(rw=>({
+            storeCode: (rw["Branch Code"]!==undefined ? String(rw["Branch Code"]) : "").padStart(4,'0'),
+            siteName:  rw["Store Name"] || "",
+            postcode:  rw["Postcode"] || "",
+            storeType: s.label,
+            fiveYear:  rw["5_Year"] || "",
+            pat:       rw["PAT"] || "",
+            em:        rw["EM"] || "",
+            pv:        rw["PV"] || "",
+            ev:        rw["EV"] || "",
+            pump:      rw["PUMP"] || "",
+            sharePoint:rw["SharePoint"] || ""
+          }));
+        } else if (j && typeof j === 'object') {
+          // Retail-style object map
+          return Object.values(j).map(rw=>({
+            storeCode: (rw.branchCode!==undefined ? String(rw.branchCode) : "").padStart(4,'0'),
+            siteName:  rw.storeName || "",
+            postcode:  rw.postcode || "",
+            storeType: s.label,
+            fiveYear:  rw["5_Year"] || "",
+            pat:       rw["PAT"] || "",
+            em:        rw["EM"] || "",
+            pv:        rw["PV"] || "",
+            ev:        rw["EV"] || "",
+            pump:      rw["PUMP"] || "",
+            sharePoint:rw["sharePointURL"] || rw["SharePoint"] || ""
+          }));
         }
-      }));
-
-      allData = results.flat();
-      console.log("Combined allData:", allData);
-      if (allData.length === 0) {
-        document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" class="error">No data available. Check console for errors.</td></tr>';
-      } else {
-        applyFilters();
+        return [];
+      }catch(e){
+        console.warn('Failed to load', s.file, e); return [];
       }
+    }));
+
+    allData = results.flat();
+    applyFilters(); // initial render with defaults
+  }
+
+  /* ---------- FILTERING CORE ---------- */
+  function applyFilters(opts={}) {
+    // If search is active, ignore filters and show search results across all store types
+    if (searchActive && opts.fromSearch) {
+      renderTable(opts.dataset, { bypassStoreType:true });
+      updateFilterSummaryBar(); // hide if not filtered
+      return;
     }
 
-    function applyFilters(opts = {}) {
-      console.log("Applying filters, opts:", opts);
-      let data = allData.slice();
-      if (opts.fromSearch && searchActive) {
-        console.log("Search active, using search dataset:", opts.dataset);
-        data = opts.dataset;
-      } else {
-        if (activeStoreType !== 'ALL') {
-          console.log(`Filtering by store type: ${activeStoreType}`);
-          data = data.filter(e => e.storeType === activeStoreType);
-        }
-        if (activeCategory) {
-          console.log(`Filtering by category: ${activeCategory}`);
-          data = data.filter(e => e[activeCategory] && String(e[activeCategory]).trim() !== '');
-        }
-        if (rangeDays) {
-          console.log(`Filtering by range: ${rangeDays} days`);
-          const now = new Date();
-          const to = new Date();
-          to.setDate(now.getDate() + rangeDays);
-          if (activeCategory) {
-            data = data.filter(e => {
-              const d = parseDate(e[activeCategory]);
-              return d && d >= now && d <= to;
-            });
-          } else {
-            data = data.filter(e => {
-              return ['fiveYear', 'pat', 'em', 'pv', 'ev', 'pump'].some(k => {
-                const d = parseDate(e[k]);
-                return d && d >= now && d <= to;
-              });
-            });
-          }
-        }
-      }
-      console.log("Filtered data:", data);
-      renderTable(data);
-      updateFilterSummaryBar();
+    let data = allData.slice();
+
+    // 1) Store Type
+    if (activeStoreType !== 'ALL') {
+      data = data.filter(e=>e.storeType===activeStoreType);
     }
 
-    function renderTable(d, options = {}) {
-      console.log("Rendering table with data:", d);
-      currentData = d.slice();
-      const tb = document.getElementById('tableBody');
-      const existingRows = [...tb.children];
-      const newRows = d.map(e => {
-        const sp = e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank" rel="noopener">Open</a>` : '';
-        return `
-          <tr>
-            <td>${(e.storeCode ?? '').toString().padStart(4, '0')}</td>
-            <td>${e.siteName ?? ''}</td>
-            <td>${e.storeType ?? ''}</td>
-            <td>${e.postcode ?? ''}</td>
-            <td>${getStatus(e)}</td>
-            <td>${e.fiveYear ?? ''}</td>
-            <td>${e.pat ?? ''}</td>
-            <td>${e.em ?? ''}</td>
-            <td>${e.pv ?? ''}</td>
-            <td>${e.ev ?? ''}</td>
-            <td>${e.pump ?? ''}</td>
-            <td>${sp}</td>
-          </tr>`;
+    // 2) Compliance Category (only rows with date in that column)
+    if (activeCategory) {
+      data = data.filter(e=>{
+        const v = e[activeCategory];
+        return v && String(v).trim()!=='';
       });
-      if (existingRows.length !== newRows.length || existingRows.some((row, i) => row.outerHTML !== newRows[i])) {
-        tb.innerHTML = newRows.join('');
-      }
-      console.log("Table rendered, row count:", newRows.length);
     }
 
-    function setActiveClass(containerSelector, btn) {
-      console.log(`Setting active class in ${containerSelector}, button:`, btn?.textContent);
-      const buttons = document.querySelectorAll(containerSelector + ' .bubble');
-      buttons.forEach(b => b.classList.remove('active'));
-      if (btn) btn.classList.add('active');
-    }
-
-    function setStoreType(type, btn) {
-      console.log(`setStoreType called with type: ${type}`);
-      if (activeStoreType === type) {
-        activeStoreType = 'ALL';
-        setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
-      } else {
-        activeStoreType = type;
-        setActiveClass('#storeTypeFilters', btn);
-      }
-      searchActive = false;
-      applyFilters();
-    }
-
-    function toggleCategory(field, btn) {
-      console.log(`toggleCategory called with field: ${field}`);
-      if (activeCategory === field) {
-        activeCategory = null;
-        document.querySelectorAll('#complianceFilters .bubble').forEach(b => b.classList.remove('active'));
-      } else {
-        activeCategory = field;
-        setActiveClass('#complianceFilters', btn);
-      }
-      searchActive = false;
-      applyFilters();
-    }
-
-    function toggleDue(btn, days) {
-      console.log(`toggleDue called with days: ${days}`);
-      const isActive = btn.classList.contains('active');
-      document.querySelectorAll('.summary-bubbles .bubble').forEach(b => {
-        if (b.textContent.startsWith('Due in')) b.classList.remove('active');
-      });
-      if (isActive) {
-        rangeDays = null;
-      } else {
-        rangeDays = days;
-        btn.classList.add('active');
-      }
-      searchActive = false;
-      applyFilters();
-    }
-
-    function clearFilters() {
-      console.log("Clearing all filters");
-      document.querySelectorAll('.summary-bubbles .bubble').forEach(b => {
-        if (b.textContent.startsWith('Due in')) b.classList.remove('active');
-      });
-      activeStoreType = 'ALL';
-      setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
-      activeCategory = null;
-      document.querySelectorAll('#complianceFilters .bubble').forEach(b => b.classList.remove('active'));
-      rangeDays = null;
-      searchActive = false;
-      document.getElementById('searchBar').value = '';
-      applyFilters();
-    }
-
-    function searchTable() {
-      const q = document.getElementById('searchBar').value.toLowerCase().trim();
-      console.log(`Searching with query: ${q}`);
-      if (!q) {
-        searchActive = false;
-        applyFilters();
-        return;
-      }
-      const base = allData.filter(e =>
-        (e.siteName ?? '').toLowerCase().includes(q) ||
-        (e.postcode ?? '').toLowerCase().includes(q) ||
-        (e.storeCode ?? '').toString().includes(q)
-      );
-      searchActive = true;
-      applyFilters({ fromSearch: true, dataset: base });
-    }
-
-    function openExportModal() {
-      console.log("Opening export modal");
-      const sel = document.getElementById('exportStoreType');
-      sel.value = activeStoreType || 'ALL';
-      exportModal.style.display = 'block';
-    }
-    function closeExportModal() {
-      console.log("Closing export modal");
-      exportModal.style.display = 'none';
-    }
-
-    function runFullExport() {
-      console.log("Running full export");
-      rangeDays = null;
-      document.querySelectorAll('.range-btn').forEach(b => {
-        b.classList.remove('active');
-        b.style.background = '#e6e8eb';
-        b.style.color = '#000';
-      });
-      document.querySelectorAll('.exportCheck').forEach(c => c.checked = true);
-      document.getElementById('exportStoreType').value = 'ALL';
-      runExport();
-    }
-
-    function selectRange(days, el) {
-      console.log(`Selecting range: ${days} days`);
-      const buttons = document.querySelectorAll('.range-btn');
-      const isAlreadyActive = el.classList.contains('active');
-      buttons.forEach(b => {
-        b.classList.remove('active');
-        b.style.background = '#e6e8eb';
-        b.style.color = '#000';
-      });
-      if (isAlreadyActive) {
-        rangeDays = null;
-      } else {
-        el.classList.add('active');
-        el.style.background = '#0071CE';
-        el.style.color = '#fff';
-        rangeDays = days;
-      }
-      document.getElementById('exportFrom').value = "";
-      document.getElementById('exportTo').value = "";
-    }
-
-    function runExport() {
-      console.log("Running export");
-      const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
-      if (!cols.length) return alert('Please select at least one column.');
-      let f = parseDate(document.getElementById('exportFrom').value.split('-').reverse().join('/'));
-      let t = parseDate(document.getElementById('exportTo').value.split('-').reverse().join('/'));
-      if (rangeDays) {
-        f = new Date();
-        t = new Date();
-        t.setDate(f.getDate() + rangeDays);
-      }
-      const chosenType = document.getElementById('exportStoreType').value || 'ALL';
-      let data = (chosenType === 'ALL') ? allData.slice() : allData.filter(e => e.storeType === chosenType);
-      if (f || t) {
-        const compCols = cols.filter(c => !['storeType', 'sharePoint'].includes(c));
-        if (compCols.length) {
-          data = data.filter(e =>
-            compCols.some(k => {
-              const d = parseDate(e[k]);
-              return d && (!f || d >= f) && (!t || d <= t);
-            })
-          );
-        }
-      }
-      const headers = ["Store Code", "Site Name",
-        ...(cols.includes('storeType') ? ["Store Type"] : []),
-        "Postcode", "Status",
-        ...cols.filter(c => !['storeType', 'sharePoint'].includes(c)).map(c => c.toUpperCase()),
-        ...(cols.includes('sharePoint') ? ["SharePoint"] : [])];
-      const sheet = [headers];
-      data.forEach(e => {
-        const row = [
-          (e.storeCode ?? '').toString().padStart(4, '0'),
-          e.siteName ?? ''
-        ];
-        if (cols.includes('storeType')) row.push(e.storeType ?? '');
-        row.push(e.postcode ?? '');
-        row.push(getStatus(e));
-        cols.filter(c => !['storeType', 'sharePoint'].includes(c)).forEach(c => row.push(e[c] || ""));
-        if (cols.includes('sharePoint')) row.push(e.sharePoint || "");
-        sheet.push(row);
-      });
-      const ws = XLSX.utils.aoa_to_sheet(sheet);
-      const colWidths = headers.map(h => (h === "Site Name" ? { wch: 30 } : { wch: 20 }));
-      ws['!cols'] = colWidths;
-      const range = XLSX.utils.decode_range(ws['!ref']);
-      for (let R = range.s.r; R <= range.e.r; ++R) {
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-          const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-          if (!ws[cellRef]) continue;
-          ws[cellRef].s = { alignment: { horizontal: "center", vertical: "center" } };
-        }
-      }
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
-      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      XLSX.writeFile(wb, `Mostlane_Compliance_Export_${ts}.xlsx`);
-      exportModal.style.display = 'none';
-    }
-
-    function openSummaryModal() {
-      console.log("Opening summary modal");
-      const groups = {};
-      const now = new Date();
-      function statusOf(e) {
-        let red = false, amber = false;
-        [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump].map(parseDate).filter(Boolean)
-          .forEach(dt => {
-            if (dt < now) red = true;
-            else if ((dt - now) / (1e3 * 60 * 60 * 24) <= 30) amber = true;
-          });
-        return red ? 'RED' : (amber ? 'AMBER' : 'GREEN');
-      }
-      currentData.forEach(e => {
-        const key = e.storeType || 'Unknown';
-        if (!groups[key]) groups[key] = { total: 0, GREEN: 0, AMBER: 0, RED: 0 };
-        groups[key].total++;
-        const s = statusOf(e);
-        groups[key][s]++;
-      });
-      const order = ["Retail", "ELS", "ELS Private", "Cobra", "Wenzel's", "Unknown"];
-      const rows = order.filter(k => groups[k]).map(k => {
-        const g = groups[k], t = g.total || 1;
-        const pct = (n) => ((n * 100 / t).toFixed(1) + '%');
-        return `
-          <div class="summary-box">
-            <div class="summary-title">${k}</div>
-            <div>Total: <b>${g.total}</b></div>
-            <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
-            <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
-            <div>🔴 RED: <b>${g.RED}</b> (${pct(g.RED)})</div>
-          </div>
-        `;
-      });
-      document.getElementById('summaryBody').innerHTML = rows.join('') || '<p>No data to summarise.</p>';
-      document.getElementById('summaryModal').style.display = 'block';
-    }
-    function closeSummaryModal() {
-      console.log("Closing summary modal");
-      document.getElementById('summaryModal').style.display = 'none';
-    }
-
-    function openModal() {
-      console.log("Opening search modal (placeholder)");
-      alert('Date/Type search modal can be implemented here (left unchanged as requested).');
-    }
-
-    function updateFilterSummaryBar() {
-      console.log("Updating filter summary bar");
-      const bar = document.getElementById('filterSummary');
-      const parts = [];
-      if (activeStoreType !== 'ALL') parts.push(`Store Type = ${activeStoreType}`);
+    // 3) Due-in-X filter
+    if (rangeDays) {
+      const now=new Date(); const to=new Date(); to.setDate(now.getDate()+rangeDays);
       if (activeCategory) {
-        const map = { fiveYear: '5 Year', pat: 'PAT', em: 'EM', pv: 'PV', ev: 'EV', pump: 'Pump' };
-        parts.push(`Category = ${map[activeCategory] || activeCategory}`);
-      }
-      if (rangeDays) parts.push(`Range = ${rangeDays} Days`);
-      if (parts.length) {
-        bar.textContent = 'Filter: ' + parts.join(' | ');
-        bar.classList.add('visible');
+        // due filter against the selected category
+        data = data.filter(e=>{
+          const d=parseDate(e[activeCategory]); return d && d>=now && d<=to;
+        });
       } else {
-        bar.classList.remove('visible');
-        bar.textContent = '';
+        // no category selected: due across ANY compliance date
+        data = data.filter(e=>{
+          return ['fiveYear','pat','em','pv','ev','pump'].some(k=>{
+            const d=parseDate(e[k]); return d && d>=now && d<=to;
+          });
+        });
       }
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-      console.log("DOM loaded, setting up event listeners");
-      const editBtn = document.getElementById("editBtn");
-      const saveBtn = document.getElementById("saveBtn");
+    renderTable(data);
+    updateFilterSummaryBar();
+  }
 
-      editBtn.addEventListener("click", () => {
-        console.log("Edit button clicked");
-        const pin = prompt("Enter edit PIN:");
-        if (pin === EDIT_PIN) {
-          editMode = true;
-          originalDataSnapshot = [...document.querySelectorAll("tbody tr")].map(tr => [...tr.children].map(td => td.textContent));
-          enableEditing(true);
-          editBtn.style.display = "none";
-          saveBtn.style.display = "inline-block";
-          alert("✅ Edit mode enabled. You can now edit compliance dates.");
-        } else {
-          alert("❌ Incorrect PIN");
-        }
+  function renderTable(d, options={}) {
+    const bypassStoreType = options.bypassStoreType || false;
+    let data = d.slice();
+
+    // If we’re rendering a non-search view and a store type is active, ensure it stays applied
+    if (!bypassStoreType && activeStoreType!=='ALL') {
+      data = data.filter(e=>e.storeType===activeStoreType);
+    }
+
+    currentData = data.slice();
+    const tb=document.getElementById('tableBody');tb.innerHTML='';
+    data.forEach(e=>{
+      const sp = e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank" rel="noopener">Open</a>` : '';
+      tb.innerHTML+=`
+        <tr>
+          <td>${(e.storeCode??'').toString().padStart(4,'0')}</td>
+          <td>${e.siteName??''}</td>
+          <td>${e.storeType??''}</td>
+          <td>${e.postcode??''}</td>
+          <td>${getStatus(e)}</td>
+          <td>${e.fiveYear??''}</td>
+          <td>${e.pat??''}</td>
+          <td>${e.em??''}</td>
+          <td>${e.pv??''}</td>
+          <td>${e.ev??''}</td>
+          <td>${e.pump??''}</td>
+          <td>${sp}</td>
+        </tr>`;
+    });
+  }
+
+  /* ---------- BUTTON HANDLERS & TOGGLING ---------- */
+  function setActiveClass(containerSelector, btn) {
+    const buttons = document.querySelectorAll(containerSelector + ' .bubble');
+    buttons.forEach(b=>b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+  }
+
+  function setStoreType(type, btn){
+    // toggle: clicking the active one returns to ALL
+    if (activeStoreType===type) {
+      activeStoreType='ALL';
+      setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
+    } else {
+      activeStoreType = type;
+      setActiveClass('#storeTypeFilters', btn);
+    }
+    searchActive=false; // leaving search mode
+    applyFilters();
+  }
+
+  function toggleCategory(field, btn){
+    if (activeCategory===field) {
+      activeCategory=null; // unselect
+      // unhighlight all compliance buttons
+      document.querySelectorAll('#complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
+    } else {
+      activeCategory = field;
+      setActiveClass('#complianceFilters', btn);
+    }
+    searchActive=false;
+    applyFilters();
+  }
+
+  function toggleDue(btn, days){
+    const isActive = btn.classList.contains('active');
+    // unhighlight all due buttons
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>{
+      if (b.textContent.startsWith('Due in')) b.classList.remove('active');
+    });
+    if (isActive) {
+      rangeDays = null; // unselect
+    } else {
+      rangeDays = days;
+      btn.classList.add('active');
+    }
+    searchActive=false;
+    applyFilters();
+  }
+
+  function clearFilters(){
+    // Clear due buttons
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>{
+      if (b.textContent.startsWith('Due in')) b.classList.remove('active');
+    });
+    // Reset store type
+    activeStoreType='ALL';
+    setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
+    // Reset compliance category
+    activeCategory=null; // restore default choice (not highlighted)
+    document.querySelectorAll('#complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
+    // Reset range
+    rangeDays=null;
+    // Reset search
+    searchActive=false;
+    document.getElementById('searchBar').value='';
+    applyFilters();
+  }
+
+  /* ---------- SEARCH (independent across ALL store types) ---------- */
+  function searchTable(){
+    const q=document.getElementById('searchBar').value.toLowerCase().trim();
+    if (!q) {
+      searchActive=false;
+      applyFilters();
+      return;
+    }
+    const base = allData.filter(e=>
+      (e.siteName??'').toLowerCase().includes(q) ||
+      (e.postcode??'').toLowerCase().includes(q) ||
+      (e.storeCode??'').toString().includes(q)
+    );
+    searchActive=true;
+    applyFilters({fromSearch:true, dataset:base});
+  }
+
+  /* ---------- EXPORT ---------- */
+  function openExportModal(){
+    // preselect active store type
+    const sel = document.getElementById('exportStoreType');
+    sel.value = activeStoreType || 'ALL';
+    exportModal.style.display='block';
+  }
+  function closeExportModal(){exportModal.style.display='none'}
+
+  function runFullExport(){
+    rangeDays=null;
+    document.querySelectorAll('.range-btn').forEach(b=>{b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
+    document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
+    document.getElementById('exportStoreType').value='ALL';
+    runExport();
+  }
+
+  function selectRange(days, el) {
+    const buttons = document.querySelectorAll('.range-btn');
+    const isAlreadyActive = el.classList.contains('active');
+    buttons.forEach(b => {b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
+    if (isAlreadyActive) {rangeDays = null;} 
+    else {el.classList.add('active');el.style.background='#0071CE';el.style.color='#fff';rangeDays = days;}
+    document.getElementById('exportFrom').value = "";
+    document.getElementById('exportTo').value = "";
+  }
+
+  // Excel Export (includes optional Store Type + SharePoint) and store-type dropdown filter
+  function runExport() {
+    const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
+    if (!cols.length) return alert('Please select at least one column.');
+    let f = parseDate(exportFrom.value.split('-').reverse().join('/'));
+    let t = parseDate(exportTo.value.split('-').reverse().join('/'));
+    if (rangeDays) { f = new Date(); t = new Date(); t.setDate(f.getDate() + rangeDays); }
+
+    // start from the full dataset for export; apply store type chosen in modal
+    const chosenType = document.getElementById('exportStoreType').value || 'ALL';
+    let data = (chosenType==='ALL') ? allData.slice() : allData.filter(e=>e.storeType===chosenType);
+
+    // apply date range across any selected compliance column (not storeType/sharePoint)
+    if (f || t){
+      const compCols = cols.filter(c=>!['storeType','sharePoint'].includes(c));
+      if (compCols.length){
+        data = data.filter(e =>
+          compCols.some(k => { const d = parseDate(e[k]); return d && (!f || d >= f) && (!t || d <= t); })
+        );
+      }
+    }
+
+    const headers = ["Store Code", "Site Name",
+                     ...(cols.includes('storeType')?["Store Type"]:[]),
+                     "Postcode", "Status",
+                     ...cols.filter(c=>!['storeType','sharePoint'].includes(c)).map(c => c.toUpperCase()),
+                     ...(cols.includes('sharePoint')?["SharePoint"]:[])];
+
+    const sheet = [headers];
+    data.forEach(e => {
+      const row = [
+        (e.storeCode??'').toString().padStart(4,'0'),
+        e.siteName??''
+      ];
+      if (cols.includes('storeType')) row.push(e.storeType??'');
+      row.push(e.postcode??'');
+      row.push(getStatus(e));
+      cols.filter(c=>!['storeType','sharePoint'].includes(c)).forEach(c=>row.push(e[c]||""));
+      if (cols.includes('sharePoint')) row.push(e.sharePoint||"");
+      sheet.push(row);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(sheet);
+    const colWidths = headers.map(h => (h === "Site Name" ? { wch: 30 } : { wch: 20 }));
+    ws['!cols'] = colWidths;
+
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[cellRef]) continue;
+        ws[cellRef].s = { alignment: { horizontal: "center", vertical: "center" } };
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Compliance Export");
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    XLSX.writeFile(wb, `Mostlane_Compliance_Export_${ts}.xlsx`);
+    exportModal.style.display = 'none';
+  }
+
+  /* ---------- SUMMARY MODALS ---------- */
+  function openSummaryModal(){
+    const groups = {};
+    const now = new Date();
+
+    function statusOf(e){
+      let red=false,amber=false;
+      [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean)
+        .forEach(dt=>{if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true});
+      return red?'RED':(amber?'AMBER':'GREEN');
+    }
+
+    currentData.forEach(e=>{
+      const key = e.storeType || 'Unknown';
+      if(!groups[key]) groups[key] = {total:0,GREEN:0,AMBER:0,RED:0};
+      groups[key].total++;
+      const s = statusOf(e);
+      groups[key][s]++;
+    });
+
+    const order = ["Retail","ELS","ELS Private","Cobra","Wenzel's","Unknown"];
+    const rows = order.filter(k=>groups[k]).map(k=>{
+      const g = groups[k], t=g.total||1;
+      const pct = (n)=>((n*100/t).toFixed(1)+'%');
+      return `
+        <div class="summary-box">
+          <div class="summary-title">${k}</div>
+          <div>Total: <b>${g.total}</b></div>
+          <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
+          <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
+          <div>🔴 RED: <b>${g.RED}</b> (${pct(g.RED)})</div>
+        </div>
+      `;
+    });
+
+    document.getElementById('summaryBody').innerHTML = rows.join('') || '<p>No data to summarise.</p>';
+    document.getElementById('summaryModal').style.display='block';
+  }
+  function closeSummaryModal(){document.getElementById('summaryModal').style.display='none'}
+
+  // Placeholder for advanced search modal (unchanged)
+  function openModal(){
+    alert('Date/Type search modal can be implemented here (left unchanged as requested).');
+  }
+
+  /* ---------- FILTER SUMMARY BAR (fade .5s) ---------- */
+  function updateFilterSummaryBar(){
+    const bar = document.getElementById('filterSummary');
+    const parts = [];
+    if (activeStoreType !== 'ALL') parts.push(`Store Type = ${activeStoreType}`);
+    if (activeCategory) {
+      const map = {fiveYear:'5 Year', pat:'PAT', em:'EM', pv:'PV', ev:'EV', pump:'Pump'};
+      parts.push(`Category = ${map[activeCategory]||activeCategory}`);
+    }
+    if (rangeDays) parts.push(`Range = ${rangeDays} Days`);
+    if (parts.length) {
+      bar.textContent = 'Filter: ' + parts.join(' | ');
+      bar.classList.add('visible');
+    } else {
+      bar.classList.remove('visible');
+      bar.textContent = '';
+    }
+  }
+  /* 🔧 NEW: Edit & Save logic */
+  const EDIT_PIN = "2025"; // Change if needed
+  let editMode = false;
+
+  document.addEventListener("DOMContentLoaded",()=>{
+    const editBtn=document.getElementById("editBtn");
+    const saveBtn=document.getElementById("saveBtn");
+
+    editBtn.addEventListener("click",()=>{
+      const pin=prompt("Enter edit PIN:");
+      if(pin===EDIT_PIN){
+        editMode=true;
+        saveBtn.style.display="inline-block";
+        enableEditing(true);
+        alert("✅ Edit mode enabled. You can now edit compliance dates.");
+      }else{
+        alert("Incorrect PIN ❌");
+      }
+    });
+
+    saveBtn.addEventListener("click",()=>{
+      const table=document.querySelector("table");
+      const headers=[...table.querySelectorAll("th")].map(th=>th.innerText.trim());
+      const rows=[...table.querySelectorAll("tbody tr")];
+
+      const data=rows.map(r=>{
+        const cells=[...r.querySelectorAll("td")];
+        const rec={};
+        headers.forEach((h,i)=>rec[h]=cells[i].innerText.trim());
+        return rec;
       });
 
-      saveBtn.addEventListener("click", async () => {
-        console.log("Save button clicked");
-        const rows = [...document.querySelectorAll("tbody tr")];
-        const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
-        const changes = rows
-          .map((r, i) => {
-            const cells = [...r.children].map(td => td.textContent.trim());
-            if (JSON.stringify(cells) !== JSON.stringify(originalDataSnapshot[i])) {
-              const record = {};
-              headers.forEach((h, idx) => record[h] = cells[idx]);
-              return record;
-            }
-            return null;
-          })
-          .filter(Boolean);
-
-        if (!changes.length) {
-          console.log("No changes detected");
-          return alert("No changes detected.");
-        }
-
-        const grouped = {};
-        for (const rec of changes) {
-          const type = rec["Store Type"];
-          if (!grouped[type]) grouped[type] = [];
-          grouped[type].push(rec);
-        }
-
-        const fileMap = {
-          "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance%20(1).json",
-          "ELS": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
-          "ELS Private": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
-          "Cobra": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
-          "Wenzel's": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
-        };
-
-        const promises = Object.entries(grouped).map(([type, entries]) => {
-          const payload = {
-            fileURL: fileMap[type] || `Test/Compliance/${type.toLowerCase().replace(' ', '_')}_compliance.json`,
-            operator: (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-            timestamp: new Date().toISOString(),
-            updatedRecords: entries
-          };
-          console.log(`Sending webhook for ${type}:`, payload);
-          return fetch(ZAPIER_WEBHOOK, {
-            method: "POST",
-            mode: "no-cors",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          }).then(() => {
-            console.log(`✅ Sent update for ${type}`);
-            return { type, status: "success" };
-          }).catch(err => {
-            console.error(`❌ Failed for ${type}:`, err);
-            return { type, status: "error", error: err.message };
-          });
-        });
-
-        try {
-          const results = await Promise.all(promises);
-          const errors = results.filter(r => r.status === "error");
-          if (errors.length) {
-            alert(`❌ Failed to send changes for: ${errors.map(e => e.type).join(", ")}. Check console for details.`);
-          } else {
-            alert("✅ All changes sent to Zapier. Check Zapier logs to confirm.");
-          }
-        } catch (err) {
-          console.error("❌ Error sending changes:", err);
-          alert("❌ Failed to send changes. Check console for details.");
-        }
-
-        enableEditing(false);
-        editBtn.style.display = "inline-block";
-        saveBtn.style.display = "none";
-        editMode = false;
-      });
-
-      function enableEditing(state) {
-        console.log(`Enabling editing: ${state}`);
-        const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
-        document.querySelectorAll("table tbody tr").forEach(row => {
-          [...row.children].forEach((td, i) => {
-            const header = document.querySelectorAll("table thead th")[i].textContent.trim();
-            td.contentEditable = state && editableCols.includes(header);
-            td.style.background = state && editableCols.includes(header) ? "#fff6d1" : "";
-          });
-        });
+      const grouped={};
+      for(const rec of data){
+        const type=rec["Store Type"];
+        if(!grouped[type])grouped[type]=[];
+        grouped[type].push(rec);
       }
 
-      fetchData();
+      const fileMap={
+        "Retail":"retail_compliance.json",
+        "ELS":"els_compliance.json",
+        "ELS Private":"els_private_compliance.json",
+        "Cobra":"cobra_compliance.json",
+        "Wenzel's":"wenzels_compliance.json"
+      };
+
+     Object.entries(grouped).forEach(([type, entries]) => {
+  const fileMap = {
+    "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
+    "ELS": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
+    "ELS Private": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
+    "Cobra": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
+    "Wenzel's": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
+  };
+
+  const fileURL = fileMap[type];
+  const user = ((sessionStorage.getItem("mostlaneUser") || "Unknown")
+    .replace(/\./g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase()));
+
+  const payload = {
+    fileURL,             // ✅ Full GitHub URL for Zapier to GET
+    operator: user,      // ✅ Logged-in user, nicely formatted
+    timestamp: new Date().toISOString(),
+    updatedRecords: entries
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).then(r => {
+    if (r.ok) console.log(`✅ Sent update for ${type}`);
+    else console.error(`❌ Failed for ${type}`);
+  });
+});
+
+
+      alert("Changes sent for update.");
+      enableEditing(false);
+      saveBtn.style.display="none";
+      editMode=false;
     });
+
+    function enableEditing(state){
+      const editableCols=["5 Year","PAT","EM","PV","EV","Pump"];
+      document.querySelectorAll("table tbody tr").forEach(row=>{
+        [...row.children].forEach((td,i)=>{
+          const header=document.querySelectorAll("table thead th")[i].innerText.trim();
+          if(state && editableCols.includes(header)) td.contentEditable=true;
+          else td.contentEditable=false;
+        });
+      });
+    }
+  });
+
+  fetchData();
   </script>
+  <script>
+/* -----------------------
+   COMPLIANCE EDIT SYSTEM
+   ----------------------- */
+const EDIT_PIN = "2025"; // Change this if needed
+let editMode = false;
+let originalDataSnapshot = [];
+
+document.addEventListener("DOMContentLoaded", () => {
+  // Add Edit/Save buttons to your backbar dynamically
+  const backbar = document.querySelector(".backbar");
+  if (backbar && !document.getElementById("editBtn")) {
+    const editBtn = document.createElement("button");
+    editBtn.id = "editBtn";
+    editBtn.textContent = "Edit";
+    editBtn.style.cssText = "margin-left:10px;background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:bold;";
+    const saveBtn = document.createElement("button");
+    saveBtn.id = "saveBtn";
+    saveBtn.textContent = "Save Changes";
+    saveBtn.style.cssText = "margin-left:10px;background:#28a745;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-weight:bold;display:none;";
+    backbar.append(editBtn, saveBtn);
+
+    editBtn.addEventListener("click", () => {
+      const pin = prompt("Enter edit PIN:");
+      if (pin === EDIT_PIN) {
+        editMode = true;
+        originalDataSnapshot = [...document.querySelectorAll("tbody tr")].map(tr => [...tr.children].map(td => td.textContent));
+        enableEditing(true);
+        editBtn.style.display = "none";
+        saveBtn.style.display = "inline-block";
+        alert("✅ Edit mode enabled. You can now edit compliance dates.");
+      } else alert("❌ Incorrect PIN");
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const rows = [...document.querySelectorAll("tbody tr")];
+      const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+      const changes = [];
+
+      rows.forEach((r, i) => {
+        const cells = [...r.children].map(td => td.textContent.trim());
+        if (JSON.stringify(cells) !== JSON.stringify(originalDataSnapshot[i])) {
+          const record = {};
+          headers.forEach((h, idx) => record[h] = cells[idx]);
+          changes.push(record);
+        }
+      });
+
+      if (!changes.length) return alert("No changes detected.");
+
+      // Group changes by Store Type
+      const grouped = {};
+      for (const rec of changes) {
+        const type = rec["Store Type"];
+        if (!grouped[type]) grouped[type] = [];
+        grouped[type].push(rec);
+      }
+
+      const fileMap = {
+        "Retail": "retail_compliance.json",
+        "ELS": "els_compliance.json",
+        "ELS Private": "els_private_compliance.json",
+        "Cobra": "cobra_compliance.json",
+        "Wenzel's": "wenzels_compliance.json"
+      };
+
+      Object.entries(grouped).forEach(([type, entries]) => {
+        const formBody = new URLSearchParams();
+        formBody.append("file", `Test/Compliance/${fileMap[type]}`);
+        formBody.append("updatedBy", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
+        formBody.append("timestamp", new Date().toISOString());
+        formBody.append("changes", JSON.stringify(entries));
+
+     fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+  method: "POST",
+  mode: "no-cors", // 👈 this line fixes it
+  headers: {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  body: formBody.toString()
+})
+          .then(() => console.log(`✅ ${type} changes sent`))
+          .catch(err => console.error("❌ Error sending changes:", err));
+      });
+
+      alert("✅ Changes sent for update.");
+      enableEditing(false);
+      editBtn.style.display = "inline-block";
+      saveBtn.style.display = "none";
+      editMode = false;
+    });
+  }
+});
+
+function enableEditing(state) {
+  const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
+  document.querySelectorAll("table tbody tr").forEach(row => {
+    [...row.children].forEach((td, i) => {
+      const header = document.querySelectorAll("table thead th")[i].textContent.trim();
+      if (state && editableCols.includes(header)) td.contentEditable = true;
+      else td.contentEditable = false;
+    });
+  });
+  document.querySelectorAll("[contenteditable='true']").forEach(td => {
+    td.style.background = state ? "#fff6d1" : "";
+  });
+}
+</script>
+
 </body>
 </html>
