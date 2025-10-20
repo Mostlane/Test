@@ -43,17 +43,28 @@
       text-decoration:none;font-weight:bold;border:0;cursor:pointer
     }
     .sp-btn:hover{opacity:.9}
+    .backbar{
+      display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;
+    }
+    .backlink{
+      display:inline-flex;align-items:center;gap:8px;
+      background:#0071CE;color:#fff;text-decoration:none;
+      padding:8px 14px;border-radius:30px;font-weight:bold;
+    }
+    .backlink:hover{opacity:.9}
     .modal{
       display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
       background:rgba(0,0,0,0.5);
     }
     .modal-content{
-      background:#fff;border-radius:10px;max-width:400px;margin:6% auto;padding:20px;
+      background:#fff;border-radius:10px;max-width:420px;margin:6% auto;padding:20px;
       box-shadow:0 4px 10px rgba(0,0,0,0.3);
     }
     .modal h2{margin-top:0;color:#0071CE;text-align:center}
     .modal label{display:block;margin:6px 0}
-    .modal input[type="date"]{width:100%;padding:6px;border:1px solid #ccc;border-radius:5px}
+    .modal input[type="date"], .modal select{
+      width:100%;padding:6px;border:1px solid #ccc;border-radius:5px
+    }
     .modal button{
       background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:6px;
       cursor:pointer;margin-top:10px;font-weight:bold;
@@ -80,6 +91,13 @@
 </head>
 <body>
   <div class="container">
+
+    <div class="backbar">
+      <a class="backlink" href="https://mostlane.github.io/Test/compliance.html">
+        <span aria-hidden="true">←</span> Back
+      </a>
+    </div>
+
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
 
@@ -139,6 +157,16 @@
       <h2>Export Options</h2>
       <button onclick="runFullExport()">Full Export</button>
       <hr>
+      <p><b>Filter by Store Type:</b></p>
+      <select id="exportStoreType">
+        <option value="ALL">All Stores</option>
+        <option value="Retail">Retail</option>
+        <option value="ELS">ELS</option>
+        <option value="ELS Private">ELS Private</option>
+        <option value="Cobra">Cobra</option>
+        <option value="Wenzel's">Wenzel's</option>
+      </select>
+      <br><br>
       <p><b>Select Columns:</b></p>
       <label><input type="checkbox" class="exportCheck" value="storeType" checked> Store Type</label>
       <label><input type="checkbox" class="exportCheck" value="fiveYear" checked> 5 Year</label>
@@ -260,6 +288,7 @@
   }
 
   function renderTable(d){
+    // Chain store type filter here so compliance/date filters also respect it
     const data = applyStoreTypeFilter(d);
     currentData = data.slice();
     const tb=document.getElementById('tableBody');tb.innerHTML='';
@@ -293,17 +322,23 @@
     document.getElementById('exportTo').value = "";
   }
 
-  function openExportModal(){exportModal.style.display='block'}
+  function openExportModal(){
+    // preselect active store type
+    const sel = document.getElementById('exportStoreType');
+    sel.value = activeStoreType || 'ALL';
+    exportModal.style.display='block';
+  }
   function closeExportModal(){exportModal.style.display='none'}
 
   function runFullExport(){
     rangeDays=null;
     document.querySelectorAll('.range-btn').forEach(b=>{b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
     document.querySelectorAll('.exportCheck').forEach(c=>c.checked=true);
+    document.getElementById('exportStoreType').value='ALL';
     runExport();
   }
 
-  // Excel Export (includes optional Store Type + SharePoint)
+  // Excel Export (includes optional Store Type + SharePoint) and store-type dropdown filter
   function runExport() {
     const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
     if (!cols.length) return alert('Please select at least one column.');
@@ -311,7 +346,11 @@
     let t = parseDate(exportTo.value.split('-').reverse().join('/'));
     if (rangeDays) { f = new Date(); t = new Date(); t.setDate(f.getDate() + rangeDays); }
 
-    let data = currentData;
+    // start from the full dataset for export; apply store type chosen in modal
+    const chosenType = document.getElementById('exportStoreType').value || 'ALL';
+    let data = (chosenType==='ALL') ? allData.slice() : allData.filter(e=>e.storeType===chosenType);
+
+    // apply date range across any selected compliance column (not storeType/sharePoint)
     if (f || t){
       const compCols = cols.filter(c=>!['storeType','sharePoint'].includes(c));
       if (compCols.length){
@@ -376,13 +415,14 @@
     activeStoreType = type;
     document.querySelectorAll('#storeTypeFilters .bubble').forEach(x=>x.classList.remove('active'));
     btn.classList.add('active');
+    // when the store type changes, re-render full set (compliance filters will apply inside calls)
     renderTable(allData);
   }
 
   function filterByDays(d){
     const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
     const base = allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f});
-    renderTable(base);
+    renderTable(base); // renderTable chains store type filter
   }
 
   function clearFilters(){
@@ -395,6 +435,7 @@
     document.getElementById('searchBar').value='';
   }
 
+  // Search across ALL store types (doesn't chain with filters)
   function searchTable(){
     const q=document.getElementById('searchBar').value.toLowerCase();
     const base = allData.filter(e=>
