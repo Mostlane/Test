@@ -697,14 +697,15 @@
     updatedRecords: entries
   };
 
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  }).then(r => {
-    if (r.ok) console.log(`✅ Sent update for ${type}`);
-    else console.error(`❌ Failed for ${type}`);
-  });
+ fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/", {
+  method: "POST",
+  mode: "no-cors",   // ✅ disables preflight
+  body: JSON.stringify(payload)
+})
+.then(() => {
+  console.log(`✅ Sent update for ${type}`);
+})
+.catch(err => console.error("❌ Fetch error:", err));
 });
 
 
