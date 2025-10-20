@@ -649,39 +649,64 @@
       }
     });
 
-<script>
-  /* ... all your functions above ... */
+    saveBtn.addEventListener("click",()=>{
+      const table=document.querySelector("table");
+      const headers=[...table.querySelectorAll("th")].map(th=>th.innerText.trim());
+      const rows=[...table.querySelectorAll("tbody tr")];
 
-  // 🔧 the fixed Save Changes block goes here
-  saveBtn.addEventListener("click", () => {
-    ...full block from previous message...
-  });
-
-  function enableEditing(state){
-    const editableCols=["5 Year","PAT","EM","PV","EV","Pump"];
-    document.querySelectorAll("table tbody tr").forEach(row=>{
-      [...row.children].forEach((td,i)=>{
-        const header=document.querySelectorAll("table thead th")[i].innerText.trim();
-        if(state && editableCols.includes(header)) td.contentEditable=true;
-        else td.contentEditable=false;
+      const data=rows.map(r=>{
+        const cells=[...r.querySelectorAll("td")];
+        const rec={};
+        headers.forEach((h,i)=>rec[h]=cells[i].innerText.trim());
+        return rec;
       });
-    });
-  }
 
-  fetchData();
-</script>
-</body>
-</html>
+      const grouped={};
+      for(const rec of data){
+        const type=rec["Store Type"];
+        if(!grouped[type])grouped[type]=[];
+        grouped[type].push(rec);
+      }
 
-fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/x-www-form-urlencoded"
-  },
-  body: formBody.toString()
-})
-.then(() => console.log(`✅ ${type} data sent`))
-.catch(err => console.error("❌ Fetch error:", err));
+      const fileMap={
+        "Retail":"retail_compliance.json",
+        "ELS":"els_compliance.json",
+        "ELS Private":"els_private_compliance.json",
+        "Cobra":"cobra_compliance.json",
+        "Wenzel's":"wenzels_compliance.json"
+      };
+
+     Object.entries(grouped).forEach(([type, entries]) => {
+  const fileMap = {
+    "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
+    "ELS": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
+    "ELS Private": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
+    "Cobra": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
+    "Wenzel's": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
+  };
+
+  const fileURL = fileMap[type];
+  const user = ((sessionStorage.getItem("mostlaneUser") || "Unknown")
+    .replace(/\./g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase()));
+
+  const payload = {
+    fileURL,             // ✅ Full GitHub URL for Zapier to GET
+    operator: user,      // ✅ Logged-in user, nicely formatted
+    timestamp: new Date().toISOString(),
+    updatedRecords: entries
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).then(r => {
+    if (r.ok) console.log(`✅ Sent update for ${type}`);
+    else console.error(`❌ Failed for ${type}`);
+  });
+});
+
 
       alert("Changes sent for update.");
       enableEditing(false);
