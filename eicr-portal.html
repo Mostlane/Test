@@ -290,9 +290,9 @@
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
     <div class="summary-bubbles">
-      <button class="bubble" onclick="toggleDue(this,30)" aria-label="Filter stores due in 30 days">Due in 30 Days</button>
-      <button class="bubble" onclick="toggleDue(this,90)" aria-label="Filter stores due in 90 days">Due in 90 Days</button>
-      <button class="bubble" onclick="toggleDue(this,365)" aria-label="Filter stores due in 365 days">Due in 365 Days</button>
+      <button class="bubble" onclick="toggleDue(this, 30)" aria-label="Filter stores due in 30 days">Due in 30 Days</button>
+      <button class="bubble" onclick="toggleDue(this, 90)" aria-label="Filter stores due in 90 days">Due in 90 Days</button>
+      <button class="bubble" onclick="toggleDue(this, 365)" aria-label="Filter stores due in 365 days">Due in 365 Days</button>
       <button class="bubble" onclick="openModal()" aria-label="Search by date or type">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()" aria-label="Clear all filters">Clear</button>
       <button class="bubble" onclick="openExportModal()" aria-label="Export to Excel">Export to Excel</button>
@@ -304,15 +304,15 @@
       <button class="bubble" onclick="setStoreType('ELS', this)" aria-label="Filter ELS stores">ELS</button>
       <button class="bubble" onclick="setStoreType('ELS Private', this)" aria-label="Filter ELS Private stores">ELS Private</button>
       <button class="bubble" onclick="setStoreType('Cobra', this)" aria-label="Filter Cobra stores">Cobra</button>
-      <button class="bubble" onclick="setStoreType(`Wenzel's`, this)" aria-label="Filter Wenzel's stores">Wenzel's</button>
+      <button class="bubble" onclick="setStoreType('Wenzel\\'s', this)" aria-label="Filter Wenzel's stores">Wenzel's</button>
     </div>
     <div class="filter-bubbles" id="complianceFilters">
-      <button class="bubble" onclick="toggleCategory('fiveYear',this)" aria-label="Filter 5 Year compliance">5 Year</button>
-      <button class="bubble" onclick="toggleCategory('pat',this)" aria-label="Filter PAT compliance">PAT</button>
-      <button class="bubble" onclick="toggleCategory('em',this)" aria-label="Filter EM compliance">EM</button>
-      <button class="bubble" onclick="toggleCategory('pv',this)" aria-label="Filter PV compliance">PV</button>
-      <button class="bubble" onclick="toggleCategory('ev',this)" aria-label="Filter EV compliance">EV</button>
-      <button class="bubble" onclick="toggleCategory('pump',this)" aria-label="Filter Pump compliance">Pump</button>
+      <button class="bubble" onclick="toggleCategory('fiveYear', this)" aria-label="Filter 5 Year compliance">5 Year</button>
+      <button class="bubble" onclick="toggleCategory('pat', this)" aria-label="Filter PAT compliance">PAT</button>
+      <button class="bubble" onclick="toggleCategory('em', this)" aria-label="Filter EM compliance">EM</button>
+      <button class="bubble" onclick="toggleCategory('pv', this)" aria-label="Filter PV compliance">PV</button>
+      <button class="bubble" onclick="toggleCategory('ev', this)" aria-label="Filter EV compliance">EV</button>
+      <button class="bubble" onclick="toggleCategory('pump', this)" aria-label="Filter Pump compliance">Pump</button>
     </div>
     <div id="filterSummary" class="filter-summary"></div>
     <div class="search-container">
@@ -356,11 +356,11 @@
       <label><input type="checkbox" class="exportCheck" value="sharePoint" checked> SharePoint</label>
       <br><p><b>Predefined Ranges:</b></p>
       <div id="rangeButtons">
-        <button class="range-btn" onclick="selectRange(7,this)" aria-label="Export data for 7 days">7 Days</button>
-        <button class="range-btn" onclick="selectRange(14,this)" aria-label="Export data for 14 days">14 Days</button>
-        <button class="range-btn" onclick="selectRange(30,this)" aria-label="Export data for 30 days">30 Days</button>
-        <button class="range-btn" onclick="selectRange(60,this)" aria-label="Export data for 60 days">60 Days</button>
-        <button class="range-btn" onclick="selectRange(90,this)" aria-label="Export data for 90 days">90 Days</button>
+        <button class="range-btn" onclick="selectRange(7, this)" aria-label="Export data for 7 days">7 Days</button>
+        <button class="range-btn" onclick="selectRange(14, this)" aria-label="Export data for 14 days">14 Days</button>
+        <button class="range-btn" onclick="selectRange(30, this)" aria-label="Export data for 30 days">30 Days</button>
+        <button class="range-btn" onclick="selectRange(60, this)" aria-label="Export data for 60 days">60 Days</button>
+        <button class="range-btn" onclick="selectRange(90, this)" aria-label="Export data for 90 days">90 Days</button>
       </div>
       <br>
       <label>From:<input type="date" id="exportFrom" aria-label="Export start date"></label>
@@ -379,7 +379,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/urh99ln/";
-    let allData = [], currentData = [], activeStoreType = 'ALL', activeCategory = 'fiveYear', rangeDays = null, searchActive = false;
+    let allData = [], currentData = [], activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
     const EDIT_PIN = "2025";
     let editMode = false, originalDataSnapshot = [];
 
@@ -418,7 +418,7 @@
 
       const results = await Promise.all(sources.map(async s => {
         try {
-          console.log(`Fetching ${s.file}...`);
+          console.log(`Fetching ${base}${s.file}...`);
           const r = await fetch(base + s.file);
           if (!r.ok) throw new Error(`HTTP ${r.status} for ${s.file}`);
           const j = await r.json();
@@ -428,7 +428,7 @@
             return [];
           }
           if (Array.isArray(j)) {
-            return j.map(rw => ({
+            const parsed = j.map(rw => ({
               storeCode: (rw["Branch Code"] !== undefined ? String(rw["Branch Code"]) : "").padStart(4, '0'),
               siteName: rw["Store Name"] || "",
               postcode: rw["Postcode"] || "",
@@ -441,8 +441,10 @@
               pump: rw["PUMP"] || "",
               sharePoint: rw["SharePoint"] || ""
             }));
+            console.log(`Parsed ${s.file}:`, parsed);
+            return parsed;
           } else if (j && typeof j === 'object') {
-            return Object.values(j).map(rw => ({
+            const parsed = Object.values(j).map(rw => ({
               storeCode: (rw.branchCode !== undefined ? String(rw.branchCode) : "").padStart(4, '0'),
               siteName: rw.storeName || "",
               postcode: rw.postcode || "",
@@ -455,11 +457,14 @@
               pump: rw["PUMP"] || "",
               sharePoint: rw.sharePointURL || rw["SharePoint"] || ""
             }));
+            console.log(`Parsed ${s.file}:`, parsed);
+            return parsed;
           }
           console.warn(`No valid data in ${s.file}`);
           return [];
         } catch (e) {
           console.error(`Failed to load ${s.file}:`, e);
+          document.getElementById('tableBody').innerHTML = `<tr><td colspan="12" class="error">Failed to load ${s.file}: ${e.message}</td></tr>`;
           return [];
         }
       }));
@@ -475,35 +480,37 @@
 
     function applyFilters(opts = {}) {
       console.log("Applying filters, opts:", opts);
-      if (searchActive && opts.fromSearch) {
-        renderTable(opts.dataset, { bypassStoreType: true });
-        updateFilterSummaryBar();
-        return;
-      }
-
       let data = allData.slice();
-      if (activeStoreType !== 'ALL') {
-        data = data.filter(e => e.storeType === activeStoreType);
-      }
-      if (activeCategory) {
-        data = data.filter(e => e[activeCategory] && String(e[activeCategory]).trim() !== '');
-      }
-      if (rangeDays) {
-        const now = new Date();
-        const to = new Date();
-        to.setDate(now.getDate() + rangeDays);
+      if (opts.fromSearch && searchActive) {
+        console.log("Search active, using search dataset:", opts.dataset);
+        data = opts.dataset;
+      } else {
+        if (activeStoreType !== 'ALL') {
+          console.log(`Filtering by store type: ${activeStoreType}`);
+          data = data.filter(e => e.storeType === activeStoreType);
+        }
         if (activeCategory) {
-          data = data.filter(e => {
-            const d = parseDate(e[activeCategory]);
-            return d && d >= now && d <= to;
-          });
-        } else {
-          data = data.filter(e => {
-            return ['fiveYear', 'pat', 'em', 'pv', 'ev', 'pump'].some(k => {
-              const d = parseDate(e[k]);
+          console.log(`Filtering by category: ${activeCategory}`);
+          data = data.filter(e => e[activeCategory] && String(e[activeCategory]).trim() !== '');
+        }
+        if (rangeDays) {
+          console.log(`Filtering by range: ${rangeDays} days`);
+          const now = new Date();
+          const to = new Date();
+          to.setDate(now.getDate() + rangeDays);
+          if (activeCategory) {
+            data = data.filter(e => {
+              const d = parseDate(e[activeCategory]);
               return d && d >= now && d <= to;
             });
-          });
+          } else {
+            data = data.filter(e => {
+              return ['fiveYear', 'pat', 'em', 'pv', 'ev', 'pump'].some(k => {
+                const d = parseDate(e[k]);
+                return d && d >= now && d <= to;
+              });
+            });
+          }
         }
       }
       console.log("Filtered data:", data);
@@ -513,15 +520,10 @@
 
     function renderTable(d, options = {}) {
       console.log("Rendering table with data:", d);
-      const bypassStoreType = options.bypassStoreType || false;
-      let data = d.slice();
-      if (!bypassStoreType && activeStoreType !== 'ALL') {
-        data = data.filter(e => e.storeType === activeStoreType);
-      }
-      currentData = data.slice();
+      currentData = d.slice();
       const tb = document.getElementById('tableBody');
       const existingRows = [...tb.children];
-      const newRows = data.map(e => {
+      const newRows = d.map(e => {
         const sp = e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank" rel="noopener">Open</a>` : '';
         return `
           <tr>
@@ -546,12 +548,14 @@
     }
 
     function setActiveClass(containerSelector, btn) {
+      console.log(`Setting active class in ${containerSelector}, button:`, btn?.textContent);
       const buttons = document.querySelectorAll(containerSelector + ' .bubble');
       buttons.forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
     }
 
     function setStoreType(type, btn) {
+      console.log(`setStoreType called with type: ${type}`);
       if (activeStoreType === type) {
         activeStoreType = 'ALL';
         setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
@@ -564,6 +568,7 @@
     }
 
     function toggleCategory(field, btn) {
+      console.log(`toggleCategory called with field: ${field}`);
       if (activeCategory === field) {
         activeCategory = null;
         document.querySelectorAll('#complianceFilters .bubble').forEach(b => b.classList.remove('active'));
@@ -576,6 +581,7 @@
     }
 
     function toggleDue(btn, days) {
+      console.log(`toggleDue called with days: ${days}`);
       const isActive = btn.classList.contains('active');
       document.querySelectorAll('.summary-bubbles .bubble').forEach(b => {
         if (b.textContent.startsWith('Due in')) b.classList.remove('active');
@@ -591,12 +597,13 @@
     }
 
     function clearFilters() {
+      console.log("Clearing all filters");
       document.querySelectorAll('.summary-bubbles .bubble').forEach(b => {
         if (b.textContent.startsWith('Due in')) b.classList.remove('active');
       });
       activeStoreType = 'ALL';
       setActiveClass('#storeTypeFilters', document.querySelector('#storeTypeFilters .bubble:first-child'));
-      activeCategory = 'fiveYear';
+      activeCategory = null;
       document.querySelectorAll('#complianceFilters .bubble').forEach(b => b.classList.remove('active'));
       rangeDays = null;
       searchActive = false;
@@ -606,6 +613,7 @@
 
     function searchTable() {
       const q = document.getElementById('searchBar').value.toLowerCase().trim();
+      console.log(`Searching with query: ${q}`);
       if (!q) {
         searchActive = false;
         applyFilters();
@@ -621,15 +629,18 @@
     }
 
     function openExportModal() {
+      console.log("Opening export modal");
       const sel = document.getElementById('exportStoreType');
       sel.value = activeStoreType || 'ALL';
       exportModal.style.display = 'block';
     }
     function closeExportModal() {
+      console.log("Closing export modal");
       exportModal.style.display = 'none';
     }
 
     function runFullExport() {
+      console.log("Running full export");
       rangeDays = null;
       document.querySelectorAll('.range-btn').forEach(b => {
         b.classList.remove('active');
@@ -642,6 +653,7 @@
     }
 
     function selectRange(days, el) {
+      console.log(`Selecting range: ${days} days`);
       const buttons = document.querySelectorAll('.range-btn');
       const isAlreadyActive = el.classList.contains('active');
       buttons.forEach(b => {
@@ -662,6 +674,7 @@
     }
 
     function runExport() {
+      console.log("Running export");
       const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
       if (!cols.length) return alert('Please select at least one column.');
       let f = parseDate(document.getElementById('exportFrom').value.split('-').reverse().join('/'));
@@ -721,6 +734,7 @@
     }
 
     function openSummaryModal() {
+      console.log("Opening summary modal");
       const groups = {};
       const now = new Date();
       function statusOf(e) {
@@ -757,14 +771,17 @@
       document.getElementById('summaryModal').style.display = 'block';
     }
     function closeSummaryModal() {
+      console.log("Closing summary modal");
       document.getElementById('summaryModal').style.display = 'none';
     }
 
     function openModal() {
+      console.log("Opening search modal (placeholder)");
       alert('Date/Type search modal can be implemented here (left unchanged as requested).');
     }
 
     function updateFilterSummaryBar() {
+      console.log("Updating filter summary bar");
       const bar = document.getElementById('filterSummary');
       const parts = [];
       if (activeStoreType !== 'ALL') parts.push(`Store Type = ${activeStoreType}`);
@@ -783,10 +800,12 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      console.log("DOM loaded, setting up event listeners");
       const editBtn = document.getElementById("editBtn");
       const saveBtn = document.getElementById("saveBtn");
 
       editBtn.addEventListener("click", () => {
+        console.log("Edit button clicked");
         const pin = prompt("Enter edit PIN:");
         if (pin === EDIT_PIN) {
           editMode = true;
@@ -801,6 +820,7 @@
       });
 
       saveBtn.addEventListener("click", async () => {
+        console.log("Save button clicked");
         const rows = [...document.querySelectorAll("tbody tr")];
         const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
         const changes = rows
@@ -815,7 +835,10 @@
           })
           .filter(Boolean);
 
-        if (!changes.length) return alert("No changes detected.");
+        if (!changes.length) {
+          console.log("No changes detected");
+          return alert("No changes detected.");
+        }
 
         const grouped = {};
         for (const rec of changes) {
@@ -874,6 +897,7 @@
       });
 
       function enableEditing(state) {
+        console.log(`Enabling editing: ${state}`);
         const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
         document.querySelectorAll("table tbody tr").forEach(row => {
           [...row.children].forEach((td, i) => {
@@ -883,9 +907,9 @@
           });
         });
       }
-    });
 
-    fetchData();
+      fetchData();
+    });
   </script>
 </body>
 </html>
