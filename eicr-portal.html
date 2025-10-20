@@ -38,6 +38,11 @@
     th{background:#0071CE;color:#fff;position:sticky;top:0;z-index:5}
     tr:nth-child(even){background:rgba(255,255,255,0.7)}
     tr:nth-child(odd){background:rgba(255,255,255,0.5)}
+    .sp-btn{
+      display:inline-block;padding:6px 10px;border-radius:6px;background:#0071CE;color:#fff;
+      text-decoration:none;font-weight:bold;border:0;cursor:pointer
+    }
+    .sp-btn:hover{opacity:.9}
     .modal{
       display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
       background:rgba(0,0,0,0.5);
@@ -66,11 +71,6 @@
       font-weight:bold;border-bottom:1px solid #ddd;padding-bottom:6px;margin-bottom:10px;
       color:#0071CE;text-transform:capitalize;
     }
-    .compliance-card{
-      border-radius:8px;padding:12px;text-align:center;
-    }
-    .compliance-card h3{margin:0;font-size:24px;font-weight:bold;color:#004a00;}
-    .compliance-card p{margin:4px 0 0 0;font-size:14px;color:#004a00;}
     @media(max-width:768px){
       .search-input{width:90%;font-size:16px}
       th,td{font-size:12px;padding:6px}
@@ -101,7 +101,7 @@
       <button class="bubble" onclick="setStoreType('ELS', this)">ELS</button>
       <button class="bubble" onclick="setStoreType('ELS Private', this)">ELS Private</button>
       <button class="bubble" onclick="setStoreType('Cobra', this)">Cobra</button>
-      <button class="bubble" onclick="setStoreType(\"Wenzel's\", this)">Wenzel's</button>
+      <button class="bubble" onclick="setStoreType(`Wenzel's`, this)">Wenzel's</button>
     </div>
 
     <!-- Row 3: Compliance Type filters -->
@@ -125,7 +125,7 @@
         <thead>
           <tr>
             <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
-            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th>
+            <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th><th>SharePoint</th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
@@ -133,7 +133,7 @@
     </div>
   </div>
 
-  <!-- Export Modal (unchanged layout, adds Store Type checkbox) -->
+  <!-- Export Modal -->
   <div id="exportModal" class="modal">
     <div class="modal-content">
       <h2>Export Options</h2>
@@ -147,6 +147,7 @@
       <label><input type="checkbox" class="exportCheck" value="pv" checked> PV</label>
       <label><input type="checkbox" class="exportCheck" value="ev" checked> EV</label>
       <label><input type="checkbox" class="exportCheck" value="pump" checked> Pump</label>
+      <label><input type="checkbox" class="exportCheck" value="sharePoint" checked> SharePoint</label>
       <br><p><b>Predefined Ranges:</b></p>
       <div id="rangeButtons">
         <button class="range-btn" onclick="selectRange(7,this)">7 Days</button>
@@ -179,8 +180,12 @@
   const parseDate=d=>{
     if(!d) return null;
     if(typeof d === 'string' && d.trim()==='') return null;
-    const p = (''+d).split('/');
-    return p.length===3 ? new Date(+p[2],p[1]-1,+p[0]) : new Date(d);
+    // supports DD/MM/YYYY and ISO YYYY-MM-DD
+    const s = String(d);
+    if (s.includes('/')) {
+      const p = s.split('/'); return p.length===3 ? new Date(+p[2],p[1]-1,+p[0]) : new Date(s);
+    }
+    return new Date(s);
   };
 
   const getStatus=e=>{
@@ -190,33 +195,59 @@
     return red?'🔴':amber?'🟡':'🟢';
   };
 
-  // Fetch & merge all JSONs
+  // Fetch & merge all JSONs (handles object maps and array structures)
   async function fetchData(){
     const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
     const sources = [
-      {file:'retail_compliance.json',    label:'Retail'},
-      {file:'els_compliance.json',       label:'ELS'},
+      {file:'retail_compliance.json',     label:'Retail'},
+      {file:'els_compliance.json',        label:'ELS'},
       {file:'els_private_compliance.json',label:'ELS Private'},
-      {file:'cobra_compliance.json',     label:'Cobra'},
-      {file:'wenzels_compliance.json',   label:"Wenzel's"},
+      {file:'cobra_compliance.json',      label:'Cobra'},
+      {file:'wenzels_compliance.json',    label:"Wenzel's"},
     ];
 
     const results = await Promise.all(sources.map(async s=>{
-      const r = await fetch(base + s.file);
-      const j = await r.json();
-      const rows = Object.values(j).map(rw=>({
-        storeCode: rw.branchCode,
-        siteName:  rw.storeName,
-        postcode:  rw.postcode,
-        storeType: s.label,
-        fiveYear:  rw["5_Year"] || "",
-        pat:       rw["PAT"]    || "",
-        em:        rw["EM"]     || "",
-        pv:        rw["PV"]     || "",
-        ev:        rw["EV"]     || "",
-        pump:      rw["PUMP"]   || ""
-      }));
-      return rows;
+      try{
+        const r = await fetch(base + s.file);
+        if(!r.ok) return [];
+        const j = await r.json();
+
+        // detect format
+        if (Array.isArray(j)) {
+          // ELS-style array with title-case keys
+          return j.map(rw=>({
+            storeCode: (rw["Branch Code"]!==undefined ? String(rw["Branch Code"]) : "").padStart(4,'0'),
+            siteName:  rw["Store Name"] || "",
+            postcode:  rw["Postcode"] || "",
+            storeType: s.label,
+            fiveYear:  rw["5_Year"] || "",
+            pat:       rw["PAT"] || "",
+            em:        rw["EM"] || "",
+            pv:        rw["PV"] || "",
+            ev:        rw["EV"] || "",
+            pump:      rw["PUMP"] || "",
+            sharePoint:rw["SharePoint"] || ""
+          }));
+        } else if (j && typeof j === 'object') {
+          // Retail-style object map
+          return Object.values(j).map(rw=>({
+            storeCode: (rw.branchCode!==undefined ? String(rw.branchCode) : "").padStart(4,'0'),
+            siteName:  rw.storeName || "",
+            postcode:  rw.postcode || "",
+            storeType: s.label,
+            fiveYear:  rw["5_Year"] || "",
+            pat:       rw["PAT"] || "",
+            em:        rw["EM"] || "",
+            pv:        rw["PV"] || "",
+            ev:        rw["EV"] || "",
+            pump:      rw["PUMP"] || "",
+            sharePoint:rw["sharePointURL"] || rw["SharePoint"] || ""
+          }));
+        }
+        return [];
+      }catch(e){
+        console.warn('Failed to load', s.file, e); return [];
+      }
     }));
 
     allData = results.flat();
@@ -229,14 +260,14 @@
   }
 
   function renderTable(d){
-    // always re-derive currentData from provided dataset & active store type
     const data = applyStoreTypeFilter(d);
     currentData = data.slice();
     const tb=document.getElementById('tableBody');tb.innerHTML='';
     data.forEach(e=>{
+      const sp = e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank" rel="noopener">Open</a>` : '';
       tb.innerHTML+=`
         <tr>
-          <td>${(e.storeCode??'').toString().padStart(3,'0')}</td>
+          <td>${(e.storeCode??'').toString().padStart(4,'0')}</td>
           <td>${e.siteName??''}</td>
           <td>${e.storeType??''}</td>
           <td>${e.postcode??''}</td>
@@ -247,6 +278,7 @@
           <td>${e.pv??''}</td>
           <td>${e.ev??''}</td>
           <td>${e.pump??''}</td>
+          <td>${sp}</td>
         </tr>`;
     });
   }
@@ -271,7 +303,7 @@
     runExport();
   }
 
-  /* ✅ Excel Export (adds Store Type as optional column) */
+  // Excel Export (includes optional Store Type + SharePoint)
   function runExport() {
     const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
     if (!cols.length) return alert('Please select at least one column.');
@@ -281,8 +313,7 @@
 
     let data = currentData;
     if (f || t){
-      // apply date range across any selected compliance column (not storeType)
-      const compCols = cols.filter(c=>!['storeType'].includes(c));
+      const compCols = cols.filter(c=>!['storeType','sharePoint'].includes(c));
       if (compCols.length){
         data = data.filter(e =>
           compCols.some(k => { const d = parseDate(e[k]); return d && (!f || d >= f) && (!t || d <= t); })
@@ -290,27 +321,30 @@
       }
     }
 
-    const headers = ["Store Code", "Site Name", ...(cols.includes('storeType')?["Store Type"]:[]), "Postcode", "Status",
-                     ...cols.filter(c=>c!=='storeType').map(c => c.toUpperCase())];
+    const headers = ["Store Code", "Site Name",
+                     ...(cols.includes('storeType')?["Store Type"]:[]),
+                     "Postcode", "Status",
+                     ...cols.filter(c=>!['storeType','sharePoint'].includes(c)).map(c => c.toUpperCase()),
+                     ...(cols.includes('sharePoint')?["SharePoint"]:[])];
 
     const sheet = [headers];
     data.forEach(e => {
       const row = [
-        (e.storeCode??'').toString().padStart(3,'0'),
+        (e.storeCode??'').toString().padStart(4,'0'),
         e.siteName??''
       ];
       if (cols.includes('storeType')) row.push(e.storeType??'');
       row.push(e.postcode??'');
       row.push(getStatus(e));
-      cols.filter(c=>c!=='storeType').forEach(c=>row.push(e[c]||""));
+      cols.filter(c=>!['storeType','sharePoint'].includes(c)).forEach(c=>row.push(e[c]||""));
+      if (cols.includes('sharePoint')) row.push(e.sharePoint||"");
       sheet.push(row);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(sheet);
-    const colWidths = headers.map((h, i) => (h === "Site Name" ? { wch: 30 } : { wch: 20 }));
+    const colWidths = headers.map(h => (h === "Site Name" ? { wch: 30 } : { wch: 20 }));
     ws['!cols'] = colWidths;
 
-    // Center alignment
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -342,7 +376,6 @@
     activeStoreType = type;
     document.querySelectorAll('#storeTypeFilters .bubble').forEach(x=>x.classList.remove('active'));
     btn.classList.add('active');
-    // re-render from the master set considering any other filters (e.g., due range buttons)
     renderTable(allData);
   }
 
@@ -353,18 +386,12 @@
   }
 
   function clearFilters(){
-    // clear active styles on summary buttons
     document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
-    // reset store type to ALL
     activeStoreType = 'ALL';
     const stBtns = document.querySelectorAll('#storeTypeFilters .bubble');
     stBtns.forEach(b=>b.classList.remove('active'));
     stBtns[0].classList.add('active'); // Show All
-
-    // keep the selected compliance category as-is per your original logic
-    // re-render full dataset
     renderTable(allData);
-    // clear search
     document.getElementById('searchBar').value='';
   }
 
@@ -398,7 +425,6 @@
       groups[key][s]++;
     });
 
-    // Ensure stable order
     const order = ["Retail","ELS","ELS Private","Cobra","Wenzel's","Unknown"];
     const rows = order.filter(k=>groups[k]).map(k=>{
       const g = groups[k], t=g.total||1;
@@ -419,12 +445,10 @@
   }
   function closeSummaryModal(){document.getElementById('summaryModal').style.display='none'}
 
-  // Placeholder hook (kept as in your file)
+  // Placeholder for advanced search modal (kept untouched)
   function openModal(){
     alert('Date/Type search modal can be implemented here (left unchanged as requested).');
   }
-
-  // Export modal open/close helpers exist above
 
   fetchData();
   </script>
