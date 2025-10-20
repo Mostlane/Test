@@ -801,11 +801,14 @@ document.addEventListener("DOMContentLoaded", () => {
         formBody.append("timestamp", new Date().toISOString());
         formBody.append("changes", JSON.stringify(entries));
 
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: formBody.toString()
-        })
+     fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+  method: "POST",
+  mode: "no-cors", // 👈 this line fixes it
+  headers: {
+    "Content-Type": "application/x-www-form-urlencoded"
+  },
+  body: formBody.toString()
+})
           .then(() => console.log(`✅ ${type} changes sent`))
           .catch(err => console.error("❌ Error sending changes:", err));
       });
