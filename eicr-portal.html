@@ -257,6 +257,12 @@
       font-size: 16px;
       color: #0071CE;
     }
+    .error {
+      text-align: center;
+      padding: 20px;
+      font-size: 16px;
+      color: #ff0000;
+    }
     @media (max-width: 768px) {
       .search-input {
         width: 90%;
@@ -378,9 +384,8 @@
     let editMode = false, originalDataSnapshot = [];
 
     const parseDate = d => {
-      if (!d) return null;
-      if (typeof d === 'string' && d.trim() === '') return null;
-      const s = String(d);
+      if (!d || (typeof d === 'string' && d.trim() === '')) return null;
+      const s = String(d).replace(/^\*/, ''); // Remove leading * in some Cobra dates
       if (s.includes('/')) {
         const p = s.split('/');
         return p.length === 3 ? new Date(+p[2], p[1] - 1, +p[0]) : new Date(s);
@@ -400,10 +405,11 @@
     };
 
     async function fetchData() {
+      console.log("Starting fetchData...");
       document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
       const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
       const sources = [
-        { file: 'retail_compliance.json', label: 'Retail' },
+        { file: 'retail_compliance%20(1).json', label: 'Retail' },
         { file: 'els_compliance.json', label: 'ELS' },
         { file: 'els_private_compliance.json', label: 'ELS Private' },
         { file: 'cobra_compliance.json', label: 'Cobra' },
@@ -412,9 +418,15 @@
 
       const results = await Promise.all(sources.map(async s => {
         try {
+          console.log(`Fetching ${s.file}...`);
           const r = await fetch(base + s.file);
-          if (!r.ok) throw new Error(`Failed to fetch ${s.file}`);
+          if (!r.ok) throw new Error(`HTTP ${r.status} for ${s.file}`);
           const j = await r.json();
+          console.log(`Fetched ${s.file}, data:`, j);
+          if (Object.keys(j).length === 0) {
+            console.log(`Empty data in ${s.file}, skipping.`);
+            return [];
+          }
           if (Array.isArray(j)) {
             return j.map(rw => ({
               storeCode: (rw["Branch Code"] !== undefined ? String(rw["Branch Code"]) : "").padStart(4, '0'),
@@ -441,32 +453,35 @@
               pv: rw["PV"] || "",
               ev: rw["EV"] || "",
               pump: rw["PUMP"] || "",
-              sharePoint: rw["sharePointURL"] || rw["SharePoint"] || ""
+              sharePoint: rw.sharePointURL || rw["SharePoint"] || ""
             }));
           }
+          console.warn(`No valid data in ${s.file}`);
           return [];
         } catch (e) {
-          console.warn('Failed to load', s.file, e);
+          console.error(`Failed to load ${s.file}:`, e);
           return [];
         }
       }));
 
       allData = results.flat();
+      console.log("Combined allData:", allData);
       if (allData.length === 0) {
-        document.getElementById('tableBody').innerHTML = '<tr><td colspan="12">No data available.</td></tr>';
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="12" class="error">No data available. Check console for errors.</td></tr>';
       } else {
         applyFilters();
       }
     }
 
     function applyFilters(opts = {}) {
+      console.log("Applying filters, opts:", opts);
       if (searchActive && opts.fromSearch) {
         renderTable(opts.dataset, { bypassStoreType: true });
         updateFilterSummaryBar();
         return;
       }
 
-      let data = all data.slice();
+      let data = allData.slice();
       if (activeStoreType !== 'ALL') {
         data = data.filter(e => e.storeType === activeStoreType);
       }
@@ -491,11 +506,13 @@
           });
         }
       }
+      console.log("Filtered data:", data);
       renderTable(data);
       updateFilterSummaryBar();
     }
 
     function renderTable(d, options = {}) {
+      console.log("Rendering table with data:", d);
       const bypassStoreType = options.bypassStoreType || false;
       let data = d.slice();
       if (!bypassStoreType && activeStoreType !== 'ALL') {
@@ -525,6 +542,7 @@
       if (existingRows.length !== newRows.length || existingRows.some((row, i) => row.outerHTML !== newRows[i])) {
         tb.innerHTML = newRows.join('');
       }
+      console.log("Table rendered, row count:", newRows.length);
     }
 
     function setActiveClass(containerSelector, btn) {
@@ -807,7 +825,7 @@
         }
 
         const fileMap = {
-          "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
+          "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance%20(1).json",
           "ELS": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
           "ELS Private": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
           "Cobra": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
@@ -816,11 +834,12 @@
 
         const promises = Object.entries(grouped).map(([type, entries]) => {
           const payload = {
-            fileURL: fileMap[type],
+            fileURL: fileMap[type] || `Test/Compliance/${type.toLowerCase().replace(' ', '_')}_compliance.json`,
             operator: (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ").replace(/\b\w/g, c => c.toUpperCase()),
             timestamp: new Date().toISOString(),
             updatedRecords: entries
           };
+          console.log(`Sending webhook for ${type}:`, payload);
           return fetch(ZAPIER_WEBHOOK, {
             method: "POST",
             mode: "no-cors",
@@ -841,11 +860,11 @@
           if (errors.length) {
             alert(`❌ Failed to send changes for: ${errors.map(e => e.type).join(", ")}. Check console for details.`);
           } else {
-            alert("✅ All changes sent for update.");
+            alert("✅ All changes sent to Zapier. Check Zapier logs to confirm.");
           }
         } catch (err) {
           console.error("❌ Error sending changes:", err);
-          alert("❌ Failed to send changes. Please try again.");
+          alert("❌ Failed to send changes. Check console for details.");
         }
 
         enableEditing(false);
