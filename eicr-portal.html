@@ -679,7 +679,7 @@
       Object.entries(grouped).forEach(([type,entries])=>{
         const payload={
           file:`Test/Compliance/${fileMap[type]}`,
-          updatedBy:sessionStorage.getItem("mostlaneUser")||"Unknown",
+          updatedBy: (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "),
           timestamp:new Date().toISOString(),
           data:entries
         };
