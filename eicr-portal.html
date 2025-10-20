@@ -51,7 +51,19 @@
       padding:8px 14px;border-radius:30px;font-weight:bold;
     }
     .backlink:hover{opacity:.9}
-
+    /* 🔧 NEW: Edit/Save Buttons */
+#editBtn,#saveBtn{
+  background:#0071CE;
+  color:#fff;
+  border:none;
+  padding:8px 16px;
+  border-radius:20px;
+  cursor:pointer;
+  font-weight:bold;
+  margin-left:10px;
+}
+#editBtn:hover,#saveBtn:hover{opacity:.9;}
+[contenteditable="true"]{background:#fff6d1;}
     .modal{
       display:none;position:fixed;z-index:999;left:0;top:0;width:100%;height:100%;
       background:rgba(0,0,0,0.5);
@@ -615,6 +627,87 @@
       bar.textContent = '';
     }
   }
+  /* 🔧 NEW: Edit & Save logic */
+  const EDIT_PIN = "2025"; // Change if needed
+  let editMode = false;
+
+  document.addEventListener("DOMContentLoaded",()=>{
+    const editBtn=document.getElementById("editBtn");
+    const saveBtn=document.getElementById("saveBtn");
+
+    editBtn.addEventListener("click",()=>{
+      const pin=prompt("Enter edit PIN:");
+      if(pin===EDIT_PIN){
+        editMode=true;
+        saveBtn.style.display="inline-block";
+        enableEditing(true);
+        alert("✅ Edit mode enabled. You can now edit compliance dates.");
+      }else{
+        alert("Incorrect PIN ❌");
+      }
+    });
+
+    saveBtn.addEventListener("click",()=>{
+      const table=document.querySelector("table");
+      const headers=[...table.querySelectorAll("th")].map(th=>th.innerText.trim());
+      const rows=[...table.querySelectorAll("tbody tr")];
+
+      const data=rows.map(r=>{
+        const cells=[...r.querySelectorAll("td")];
+        const rec={};
+        headers.forEach((h,i)=>rec[h]=cells[i].innerText.trim());
+        return rec;
+      });
+
+      const grouped={};
+      for(const rec of data){
+        const type=rec["Store Type"];
+        if(!grouped[type])grouped[type]=[];
+        grouped[type].push(rec);
+      }
+
+      const fileMap={
+        "Retail":"retail_compliance.json",
+        "ELS":"els_compliance.json",
+        "ELS Private":"els_private_compliance.json",
+        "Cobra":"cobra_compliance.json",
+        "Wenzel's":"wenzels_compliance.json"
+      };
+
+      Object.entries(grouped).forEach(([type,entries])=>{
+        const payload={
+          file:`Test/Compliance/${fileMap[type]}`,
+          updatedBy:sessionStorage.getItem("mostlaneUser")||"Unknown",
+          timestamp:new Date().toISOString(),
+          data:entries
+        };
+        fetch("https://hooks.zapier.com/hooks/catch/20261714/27zi8ol/",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(payload)
+        }).then(r=>{
+          if(r.ok)console.log(`✅ ${type} data sent`);
+          else console.error(`❌ failed for ${type}`);
+        });
+      });
+
+      alert("Changes sent for update.");
+      enableEditing(false);
+      saveBtn.style.display="none";
+      editMode=false;
+    });
+
+    function enableEditing(state){
+      const editableCols=["5 Year","PAT","EM","PV","EV","Pump"];
+      document.querySelectorAll("table tbody tr").forEach(row=>{
+        [...row.children].forEach((td,i)=>{
+          const header=document.querySelectorAll("table thead th")[i].innerText.trim();
+          if(state && editableCols.includes(header)) td.contentEditable=true;
+          else td.contentEditable=false;
+        });
+      });
+    }
+  });
 
   fetchData();
   </script>
