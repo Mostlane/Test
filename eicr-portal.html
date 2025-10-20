@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Retail Compliance Portal</title>
+  <title>The Southern Co-op Compliance Portal</title>
   <style>
     body{
       margin:0;font-family:Arial,sans-serif;color:#1f2937;
@@ -81,8 +81,9 @@
 <body>
   <div class="container">
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
-    <h1>Mostlane Retail Compliance Portal</h1>
+    <h1>The Southern Co-op Compliance Portal</h1>
 
+    <!-- Row 1: Summary buttons -->
     <div class="summary-bubbles">
       <button class="bubble" onclick="setDueActive(this);filterByDays(30)">Due in 30 Days</button>
       <button class="bubble" onclick="setDueActive(this);filterByDays(90)">Due in 90 Days</button>
@@ -93,6 +94,17 @@
       <button class="bubble" onclick="openSummaryModal()">%</button>
     </div>
 
+    <!-- Row 2: Store Type filter row -->
+    <div class="filter-bubbles" id="storeTypeFilters">
+      <button class="bubble active" onclick="setStoreType('ALL', this)">Show All</button>
+      <button class="bubble" onclick="setStoreType('Retail', this)">Retail</button>
+      <button class="bubble" onclick="setStoreType('ELS', this)">ELS</button>
+      <button class="bubble" onclick="setStoreType('ELS Private', this)">ELS Private</button>
+      <button class="bubble" onclick="setStoreType('Cobra', this)">Cobra</button>
+      <button class="bubble" onclick="setStoreType(\"Wenzel's\", this)">Wenzel's</button>
+    </div>
+
+    <!-- Row 3: Compliance Type filters -->
     <div class="filter-bubbles">
       <button class="bubble" onclick="setCategory('fiveYear',this)">5 Year</button>
       <button class="bubble" onclick="setCategory('pat',this)">PAT</button>
@@ -102,15 +114,17 @@
       <button class="bubble" onclick="setCategory('pump',this)">Pump</button>
     </div>
 
+    <!-- Row 4: Search -->
     <div class="search-container">
       <input class="search-input" id="searchBar" placeholder="Search store name, number or postcode..." onkeyup="searchTable()">
     </div>
 
+    <!-- Row 5: Table -->
     <div class="table-wrapper">
       <table>
         <thead>
           <tr>
-            <th>Store Code</th><th>Site Name</th><th>Postcode</th><th>Status</th>
+            <th>Store Code</th><th>Site Name</th><th>Store Type</th><th>Postcode</th><th>Status</th>
             <th>5 Year</th><th>PAT</th><th>EM</th><th>PV</th><th>EV</th><th>Pump</th>
           </tr>
         </thead>
@@ -119,12 +133,14 @@
     </div>
   </div>
 
+  <!-- Export Modal (unchanged layout, adds Store Type checkbox) -->
   <div id="exportModal" class="modal">
     <div class="modal-content">
       <h2>Export Options</h2>
       <button onclick="runFullExport()">Full Export</button>
       <hr>
-      <p><b>Select Compliance Types:</b></p>
+      <p><b>Select Columns:</b></p>
+      <label><input type="checkbox" class="exportCheck" value="storeType" checked> Store Type</label>
       <label><input type="checkbox" class="exportCheck" value="fiveYear" checked> 5 Year</label>
       <label><input type="checkbox" class="exportCheck" value="pat" checked> PAT</label>
       <label><input type="checkbox" class="exportCheck" value="em" checked> EM</label>
@@ -147,10 +163,26 @@
     </div>
   </div>
 
+  <!-- % Summary Modal -->
+  <div id="summaryModal" class="modal">
+    <div class="modal-content">
+      <h2>Compliance Summary</h2>
+      <div id="summaryBody" style="font-size:14px; line-height:1.5;"></div>
+      <button class="close-btn" onclick="closeSummaryModal()">Close</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
-  let allData=[],activeCategory='fiveYear',currentData=[],rangeDays=null;
-  const parseDate=d=>{if(!d)return null;const p=d.split('/');return p.length===3?new Date(+p[2],p[1]-1,+p[0]):new Date(d)};
+  let allData=[],activeCategory='fiveYear',currentData=[],rangeDays=null,activeStoreType='ALL';
+
+  const parseDate=d=>{
+    if(!d) return null;
+    if(typeof d === 'string' && d.trim()==='') return null;
+    const p = (''+d).split('/');
+    return p.length===3 ? new Date(+p[2],p[1]-1,+p[0]) : new Date(d);
+  };
+
   const getStatus=e=>{
     const now=new Date();let red=false,amber=false;
     [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean)
@@ -158,22 +190,65 @@
     return red?'🔴':amber?'🟡':'🟢';
   };
 
+  // Fetch & merge all JSONs
   async function fetchData(){
-    const r=await fetch('https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json');
-    const j=await r.json();
-    allData=Object.values(j).map(r=>({
-      storeCode:r.branchCode,siteName:r.storeName,postcode:r.postcode,
-      fiveYear:r["5_Year"]||"",pat:r["PAT"]||"",em:r["EM"]||"",
-      pv:r["PV"]||"",ev:r["EV"]||"",pump:r["PUMP"]||""
-    }));renderTable(allData);
+    const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
+    const sources = [
+      {file:'retail_compliance.json',    label:'Retail'},
+      {file:'els_compliance.json',       label:'ELS'},
+      {file:'els_private_compliance.json',label:'ELS Private'},
+      {file:'cobra_compliance.json',     label:'Cobra'},
+      {file:'wenzels_compliance.json',   label:"Wenzel's"},
+    ];
+
+    const results = await Promise.all(sources.map(async s=>{
+      const r = await fetch(base + s.file);
+      const j = await r.json();
+      const rows = Object.values(j).map(rw=>({
+        storeCode: rw.branchCode,
+        siteName:  rw.storeName,
+        postcode:  rw.postcode,
+        storeType: s.label,
+        fiveYear:  rw["5_Year"] || "",
+        pat:       rw["PAT"]    || "",
+        em:        rw["EM"]     || "",
+        pv:        rw["PV"]     || "",
+        ev:        rw["EV"]     || "",
+        pump:      rw["PUMP"]   || ""
+      }));
+      return rows;
+    }));
+
+    allData = results.flat();
+    renderTable(allData);
+  }
+
+  function applyStoreTypeFilter(data){
+    if(activeStoreType==='ALL') return data;
+    return data.filter(e=>e.storeType===activeStoreType);
   }
 
   function renderTable(d){
-    currentData=d.slice();const tb=document.getElementById('tableBody');tb.innerHTML='';
-    d.forEach(e=>{tb.innerHTML+=`
-      <tr><td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.postcode}</td>
-      <td>${getStatus(e)}</td><td>${e.fiveYear}</td><td>${e.pat}</td>
-      <td>${e.em}</td><td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td></tr>`});
+    // always re-derive currentData from provided dataset & active store type
+    const data = applyStoreTypeFilter(d);
+    currentData = data.slice();
+    const tb=document.getElementById('tableBody');tb.innerHTML='';
+    data.forEach(e=>{
+      tb.innerHTML+=`
+        <tr>
+          <td>${(e.storeCode??'').toString().padStart(3,'0')}</td>
+          <td>${e.siteName??''}</td>
+          <td>${e.storeType??''}</td>
+          <td>${e.postcode??''}</td>
+          <td>${getStatus(e)}</td>
+          <td>${e.fiveYear??''}</td>
+          <td>${e.pat??''}</td>
+          <td>${e.em??''}</td>
+          <td>${e.pv??''}</td>
+          <td>${e.ev??''}</td>
+          <td>${e.pump??''}</td>
+        </tr>`;
+    });
   }
 
   function selectRange(days, el) {
@@ -182,7 +257,8 @@
     buttons.forEach(b => {b.classList.remove('active');b.style.background='#e6e8eb';b.style.color='#000';});
     if (isAlreadyActive) {rangeDays = null;} 
     else {el.classList.add('active');el.style.background='#0071CE';el.style.color='#fff';rangeDays = days;}
-    document.getElementById('exportFrom').value = "";document.getElementById('exportTo').value = "";
+    document.getElementById('exportFrom').value = "";
+    document.getElementById('exportTo').value = "";
   }
 
   function openExportModal(){exportModal.style.display='block'}
@@ -195,29 +271,46 @@
     runExport();
   }
 
-  /* ✅ Excel Export: centered cell contents + wider Site Name */
+  /* ✅ Excel Export (adds Store Type as optional column) */
   function runExport() {
     const cols = [...document.querySelectorAll('.exportCheck:checked')].map(c => c.value);
-    if (!cols.length) return alert('Please select at least one compliance type.');
+    if (!cols.length) return alert('Please select at least one column.');
     let f = parseDate(exportFrom.value.split('-').reverse().join('/'));
     let t = parseDate(exportTo.value.split('-').reverse().join('/'));
     if (rangeDays) { f = new Date(); t = new Date(); t.setDate(f.getDate() + rangeDays); }
+
     let data = currentData;
-    if (f || t)
-      data = data.filter(e =>
-        cols.some(k => { const d = parseDate(e[k]); return d && (!f || d >= f) && (!t || d <= t); })
-      );
-    const headers = ["Store Code", "Site Name", "Postcode", "Status", ...cols.map(c => c.toUpperCase())];
+    if (f || t){
+      // apply date range across any selected compliance column (not storeType)
+      const compCols = cols.filter(c=>!['storeType'].includes(c));
+      if (compCols.length){
+        data = data.filter(e =>
+          compCols.some(k => { const d = parseDate(e[k]); return d && (!f || d >= f) && (!t || d <= t); })
+        );
+      }
+    }
+
+    const headers = ["Store Code", "Site Name", ...(cols.includes('storeType')?["Store Type"]:[]), "Postcode", "Status",
+                     ...cols.filter(c=>c!=='storeType').map(c => c.toUpperCase())];
+
     const sheet = [headers];
     data.forEach(e => {
-      const r = [e.storeCode.toString().padStart(4, '0'), e.siteName, e.postcode, getStatus(e)];
-      cols.forEach(c => r.push(e[c] || "")); sheet.push(r);
+      const row = [
+        (e.storeCode??'').toString().padStart(3,'0'),
+        e.siteName??''
+      ];
+      if (cols.includes('storeType')) row.push(e.storeType??'');
+      row.push(e.postcode??'');
+      row.push(getStatus(e));
+      cols.filter(c=>c!=='storeType').forEach(c=>row.push(e[c]||""));
+      sheet.push(row);
     });
+
     const ws = XLSX.utils.aoa_to_sheet(sheet);
-    const colWidths = headers.map((h, i) => i === 1 ? { wch: 30 } : { wch: 20 });
+    const colWidths = headers.map((h, i) => (h === "Site Name" ? { wch: 30 } : { wch: 20 }));
     ws['!cols'] = colWidths;
 
-    // ✅ Center text alignment for all cells
+    // Center alignment
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -234,15 +327,104 @@
     exportModal.style.display = 'none';
   }
 
-  function setDueActive(b){document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
-  function setCategory(f,b){activeCategory=f;document.querySelectorAll('.filter-bubbles .bubble').forEach(x=>x.classList.remove('active'));b.classList.add('active')}
-  function filterByDays(d){const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
-    renderTable(allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f}))}
-  function clearFilters(){renderTable(allData)}
+  function setDueActive(b){
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active')
+  }
+
+  function setCategory(f,b){
+    activeCategory=f;
+    document.querySelectorAll('.filter-bubbles:nth-of-type(3) .bubble').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active')
+  }
+
+  function setStoreType(type, btn){
+    activeStoreType = type;
+    document.querySelectorAll('#storeTypeFilters .bubble').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    // re-render from the master set considering any other filters (e.g., due range buttons)
+    renderTable(allData);
+  }
+
+  function filterByDays(d){
+    const n=new Date(),f=new Date(n);f.setDate(n.getDate()+d);
+    const base = allData.filter(e=>{const dt=parseDate(e[activeCategory]);return dt&&dt<=f});
+    renderTable(base);
+  }
+
+  function clearFilters(){
+    // clear active styles on summary buttons
+    document.querySelectorAll('.summary-bubbles .bubble').forEach(x=>x.classList.remove('active'));
+    // reset store type to ALL
+    activeStoreType = 'ALL';
+    const stBtns = document.querySelectorAll('#storeTypeFilters .bubble');
+    stBtns.forEach(b=>b.classList.remove('active'));
+    stBtns[0].classList.add('active'); // Show All
+
+    // keep the selected compliance category as-is per your original logic
+    // re-render full dataset
+    renderTable(allData);
+    // clear search
+    document.getElementById('searchBar').value='';
+  }
+
   function searchTable(){
     const q=document.getElementById('searchBar').value.toLowerCase();
-    renderTable(allData.filter(e=>e.siteName.toLowerCase().includes(q)||e.postcode.toLowerCase().includes(q)||e.storeCode.toString().includes(q)))
+    const base = allData.filter(e=>
+      (e.siteName??'').toLowerCase().includes(q) ||
+      (e.postcode??'').toLowerCase().includes(q) ||
+      (e.storeCode??'').toString().includes(q)
+    );
+    renderTable(base);
   }
+
+  // % Summary modal (per store type; uses currentData view)
+  function openSummaryModal(){
+    const groups = {};
+    const now = new Date();
+
+    function statusOf(e){
+      let red=false,amber=false;
+      [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean)
+        .forEach(dt=>{if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true});
+      return red?'RED':(amber?'AMBER':'GREEN');
+    }
+
+    currentData.forEach(e=>{
+      const key = e.storeType || 'Unknown';
+      if(!groups[key]) groups[key] = {total:0,GREEN:0,AMBER:0,RED:0};
+      groups[key].total++;
+      const s = statusOf(e);
+      groups[key][s]++;
+    });
+
+    // Ensure stable order
+    const order = ["Retail","ELS","ELS Private","Cobra","Wenzel's","Unknown"];
+    const rows = order.filter(k=>groups[k]).map(k=>{
+      const g = groups[k], t=g.total||1;
+      const pct = (n)=>((n*100/t).toFixed(1)+'%');
+      return `
+        <div class="summary-box">
+          <div class="summary-title">${k}</div>
+          <div>Total: <b>${g.total}</b></div>
+          <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
+          <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
+          <div>🔴 RED: <b>${g.RED}</b> (${pct(g.RED)})</div>
+        </div>
+      `;
+    });
+
+    document.getElementById('summaryBody').innerHTML = rows.join('') || '<p>No data to summarise.</p>';
+    document.getElementById('summaryModal').style.display='block';
+  }
+  function closeSummaryModal(){document.getElementById('summaryModal').style.display='none'}
+
+  // Placeholder hook (kept as in your file)
+  function openModal(){
+    alert('Date/Type search modal can be implemented here (left unchanged as requested).');
+  }
+
+  // Export modal open/close helpers exist above
 
   fetchData();
   </script>
