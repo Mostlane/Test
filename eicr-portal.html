@@ -676,22 +676,37 @@
         "Wenzel's":"wenzels_compliance.json"
       };
 
-      Object.entries(grouped).forEach(([type,entries])=>{
-        const payload={
-          file:`Test/Compliance/${fileMap[type]}`,
-          updatedBy: (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "),
-          timestamp:new Date().toISOString(),
-          data:entries
-        };
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify(payload)
-        }).then(r=>{
-          if(r.ok)console.log(`✅ ${type} data sent`);
-          else console.error(`❌ failed for ${type}`);
-        });
-      });
+     Object.entries(grouped).forEach(([type, entries]) => {
+  const fileMap = {
+    "Retail": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
+    "ELS": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
+    "ELS Private": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
+    "Cobra": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
+    "Wenzel's": "https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
+  };
+
+  const fileURL = fileMap[type];
+  const user = ((sessionStorage.getItem("mostlaneUser") || "Unknown")
+    .replace(/\./g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase()));
+
+  const payload = {
+    fileURL,             // ✅ Full GitHub URL for Zapier to GET
+    operator: user,      // ✅ Logged-in user, nicely formatted
+    timestamp: new Date().toISOString(),
+    updatedRecords: entries
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/urh99ln/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).then(r => {
+    if (r.ok) console.log(`✅ Sent update for ${type}`);
+    else console.error(`❌ Failed for ${type}`);
+  });
+});
+
 
       alert("Changes sent for update.");
       enableEditing(false);
