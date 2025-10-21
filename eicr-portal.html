@@ -267,8 +267,8 @@
   // ✅ Cache-busting timestamp that works reliably with GitHub
   const results = await Promise.all(
     sources.map(async s => {
-      try {
-                const j = await fetchNoCacheJSON(`${base}${s.file}`); // ✅ always fresh
+      try {const j = await fetchNoCacheJSON(`${base}${s.file}`).catch(() => []); // ✅ fallback if fetch fails
+if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
 
         return (Array.isArray(j) ? j : Object.values(j)).map(rw => ({
           storeCode:
