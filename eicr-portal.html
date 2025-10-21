@@ -3,6 +3,11 @@
 <head>
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
+    <meta charset="UTF-8" />
+  <!-- ✅ Prevent browsers from caching HTML or JS -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Southern Co-op Compliance Portal</title>
   <style>
@@ -198,7 +203,28 @@
     </div>
   </div>  
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script>
+    // ✅ Kill any service workers that might cache files
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        for (let r of regs) r.unregister();
+      });
+    }
+  </script>
   <script>
+        // ✅ Helper to fetch JSON with guaranteed no-cache behaviour
+    async function fetchNoCacheJSON(url) {
+      const noCacheUrl = `${url}?v=${Date.now()}`; // unique on each call
+      const response = await fetch(noCacheUrl, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
+      return response.json();
+    }
     const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
     const USE_JSON = false;
     let allData = [], currentData = [];
@@ -242,11 +268,7 @@
   const results = await Promise.all(
     sources.map(async s => {
       try {
-        const url = `${base}${s.file}?nocache=${Date.now()}`; // unique every load
-        const r = await fetch(url, { cache: 'reload' });      // GitHub-safe
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
-        if (!j) return [];
+                const j = await fetchNoCacheJSON(`${base}${s.file}`); // ✅ always fresh
 
         return (Array.isArray(j) ? j : Object.values(j)).map(rw => ({
           storeCode:
@@ -699,6 +721,8 @@ function searchTable() {
   );
   renderTable(filtered);
 }
+        // ✅ Auto-refresh data every 10 seconds
+    setInterval(fetchData, 10000);
   </script>
 </body>
 </html>
