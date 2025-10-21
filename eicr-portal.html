@@ -368,11 +368,10 @@
       fetchData();
     });
 
-    /* ---------- FILTER FIX SECTION ---------- */
+/* ---------- FILTER FIX SECTION ---------- */
 
-let activeStoreType = 'ALL';
+// use the existing activeStoreType from above
 let activeCategories = new Set();
-
 function setStoreType(type, btn) {
   // Toggle store type — single active
   document.querySelectorAll('#storeTypeFilters .bubble').forEach(b => b.classList.remove('active'));
@@ -386,7 +385,6 @@ function setStoreType(type, btn) {
   }
   applyFilters();
 }
-
 function toggleCategory(cat, btn) {
   // Allow multiple compliance types active
   if (activeCategories.has(cat)) {
