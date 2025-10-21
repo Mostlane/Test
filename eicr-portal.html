@@ -514,16 +514,6 @@ function runDateSearch() {
   renderTable(filtered);
   document.querySelector('.modal').remove();
 }
-// Clear all filters and reset buttons
-function clearFilters() {
-  activeStoreType = 'ALL';
-  activeCategories.clear();
-  rangeDays = null;
-  document.querySelectorAll('.bubble').forEach(b => b.classList.remove('active'));
-  document.querySelector('#storeTypeFilters .bubble').classList.add('active');
-  renderTable(allData);
-}
-
 // Export currently visible table to Excel
 function openExportModal() {
   const wb = XLSX.utils.book_new();
