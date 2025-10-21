@@ -514,28 +514,6 @@ function runDateSearch() {
   renderTable(filtered);
   document.querySelector('.modal').remove();
 }
-
-// Run the date search logic
-function runDateSearch() {
-  const type = document.getElementById('searchType').value;
-  const from = parseDate(document.getElementById('fromDate').value);
-  const to = parseDate(document.getElementById('toDate').value);
-  const now = new Date();
-
-  let filtered = [...allData];
-  if (type) filtered = filtered.filter(e => e[type]);
-
-  if (from && to) {
-    filtered = filtered.filter(e => {
-      const d = parseDate(e[type]);
-      return d && d >= from && d <= to;
-    });
-  }
-
-  renderTable(filtered);
-  document.querySelector('.modal').remove();
-}
-
 // Clear all filters and reset buttons
 function clearFilters() {
   activeStoreType = 'ALL';
