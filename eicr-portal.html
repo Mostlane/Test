@@ -439,9 +439,103 @@ function applyFilters() {
   renderTable(data);
 }
 
-        /* ----------- Optional helpers (unchanged from your baseline) ----------- */
+/* ----------- Optional helpers (fixed functional versions) ----------- */
 
-    function openModal(){ alert("Date/Type search modal placeholder."); }
+// Filter by due range (30 / 90 / 365 days)
+function toggleDue(btn, days) {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  rangeDays = days;
+  const filtered = allData.filter(e => {
+    return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
+      .map(parseDate)
+      .filter(Boolean)
+      .some(d => d >= now && d <= cutoff);
+  });
+
+  renderTable(filtered);
+}
+
+// Search by date/type
+function openModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Search by Date/Type</h2>
+      <label>Compliance Type:</label>
+      <select id="searchType">
+        <option value="">All</option>
+        <option value="fiveYear">5 Year</option>
+        <option value="pat">PAT</option>
+        <option value="em">EM</option>
+        <option value="pv">PV</option>
+        <option value="ev">EV</option>
+        <option value="pump">Pump</option>
+      </select>
+      <label>From Date:</label>
+      <input type="date" id="fromDate">
+      <label>To Date:</label>
+      <input type="date" id="toDate">
+      <button onclick="runDateSearch()">Search</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display = 'block';
+}
+
+// Run the date search logic
+function runDateSearch() {
+  const type = document.getElementById('searchType').value;
+  const from = parseDate(document.getElementById('fromDate').value);
+  const to = parseDate(document.getElementById('toDate').value);
+  const now = new Date();
+
+  let filtered = [...allData];
+  if (type) filtered = filtered.filter(e => e[type]);
+
+  if (from && to) {
+    filtered = filtered.filter(e => {
+      const d = parseDate(e[type]);
+      return d && d >= from && d <= to;
+    });
+  }
+
+  renderTable(filtered);
+  document.querySelector('.modal').remove();
+}
+
+// Clear all filters and reset buttons
+function clearFilters() {
+  activeStoreType = 'ALL';
+  activeCategories.clear();
+  rangeDays = null;
+  document.querySelectorAll('.bubble').forEach(b => b.classList.remove('active'));
+  document.querySelector('#storeTypeFilters .bubble').classList.add('active');
+  renderTable(allData);
+}
+
+// Export currently visible table to Excel
+function openExportModal() {
+  const wb = XLSX.utils.book_new();
+  const wsData = [
+    ["Store Code", "Site Name", "Store Type", "Postcode", "Status", "5 Year", "PAT", "EM", "PV", "EV", "Pump", "SharePoint"]
+  ];
+  currentData.forEach(e => {
+    wsData.push([
+      e.storeCode, e.siteName, e.storeType, e.postcode, getStatus(e),
+      e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump, e.sharePoint
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  XLSX.utils.book_append_sheet(wb, ws, "Compliance Data");
+  XLSX.writeFile(wb, `Compliance_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 
     function openSummaryModal(){
       const groups={}; const now=new Date();
