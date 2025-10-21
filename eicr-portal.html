@@ -570,7 +570,20 @@ function openExportModal() {
       document.body.appendChild(modal);
       modal.style.display='block';
     }
-
+// Search bar filter (store name, number, postcode)
+function searchTable() {
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  if (!q) {
+    renderTable(allData);
+    return;
+  }
+  const filtered = allData.filter(e =>
+    (e.storeCode || '').toLowerCase().includes(q) ||
+    (e.siteName || '').toLowerCase().includes(q) ||
+    (e.postcode || '').toLowerCase().includes(q)
+  );
+  renderTable(filtered);
+}
   </script>
 </body>
 </html>
