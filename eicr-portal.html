@@ -228,17 +228,16 @@
     async function fetchData(){
       const tb=document.getElementById('tableBody');
       tb.innerHTML='<tr><td colspan="12" class="loading">Loading data...</td></tr>';
-      const base='https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
-      const sources=[
-        {file:'retail_compliance.json',label:'Retail'},
-        {file:'els_compliance.json',label:'ELS'},
-        {file:'els_private_compliance.json',label:'ELS Private'},
-        {file:'cobra_compliance.json',label:'Cobra'},
-        {file:'wenzels_compliance.json',label:"Wenzel's"}
-      ];
-      const results=await Promise.all(sources.map(async s=>{
-        try{
-          const r=await fetch(base+s.file);
+      const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
+const timestamp = `?v=${Date.now()}`; // 🔥 cache-busting query string
+
+const results = await Promise.all(sources.map(async s => {
+  try {
+    const url = `${base}${s.file}${timestamp}`; // ✅ append cache-buster
+    const r = await fetch(url, { cache: 'no-store' }); // ✅ ensure browser doesn’t reuse old copy
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (!j) return [];
           if(!r.ok)throw new Error(`HTTP ${r.status}`);
           const j=await r.json();
           if(!j)return[];
