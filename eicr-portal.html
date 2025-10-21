@@ -367,6 +367,69 @@
 
       fetchData();
     });
+
+    /* ---------- FILTER FIX SECTION ---------- */
+
+let activeStoreType = 'ALL';
+let activeCategories = new Set();
+
+function setStoreType(type, btn) {
+  // Toggle store type — single active
+  document.querySelectorAll('#storeTypeFilters .bubble').forEach(b => b.classList.remove('active'));
+  if (activeStoreType === type) {
+    activeStoreType = 'ALL';
+    document.querySelector('#storeTypeFilters .bubble').textContent = 'Show All';
+    document.querySelector('#storeTypeFilters .bubble').classList.add('active');
+  } else {
+    activeStoreType = type;
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+
+function toggleCategory(cat, btn) {
+  // Allow multiple compliance types active
+  if (activeCategories.has(cat)) {
+    activeCategories.delete(cat);
+    btn.classList.remove('active');
+  } else {
+    activeCategories.add(cat);
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+
+function clearFilters() {
+  activeStoreType = 'ALL';
+  activeCategories.clear();
+  document.querySelectorAll('#storeTypeFilters .bubble, #complianceFilters .bubble')
+    .forEach(b => b.classList.remove('active'));
+  document.querySelector('#storeTypeFilters .bubble').classList.add('active');
+  applyFilters();
+}
+
+function applyFilters() {
+  let data = [...allData];
+
+  // Store Type filter
+  if (activeStoreType !== 'ALL') {
+    data = data.filter(e => e.storeType === activeStoreType);
+  }
+
+  // Compliance type filters (combine)
+  if (activeCategories.size > 0) {
+    data = data.filter(e => {
+      for (let cat of activeCategories) {
+        const val = e[cat];
+        if (!val || String(val).trim() === '') return false;
+      }
+      return true;
+    });
+  }
+
+  renderTable(data);
+}
+
         /* ----------- Optional helpers (unchanged from your baseline) ----------- */
 
     function openModal(){ alert("Date/Type search modal placeholder."); }
