@@ -298,6 +298,7 @@ if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
 
   allData = results.flat();
   applyFilters();
+  console.log(`✅ Loaded ${allData.length} records total`);
 }
 
     function applyFilters(){
@@ -405,8 +406,9 @@ if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
         });
       }
 
-      fetchData();
-    });
+        fetchData();   // existing line
+  console.log("📡 Fetching compliance JSON files...");
+});
 
 /* ---------- FILTER FIX SECTION ---------- */
 
