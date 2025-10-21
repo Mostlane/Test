@@ -225,51 +225,58 @@
       return red?'🔴':amber?'🟡':'🟢';
     };
 
-    async function fetchData(){
-      const tb=document.getElementById('tableBody');
-      tb.innerHTML='<tr><td colspan="12" class="loading">Loading data...</td></tr>';
-      const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
-const timestamp = `?v=${Date.now()}`; // 🔥 cache-busting query string
+    async function fetchData() {
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
 
-const results = await Promise.all(sources.map(async s => {
-  try {
-    const url = `${base}${s.file}${timestamp}`; // ✅ append cache-buster
-    const r = await fetch(url, { cache: 'no-store' }); // ✅ ensure browser doesn’t reuse old copy
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = await r.json();
-    if (!j) return [];
-          if(!r.ok)throw new Error(`HTTP ${r.status}`);
-          const j=await r.json();
-          if(!j)return[];
+  const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
+  const sources = [
+    { file: 'retail_compliance.json', label: 'Retail' },
+    { file: 'els_compliance.json', label: 'ELS' },
+    { file: 'els_private_compliance.json', label: 'ELS Private' },
+    { file: 'cobra_compliance.json', label: 'Cobra' },
+    { file: 'wenzels_compliance.json', label: "Wenzel's" }
+  ];
+
+  // ✅ Cache-busting timestamp that works reliably with GitHub
+  const results = await Promise.all(
+    sources.map(async s => {
+      try {
+        const url = `${base}${s.file}?nocache=${Date.now()}`; // unique every load
+        const r = await fetch(url, { cache: 'reload' });      // GitHub-safe
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        if (!j) return [];
+
         return (Array.isArray(j) ? j : Object.values(j)).map(rw => ({
-  storeCode:
-    (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "").toString().padStart(4, '0'),
-  siteName:
-    rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
-  postcode:
-    rw["Postcode"] ?? rw["postcode"] ?? "",
-  storeType: s.label,
-  fiveYear:
-    rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
-  pat:
-    rw["PAT"] ?? "",
-  em:
-    rw["EM"] ?? "",
-  pv:
-    rw["PV"] ?? "",
-  ev:
-    rw["EV"] ?? "",
-  pump:
-    rw["PUMP"] ?? "",
-  sharePoint:
-    rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
-}));
+          storeCode:
+            (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "")
+              .toString().padStart(4, "0"),
+          siteName:
+            rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
+          postcode:
+            rw["Postcode"] ?? rw["postcode"] ?? "",
+          storeType: s.label,
+          fiveYear:
+            rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
+          pat: rw["PAT"] ?? "",
+          em: rw["EM"] ?? "",
+          pv: rw["PV"] ?? "",
+          ev: rw["EV"] ?? "",
+          pump: rw["PUMP"] ?? "",
+          sharePoint:
+            rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
+        }));
+      } catch (e) {
+        console.error("❌ Fetch failed for", s.file, e);
+        return [];
+      }
+    })
+  );
 
-        }catch(e){console.error(e);return[];}
-      }));
-      allData=results.flat();
-      applyFilters();
-    }
+  allData = results.flat();
+  applyFilters();
+}
 
     function applyFilters(){
       let data=[...allData];
