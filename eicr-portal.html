@@ -462,6 +462,8 @@ function toggleDue(btn, days) {
 
 // Search by date/type
 function openModal() {
+  // Search by date/type
+function openModal() {
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.innerHTML = `
@@ -486,6 +488,33 @@ function openModal() {
     </div>`;
   document.body.appendChild(modal);
   modal.style.display = 'block';
+}
+
+// Run the date search logic
+function runDateSearch() {
+  const type = document.getElementById('searchType').value;
+  const from = parseDate(document.getElementById('fromDate').value);
+  const to = parseDate(document.getElementById('toDate').value);
+
+  let filtered = [...allData];
+
+  // If a compliance type is selected, filter for entries with that type filled
+  if (type) filtered = filtered.filter(e => e[type] && String(e[type]).trim() !== '');
+
+  // Apply date range — if no type selected, check all compliance fields
+  if (from || to) {
+    filtered = filtered.filter(e => {
+      const keys = type ? [type] : ['fiveYear', 'pat', 'em', 'pv', 'ev', 'pump'];
+      return keys.some(k => {
+        const d = parseDate(e[k]);
+        if (!d) return false;
+        return (!from || d >= from) && (!to || d <= to);
+      });
+    });
+  }
+
+  renderTable(filtered);
+  document.querySelector('.modal').remove();
 }
 
 // Run the date search logic
