@@ -522,21 +522,133 @@ function runDateSearch() {
   renderTable(filtered);
   document.querySelector('.modal').remove();
 }
-// Export currently visible table to Excel
+// ---------- EXPORT TO EXCEL (with modal options + clickable links + logo + blue header + frozen row) ----------
 function openExportModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Export Options</h2>
+      <label><input type="checkbox" id="includeFilters" checked> Include active filters summary</label><br>
+      <label><input type="checkbox" id="includeSummary" checked> Include Green/Amber/Red summary</label><br>
+      <button onclick="generateExcel()">Generate Excel</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display = 'block';
+}
+
+async function generateExcel() {
+  document.querySelector('.modal').remove();
+
+  const includeFilters = document.getElementById('includeFilters')?.checked ?? true;
+  const includeSummary = document.getElementById('includeSummary')?.checked ?? true;
+
   const wb = XLSX.utils.book_new();
-  const wsData = [
-    ["Store Code", "Site Name", "Store Type", "Postcode", "Status", "5 Year", "PAT", "EM", "PV", "EV", "Pump", "SharePoint"]
+  const wsData = [];
+
+  // Title section (Mostlane blue)
+  const logoUrl = "https://mostlane.github.io/Test/mostlane-logo.jpg";
+  wsData.push(["The Southern Co-op Compliance Portal Export"]);
+  wsData.push(["Exported by:", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ")]);
+  wsData.push(["Date/Time:", new Date().toLocaleString("en-GB")]);
+  if (includeFilters) {
+    wsData.push(["Active Filters:", `Store Type: ${activeStoreType} | Compliance: ${
+      activeCategories.size ? Array.from(activeCategories).join(", ") : "None"
+    }`]);
+  }
+  wsData.push([]);
+
+  // Table header
+  const headers = [
+    "Store Code", "Site Name", "Store Type", "Postcode", "Status",
+    "5 Year", "PAT", "EM", "PV", "EV", "Pump", "SharePoint"
   ];
+  wsData.push(headers);
+
+  // Table rows
   currentData.forEach(e => {
     wsData.push([
-      e.storeCode, e.siteName, e.storeType, e.postcode, getStatus(e),
-      e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump, e.sharePoint
+      e.storeCode,
+      e.siteName,
+      e.storeType,
+      e.postcode,
+      getStatus(e),
+      e.fiveYear,
+      e.pat,
+      e.em,
+      e.pv,
+      e.ev,
+      e.pump,
+      e.sharePoint ? "Open File" : ""
     ]);
   });
+
+  // Summary section
+  if (includeSummary) {
+    const g = currentData.filter(e => getStatus(e) === "🟢").length;
+    const a = currentData.filter(e => getStatus(e) === "🟡").length;
+    const r = currentData.filter(e => getStatus(e) === "🔴").length;
+    const total = currentData.length;
+    wsData.push([]);
+    wsData.push(["Summary"]);
+    wsData.push(["🟢 Green", g]);
+    wsData.push(["🟡 Amber", a]);
+    wsData.push(["🔴 Red", r]);
+    wsData.push(["Total", total]);
+  }
+
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  XLSX.utils.book_append_sheet(wb, ws, "Compliance Data");
-  XLSX.writeFile(wb, `Compliance_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
+
+  // Add clickable hyperlinks for SharePoint
+  const sharePointCol = headers.indexOf("SharePoint");
+  if (sharePointCol !== -1) {
+    currentData.forEach((e, i) => {
+      const cell = XLSX.utils.encode_cell({ r: i + 5, c: sharePointCol });
+      if (e.sharePoint) {
+        ws[cell].l = { Target: e.sharePoint, Tooltip: "Open file" };
+      }
+    });
+  }
+
+  // Style: blue title, bold headers, borders, freeze top row
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws[cellRef]) continue;
+      ws[cellRef].s = ws[cellRef].s || {};
+      ws[cellRef].s.border = {
+        top: { style: "thin", color: { rgb: "AAAAAA" } },
+        bottom: { style: "thin", color: { rgb: "AAAAAA" } },
+        left: { style: "thin", color: { rgb: "AAAAAA" } },
+        right: { style: "thin", color: { rgb: "AAAAAA" } }
+      };
+      if (R === 5) {
+        ws[cellRef].s.fill = { fgColor: { rgb: "0071CE" } };
+        ws[cellRef].s.font = { bold: true, color: { rgb: "FFFFFF" } };
+      }
+      if (R === 0) {
+        ws[cellRef].s.font = { bold: true, color: { rgb: "0071CE" }, sz: 16 };
+      }
+    }
+  }
+
+  // Freeze header
+  ws["!freeze"] = { xSplit: 0, ySplit: 6, topLeftCell: "A7", activePane: "bottomLeft", state: "frozen" };
+
+  // Auto column width
+  ws['!cols'] = wsData[5].map((_, i) => ({
+    wch: Math.max(...wsData.map(r => (r[i] ? r[i].toString().length : 0))) + 2
+  }));
+
+  const tabName = activeStoreType === 'ALL' ? 'All Data' : activeStoreType;
+  XLSX.utils.book_append_sheet(wb, ws, tabName);
+
+  const datePart = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  const fileName = `Compliance_Export_${tabName}_${datePart}.xlsx`;
+
+  XLSX.writeFile(wb, fileName);
 }
 
 
