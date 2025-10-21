@@ -159,6 +159,7 @@
       <button class="bubble" onclick="toggleDue(this,30)">Due in 30 Days</button>
       <button class="bubble" onclick="toggleDue(this,90)">Due in 90 Days</button>
       <button class="bubble" onclick="toggleDue(this,365)">Due in 365 Days</button>
+      <button class="bubble" onclick="filterOverdue(this)">Overdue</button>
       <button class="bubble" onclick="openModal()">Search by Date/Type</button>
       <button class="bubble" onclick="clearFilters()">Clear</button>
       <button class="bubble" onclick="openExportModal()">Export to Excel</button>
@@ -441,24 +442,25 @@ function applyFilters() {
 
 /* ----------- Optional helpers (fixed functional versions) ----------- */
 
-// Filter by due range (30 / 90 / 365 days)
-function toggleDue(btn, days) {
+// Filter overdue (any compliance date before today)
+function filterOverdue(btn) {
   const now = new Date();
-  const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
+  // Deactivate all summary bubbles first
   document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 
-  rangeDays = days;
+  // Find any record where one or more compliance dates are before today
   const filtered = allData.filter(e => {
     return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
       .map(parseDate)
       .filter(Boolean)
-      .some(d => d >= now && d <= cutoff);
+      .some(d => d < now);
   });
 
   renderTable(filtered);
 }
+
 
   // Search by date/type
 function openModal() {
