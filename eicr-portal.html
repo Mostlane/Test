@@ -486,6 +486,9 @@ function applyFilters() {
 /* ----------- Optional helpers (fixed functional versions) ----------- */
 
 // Filter overdue (any compliance date before today)
+function filterOverdue(btn) {
+  const now = new Date();
+
 // -------------------- DUE IN X DAYS FILTERS --------------------
 function toggleDue(btn, days) {
   // Deactivate all summary bubbles first
