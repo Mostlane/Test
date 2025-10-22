@@ -489,6 +489,21 @@ function applyFilters() {
 function filterOverdue(btn) {
   const now = new Date();
 
+  // Deactivate all summary bubbles first
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Find any record where one or more compliance dates are before today
+  const filtered = allData.filter(e => {
+    return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
+      .map(parseDate)
+      .filter(Boolean)
+      .some(d => d < now);
+  });
+
+  renderTable(filtered);
+}
+
 // -------------------- DUE IN X DAYS FILTERS --------------------
 function toggleDue(btn, days) {
   // Deactivate all summary bubbles first
@@ -508,9 +523,6 @@ function toggleDue(btn, days) {
 
   renderTable(filtered);
 }
-
-
-
   // Search by date/type
 function openModal() {
   const modal = document.createElement('div');
