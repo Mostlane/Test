@@ -216,7 +216,11 @@
    // ✅ Safe no-cache fetch for jsDelivr + GitHub
 async function fetchNoCacheJSON(url) {
   const noCacheUrl = `${url}?v=${Date.now()}`; // cache-busting timestamp
-  const response = await fetch(noCacheUrl, { cache: 'reload' });
+  let response = await fetch(noCacheUrl, { cache: 'reload' }).catch(() => null);
+if (!response || !response.ok) {
+  const ghUrl = url.replace('cdn.jsdelivr.net/gh', 'raw.githubusercontent.com').replace('@main', 'main');
+  response = await fetch(`${ghUrl}?v=${Date.now()}`);
+}
   if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
   return response.json();
 }
