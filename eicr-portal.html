@@ -220,9 +220,6 @@ async function fetchNoCacheJSON(url) {
   if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
   return response.json();
 }
-      });
-      return response.json();
-    }
     const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
     const USE_JSON = false;
     let allData = [], currentData = [];
