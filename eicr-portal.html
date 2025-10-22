@@ -213,15 +213,13 @@
   </script>
   <script>
         // ✅ Helper to fetch JSON with guaranteed no-cache behaviour
-    async function fetchNoCacheJSON(url) {
-      const noCacheUrl = `${url}?v=${Date.now()}`; // unique on each call
-      const response = await fetch(noCacheUrl, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
+   // ✅ Safe no-cache fetch for jsDelivr + GitHub
+async function fetchNoCacheJSON(url) {
+  const noCacheUrl = `${url}?v=${Date.now()}`; // cache-busting timestamp
+  const response = await fetch(noCacheUrl, { cache: 'reload' });
+  if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  return response.json();
+}
       });
       return response.json();
     }
