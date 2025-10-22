@@ -486,23 +486,26 @@ function applyFilters() {
 /* ----------- Optional helpers (fixed functional versions) ----------- */
 
 // Filter overdue (any compliance date before today)
-function filterOverdue(btn) {
-  const now = new Date();
-
+// -------------------- DUE IN X DAYS FILTERS --------------------
+function toggleDue(btn, days) {
   // Deactivate all summary bubbles first
   document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 
-  // Find any record where one or more compliance dates are before today
+  const now = new Date();
+  const future = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+  // Show any record where at least one compliance date is within the next X days
   const filtered = allData.filter(e => {
     return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
       .map(parseDate)
       .filter(Boolean)
-      .some(d => d < now);
+      .some(d => d >= now && d <= future);
   });
 
   renderTable(filtered);
 }
+
 
 
   // Search by date/type
