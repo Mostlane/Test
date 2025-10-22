@@ -214,14 +214,24 @@
   <script>
         // ✅ Helper to fetch JSON with guaranteed no-cache behaviour
    // ✅ Safe no-cache fetch for jsDelivr + GitHub
+// ✅ Final safe no-cache fetch with auto-fallback
 async function fetchNoCacheJSON(url) {
-  const noCacheUrl = `${url}?v=${Date.now()}`; // cache-busting timestamp
+  const noCacheUrl = `${url}?v=${Date.now()}`;
   let response = await fetch(noCacheUrl, { cache: 'reload' }).catch(() => null);
-if (!response || !response.ok) {
-  const ghUrl = url.replace('cdn.jsdelivr.net/gh', 'raw.githubusercontent.com').replace('@main', 'main');
-  response = await fetch(`${ghUrl}?v=${Date.now()}`);
-}
-  if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+
+  // ⬇ fallback if jsDelivr fails
+  if (!response || !response.ok) {
+    const ghUrl = url
+      .replace('cdn.jsdelivr.net/gh', 'raw.githubusercontent.com')
+      .replace('@main', '/main');
+    console.warn('⚠️ jsDelivr failed, using GitHub fallback:', ghUrl);
+    response = await fetch(`${ghUrl}?v=${Date.now()}`).catch(() => null);
+  }
+
+  if (!response || !response.ok) {
+    console.error(`❌ Both sources failed for ${url}`);
+    return [];
+  }
   return response.json();
 }
     const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
