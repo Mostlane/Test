@@ -216,130 +216,620 @@
     }
   </script>
   <script>
-const CLOUDFLARE_URL = "https://mostlane-api.jamie-def.workers.dev/update";
-const KV_BASE = "https://mostlane-api.jamie-def.workers.dev/kv?namespace=MOSTLANE_COMPLIANCE&key=";
+        // ✅ Helper to fetch JSON with guaranteed no-cache behaviour
+   // ✅ Safe no-cache fetch for jsDelivr + GitHub
+// ✅ Final safe no-cache fetch with auto-fallback
+async function fetchNoCacheJSON(url) {
+  const noCacheUrl = `${url}?v=${Date.now()}`;
+  let response = await fetch(noCacheUrl, { cache: 'reload' }).catch(() => null);
 
-let allData = [], currentData = [];
-let activeStoreType = 'ALL', activeCategory = null, rangeDays = null;
-let editMode = false;
-const EDIT_PIN = "2025";
+  // ⬇ fallback if jsDelivr fails
+  if (!response || !response.ok) {
+    const ghUrl = url
+      .replace('cdn.jsdelivr.net/gh', 'raw.githubusercontent.com')
+      .replace('@main', '/main');
+    console.warn('⚠️ jsDelivr failed, using GitHub fallback:', ghUrl);
+    response = await fetch(`${ghUrl}?v=${Date.now()}`).catch(() => null);
+  }
 
-// ---------- FETCH LIVE DATA FROM KV ----------
-async function fetchData() {
+  if (!response || !response.ok) {
+    console.error(`❌ Both sources failed for ${url}`);
+    return [];
+  }
+  return response.json();
+}
+    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
+    const USE_JSON = false;
+    let allData = [], currentData = [];
+    let activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
+    const EDIT_PIN = "2025";
+    let editMode = false, originalDataSnapshot = [];
+
+    const parseDate = d => {
+      if (!d || (typeof d === 'string' && d.trim() === '')) return null;
+      const s = String(d).replace(/^\*/, '');
+      if (s.includes('/')) {
+        const p = s.split('/');
+        return p.length === 3 ? new Date(+p[2], p[1]-1, +p[0]) : new Date(s);
+      }
+      return new Date(s);
+    };
+
+    const getStatus = e => {
+      const now = new Date();
+      let red=false, amber=false;
+      [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean).forEach(dt=>{
+        if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true;
+      });
+      return red?'🔴':amber?'🟡':'🟢';
+    };
+
+    async function fetchData() {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
 
-  const kvSources = [
-    { key: "compliance:retail", label: "Retail" },
-    { key: "compliance:els", label: "ELS" },
-    { key: "compliance:els_private", label: "ELS Private" },
-    { key: "compliance:cobra", label: "Cobra" },
-    { key: "compliance:wenzels", label: "Wenzel\'s" }
+// ✅ Use Cloudflare Worker for instant live data
+const base = 'https://mostlane-cachefix.jamie-def.workers.dev/Compliance/';
+  const sources = [
+    { file: 'retail_compliance.json', label: 'Retail' },
+    { file: 'els_compliance.json', label: 'ELS' },
+    { file: 'els_private_compliance.json', label: 'ELS Private' },
+    { file: 'cobra_compliance.json', label: 'Cobra' },
+    { file: 'wenzels_compliance.json', label: "Wenzel's" }
   ];
 
-  try {
-    const results = await Promise.all(
-      kvSources.map(async s => {
-        const url = `${KV_BASE}${encodeURIComponent(s.key)}&v=${Date.now()}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+  // ✅ Cache-busting timestamp that works reliably with GitHub
+  const results = await Promise.all(
+    sources.map(async s => {
+      try {const j = await fetchNoCacheJSON(`${base}${s.file}`).catch(() => []); // ✅ fallback if fetch fails
+if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
 
-        // Normalise record shape
-        return (Array.isArray(data) ? data : Object.values(data)).map(rw => ({
-          storeCode: (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "").toString().padStart(4, "0"),
-          siteName: rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
-          postcode: rw["Postcode"] ?? rw["postcode"] ?? "",
+        return (Array.isArray(j) ? j : Object.values(j)).map(rw => ({
+          storeCode:
+            (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "")
+              .toString().padStart(4, "0"),
+          siteName:
+            rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
+          postcode:
+            rw["Postcode"] ?? rw["postcode"] ?? "",
           storeType: s.label,
-          fiveYear: rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
+          fiveYear:
+            rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
           pat: rw["PAT"] ?? "",
           em: rw["EM"] ?? "",
           pv: rw["PV"] ?? "",
           ev: rw["EV"] ?? "",
           pump: rw["PUMP"] ?? "",
-          sharePoint: rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
+          sharePoint:
+            rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
         }));
-      })
-    );
+      } catch (e) {
+        console.error("❌ Fetch failed for", s.file, e);
+        return [];
+      }
+    })
+  );
 
-    allData = results.flat();
-    applyFilters();
-    console.log(`✅ Loaded ${allData.length} records from KV namespace MOSTLANE_COMPLIANCE`);
-  } catch (err) {
-    console.error("❌ KV fetch failed:", err);
-    tb.innerHTML = `<tr><td colspan="12" class="error">Failed to load data from Cloudflare KV.</td></tr>`;
-  }
+  allData = results.flat();
+  applyFilters();
+  console.log(`✅ Loaded ${allData.length} records total`);
 }
 
-// ---------- SAVE EDITS DIRECTLY TO CLOUDFLARE ----------
+    function applyFilters(){
+      let data=[...allData];
+      if(activeStoreType!=='ALL')data=data.filter(e=>e.storeType===activeStoreType);
+      if(activeCategory)data=data.filter(e=>e[activeCategory]&&String(e[activeCategory]).trim()!=='');
+      renderTable(data);
+    }
+
+    function renderTable(d){
+      currentData=d;
+      const tb=document.getElementById('tableBody'); tb.innerHTML='';
+      d.forEach(e=>{
+        const sp=e.sharePoint?`<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>`:'';
+        tb.innerHTML+=`
+          <tr data-code="${e.storeCode}">
+            <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
+            <td>${e.postcode}</td><td>${getStatus(e)}</td>
+            <td>${e.fiveYear}</td><td>${e.pat}</td><td>${e.em}</td>
+            <td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td><td>${sp}</td>
+          </tr>`;
+      });
+    }
+
+    /* ---------------- EDIT MODE ---------------- */
+
+    document.addEventListener("DOMContentLoaded",()=>{
+      const editBtn=document.getElementById("editBtn");
+      const saveBtn=document.getElementById("saveBtn");
+
+      editBtn.addEventListener("click",()=>{
+        const pin=prompt("Enter edit PIN:");
+        if(pin===EDIT_PIN){
+          editMode=true;
+          enableEditing(true);
+          editBtn.style.display="none";
+          saveBtn.style.display="inline-block";
+          alert("✅ Edit mode enabled.");
+        } else alert("❌ Incorrect PIN");
+      });
+
+      saveBtn.addEventListener("click",async()=>{
+        const changedRows=[...document.querySelectorAll("tbody tr[data-changed='true']")];
+        if(!changedRows.length)return alert("No changes detected.");
+        const headers=[...document.querySelectorAll("thead th")].map(th=>th.textContent.trim());
+        const changes=changedRows.map(r=>{
+          const record={};
+          [...r.children].forEach((td,i)=>record[headers[i]]=td.textContent.trim());
+          return record;
+        });
+        const grouped={};
+        for(const rec of changes){
+          const type=rec["Store Type"];
+          if(!grouped[type])grouped[type]=[];
+          grouped[type].push(rec);
+        }
+        const fileMap={
+          "Retail":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
+          "ELS":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
+          "ELS Private":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
+          "Cobra":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
+          "Wenzel's":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
+        };
+
+        const results=await Promise.all(Object.entries(grouped).map(async([type,entries])=>{
+          const formBody=new URLSearchParams();
+          formBody.append('fileURL',fileMap[type]||'');
+          formBody.append('operator',(sessionStorage.getItem("mostlaneUser")||"Unknown").replace(/\./g," "));
+          formBody.append('timestamp',new Date().toISOString());
+          formBody.append('updatedRecords',JSON.stringify(entries));
+          try{
+            await fetch(ZAPIER_WEBHOOK,{
+              method:"POST",mode:"no-cors",
+              headers:{"Content-Type":"application/x-www-form-urlencoded"},
+              body:formBody.toString()
+            });
+            console.log(`✅ Sent ${entries.length} record(s) for ${type}`);
+            return{type,status:"success"};
+          }catch(err){console.error(err);return{type,status:"error"};}
+        }));
+
+        const fails=results.filter(r=>r.status==="error");
+        alert(fails.length?`❌ Failed for: ${fails.map(f=>f.type).join(', ')}`:"✅ All changes sent.");
+        enableEditing(false);
+        editBtn.style.display="inline-block";
+        saveBtn.style.display="none";
+        editMode=false;
+      });
+
+      function enableEditing(state){
+        const editableCols=["5 Year","PAT","EM","PV","EV","Pump"];
+        document.querySelectorAll("table tbody tr").forEach(row=>{
+          [...row.children].forEach((td,i)=>{
+            const header=document.querySelectorAll("thead th")[i].textContent.trim();
+            if(state&&editableCols.includes(header)){
+              td.contentEditable=true;
+              td.style.background="#fff6d1";
+              td.addEventListener("input",()=>row.dataset.changed="true",{once:true});
+            } else {
+              td.contentEditable=false;
+              td.style.background="";
+            }
+          });
+          if(!state)row.removeAttribute("data-changed");
+        });
+      }
+
+        fetchData();   // existing line
+  console.log("📡 Fetching compliance JSON files...");
+});
+
+/* ---------- FILTER FIX SECTION ---------- */
+
+// use the existing activeStoreType from above
+let activeCategories = new Set();
+function setStoreType(type, btn) {
+  // Toggle store type — single active
+  document.querySelectorAll('#storeTypeFilters .bubble').forEach(b => b.classList.remove('active'));
+  if (activeStoreType === type) {
+    activeStoreType = 'ALL';
+    document.querySelector('#storeTypeFilters .bubble').textContent = 'Show All';
+    document.querySelector('#storeTypeFilters .bubble').classList.add('active');
+  } else {
+    activeStoreType = type;
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+function toggleCategory(cat, btn) {
+  // Allow multiple compliance types active
+  if (activeCategories.has(cat)) {
+    activeCategories.delete(cat);
+    btn.classList.remove('active');
+  } else {
+    activeCategories.add(cat);
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+
+function clearFilters() {
+  activeStoreType = 'ALL';
+  activeCategories.clear();
+  document.querySelectorAll('#storeTypeFilters .bubble, #complianceFilters .bubble')
+    .forEach(b => b.classList.remove('active'));
+  document.querySelector('#storeTypeFilters .bubble').classList.add('active');
+  applyFilters();
+}
+
+function applyFilters() {
+  let data = [...allData];
+
+  // Store Type filter
+  if (activeStoreType !== 'ALL') {
+    data = data.filter(e => e.storeType === activeStoreType);
+  }
+
+  // Compliance type filters (combine)
+  if (activeCategories.size > 0) {
+    data = data.filter(e => {
+      for (let cat of activeCategories) {
+        const val = e[cat];
+        if (!val || String(val).trim() === '') return false;
+      }
+      return true;
+    });
+  }
+
+  renderTable(data);
+}
+
+/* ----------- Optional helpers (fixed functional versions) ----------- */
+
+// Filter overdue (any compliance date before today)
+function filterOverdue(btn) {
+  const now = new Date();
+
+  // Deactivate all summary bubbles first
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  // Find any record where one or more compliance dates are before today
+  const filtered = allData.filter(e => {
+    return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
+      .map(parseDate)
+      .filter(Boolean)
+      .some(d => d < now);
+  });
+
+  renderTable(filtered);
+}
+
+// -------------------- DUE IN X DAYS FILTERS --------------------
+function toggleDue(btn, days) {
+  // Deactivate all summary bubbles first
+  document.querySelectorAll('.summary-bubbles .bubble').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const now = new Date();
+  const future = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+  // Show any record where at least one compliance date is within the next X days
+  const filtered = allData.filter(e => {
+    return [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump]
+      .map(parseDate)
+      .filter(Boolean)
+      .some(d => d >= now && d <= future);
+  });
+
+  renderTable(filtered);
+}
+  // Search by date/type
+function openModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Search by Date/Type</h2>
+      <label>Compliance Type:</label>
+      <select id="searchType">
+        <option value="">All</option>
+        <option value="fiveYear">5 Year</option>
+        <option value="pat">PAT</option>
+        <option value="em">EM</option>
+        <option value="pv">PV</option>
+        <option value="ev">EV</option>
+        <option value="pump">Pump</option>
+      </select>
+      <label>From Date:</label>
+      <input type="date" id="fromDate">
+      <label>To Date:</label>
+      <input type="date" id="toDate">
+      <button onclick="runDateSearch()">Search</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display = 'block';
+}
+
+// Run the date search logic
+function runDateSearch() {
+  const type = document.getElementById('searchType').value;
+  const from = parseDate(document.getElementById('fromDate').value);
+  const to = parseDate(document.getElementById('toDate').value);
+
+  let filtered = [...allData];
+
+  // If a compliance type is selected, filter for entries with that type filled
+  if (type) filtered = filtered.filter(e => e[type] && String(e[type]).trim() !== '');
+
+  // Apply date range — if no type selected, check all compliance fields
+  if (from || to) {
+    filtered = filtered.filter(e => {
+      const keys = type ? [type] : ['fiveYear', 'pat', 'em', 'pv', 'ev', 'pump'];
+      return keys.some(k => {
+        const d = parseDate(e[k]);
+        if (!d) return false;
+        return (!from || d >= from) && (!to || d <= to);
+      });
+    });
+  }
+
+  renderTable(filtered);
+  document.querySelector('.modal').remove();
+}
+// ---------- EXPORT TO EXCEL (with modal options + clickable links + logo + blue header + frozen row) ----------
+function openExportModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>Export Options</h2>
+      <label><input type="checkbox" id="includeFilters" checked> Include active filters summary</label><br>
+      <label><input type="checkbox" id="includeSummary" checked> Include Green/Amber/Red summary</label><br>
+      <button onclick="generateExcel()">Generate Excel</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.style.display = 'block';
+}
+
+async function generateExcel() {
+  document.querySelector('.modal').remove();
+
+  const includeFilters = document.getElementById('includeFilters')?.checked ?? true;
+  const includeSummary = document.getElementById('includeSummary')?.checked ?? true;
+
+  const wb = XLSX.utils.book_new();
+  const wsData = [];
+
+  // Title section (Mostlane blue)
+  const logoUrl = "https://mostlane.github.io/Test/mostlane-logo.jpg";
+  wsData.push(["The Southern Co-op Compliance Portal Export"]);
+  wsData.push(["Exported by:", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ")]);
+  wsData.push(["Date/Time:", new Date().toLocaleString("en-GB")]);
+  if (includeFilters) {
+    wsData.push(["Active Filters:", `Store Type: ${activeStoreType} | Compliance: ${
+      activeCategories.size ? Array.from(activeCategories).join(", ") : "None"
+    }`]);
+  }
+  wsData.push([]);
+
+  // Table header
+  const headers = [
+    "Store Code", "Site Name", "Store Type", "Postcode", "Status",
+    "5 Year", "PAT", "EM", "PV", "EV", "Pump", "SharePoint"
+  ];
+  wsData.push(headers);
+
+  // Table rows
+  currentData.forEach(e => {
+    wsData.push([
+      e.storeCode,
+      e.siteName,
+      e.storeType,
+      e.postcode,
+      getStatus(e),
+      e.fiveYear,
+      e.pat,
+      e.em,
+      e.pv,
+      e.ev,
+      e.pump,
+      e.sharePoint ? "Open File" : ""
+    ]);
+  });
+
+  // Summary section
+  if (includeSummary) {
+    const g = currentData.filter(e => getStatus(e) === "🟢").length;
+    const a = currentData.filter(e => getStatus(e) === "🟡").length;
+    const r = currentData.filter(e => getStatus(e) === "🔴").length;
+    const total = currentData.length;
+    wsData.push([]);
+    wsData.push(["Summary"]);
+    wsData.push(["🟢 Green", g]);
+    wsData.push(["🟡 Amber", a]);
+    wsData.push(["🔴 Red", r]);
+    wsData.push(["Total", total]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Add clickable hyperlinks for SharePoint
+  const sharePointCol = headers.indexOf("SharePoint");
+  if (sharePointCol !== -1) {
+    currentData.forEach((e, i) => {
+      const cell = XLSX.utils.encode_cell({ r: i + 5, c: sharePointCol });
+      if (e.sharePoint) {
+        ws[cell].l = { Target: e.sharePoint, Tooltip: "Open file" };
+      }
+    });
+  }
+
+  // Style: blue title, bold headers, borders, freeze top row
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws[cellRef]) continue;
+      ws[cellRef].s = ws[cellRef].s || {};
+      ws[cellRef].s.border = {
+        top: { style: "thin", color: { rgb: "AAAAAA" } },
+        bottom: { style: "thin", color: { rgb: "AAAAAA" } },
+        left: { style: "thin", color: { rgb: "AAAAAA" } },
+        right: { style: "thin", color: { rgb: "AAAAAA" } }
+      };
+      if (R === 5) {
+        ws[cellRef].s.fill = { fgColor: { rgb: "0071CE" } };
+        ws[cellRef].s.font = { bold: true, color: { rgb: "FFFFFF" } };
+      }
+      if (R === 0) {
+        ws[cellRef].s.font = { bold: true, color: { rgb: "0071CE" }, sz: 16 };
+      }
+    }
+  }
+
+  // Freeze header
+  ws["!freeze"] = { xSplit: 0, ySplit: 6, topLeftCell: "A7", activePane: "bottomLeft", state: "frozen" };
+
+  // Auto column width
+  ws['!cols'] = wsData[5].map((_, i) => ({
+    wch: Math.max(...wsData.map(r => (r[i] ? r[i].toString().length : 0))) + 2
+  }));
+
+  const tabName = activeStoreType === 'ALL' ? 'All Data' : activeStoreType;
+  XLSX.utils.book_append_sheet(wb, ws, tabName);
+
+  const datePart = new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  const fileName = `Compliance_Export_${tabName}_${datePart}.xlsx`;
+
+  XLSX.writeFile(wb, fileName);
+}
+
+
+    function openSummaryModal(){
+      const groups={}; const now=new Date();
+      currentData.forEach(e=>{
+        const key=e.storeType||'Unknown';
+        if(!groups[key])groups[key]={total:0,GREEN:0,AMBER:0,RED:0};
+        groups[key].total++;
+        let red=false,amber=false;
+        [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean).forEach(dt=>{
+          if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true;
+        });
+        const s=red?'RED':amber?'AMBER':'GREEN'; groups[key][s]++;
+      });
+      const order=["Retail","ELS","ELS Private","Cobra","Wenzel's","Unknown"];
+      const rows=order.filter(k=>groups[k]).map(k=>{
+        const g=groups[k],t=g.total||1;
+        const pct=n=>((n*100/t).toFixed(1)+'%');
+        return `
+          <div class="summary-box">
+            <div class="summary-title">${k}</div>
+            <div>Total: <b>${g.total}</b></div>
+            <div>🟢 GREEN: <b>${g.GREEN}</b> (${pct(g.GREEN)})</div>
+            <div>🟡 AMBER: <b>${g.AMBER}</b> (${pct(g.AMBER)})</div>
+            <div>🔴 RED: <b>${g.RED}</b> (${pct(g.RED)})</div>
+          </div>`;
+      });
+      const modal=document.createElement('div');
+      modal.className='modal';
+      modal.innerHTML=`<div class="modal-content"><h2>Compliance Summary</h2>
+        ${rows.join('')||'<p>No data.</p>'}
+        <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button></div>`;
+      document.body.appendChild(modal);
+      modal.style.display='block';
+    }
+// Search bar filter (store name, number, postcode)
+function searchTable() {
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  if (!q) {
+    renderTable(allData);
+    return;
+  }
+  const filtered = allData.filter(e =>
+    (e.storeCode || '').toLowerCase().includes(q) ||
+    (e.siteName || '').toLowerCase().includes(q) ||
+    (e.postcode || '').toLowerCase().includes(q)
+  );
+  renderTable(filtered);
+}
+    // 🔁 --- BEGIN UNIVERSAL SAVE HANDLER (Zapier + Cloudflare toggle) ---
+const USE_CLOUDFLARE = true; // ⬅️ Flip this false to use Zapier instead
+const CLOUDFLARE_URL = "https://mostlane-api.jamie-def.workers.dev/update";
+const ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
+
 async function saveEditInstant(row) {
   const storeCode = row.children[0].textContent.trim();
   const storeType = row.children[2].textContent.trim();
+
+  row.style.opacity = "0.6";
+  row.style.background = "#eaf6ff";
+  row.style.transition = "opacity 0.3s";
+
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td, i) => record[headers[i]] = td.textContent.trim());
 
-  const editableFields = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
-  const fields = {};
-  editableFields.forEach(k => { if (record[k]) fields[k] = record[k]; });
+  if (USE_CLOUDFLARE) {
+    // ✅ Cloudflare JSON API
+    const editable = ["5 Year", "5_Year", "PAT", "EM", "PV", "EV", "Pump"];
+    const fields = {};
+    editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
-  const payload = {
-    namespace: "MOSTLANE_COMPLIANCE",
-    key: `compliance:${storeType.toLowerCase().replace(' ', '_')}`,
-    updates: [{
-      branchCode: storeCode,
-      fields
-    }]
-  };
+    const payload = {
+      updates: [{ storeType: storeType.toLowerCase(), branchCode: storeCode, fields }]
+    };
 
-  row.style.opacity = "0.6";
-  row.style.background = "#eaf6ff";
+    try {
+      const res = await fetch(CLOUDFLARE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const out = await res.json().catch(() => ({}));
+      console.log(`✅ Cloudflare updated:`, out);
+      row.style.background = "#d7ffd9"; // green
+    } catch (err) {
+      console.error("❌ Cloudflare error:", err);
+      row.style.background = "#ffecec"; // red
+    }
+  } else {
+    // ⚙️ Zapier fallback
+    const formBody = new URLSearchParams();
+    formBody.append("fileURL",
+      `https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/${storeType.toLowerCase().replace(" ", "_")}_compliance.json`);
+    formBody.append("operator", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
+    formBody.append("timestamp", new Date().toISOString());
+    formBody.append("updatedRecords", JSON.stringify([record]));
 
-  try {
-    const res = await fetch(CLOUDFLARE_URL, {
+    fetch(ZAPIER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formBody.toString()
+    })
+    .then(() => {
+      console.log(`✅ Sent ${storeCode} to Zapier`);
+      row.style.background = "#d7ffd9";
+    })
+    .catch(() => {
+      row.style.background = "#ffecec";
+      console.error("⚠️ Zapier send failed");
     });
-    const out = await res.json();
-    console.log("✅ KV update response:", out);
-    row.style.background = "#d7ffd9";
-  } catch (err) {
-    console.error("❌ KV update failed:", err);
-    row.style.background = "#ffecec";
   }
 
-  setTimeout(() => {
-    row.style.opacity = "1";
-    fetchData();
-  }, 4000);
+  setTimeout(fetchData, 5000);
 }
-
-// ---------- INITIALISATION ----------
-document.addEventListener("DOMContentLoaded", () => {
-  const editBtn = document.getElementById("editBtn");
-  const saveBtn = document.getElementById("saveBtn");
-
-  editBtn.addEventListener("click", () => {
-    const pin = prompt("Enter edit PIN:");
-    if (pin === EDIT_PIN) {
-      editMode = true;
-      enableEditing(true);
-      editBtn.style.display = "none";
-      saveBtn.style.display = "inline-block";
-      alert("✅ Edit mode enabled.");
-    } else alert("❌ Incorrect PIN");
-  });
-
-  saveBtn.addEventListener("click", () => {
-    const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
-    if (!changedRows.length) return alert("No changes detected.");
-    changedRows.forEach(row => saveEditInstant(row));
-    alert("✅ Changes sent — refreshing shortly...");
-  });
-
-  fetchData();
+// 🔁 --- END UNIVERSAL SAVE HANDLER ---
+// Attach to existing Save Changes button
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
+  if (!changedRows.length) return alert("No changes detected.");
+  changedRows.forEach(r => saveEditInstant(r));
+  alert("✅ Changes applied — refreshing shortly to confirm.");
 });
-</script>
+  </script>
 </body>
 </html>
