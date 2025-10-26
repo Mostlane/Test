@@ -238,56 +238,111 @@ async function fetchNoCacheJSON(url) {
   }
   return response.json();
 }
-    const ZAPIER_WEBHOOK = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
-    const USE_JSON = false;
-    let allData = [], currentData = [];
-    let activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
-    const EDIT_PIN = "2025";
-    let editMode = false, originalDataSnapshot = [];
+    // ✅ Cloudflare instant update settings
+const CLOUDFLARE_URL = "https://mostlane-api.jamie-def.workers.dev/update";
+let allData = [], currentData = [];
+let activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActive = false;
+const EDIT_PIN = "2025";
+let editMode = false, originalDataSnapshot = [];
 
-    const parseDate = d => {
-      if (!d || (typeof d === 'string' && d.trim() === '')) return null;
-      const s = String(d).replace(/^\*/, '');
-      if (s.includes('/')) {
-        const p = s.split('/');
-        return p.length === 3 ? new Date(+p[2], p[1]-1, +p[0]) : new Date(s);
-      }
-      return new Date(s);
-    };
+// ✅ Handle edits and saving directly to Cloudflare
+async function saveEditInstant(row) {
+  const storeCode = row.children[0].textContent.trim();
+  const storeType = row.children[2].textContent.trim();
+  const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+  const record = {};
+  [...row.children].forEach((td, i) => record[headers[i]] = td.textContent.trim());
 
-    const getStatus = e => {
-      const now = new Date();
-      let red=false, amber=false;
-      [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean).forEach(dt=>{
-        if(dt<now)red=true;else if((dt-now)/(1e3*60*60*24)<=30)amber=true;
-      });
-      return red?'🔴':amber?'🟡':'🟢';
-    };
+  const editableFields = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
+  const fields = {};
+  editableFields.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
-    async function fetchData() {
+  const payload = {
+    updates: [{
+      storeType: storeType.toLowerCase(),
+      branchCode: storeCode,
+      fields
+    }]
+  };
+
+  row.style.opacity = "0.6";
+  row.style.background = "#eaf6ff";
+
+  try {
+    const res = await fetch(CLOUDFLARE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const out = await res.json();
+    console.log("✅ Cloudflare response:", out);
+    row.style.background = "#d7ffd9";
+  } catch (err) {
+    console.error("❌ Cloudflare update failed:", err);
+    row.style.background = "#ffecec";
+  }
+
+  setTimeout(() => {
+    row.style.opacity = "1";
+    fetchData();
+  }, 5000);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const editBtn = document.getElementById("editBtn");
+  const saveBtn = document.getElementById("saveBtn");
+
+  editBtn.addEventListener("click", () => {
+    const pin = prompt("Enter edit PIN:");
+    if (pin === EDIT_PIN) {
+      editMode = true;
+      enableEditing(true);
+      editBtn.style.display = "none";
+      saveBtn.style.display = "inline-block";
+      alert("✅ Edit mode enabled.");
+    } else {
+      alert("❌ Incorrect PIN");
+    }
+  });
+
+  saveBtn.addEventListener("click", () => {
+    const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
+    if (!changedRows.length) return alert("No changes detected.");
+    changedRows.forEach(row => saveEditInstant(row));
+    alert("✅ Changes sent to Cloudflare — refreshing shortly...");
+  });
+
+  fetchData();
+  console.log("📡 Fetching compliance JSON files...");
+});
+    
+// ✅ Fetch data directly from Cloudflare Worker (always live)
+async function fetchData() {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
 
-// ✅ Use Cloudflare Worker for instant live data
-const base = 'https://mostlane-cachefix.jamie-def.workers.dev/Compliance/';
+  const base = "https://mostlane-api.jamie-def.workers.dev/Compliance/";
+
   const sources = [
-    { file: 'retail_compliance.json', label: 'Retail' },
-    { file: 'els_compliance.json', label: 'ELS' },
-    { file: 'els_private_compliance.json', label: 'ELS Private' },
-    { file: 'cobra_compliance.json', label: 'Cobra' },
-    { file: 'wenzels_compliance.json', label: "Wenzel's" }
+    { file: "retail_compliance.json", label: "Retail" },
+    { file: "els_compliance.json", label: "ELS" },
+    { file: "els_private_compliance.json", label: "ELS Private" },
+    { file: "cobra_compliance.json", label: "Cobra" },
+    { file: "wenzels_compliance.json", label: "Wenzel's" }
   ];
 
-  // ✅ Cache-busting timestamp that works reliably with GitHub
   const results = await Promise.all(
-    sources.map(async s => {
-      try {const j = await fetchNoCacheJSON(`${base}${s.file}`).catch(() => []); // ✅ fallback if fetch fails
-if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
+    sources.map(async (s) => {
+      try {
+        const res = await fetch(`${base}${s.file}?v=${Date.now()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const j = await res.json();
 
         return (Array.isArray(j) ? j : Object.values(j)).map(rw => ({
           storeCode:
             (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "")
-              .toString().padStart(4, "0"),
+              .toString()
+              .padStart(4, "0"),
           siteName:
             rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
           postcode:
@@ -304,7 +359,7 @@ if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
             rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
         }));
       } catch (e) {
-        console.error("❌ Fetch failed for", s.file, e);
+        console.error(`❌ Fetch failed for ${s.file}:`, e);
         return [];
       }
     })
@@ -312,118 +367,25 @@ if (!j || !Array.isArray(j) && typeof j !== 'object') return [];
 
   allData = results.flat();
   applyFilters();
-  console.log(`✅ Loaded ${allData.length} records total`);
+  console.log(`✅ Loaded ${allData.length} total records from Cloudflare`);
 }
-
-    function applyFilters(){
-      let data=[...allData];
-      if(activeStoreType!=='ALL')data=data.filter(e=>e.storeType===activeStoreType);
-      if(activeCategory)data=data.filter(e=>e[activeCategory]&&String(e[activeCategory]).trim()!=='');
-      renderTable(data);
-    }
-
-    function renderTable(d){
-      currentData=d;
-      const tb=document.getElementById('tableBody'); tb.innerHTML='';
-      d.forEach(e=>{
-        const sp=e.sharePoint?`<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>`:'';
-        tb.innerHTML+=`
-          <tr data-code="${e.storeCode}">
-            <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
-            <td>${e.postcode}</td><td>${getStatus(e)}</td>
-            <td>${e.fiveYear}</td><td>${e.pat}</td><td>${e.em}</td>
-            <td>${e.pv}</td><td>${e.ev}</td><td>${e.pump}</td><td>${sp}</td>
-          </tr>`;
-      });
-    }
-
-    /* ---------------- EDIT MODE ---------------- */
-
-    document.addEventListener("DOMContentLoaded",()=>{
-      const editBtn=document.getElementById("editBtn");
-      const saveBtn=document.getElementById("saveBtn");
-
-      editBtn.addEventListener("click",()=>{
-        const pin=prompt("Enter edit PIN:");
-        if(pin===EDIT_PIN){
-          editMode=true;
-          enableEditing(true);
-          editBtn.style.display="none";
-          saveBtn.style.display="inline-block";
-          alert("✅ Edit mode enabled.");
-        } else alert("❌ Incorrect PIN");
-      });
-
-      saveBtn.addEventListener("click",async()=>{
-        const changedRows=[...document.querySelectorAll("tbody tr[data-changed='true']")];
-        if(!changedRows.length)return alert("No changes detected.");
-        const headers=[...document.querySelectorAll("thead th")].map(th=>th.textContent.trim());
-        const changes=changedRows.map(r=>{
-          const record={};
-          [...r.children].forEach((td,i)=>record[headers[i]]=td.textContent.trim());
-          return record;
-        });
-        const grouped={};
-        for(const rec of changes){
-          const type=rec["Store Type"];
-          if(!grouped[type])grouped[type]=[];
-          grouped[type].push(rec);
-        }
-        const fileMap={
-          "Retail":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/retail_compliance.json",
-          "ELS":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_compliance.json",
-          "ELS Private":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/els_private_compliance.json",
-          "Cobra":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/cobra_compliance.json",
-          "Wenzel's":"https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/wenzels_compliance.json"
-        };
-
-        const results=await Promise.all(Object.entries(grouped).map(async([type,entries])=>{
-          const formBody=new URLSearchParams();
-          formBody.append('fileURL',fileMap[type]||'');
-          formBody.append('operator',(sessionStorage.getItem("mostlaneUser")||"Unknown").replace(/\./g," "));
-          formBody.append('timestamp',new Date().toISOString());
-          formBody.append('updatedRecords',JSON.stringify(entries));
-          try{
-            await fetch(ZAPIER_WEBHOOK,{
-              method:"POST",mode:"no-cors",
-              headers:{"Content-Type":"application/x-www-form-urlencoded"},
-              body:formBody.toString()
-            });
-            console.log(`✅ Sent ${entries.length} record(s) for ${type}`);
-            return{type,status:"success"};
-          }catch(err){console.error(err);return{type,status:"error"};}
-        }));
-
-        const fails=results.filter(r=>r.status==="error");
-        alert(fails.length?`❌ Failed for: ${fails.map(f=>f.type).join(', ')}`:"✅ All changes sent.");
-        enableEditing(false);
-        editBtn.style.display="inline-block";
-        saveBtn.style.display="none";
-        editMode=false;
-      });
-
-      function enableEditing(state){
-        const editableCols=["5 Year","PAT","EM","PV","EV","Pump"];
-        document.querySelectorAll("table tbody tr").forEach(row=>{
-          [...row.children].forEach((td,i)=>{
-            const header=document.querySelectorAll("thead th")[i].textContent.trim();
-            if(state&&editableCols.includes(header)){
-              td.contentEditable=true;
-              td.style.background="#fff6d1";
-              td.addEventListener("input",()=>row.dataset.changed="true",{once:true});
-            } else {
-              td.contentEditable=false;
-              td.style.background="";
-            }
-          });
-          if(!state)row.removeAttribute("data-changed");
-        });
+function enableEditing(state) {
+  const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
+  document.querySelectorAll("table tbody tr").forEach(row => {
+    [...row.children].forEach((td, i) => {
+      const header = document.querySelectorAll("thead th")[i].textContent.trim();
+      if (state && editableCols.includes(header)) {
+        td.contentEditable = true;
+        td.style.background = "#fff6d1";
+        td.addEventListener("input", () => (row.dataset.changed = "true"), { once: true });
+      } else {
+        td.contentEditable = false;
+        td.style.background = "";
       }
-
-        fetchData();   // existing line
-  console.log("📡 Fetching compliance JSON files...");
-});
-
+    });
+    if (!state) row.removeAttribute("data-changed");
+  });
+}
 /* ---------- FILTER FIX SECTION ---------- */
 
 // use the existing activeStoreType from above
@@ -755,81 +717,6 @@ function searchTable() {
   );
   renderTable(filtered);
 }
-    // 🔁 --- BEGIN UNIVERSAL SAVE HANDLER (Zapier + Cloudflare toggle) ---
-const USE_CLOUDFLARE = true; // ⬅️ Flip this false to use Zapier instead
-const CLOUDFLARE_URL = "https://mostlane-api.jamie-def.workers.dev/update";
-const ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
-
-async function saveEditInstant(row) {
-  const storeCode = row.children[0].textContent.trim();
-  const storeType = row.children[2].textContent.trim();
-
-  row.style.opacity = "0.6";
-  row.style.background = "#eaf6ff";
-  row.style.transition = "opacity 0.3s";
-
-  const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
-  const record = {};
-  [...row.children].forEach((td, i) => record[headers[i]] = td.textContent.trim());
-
-  if (USE_CLOUDFLARE) {
-    // ✅ Cloudflare JSON API
-    const editable = ["5 Year", "5_Year", "PAT", "EM", "PV", "EV", "Pump"];
-    const fields = {};
-    editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
-
-    const payload = {
-      updates: [{ storeType: storeType.toLowerCase(), branchCode: storeCode, fields }]
-    };
-
-    try {
-      const res = await fetch(CLOUDFLARE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const out = await res.json().catch(() => ({}));
-      console.log(`✅ Cloudflare updated:`, out);
-      row.style.background = "#d7ffd9"; // green
-    } catch (err) {
-      console.error("❌ Cloudflare error:", err);
-      row.style.background = "#ffecec"; // red
-    }
-  } else {
-    // ⚙️ Zapier fallback
-    const formBody = new URLSearchParams();
-    formBody.append("fileURL",
-      `https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/${storeType.toLowerCase().replace(" ", "_")}_compliance.json`);
-    formBody.append("operator", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
-    formBody.append("timestamp", new Date().toISOString());
-    formBody.append("updatedRecords", JSON.stringify([record]));
-
-    fetch(ZAPIER_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formBody.toString()
-    })
-    .then(() => {
-      console.log(`✅ Sent ${storeCode} to Zapier`);
-      row.style.background = "#d7ffd9";
-    })
-    .catch(() => {
-      row.style.background = "#ffecec";
-      console.error("⚠️ Zapier send failed");
-    });
-  }
-
-  setTimeout(fetchData, 5000);
-}
-// 🔁 --- END UNIVERSAL SAVE HANDLER ---
-// Attach to existing Save Changes button
-document.getElementById("saveBtn").addEventListener("click", () => {
-  const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
-  if (!changedRows.length) return alert("No changes detected.");
-  changedRows.forEach(r => saveEditInstant(r));
-  alert("✅ Changes applied — refreshing shortly to confirm.");
-});
   </script>
 </body>
 </html>
