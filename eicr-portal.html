@@ -755,8 +755,7 @@ function searchTable() {
   );
   renderTable(filtered);
 }
-<!-- 🔹 INSTANT UPDATE + ONE-TIME REFRESH -->
-<script>
+// 🔹 INSTANT UPDATE + ONE-TIME REFRESH
 async function saveEditInstant(row) {
   const storeCode = row.children[0].textContent.trim();
   const storeType = row.children[2].textContent.trim();
@@ -789,7 +788,7 @@ async function saveEditInstant(row) {
     row.style.background = "";
     console.log(`✅ Saved ${storeCode}, refreshing in 5 s...`);
     // 3️⃣ Wait ~5 s, then reload live data once
-    setTimeout(refreshData, 5000);
+    setTimeout(fetchData, 5000);
   })
   .catch(() => {
     row.style.background = "#ffecec";
@@ -804,8 +803,6 @@ document.getElementById("saveBtn").addEventListener("click", () => {
   changedRows.forEach(r => saveEditInstant(r));
   alert("✅ Changes applied — refreshing shortly to confirm.");
 });
-</script>
-<!-- 🔹 END ONE-TIME REFRESH -->
   </script>
 </body>
 </html>
