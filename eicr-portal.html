@@ -268,7 +268,8 @@ async function fetchNoCacheJSON(url) {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
 
-const base = 'https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/';
+// ✅ Use Cloudflare Worker for instant live data
+const base = 'https://mostlane-cachefix.jamie-def.workers.dev/Compliance/';
   const sources = [
     { file: 'retail_compliance.json', label: 'Retail' },
     { file: 'els_compliance.json', label: 'ELS' },
@@ -754,7 +755,57 @@ function searchTable() {
   );
   renderTable(filtered);
 }
-        // ✅ Auto-refresh data every 10 seconds
+<!-- 🔹 INSTANT UPDATE + ONE-TIME REFRESH -->
+<script>
+async function saveEditInstant(row) {
+  const storeCode = row.children[0].textContent.trim();
+  const storeType = row.children[2].textContent.trim();
+
+  // 1️⃣ Show immediate visual feedback
+  row.style.opacity = "0.6";
+  row.style.background = "#eaf6ff";
+  row.style.transition = "opacity 0.3s";
+
+  const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
+  const record = {};
+  [...row.children].forEach((td, i) => record[headers[i]] = td.textContent.trim());
+
+  // 2️⃣ Send webhook in background
+  const formBody = new URLSearchParams();
+  formBody.append("fileURL",
+    `https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/${storeType.toLowerCase().replace(" ", "_")}_compliance.json`);
+  formBody.append("operator", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g," "));
+  formBody.append("timestamp", new Date().toISOString());
+  formBody.append("updatedRecords", JSON.stringify([record]));
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/ur9pond/", {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formBody.toString()
+  })
+  .then(() => {
+    row.style.opacity = "1";
+    row.style.background = "";
+    console.log(`✅ Saved ${storeCode}, refreshing in 5 s...`);
+    // 3️⃣ Wait ~5 s, then reload live data once
+    setTimeout(refreshData, 5000);
+  })
+  .catch(() => {
+    row.style.background = "#ffecec";
+    console.error("⚠️ Save failed for", storeCode);
+  });
+}
+
+// Attach to existing Save Changes button
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
+  if (!changedRows.length) return alert("No changes detected.");
+  changedRows.forEach(r => saveEditInstant(r));
+  alert("✅ Changes applied — refreshing shortly to confirm.");
+});
+</script>
+<!-- 🔹 END ONE-TIME REFRESH -->
   </script>
 </body>
 </html>
