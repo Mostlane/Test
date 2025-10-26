@@ -755,12 +755,15 @@ function searchTable() {
   );
   renderTable(filtered);
 }
-// 🔹 INSTANT UPDATE + ONE-TIME REFRESH
+    // 🔁 --- BEGIN UNIVERSAL SAVE HANDLER (Zapier + Cloudflare toggle) ---
+const USE_CLOUDFLARE = true; // ⬅️ Flip this false to use Zapier instead
+const CLOUDFLARE_URL = "https://mostlane-api.jamie-def.workers.dev/update";
+const ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
+
 async function saveEditInstant(row) {
   const storeCode = row.children[0].textContent.trim();
   const storeType = row.children[2].textContent.trim();
 
-  // 1️⃣ Show immediate visual feedback
   row.style.opacity = "0.6";
   row.style.background = "#eaf6ff";
   row.style.transition = "opacity 0.3s";
@@ -769,33 +772,57 @@ async function saveEditInstant(row) {
   const record = {};
   [...row.children].forEach((td, i) => record[headers[i]] = td.textContent.trim());
 
-  // 2️⃣ Send webhook in background
-  const formBody = new URLSearchParams();
-  formBody.append("fileURL",
-    `https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/${storeType.toLowerCase().replace(" ", "_")}_compliance.json`);
-  formBody.append("operator", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g," "));
-  formBody.append("timestamp", new Date().toISOString());
-  formBody.append("updatedRecords", JSON.stringify([record]));
+  if (USE_CLOUDFLARE) {
+    // ✅ Cloudflare JSON API
+    const editable = ["5 Year", "5_Year", "PAT", "EM", "PV", "EV", "Pump"];
+    const fields = {};
+    editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
-  fetch("https://hooks.zapier.com/hooks/catch/20261714/ur9pond/", {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: formBody.toString()
-  })
-  .then(() => {
-    row.style.opacity = "1";
-    row.style.background = "";
-    console.log(`✅ Saved ${storeCode}, refreshing in 5 s...`);
-    // 3️⃣ Wait ~5 s, then reload live data once
-    setTimeout(fetchData, 5000);
-  })
-  .catch(() => {
-    row.style.background = "#ffecec";
-    console.error("⚠️ Save failed for", storeCode);
-  });
+    const payload = {
+      updates: [{ storeType: storeType.toLowerCase(), branchCode: storeCode, fields }]
+    };
+
+    try {
+      const res = await fetch(CLOUDFLARE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const out = await res.json().catch(() => ({}));
+      console.log(`✅ Cloudflare updated:`, out);
+      row.style.background = "#d7ffd9"; // green
+    } catch (err) {
+      console.error("❌ Cloudflare error:", err);
+      row.style.background = "#ffecec"; // red
+    }
+  } else {
+    // ⚙️ Zapier fallback
+    const formBody = new URLSearchParams();
+    formBody.append("fileURL",
+      `https://raw.githubusercontent.com/Mostlane/Test/main/Compliance/${storeType.toLowerCase().replace(" ", "_")}_compliance.json`);
+    formBody.append("operator", (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " "));
+    formBody.append("timestamp", new Date().toISOString());
+    formBody.append("updatedRecords", JSON.stringify([record]));
+
+    fetch(ZAPIER_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formBody.toString()
+    })
+    .then(() => {
+      console.log(`✅ Sent ${storeCode} to Zapier`);
+      row.style.background = "#d7ffd9";
+    })
+    .catch(() => {
+      row.style.background = "#ffecec";
+      console.error("⚠️ Zapier send failed");
+    });
+  }
+
+  setTimeout(fetchData, 5000);
 }
-
+// 🔁 --- END UNIVERSAL SAVE HANDLER ---
 // Attach to existing Save Changes button
 document.getElementById("saveBtn").addEventListener("click", () => {
   const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
