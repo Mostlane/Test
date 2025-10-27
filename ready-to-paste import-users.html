@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import Users – Mostlane Portal</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 30px 15px;
+      color: #003366;
+    }
+    .container {
+      background: rgba(255,255,255,0.9);
+      max-width: 600px;
+      margin: auto;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    h1 { text-align: center; margin-top: 0; }
+    textarea {
+      width: 100%; min-height: 200px;
+      border-radius: 8px; border: 1px solid #ccc;
+      padding: 10px; font-size: 15px; resize: vertical;
+    }
+    input[type=file] { margin-top: 10px; }
+    button {
+      margin-top: 15px;
+      padding: 12px 20px;
+      background-color: #004a99;
+      color: white; border: none;
+      border-radius: 8px;
+      font-size: 17px;
+      width: 100%;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status {
+      margin-top: 12px; text-align: center;
+      font-weight: bold; color: #003366;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Import Users</h1>
+    <p>Paste your <strong>users.json</strong> content below or upload the file, then tap <strong>Import</strong>.</p>
+
+    <textarea id="jsonInput" placeholder='[ { "username": "jamie.line", "role": "Director", ... } ]'></textarea>
+    <input type="file" id="fileInput" accept=".json">
+    <button id="importBtn">Import Users</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/import-users';
+
+    const importBtn = document.getElementById('importBtn');
+    const jsonInput = document.getElementById('jsonInput');
+    const fileInput = document.getElementById('fileInput');
+    const statusDiv = document.getElementById('status');
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      jsonInput.value = text;
+    });
+
+    importBtn.addEventListener('click', async () => {
+      const text = jsonInput.value.trim();
+      if (!text) {
+        statusDiv.textContent = '⚠️ Please paste or upload JSON first.';
+        return;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        statusDiv.textContent = '❌ Invalid JSON format.';
+        return;
+      }
+
+      importBtn.disabled = true;
+      statusDiv.textContent = '⏳ Uploading to Cloudflare...';
+
+      try {
+        const res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const result = await res.json();
+
+        if (res.ok && result.ok) {
+          statusDiv.textContent = `✅ ${result.message || 'Users imported successfully!'}`;
+          setTimeout(() => {
+            window.location.href = 'https://mostlane-pos.jamie-def.workers.dev/get-users';
+          }, 2000);
+        } else {
+          statusDiv.textContent = `⚠️ Error: ${result.error || 'Upload failed.'}`;
+        }
+      } catch (err) {
+        statusDiv.textContent = '❌ Failed to reach server: ' + err.message;
+      } finally {
+        importBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
