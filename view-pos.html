@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>View Purchase Orders</title>
+  <title>My Purchase Orders</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -15,7 +15,7 @@
       color: #333;
     }
     .container {
-      max-width: 900px;
+      max-width: 950px;
       margin: auto;
       background: rgba(255,255,255,0.9);
       padding: 25px;
@@ -26,13 +26,17 @@
       text-align: center;
       color: #003366;
       margin-top: 0;
+      margin-bottom: 25px;
     }
-    .top-buttons {
+    .top-bar {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
+      align-items: center;
+      gap: 10px;
       margin-bottom: 20px;
     }
-    button, select {
+    button {
       background-color: rgba(0,74,153,0.9);
       color: #fff;
       border: none;
@@ -45,8 +49,9 @@
       background: #fff;
       color: #003366;
       border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 8px 10px;
       font-size: 15px;
-      padding: 8px;
     }
     .week-header {
       background: #003366;
@@ -60,21 +65,32 @@
       width: 100%;
       border-collapse: collapse;
       margin-top: 8px;
+      margin-bottom: 25px;
     }
     th, td {
       text-align: left;
-      padding: 8px 10px;
+      padding: 10px 8px;
       border-bottom: 1px solid #ddd;
     }
-    th { background-color: #f0f3f8; color: #003366; }
-    tr:hover { background-color: #f9f9f9; }
+    th {
+      background-color: #f0f3f8;
+      color: #003366;
+    }
+    tr:hover {
+      background-color: #f9f9f9;
+    }
+    .map-link {
+      color: #003366;
+      text-decoration: none;
+      font-size: 16px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>My Purchase Orders</h1>
 
-    <div class="top-buttons">
+    <div class="top-bar">
       <button onclick="window.location.href='main.html'">Main Menu</button>
       <div>
         <label for="supplierFilter"><strong>Filter by Supplier:</strong></label>
@@ -89,18 +105,27 @@
 
 <script>
 const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
-
 const dotToSpace = s => (s || '').replace(/\./g, ' ');
-const formatDateUK = d => {
-  const date = new Date(d);
-  return date.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-};
 
-// Group by week number (Mon–Sun)
+// 🗓️ Parse UK-style date safely
+function parseUKDate(dateStr) {
+  if (!dateStr) return null;
+  const [d, m, y] = dateStr.split('/');
+  if (!d || !m || !y) return null;
+  return new Date(`${y}-${m}-${d}T00:00:00`);
+}
+function formatDateDisplay(dateStr) {
+  const d = parseUKDate(dateStr);
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// Group by week starting Monday
 function getWeekStart(dateStr) {
-  const d = new Date(dateStr);
-  const day = d.getDay(); // 0=Sun
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+  const d = parseUKDate(dateStr);
+  if (!d || isNaN(d)) return 'Unknown';
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(d.setDate(diff));
   return monday.toISOString().split('T')[0];
 }
@@ -116,7 +141,7 @@ async function loadPOs() {
     const data = await res.json();
     const myPOs = data.filter(po => po.engineer === engineerName);
 
-    // Build supplier filter
+    // Populate supplier filter
     const suppliers = [...new Set(myPOs.map(p => p.supplierName))].sort();
     suppliers.forEach(name => {
       const opt = document.createElement('option');
@@ -149,12 +174,11 @@ function renderPOs(pos) {
   // Group by week
   const grouped = {};
   pos.forEach(p => {
-    const weekStart = getWeekStart(p.createdAt);
+    const weekStart = getWeekStart(p.date);
     if (!grouped[weekStart]) grouped[weekStart] = [];
     grouped[weekStart].push(p);
   });
 
-  // Sort weeks descending
   const sortedWeeks = Object.keys(grouped).sort((a,b)=>new Date(b)-new Date(a));
 
   sortedWeeks.forEach(weekStart => {
@@ -163,7 +187,10 @@ function renderPOs(pos) {
 
     const header = document.createElement('div');
     header.className = 'week-header';
-    header.textContent = `Week of ${formatDateUK(weekStart)} → ${formatDateUK(weekEnd)}`;
+    const weekText = weekStart === 'Unknown'
+      ? 'Unknown Date'
+      : `Week of ${formatDateDisplay(weekStart)} → ${formatDateDisplay(weekEnd.toISOString().split('T')[0])}`;
+    header.textContent = weekText;
     container.appendChild(header);
 
     const table = document.createElement('table');
@@ -173,9 +200,9 @@ function renderPOs(pos) {
           <th>Date</th>
           <th>PO Number</th>
           <th>Supplier</th>
-          <th>Site</th>
           <th>Description</th>
           <th>Type</th>
+          <th>Map</th>
         </tr>
       </thead>
       <tbody>
@@ -183,12 +210,14 @@ function renderPOs(pos) {
           .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
           .map(po => `
             <tr>
-              <td>${formatDateUK(po.date)}</td>
+              <td>${formatDateDisplay(po.date)}</td>
               <td>${po.poNumber}</td>
               <td>${po.supplierName}</td>
-              <td>${po.workType==='Vehicle Maintenance'?po.vehicleReg || 'Vehicle':po.siteNumber || ''}</td>
               <td>${po.description}</td>
               <td>${po.workType}</td>
+              <td>${po.latitude && po.longitude ? 
+                  `<a class="map-link" href="https://www.google.com/maps?q=${po.latitude},${po.longitude}" target="_blank">📍</a>` 
+                  : ''}</td>
             </tr>
           `).join('')}
       </tbody>`;
