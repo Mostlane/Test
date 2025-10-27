@@ -21,7 +21,7 @@
     *{box-sizing:border-box}
     body{
       margin:0;
-      font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+      font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;
       color:var(--text);
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
       min-height:100vh;
@@ -35,71 +35,45 @@
       overflow:hidden;
     }
     .topbar{
-      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-      padding:16px 18px; background:rgba(255,255,255,.75); border-bottom:1px solid #ddd;
+      display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+      padding:16px 18px;background:rgba(255,255,255,.75);border-bottom:1px solid #ddd;
     }
-    .title{font-weight:700; font-size:20px; color:var(--ml-blue); flex:1}
-    .btn{
-      background:var(--ml-blue); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer;
-    }
+    .title{font-weight:700;font-size:20px;color:var(--ml-blue);flex:1}
+    .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer;}
     .btn.alt{background:var(--ml-blue-2)}
-    .btn.ghost{background:transparent; color:var(--ml-blue); border:1px solid var(--ml-blue)}
-    .userpill{
-      background:#fff; border:1px solid #d7dbe3; padding:8px 12px; border-radius:999px; color:#374151; font-size:14px;
-    }
-    .tabs{
-      display:flex; gap:6px; overflow:auto; padding:10px 10px 0; background:rgba(255,255,255,.55);
-      border-bottom:1px solid #e5e7eb;
-    }
-    .tab{
-      padding:10px 14px; border:1px solid #cbd5e1; background:#fff; border-bottom:none; border-top-left-radius:10px; border-top-right-radius:10px; cursor:pointer; color:#334155;
-      white-space:nowrap;
-    }
-    .tab.active{ background:#f8fafc; color:var(--ml-blue); font-weight:700; }
-    .content{ padding:16px; background:#f8fafc; }
-    .grid{
-      display:grid; gap:12px;
-    }
-    @media(min-width:900px){ .grid.cols-2{ grid-template-columns: 1fr 1fr; } }
-    .card{
-      background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px;
-    }
-    .card h3{ margin:0 0 10px 0; color:var(--ml-blue) }
-    .toolbar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px }
-    input[type="text"], input[type="password"], input[type="number"], input[type="email"], select, textarea{
-      width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:15px; background:#fff;
-    }
-    table{
-      width:100%; border-collapse:separate; border-spacing:0; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff;
-    }
-    th, td{ padding:10px 12px; border-bottom:1px solid #eef2f7; font-size:14px; vertical-align:middle }
-    th{ background:#f1f5f9; text-align:left; color:#334155 }
-    tr:last-child td{ border-bottom:none }
-    .chip{ display:inline-block; padding:4px 8px; border-radius:999px; background:var(--chip); font-size:12px; color:#374151; }
-    .switch{ position:relative; width:44px; height:24px; background:#cbd5e1; border-radius:999px; cursor:pointer; transition:.2s }
-    .switch.on{ background:var(--ml-blue) }
-    .switch .knob{ position:absolute; top:2px; left:2px; width:20px; height:20px; background:#fff; border-radius:50%; transition:.2s }
-    .switch.on .knob{ left:22px }
-    .row-actions{ display:flex; gap:8px; flex-wrap:wrap }
-    .note{ color:var(--muted); font-size:13px }
-    .matrix{ overflow:auto; }
-    .matrix table{ min-width:720px }
-    .tag{ font-size:12px; background:#f3f4f6; padding:3px 8px; border-radius:999px; border:1px solid #e5e7eb }
-    .radio-group{ display:flex; gap:8px; flex-wrap:wrap }
-    .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:9999 }
-    .modal{ background:#fff; width:min(560px, calc(100% - 24px)); border-radius:12px; padding:16px; box-shadow:0 12px 40px rgba(0,0,0,.25) }
-    .modal h3{ margin:0 0 10px 0; color:var(--ml-blue) }
-    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
-    .toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 14px; border-radius:999px; opacity:0; pointer-events:none; transition:.25s; z-index:99999; font-size:14px }
-    .toast.show{ opacity:1 }
+    .btn.ghost{background:transparent;color:var(--ml-blue);border:1px solid var(--ml-blue)}
+    .userpill{background:#fff;border:1px solid #d7dbe3;padding:8px 12px;border-radius:999px;color:#374151;font-size:14px;}
+    .tabs{display:flex;gap:6px;overflow:auto;padding:10px 10px 0;background:rgba(255,255,255,.55);border-bottom:1px solid #e5e7eb;}
+    .tab{padding:10px 14px;border:1px solid #cbd5e1;background:#fff;border-bottom:none;border-top-left-radius:10px;border-top-right-radius:10px;cursor:pointer;color:#334155;white-space:nowrap;}
+    .tab.active{background:#f8fafc;color:var(--ml-blue);font-weight:700;}
+    .content{padding:16px;background:#f8fafc;}
+    .grid{display:grid;gap:12px;}
+    @media(min-width:900px){.grid.cols-2{grid-template-columns:1fr 1fr;}}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;}
+    .card h3{margin:0 0 10px 0;color:var(--ml-blue);}
+    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+    input,select,textarea{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;background:#fff;}
+    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;}
+    th,td{padding:10px 12px;border-bottom:1px solid #eef2f7;font-size:14px;vertical-align:middle;}
+    th{background:#f1f5f9;text-align:left;color:#334155;}
+    tr:last-child td{border-bottom:none;}
+    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:var(--chip);font-size:12px;color:#374151;}
+    .row-actions{display:flex;gap:8px;flex-wrap:wrap;}
+    .note{color:var(--muted);font-size:13px;}
+    .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999;}
+    .modal{background:#fff;width:min(560px,calc(100% - 24px));border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+    .modal h3{margin:0 0 10px 0;color:var(--ml-blue);}
+    .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
+    .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;pointer-events:none;transition:.25s;z-index:99999;font-size:14px;}
+    .toast.show{opacity:1;}
     @media(max-width:700px){
-      table.responsive{ display:block }
-      table.responsive thead{ display:none }
-      table.responsive tbody{ display:grid; gap:10px }
-      table.responsive tr{ display:block; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff }
-      table.responsive td{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid #eef2f7 }
-      table.responsive td::before{ content:attr(data-label); font-weight:600; color:#475569 }
-      table.responsive tr td:last-child{ border-bottom:none }
+      table.responsive{display:block;}
+      table.responsive thead{display:none;}
+      table.responsive tbody{display:grid;gap:10px;}
+      table.responsive tr{display:block;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;}
+      table.responsive td{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eef2f7;}
+      table.responsive td::before{content:attr(data-label);font-weight:600;color:#475569;}
+      table.responsive tr td:last-child{border-bottom:none;}
     }
   </style>
 </head>
@@ -129,16 +103,49 @@
         </div>
         <div class="card">
           <h3>All Users</h3>
-          <div class="note">Tap Active to toggle; Edit to change details; Delete to soft-delete (restorable).</div>
+          <div class="note">Tap Activate/Deactivate to toggle; Edit to change details.</div>
           <div id="usersTableWrap"></div>
         </div>
       </section>
 
-      <!-- other tabs unchanged (Pages, Sites, Vehicles, System) -->
-      <section id="panel-pages" style="display:none"><div class="card"><h3>Pages</h3><div class="note">Page permissions coming next build.</div></div></section>
-      <section id="panel-sites" style="display:none"><div class="card"><h3>Sites</h3><div id="sitesTableWrap" class="note">Will load per JSON type.</div></div></section>
-      <section id="panel-vehicles" style="display:none"><div class="card"><h3>Vehicles</h3><div id="vehiclesWrap" class="note">Linked from users’ vehicle assignments.</div></div></section>
-      <section id="panel-system" style="display:none"><div class="card"><h3>System Config</h3><div class="note">Central portal configuration options go here.</div></div></section>
+      <!-- PAGES -->
+      <section id="panel-pages" style="display:none">
+        <div class="card"><h3>Pages</h3><div class="note">Page permissions management coming soon.</div></div>
+      </section>
+
+      <!-- SITES -->
+      <section id="panel-sites" style="display:none">
+        <div class="card"><h3>Sites</h3><div id="sitesTableWrap">No sites loaded</div></div>
+      </section>
+
+      <!-- VEHICLES -->
+      <section id="panel-vehicles" style="display:none">
+        <div class="card"><h3>Vehicles</h3><div id="vehiclesWrap">Linked vehicles from user JSON</div></div>
+      </section>
+
+      <!-- SYSTEM -->
+      <section id="panel-system" style="display:none">
+        <div class="card"><h3>System Config</h3><div class="note">Portal-wide configuration coming soon.</div></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- USER MODAL -->
+  <div class="backdrop" id="userModal">
+    <div class="modal">
+      <h3 id="userModalTitle">Add User</h3>
+      <div class="grid cols-2">
+        <label>Username<input type="text" id="uUsername" placeholder="jamie.line"></label>
+        <label>First Name<input type="text" id="uFirstName"></label>
+        <label>Last Name<input type="text" id="uLastName"></label>
+        <label>Email<input type="email" id="uEmail"></label>
+        <label>Employment Type<input type="text" id="uEmployment"></label>
+        <label>Status<select id="uStatus"><option>Active</option><option>Not Active</option></select></label>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="userCancel">Cancel</button>
+        <button class="btn" id="userSave">Save</button>
+      </div>
     </div>
   </div>
 
@@ -150,13 +157,29 @@
     const $$=s=>document.querySelectorAll(s);
     const toast=msg=>{const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);};
 
-    let allUsers=[],showDeleted=false;
+    let allUsers=[],showDeleted=false,currentTab='users';
 
     document.addEventListener('DOMContentLoaded',async()=>{
       const u=sessionStorage.getItem('mostlaneUser')||'';
       $('#whoami').textContent='Signed in: '+(u||'Unknown');
+      bindTabs();
+      bindUserModal();
       await loadUsers();
     });
+
+    function bindTabs(){
+      $$('#tabs .tab').forEach(tab=>{
+        tab.addEventListener('click',()=>{
+          $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
+          tab.classList.add('active');
+          const name=tab.dataset.tab;
+          ['users','pages','sites','vehicles','system'].forEach(p=>{
+            $('#panel-'+p).style.display=(p===name)?'block':'none';
+          });
+          currentTab=name;
+        });
+      });
+    }
 
     async function loadUsers(){
       const res=await fetch(WORKER+'/get-users',{cache:'no-store'});
@@ -170,7 +193,8 @@
         .filter(u=>showDeleted?true:!u.deleted)
         .filter(u=>{
           if(!q)return true;
-          return [u.Username,u.FirstName,u.LastName,u.Email,u.EmploymentType].filter(Boolean).some(x=>x.toLowerCase().includes(q));
+          return [u.Username,u.FirstName,u.LastName,u.Email,u.EmploymentType]
+            .filter(Boolean).some(x=>x.toLowerCase().includes(q));
         });
 
       let html=`<table class="responsive"><thead><tr>
@@ -206,13 +230,48 @@
       $$('#usersTableWrap [data-act]').forEach(b=>{
         b.addEventListener('click',()=>{
           const act=b.dataset.act,uname=b.dataset.username;
+          if(act==='edit')openUserModal(uname);
           toast(`Clicked ${act} on ${uname}`);
         });
       });
     }
 
-    $('#userSearch').addEventListener('input',renderUsers);
-    $('#toggleDeleted').addEventListener('change',e=>{showDeleted=e.target.checked;renderUsers();});
+    function bindUserModal(){
+      $('#btnAddUser').addEventListener('click',()=>openUserModal());
+      $('#userCancel').addEventListener('click',()=>$('#userModal').style.display='none');
+      $('#userModal').addEventListener('click',e=>{if(e.target.id==='userModal')$('#userModal').style.display='none';});
+      $('#userSave').addEventListener('click',saveUserFromModal);
+      $('#userSearch').addEventListener('input',renderUsers);
+      $('#toggleDeleted').addEventListener('change',e=>{showDeleted=e.target.checked;renderUsers();});
+    }
+
+    function openUserModal(username){
+      const u=(allUsers.find(x=>x.Username===username))||{};
+      $('#userModalTitle').textContent=username?'Edit User':'Add User';
+      $('#uUsername').value=u.Username||'';
+      $('#uFirstName').value=u.FirstName||'';
+      $('#uLastName').value=u.LastName||'';
+      $('#uEmail').value=u.Email||'';
+      $('#uEmployment').value=u.EmploymentType||'';
+      $('#uStatus').value=u.Status||'Active';
+      $('#userModal').style.display='flex';
+    }
+
+    async function saveUserFromModal(){
+      const body={
+        Username:$('#uUsername').value.trim(),
+        FirstName:$('#uFirstName').value.trim(),
+        LastName:$('#uLastName').value.trim(),
+        Email:$('#uEmail').value.trim(),
+        EmploymentType:$('#uEmployment').value.trim(),
+        Status:$('#uStatus').value.trim()
+      };
+      if(!body.Username){alert('Username required');return;}
+      await fetch(WORKER+'/update-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      $('#userModal').style.display='none';
+      await loadUsers();
+      toast('User saved');
+    }
   </script>
 </body>
 </html>
