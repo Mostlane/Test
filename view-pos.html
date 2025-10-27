@@ -91,32 +91,13 @@
       font-size: 18px;
     }
     @media (max-width: 700px) {
-      body {
-        padding: 10px;
-      }
-      .container {
-        padding: 15px;
-        border-radius: 10px;
-      }
-      h1 {
-        font-size: 20px;
-      }
-      th, td {
-        font-size: 13px;
-        padding: 8px 6px;
-      }
-      .top-bar {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 12px;
-      }
-      button, select {
-        width: 100%;
-      }
-      .week-header {
-        font-size: 14px;
-        text-align: center;
-      }
+      body { padding: 10px; }
+      .container { padding: 15px; border-radius: 10px; }
+      h1 { font-size: 20px; }
+      th, td { font-size: 13px; padding: 8px 6px; }
+      .top-bar { flex-direction: column; align-items: stretch; gap: 12px; }
+      button, select { width: 100%; }
+      .week-header { font-size: 14px; text-align: center; }
     }
   </style>
 </head>
@@ -126,10 +107,23 @@
 
     <div class="top-bar">
       <button onclick="window.location.href='main.html'">Main Menu</button>
+
       <div>
         <label for="supplierFilter"><strong>Filter by Supplier:</strong></label>
         <select id="supplierFilter">
           <option value="">All Suppliers</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="dateRange"><strong>Show:</strong></label>
+        <select id="dateRange">
+          <option value="7">Last 7 Days</option>
+          <option value="14">Last 14 Days</option>
+          <option value="30" selected>Last 30 Days</option>
+          <option value="60">Last 60 Days</option>
+          <option value="90">Last 90 Days</option>
+          <option value="all">All</option>
         </select>
       </div>
     </div>
@@ -141,7 +135,7 @@
   const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
 
-  // 🗓️ Parse and format UK-style date
+  // 🗓 Parse UK date (DD/MM/YYYY)
   function parseUKDate(dateStr) {
     if (!dateStr) return null;
     const [d, m, y] = dateStr.split('/');
@@ -153,8 +147,6 @@
     if (!d || isNaN(d)) return '';
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
-
-  // Group by week starting Monday
   function getWeekStart(dateStr) {
     const d = parseUKDate(dateStr);
     if (!d || isNaN(d)) return 'Unknown';
@@ -164,9 +156,22 @@
     return monday.toISOString().split('T')[0];
   }
 
+  // 🔎 Date filter
+  function filterByDate(pos, range) {
+    if (range === 'all') return pos;
+    const days = parseInt(range);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return pos.filter(p => {
+      const d = parseUKDate(p.date);
+      return d && d >= cutoff;
+    });
+  }
+
   async function loadPOs() {
     const container = document.getElementById('poContainer');
     const supplierFilter = document.getElementById('supplierFilter');
+    const dateRange = document.getElementById('dateRange');
     const username = sessionStorage.getItem('mostlaneUser') || '';
     const engineerName = dotToSpace(username);
 
@@ -183,11 +188,23 @@
         supplierFilter.appendChild(opt);
       });
 
-      renderPOs(myPOs);
+      // Default filter render
+      const filtered = filterByDate(myPOs, dateRange.value);
+      renderPOs(filtered);
 
       supplierFilter.addEventListener('change', () => {
-        const val = supplierFilter.value;
-        const filtered = val ? myPOs.filter(p => p.supplierName === val) : myPOs;
+        const supplierVal = supplierFilter.value;
+        const dateVal = dateRange.value;
+        let filtered = filterByDate(myPOs, dateVal);
+        if (supplierVal) filtered = filtered.filter(p => p.supplierName === supplierVal);
+        renderPOs(filtered);
+      });
+
+      dateRange.addEventListener('change', () => {
+        const supplierVal = supplierFilter.value;
+        const dateVal = dateRange.value;
+        let filtered = filterByDate(myPOs, dateVal);
+        if (supplierVal) filtered = filtered.filter(p => p.supplierName === supplierVal);
         renderPOs(filtered);
       });
 
@@ -205,7 +222,6 @@
       return;
     }
 
-    // Group by week
     const grouped = {};
     pos.forEach(p => {
       const weekStart = getWeekStart(p.date);
