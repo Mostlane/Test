@@ -180,7 +180,187 @@
   // ✅ LIVE Mostlane Cloudflare Worker endpoint
   const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
   const API_KEY = ''; // optional security key if you enable it in the Worker
-  ...
+
+  const byId = id => document.getElementById(id);
+  const fetchJSON = url => fetch(url + '?v=' + Date.now()).then(r => r.json());
+  const dotToSpace = s => (s || '').replace(/\./g, ' ');
+  const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  const norm = v => (v||'').toString().toLowerCase().trim();
+
+  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
+
+  function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
+    const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
+    let n = parseInt(localStorage.getItem(key) || "0",10)+1;
+    localStorage.setItem(key,n);
+    return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
+  }
+
+  async function populateSuppliers(){
+    try {
+      allSuppliers = await fetchJSON(SUPPLIERS_URL);
+      const sel = byId('supplier');
+      sel.innerHTML='';
+      allSuppliers.forEach(s=>{
+        const opt=document.createElement('option');
+        opt.value=s.supplierNumber;
+        opt.textContent=s.supplierName;
+        sel.appendChild(opt);
+      });
+    } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
+  }
+
+  async function populateSites(){
+    try {
+      allSites = await fetchJSON(SITES_URL);
+      filterSites();
+    } catch { byId('site').innerHTML='<option>(Unable to load)</option>'; }
+  }
+
+  function filterSites(){
+    const sel=byId('site');
+    sel.innerHTML='';
+    const type=byId('siteType').value.trim();
+    const filtered = type ? allSites.filter(s => norm(s.siteType) === norm(type)) : allSites;
+    filtered.forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s.jobNumber||'';
+      opt.textContent=[s.siteName,s.jobNumber].filter(Boolean).join(' — ');
+      opt.dataset.siteName=s.siteName||'';
+      sel.appendChild(opt);
+    });
+  }
+
+  async function populateVehicles(){
+    try {
+      const vehicles = await fetchJSON(VEHICLES_URL);
+      const sel=byId('vehicleReg'); sel.innerHTML='';
+      (vehicles||[]).forEach(v=>{
+        const opt=document.createElement('option');
+        const reg=(v.reg||v.registration||'').toString().replace(/\s+/g,'');
+        opt.value=reg; opt.textContent=v.reg||v.registration||reg;
+        sel.appendChild(opt);
+      });
+    } catch{}
+  }
+
+  function showModal(po){ byId('poCodeText').textContent=po; byId('modalBackdrop').style.display='flex'; }
+  function hideModal(){ byId('modalBackdrop').style.display='none'; }
+
+  async function init(){
+    const username=sessionStorage.getItem('mostlaneUser')||'';
+    engineerName=username?dotToSpace(username):'Unknown';
+    byId('engineer').value=engineerName;
+    byId('date').value=formatDateUK();
+
+    try{
+      const users=await fetchJSON(USERS_URL);
+      const rec=(users||[]).find(u=>u.Username===username||u.username===username);
+      const engNum=rec?.EngineerNumber||rec?.engineerNumber||'';
+      const empType=(rec?.EmploymentType||rec?.employmentType||'Employed').toLowerCase();
+      const prefix=empType.includes('self')?'SE':'E';
+      engineerCode=prefix+String(engNum||'').trim();
+    }catch{engineerCode='E0';}
+
+    await populateSites();
+    await populateSuppliers();
+    await populateVehicles();
+
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        pos=>{
+          geo.lat=pos.coords.latitude; geo.lon=pos.coords.longitude;
+          byId('geoStatus').textContent=`📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
+        },
+        ()=>{byId('geoStatus').textContent='⚠️ Location permission denied. Allow access.';},
+        {enableHighAccuracy:true,timeout:10000}
+      );
+    } else byId('geoStatus').textContent='❌ Geolocation not supported.';
+
+    byId('workType').addEventListener('change', e=>{
+      const val=e.target.value;
+      const isReactive=val==='Reactive';
+      const isVehicle=val==='Vehicle Maintenance';
+      byId('incidentRow').style.display=isReactive?'':'none';
+      byId('siteTypeRow').style.display=isVehicle?'none':'';
+      byId('siteRow').style.display=isVehicle?'none':'';
+      byId('vehicleRow').classList.toggle('hidden',!isVehicle);
+    });
+
+    byId('siteType').addEventListener('change', filterSites);
+
+    byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
+    byId('closeBtn').onclick=hideModal;
+    byId('newBtn').onclick=()=>{hideModal();byId('poForm').reset();byId('engineer').value=engineerName;byId('date').value=formatDateUK();};
+
+    byId('personalBtn').onclick=()=>{
+      const eng=encodeURIComponent(byId('engineer').value||'');
+      const date=encodeURIComponent(byId('date').value||'');
+      window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`,'_blank');
+    };
+
+    byId('poForm').addEventListener('submit',onSubmit);
+  }
+
+  async function onSubmit(e){
+    e.preventDefault();
+    const submitBtn=byId('submitBtn'); submitBtn.disabled=true;
+    const workType=byId('workType').value;
+    const isVehicle=workType==='Vehicle Maintenance';
+    const engineerVal=byId('engineer').value.trim();
+    const dateVal=byId('date').value.trim();
+    const siteNumber=byId('site').value;
+    const vehicleReg=byId('vehicleReg').value;
+    const supplierNumber=byId('supplier').value;
+    const supplierName=byId('supplier').selectedOptions[0]?.textContent||'';
+    const descVal=byId('desc').value.trim();
+    const incidentVal=byId('incident').value.trim();
+
+    if(!engineerVal||!dateVal||!descVal||!supplierNumber){alert('All required fields must be completed.');submitBtn.disabled=false;return;}
+    if(geo.lat===null||geo.lon===null){alert('Location required. Enable location.');submitBtn.disabled=false;return;}
+
+    const typeLetter=workType==='Reactive'?'R':workType==='Planned'?'P':'V';
+    const siteSegment=isVehicle?(vehicleReg||'').replace(/\s+/g,''):siteNumber;
+    const poCode=nextPO(engineerCode,supplierNumber,siteSegment,typeLetter);
+    showModal(poCode);
+
+    const data = {
+      poNumber: poCode,
+      engineer: engineerVal,
+      engineerCode,
+      date: dateVal,
+      workType,
+      supplierName,
+      supplierNumber,
+      description: descVal,
+      latitude: geo.lat,
+      longitude: geo.lon,
+      incidentNumber: incidentVal,
+      notes: descVal,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      const res = await fetch(CLOUDFLARE_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(API_KEY ? { 'x-api-key': API_KEY } : {})
+        },
+        body: JSON.stringify(data),
+        cache: 'no-store'
+      });
+      const result = await res.json();
+      if(res.ok) alert(`✅ Purchase Order ${poCode} submitted successfully.`);
+      else alert(`⚠️ Failed: ${result?.error || 'Unknown error'}`);
+    } catch (err) {
+      alert('⚠️ Failed to reach server: ' + err.message);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded',init);
 </script>
 </body>
 </html>
