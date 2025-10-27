@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>View Purchase Orders</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+    .container {
+      max-width: 900px;
+      margin: auto;
+      background: rgba(255,255,255,0.9);
+      padding: 25px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    h1 {
+      text-align: center;
+      color: #003366;
+      margin-top: 0;
+    }
+    .top-buttons {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    button, select {
+      background-color: rgba(0,74,153,0.9);
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    select {
+      background: #fff;
+      color: #003366;
+      border: 1px solid #ccc;
+      font-size: 15px;
+      padding: 8px;
+    }
+    .week-header {
+      background: #003366;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 25px;
+      font-weight: bold;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    th { background-color: #f0f3f8; color: #003366; }
+    tr:hover { background-color: #f9f9f9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>My Purchase Orders</h1>
+
+    <div class="top-buttons">
+      <button onclick="window.location.href='main.html'">Main Menu</button>
+      <div>
+        <label for="supplierFilter"><strong>Filter by Supplier:</strong></label>
+        <select id="supplierFilter">
+          <option value="">All Suppliers</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="poContainer">Loading...</div>
+  </div>
+
+<script>
+const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
+
+const dotToSpace = s => (s || '').replace(/\./g, ' ');
+const formatDateUK = d => {
+  const date = new Date(d);
+  return date.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// Group by week number (Mon–Sun)
+function getWeekStart(dateStr) {
+  const d = new Date(dateStr);
+  const day = d.getDay(); // 0=Sun
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split('T')[0];
+}
+
+async function loadPOs() {
+  const container = document.getElementById('poContainer');
+  const supplierFilter = document.getElementById('supplierFilter');
+  const username = sessionStorage.getItem('mostlaneUser') || '';
+  const engineerName = dotToSpace(username);
+
+  try {
+    const res = await fetch(CLOUDFLARE_ENDPOINT, { cache: 'no-store' });
+    const data = await res.json();
+    const myPOs = data.filter(po => po.engineer === engineerName);
+
+    // Build supplier filter
+    const suppliers = [...new Set(myPOs.map(p => p.supplierName))].sort();
+    suppliers.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      supplierFilter.appendChild(opt);
+    });
+
+    renderPOs(myPOs);
+
+    supplierFilter.addEventListener('change', () => {
+      const val = supplierFilter.value;
+      const filtered = val ? myPOs.filter(p => p.supplierName === val) : myPOs;
+      renderPOs(filtered);
+    });
+
+  } catch (err) {
+    container.textContent = '⚠️ Failed to load POs: ' + err.message;
+  }
+}
+
+function renderPOs(pos) {
+  const container = document.getElementById('poContainer');
+  container.innerHTML = '';
+
+  if (!pos.length) {
+    container.textContent = 'No Purchase Orders found.';
+    return;
+  }
+
+  // Group by week
+  const grouped = {};
+  pos.forEach(p => {
+    const weekStart = getWeekStart(p.createdAt);
+    if (!grouped[weekStart]) grouped[weekStart] = [];
+    grouped[weekStart].push(p);
+  });
+
+  // Sort weeks descending
+  const sortedWeeks = Object.keys(grouped).sort((a,b)=>new Date(b)-new Date(a));
+
+  sortedWeeks.forEach(weekStart => {
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+
+    const header = document.createElement('div');
+    header.className = 'week-header';
+    header.textContent = `Week of ${formatDateUK(weekStart)} → ${formatDateUK(weekEnd)}`;
+    container.appendChild(header);
+
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>PO Number</th>
+          <th>Supplier</th>
+          <th>Site</th>
+          <th>Description</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${grouped[weekStart]
+          .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
+          .map(po => `
+            <tr>
+              <td>${formatDateUK(po.date)}</td>
+              <td>${po.poNumber}</td>
+              <td>${po.supplierName}</td>
+              <td>${po.workType==='Vehicle Maintenance'?po.vehicleReg || 'Vehicle':po.siteNumber || ''}</td>
+              <td>${po.description}</td>
+              <td>${po.workType}</td>
+            </tr>
+          `).join('')}
+      </tbody>`;
+    container.appendChild(table);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', loadPOs);
+</script>
+</body>
+</html>
