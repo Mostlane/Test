@@ -1,14 +1,3 @@
-Perfect ✅ — here’s the fully expanded, commented, production-ready settings.html.
-This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) and adds:
-	•	💬 Clear section comments
-	•	💾 Password hashing + all field editing for Users
-	•	📜 Scrollable modal fix (mobile safe)
-	•	🧱 All prior portal styling intact
-	•	🧩 Sites tab “bullet-proof” loader (handles any JSON field names)
-
-⸻
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,7 +5,6 @@ This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) 
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>⚙️ Settings – Mostlane Portal</title>
-
   <style>
     :root{
       --ml-blue:#003366;
@@ -24,146 +12,110 @@ This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) 
       --panel-bg:rgba(255,255,255,0.6);
       --text:#1f2937;
       --muted:#6b7280;
+      --ok:#0f9d58;
+      --warn:#d97706;
+      --err:#d32f2f;
       --chip:#eef2f7;
       --radius:12px;
     }
-
     *{box-sizing:border-box}
-
     body{
       margin:0;
-      font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+      font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
       color:var(--text);
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
       min-height:100vh;
     }
-
-    /* --- Layout wrappers --- */
     .wrap{
-      max-width:1100px;
+      max-width:1200px;
       margin:20px auto 60px;
       background:var(--panel-bg);
       border-radius:var(--radius);
       box-shadow:0 6px 24px rgba(0,0,0,.15);
       overflow:hidden;
     }
-
     .topbar{
-      display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-      padding:16px 18px;background:rgba(255,255,255,.75);
-      border-bottom:1px solid #ddd;
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:16px 18px; background:rgba(255,255,255,.75); border-bottom:1px solid #ddd;
     }
-
-    .title{font-weight:700;font-size:20px;color:var(--ml-blue);flex:1}
-
+    .title{font-weight:700; font-size:20px; color:var(--ml-blue); flex:1}
     .btn{
-      background:var(--ml-blue);
-      color:#fff;border:none;border-radius:8px;
-      padding:10px 14px;font-weight:600;cursor:pointer;
+      background:var(--ml-blue); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer;
     }
     .btn.alt{background:var(--ml-blue-2)}
-    .btn.ghost{background:transparent;color:var(--ml-blue);border:1px solid var(--ml-blue)}
-
+    .btn.ghost{background:transparent; color:var(--ml-blue); border:1px solid var(--ml-blue)}
+    .btn.small{padding:6px 10px; font-size:13px}
     .userpill{
-      background:#fff;border:1px solid #d7dbe3;
-      padding:8px 12px;border-radius:999px;color:#374151;font-size:14px;
+      background:#fff; border:1px solid #d7dbe3; padding:8px 12px; border-radius:999px; color:#374151; font-size:14px;
     }
-
-    /* --- Tabs --- */
     .tabs{
-      display:flex;gap:6px;overflow:auto;padding:10px 10px 0;
-      background:rgba(255,255,255,.55);border-bottom:1px solid #e5e7eb;
+      display:flex; gap:6px; overflow:auto; padding:10px 10px 0; background:rgba(255,255,255,.55);
+      border-bottom:1px solid #e5e7eb;
     }
     .tab{
-      padding:10px 14px;border:1px solid #cbd5e1;background:#fff;
-      border-bottom:none;border-top-left-radius:10px;border-top-right-radius:10px;
-      cursor:pointer;color:#334155;white-space:nowrap;
+      padding:10px 14px; border:1px solid #cbd5e1; background:#fff; border-bottom:none; border-top-left-radius:10px; border-top-right-radius:10px; cursor:pointer; color:#334155;
+      white-space:nowrap;
     }
-    .tab.active{background:#f8fafc;color:var(--ml-blue);font-weight:700;}
-
-    .content{padding:16px;background:#f8fafc;}
-
-    .grid{display:grid;gap:12px;}
-    @media(min-width:900px){.grid.cols-2{grid-template-columns:1fr 1fr;}}
-
-    .card{
-      background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;
+    .tab.active{ background:#f8fafc; color:var(--ml-blue); font-weight:700; }
+    .content{ padding:16px; background:#f8fafc; }
+    .grid{ display:grid; gap:12px; }
+    @media(min-width:900px){ .grid.cols-2{ grid-template-columns: 1fr 1fr; } .grid.cols-3{ grid-template-columns: 1fr 1fr 1fr; } }
+    .card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; }
+    .card h3{ margin:0 0 10px 0; color:var(--ml-blue) }
+    .toolbar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px }
+    input[type="text"], input[type="password"], input[type="number"], input[type="email"], select, textarea{
+      width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:15px; background:#fff;
     }
-    .card h3{margin:0 0 10px 0;color:var(--ml-blue);}
-    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
-    input,select,textarea{
-      width:100%;padding:10px 12px;border:1px solid #cbd5e1;
-      border-radius:8px;font-size:15px;background:#fff;
-    }
-
-    /* --- Tables --- */
     table{
-      width:100%;border-collapse:separate;border-spacing:0;
-      border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;
+      width:100%; border-collapse:separate; border-spacing:0; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff;
     }
-    th,td{padding:10px 12px;border-bottom:1px solid #eef2f7;font-size:14px;vertical-align:middle;}
-    th{background:#f1f5f9;text-align:left;color:#334155;}
-    tr:last-child td{border-bottom:none;}
-    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:var(--chip);font-size:12px;color:#374151;}
-    .row-actions{display:flex;gap:8px;flex-wrap:wrap;}
-    .note{color:var(--muted);font-size:13px;}
-    .matrix{overflow:auto;}
-    .matrix table{min-width:720px;}
-    .radio-group{display:flex;gap:8px;flex-wrap:wrap;}
-
-    /* --- Modal (scrollable) --- */
-    .backdrop{
-      position:fixed;inset:0;background:rgba(0,0,0,.45);
-      display:none;align-items:center;justify-content:center;z-index:9999;
-      overflow:auto;
-    }
+    th, td{ padding:10px 12px; border-bottom:1px solid #eef2f7; font-size:14px; vertical-align:middle }
+    th{ background:#f1f5f9; text-align:left; color:#334155 }
+    tr:last-child td{ border-bottom:none }
+    .chip{ display:inline-block; padding:4px 8px; border-radius:999px; background:var(--chip); font-size:12px; color:#374151; }
+    .row-actions{ display:flex; gap:8px; flex-wrap:wrap }
+    .note{ color:var(--muted); font-size:13px }
+    .matrix{ overflow:auto; }
+    .matrix table{ min-width:720px }
+    .tag{ font-size:12px; background:#f3f4f6; padding:3px 8px; border-radius:999px; border:1px solid #e5e7eb }
+    .radio-group{ display:flex; gap:8px; flex-wrap:wrap }
+    /* Modal */
+    .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:9999; padding:10px }
     .modal{
-      background:#fff;width:min(560px,calc(100% - 24px));
-      border-radius:12px;padding:16px;
-      box-shadow:0 12px 40px rgba(0,0,0,.25);
-      max-height:90vh;overflow-y:auto;
+      background:#fff; width:min(760px, 100%); border-radius:12px; padding:16px;
+      box-shadow:0 12px 40px rgba(0,0,0,.25); max-height:90vh; display:flex; flex-direction:column;
     }
-    .modal h3{margin:0 0 10px 0;color:var(--ml-blue);}
-    .modal .actions{
-      display:flex;gap:10px;justify-content:flex-end;margin-top:12px;
-      position:sticky;bottom:0;background:#fff;padding-top:10px;
+    .modal h3{ margin:0 0 10px 0; color:var(--ml-blue) }
+    .modal .body{ overflow:auto; padding-right:4px; }
+    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-shrink:0 }
+    /* Toast */
+    .toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 14px; border-radius:999px; opacity:0; pointer-events:none; transition:.25s; z-index:99999; font-size:14px }
+    .toast.show{ opacity:1 }
+    /* Mobile tables -> cards (Users & Sites) */
+    @media(max-width:760px){
+      table.responsive{ display:block }
+      table.responsive thead{ display:none }
+      table.responsive tbody{ display:grid; gap:10px }
+      table.responsive tr{ display:block; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff }
+      table.responsive td{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid #eef2f7 }
+      table.responsive td::before{ content:attr(data-label); font-weight:600; color:#475569 }
+      table.responsive tr td:last-child{ border-bottom:none }
     }
-
-    /* --- Toast --- */
-    .toast{
-      position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
-      background:#111827;color:#fff;padding:10px 14px;border-radius:999px;
-      opacity:0;pointer-events:none;transition:.25s;z-index:99999;font-size:14px;
-    }
-    .toast.show{opacity:1;}
-
-    /* --- Mobile table cards --- */
-    @media(max-width:700px){
-      table.responsive{display:block;}
-      table.responsive thead{display:none;}
-      table.responsive tbody{display:grid;gap:10px;}
-      table.responsive tr{display:block;border:1px solid #e5e7eb;
-        border-radius:10px;overflow:hidden;background:#fff;}
-      table.responsive td{display:flex;justify-content:space-between;
-        gap:10px;border-bottom:1px solid #eef2f7;}
-      table.responsive td::before{
-        content:attr(data-label);font-weight:600;color:#475569;
-      }
-      table.responsive tr td:last-child{border-bottom:none;}
-    }
+    .error{ color:var(--err); font-weight:600; }
+    .success{ color:var(--ok); font-weight:600; }
+    .muted{ color:#6b7280; }
+    .pill{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #e5e7eb; background:#f9fafb; font-size:12px; }
+    .kvs{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; background:#f8fafc; padding:6px 8px; border-radius:8px; border:1px solid #e5e7eb; }
   </style>
 </head>
-
 <body>
   <div class="wrap">
-    <!-- ======= Top bar ======= -->
     <div class="topbar">
       <div class="title">⚙️ Settings</div>
       <a class="btn ghost" href="main.html">Main Menu</a>
       <div class="userpill" id="whoami">Signed in: …</div>
     </div>
 
-    <!-- ======= Tabs ======= -->
     <div class="tabs" id="tabs">
       <div class="tab active" data-tab="users">👥 Users</div>
       <div class="tab" data-tab="pages">🌐 Pages</div>
@@ -171,39 +123,49 @@ This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) 
       <div class="tab" data-tab="system">⚙️ System</div>
     </div>
 
-    <!-- ======= Content ======= -->
     <div class="content">
-      <!-- USERS TAB -->
+      <!-- USERS -->
       <section id="panel-users">
         <div class="toolbar">
-          <input type="text" id="userSearch" placeholder="Search users… (name, username, role)"/>
+          <input type="text" id="userSearch" placeholder="Search users… (name, username, role, vehicle)"/>
           <button class="btn" id="btnAddUser">+ Add User</button>
+          <label class="chip"><input type="checkbox" id="toggleDeleted" /> Show deleted</label>
         </div>
         <div class="card">
           <h3>All Users</h3>
+          <div class="note">Tap Edit to change any field. “New Password” will be SHA-256 hashed into <code>HashedPassword</code>.</div>
           <div id="usersTableWrap"></div>
         </div>
       </section>
 
-      <!-- PAGES TAB -->
+      <!-- PAGES -->
       <section id="panel-pages" style="display:none">
+        <div class="toolbar">
+          <button class="btn alt" id="btnReloadPages">Reload Pages</button>
+          <span class="chip" id="pagesCount">0 pages</span>
+        </div>
         <div class="card">
           <h3>Page Access Matrix</h3>
-          <div class="matrix" id="pagesMatrix"></div>
+          <div class="note">Tick which pages each user can access. Click “Save” to persist to each user’s <code>permissions</code> object.</div>
+          <div class="matrix" id="pagesMatrix">Loading…</div>
+          <div style="margin-top:10px; display:flex; gap:10px; justify-content:flex-end">
+            <button class="btn" id="btnSavePermissions">Save Changes</button>
+          </div>
         </div>
       </section>
 
-      <!-- SITES TAB -->
+      <!-- SITES -->
       <section id="panel-sites" style="display:none">
         <div class="toolbar">
           <div class="radio-group">
-            <label><input type="radio" name="siteType" value="retail" checked> Retail</label>
-            <label><input type="radio" name="siteType" value="els"> ELS</label>
-            <label><input type="radio" name="siteType" value="els_private"> ELS Private</label>
-            <label><input type="radio" name="siteType" value="cobra"> COBRA</label>
-            <label><input type="radio" name="siteType" value="wenzels"> Wenzel’s</label>
-            <label><input type="radio" name="siteType" value="projects"> Projects</label>
+            <label class="tag"><input type="radio" name="siteType" value="retail" checked> Retail</label>
+            <label class="tag"><input type="radio" name="siteType" value="els"> ELS</label>
+            <label class="tag"><input type="radio" name="siteType" value="els_private"> ELS Private</label>
+            <label class="tag"><input type="radio" name="siteType" value="cobra"> Cobra</label>
+            <label class="tag"><input type="radio" name="siteType" value="wenzels"> Wenzel’s</label>
+            <label class="tag"><input type="radio" name="siteType" value="projects"> Projects</label>
           </div>
+          <div style="flex:1"></div>
           <input type="text" id="siteSearch" placeholder="Search sites… (name, code, postcode)"/>
           <button class="btn" id="btnAddSite">+ Add Site</button>
         </div>
@@ -213,18 +175,62 @@ This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) 
         </div>
       </section>
 
-      <!-- SYSTEM TAB -->
+      <!-- SYSTEM -->
       <section id="panel-system" style="display:none">
-        <div class="card"><h3>System Settings</h3><p>Future global settings go here.</p></div>
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>Global Config</h3>
+            <label>SharePoint Root Path
+              <input type="text" id="cfgSharePoint" placeholder="Mostlane Shared Documents > …"/>
+            </label>
+            <label>HQ Postcode
+              <input type="text" id="cfgPostcode" placeholder="PO15 5RQ"/>
+            </label>
+            <label>Google Maps API Key
+              <input type="password" id="cfgMapsKey" placeholder="••••••••"/>
+            </label>
+            <div class="grid cols-2">
+              <label>VAT Rate %
+                <input type="number" id="cfgVAT" step="0.01" placeholder="20"/>
+              </label>
+              <label>Mileage Rate (£/mile)
+                <input type="number" id="cfgMileage" step="0.01" placeholder="0.25"/>
+              </label>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:10px; justify-content:flex-end">
+              <button class="btn" id="btnSaveConfig">Save Config</button>
+            </div>
+            <div class="note" id="cfgNote">If your Worker doesn’t yet have <code>/update-config</code>, you’ll see a warning.</div>
+          </div>
+
+          <div class="card">
+            <h3>Worker / KV (read-only quick view)</h3>
+            <div class="note">Endpoints in use:</div>
+            <div class="kvs">
+              <div>USERS: <code>/get-users</code>, <code>/update-user</code>, <code>/add-user</code>, <code>/delete-user</code>, <code>/restore-user</code></div>
+              <div>PAGES: <code>/get-pages</code></div>
+              <div>SITES: <code>/get-sites?type=retail|els|els_private|cobra|wenzels|projects</code></div>
+              <div>CONFIG: <code>/get-config</code>, <code>/update-config</code></div>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   </div>
 
-  <!-- ======= User Edit Modal ======= -->
+  <!-- Add/Edit User Modal -->
   <div class="backdrop" id="userModal">
     <div class="modal">
       <h3 id="userModalTitle">Edit User</h3>
-      <div id="userModalBody"></div>
+      <div class="body">
+        <div class="note" style="margin-bottom:10px">All fields are editable. “New Password” will become <code>HashedPassword</code> via SHA-256.</div>
+        <div id="userDynamicFields" class="grid cols-2"></div>
+        <div class="card" style="margin-top:12px">
+          <h3>Set New Password</h3>
+          <input type="password" id="uNewPassword" placeholder="Leave blank to keep existing password">
+          <div class="note">We will hash this to <code>HashedPassword</code> when you press Save.</div>
+        </div>
+      </div>
       <div class="actions">
         <button class="btn ghost" id="userCancel">Cancel</button>
         <button class="btn" id="userSave">Save</button>
@@ -232,232 +238,492 @@ This version keeps all the logic (Users + full JSON-tolerant Sites + Pages tab) 
     </div>
   </div>
 
+  <!-- Add/Edit Site Modal -->
+  <div class="backdrop" id="siteModal">
+    <div class="modal">
+      <h3 id="siteModalTitle">Add Site</h3>
+      <div class="body">
+        <div class="grid cols-2">
+          <label>Site Code
+            <input type="text" id="sCode" placeholder="0006">
+          </label>
+          <label>Site Name
+            <input type="text" id="sName" placeholder="Co-op Portsmouth Elm Grove">
+          </label>
+          <label>Postcode
+            <input type="text" id="sPostcode" placeholder="PO15 5RQ">
+          </label>
+          <label>Address
+            <input type="text" id="sAddress" placeholder="Unit A5, Segensworth Business Centre">
+          </label>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="siteCancel">Cancel</button>
+        <button class="btn" id="siteSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast">Saved</div>
 
-  <!-- ======= SCRIPT SECTION ======= -->
   <script>
-    const WORKER='https://mostlane-pos.jamie-def.workers.dev';
-    const $=s=>document.querySelector(s);
-    const $$=s=>document.querySelectorAll(s);
-    const toast=msg=>{
-      const t=$('#toast');t.textContent=msg;t.classList.add('show');
-      setTimeout(()=>t.classList.remove('show'),1800);
-    };
+    /* ========== CONFIG ========= */
+    const WORKER = 'https://mostlane-pos.jamie-def.workers.dev';
 
-    /* ======================
-       INITIALISATION
-    ====================== */
-    document.addEventListener('DOMContentLoaded',()=>{
-      // show signed-in user
-      $('#whoami').textContent='Signed in: '+(sessionStorage.getItem('mostlaneUser')||'Unknown');
-      // load main modules
-      loadUsers();
-      bindTabs();
-      bindUserModal();
-      bindSitesUI();
-    });
+    /* ========== MINI UTILS ========= */
+    const $  = sel => document.querySelector(sel);
+    const $$ = sel => document.querySelectorAll(sel);
+    const toast = (msg)=>{ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); };
+    const safeJson = async (res)=>{ try{ return await res.json(); }catch{ return null; } };
+    const dotToSpace = s => (s||'').replace(/\./g, ' ');
+    const getSessionUser = () => sessionStorage.getItem('mostlaneUser') || '';
 
-    /* ======================
-       TAB SWITCHER
-    ====================== */
-    function bindTabs(){
-      $$('#tabs .tab').forEach(tab=>{
-        tab.addEventListener('click',()=>{
-          $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
-          tab.classList.add('active');
-          const name=tab.dataset.tab;
-          ['users','pages','sites','system'].forEach(p=>{
-            $('#panel-'+p).style.display=(p===name)?'block':'none';
-          });
-          if(name==='sites')loadSites();
-        });
-      });
+    /* ========== NORMALISERS ========= */
+    // Accepts array or {Users:[...]} and returns array
+    function normaliseUsers(payload){
+      let arr = [];
+      if (Array.isArray(payload)) arr = payload;
+      else if (payload && Array.isArray(payload.Users)) arr = payload.Users;
+      else if (payload && Array.isArray(payload.users)) arr = payload.users;
+      else arr = [];
+
+      // Nothing else enforced; keep original keys (Jamie wants to edit everything).
+      return arr;
     }
 
-    /* ======================
-       USERS MODULE
-    ====================== */
-    let allUsers=[];
+    // Turn any user object into a few display helpers, but DO NOT mutate original keys.
+    function userDisplayMeta(u){
+      const username = u.Username || u.username || '';
+      const name = [u.FirstName||u.firstName, u.LastName||u.lastName].filter(Boolean).join(' ') || (u.displayName||'');
+      const employment = u.EmploymentType || u.employmentType || '';
+      const status = u.Status || u.status || '';
+      const vehicle = u.VehicleAssigned || u.vehicleAssigned || u.vehicleReg || '';
+      return { username, name, employment, status, vehicle };
+    }
+
+    // Sites can be array or wrapped under arbitrary key (sites/Sites/data/etc.)
+    function normaliseSites(payload){
+      if (Array.isArray(payload)) return payload;
+      if (!payload || typeof payload !== 'object') return [];
+      for (const k of Object.keys(payload)) {
+        const v = payload[k];
+        if (Array.isArray(v)) return v;
+      }
+      return [];
+    }
+
+    // Try to pick a site code/name/postcode/address from inconsistent records
+    function normaliseSiteRecord(s){
+      const code = s.siteCode || s.SiteCode || s.code || s.store || s.Store || s.id || '';
+      const name = s.siteName || s.SiteName || s.name || s.StoreName || s.title || '';
+      const postcode = s.postcode || s.Postcode || s.post_code || s.post_code1 || s.pc || '';
+      const address  = s.address || s.Address || s.addr || s.street || '';
+      return { siteCode:String(code||''), siteName:String(name||''), postcode:String(postcode||''), address:String(address||'') };
+    }
+
+    /* ========= STATE ========= */
+    let allUsers = [];
+    let showDeleted = false;
+    let pagesList = [];        // from /get-pages
+    let pageMatrixEdits = {};  // username -> { path: boolean }
+    let currentSiteType = 'retail';
+    let currentSites = [];
+    let currentUserEdit = null; // raw object under edit
+
+    /* ========= TABS ========= */
+    $$('#tabs .tab').forEach(tab => {
+      tab.addEventListener('click', ()=>{
+        $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        const name = tab.dataset.tab;
+        ['users','pages','sites','system'].forEach(p=>{
+          const el = $('#panel-'+p);
+          el.style.display = (p===name)?'block':'none';
+        });
+        if(name==='pages'){ loadPages(); }
+        if(name==='sites'){ loadSites(); }
+        if(name==='system'){ loadConfig(); }
+      });
+    });
+
+    /* ========= INIT ========= */
+    document.addEventListener('DOMContentLoaded', async ()=>{
+      const u = getSessionUser();
+      $('#whoami').textContent = 'Signed in: ' + (u ? dotToSpace(u) : 'Unknown');
+
+      await loadUsers();
+      bindUsersUI();
+      bindPagesUI();
+      bindSitesUI();
+      bindSystemUI();
+    });
+
+    /* ========= USERS ========= */
     async function loadUsers(){
-      const res=await fetch(WORKER+'/get-users',{cache:'no-store'});
-      const data=await res.json();
-      allUsers=Array.isArray(data)?data:(data.Users||[]);
-      renderUsers();
+      try{
+        const res = await fetch(WORKER + '/get-users', { cache:'no-store' });
+        if(!res.ok){ $('#usersTableWrap').innerHTML = `<div class="error">/get-users returned ${res.status}</div>`; return; }
+        const raw = await safeJson(res);
+        allUsers = normaliseUsers(raw);
+        renderUsers();
+      }catch(e){
+        $('#usersTableWrap').innerHTML = `<div class="error">Failed to load users.</div>`;
+      }
     }
 
     function renderUsers(){
-      const q=($('#userSearch').value||'').toLowerCase().trim();
-      const filtered=allUsers.filter(u=>{
-        if(!q)return true;
-        return JSON.stringify(u).toLowerCase().includes(q);
-      });
-      let html=`<table class="responsive"><thead><tr>
-        <th>User</th><th>Employment</th><th>Status</th><th>Actions</th>
-      </tr></thead><tbody>`;
+      const q = ($('#userSearch').value||'').toLowerCase().trim();
+      // NOTE: “deleted” flag may not exist in your monolithic JSON → treat missing as not deleted.
+      const filtered = (allUsers||[])
+        .filter(u => showDeleted ? true : !Boolean(u.deleted))
+        .filter(u => {
+          if(!q) return true;
+          const meta = userDisplayMeta(u);
+          const hay = [
+            meta.username, meta.name, meta.employment, meta.status, meta.vehicle,
+            u.Email||u.email||'', u.Role||u.role||''
+          ].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+
+      let html = `
+        <table class="responsive">
+          <thead><tr>
+            <th>Username</th><th>Name</th><th>Employment</th><th>Status</th><th>Vehicle</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+      `;
       filtered.forEach(u=>{
-        const username=u.Username||u.username||'';
-        html+=`<tr>
-          <td data-label="User">${username}</td>
-          <td data-label="Employment">${u.EmploymentType||''}</td>
-          <td data-label="Status">${u.Status||''}</td>
-          <td data-label="Actions">
-            <div class="row-actions">
-              <button class="btn ghost" data-act="edit" data-u="${username}">Edit</button>
-            </div>
-          </td>
-        </tr>`;
+        const meta = userDisplayMeta(u);
+        html += `
+          <tr>
+            <td data-label="Username"><span class="chip">${meta.username}</span></td>
+            <td data-label="Name">${meta.name}</td>
+            <td data-label="Employment">${meta.employment}</td>
+            <td data-label="Status">${meta.status}</td>
+            <td data-label="Vehicle">${meta.vehicle}</td>
+            <td data-label="Actions">
+              <div class="row-actions">
+                <button class="btn ghost small" data-act="edit" data-username="${meta.username}">Edit</button>
+              </div>
+            </td>
+          </tr>
+        `;
       });
-      html+=`</tbody></table>`;
-      $('#usersTableWrap').innerHTML=html;
-      $$('#usersTableWrap [data-act="edit"]').forEach(b=>b.addEventListener('click',()=>openUserModal(b.dataset.u)));
+      html += `</tbody></table>`;
+      $('#usersTableWrap').innerHTML = html;
+
+      // Bind edits
+      $$('#usersTableWrap [data-act="edit"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>openUserModal(btn.dataset.username));
+      });
     }
 
-    // --- Modal controls
-    function bindUserModal(){
-      $('#userCancel').addEventListener('click',()=>$('#userModal').style.display='none');
-      $('#userModal').addEventListener('click',e=>{if(e.target.id==='userModal')$('#userModal').style.display='none';});
-      $('#userSave').addEventListener('click',saveUser);
+    function bindUsersUI(){
+      $('#userSearch').addEventListener('input', renderUsers);
+      $('#toggleDeleted').addEventListener('change', e=>{ showDeleted=e.target.checked; renderUsers(); });
+      $('#btnAddUser').addEventListener('click', ()=>openUserModal(null, true));
+      // Modal controls
+      $('#userCancel').addEventListener('click', closeUserModal);
+      $('#userModal').addEventListener('click', e=>{ if(e.target.id==='userModal') closeUserModal(); });
+      $('#userSave').addEventListener('click', saveUserFromModal);
     }
 
-    // --- Open user modal dynamically listing every key in record
-    function openUserModal(name){
-      const u=allUsers.find(x=>x.Username===name||x.username===name)||{};
-      const keys=[...new Set(Object.keys(u||{}).concat(['Username','Email','EmploymentType','Status','VehicleAssigned','SharePointPath']))];
-      let form='<div class="grid cols-2">';
-      keys.forEach(k=>{
-        const val=u[k]||u[k.toLowerCase()]||'';
-        form+=`<label>${k}<input type="text" data-field="${k}" value="${val}"></label>`;
+    function openUserModal(username, isNew=false){
+      let u = {};
+      if(!isNew){
+        u = (allUsers.find(x => (x.Username||x.username) === username) || {});
+      }
+      currentUserEdit = JSON.parse(JSON.stringify(u)); // deep-ish copy to edit safely
+      $('#userModalTitle').textContent = isNew ? 'Add User' : `Edit User – ${username || ''}`;
+
+      // Build dynamic field list from keys present (for Add, show a sensible starter set)
+      const keys = isNew
+        ? ['EngineerNumber','FirstName','LastName','Username','Email','HashedPassword','VehicleAssigned','EmploymentType','Status','FullAccess','PurchaseOrders','CheckInOut','Holiday','Forms','Assets','AddSite','MyDocuments','Compliance','HoursDashboard','SharePointPath','Phone']
+        : Object.keys(currentUserEdit);
+
+      const wrap = $('#userDynamicFields');
+      wrap.innerHTML = '';
+      keys.forEach(key=>{
+        const val = currentUserEdit[key] ?? '';
+        const inputType = (String(key).toLowerCase().includes('password') || key==='HashedPassword') ? 'text' : 'text';
+        const readOnly = (key==='Username' && !isNew) ? 'readonly' : '';
+        const help = (key==='HashedPassword') ? `<div class="note">Auto-set from “New Password” below when you save.</div>` : '';
+        const field = document.createElement('div');
+        field.innerHTML = `
+          <label>${key}
+            <input ${readOnly} type="${inputType}" data-k="${key}" value="${String(val)}" />
+          </label>
+          ${help}
+        `;
+        wrap.appendChild(field);
       });
-      form+=`<label>Password<input type="password" data-field="__passwordPlain" placeholder="New password"></label></div>`;
-      $('#userModalBody').innerHTML=form;
-      $('#userModal').dataset.username=name;
+
+      $('#uNewPassword').value = '';
       $('#userModal').style.display='flex';
     }
 
-    // --- SHA256 helper
-    async function sha256(t){
-      const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));
+    function closeUserModal(){ $('#userModal').style.display='none'; currentUserEdit=null; }
+
+    async function sha256(text){
+      const enc = new TextEncoder().encode(text);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
       return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
 
-    // --- Save user (any field + optional new password)
-    async function saveUser(){
-      const name=$('#userModal').dataset.username;
-      const inputs=$$('#userModalBody [data-field]');
-      const payload={};
-      for(const i of inputs){
-        if(i.dataset.field==='__passwordPlain')continue;
-        payload[i.dataset.field]=i.value.trim();
+    async function saveUserFromModal(){
+      if(!currentUserEdit) return;
+      // gather fields
+      $$('#userDynamicFields input').forEach(inp=>{
+        const k = inp.dataset.k;
+        currentUserEdit[k] = inp.value;
+      });
+      const newPwd = $('#uNewPassword').value.trim();
+      if(newPwd){
+        // Write to HashedPassword (preserve your scheme)
+        currentUserEdit['HashedPassword'] = await sha256(newPwd);
       }
-      const pwd=$$('#userModalBody [data-field="__passwordPlain"]')[0].value.trim();
-      if(pwd){payload.HashedPassword=await sha256(pwd);}
-      payload.username=name;
-      await fetch(WORKER+'/update-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      toast('User updated');
-      $('#userModal').style.display='none';
-      loadUsers();
+
+      // Decide add vs update:
+      const username = currentUserEdit.Username || currentUserEdit.username;
+      const exists = allUsers.some(u => (u.Username||u.username) === username);
+
+      try{
+        if(exists){
+          // We’ll send the entire object as a patch under a canonical key “username” for the worker
+          const patch = { ...currentUserEdit, username: username };
+          await fetch(WORKER + '/update-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch) });
+          toast('User updated');
+        }else{
+          // Add new
+          await fetch(WORKER + '/add-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(currentUserEdit) });
+          toast('User added');
+        }
+        closeUserModal();
+        await loadUsers();
+      }catch(e){
+        toast('Failed to save user');
+      }
     }
 
-    /* ======================
-       SITES MODULE (bullet-proof)
-    ====================== */
-    let currentSiteType='retail';
-    let currentSites=[];
+    /* ========= PAGES (permissions) ========= */
+    function bindPagesUI(){
+      $('#btnReloadPages').addEventListener('click', loadPages);
+      $('#btnSavePermissions').addEventListener('click', savePermissions);
+    }
 
-    function bindSitesUI(){
-      $$('input[name="siteType"]').forEach(r=>{
-        r.addEventListener('change',()=>{
-          currentSiteType=r.value;
-          loadSites();
+    async function loadPages(){
+      try{
+        const [usrRes, pgRes] = await Promise.all([
+          fetch(WORKER + '/get-users', { cache:'no-store' }),
+          fetch(WORKER + '/get-pages', { cache:'no-store' })
+        ]);
+        const usersRaw = await safeJson(usrRes);
+        allUsers = normaliseUsers(usersRaw);
+
+        const data = await safeJson(pgRes) || {};
+        pagesList = Array.isArray(data.pages) ? data.pages : [];
+        $('#pagesCount').textContent = (pagesList.length||0) + ' pages';
+        renderPagesMatrix();
+      }catch(e){
+        $('#pagesMatrix').innerHTML = `<div class="error">Failed to load pages.</div>`;
+      }
+    }
+
+    function renderPagesMatrix(){
+      if(!pagesList.length){
+        $('#pagesMatrix').innerHTML = `<div class="note">No pages discovered from GitHub yet.</div>`;
+        return;
+      }
+      // header
+      let html = `<table><thead><tr><th>User</th>`;
+      pagesList.forEach(p=>{ html += `<th title="${p.path}">${p.name}</th>`; });
+      html += `</tr></thead><tbody>`;
+
+      pageMatrixEdits = {};
+      (allUsers||[]).filter(u=>!u.deleted).forEach(u=>{
+        const uname = u.Username || u.username || '';
+        const perms = (u.permissions && typeof u.permissions==='object') ? u.permissions : {};
+        pageMatrixEdits[uname] = {...perms};
+        html += `<tr><td><span class="chip">${uname}</span></td>`;
+        pagesList.forEach(p=>{
+          const checked = !!perms[p.path];
+          html += `<td style="text-align:center"><input type="checkbox" data-u="${uname}" data-path="${p.path}" ${checked?'checked':''}></td>`;
+        });
+        html += `</tr>`;
+      });
+
+      html += `</tbody></table>`;
+      $('#pagesMatrix').innerHTML = html;
+
+      // bind
+      $$('#pagesMatrix input[type="checkbox"]').forEach(ch=>{
+        ch.addEventListener('change', ()=>{
+          const uname = ch.dataset.u;
+          const path = ch.dataset.path;
+          pageMatrixEdits[uname] = pageMatrixEdits[uname] || {};
+          pageMatrixEdits[uname][path] = ch.checked;
         });
       });
-      $('#siteSearch').addEventListener('input',renderSites);
-      $('#btnAddSite').addEventListener('click',()=>toast('Add Site coming soon'));
+    }
+
+    async function savePermissions(){
+      try{
+        const ops = [];
+        Object.keys(pageMatrixEdits).forEach(username=>{
+          ops.push(fetch(WORKER + '/update-user', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ username, permissions: pageMatrixEdits[username] })
+          }));
+        });
+        await Promise.all(ops);
+        toast('Permissions saved');
+      }catch(e){
+        toast('Failed to save permissions');
+      }
+    }
+
+    /* ========= SITES ========= */
+    function bindSitesUI(){
+      $$('input[name="siteType"]').forEach(r=>{
+        r.addEventListener('change', async ()=>{
+          currentSiteType = r.value;
+          await loadSites();
+        });
+      });
+      $('#siteSearch').addEventListener('input', renderSites);
+      $('#btnAddSite').addEventListener('click', ()=>openSiteModal());
+      // Modal controls
+      $('#siteCancel').addEventListener('click', closeSiteModal);
+      $('#siteModal').addEventListener('click', e=>{ if(e.target.id==='siteModal') closeSiteModal(); });
+      $('#siteSave').addEventListener('click', saveSiteFromModal);
     }
 
     async function loadSites(){
-      const res=await fetch(`${WORKER}/get-sites?type=${encodeURIComponent(currentSiteType)}`,{cache:'no-store'});
-      let data=[];
-      try{data=await res.json();}catch(e){console.error(e);}
-      // normalise to array
-      if(!Array.isArray(data)){
-        if(Array.isArray(data.sites))data=data.sites;
-        else if(data&&typeof data==='object')data=Object.values(data);
-        else data=[];
+      try{
+        const res = await fetch(`${WORKER}/get-sites?type=${encodeURIComponent(currentSiteType)}`, { cache:'no-store' });
+        if(!res.ok){ $('#sitesTableWrap').innerHTML = `<div class="error">/get-sites?type=${currentSiteType} → ${res.status}</div>`; return; }
+        const raw = await safeJson(res);
+        const arr = normaliseSites(raw);
+        currentSites = arr.map(normaliseSiteRecord);
+        renderSites();
+      }catch(e){
+        $('#sitesTableWrap').innerHTML = `<div class="error">Failed to load sites.</div>`;
       }
-      // map & normalise key names
-      currentSites=data.map(s=>{
-        const e=Object.fromEntries(Object.entries(s||{}).map(([k,v])=>[k.toLowerCase(),v]));
-        return{
-          siteCode:e.sitecode||e.code||e.storecode||e.storenumber||e.id||'',
-          siteName:e.sitename||e.name||e.storename||e.store||e.title||'',
-          postcode:e.postcode||e.postcodearea||e.zip||e.zipcode||'',
-          address:e.address||e.addressline1||e.location||e.siteaddress||'',
-        };
-      }).filter(s=>s.siteCode||s.siteName);
-      renderSites();
     }
 
     function renderSites(){
-      const q=($('#siteSearch').value||'').toLowerCase().trim();
-      const f=currentSites.filter(s=>!q||JSON.stringify(s).toLowerCase().includes(q));
-      if(!f.length){$('#sitesTableWrap').innerHTML='<div class="note">No sites found.</div>';return;}
-      let html=`<table class="responsive"><thead><tr>
-        <th>Code</th><th>Name</th><th>Postcode</th><th>Address</th><th>Actions</th>
-      </tr></thead><tbody>`;
-      f.forEach(s=>{
-        html+=`<tr>
-          <td data-label="Code">${s.siteCode}</td>
-          <td data-label
-                    <td data-label="Name">${s.siteName}</td>
-          <td data-label="Postcode">${s.postcode}</td>
-          <td data-label="Address">${s.address}</td>
-          <td data-label="Actions">
-            <div class="row-actions">
-              <button class="btn ghost" data-sact="edit" data-code="${s.siteCode}">Edit</button>
-              <button class="btn alt" data-sact="delete" data-code="${s.siteCode}">Delete</button>
-            </div>
-          </td>
-        </tr>`;
+      const q = ($('#siteSearch').value||'').toLowerCase().trim();
+      const filtered = (currentSites||[]).filter(s=>{
+        if(!q) return true;
+        return [s.siteCode,s.siteName,s.postcode,s.address].filter(Boolean).some(x=>String(x).toLowerCase().includes(q));
+      });
+
+      let html = `
+        <table class="responsive">
+          <thead><tr>
+            <th>Code</th><th>Name</th><th>Postcode</th><th>Address</th><th>Actions</th>
+          </tr></thead><tbody>
+      `;
+      filtered.forEach(s=>{
+        const code = s.siteCode || '';
+        html += `
+          <tr>
+            <td data-label="Code"><span class="chip">${code}</span></td>
+            <td data-label="Name">${s.siteName||''}</td>
+            <td data-label="Postcode">${s.postcode||''}</td>
+            <td data-label="Address">${s.address||''}</td>
+            <td data-label="Actions">
+              <div class="row-actions">
+                <button class="btn ghost small" data-sact="edit" data-code="${code}">Edit</button>
+                <button class="btn alt small" data-sact="delete" data-code="${code}">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `;
       });
       html += `</tbody></table>`;
       $('#sitesTableWrap').innerHTML = html;
 
-      // handle buttons
       $$('#sitesTableWrap [data-sact]').forEach(b=>{
-        b.addEventListener('click',()=>{
-          const act=b.dataset.sact;
-          const code=b.dataset.code;
-          if(act==='edit'){
-            toast(`Editing ${code} (coming soon)`);
-          }else if(act==='delete'){
-            toast(`Deleting ${code} (coming soon)`);
+        b.addEventListener('click', async ()=>{
+          const act = b.dataset.sact;
+          const code = b.dataset.code;
+          const rec = (currentSites||[]).find(s=>s.siteCode===code) || {};
+          if(act==='edit'){ openSiteModal(rec); }
+          if(act==='delete'){
+            if(!confirm(`Delete site ${code}? (Soft delete)`)) return;
+            await fetch(`${WORKER}/delete-site?type=${encodeURIComponent(currentSiteType)}`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({ siteCode: code })
+            });
+            await loadSites(); toast(`Deleted ${code}`);
           }
         });
       });
     }
 
-    /* ======================
-       PAGE MATRIX (future use)
-       Dynamically lists all HTML files in repo
-    ====================== */
-    async function loadPages(){
-      const res=await fetch(WORKER+'/get-pages',{cache:'no-store'});
-      const data=await res.json();
-      const pages=(data.pages||[]).map(p=>p.name);
-      let html=`<table><thead><tr><th>Page</th></tr></thead><tbody>`;
-      pages.forEach(p=>{
-        html+=`<tr><td>${p}</td></tr>`;
-      });
-      html+=`</tbody></table>`;
-      $('#pagesMatrix').innerHTML=html;
+    function openSiteModal(rec){
+      const isEdit = !!rec && !!rec.siteCode;
+      $('#siteModalTitle').textContent = isEdit ? `Edit Site – ${rec.siteCode}` : 'Add Site';
+      $('#sCode').value = rec?.siteCode || '';
+      $('#sCode').disabled = !!rec?.siteCode;
+      $('#sName').value = rec?.siteName || '';
+      $('#sPostcode').value = rec?.postcode || '';
+      $('#sAddress').value = rec?.address || '';
+      $('#siteModal').style.display = 'flex';
+    }
+    function closeSiteModal(){ $('#siteModal').style.display='none'; }
+    async function saveSiteFromModal(){
+      const body = {
+        siteCode: $('#sCode').value.trim(),
+        siteName: $('#sName').value.trim(),
+        postcode: $('#sPostcode').value.trim(),
+        address: $('#sAddress').value.trim()
+      };
+      if(!body.siteCode || !body.siteName){ alert('Site Code & Name required'); return; }
+
+      const isEdit = !!(currentSites.find(s=>s.siteCode===body.siteCode));
+      const url = isEdit ? `${WORKER}/update-site?type=${encodeURIComponent(currentSiteType)}`
+                         : `${WORKER}/add-site?type=${encodeURIComponent(currentSiteType)}`;
+      await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      closeSiteModal(); await loadSites(); toast(isEdit?'Site updated':'Site added');
     }
 
-    // Load pages tab dynamically when clicked
-    $$('#tabs .tab[data-tab="pages"]').forEach(tab=>{
-      tab.addEventListener('click',()=>loadPages());
-    });
-
+    /* ========= SYSTEM ========= */
+    function bindSystemUI(){
+      $('#btnSaveConfig').addEventListener('click', saveConfig);
+    }
+    async function loadConfig(){
+      try{
+        const res = await fetch(WORKER + '/get-config', { cache:'no-store' });
+        if(!res.ok) return;
+        const cfg = await safeJson(res) || {};
+        $('#cfgSharePoint').value = cfg.sharepointRoot || '';
+        $('#cfgPostcode').value = cfg.hqPostcode || '';
+        $('#cfgMapsKey').value = cfg.mapsApiKey || '';
+        $('#cfgVAT').value = (cfg.vatRate ?? 20);
+        $('#cfgMileage').value = (cfg.mileageRate ?? 0.25);
+      }catch(e){ /* ignore */ }
+    }
+    async function saveConfig(){
+      const cfg = {
+        sharepointRoot: $('#cfgSharePoint').value.trim(),
+        hqPostcode: $('#cfgPostcode').value.trim(),
+        mapsApiKey: $('#cfgMapsKey').value.trim(),
+        vatRate: parseFloat($('#cfgVAT').value || '20'),
+        mileageRate: parseFloat($('#cfgMileage').value || '0.25'),
+        updatedAt: new Date().toISOString()
+      };
+      try{
+        const res = await fetch(WORKER + '/update-config', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+        });
+        if(res.ok){ toast('Config saved'); }
+        else{ toast('Your Worker has no /update-config yet'); alert('Add /update-config in Worker to save.'); }
+      }catch(err){ toast('Failed to save'); }
+    }
   </script>
 </body>
 </html>
