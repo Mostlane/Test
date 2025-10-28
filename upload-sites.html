@@ -6,7 +6,7 @@
   <title>📦 Upload Sites – Mostlane Portal</title>
   <style>
     body {
-      margin:0; font-family: 'Segoe UI', system-ui, -apple-system, Arial;
+      margin:0; font-family:'Segoe UI',system-ui,-apple-system,Arial;
       color:#1f2937; background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
       min-height:100vh;
     }
@@ -15,31 +15,31 @@
       border-radius:12px; padding:24px; box-shadow:0 6px 24px rgba(0,0,0,.15);
     }
     h1{margin-top:0;color:#003366;}
-    select, textarea, input[type=file]{
+    select,textarea,input[type=file]{
       width:100%; padding:10px; margin:8px 0; border-radius:8px;
       border:1px solid #cbd5e1; font-size:15px;
     }
-    textarea{min-height:180px; font-family:monospace;}
+    textarea{min-height:180px;font-family:monospace;}
     button{
-      background:#003366; color:#fff; border:none; border-radius:8px; padding:10px 14px;
-      font-weight:600; cursor:pointer; margin-top:10px;
+      background:#003366;color:#fff;border:none;border-radius:8px;padding:10px 14px;
+      font-weight:600;cursor:pointer;margin-top:10px;
     }
     button.alt{background:#004a99;}
-    .note{color:#6b7280; font-size:14px;}
+    .note{color:#6b7280;font-size:14px;}
     pre{
-      background:#f8fafc; padding:10px; border-radius:8px;
-      font-size:13px; overflow:auto; max-height:200px;
+      background:#f8fafc;padding:10px;border-radius:8px;
+      font-size:13px;overflow:auto;max-height:200px;
     }
-    .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
-      background:#111827; color:#fff; padding:10px 14px; border-radius:999px;
-      opacity:0; pointer-events:none; transition:.25s;}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+      background:#111827;color:#fff;padding:10px 14px;border-radius:999px;
+      opacity:0;pointer-events:none;transition:.25s;}
     .toast.show{opacity:1;}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>📦 Upload Site JSON</h1>
-    <p class="note">Select a site type, paste your JSON array, or upload a file.<br>
+    <p class="note">Select a site type, paste your JSON object or array, or upload a file.<br>
       The system will replace all entries for that type in <strong>SITES_STORE</strong>.</p>
 
     <label>Site Type</label>
@@ -56,7 +56,7 @@
     <input type="file" id="fileInput" accept=".json">
 
     <label>Or Paste JSON Below</label>
-    <textarea id="jsonInput" placeholder='[{"siteCode":"0001","siteName":"Example Site"}]'></textarea>
+    <textarea id="jsonInput" placeholder='Paste a JSON object or array here'></textarea>
 
     <button id="btnPreview">Preview</button>
     <button class="alt" id="btnUpload">Upload to Worker</button>
@@ -73,56 +73,62 @@
       const t = $('#toast');
       t.textContent = msg;
       t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 1800);
+      setTimeout(()=>t.classList.remove('show'),1800);
     };
 
-    // file upload → textarea
-    $('#fileInput').addEventListener('change', e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => $('#jsonInput').value = ev.target.result;
-      reader.readAsText(file);
+    // Read file into textarea
+    $('#fileInput').addEventListener('change', e=>{
+      const f = e.target.files[0];
+      if(!f) return;
+      const r = new FileReader();
+      r.onload = ev => $('#jsonInput').value = ev.target.result;
+      r.readAsText(f);
     });
 
-    // Preview JSON
-    $('#btnPreview').addEventListener('click', () => {
+    function safeParseJSON(text){
       try {
-        const arr = JSON.parse($('#jsonInput').value.trim());
-        if (!Array.isArray(arr)) throw new Error('Not an array');
+        const parsed = JSON.parse(text);
+        if(Array.isArray(parsed)) return parsed;
+        if(typeof parsed === 'object') return [parsed]; // wrap single object
+        throw new Error('Not valid JSON object/array');
+      } catch(e){
+        throw new Error('Invalid JSON: '+e.message);
+      }
+    }
+
+    // Preview
+    $('#btnPreview').addEventListener('click', ()=>{
+      try{
+        const txt = $('#jsonInput').value.trim();
+        if(!txt){ alert('Please paste JSON first'); return; }
+        const arr = safeParseJSON(txt);
         $('#preview').innerHTML = `
-          <p><strong>${arr.length}</strong> records detected.</p>
-          <pre>${JSON.stringify(arr.slice(0,5), null, 2)}${arr.length>5?'\n...':''}</pre>
+          <p><strong>${arr.length}</strong> record${arr.length>1?'s':''} detected.</p>
+          <pre>${JSON.stringify(arr.slice(0,5),null,2)}${arr.length>5?'\n...':''}</pre>
         `;
-      } catch (e) {
-        alert('Invalid JSON: ' + e.message);
-      }
+      }catch(e){ alert(e.message); }
     });
 
-    // Upload to Worker
-    $('#btnUpload').addEventListener('click', async () => {
-      const type = $('#siteType').value;
-      let arr;
-      try {
-        arr = JSON.parse($('#jsonInput').value.trim());
-        if (!Array.isArray(arr)) throw new Error('Expected an array');
-      } catch (e) {
-        alert('Invalid JSON: ' + e.message);
-        return;
-      }
-      const res = await fetch(`${WORKER}/import-sites?type=${encodeURIComponent(type)}`, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(arr)
-      });
-      if (res.ok) {
+    // Upload
+    $('#btnUpload').addEventListener('click', async ()=>{
+      try{
+        const txt = $('#jsonInput').value.trim();
+        if(!txt){ alert('Paste or upload JSON first'); return; }
+        const arr = safeParseJSON(txt);
+        const type = $('#siteType').value;
+        const res = await fetch(`${WORKER}/import-sites?type=${encodeURIComponent(type)}`,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(arr)
+        });
         const data = await res.json();
-        toast(`✅ ${data.message}`);
-        $('#preview').innerHTML = `<p>${data.message}</p>`;
-      } else {
-        const text = await res.text();
-        alert('Upload failed: ' + text);
-      }
+        if(res.ok){
+          toast(`✅ ${data.message||'Uploaded'}`);
+          $('#preview').innerHTML = `<p>${data.message||'Upload successful.'}</p>`;
+        }else{
+          alert('Upload failed: '+JSON.stringify(data));
+        }
+      }catch(e){ alert(e.message); }
     });
   </script>
 </body>
