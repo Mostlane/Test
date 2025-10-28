@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📦 Upload Sites – Mostlane Portal</title>
+  <style>
+    body {
+      margin:0; font-family: 'Segoe UI', system-ui, -apple-system, Arial;
+      color:#1f2937; background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
+      min-height:100vh;
+    }
+    .wrap {
+      max-width:800px; margin:40px auto; background:rgba(255,255,255,0.6);
+      border-radius:12px; padding:24px; box-shadow:0 6px 24px rgba(0,0,0,.15);
+    }
+    h1{margin-top:0;color:#003366;}
+    select, textarea, input[type=file]{
+      width:100%; padding:10px; margin:8px 0; border-radius:8px;
+      border:1px solid #cbd5e1; font-size:15px;
+    }
+    textarea{min-height:180px; font-family:monospace;}
+    button{
+      background:#003366; color:#fff; border:none; border-radius:8px; padding:10px 14px;
+      font-weight:600; cursor:pointer; margin-top:10px;
+    }
+    button.alt{background:#004a99;}
+    .note{color:#6b7280; font-size:14px;}
+    pre{
+      background:#f8fafc; padding:10px; border-radius:8px;
+      font-size:13px; overflow:auto; max-height:200px;
+    }
+    .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+      background:#111827; color:#fff; padding:10px 14px; border-radius:999px;
+      opacity:0; pointer-events:none; transition:.25s;}
+    .toast.show{opacity:1;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>📦 Upload Site JSON</h1>
+    <p class="note">Select a site type, paste your JSON array, or upload a file.<br>
+      The system will replace all entries for that type in <strong>SITES_STORE</strong>.</p>
+
+    <label>Site Type</label>
+    <select id="siteType">
+      <option value="retail">Retail</option>
+      <option value="els">ELS</option>
+      <option value="els_private">ELS Private</option>
+      <option value="cobra">Cobra</option>
+      <option value="wenzels">Wenzel’s</option>
+      <option value="projects">Projects</option>
+    </select>
+
+    <label>Upload JSON File</label>
+    <input type="file" id="fileInput" accept=".json">
+
+    <label>Or Paste JSON Below</label>
+    <textarea id="jsonInput" placeholder='[{"siteCode":"0001","siteName":"Example Site"}]'></textarea>
+
+    <button id="btnPreview">Preview</button>
+    <button class="alt" id="btnUpload">Upload to Worker</button>
+
+    <div id="preview"></div>
+  </div>
+
+  <div class="toast" id="toast">Done</div>
+
+  <script>
+    const WORKER = 'https://mostlane-pos.jamie-def.workers.dev';
+    const $ = s => document.querySelector(s);
+    const toast = msg => {
+      const t = $('#toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 1800);
+    };
+
+    // file upload → textarea
+    $('#fileInput').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => $('#jsonInput').value = ev.target.result;
+      reader.readAsText(file);
+    });
+
+    // Preview JSON
+    $('#btnPreview').addEventListener('click', () => {
+      try {
+        const arr = JSON.parse($('#jsonInput').value.trim());
+        if (!Array.isArray(arr)) throw new Error('Not an array');
+        $('#preview').innerHTML = `
+          <p><strong>${arr.length}</strong> records detected.</p>
+          <pre>${JSON.stringify(arr.slice(0,5), null, 2)}${arr.length>5?'\n...':''}</pre>
+        `;
+      } catch (e) {
+        alert('Invalid JSON: ' + e.message);
+      }
+    });
+
+    // Upload to Worker
+    $('#btnUpload').addEventListener('click', async () => {
+      const type = $('#siteType').value;
+      let arr;
+      try {
+        arr = JSON.parse($('#jsonInput').value.trim());
+        if (!Array.isArray(arr)) throw new Error('Expected an array');
+      } catch (e) {
+        alert('Invalid JSON: ' + e.message);
+        return;
+      }
+      const res = await fetch(`${WORKER}/import-sites?type=${encodeURIComponent(type)}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(arr)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast(`✅ ${data.message}`);
+        $('#preview').innerHTML = `<p>${data.message}</p>`;
+      } else {
+        const text = await res.text();
+        alert('Upload failed: ' + text);
+      }
+    });
+  </script>
+</body>
+</html>
