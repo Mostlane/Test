@@ -12,16 +12,13 @@
       --panel-bg:rgba(255,255,255,0.6);
       --text:#1f2937;
       --muted:#6b7280;
-      --ok:#0f9d58;
-      --warn:#d97706;
-      --err:#d32f2f;
       --chip:#eef2f7;
       --radius:12px;
     }
     *{box-sizing:border-box}
     body{
       margin:0;
-      font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+      font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
       color:var(--text);
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
       min-height:100vh;
@@ -35,46 +32,74 @@
       overflow:hidden;
     }
     .topbar{
-      display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-      padding:16px 18px;background:rgba(255,255,255,.75);border-bottom:1px solid #ddd;
+      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+      padding:16px 18px; background:rgba(255,255,255,.75); border-bottom:1px solid #ddd;
     }
-    .title{font-weight:700;font-size:20px;color:var(--ml-blue);flex:1}
-    .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer;}
+    .title{font-weight:700; font-size:20px; color:var(--ml-blue); flex:1}
+    .btn{
+      background:var(--ml-blue); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer;
+    }
     .btn.alt{background:var(--ml-blue-2)}
-    .btn.ghost{background:transparent;color:var(--ml-blue);border:1px solid var(--ml-blue)}
-    .userpill{background:#fff;border:1px solid #d7dbe3;padding:8px 12px;border-radius:999px;color:#374151;font-size:14px;}
-    .tabs{display:flex;gap:6px;overflow:auto;padding:10px 10px 0;background:rgba(255,255,255,.55);border-bottom:1px solid #e5e7eb;}
-    .tab{padding:10px 14px;border:1px solid #cbd5e1;background:#fff;border-bottom:none;border-top-left-radius:10px;border-top-right-radius:10px;cursor:pointer;color:#334155;white-space:nowrap;}
-    .tab.active{background:#f8fafc;color:var(--ml-blue);font-weight:700;}
-    .content{padding:16px;background:#f8fafc;}
-    .grid{display:grid;gap:12px;}
-    @media(min-width:900px){.grid.cols-2{grid-template-columns:1fr 1fr;}}
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;}
-    .card h3{margin:0 0 10px 0;color:var(--ml-blue);}
-    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
-    input,select,textarea{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;background:#fff;}
-    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;}
-    th,td{padding:10px 12px;border-bottom:1px solid #eef2f7;font-size:14px;vertical-align:middle;}
-    th{background:#f1f5f9;text-align:left;color:#334155;}
-    tr:last-child td{border-bottom:none;}
-    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:var(--chip);font-size:12px;color:#374151;}
-    .row-actions{display:flex;gap:8px;flex-wrap:wrap;}
-    .note{color:var(--muted);font-size:13px;}
-    .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:9999;}
-    .modal{background:#fff;width:min(560px,calc(100% - 24px));border-radius:12px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
-    .modal h3{margin:0 0 10px 0;color:var(--ml-blue);}
-    .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
-    .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;pointer-events:none;transition:.25s;z-index:99999;font-size:14px;}
-    .toast.show{opacity:1;}
-    @media(max-width:700px){
-      table.responsive{display:block;}
-      table.responsive thead{display:none;}
-      table.responsive tbody{display:grid;gap:10px;}
-      table.responsive tr{display:block;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;}
-      table.responsive td{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eef2f7;}
-      table.responsive td::before{content:attr(data-label);font-weight:600;color:#475569;}
-      table.responsive tr td:last-child{border-bottom:none;}
+    .btn.ghost{background:transparent; color:var(--ml-blue); border:1px solid var(--ml-blue)}
+    .userpill{
+      background:#fff; border:1px solid #d7dbe3; padding:8px 12px; border-radius:999px; color:#374151; font-size:14px;
     }
+    .tabs{
+      display:flex; gap:6px; overflow:auto; padding:10px 10px 0; background:rgba(255,255,255,.55);
+      border-bottom:1px solid #e5e7eb;
+    }
+    .tab{
+      padding:10px 14px; border:1px solid #cbd5e1; background:#fff; border-bottom:none; border-top-left-radius:10px; border-top-right-radius:10px; cursor:pointer; color:#334155;
+      white-space:nowrap;
+    }
+    .tab.active{ background:#f8fafc; color:var(--ml-blue); font-weight:700; }
+    .content{ padding:16px; background:#f8fafc; }
+    .grid{ display:grid; gap:12px; }
+    @media(min-width:900px){ .grid.cols-2{ grid-template-columns: 1fr 1fr; } }
+    .card{
+      background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px;
+    }
+    .card h3{ margin:0 0 10px 0; color:var(--ml-blue) }
+    .toolbar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px }
+    input[type="text"], input[type="password"], input[type="number"], input[type="email"], select, textarea{
+      width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:15px; background:#fff;
+    }
+    table{
+      width:100%; border-collapse:separate; border-spacing:0; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff;
+    }
+    th, td{ padding:10px 12px; border-bottom:1px solid #eef2f7; font-size:14px; vertical-align:middle }
+    th{ background:#f1f5f9; text-align:left; color:#334155 }
+    tr:last-child td{ border-bottom:none }
+    .chip{ display:inline-block; padding:4px 8px; border-radius:999px; background:var(--chip); font-size:12px; color:#374151; }
+    .row-actions{ display:flex; gap:8px; flex-wrap:wrap }
+    .note{ color:var(--muted); font-size:13px }
+    .matrix{ overflow:auto; }
+    .matrix table{ min-width:720px }
+    .tag{ font-size:12px; background:#f3f4f6; padding:3px 8px; border-radius:999px; border:1px solid #e5e7eb }
+    .radio-group{ display:flex; gap:8px; flex-wrap:wrap }
+
+    /* Modal */
+    .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:9999 }
+    .modal{ background:#fff; width:min(560px, calc(100% - 24px)); border-radius:12px; padding:16px; box-shadow:0 12px 40px rgba(0,0,0,.25) }
+    .modal h3{ margin:0 0 10px 0; color:var(--ml-blue) }
+    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px }
+    /* Toast */
+    .toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 14px; border-radius:999px; opacity:0; pointer-events:none; transition:.25s; z-index:99999; font-size:14px }
+    .toast.show{ opacity:1 }
+
+    /* Mobile tables -> cards (Users & Sites) */
+    @media(max-width:700px){
+      table.responsive{ display:block }
+      table.responsive thead{ display:none }
+      table.responsive tbody{ display:grid; gap:10px }
+      table.responsive tr{ display:block; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff }
+      table.responsive td{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid #eef2f7 }
+      table.responsive td::before{ content:attr(data-label); font-weight:600; color:#475569 }
+      table.responsive tr td:last-child{ border-bottom:none }
+    }
+
+    /* Simple badge */
+    .badge{ display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid #e5e7eb; background:#f8fafc; }
   </style>
 </head>
 <body>
@@ -89,7 +114,6 @@
       <div class="tab active" data-tab="users">👥 Users</div>
       <div class="tab" data-tab="pages">🌐 Pages</div>
       <div class="tab" data-tab="sites">🏗 Sites</div>
-      <div class="tab" data-tab="vehicles">🚐 Vehicles</div>
       <div class="tab" data-tab="system">⚙️ System</div>
     </div>
 
@@ -97,51 +121,100 @@
       <!-- USERS -->
       <section id="panel-users">
         <div class="toolbar">
-          <input type="text" id="userSearch" placeholder="Search users… (name, username, role)"/>
+          <input type="text" id="userSearch" placeholder="Search users… (name, username, role/employment)"/>
           <button class="btn" id="btnAddUser">+ Add User</button>
           <label class="chip"><input type="checkbox" id="toggleDeleted" /> Show deleted</label>
         </div>
         <div class="card">
           <h3>All Users</h3>
-          <div class="note">Tap Activate/Deactivate to toggle; Edit to change details.</div>
+          <div class="note">This list is reading from your Worker’s /get-users (normalized from your uploaded JSON). Edit opens the full-field modal.</div>
           <div id="usersTableWrap"></div>
         </div>
       </section>
 
       <!-- PAGES -->
       <section id="panel-pages" style="display:none">
-        <div class="card"><h3>Pages</h3><div class="note">Page permissions management coming soon.</div></div>
+        <div class="toolbar">
+          <button class="btn alt" id="btnReloadPages">Reload Pages</button>
+          <span class="badge" id="pagesCount">0 pages</span>
+        </div>
+        <div class="card">
+          <h3>Page Access Matrix</h3>
+          <div class="note">Tick which pages each user can access. Then press “Save Changes”. Pages are pulled live from your GitHub via the Worker’s /get-pages.</div>
+          <div class="matrix" id="pagesMatrix" style="min-height:60px"></div>
+          <div style="margin-top:10px; display:flex; gap:10px; justify-content:flex-end">
+            <button class="btn" id="btnSavePermissions">Save Changes</button>
+          </div>
+        </div>
       </section>
 
       <!-- SITES -->
       <section id="panel-sites" style="display:none">
-        <div class="card"><h3>Sites</h3><div id="sitesTableWrap">No sites loaded</div></div>
-      </section>
-
-      <!-- VEHICLES -->
-      <section id="panel-vehicles" style="display:none">
-        <div class="card"><h3>Vehicles</h3><div id="vehiclesWrap">Linked vehicles from user JSON</div></div>
+        <div class="toolbar">
+          <div class="radio-group">
+            <label class="tag"><input type="radio" name="siteType" value="retail" checked> Retail</label>
+            <label class="tag"><input type="radio" name="siteType" value="els"> ELS</label>
+            <label class="tag"><input type="radio" name="siteType" value="els_private"> ELS Private</label>
+            <label class="tag"><input type="radio" name="siteType" value="cobra"> COBRA</label>
+            <label class="tag"><input type="radio" name="siteType" value="wenzels"> Wenzel’s</label>
+            <label class="tag"><input type="radio" name="siteType" value="projects"> Projects</label>
+          </div>
+          <div style="flex:1"></div>
+          <input type="text" id="siteSearch" placeholder="Search sites… (name, code, postcode)"/>
+          <button class="btn" id="btnAddSite">+ Add Site</button>
+        </div>
+        <div class="card">
+          <h3>Sites</h3>
+          <div id="sitesTableWrap"></div>
+        </div>
       </section>
 
       <!-- SYSTEM -->
       <section id="panel-system" style="display:none">
-        <div class="card"><h3>System Config</h3><div class="note">Portal-wide configuration coming soon.</div></div>
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>Global Config</h3>
+            <label>SharePoint Root Path
+              <input type="text" id="cfgSharePoint" placeholder="Mostlane Shared Documents > …"/>
+            </label>
+            <label>HQ Postcode
+              <input type="text" id="cfgPostcode" placeholder="PO15 5RQ"/>
+            </label>
+            <label>Google Maps API Key
+              <input type="password" id="cfgMapsKey" placeholder="••••••••"/>
+            </label>
+            <div class="grid cols-2">
+              <label>VAT Rate %
+                <input type="number" id="cfgVAT" step="0.01" placeholder="20"/>
+              </label>
+              <label>Mileage Rate (£/mile)
+                <input type="number" id="cfgMileage" step="0.01" placeholder="0.25"/>
+              </label>
+            </div>
+            <div style="margin-top:12px; display:flex; gap:10px; justify-content:flex-end">
+              <button class="btn" id="btnSaveConfig">Save Config</button>
+            </div>
+            <div class="note" id="cfgNote">Saves to /update-config on your Worker.</div>
+          </div>
+
+          <div class="card">
+            <h3>Security</h3>
+            <ul>
+              <li>Worker CORS is locked to <strong>mostlane.github.io</strong></li>
+              <li>Session via <strong>auth.js</strong></li>
+              <li>Optional <strong>x-api-key</strong> can be enabled later</li>
+            </ul>
+          </div>
+        </div>
       </section>
     </div>
   </div>
 
-  <!-- USER MODAL -->
+  <!-- Add/Edit User Modal (dynamic form) -->
   <div class="backdrop" id="userModal">
     <div class="modal">
-      <h3 id="userModalTitle">Add User</h3>
-      <div class="grid cols-2">
-        <label>Username<input type="text" id="uUsername" placeholder="jamie.line"></label>
-        <label>First Name<input type="text" id="uFirstName"></label>
-        <label>Last Name<input type="text" id="uLastName"></label>
-        <label>Email<input type="email" id="uEmail"></label>
-        <label>Employment Type<input type="text" id="uEmployment"></label>
-        <label>Status<select id="uStatus"><option>Active</option><option>Not Active</option></select></label>
-      </div>
+      <h3 id="userModalTitle">Edit User</h3>
+      <div id="userModalBody"></div>
       <div class="actions">
         <button class="btn ghost" id="userCancel">Cancel</button>
         <button class="btn" id="userSave">Save</button>
@@ -149,128 +222,471 @@
     </div>
   </div>
 
+  <!-- Add/Edit Site Modal -->
+  <div class="backdrop" id="siteModal">
+    <div class="modal">
+      <h3 id="siteModalTitle">Add Site</h3>
+      <div class="grid cols-2">
+        <label>Site Code
+          <input type="text" id="sCode" placeholder="0006">
+        </label>
+        <label>Site Name
+          <input type="text" id="sName" placeholder="Co-op Portsmouth Elm Grove">
+        </label>
+        <label>Postcode
+          <input type="text" id="sPostcode" placeholder="PO15 5RQ">
+        </label>
+        <label>Address
+          <input type="text" id="sAddress" placeholder="Unit A5, Segensworth Business Centre">
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" id="siteCancel">Cancel</button>
+        <button class="btn" id="siteSave">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast">Saved</div>
 
   <script>
-    const WORKER='https://mostlane-pos.jamie-def.workers.dev';
-    const $=s=>document.querySelector(s);
-    const $$=s=>document.querySelectorAll(s);
-    const toast=msg=>{const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);};
+    const WORKER = 'https://mostlane-pos.jamie-def.workers.dev';
 
-    let allUsers=[],showDeleted=false,currentTab='users';
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => document.querySelectorAll(sel);
+    const toast = (msg)=>{ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); };
 
-    document.addEventListener('DOMContentLoaded',async()=>{
-      const u=sessionStorage.getItem('mostlaneUser')||'';
-      $('#whoami').textContent='Signed in: '+(u||'Unknown');
-      bindTabs();
-      bindUserModal();
-      await loadUsers();
+    function dotToSpace(s){ return (s||'').replace(/\./g,' '); }
+    function getUser(){ return sessionStorage.getItem('mostlaneUser') || ''; }
+
+    let currentTab = 'users';
+    let allUsers = [];
+    let showDeleted = false;
+
+    // Pages
+    let pagesList = [];              // from /get-pages
+    let pageMatrixEdits = {};        // username -> { path: boolean }
+
+    // Sites
+    let currentSiteType = 'retail';
+    let currentSites = [];
+
+    // ----- Tabs
+    $$('#tabs .tab').forEach(tab => {
+      tab.addEventListener('click', ()=>{
+        $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        const name = tab.dataset.tab;
+        ['users','pages','sites','system'].forEach(p=>{
+          $('#panel-'+p).style.display = (p===name)?'block':'none';
+        });
+        currentTab = name;
+        if(name==='pages'){ loadPages(); }
+        if(name==='sites'){ loadSites(); }
+        if(name==='system'){ loadConfig(); }
+      });
     });
 
-    function bindTabs(){
-      $$('#tabs .tab').forEach(tab=>{
-        tab.addEventListener('click',()=>{
-          $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
-          tab.classList.add('active');
-          const name=tab.dataset.tab;
-          ['users','pages','sites','vehicles','system'].forEach(p=>{
-            $('#panel-'+p).style.display=(p===name)?'block':'none';
-          });
-          currentTab=name;
-        });
-      });
-    }
+    // ----- Init
+    document.addEventListener('DOMContentLoaded', async ()=>{
+      const u = getUser();
+      $('#whoami').textContent = 'Signed in: ' + (u ? dotToSpace(u) : 'Unknown');
 
+      await loadUsers();
+      bindUsersUI();
+      bindPagesUI();
+      bindSitesUI();
+      bindSystemUI();
+    });
+
+    // ==========================================
+    // USERS
+    // ==========================================
     async function loadUsers(){
-      const res=await fetch(WORKER+'/get-users',{cache:'no-store'});
-      allUsers=await res.json();
+      const res = await fetch(WORKER + '/get-users', { cache:'no-store' });
+      const data = await res.json();
+      // Support either [{...}] or {Users:[...]}
+      allUsers = Array.isArray(data) ? data : (Array.isArray(data.Users) ? data.Users : []);
       renderUsers();
     }
 
+    function normalizedUserName(u){
+      // Prefer Username key from your JSON; fall back to username/display fields if present
+      return u.Username || u.username || '';
+    }
+    function displayName(u){
+      const dn = u.DisplayName || u.displayName;
+      if(dn) return dn;
+      const parts = [u.FirstName||u.firstName, u.LastName||u.lastName].filter(Boolean);
+      return parts.join(' ');
+    }
+
     function renderUsers(){
-      const q=($('#userSearch').value||'').toLowerCase().trim();
-      const filtered=(allUsers||[])
-        .filter(u=>showDeleted?true:!u.deleted)
-        .filter(u=>{
-          if(!q)return true;
-          return [u.Username,u.FirstName,u.LastName,u.Email,u.EmploymentType]
-            .filter(Boolean).some(x=>x.toLowerCase().includes(q));
+      const q = ($('#userSearch').value||'').toLowerCase().trim();
+      const filtered = (allUsers||[])
+        .filter(u => showDeleted ? true : !(u.deleted === true))
+        .filter(u => {
+          if(!q) return true;
+          return [
+            normalizedUserName(u),
+            displayName(u),
+            u.Email || u.email,
+            u.EmploymentType || u.role || ''
+          ].filter(Boolean).some(x=>String(x).toLowerCase().includes(q));
         });
 
-      let html=`<table class="responsive"><thead><tr>
-      <th>Username</th><th>Name</th><th>Employment</th><th>Status</th><th>Vehicle</th><th>Actions</th>
-      </tr></thead><tbody>`;
-
+      let html = `
+        <table class="responsive">
+          <thead><tr>
+            <th>Username</th><th>Name</th><th>Employment</th><th>Status</th><th>Vehicle</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+      `;
       filtered.forEach(u=>{
-        const username=u.Username||'';
-        const name=[u.FirstName,u.LastName].filter(Boolean).join(' ');
-        const employment=u.EmploymentType||'';
-        const status=u.Status||'';
-        const vehicle=u.VehicleAssigned||'';
-        html+=`
-        <tr>
-          <td data-label="Username"><span class="chip">${username}</span></td>
-          <td data-label="Name">${name}</td>
-          <td data-label="Employment">${employment}</td>
-          <td data-label="Status">${status}</td>
-          <td data-label="Vehicle">${vehicle}</td>
-          <td data-label="Actions">
-            <div class="row-actions">
-              <button class="btn ghost" data-act="edit" data-username="${username}">Edit</button>
-              ${status.toLowerCase()==='active'
-                ?`<button class="btn alt" data-act="deactivate" data-username="${username}">Deactivate</button>`
-                :`<button class="btn" data-act="activate" data-username="${username}">Activate</button>`}
-            </div>
-          </td>
-        </tr>`;
+        const username = normalizedUserName(u);
+        const name = displayName(u);
+        const employment = u.EmploymentType || u.role || '';
+        const status = u.Status || ((u.active===false)?'Not Active':'Active');
+        const vehicle = u.VehicleAssigned || u.vehicle || '';
+        html += `
+          <tr>
+            <td data-label="Username"><span class="chip">${username}</span></td>
+            <td data-label="Name">${name}</td>
+            <td data-label="Employment">${employment}</td>
+            <td data-label="Status">${status}</td>
+            <td data-label="Vehicle">${vehicle}</td>
+            <td data-label="Actions">
+              <div class="row-actions">
+                <button class="btn ghost" data-act="edit" data-username="${username}">Edit</button>
+                ${(u.deleted===true)
+                  ? `<button class="btn" data-act="restore" data-username="${username}">Restore</button>`
+                  : `<button class="btn alt" data-act="delete" data-username="${username}">Delete</button>`}
+              </div>
+            </td>
+          </tr>`;
       });
-      html+=`</tbody></table>`;
-      $('#usersTableWrap').innerHTML=html;
+      html += `</tbody></table>`;
+      $('#usersTableWrap').innerHTML = html;
 
       $$('#usersTableWrap [data-act]').forEach(b=>{
-        b.addEventListener('click',()=>{
-          const act=b.dataset.act,uname=b.dataset.username;
-          if(act==='edit')openUserModal(uname);
-          toast(`Clicked ${act} on ${uname}`);
+        b.addEventListener('click', async ()=>{
+          const act = b.dataset.act;
+          const uname = b.dataset.username;
+          if(act==='edit'){ return openUserModal(uname); }
+          if(act==='delete'){
+            if(!confirm(`Soft-delete ${uname}?`)) return;
+            await fetch(WORKER + '/delete-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username: uname }) });
+            await loadUsers(); toast(`Deleted ${uname}`);
+          }
+          if(act==='restore'){
+            await fetch(WORKER + '/restore-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username: uname }) });
+            await loadUsers(); toast(`Restored ${uname}`);
+          }
         });
       });
     }
 
-    function bindUserModal(){
-      $('#btnAddUser').addEventListener('click',()=>openUserModal());
-      $('#userCancel').addEventListener('click',()=>$('#userModal').style.display='none');
-      $('#userModal').addEventListener('click',e=>{if(e.target.id==='userModal')$('#userModal').style.display='none';});
-      $('#userSave').addEventListener('click',saveUserFromModal);
-      $('#userSearch').addEventListener('input',renderUsers);
-      $('#toggleDeleted').addEventListener('change',e=>{showDeleted=e.target.checked;renderUsers();});
+    function bindUsersUI(){
+      $('#userSearch').addEventListener('input', renderUsers);
+      $('#toggleDeleted').addEventListener('change', e=>{ showDeleted=e.target.checked; renderUsers(); });
+      $('#btnAddUser').addEventListener('click', ()=>openUserModal());
+      // Modal controls
+      $('#userCancel').addEventListener('click', closeUserModal);
+      $('#userModal').addEventListener('click', e=>{ if(e.target.id==='userModal') closeUserModal(); });
+      $('#userSave').addEventListener('click', saveUserFromModal);
     }
 
     function openUserModal(username){
-      const u=(allUsers.find(x=>x.Username===username))||{};
-      $('#userModalTitle').textContent=username?'Edit User':'Add User';
-      $('#uUsername').value=u.Username||'';
-      $('#uFirstName').value=u.FirstName||'';
-      $('#uLastName').value=u.LastName||'';
-      $('#uEmail').value=u.Email||'';
-      $('#uEmployment').value=u.EmploymentType||'';
-      $('#uStatus').value=u.Status||'Active';
+      const isEdit = !!username;
+      $('#userModalTitle').textContent = isEdit? 'Edit User' : 'Add User';
+      const record = isEdit ? (allUsers.find(u=>normalizedUserName(u)===username) || {}) : {};
+      // Build dynamic form for all fields present + password field
+      const keys = new Set();
+      (allUsers||[]).forEach(u=>{
+        Object.keys(u||{}).forEach(k=>keys.add(k));
+      });
+      // Ensure common fields exist
+      ['Username','FirstName','LastName','Email','EmploymentType','Status','VehicleAssigned','SharePointPath'].forEach(k=>keys.add(k));
+
+      let form = `<div class="grid cols-2">`;
+      keys.forEach(k=>{
+        const val = (record[k] ?? record[k.charAt(0).toLowerCase()+k.slice(1)] ?? '');
+        form += `
+          <label>${k}
+            <input type="text" data-field="${k}" value="${String(val).replace(/"/g,'&quot;')}">
+          </label>`;
+      });
+      // password (special – write as HashedPassword via SHA-256)
+      form += `
+        <label>Password (leave blank to keep)
+          <input type="password" data-field="__passwordPlain" placeholder="New password">
+        </label>
+      `;
+      form += `</div>`;
+      $('#userModalBody').innerHTML = form;
       $('#userModal').style.display='flex';
+      // stash current username for save
+      $('#userModal').dataset.username = isEdit ? username : '';
+    }
+    function closeUserModal(){ $('#userModal').style.display='none'; }
+
+    async function sha256(text){
+      const enc = new TextEncoder().encode(text);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
 
     async function saveUserFromModal(){
-      const body={
-        Username:$('#uUsername').value.trim(),
-        FirstName:$('#uFirstName').value.trim(),
-        LastName:$('#uLastName').value.trim(),
-        Email:$('#uEmail').value.trim(),
-        EmploymentType:$('#uEmployment').value.trim(),
-        Status:$('#uStatus').value.trim()
-      };
-      if(!body.Username){alert('Username required');return;}
-      await fetch(WORKER+'/update-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      $('#userModal').style.display='none';
+      const inputs = $$('#userModalBody [data-field]');
+      const payload = {};
+      inputs.forEach(i=>{
+        const key = i.dataset.field;
+        if(key==='__passwordPlain') return;
+        payload[key] = i.value.trim();
+      });
+
+      // Map Username→username for Worker update endpoint compatibility too
+      if(payload.Username && !payload.username) payload.username = payload.Username;
+
+      // Handle password hashing if provided
+      const pwd = Array.from(inputs).find(i=>i.dataset.field==='__passwordPlain')?.value || '';
+      if(pwd){
+        const hash = await sha256(pwd);
+        payload.HashedPassword = hash;
+        payload.passwordHash = hash; // also save as lowercase key if Worker expects this
+      }
+
+      // Decide add vs update
+      const editingUsername = $('#userModal').dataset.username || '';
+      if(editingUsername){
+        payload.username = payload.username || editingUsername;
+        await fetch(WORKER + '/update-user', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payload)
+        });
+        toast('User updated');
+      }else{
+        // add-user expects a user object; ensure createdAt
+        payload.createdAt = new Date().toISOString();
+        await fetch(WORKER + '/add-user', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payload)
+        });
+        toast('User added');
+      }
+      closeUserModal();
       await loadUsers();
-      toast('User saved');
+    }
+
+    // ==========================================
+    // PAGES (permissions matrix)
+    // ==========================================
+    function bindPagesUI(){
+      $('#btnReloadPages').addEventListener('click', loadPages);
+      $('#btnSavePermissions').addEventListener('click', savePermissions);
+    }
+
+    async function loadPages(){
+      // Fetch users and pages concurrently
+      const [usrRes, pgRes] = await Promise.all([
+        fetch(WORKER + '/get-users', { cache:'no-store' }),
+        fetch(WORKER + '/get-pages', { cache:'no-store' })
+      ]);
+
+      const usrData = await usrRes.json();
+      allUsers = Array.isArray(usrData) ? usrData : (Array.isArray(usrData.Users) ? usrData.Users : []);
+      const pgData = await pgRes.json();
+      pagesList = Array.isArray(pgData.pages) ? pgData.pages : [];
+
+      $('#pagesCount').textContent = (pagesList.length||0) + ' pages';
+      renderPagesMatrix();
+    }
+
+    function renderPagesMatrix(){
+      if(!pagesList.length){
+        $('#pagesMatrix').innerHTML = `<div class="note">No pages found. Ensure your Worker’s /get-pages can access your GitHub repo.</div>`;
+        return;
+      }
+      let html = `<table><thead><tr><th>User</th>`;
+      pagesList.forEach(p=>{ html += `<th title="${p.path}">${p.name}</th>`; });
+      html += `</tr></thead><tbody>`;
+
+      pageMatrixEdits = {};
+      (allUsers||[]).filter(u=>!(u.deleted===true)).forEach(u=>{
+        const uname = normalizedUserName(u);
+        // Permissions object can live either under u.permissions or as a field in your JSON;
+        // we standardize to u.permissions
+        const perms = (u.permissions && typeof u.permissions==='object') ? u.permissions : {};
+        pageMatrixEdits[uname] = {...perms};
+        html += `<tr><td><span class="chip">${uname}</span></td>`;
+        pagesList.forEach(p=>{
+          const checked = !!perms[p.path] || !!perms[p.name]; // allow either path or name key
+          html += `<td style="text-align:center"><input type="checkbox" data-u="${uname}" data-path="${p.path}" ${checked?'checked':''}></td>`;
+        });
+        html += `</tr>`;
+      });
+
+      html += `</tbody></table>`;
+      $('#pagesMatrix').innerHTML = html;
+
+      // Bind checkbox changes
+      $$('#pagesMatrix input[type="checkbox"]').forEach(ch=>{
+        ch.addEventListener('change', ()=>{
+          const uname = ch.dataset.u;
+          const path = ch.dataset.path;
+          pageMatrixEdits[uname] = pageMatrixEdits[uname] || {};
+          pageMatrixEdits[uname][path] = ch.checked;
+        });
+      });
+    }
+
+    async function savePermissions(){
+      const ops = [];
+      Object.keys(pageMatrixEdits).forEach(username=>{
+        ops.push(fetch(WORKER + '/update-user', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ username, permissions: pageMatrixEdits[username] })
+        }));
+      });
+      await Promise.all(ops);
+      toast('Permissions saved');
+    }
+
+    // ==========================================
+    // SITES
+    // ==========================================
+    function bindSitesUI(){
+      $$('input[name="siteType"]').forEach(r=>{
+        r.addEventListener('change', async ()=>{
+          currentSiteType = r.value;
+          await loadSites();
+        });
+      });
+      $('#siteSearch').addEventListener('input', renderSites);
+      $('#btnAddSite').addEventListener('click', ()=>openSiteModal());
+      // Modal controls
+      $('#siteCancel').addEventListener('click', closeSiteModal);
+      $('#siteModal').addEventListener('click', e=>{ if(e.target.id==='siteModal') closeSiteModal(); });
+      $('#siteSave').addEventListener('click', saveSiteFromModal);
+    }
+
+    async function loadSites(){
+      const res = await fetch(`${WORKER}/get-sites?type=${encodeURIComponent(currentSiteType)}`, { cache:'no-store' });
+      currentSites = await res.json();
+      renderSites();
+    }
+
+    function renderSites(){
+      const q = ($('#siteSearch').value||'').toLowerCase().trim();
+      const filtered = (currentSites||[]).filter(s=>{
+        if(!q) return true;
+        return [s.siteCode,s.siteName,s.postcode,s.address].filter(Boolean).some(x=>String(x).toLowerCase().includes(q));
+      });
+
+      let html = `
+        <table class="responsive">
+          <thead><tr>
+            <th>Code</th><th>Name</th><th>Postcode</th><th>Address</th><th>Actions</th>
+          </tr></thead><tbody>
+      `;
+      filtered.forEach(s=>{
+        html += `
+          <tr>
+            <td data-label="Code"><span class="chip">${s.siteCode||''}</span></td>
+            <td data-label="Name">${s.siteName||''}</td>
+            <td data-label="Postcode">${s.postcode||''}</td>
+            <td data-label="Address">${s.address||''}</td>
+            <td data-label="Actions">
+              <div class="row-actions">
+                <button class="btn ghost" data-sact="edit" data-code="${s.siteCode||''}">Edit</button>
+                <button class="btn alt" data-sact="delete" data-code="${s.siteCode||''}">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      });
+      html += `</tbody></table>`;
+      $('#sitesTableWrap').innerHTML = html;
+
+      $$('#sitesTableWrap [data-sact]').forEach(b=>{
+        b.addEventListener('click', async ()=>{
+          const act = b.dataset.sact;
+          const code = b.dataset.code;
+          const rec = (currentSites||[]).find(s=>s.siteCode===code) || {};
+          if(act==='edit'){ openSiteModal(rec); }
+          if(act==='delete'){
+            if(!confirm(`Delete site ${code}? (Soft delete)`)) return;
+            await fetch(`${WORKER}/delete-site?type=${encodeURIComponent(currentSiteType)}`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({ siteCode: code })
+            });
+            await loadSites(); toast(`Deleted ${code}`);
+          }
+        });
+      });
+    }
+
+    function openSiteModal(rec){
+      const isEdit = !!rec;
+      $('#siteModalTitle').textContent = isEdit ? 'Edit Site' : 'Add Site';
+      $('#sCode').value = rec?.siteCode || '';
+      $('#sCode').disabled = !!rec?.siteCode;
+      $('#sName').value = rec?.siteName || '';
+      $('#sPostcode').value = rec?.postcode || '';
+      $('#sAddress').value = rec?.address || '';
+      $('#siteModal').style.display = 'flex';
+    }
+    function closeSiteModal(){ $('#siteModal').style.display='none'; }
+
+    async function saveSiteFromModal(){
+      const body = {
+        siteCode: $('#sCode').value.trim(),
+        siteName: $('#sName').value.trim(),
+        postcode: $('#sPostcode').value.trim(),
+        address: $('#sAddress').value.trim()
+      };
+      if(!body.siteCode || !body.siteName){ alert('Site Code & Name required'); return; }
+
+      const isEdit = !!(currentSites.find(s=>s.siteCode===body.siteCode));
+      const url = isEdit ? `${WORKER}/update-site?type=${encodeURIComponent(currentSiteType)}` :
+                           `${WORKER}/add-site?type=${encodeURIComponent(currentSiteType)}`;
+      await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      closeSiteModal(); await loadSites(); toast(isEdit?'Site updated':'Site added');
+    }
+
+    // ==========================================
+    // SYSTEM
+    // ==========================================
+    function bindSystemUI(){
+      $('#btnSaveConfig').addEventListener('click', saveConfig);
+    }
+    async function loadConfig(){
+      try{
+        const res = await fetch(WORKER + '/get-config', { cache:'no-store' });
+        const cfg = await res.json();
+        $('#cfgSharePoint').value = cfg.sharepointRoot || '';
+        $('#cfgPostcode').value = cfg.hqPostcode || '';
+        $('#cfgMapsKey').value = cfg.mapsApiKey || '';
+        $('#cfgVAT').value = (cfg.vatRate ?? 20);
+        $('#cfgMileage').value = (cfg.mileageRate ?? 0.25);
+      }catch(e){ /* ignore */ }
+    }
+    async function saveConfig(){
+      const cfg = {
+        sharepointRoot: $('#cfgSharePoint').value.trim(),
+        hqPostcode: $('#cfgPostcode').value.trim(),
+        mapsApiKey: $('#cfgMapsKey').value.trim(),
+        vatRate: parseFloat($('#cfgVAT').value || '20'),
+        mileageRate: parseFloat($('#cfgMileage').value || '0.25'),
+        updatedAt: new Date().toISOString()
+      };
+      try{
+        const res = await fetch(WORKER + '/update-config', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+        });
+        if(res.ok){ toast('Config saved'); }
+        else{ toast('Your Worker has no /update-config yet'); alert('Add /update-config in Worker to save.'); }
+      }catch(err){ toast('Failed to save'); }
     }
   </script>
 </body>
