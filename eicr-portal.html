@@ -3,6 +3,7 @@
 <head>
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
+  <meta charset="UTF-8" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -24,18 +25,14 @@
     }
     body::before {
       content: "";
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       background: url('Mostlane_Embossed.png') no-repeat center/180%;
       z-index: -1;
     }
     .container {
       background-color: rgba(255, 255, 255, 0.6);
-      margin: 20px auto;
-      padding: 20px;
-      border-radius: 15px;
-      max-width: 95%;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      margin: 20px auto; padding: 20px; border-radius: 15px;
+      max-width: 95%; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     }
     h1 { text-align: center; color: #0071CE; margin-top: 0; }
     .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
@@ -65,17 +62,17 @@
       text-decoration:none;font-weight:bold;border:0;cursor:pointer;
     }
     .sp-btn:hover{opacity:.9;}
-    .backbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;}
+    .backbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;gap:10px;}
     .backlink{
       display:inline-flex;align-items:center;gap:8px;background:#0071CE;color:#fff;text-decoration:none;
       padding:8px 14px;border-radius:30px;font-weight:bold;
     }
     .backlink:hover{opacity:.9;}
-    #editBtn,#saveBtn{
+    #editBtn,#saveBtn,#addSiteBtn,#deleteSiteBtn{
       background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;
-      font-weight:bold;margin-left:10px;
+      font-weight:bold;
     }
-    #editBtn:hover,#saveBtn:hover{opacity:.9;}
+    #editBtn:hover,#saveBtn:hover,#addSiteBtn:hover,#deleteSiteBtn:hover{opacity:.9;}
     [contenteditable="true"]{background:#fff6d1;}
 
     .modal {
@@ -83,19 +80,23 @@
       width: 100%; height: 100%; background: rgba(0,0,0,0.5);
     }
     .modal-content {
-      background: #fff; border-radius: 10px; max-width: 420px; margin: 6% auto;
+      background: #fff; border-radius: 10px; max-width: 480px; margin: 4% auto;
       padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     .modal h2 { margin-top: 0; color: #0071CE; text-align: center; }
-    .modal label { display:block; margin:6px 0; }
-    .modal input[type="date"], .modal select {
-      width:100%; padding:6px; border:1px solid #ccc; border-radius:5px;
+    .modal label { display:block; margin:6px 0; font-weight:bold; }
+    .modal input[type="text"], .modal input[type="date"], .modal select {
+      width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;
     }
+    .modal .row-2 { display:flex; gap:10px; }
+    .modal .row-2 > div { flex:1; }
+    .modal .btnbar { display:flex; gap:10px; justify-content:flex-end; margin-top:10px; }
     .modal button {
       background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:6px;
-      cursor:pointer;margin-top:10px;font-weight:bold;
+      cursor:pointer;font-weight:bold;
     }
-    .modal .close-btn { background:#ccc;color:#000;margin-left:10px; }
+    .modal .close-btn { background:#ccc;color:#000; }
+
     .range-btn { background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;border-radius:6px;cursor:pointer;transition:0.2s; }
     .range-btn.active { background:#0071CE;color:#fff; }
     .summary-box { border:1px solid #ddd;border-radius:10px;margin:10px 0;padding:10px;background:#fff; }
@@ -113,6 +114,7 @@
       .search-input{width:90%;font-size:16px;}
       th,td{font-size:12px;padding:6px;}
       .modal-content{max-width:90%;}
+      .modal .row-2 { flex-direction:column; }
     }
   </style>
 </head>
@@ -124,6 +126,9 @@
       </a>
       <button id="editBtn">Edit</button>
       <button id="saveBtn" style="display:none;">Save Changes</button>
+      <!-- NEW: buttons appear only after PIN (we toggle display in JS) -->
+      <button id="addSiteBtn" style="display:none;">Add Site</button>
+      <button id="deleteSiteBtn" style="display:none;">Delete Site</button>
     </div>
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
@@ -230,7 +235,7 @@ const getStatus = e => {
   return red?'🔴':amber?'🟡':'🟢';
 };
 
-/* ========== CHANGED: fetchData() mapping made bulletproof; everything else identical ========== */
+/* ========== CHANGED: fetchData() now pulls from Cloudflare Worker endpoints ========== */
 async function fetchData() {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
@@ -250,32 +255,18 @@ async function fetchData() {
         const j = await fetchNoCacheJSON(`${base}${s.path}`).catch(() => []);
         if (!j || (!Array.isArray(j) && typeof j !== 'object')) return [];
         const arr = Array.isArray(j) ? j : Object.values(j);
-
-        // 🔒 bulletproof mapping (handles all known variants + zero-pads store code)
         return arr.map(rw => ({
-          storeCode: String(
-            rw["Branch Code"] ?? rw["BranchCode"] ?? rw["Store Code"] ?? rw["StoreCode"] ?? rw["branchCode"] ?? rw["storeCode"] ?? ""
-          ).padStart(4, "0"),
-          siteName:
-            rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? rw["sitename"] ?? "",
-          postcode:
-            rw["Postcode"] ?? rw["postcode"] ?? rw["Post Code"] ?? rw["Zip"] ?? "",
-          storeType:
-            s.label || rw["Store Type"] || rw["storeType"] || "",
-          fiveYear:
-            rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? rw["five_year"] ?? rw["FiveYear"] ?? "",
-          pat:
-            rw["PAT"] ?? rw["Pat"] ?? rw["pat"] ?? "",
-          em:
-            rw["EM"] ?? rw["Em"] ?? rw["emergency"] ?? rw["em"] ?? "",
-          pv:
-            rw["PV"] ?? rw["Pv"] ?? rw["pv"] ?? "",
-          ev:
-            rw["EV"] ?? rw["Ev"] ?? rw["ev"] ?? "",
-          pump:
-            rw["PUMP"] ?? rw["Pump"] ?? rw["pump"] ?? "",
-          sharePoint:
-            rw["SharePoint"] ?? rw["Sharepoint"] ?? rw["sharepoint"] ?? rw["SharePoint Link"] ?? ""
+          storeCode: (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "").toString().padStart(4, "0"),
+          siteName:  rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
+          postcode:  rw["Postcode"] ?? rw["postcode"] ?? "",
+          storeType: s.label,
+          fiveYear:  rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
+          pat:       rw["PAT"] ?? "",
+          em:        rw["EM"] ?? "",
+          pv:        rw["PV"] ?? "",
+          ev:        rw["EV"] ?? "",
+          pump:      rw["PUMP"] ?? "",
+          sharePoint: rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
         }));
       } catch (e) {
         console.error("❌ Fetch failed for", s.path, e);
@@ -315,6 +306,8 @@ function renderTable(d){
 document.addEventListener("DOMContentLoaded",()=>{
   const editBtn=document.getElementById("editBtn");
   const saveBtn=document.getElementById("saveBtn");
+  const addSiteBtn=document.getElementById("addSiteBtn");
+  const deleteSiteBtn=document.getElementById("deleteSiteBtn");
 
   editBtn.addEventListener("click",()=>{
     const pin=prompt("Enter edit PIN:");
@@ -323,6 +316,9 @@ document.addEventListener("DOMContentLoaded",()=>{
       enableEditing(true);
       editBtn.style.display="none";
       saveBtn.style.display="inline-block";
+      // NEW: show Add/Delete buttons in edit mode
+      addSiteBtn.style.display="inline-block";
+      deleteSiteBtn.style.display="inline-block";
       alert("✅ Edit mode enabled.");
     } else alert("❌ Incorrect PIN");
   });
@@ -330,25 +326,13 @@ document.addEventListener("DOMContentLoaded",()=>{
   saveBtn.addEventListener("click",async()=>{
     const changedRows=[...document.querySelectorAll("tbody tr[data-changed='true']")];
     if(!changedRows.length)return alert("No changes detected.");
-    const headers=[...document.querySelectorAll("thead th")].map(th=>th.textContent.trim());
-    const changes=changedRows.map(r=>{
-      const record={};
-      [...r.children].forEach((td,i)=>record[headers[i]]=td.textContent.trim());
-      return record;
-    });
-    const grouped={};
-    for(const rec of changes){
-      const type=rec["Store Type"];
-      if(!grouped[type])grouped[type]=[];
-      grouped[type].push(rec);
-    }
-    // (Zapier legacy kept but not used here)
     alert("✅ Changes queued — sending now.");
     enableEditing(false);
     editBtn.style.display="inline-block";
     saveBtn.style.display="none";
+    addSiteBtn.style.display="none";
+    deleteSiteBtn.style.display="none";
     editMode=false;
-    // Send each changed row immediately via Cloudflare (see saveEditInstant below)
     changedRows.forEach(r => saveEditInstant(r));
   });
 
@@ -369,6 +353,10 @@ document.addEventListener("DOMContentLoaded",()=>{
       if(!state)row.removeAttribute("data-changed");
     });
   }
+
+  // NEW: wire up Add/Delete buttons
+  addSiteBtn.addEventListener("click", openAddSiteModal);
+  deleteSiteBtn.addEventListener("click", openDeleteSiteModal);
 
   fetchData();
   console.log("📡 Fetching compliance JSON files from Cloudflare...");
@@ -457,8 +445,10 @@ function openModal() {
       <input type="date" id="fromDate">
       <label>To Date:</label>
       <input type="date" id="toDate">
-      <button onclick="runDateSearch()">Search</button>
-      <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button>
+      <div class="btnbar">
+        <button onclick="runDateSearch()">Search</button>
+        <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button>
+      </div>
     </div>`;
   document.body.appendChild(modal);
   modal.style.display = 'block';
@@ -492,8 +482,10 @@ function openExportModal() {
       <h2>Export Options</h2>
       <label><input type="checkbox" id="includeFilters" checked> Include active filters summary</label><br>
       <label><input type="checkbox" id="includeSummary" checked> Include Green/Amber/Red summary</label><br>
-      <button onclick="generateExcel()">Generate Excel</button>
-      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+      <div class="btnbar">
+        <button onclick="generateExcel()">Generate Excel</button>
+        <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+      </div>
     </div>`;
   document.body.appendChild(modal);
   modal.style.display = 'block';
@@ -618,7 +610,7 @@ function openSummaryModal(){
   modal.className='modal';
   modal.innerHTML=`<div class="modal-content"><h2>Compliance Summary</h2>
     ${rows.join('')||'<p>No data.</p>'}
-    <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button></div>`;
+    <div class="btnbar"><button class="close-btn" onclick="this.closest('.modal').remove()">Close</button></div></div>`;
   document.body.appendChild(modal);
   modal.style.display='block';
 }
@@ -691,13 +683,232 @@ async function saveEditInstant(row) {
   setTimeout(fetchData, 1500);
 }
 
-// Attach to existing Save Changes button
-document.getElementById("saveBtn").addEventListener("click", () => {
-  const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
-  if (!changedRows.length) return alert("No changes detected.");
-  changedRows.forEach(r => saveEditInstant(r));
-  alert("✅ Changes applied — refreshing shortly to confirm.");
-});
+/* ===================== NEW: ADD / DELETE SITE (PIN-GATED) ===================== */
+
+// Map UI label to worker storeType slug
+function toSlug(label) {
+  switch (label) {
+    case "Retail": return "retail";
+    case "ELS": return "els";
+    case "ELS Private": return "els_private";
+    case "Cobra": return "cobra";
+    case "Wenzel's": return "wenzels";
+    default: return label.toLowerCase();
+  }
+}
+
+function openAddSiteModal(){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML = `
+  <div class="modal-content">
+    <h2>Add Site</h2>
+    <label>Store Type</label>
+    <select id="as_storeType">
+      <option>Retail</option>
+      <option>ELS</option>
+      <option>ELS Private</option>
+      <option>Cobra</option>
+      <option>Wenzel's</option>
+    </select>
+
+    <div class="row-2">
+      <div>
+        <label>Site Name</label>
+        <input id="as_siteName" type="text" placeholder="e.g. Portsmouth Elm Grove">
+      </div>
+      <div>
+        <label>Postcode</label>
+        <input id="as_postcode" type="text" placeholder="e.g. PO15 5RQ">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div>
+        <label>5 Year</label>
+        <input id="as_5year" type="date">
+      </div>
+      <div>
+        <label>PAT</label>
+        <input id="as_pat" type="date">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div>
+        <label>EM</label>
+        <input id="as_em" type="date">
+      </div>
+      <div>
+        <label>PV (optional)</label>
+        <input id="as_pv" type="date">
+      </div>
+    </div>
+
+    <div class="row-2">
+      <div>
+        <label>EV (optional)</label>
+        <input id="as_ev" type="date">
+      </div>
+      <div>
+        <label>PUMP (optional)</label>
+        <input id="as_pump" type="date">
+      </div>
+    </div>
+
+    <label>SharePoint (optional)</label>
+    <input id="as_sp" type="text" placeholder="Full link to folder/file (optional)">
+
+    <div class="btnbar">
+      <button onclick="saveNewSite(this)">Save Site</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+}
+
+function fmtUK(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (isNaN(dt)) return "";
+  const dd = String(dt.getDate()).padStart(2,'0');
+  const mm = String(dt.getMonth()+1).padStart(2,'0');
+  const yyyy = dt.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+async function saveNewSite(btn){
+  btn.disabled = true;
+  const storeTypeLabel = document.getElementById('as_storeType').value;
+  const siteName = document.getElementById('as_siteName').value.trim();
+  const postcode = document.getElementById('as_postcode').value.trim();
+  const d5 = document.getElementById('as_5year').value;
+  const dpat = document.getElementById('as_pat').value;
+  const dem = document.getElementById('as_em').value;
+  const dpv = document.getElementById('as_pv').value;
+  const dev = document.getElementById('as_ev').value;
+  const dpump = document.getElementById('as_pump').value;
+  const sp = document.getElementById('as_sp').value.trim();
+
+  // Required fields
+  if (!storeTypeLabel || !siteName || !postcode || !d5 || !dpat || !dem) {
+    alert("Please complete Store Type, Site Name, Postcode, 5 Year, PAT, and EM.");
+    btn.disabled = false;
+    return;
+  }
+
+  // Compute next Branch Code for this storeType from current dataset
+  const nextCode = (() => {
+    const subset = allData.filter(e => e.storeType === storeTypeLabel);
+    const maxNum = subset.reduce((m, e) => {
+      const n = parseInt((e.storeCode || "0").replace(/\D/g,''), 10);
+      return isNaN(n) ? m : Math.max(m, n);
+    }, 0);
+    return String(maxNum + 1).padStart(4, '0');
+  })();
+
+  const record = {
+    "Branch Code": nextCode,
+    "Store Name": siteName,
+    "Postcode": postcode.toUpperCase(),
+    "5_Year": fmtUK(d5),
+    "PAT": fmtUK(dpat),
+    "EM": fmtUK(dem),
+    "PV": fmtUK(dpv),
+    "EV": fmtUK(dev),
+    "PUMP": fmtUK(dpump),
+    "SharePoint": sp,
+    "Store Type": storeTypeLabel
+  };
+
+  const payload = {
+    action: "add",
+    storeType: toSlug(storeTypeLabel),
+    record
+  };
+
+  try {
+    const res = await fetch(CLOUDFLARE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const out = await res.json().catch(()=>({}));
+    console.log("Add Site →", out);
+    alert(`✅ Added ${storeTypeLabel} ${nextCode} – ${siteName}`);
+    // Close modal & refresh
+    document.querySelector('.modal')?.remove();
+    await fetchData();
+  } catch (e) {
+    console.error(e);
+    alert("❌ Failed to add site.");
+    btn.disabled = false;
+  }
+}
+
+function openDeleteSiteModal() {
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML = `
+  <div class="modal-content">
+    <h2>Delete Site</h2>
+    <label>Store Type</label>
+    <select id="ds_storeType">
+      <option>Retail</option>
+      <option>ELS</option>
+      <option>ELS Private</option>
+      <option>Cobra</option>
+      <option>Wenzel's</option>
+    </select>
+
+    <label>Store Number (4 digits)</label>
+    <input id="ds_branch" type="text" placeholder="e.g. 0123" maxlength="4">
+
+    <div class="btnbar">
+      <button onclick="confirmDeleteSite(this)">Delete</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+}
+
+async function confirmDeleteSite(btn){
+  btn.disabled = true;
+  const storeTypeLabel = document.getElementById('ds_storeType').value;
+  const codeRaw = (document.getElementById('ds_branch').value || '').trim();
+  const branchCode = codeRaw.padStart(4,'0');
+
+  if (!storeTypeLabel || !branchCode.match(/^\d{4}$/)) {
+    alert("Enter a valid 4-digit Store Number.");
+    btn.disabled = false;
+    return;
+  }
+
+  const payload = {
+    action: "delete",
+    storeType: toSlug(storeTypeLabel),
+    branchCode
+  };
+
+  try {
+    const res = await fetch(CLOUDFLARE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const out = await res.json().catch(()=>({}));
+    console.log("Delete Site →", out);
+    alert(`🗑️ Deleted ${storeTypeLabel} ${branchCode}`);
+    document.querySelector('.modal')?.remove();
+    await fetchData();
+  } catch (e) {
+    console.error(e);
+    alert("❌ Failed to delete site.");
+    btn.disabled = false;
+  }
+}
   </script>
 </body>
 </html>
