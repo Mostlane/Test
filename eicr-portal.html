@@ -25,14 +25,18 @@
     }
     body::before {
       content: "";
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
       background: url('Mostlane_Embossed.png') no-repeat center/180%;
       z-index: -1;
     }
     .container {
       background-color: rgba(255, 255, 255, 0.6);
-      margin: 20px auto; padding: 20px; border-radius: 15px;
-      max-width: 95%; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      margin: 20px auto;
+      padding: 20px;
+      border-radius: 15px;
+      max-width: 95%;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     }
     h1 { text-align: center; color: #0071CE; margin-top: 0; }
     .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
@@ -62,17 +66,20 @@
       text-decoration:none;font-weight:bold;border:0;cursor:pointer;
     }
     .sp-btn:hover{opacity:.9;}
-    .backbar{display:flex;justify-content:flex-start;align-items:center;margin-bottom:10px;gap:10px;}
+    .backbar{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-start;align-items:center;margin-bottom:10px;}
     .backlink{
       display:inline-flex;align-items:center;gap:8px;background:#0071CE;color:#fff;text-decoration:none;
       padding:8px 14px;border-radius:30px;font-weight:bold;
     }
     .backlink:hover{opacity:.9;}
-    #editBtn,#saveBtn,#addSiteBtn,#deleteSiteBtn{
+    #editBtn,#saveBtn,
+    /* ✅ NEW buttons */
+    #addSiteBtn,#deleteSiteBtn{
       background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;
       font-weight:bold;
     }
-    #editBtn:hover,#saveBtn:hover,#addSiteBtn:hover,#deleteSiteBtn:hover{opacity:.9;}
+    #editBtn:hover,#saveBtn:hover,
+    #addSiteBtn:hover,#deleteSiteBtn:hover{opacity:.9;}
     [contenteditable="true"]{background:#fff6d1;}
 
     .modal {
@@ -80,23 +87,21 @@
       width: 100%; height: 100%; background: rgba(0,0,0,0.5);
     }
     .modal-content {
-      background: #fff; border-radius: 10px; max-width: 480px; margin: 4% auto;
+      background: #fff; border-radius: 10px; max-width: 520px; margin: 4% auto;
       padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
     }
     .modal h2 { margin-top: 0; color: #0071CE; text-align: center; }
-    .modal label { display:block; margin:6px 0; font-weight:bold; }
+    .modal label { display:block; margin:6px 0; }
     .modal input[type="text"], .modal input[type="date"], .modal select {
-      width:100%; padding:8px; border:1px solid #ccc; border-radius:6px;
+      width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;
     }
-    .modal .row-2 { display:flex; gap:10px; }
-    .modal .row-2 > div { flex:1; }
-    .modal .btnbar { display:flex; gap:10px; justify-content:flex-end; margin-top:10px; }
+    .modal .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px;}
     .modal button {
       background:#0071CE;color:#fff;border:none;padding:8px 16px;border-radius:6px;
       cursor:pointer;font-weight:bold;
     }
     .modal .close-btn { background:#ccc;color:#000; }
-
     .range-btn { background:#e6e8eb;color:#000;margin:3px;padding:6px 10px;border:none;border-radius:6px;cursor:pointer;transition:0.2s; }
     .range-btn.active { background:#0071CE;color:#fff; }
     .summary-box { border:1px solid #ddd;border-radius:10px;margin:10px 0;padding:10px;background:#fff; }
@@ -114,7 +119,7 @@
       .search-input{width:90%;font-size:16px;}
       th,td{font-size:12px;padding:6px;}
       .modal-content{max-width:90%;}
-      .modal .row-2 { flex-direction:column; }
+      .modal .row{grid-template-columns:1fr;}
     }
   </style>
 </head>
@@ -126,7 +131,8 @@
       </a>
       <button id="editBtn">Edit</button>
       <button id="saveBtn" style="display:none;">Save Changes</button>
-      <!-- NEW: buttons appear only after PIN (we toggle display in JS) -->
+
+      <!-- ✅ NEW: appear only in edit mode after correct PIN -->
       <button id="addSiteBtn" style="display:none;">Add Site</button>
       <button id="deleteSiteBtn" style="display:none;">Delete Site</button>
     </div>
@@ -216,6 +222,12 @@ let activeStoreType = 'ALL', activeCategory = null, rangeDays = null, searchActi
 const EDIT_PIN = "2025";
 let editMode = false, originalDataSnapshot = [];
 
+/* ---------- Worker endpoints ---------- */
+const WORKER_BASE = "https://mostlane-pos.jamie-def.workers.dev/Compliance";
+const CLOUDFLARE_GET = (key) => `${WORKER_BASE}/${key}`;
+const CLOUDFLARE_UPDATE = `${WORKER_BASE}/update`;
+const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
+
 const parseDate = d => {
   if (!d || (typeof d === 'string' && d.trim() === '')) return null;
   const s = String(d).replace(/^\*/, '');
@@ -235,12 +247,38 @@ const getStatus = e => {
   return red?'🔴':amber?'🟡':'🟢';
 };
 
-/* ========== CHANGED: fetchData() now pulls from Cloudflare Worker endpoints ========== */
+/* ========== CHANGED: fetchData() now pulls from Worker + bulletproof normaliser ========== */
+function pad4(v){ return String(v ?? "").padStart(4,"0"); }
+function pick(o, keys){ for(const k of keys){ if(o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
+function normaliseRecord(raw, label){
+  // Handle many possible keys coming from different lists
+  const storeCode = pad4(
+    pick(raw, ["Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"])
+  );
+  const siteName = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
+  const postcode = pick(raw, ["Postcode","postcode","Post Code","ZIP"]);
+  const fiveYear = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
+  const pat  = pick(raw, ["PAT","Pat"]);
+  const em   = pick(raw, ["EM","Emergency Lighting","EmergencyLighting"]);
+  const pv   = pick(raw, ["PV","Photovoltaic"]);
+  const ev   = pick(raw, ["EV","EVCP","EV_Charge"]);
+  const pump = pick(raw, ["PUMP","Pump"]);
+  const sharePoint = pick(raw, ["SharePoint","sharePointURL","sharePoint","SP"]);
+
+  return {
+    storeCode,
+    siteName,
+    postcode,
+    storeType: label,
+    fiveYear, pat, em, pv, ev, pump,
+    sharePoint
+  };
+}
+
 async function fetchData() {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
 
-  const base = 'https://mostlane-pos.jamie-def.workers.dev/Compliance/';
   const sources = [
     { path: 'retail',      label: 'Retail' },
     { path: 'els',         label: 'ELS' },
@@ -252,22 +290,9 @@ async function fetchData() {
   const results = await Promise.all(
     sources.map(async s => {
       try {
-        const j = await fetchNoCacheJSON(`${base}${s.path}`).catch(() => []);
-        if (!j || (!Array.isArray(j) && typeof j !== 'object')) return [];
-        const arr = Array.isArray(j) ? j : Object.values(j);
-        return arr.map(rw => ({
-          storeCode: (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "").toString().padStart(4, "0"),
-          siteName:  rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
-          postcode:  rw["Postcode"] ?? rw["postcode"] ?? "",
-          storeType: s.label,
-          fiveYear:  rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
-          pat:       rw["PAT"] ?? "",
-          em:        rw["EM"] ?? "",
-          pv:        rw["PV"] ?? "",
-          ev:        rw["EV"] ?? "",
-          pump:      rw["PUMP"] ?? "",
-          sharePoint: rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
-        }));
+        const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path)).catch(() => []);
+        const arr = Array.isArray(j) ? j : (j ? Object.values(j) : []);
+        return arr.map(r => normaliseRecord(r, s.label));
       } catch (e) {
         console.error("❌ Fetch failed for", s.path, e);
         return [];
@@ -306,8 +331,8 @@ function renderTable(d){
 document.addEventListener("DOMContentLoaded",()=>{
   const editBtn=document.getElementById("editBtn");
   const saveBtn=document.getElementById("saveBtn");
-  const addSiteBtn=document.getElementById("addSiteBtn");
-  const deleteSiteBtn=document.getElementById("deleteSiteBtn");
+  const addBtn = document.getElementById("addSiteBtn");     // ✅ NEW
+  const delBtn = document.getElementById("deleteSiteBtn");  // ✅ NEW
 
   editBtn.addEventListener("click",()=>{
     const pin=prompt("Enter edit PIN:");
@@ -316,12 +341,15 @@ document.addEventListener("DOMContentLoaded",()=>{
       enableEditing(true);
       editBtn.style.display="none";
       saveBtn.style.display="inline-block";
-      // NEW: show Add/Delete buttons in edit mode
-      addSiteBtn.style.display="inline-block";
-      deleteSiteBtn.style.display="inline-block";
+      addBtn.style.display="inline-block";   // ✅ show Add
+      delBtn.style.display="inline-block";   // ✅ show Delete
       alert("✅ Edit mode enabled.");
     } else alert("❌ Incorrect PIN");
   });
+
+  // ✅ NEW – open add/delete modals
+  addBtn.addEventListener("click", openAddSiteModal);
+  delBtn.addEventListener("click", openDeleteSiteModal);
 
   saveBtn.addEventListener("click",async()=>{
     const changedRows=[...document.querySelectorAll("tbody tr[data-changed='true']")];
@@ -330,8 +358,8 @@ document.addEventListener("DOMContentLoaded",()=>{
     enableEditing(false);
     editBtn.style.display="inline-block";
     saveBtn.style.display="none";
-    addSiteBtn.style.display="none";
-    deleteSiteBtn.style.display="none";
+    addBtn.style.display="none";
+    delBtn.style.display="none";
     editMode=false;
     changedRows.forEach(r => saveEditInstant(r));
   });
@@ -353,10 +381,6 @@ document.addEventListener("DOMContentLoaded",()=>{
       if(!state)row.removeAttribute("data-changed");
     });
   }
-
-  // NEW: wire up Add/Delete buttons
-  addSiteBtn.addEventListener("click", openAddSiteModal);
-  deleteSiteBtn.addEventListener("click", openDeleteSiteModal);
 
   fetchData();
   console.log("📡 Fetching compliance JSON files from Cloudflare...");
@@ -445,7 +469,7 @@ function openModal() {
       <input type="date" id="fromDate">
       <label>To Date:</label>
       <input type="date" id="toDate">
-      <div class="btnbar">
+      <div class="actions">
         <button onclick="runDateSearch()">Search</button>
         <button class="close-btn" onclick="this.closest('.modal').remove()">Close</button>
       </div>
@@ -482,7 +506,7 @@ function openExportModal() {
       <h2>Export Options</h2>
       <label><input type="checkbox" id="includeFilters" checked> Include active filters summary</label><br>
       <label><input type="checkbox" id="includeSummary" checked> Include Green/Amber/Red summary</label><br>
-      <div class="btnbar">
+      <div class="actions">
         <button onclick="generateExcel()">Generate Excel</button>
         <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
       </div>
@@ -610,7 +634,7 @@ function openSummaryModal(){
   modal.className='modal';
   modal.innerHTML=`<div class="modal-content"><h2>Compliance Summary</h2>
     ${rows.join('')||'<p>No data.</p>'}
-    <div class="btnbar"><button class="close-btn" onclick="this.closest('.modal').remove()">Close</button></div></div>`;
+    <div class="actions"><button class="close-btn" onclick="this.closest('.modal').remove()">Close</button></div></div>`;
   document.body.appendChild(modal);
   modal.style.display='block';
 }
@@ -629,7 +653,6 @@ function searchTable() {
 
 /* ---------- Save handler (Cloudflare first, Zapier fallback kept) ---------- */
 const USE_CLOUDFLARE = true;
-const CLOUDFLARE_URL = "https://mostlane-pos.jamie-def.workers.dev/Compliance/update";
 const ZAPIER_URL = "https://hooks.zapier.com/hooks/catch/20261714/ur9pond/";
 
 async function saveEditInstant(row) {
@@ -652,7 +675,7 @@ async function saveEditInstant(row) {
     const payload = { updates: [{ storeType: storeType.toLowerCase(), branchCode: storeCode, fields }] };
 
     try {
-      const res = await fetch(CLOUDFLARE_URL, {
+      const res = await fetch(CLOUDFLARE_UPDATE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -683,84 +706,50 @@ async function saveEditInstant(row) {
   setTimeout(fetchData, 1500);
 }
 
-/* ===================== NEW: ADD / DELETE SITE (PIN-GATED) ===================== */
+/* =========================
+   ✅ NEW: ADD / DELETE SITE
+   ========================= */
 
-// Map UI label to worker storeType slug
-function toSlug(label) {
-  switch (label) {
-    case "Retail": return "retail";
-    case "ELS": return "els";
-    case "ELS Private": return "els_private";
-    case "Cobra": return "cobra";
-    case "Wenzel's": return "wenzels";
-    default: return label.toLowerCase();
-  }
-}
-
+// Open Add modal
 function openAddSiteModal(){
-  const modal=document.createElement('div');
-  modal.className='modal';
+  const modal = document.createElement('div');
+  modal.className = 'modal';
   modal.innerHTML = `
   <div class="modal-content">
     <h2>Add Site</h2>
-    <label>Store Type</label>
-    <select id="as_storeType">
-      <option>Retail</option>
-      <option>ELS</option>
-      <option>ELS Private</option>
-      <option>Cobra</option>
-      <option>Wenzel's</option>
-    </select>
-
-    <div class="row-2">
+    <div class="row">
       <div>
-        <label>Site Name</label>
-        <input id="as_siteName" type="text" placeholder="e.g. Portsmouth Elm Grove">
+        <label>Store Type</label>
+        <select id="add_storeType">
+          <option>Retail</option>
+          <option>ELS</option>
+          <option>ELS Private</option>
+          <option>Cobra</option>
+          <option>Wenzel's</option>
+        </select>
       </div>
       <div>
-        <label>Postcode</label>
-        <input id="as_postcode" type="text" placeholder="e.g. PO15 5RQ">
+        <label>Store Code (4 digits)</label>
+        <input id="add_code" type="text" placeholder="e.g. 0123" />
       </div>
     </div>
-
-    <div class="row-2">
-      <div>
-        <label>5 Year</label>
-        <input id="as_5year" type="date">
-      </div>
-      <div>
-        <label>PAT</label>
-        <input id="as_pat" type="date">
-      </div>
+    <label>Site Name</label><input id="add_name" type="text" placeholder="Site name" />
+    <label>Postcode</label><input id="add_postcode" type="text" placeholder="e.g. PO15 5RQ" />
+    <div class="row">
+      <div><label>5 Year</label><input id="add_five" type="text" placeholder="dd/mm/yyyy" /></div>
+      <div><label>PAT</label><input id="add_pat" type="text" placeholder="dd/mm/yyyy" /></div>
     </div>
-
-    <div class="row-2">
-      <div>
-        <label>EM</label>
-        <input id="as_em" type="date">
-      </div>
-      <div>
-        <label>PV (optional)</label>
-        <input id="as_pv" type="date">
-      </div>
+    <div class="row">
+      <div><label>EM</label><input id="add_em" type="text" placeholder="dd/mm/yyyy" /></div>
+      <div><label>PV</label><input id="add_pv" type="text" placeholder="dd/mm/yyyy" /></div>
     </div>
-
-    <div class="row-2">
-      <div>
-        <label>EV (optional)</label>
-        <input id="as_ev" type="date">
-      </div>
-      <div>
-        <label>PUMP (optional)</label>
-        <input id="as_pump" type="date">
-      </div>
+    <div class="row">
+      <div><label>EV</label><input id="add_ev" type="text" placeholder="dd/mm/yyyy" /></div>
+      <div><label>Pump</label><input id="add_pump" type="text" placeholder="dd/mm/yyyy" /></div>
     </div>
-
-    <label>SharePoint (optional)</label>
-    <input id="as_sp" type="text" placeholder="Full link to folder/file (optional)">
-
-    <div class="btnbar">
-      <button onclick="saveNewSite(this)">Save Site</button>
+    <label>SharePoint URL</label><input id="add_sp" type="text" placeholder="https://..." />
+    <div class="actions">
+      <button onclick="saveNewSite()">Save</button>
       <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
     </div>
   </div>`;
@@ -768,105 +757,81 @@ function openAddSiteModal(){
   modal.style.display='block';
 }
 
-function fmtUK(d) {
-  if (!d) return "";
-  const dt = new Date(d);
-  if (isNaN(dt)) return "";
-  const dd = String(dt.getDate()).padStart(2,'0');
-  const mm = String(dt.getMonth()+1).padStart(2,'0');
-  const yyyy = dt.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
+async function saveNewSite(){
+  const m = document.querySelector('.modal'); if(!m) return;
+  const type = document.getElementById('add_storeType').value;
+  const code = (document.getElementById('add_code').value || '').padStart(4,'0');
+  const name = document.getElementById('add_name').value || '';
+  const pc   = document.getElementById('add_postcode').value || '';
+  const f    = document.getElementById('add_five').value || '';
+  const pat  = document.getElementById('add_pat').value || '';
+  const em   = document.getElementById('add_em').value || '';
+  const pv   = document.getElementById('add_pv').value || '';
+  const ev   = document.getElementById('add_ev').value || '';
+  const pump = document.getElementById('add_pump').value || '';
+  const sp   = document.getElementById('add_sp').value || '';
 
-async function saveNewSite(btn){
-  btn.disabled = true;
-  const storeTypeLabel = document.getElementById('as_storeType').value;
-  const siteName = document.getElementById('as_siteName').value.trim();
-  const postcode = document.getElementById('as_postcode').value.trim();
-  const d5 = document.getElementById('as_5year').value;
-  const dpat = document.getElementById('as_pat').value;
-  const dem = document.getElementById('as_em').value;
-  const dpv = document.getElementById('as_pv').value;
-  const dev = document.getElementById('as_ev').value;
-  const dpump = document.getElementById('as_pump').value;
-  const sp = document.getElementById('as_sp').value.trim();
-
-  // Required fields
-  if (!storeTypeLabel || !siteName || !postcode || !d5 || !dpat || !dem) {
-    alert("Please complete Store Type, Site Name, Postcode, 5 Year, PAT, and EM.");
-    btn.disabled = false;
-    return;
-  }
-
-  // Compute next Branch Code for this storeType from current dataset
-  const nextCode = (() => {
-    const subset = allData.filter(e => e.storeType === storeTypeLabel);
-    const maxNum = subset.reduce((m, e) => {
-      const n = parseInt((e.storeCode || "0").replace(/\D/g,''), 10);
-      return isNaN(n) ? m : Math.max(m, n);
-    }, 0);
-    return String(maxNum + 1).padStart(4, '0');
-  })();
-
-  const record = {
-    "Branch Code": nextCode,
-    "Store Name": siteName,
-    "Postcode": postcode.toUpperCase(),
-    "5_Year": fmtUK(d5),
-    "PAT": fmtUK(dpat),
-    "EM": fmtUK(dem),
-    "PV": fmtUK(dpv),
-    "EV": fmtUK(dev),
-    "PUMP": fmtUK(dpump),
-    "SharePoint": sp,
-    "Store Type": storeTypeLabel
-  };
+  if(!code || !/^\d{4}$/.test(code)) { alert("Store Code must be 4 digits."); return; }
+  if(!name){ alert("Site Name is required."); return; }
 
   const payload = {
-    action: "add",
-    storeType: toSlug(storeTypeLabel),
-    record
+    updates: [{
+      storeType: type.toLowerCase(),
+      branchCode: code,
+      fields: {
+        "Store Name": name,
+        "Postcode": pc,
+        "5_Year": f,
+        "PAT": pat,
+        "EM": em,
+        "PV": pv,
+        "EV": ev,
+        "PUMP": pump,
+        "SharePoint": sp
+      }
+    }]
   };
 
-  try {
-    const res = await fetch(CLOUDFLARE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+  try{
+    const res = await fetch(CLOUDFLARE_UPDATE, {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    const out = await res.json().catch(()=>({}));
-    console.log("Add Site →", out);
-    alert(`✅ Added ${storeTypeLabel} ${nextCode} – ${siteName}`);
-    // Close modal & refresh
-    document.querySelector('.modal')?.remove();
-    await fetchData();
-  } catch (e) {
+    await res.json().catch(()=>({}));
+    m.remove();
+    alert("✅ Site added.");
+    fetchData();
+  }catch(e){
     console.error(e);
     alert("❌ Failed to add site.");
-    btn.disabled = false;
   }
 }
 
-function openDeleteSiteModal() {
-  const modal=document.createElement('div');
-  modal.className='modal';
+// Open Delete modal
+function openDeleteSiteModal(){
+  const modal = document.createElement('div');
+  modal.className = 'modal';
   modal.innerHTML = `
   <div class="modal-content">
     <h2>Delete Site</h2>
-    <label>Store Type</label>
-    <select id="ds_storeType">
-      <option>Retail</option>
-      <option>ELS</option>
-      <option>ELS Private</option>
-      <option>Cobra</option>
-      <option>Wenzel's</option>
-    </select>
-
-    <label>Store Number (4 digits)</label>
-    <input id="ds_branch" type="text" placeholder="e.g. 0123" maxlength="4">
-
-    <div class="btnbar">
-      <button onclick="confirmDeleteSite(this)">Delete</button>
+    <div class="row">
+      <div>
+        <label>Store Type</label>
+        <select id="del_storeType">
+          <option>Retail</option>
+          <option>ELS</option>
+          <option>ELS Private</option>
+          <option>Cobra</option>
+          <option>Wenzel's</option>
+        </select>
+      </div>
+      <div>
+        <label>Store Code (4 digits)</label>
+        <input id="del_code" type="text" placeholder="e.g. 0123" />
+      </div>
+    </div>
+    <div class="actions">
+      <button style="background:#d9534f" onclick="confirmDeleteSite()">Delete</button>
       <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
     </div>
   </div>`;
@@ -874,183 +839,28 @@ function openDeleteSiteModal() {
   modal.style.display='block';
 }
 
-async function confirmDeleteSite(btn){
-  btn.disabled = true;
-  const storeTypeLabel = document.getElementById('ds_storeType').value;
-  const codeRaw = (document.getElementById('ds_branch').value || '').trim();
-  const branchCode = codeRaw.padStart(4,'0');
+async function confirmDeleteSite(){
+  const m = document.querySelector('.modal'); if(!m) return;
+  const type = document.getElementById('del_storeType').value;
+  const code = (document.getElementById('del_code').value || '').padStart(4,'0');
+  if(!/^\d{4}$/.test(code)){ alert("Store Code must be 4 digits."); return; }
 
-  if (!storeTypeLabel || !branchCode.match(/^\d{4}$/)) {
-    alert("Enter a valid 4-digit Store Number.");
-    btn.disabled = false;
-    return;
-  }
-
-  const payload = {
-    action: "delete",
-    storeType: toSlug(storeTypeLabel),
-    branchCode
-  };
-
-  try {
-    const res = await fetch(CLOUDFLARE_URL, {
+  try{
+    const res = await fetch(CLOUDFLARE_DELETE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ storeType: type.toLowerCase(), branchCode: code })
     });
     const out = await res.json().catch(()=>({}));
-    console.log("Delete Site →", out);
-    alert(`🗑️ Deleted ${storeTypeLabel} ${branchCode}`);
-    document.querySelector('.modal')?.remove();
-    await fetchData();
-  } catch (e) {
+    m.remove();
+    alert("🗑️ Site deleted (if it existed).");
+    fetchData();
+  }catch(e){
     console.error(e);
     alert("❌ Failed to delete site.");
-    btn.disabled = false;
-  }
-}
-    /* ===================== ADD / DELETE SITE (PIN-GATED) ===================== */
-
-// Map UI label to worker storeType slug
-function toSlug(label) {
-  switch (label) {
-    case "Retail": return "retail";
-    case "ELS": return "els";
-    case "ELS Private": return "els_private";
-    case "Cobra": return "cobra";
-    case "Wenzel's": return "wenzels";
-    default: return label.toLowerCase();
   }
 }
 
-function openAddSiteModal(){
-  const modal=document.createElement('div');
-  modal.className='modal';
-  modal.innerHTML = `
-  <div class="modal-content">
-    <h2>Add Site</h2>
-    <label>Store Type</label>
-    <select id="as_storeType">
-      <option>Retail</option>
-      <option>ELS</option>
-      <option>ELS Private</option>
-      <option>Cobra</option>
-      <option>Wenzel's</option>
-    </select>
-    <label>Site Name</label>
-    <input id="as_siteName" type="text" placeholder="e.g. Portsmouth Elm Grove">
-    <label>Postcode</label>
-    <input id="as_postcode" type="text" placeholder="e.g. PO15 5RQ">
-    <label>5 Year</label><input id="as_5year" type="date">
-    <label>PAT</label><input id="as_pat" type="date">
-    <label>EM</label><input id="as_em" type="date">
-    <label>PV (optional)</label><input id="as_pv" type="date">
-    <label>EV (optional)</label><input id="as_ev" type="date">
-    <label>PUMP (optional)</label><input id="as_pump" type="date">
-    <label>SharePoint (optional)</label>
-    <input id="as_sp" type="text" placeholder="Full SharePoint link">
-    <div class="btnbar">
-      <button onclick="saveNewSite(this)">Save Site</button>
-      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
-    </div>
-  </div>`;
-  document.body.appendChild(modal);
-  modal.style.display='block';
-}
-
-function fmtUK(d) {
-  if (!d) return "";
-  const dt = new Date(d);
-  if (isNaN(dt)) return "";
-  const dd = String(dt.getDate()).padStart(2,'0');
-  const mm = String(dt.getMonth()+1).padStart(2,'0');
-  const yyyy = dt.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-async function saveNewSite(btn){
-  btn.disabled = true;
-  const type = document.getElementById('as_storeType').value;
-  const site = document.getElementById('as_siteName').value.trim();
-  const pc = document.getElementById('as_postcode').value.trim();
-  const d5 = document.getElementById('as_5year').value;
-  const dp = document.getElementById('as_pat').value;
-  const de = document.getElementById('as_em').value;
-  const pv = document.getElementById('as_pv').value;
-  const ev = document.getElementById('as_ev').value;
-  const pump = document.getElementById('as_pump').value;
-  const sp = document.getElementById('as_sp').value.trim();
-
-  if(!type||!site||!pc||!d5||!dp||!de){ alert("Please fill required fields."); btn.disabled=false; return; }
-
-  const nextCode = (() => {
-    const subset = allData.filter(e => e.storeType === type);
-    const maxNum = subset.reduce((m, e) => Math.max(m, parseInt(e.storeCode||"0")), 0);
-    return String(maxNum + 1).padStart(4, '0');
-  })();
-
-  const record = {
-    "Branch Code": nextCode, "Store Name": site, "Postcode": pc.toUpperCase(),
-    "5_Year": fmtUK(d5), "PAT": fmtUK(dp), "EM": fmtUK(de),
-    "PV": fmtUK(pv), "EV": fmtUK(ev), "PUMP": fmtUK(pump),
-    "SharePoint": sp, "Store Type": type
-  };
-
-  const payload = { action:"add", storeType:toSlug(type), record };
-  try {
-    await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update", {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify(payload)
-    });
-    alert(`✅ Added ${type} ${nextCode} – ${site}`);
-    document.querySelector('.modal')?.remove();
-    fetchData();
-  } catch(e){ alert("❌ Failed to add site."); console.error(e); }
-  btn.disabled=false;
-}
-
-function openDeleteSiteModal(){
-  const modal=document.createElement('div');
-  modal.className='modal';
-  modal.innerHTML=`
-  <div class="modal-content">
-    <h2>Delete Site</h2>
-    <label>Store Type</label>
-    <select id="ds_storeType">
-      <option>Retail</option>
-      <option>ELS</option>
-      <option>ELS Private</option>
-      <option>Cobra</option>
-      <option>Wenzel's</option>
-    </select>
-    <label>Store Number (4 digits)</label>
-    <input id="ds_branch" type="text" placeholder="0001" maxlength="4">
-    <div class="btnbar">
-      <button onclick="confirmDeleteSite(this)">Delete</button>
-      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
-    </div>
-  </div>`;
-  document.body.appendChild(modal);
-  modal.style.display='block';
-}
-
-async function confirmDeleteSite(btn){
-  btn.disabled=true;
-  const t=document.getElementById('ds_storeType').value;
-  const c=(document.getElementById('ds_branch').value||'').padStart(4,'0');
-  if(!t||!c.match(/^\d{4}$/)){ alert("Enter valid store code."); btn.disabled=false; return; }
-  const payload={ action:"delete", storeType:toSlug(t), branchCode:c };
-  try {
-    await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update",{
-      method:"POST",headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify(payload)
-    });
-    alert(`🗑️ Deleted ${t} ${c}`);
-    document.querySelector('.modal')?.remove();
-    fetchData();
-  } catch(e){ alert("❌ Failed to delete."); console.error(e); }
-  btn.disabled=false;
-}
   </script>
 </body>
 </html>
