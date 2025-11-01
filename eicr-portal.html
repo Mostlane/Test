@@ -909,6 +909,148 @@ async function confirmDeleteSite(btn){
     btn.disabled = false;
   }
 }
+    /* ===================== ADD / DELETE SITE (PIN-GATED) ===================== */
+
+// Map UI label to worker storeType slug
+function toSlug(label) {
+  switch (label) {
+    case "Retail": return "retail";
+    case "ELS": return "els";
+    case "ELS Private": return "els_private";
+    case "Cobra": return "cobra";
+    case "Wenzel's": return "wenzels";
+    default: return label.toLowerCase();
+  }
+}
+
+function openAddSiteModal(){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML = `
+  <div class="modal-content">
+    <h2>Add Site</h2>
+    <label>Store Type</label>
+    <select id="as_storeType">
+      <option>Retail</option>
+      <option>ELS</option>
+      <option>ELS Private</option>
+      <option>Cobra</option>
+      <option>Wenzel's</option>
+    </select>
+    <label>Site Name</label>
+    <input id="as_siteName" type="text" placeholder="e.g. Portsmouth Elm Grove">
+    <label>Postcode</label>
+    <input id="as_postcode" type="text" placeholder="e.g. PO15 5RQ">
+    <label>5 Year</label><input id="as_5year" type="date">
+    <label>PAT</label><input id="as_pat" type="date">
+    <label>EM</label><input id="as_em" type="date">
+    <label>PV (optional)</label><input id="as_pv" type="date">
+    <label>EV (optional)</label><input id="as_ev" type="date">
+    <label>PUMP (optional)</label><input id="as_pump" type="date">
+    <label>SharePoint (optional)</label>
+    <input id="as_sp" type="text" placeholder="Full SharePoint link">
+    <div class="btnbar">
+      <button onclick="saveNewSite(this)">Save Site</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+}
+
+function fmtUK(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (isNaN(dt)) return "";
+  const dd = String(dt.getDate()).padStart(2,'0');
+  const mm = String(dt.getMonth()+1).padStart(2,'0');
+  const yyyy = dt.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+async function saveNewSite(btn){
+  btn.disabled = true;
+  const type = document.getElementById('as_storeType').value;
+  const site = document.getElementById('as_siteName').value.trim();
+  const pc = document.getElementById('as_postcode').value.trim();
+  const d5 = document.getElementById('as_5year').value;
+  const dp = document.getElementById('as_pat').value;
+  const de = document.getElementById('as_em').value;
+  const pv = document.getElementById('as_pv').value;
+  const ev = document.getElementById('as_ev').value;
+  const pump = document.getElementById('as_pump').value;
+  const sp = document.getElementById('as_sp').value.trim();
+
+  if(!type||!site||!pc||!d5||!dp||!de){ alert("Please fill required fields."); btn.disabled=false; return; }
+
+  const nextCode = (() => {
+    const subset = allData.filter(e => e.storeType === type);
+    const maxNum = subset.reduce((m, e) => Math.max(m, parseInt(e.storeCode||"0")), 0);
+    return String(maxNum + 1).padStart(4, '0');
+  })();
+
+  const record = {
+    "Branch Code": nextCode, "Store Name": site, "Postcode": pc.toUpperCase(),
+    "5_Year": fmtUK(d5), "PAT": fmtUK(dp), "EM": fmtUK(de),
+    "PV": fmtUK(pv), "EV": fmtUK(ev), "PUMP": fmtUK(pump),
+    "SharePoint": sp, "Store Type": type
+  };
+
+  const payload = { action:"add", storeType:toSlug(type), record };
+  try {
+    await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
+    alert(`✅ Added ${type} ${nextCode} – ${site}`);
+    document.querySelector('.modal')?.remove();
+    fetchData();
+  } catch(e){ alert("❌ Failed to add site."); console.error(e); }
+  btn.disabled=false;
+}
+
+function openDeleteSiteModal(){
+  const modal=document.createElement('div');
+  modal.className='modal';
+  modal.innerHTML=`
+  <div class="modal-content">
+    <h2>Delete Site</h2>
+    <label>Store Type</label>
+    <select id="ds_storeType">
+      <option>Retail</option>
+      <option>ELS</option>
+      <option>ELS Private</option>
+      <option>Cobra</option>
+      <option>Wenzel's</option>
+    </select>
+    <label>Store Number (4 digits)</label>
+    <input id="ds_branch" type="text" placeholder="0001" maxlength="4">
+    <div class="btnbar">
+      <button onclick="confirmDeleteSite(this)">Delete</button>
+      <button class="close-btn" onclick="this.closest('.modal').remove()">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.style.display='block';
+}
+
+async function confirmDeleteSite(btn){
+  btn.disabled=true;
+  const t=document.getElementById('ds_storeType').value;
+  const c=(document.getElementById('ds_branch').value||'').padStart(4,'0');
+  if(!t||!c.match(/^\d{4}$/)){ alert("Enter valid store code."); btn.disabled=false; return; }
+  const payload={ action:"delete", storeType:toSlug(t), branchCode:c };
+  try {
+    await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update",{
+      method:"POST",headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
+    alert(`🗑️ Deleted ${t} ${c}`);
+    document.querySelector('.modal')?.remove();
+    fetchData();
+  } catch(e){ alert("❌ Failed to delete."); console.error(e); }
+  btn.disabled=false;
+}
   </script>
 </body>
 </html>
