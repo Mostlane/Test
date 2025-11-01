@@ -291,8 +291,29 @@ async function fetchData() {
     sources.map(async s => {
       try {
         const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path)).catch(() => []);
-        const arr = Array.isArray(j) ? j : (j ? Object.values(j) : []);
-        return arr.map(r => normaliseRecord(r, s.label));
+        let arr = [];
+
+        // ✅ handle the special retail shape: [ { "9701": {...}, "9704": {...} } ]
+        if (Array.isArray(j) && j.length === 1 && typeof j[0] === "object" && !Array.isArray(j[0])) {
+          arr = Object.values(j[0]);
+        }
+        // ✅ handle normal array of records
+        else if (Array.isArray(j)) {
+          arr = j;
+        }
+        // ✅ handle wrappers { data:[...] } or { items:[...] }
+        else if (j && Array.isArray(j.data)) {
+          arr = j.data;
+        } else if (j && Array.isArray(j.items)) {
+          arr = j.items;
+        }
+        // ✅ final fallback for plain object
+        else if (j && typeof j === "object") {
+          arr = Object.values(j);
+        }
+
+        // normalise each record
+        return arr.map(r => normaliseRecord(r, s.label)).filter(r => r.storeCode && r.siteName);
       } catch (e) {
         console.error("❌ Fetch failed for", s.path, e);
         return [];
