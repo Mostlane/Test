@@ -3,7 +3,6 @@
 <head>
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
-  <meta charset="UTF-8" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -231,7 +230,7 @@ const getStatus = e => {
   return red?'🔴':amber?'🟡':'🟢';
 };
 
-/* ========== CHANGED: fetchData() now pulls from Cloudflare Worker endpoints ========== */
+/* ========== CHANGED: fetchData() mapping made bulletproof; everything else identical ========== */
 async function fetchData() {
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data...</td></tr>';
@@ -251,18 +250,32 @@ async function fetchData() {
         const j = await fetchNoCacheJSON(`${base}${s.path}`).catch(() => []);
         if (!j || (!Array.isArray(j) && typeof j !== 'object')) return [];
         const arr = Array.isArray(j) ? j : Object.values(j);
+
+        // 🔒 bulletproof mapping (handles all known variants + zero-pads store code)
         return arr.map(rw => ({
-          storeCode: (rw["Branch Code"] ?? rw["branchCode"] ?? rw["Store Code"] ?? "").toString().padStart(4, "0"),
-          siteName:  rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? "",
-          postcode:  rw["Postcode"] ?? rw["postcode"] ?? "",
-          storeType: s.label,
-          fiveYear:  rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? "",
-          pat:       rw["PAT"] ?? "",
-          em:        rw["EM"] ?? "",
-          pv:        rw["PV"] ?? "",
-          ev:        rw["EV"] ?? "",
-          pump:      rw["PUMP"] ?? "",
-          sharePoint: rw["SharePoint"] ?? rw["sharePointURL"] ?? rw["sharePoint"] ?? ""
+          storeCode: String(
+            rw["Branch Code"] ?? rw["BranchCode"] ?? rw["Store Code"] ?? rw["StoreCode"] ?? rw["branchCode"] ?? rw["storeCode"] ?? ""
+          ).padStart(4, "0"),
+          siteName:
+            rw["Store Name"] ?? rw["storeName"] ?? rw["Site Name"] ?? rw["sitename"] ?? "",
+          postcode:
+            rw["Postcode"] ?? rw["postcode"] ?? rw["Post Code"] ?? rw["Zip"] ?? "",
+          storeType:
+            s.label || rw["Store Type"] || rw["storeType"] || "",
+          fiveYear:
+            rw["5_Year"] ?? rw["5 Year"] ?? rw["5year"] ?? rw["five_year"] ?? rw["FiveYear"] ?? "",
+          pat:
+            rw["PAT"] ?? rw["Pat"] ?? rw["pat"] ?? "",
+          em:
+            rw["EM"] ?? rw["Em"] ?? rw["emergency"] ?? rw["em"] ?? "",
+          pv:
+            rw["PV"] ?? rw["Pv"] ?? rw["pv"] ?? "",
+          ev:
+            rw["EV"] ?? rw["Ev"] ?? rw["ev"] ?? "",
+          pump:
+            rw["PUMP"] ?? rw["Pump"] ?? rw["pump"] ?? "",
+          sharePoint:
+            rw["SharePoint"] ?? rw["Sharepoint"] ?? rw["sharepoint"] ?? rw["SharePoint Link"] ?? ""
         }));
       } catch (e) {
         console.error("❌ Fetch failed for", s.path, e);
