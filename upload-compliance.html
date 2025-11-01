@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Upload Compliance JSON – Mostlane</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center/180%;
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .box {
+      background: rgba(255,255,255,0.7);
+      border-radius: 15px;
+      padding: 25px;
+      max-width: 600px;
+      width: 90%;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    h1 {
+      text-align: center;
+      color: #0071CE;
+      margin-bottom: 20px;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 10px;
+    }
+    select, textarea, button {
+      width: 100%;
+      font-size: 16px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      margin-top: 6px;
+    }
+    textarea {
+      height: 200px;
+      resize: vertical;
+    }
+    button {
+      background: #0071CE;
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+      margin-top: 15px;
+    }
+    button:hover { opacity: 0.9; }
+    .status {
+      text-align: center;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    .success { color: #28a745; }
+    .error { color: #dc3545; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Upload Compliance JSON</h1>
+
+    <label for="category">Select Category</label>
+    <select id="category">
+      <option value="">-- Select One --</option>
+      <option value="retail">Retail</option>
+      <option value="els">ELS</option>
+      <option value="els_private">ELS Private</option>
+      <option value="cobra">Cobra</option>
+      <option value="wenzels">Wenzel’s</option>
+    </select>
+
+    <label for="jsonInput">Paste JSON Data</label>
+    <textarea id="jsonInput" placeholder='[ { "Branch Code": "0001", "Store Name": "...", ... } ]'></textarea>
+
+    <button onclick="uploadJSON()">Upload to Cloudflare</button>
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    async function uploadJSON() {
+      const category = document.getElementById("category").value.trim();
+      const jsonText = document.getElementById("jsonInput").value.trim();
+      const statusEl = document.getElementById("status");
+
+      if (!category) {
+        statusEl.textContent = "⚠️ Please select a category.";
+        statusEl.className = "status error";
+        return;
+      }
+      if (!jsonText) {
+        statusEl.textContent = "⚠️ Please paste your JSON data.";
+        statusEl.className = "status error";
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+        if (!Array.isArray(parsed)) throw new Error("Not an array");
+      } catch (err) {
+        statusEl.textContent = "❌ Invalid JSON format.";
+        statusEl.className = "status error";
+        return;
+      }
+
+      statusEl.textContent = "⏳ Uploading...";
+      statusEl.className = "status";
+
+      try {
+        const res = await fetch(`https://mostlane-pos.jamie-def.workers.dev/Compliance/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category, data: parsed }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const out = await res.json();
+        statusEl.textContent = `✅ Successfully uploaded to ${out.key}`;
+        statusEl.className = "status success";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "❌ Upload failed. Check console or Worker logs.";
+        statusEl.className = "status error";
+      }
+    }
+  </script>
+</body>
+</html>
