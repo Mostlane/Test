@@ -252,9 +252,13 @@ function pad4(v){ return String(v ?? "").padStart(4,"0"); }
 function pick(o, keys){ for(const k of keys){ if(o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
 function normaliseRecord(raw, label){
   // Handle many possible keys coming from different lists
-  const storeCode = pad4(
-    pick(raw, ["Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"])
-  );
+  // ✅ Force to 4 digits with leading zeros
+let rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"]);
+let storeCode = "";
+if (rawCode !== undefined && rawCode !== null) {
+  storeCode = String(rawCode).replace(/\D/g, ""); // remove anything non-numeric
+  storeCode = storeCode.padStart(4, "0");
+}
   const siteName = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
   const postcode = pick(raw, ["Postcode","postcode","Post Code","ZIP"]);
   const fiveYear = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
