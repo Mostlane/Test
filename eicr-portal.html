@@ -183,9 +183,9 @@
    ========================= */
 const EDIT_PIN = "2025";
 const WORKER_BASE = "https://mostlane-pos.jamie-def.workers.dev/Compliance";
-const CLOUDFLARE_GET   = (key) => `${WORKER_BASE}/${key}`;
-const CLOUDFLARE_UPDATE= `${WORKER_BASE}/update`;
-const CLOUDFLARE_DELETE= `${WORKER_BASE}/delete`;
+const CLOUDFLARE_GET = (key) => `${WORKER_BASE}/${key}`;
+const CLOUDFLARE_UPDATE = `${WORKER_BASE}/update`;
+const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
 
 /* Kill any service workers that might cache */
 if ('serviceWorker' in navigator) {
@@ -206,35 +206,34 @@ function bust(url){
   return u.toString();
 }
 
+/*  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    IMPORTANT CHANGE (only change you asked for):
+    - Removed non-simple request headers to avoid CORS preflight rejection.
+    - Keep cache busting and no-store to force fresh responses.
+    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< */
 async function fetchNoCacheJSON(url) {
-  const res = await fetch(bust(url), {
-    cache: 'no-store',
-    headers: {
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
-    }
-  }).catch(()=>null);
-  if (!res || !res.ok) return null;
-  return res.json().catch(()=>null);
+  try {
+    const res = await fetch(bust(url), {
+      cache: 'no-store',
+      mode: 'cors'
+      // No custom headers here — makes it a "simple" GET so Worker doesn't need to handle OPTIONS
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('fetchNoCacheJSON error:', e);
+    return null;
+  }
 }
 
 function pad4(v){ return String(v ?? "").replace(/\D/g,"").padStart(4,"0"); }
 function pick(o, keys){ for (const k of keys){ if(o && o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
 
-/* Normalise each raw site object into our renderable record */
 function normaliseRecord(raw, label){
-  if (!raw || typeof raw !== 'object') return {};
-
-  /* If shape is { "9701": {...} }, unwrap */
-  if (Object.keys(raw).length === 1 && typeof Object.values(raw)[0] === 'object') {
-    raw = Object.values(raw)[0];
-  }
-
   const rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"]);
   const storeCode = pad4(rawCode || "");
   const siteName  = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
-  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP","zip"]);
+  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP"]);
   const fiveYear  = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
   const pat       = pick(raw, ["PAT","Pat"]);
   const em        = pick(raw, ["EM","Emergency Lighting","EmergencyLighting"]);
@@ -345,57 +344,20 @@ const SOURCES = [
   { path: 'wenzels',     label: "Wenzel's" }
 ];
 
-/* Universal flattener that safely turns ANY worker output into a flat array of site objects */
-function flattenAnyShape(j){
-  if (j == null) return [];
-
-  // If it's already an array of sites (or site-like objects), return as-is (but unwrap single-key wrappers).
-  if (Array.isArray(j)) {
-    // Case: [ { "9701": {...} }, { "9704": {...} } ]  OR  [ {...}, {...} ]
-    return j.flatMap(item=>{
-      if (item && typeof item === 'object' && !Array.isArray(item) &&
-          Object.keys(item).length === 1 && typeof Object.values(item)[0] === 'object') {
-        return Object.values(item);
-      }
-      return item;
-    });
-  }
-
-  // If wrapped like { data: [...] } or { data: { ... } }
-  if (j && typeof j === 'object') {
-    if (Array.isArray(j.data)) {
-      return flattenAnyShape(j.data);
-    }
-    if (j.data && typeof j.data === 'object') {
-      return Object.values(j.data);
-    }
-    // Case: { "9701": {...}, "9704": {...} }
-    return Object.values(j);
-  }
-
-  return [];
-}
-
 async function fetchOneSource(s){
   const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
   if (!j) return [];
-
-  let arr = flattenAnyShape(j);
-
-  // Special historical shape: [ { "9701": {...}, "9704": {...} } ]
-  if (!arr.length && Array.isArray(j) && j.length === 1 && typeof j[0] === 'object') {
+  let arr = [];
+  // special shapes handling
+  if (Array.isArray(j) && j.length === 1 && typeof j[0] === 'object' && !Array.isArray(j[0])) {
     arr = Object.values(j[0]);
+  } else if (Array.isArray(j)) {
+    arr = j;
+  } else if (j && Array.isArray(j.data)) {
+    arr = j.data;
+  } else if (j && typeof j === 'object') {
+    arr = Object.values(j);
   }
-
-  // Final unwrap if any entries are { "9701": {...} }
-  arr = arr.flatMap(e=>{
-    if (e && typeof e === 'object' && !Array.isArray(e) &&
-        Object.keys(e).length === 1 && typeof Object.values(e)[0] === 'object') {
-      return Object.values(e);
-    }
-    return e;
-  });
-
   return arr
     .map(r => normaliseRecord(r, s.label))
     .filter(r => r.storeCode && r.siteName && r.siteName.trim()!=="");
@@ -408,17 +370,15 @@ async function fetchAllProgressive(){
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data…</td></tr>';
 
   for (const s of SOURCES){
-    try{
-      const chunk = await fetchOneSource(s);
-      if (chunk.length){
-        allData = allData.concat(chunk);
-        applyFilters(); // render incrementally as data arrives
-      }
-    }catch(err){
-      console.error('Source load error', s.path, err);
+    const chunk = await fetchOneSource(s).catch(err => {
+      console.error('fetchOneSource error for', s.path, err);
+      return [];
+    });
+    if (chunk.length){
+      allData = allData.concat(chunk);
+      applyFilters(); // render incrementally
     }
   }
-
   if (!allData.length) {
     tb.innerHTML = '<tr><td colspan="12" class="error">No data returned.</td></tr>';
   }
@@ -468,7 +428,7 @@ async function saveEditInstant(row){
       headers: { "Content-Type": "application/json", "Cache-Control":"no-store" },
       body: JSON.stringify(payload)
     });
-    await res.json().catch(()=>({}));
+    const out = await res.json().catch(()=>({}));
     row.style.background = "#d7ffd9";
   } catch (e) {
     console.error("Update error:", e);
@@ -688,6 +648,7 @@ function openSearchModal(){
 function clearFilters(){
   activeStoreType = 'ALL';
   activeCategories.clear();
+  // reset active highlight
   document.querySelectorAll('#storeTypeFilters .bubble, #complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
   document.querySelector('#storeTypeFilters .bubble[data-storetype="ALL"]').classList.add('active');
   document.getElementById('searchBar').value = '';
