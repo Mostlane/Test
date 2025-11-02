@@ -414,21 +414,23 @@ async function saveEditInstant(row){
   const fields = {};
   editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
-  // Worker expects lower snake for type (retail, els_private, etc.)
-  const stKey = storeType.toLowerCase().replace(/\s+/g,"_");
-  const payload = { updates: [{ storeType: stKey, branchCode: storeCode.padStart(4,"0"), fields }] };
+  const payload = {
+    storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
+    branchCode: storeCode.padStart(4,"0"),
+    fields
+  };
 
-  // row feedback
   row.style.opacity = "0.6";
   row.style.background = "#eaf6ff";
 
   try {
     const res = await fetch(CLOUDFLARE_UPDATE, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Cache-Control":"no-store" },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify(payload)
     });
     const out = await res.json().catch(()=>({}));
+    console.log("Update response:", out);
     row.style.background = "#d7ffd9";
   } catch (e) {
     console.error("Update error:", e);
@@ -436,6 +438,7 @@ async function saveEditInstant(row){
   } finally {
     row.style.opacity = "1";
   }
+}
 }
 
 /* Add Site modal */
