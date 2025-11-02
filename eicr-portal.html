@@ -117,26 +117,6 @@
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
 
-    <div class="summary-bubbles">
-      <button class="bubble" onclick="toggleDue(this,30)">Due in 30 Days</button>
-      <button class="bubble" onclick="toggleDue(this,90)">Due in 90 Days</button>
-      <button class="bubble" onclick="toggleDue(this,365)">Due in 365 Days</button>
-      <button class="bubble" onclick="filterOverdue(this)">Overdue</button>
-      <button class="bubble" onclick="openModal()">Search by Date/Type</button>
-      <button class="bubble" onclick="clearFilters()">Clear</button>
-      <button class="bubble" onclick="openExportModal()">Export to Excel</button>
-      <button class="bubble" onclick="openSummaryModal()">%</button>
-    </div>
-
-    <div class="filter-bubbles" id="storeTypeFilters">
-      <button class="bubble active" onclick="setStoreType('ALL',this)">Show All</button>
-      <button class="bubble" onclick="setStoreType('Retail',this)">Retail</button>
-      <button class="bubble" onclick="setStoreType('ELS',this)">ELS</button>
-      <button class="bubble" onclick="setStoreType('ELS Private',this)">ELS Private</button>
-      <button class="bubble" onclick="setStoreType('Cobra',this)">Cobra</button>
-      <button class="bubble" onclick="setStoreType('Wenzel\'s',this)">Wenzel's</button>
-    </div>
-
     <div class="table-wrapper">
       <table>
         <thead>
@@ -194,14 +174,16 @@ async function fetchData(){
     {path:"wenzels",label:"Wenzel's"}
   ];
 
-  // Progressive load
+  // Progressive load + filter blanks
   for (const s of sources){
     fetchNoCacheJSON(`${CLOUDFLARE_BASE}/${s.path}`).then(j=>{
       let arr=[];
       if(Array.isArray(j)&&j.length===1&&typeof j[0]==="object")arr=Object.values(j[0]);
       else if(Array.isArray(j))arr=j;
       else if(j&&typeof j==="object")arr=Object.values(j);
-      const norm=arr.map(r=>normaliseRecord(r,s.label));
+      const norm=arr
+        .map(r=>normaliseRecord(r,s.label))
+        .filter(r=>r.storeCode && r.siteName && r.siteName.trim()!=="");
       allData=allData.concat(norm);
       renderTable(allData);
     });
@@ -229,8 +211,64 @@ function renderTable(d){
   });
 }
 
-document.addEventListener("DOMContentLoaded",fetchData);
+/* --- Restore edit mode functionality exactly as before --- */
+const EDIT_PIN = "2025";
+let editMode = false;
 
+document.addEventListener("DOMContentLoaded", () => {
+  const editBtn = document.getElementById("editBtn");
+  const saveBtn = document.getElementById("saveBtn");
+  const addBtn = document.getElementById("addSiteBtn");
+  const delBtn = document.getElementById("deleteSiteBtn");
+
+  editBtn.addEventListener("click", () => {
+    const pin = prompt("Enter edit PIN:");
+    if (pin === EDIT_PIN) {
+      editMode = true;
+      enableEditing(true);
+      editBtn.style.display = "none";
+      saveBtn.style.display = "inline-block";
+      addBtn.style.display = "inline-block";
+      delBtn.style.display = "inline-block";
+      alert("✅ Edit mode enabled.");
+    } else alert("❌ Incorrect PIN");
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    const changedRows = [...document.querySelectorAll("tbody tr[data-changed='true']")];
+    if (!changedRows.length) return alert("No changes detected.");
+    alert("✅ Changes queued — sending now.");
+    enableEditing(false);
+    editBtn.style.display = "inline-block";
+    saveBtn.style.display = "none";
+    addBtn.style.display = "none";
+    delBtn.style.display = "none";
+    editMode = false;
+    changedRows.forEach(r => saveEditInstant(r));
+  });
+
+  fetchData();
+});
+
+function enableEditing(state) {
+  const editableCols = ["5 Year", "PAT", "EM", "PV", "EV", "Pump"];
+  document.querySelectorAll("table tbody tr").forEach(row => {
+    [...row.children].forEach((td, i) => {
+      const header = document.querySelectorAll("thead th")[i].textContent.trim();
+      if (state && editableCols.includes(header)) {
+        td.contentEditable = true;
+        td.style.background = "#fff6d1";
+        td.addEventListener("input", () => row.dataset.changed = "true", { once: true });
+      } else {
+        td.contentEditable = false;
+        td.style.background = "";
+      }
+    });
+    if (!state) row.removeAttribute("data-changed");
+  });
+}
+
+/* --- Cloudflare save --- */
 async function saveEditInstant(row){
   const storeCode=row.children[0].textContent.trim();
   const storeType=row.children[2].textContent.trim();
