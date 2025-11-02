@@ -414,10 +414,13 @@ async function saveEditInstant(row){
   const fields = {};
   editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
+  // ✅ Worker requires 'updates' array wrapper
   const payload = {
-    storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
-    branchCode: storeCode.padStart(4,"0"),
-    fields
+    updates: [{
+      storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
+      branchCode: storeCode.padStart(4,"0"),
+      fields
+    }]
   };
 
   row.style.opacity = "0.6";
@@ -431,10 +434,10 @@ async function saveEditInstant(row){
     });
     const out = await res.json().catch(()=>({}));
     console.log("Update response:", out);
-    row.style.background = "#d7ffd9";
+    row.style.background = "#d7ffd9"; // success
   } catch (e) {
     console.error("Update error:", e);
-    row.style.background = "#ffecec";
+    row.style.background = "#ffecec"; // fail
   } finally {
     row.style.opacity = "1";
   }
