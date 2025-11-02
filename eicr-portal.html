@@ -206,17 +206,11 @@ function bust(url){
   return u.toString();
 }
 
-/*  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    IMPORTANT CHANGE (only change you asked for):
-    - Removed non-simple request headers to avoid CORS preflight rejection.
-    - Keep cache busting and no-store to force fresh responses.
-    <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< */
 async function fetchNoCacheJSON(url) {
   try {
     const res = await fetch(bust(url), {
       cache: 'no-store',
       mode: 'cors'
-      // No custom headers here — makes it a "simple" GET so Worker doesn't need to handle OPTIONS
     });
     if (!res.ok) return null;
     return await res.json();
@@ -240,7 +234,7 @@ function normaliseRecord(raw, label){
   const pv        = pick(raw, ["PV","Photovoltaic"]);
   const ev        = pick(raw, ["EV","EVCP","EV_Charge"]);
   const pump      = pick(raw, ["PUMP","Pump"]);
-  const sharePoint= pick(raw, ["SharePoint","sharePointURL","sharePoint","SP"]);
+  const sharePoint= pick(raw, ["SharePoint","SharePointURL","sharePointURL","sharePoint","SP"]);
 
   return {
     storeCode,
@@ -256,7 +250,6 @@ function parseDate(d) {
   if (!d) return null;
   const s = String(d).trim().replace(/^\*/, '');
   if (!s) return null;
-  // dd/mm/yyyy support
   if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
     const [dd, mm, yy] = s.split('/');
     const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
@@ -285,7 +278,7 @@ function renderTable(d){
   const frag = document.createDocumentFragment();
 
   d.forEach(e=>{
-    if (!e.storeCode || !e.siteName) return; // filter empties
+    if (!e.storeCode || !e.siteName) return;
     const tr = document.createElement('tr');
     tr.dataset.code = e.storeCode;
     tr.innerHTML = `
@@ -300,7 +293,7 @@ function renderTable(d){
 
   tb.appendChild(frag);
   document.getElementById('loadedCount').textContent = d.length;
-  if (editMode) enableEditing(true); // keep cells editable if user toggled edit already
+  if (editMode) enableEditing(true);
 }
 
 /* apply filters + re-render */
@@ -315,7 +308,6 @@ function applyFilters(){
       return true;
     });
   }
-  // search term
   const q = document.getElementById('searchBar').value.toLowerCase().trim();
   if (q) {
     data = data.filter(e =>
@@ -348,7 +340,6 @@ async function fetchOneSource(s){
   const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
   if (!j) return [];
   let arr = [];
-  // special shapes handling
   if (Array.isArray(j) && j.length === 1 && typeof j[0] === 'object' && !Array.isArray(j[0])) {
     arr = Object.values(j[0]);
   } else if (Array.isArray(j)) {
@@ -360,12 +351,12 @@ async function fetchOneSource(s){
   }
   return arr
     .map(r => normaliseRecord(r, s.label))
-    .filter(r => r.storeCode && r.siteName && r.siteName.trim()!=="");
+    .filter(r => r.storeCode && r.siteName && r.storeName !== '');
 }
 
 async function fetchAllProgressive(){
   allData = [];
-  renderTable([]); // clear immediately
+  renderTable([]);
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data…</td></tr>';
 
@@ -376,7 +367,7 @@ async function fetchAllProgressive(){
     });
     if (chunk.length){
       allData = allData.concat(chunk);
-      applyFilters(); // render incrementally
+      applyFilters();
     }
   }
   if (!allData.length) {
@@ -402,7 +393,8 @@ function enableEditing(state){
     if (!state) row.removeAttribute("data-changed");
   });
 }
-// Canonical storage keys to avoid duplicates like "5 Year" vs "5_Year"
+
+/* —— Canonical KV keys (accept various headers, write consistent fields) —— */
 const KEY_CANONICAL = {
   "5 Year": "5_Year",
   "5_Year": "5_Year",
@@ -412,18 +404,30 @@ const KEY_CANONICAL = {
   "EV": "EV",
   "Pump": "PUMP",
   "PUMP": "PUMP",
-  "SharePoint": "SharePointURL",
-  "SharePointURL": "SharePointURL"
+  "SharePoint": "sharePointURL",
+  "SharePointURL": "sharePointURL",
+  "sharePointURL": "sharePointURL"
 };
+
+/* —— NEW: strict normaliser for KV category names (fixes Wenzel's) —— */
+function normaliseTypeLabel(label) {
+  return String(label || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/ig, "_")     // non-alphanumerics -> underscores
+    .replace(/^_+|_+$/g, "")          // trim underscores
+    .replace(/_+/g, "_");             // collapse
+}
+
 async function saveEditInstant(row){
   const storeCode = row.children[0].textContent.trim();
-  const storeType = row.children[2].textContent.trim();
+  const storeTypeRaw = row.children[2].textContent.trim();
+  const storeType = normaliseTypeLabel(storeTypeRaw); // << crucial fix
+
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
 
-  // Only take editable columns and map them to canonical KV keys
-  const editableHeaders = ["5 Year","5_Year","PAT","EM","PV","EV","Pump","PUMP","SharePoint","SharePointURL"];
+  const editableHeaders = ["5 Year","5_Year","PAT","EM","PV","EV","Pump","PUMP","SharePoint","SharePointURL","sharePointURL"];
   const fields = {};
   editableHeaders.forEach(h => {
     if (h in record) {
@@ -434,7 +438,7 @@ async function saveEditInstant(row){
 
   const payload = {
     updates: [{
-      storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
+      storeType,                                   // already normalised
       branchCode: storeCode.padStart(4,"0"),
       fields
     }]
@@ -448,9 +452,15 @@ async function saveEditInstant(row){
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify(payload)
     });
-    const out = await res.json().catch(()=>({}));
-    console.log("Update response:", out);
-    row.style.background = "#d7ffd9";
+    const outText = await res.text();
+    let out; try { out = JSON.parse(outText); } catch { out = {}; }
+    console.log("Update response:", outText);
+    if (res.ok && (out.ok || Object.keys(out).length === 0)) {
+      row.style.background = "#d7ffd9";
+    } else {
+      row.style.background = "#ffecec";
+      console.warn("Update not OK:", out);
+    }
   } catch (e) {
     console.error("Update error:", e);
     row.style.background = "#ffecec";
@@ -458,6 +468,7 @@ async function saveEditInstant(row){
     row.style.opacity = "1";
   }
 }
+
 /* Add Site modal */
 function openAddSiteModal(){
   const modal = document.createElement('div');
@@ -503,7 +514,8 @@ function openAddSiteModal(){
 
   modal.querySelector('#add_cancel').onclick = ()=> modal.remove();
   modal.querySelector('#add_save').onclick = async ()=>{
-    const type = modal.querySelector('#add_storeType').value;
+    const typeRaw = modal.querySelector('#add_storeType').value;
+    const type = normaliseTypeLabel(typeRaw); // << match Worker KV keys
     const code = (modal.querySelector('#add_code').value || '').padStart(4, '0');
     const name = modal.querySelector('#add_name').value || '';
     if (!/^\d{4}$/.test(code)) return alert("Store Code must be 4 digits.");
@@ -511,7 +523,7 @@ function openAddSiteModal(){
 
     const payload = {
       updates: [{
-        storeType: type.toLowerCase().replace(/\s+/g,'_'),
+        storeType: type,
         branchCode: code,
         fields: {
           "Store Name": name,
@@ -522,7 +534,7 @@ function openAddSiteModal(){
           "PV":      modal.querySelector('#add_pv').value || '',
           "EV":      modal.querySelector('#add_ev').value || '',
           "PUMP":    modal.querySelector('#add_pump').value || '',
-          "SharePoint": modal.querySelector('#add_sp').value || ''
+          "sharePointURL": modal.querySelector('#add_sp').value || ''
         }
       }]
     };
@@ -535,7 +547,7 @@ function openAddSiteModal(){
       });
       modal.remove();
       alert("✅ Site added.");
-      fetchAllProgressive(); // refresh live
+      fetchAllProgressive();
     }catch(e){
       console.error(e);
       alert("❌ Failed to add site.");
@@ -573,7 +585,7 @@ function openDeleteSiteModal(){
 
   modal.querySelector('#del_cancel').onclick = ()=> modal.remove();
   modal.querySelector('#del_go').onclick = async ()=>{
-    const type = modal.querySelector('#del_storeType').value;
+    const type = normaliseTypeLabel(modal.querySelector('#del_storeType').value);
     const code = (modal.querySelector('#del_code').value || '').padStart(4, '0');
     if (!/^\d{4}$/.test(code)) return alert("Store Code must be 4 digits.");
 
@@ -581,7 +593,7 @@ function openDeleteSiteModal(){
       const res = await fetch(CLOUDFLARE_DELETE, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Cache-Control":"no-store" },
-        body: JSON.stringify({ storeType: type.toLowerCase().replace(/\s+/g,'_'), branchCode: code })
+        body: JSON.stringify({ storeType: type, branchCode: code })
       });
       await res.json().catch(()=>({}));
       modal.remove();
@@ -668,7 +680,6 @@ function openSearchModal(){
 function clearFilters(){
   activeStoreType = 'ALL';
   activeCategories.clear();
-  // reset active highlight
   document.querySelectorAll('#storeTypeFilters .bubble, #complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
   document.querySelector('#storeTypeFilters .bubble[data-storetype="ALL"]').classList.add('active');
   document.getElementById('searchBar').value = '';
@@ -745,7 +756,6 @@ function exportExcel(){
   });
 
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  // add links
   const sharePointCol = headers.indexOf("SharePoint");
   if (sharePointCol !== -1) {
     currentData.forEach((e, i) => {
@@ -837,7 +847,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const changed = [...document.querySelectorAll("tbody tr[data-changed='true']")];
     if (!changed.length) return alert("No changes detected.");
     alert("✅ Changes queued — sending now.");
-    // send all updates, then reload fresh
     for (const r of changed) { await saveEditInstant(r); }
     enableEditing(false);
     editMode = false;
@@ -845,7 +854,6 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBtn.style.display = "none";
     addBtn.style.display  = "none";
     delBtn.style.display  = "none";
-    // refetch live (no cache)
     fetchAllProgressive();
   };
 
