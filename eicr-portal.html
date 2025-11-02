@@ -403,46 +403,78 @@ function enableEditing(state){
   });
 }
 
-async function saveEditInstant(row){
+async function saveEditInstant(row) {
   const storeCode = row.children[0].textContent.trim();
   const storeType = row.children[2].textContent.trim();
+
+  // Capture all headers and values for the current row
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
-  [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
+  [...row.children].forEach((td, i) => (record[headers[i]] = td.textContent.trim()));
 
-  // ✅ match actual JSON key names exactly
-  const editable = ["5_Year","PAT","EM","PV","EV","PUMP"];
+  // Dynamically discover what keys exist in the loaded data for this storeType
+  const sample = allData.find(
+    e => e.storeCode === storeCode && e.storeType === storeType
+  ) || {};
+
+  // Build a key map: find what the real JSON uses for each field name
+  const keyMap = {
+    "5_Year": Object.keys(sample).find(k => /5[\s_]?Year/i.test(k)) || "5_Year",
+    "PAT": Object.keys(sample).find(k => /^PAT$/i.test(k)) || "PAT",
+    "EM": Object.keys(sample).find(k => /^EM$/i.test(k)) || "EM",
+    "PV": Object.keys(sample).find(k => /^PV$/i.test(k)) || "PV",
+    "EV": Object.keys(sample).find(k => /^EV$/i.test(k)) || "EV",
+    "PUMP": Object.keys(sample).find(k => /^PUMP|Pump$/i.test(k)) || "PUMP"
+  };
+
+  // Now use those discovered key names to build the correct fields payload
   const fields = {};
-
-  // Map “5 Year” column to “5_Year” key for consistency
-  editable.forEach(k => {
-    if (k === "5_Year" && record["5 Year"]) fields[k] = record["5 Year"];
-    else if (record[k]) fields[k] = record[k];
-  });
+  for (const [stdKey, actualKey] of Object.entries(keyMap)) {
+    const val = record[stdKey.replace("_", " ")] || record[stdKey] || record[actualKey] || "";
+    if (val !== "") fields[actualKey] = val;
+  }
 
   const payload = {
-    updates: [{
-      storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
-      branchCode: storeCode.padStart(4,"0"),
-      fields
-    }]
+    updates: [
+      {
+        storeType: storeType.toLowerCase().replace(/\s+/g, "_"),
+        branchCode: storeCode.padStart(4, "0"),
+        fields
+      }
+    ]
   };
+
+  console.log("⬆️ Sending adaptive payload:", payload);
 
   row.style.opacity = "0.6";
   row.style.background = "#eaf6ff";
 
   try {
-    const res = await fetch(CLOUDFLARE_UPDATE, {
+    const res = await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store"
+      },
       body: JSON.stringify(payload)
     });
-    const out = await res.json().catch(()=>({}));
-    console.log("Update response:", out);
-    row.style.background = "#d7ffd9"; // ✅ success
-  } catch (e) {
-    console.error("Update error:", e);
-    row.style.background = "#ffecec"; // ❌ fail
+
+    const text = await res.text();
+    console.log("⬇️ Worker response:", text);
+
+    let json;
+    try { json = JSON.parse(text); } catch { json = {}; }
+
+    if (res.ok && json.ok) {
+      row.style.background = "#d7ffd9";
+      console.log(`✅ Updated ${storeType} ${storeCode} successfully.`);
+    } else {
+      row.style.background = "#ffecec";
+      console.warn(`⚠️ Update failed for ${storeType} ${storeCode}`, json);
+    }
+  } catch (err) {
+    console.error("❌ Update error:", err);
+    row.style.background = "#ffecec";
   } finally {
     row.style.opacity = "1";
   }
