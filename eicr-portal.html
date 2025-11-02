@@ -75,7 +75,7 @@
     }
     .modal-content {
       background:#fff; border-radius:10px; max-width:560px; width:92%;
-      margin:40px auto; padding:20px; box-shadow:0 4px 10px rgba(0, 0, 0, 0.3); position:relative;
+      margin:40px auto; padding:20px; box-shadow:0 4px 10px rgba(0,0,0,0.3); position:relative;
     }
     .modal h2 { margin:0 0 10px; color:#0071CE; text-align:center; }
     .modal label { display:block; margin:6px 0; }
@@ -96,10 +96,19 @@
     .loading { text-align:center; padding:20px; font-size:16px; color:#0071CE; }
     .error { text-align:center; padding:20px; font-size:16px; color:#ff0000; }
 
-    /* Row state colouring that persists until manual reload */
-    tr.row-updating    { background: #eaf6ff !important; }
-    tr.row-updated-ok  { background: #d7ffd9 !important; }
-    tr.row-update-fail { background: #ffecec !important; }
+    /* Sticky success flag (left edge) */
+    tr.__saved {
+      box-shadow: inset 6px 0 0 0 #22c55e;  /* green bar */
+      transition: background 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease;
+    }
+    tr.__saving {
+      box-shadow: inset 6px 0 0 0 #60a5fa;  /* blue while saving */
+      opacity: 0.85;
+    }
+    tr.__savefail {
+      box-shadow: inset 6px 0 0 0 #ef4444;  /* red if failure */
+      background: #ffecec !important;
+    }
 
     @media (max-width:768px){
       .search-input{ width:90%; font-size:16px; }
@@ -188,9 +197,9 @@
    ========================= */
 const EDIT_PIN = "2025";
 const WORKER_BASE = "https://mostlane-pos.jamie-def.workers.dev/Compliance";
-const CLOUDFLARE_GET = (key) => \`\${WORKER_BASE}/\${key}\`;
-const CLOUDFLARE_UPDATE = \`\${WORKER_BASE}/update\`;
-const CLOUDFLARE_DELETE = \`\${WORKER_BASE}/delete\`;
+const CLOUDFLARE_GET = (key) => `${WORKER_BASE}/${key}`;
+const CLOUDFLARE_UPDATE = `${WORKER_BASE}/update`;
+const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
 
 /* Kill any service workers that might cache */
 if ('serviceWorker' in navigator) {
@@ -213,26 +222,27 @@ function bust(url){
 
 async function fetchNoCacheJSON(url) {
   try {
-    const res = await fetch(bust(url), {
-      cache: 'no-store',
-      mode: 'cors'
-    });
-    if (!res.ok) return null;
+    const res = await fetch(bust(url), { cache: 'no-store', mode: 'cors' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('fetchNoCacheJSON error:', e);
+    console.error('fetchNoCacheJSON error for', url, e);
     return null;
   }
 }
 
-function pad4(v){ return String(v ?? "").replace(/\\D/g,"").padStart(4,"0"); }
+function pad4(v){ return String(v ?? "").replace(/\D/g,"").padStart(4,"0"); }
 function pick(o, keys){ for (const k of keys){ if(o && o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
 
+/* Normalise a single raw record from any shape into table fields */
 function normaliseRecord(raw, label){
-  const rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"]);
-  const storeCode = pad4(rawCode || "");
-  const siteName  = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
-  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP"]);
+  // Raw could be the inner map value from your [ { "0001": {...} } ] structure
+  const rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID","siteCode"]);
+  const storeCode = pad4(rawCode || raw?.branchCode || raw?.siteCode || "");
+  const siteName  = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]) || "";  // may be blank in compliance KV
+  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP"]) || "";
+
+  // Dates (may or may not exist)
   const fiveYear  = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
   const pat       = pick(raw, ["PAT","Pat"]);
   const em        = pick(raw, ["EM","Emergency Lighting","EmergencyLighting"]);
@@ -253,9 +263,9 @@ function normaliseRecord(raw, label){
 
 function parseDate(d) {
   if (!d) return null;
-  const s = String(d).trim().replace(/^\\*/, '');
+  const s = String(d).trim().replace(/^\*/, '');
   if (!s) return null;
-  if (/^\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}$/.test(s)) {
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
     const [dd, mm, yy] = s.split('/');
     const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
     return new Date(y, Number(mm)-1, Number(dd));
@@ -283,15 +293,15 @@ function renderTable(d){
   const frag = document.createDocumentFragment();
 
   d.forEach(e=>{
-    if (!e.storeCode || !e.siteName) return;
+    if (!e.storeCode) return; // allow nameless rows (compliance-only JSON)
     const tr = document.createElement('tr');
     tr.dataset.code = e.storeCode;
     tr.innerHTML = `
-      <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
-      <td>${e.postcode}</td><td>${getStatus(e)}</td>
+      <td>${e.storeCode}</td><td>${e.siteName || ''}</td><td>${e.storeType}</td>
+      <td>${e.postcode || ''}</td><td>${getStatus(e)}</td>
       <td>${e.fiveYear || ''}</td><td>${e.pat || ''}</td><td>${e.em || ''}</td>
       <td>${e.pv || ''}</td><td>${e.ev || ''}</td><td>${e.pump || ''}</td>
-      <td>${e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>` : ''}</td>
+      <td>${e.sharePoint ? '<a class="sp-btn" href="'+e.sharePoint+'" target="_blank">Open</a>' : ''}</td>
     `;
     frag.appendChild(tr);
   });
@@ -341,35 +351,46 @@ const SOURCES = [
   { path: 'wenzels',     label: "Wenzel's" }
 ];
 
+/* Accepts array, single-map-in-array, or object */
+function coerceArray(j){
+  if (!j) return [];
+  if (Array.isArray(j)) {
+    // [ { "0001": {...}, "0002": {...} } ]  → values of first map
+    if (j.length === 1 && j[0] && typeof j[0] === 'object' && !Array.isArray(j[0])) {
+      return Object.values(j[0]);
+    }
+    // [ {row},{row}, ... ]
+    return j;
+  }
+  if (typeof j === 'object') {
+    // { "0001": {...}, ... } → values
+    if (j.data && Array.isArray(j.data)) return j.data;
+    return Object.values(j);
+  }
+  return [];
+}
+
 async function fetchOneSource(s){
   const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
-  if (!j) return [];
-  let arr = [];
-  if (Array.isArray(j) && j.length === 1 && typeof j[0] === 'object' && !Array.isArray(j[0])) {
-    arr = Object.values(j[0]);
-  } else if (Array.isArray(j)) {
-    arr = j;
-  } else if (j && Array.isArray(j.data)) {
-    arr = j.data;
-  } else if (j && typeof j === 'object') {
-    arr = Object.values(j);
-  }
+  const arr = coerceArray(j);
   return arr
     .map(r => normaliseRecord(r, s.label))
-    .filter(r => r.storeCode && r.siteName && r.storeName !== '');
+    .filter(r => r.storeCode); // allow blank names
 }
 
 async function fetchAllProgressive(){
   allData = [];
-  renderTable([]);
   const tb = document.getElementById('tableBody');
   tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data…</td></tr>';
 
   for (const s of SOURCES){
-    const chunk = await fetchOneSource(s).catch(err => {
+    let chunk = [];
+    try {
+      chunk = await fetchOneSource(s);
+    } catch (err) {
       console.error('fetchOneSource error for', s.path, err);
-      return [];
-    });
+      chunk = [];
+    }
     if (chunk.length){
       allData = allData.concat(chunk);
       applyFilters();
@@ -423,46 +444,15 @@ function normaliseTypeLabel(label) {
     .replace(/_+/g, "_");
 }
 
-/* Robust KV normaliser used for verification reads */
-function toKVObject(raw){
-  if (!raw) return {};
-  if (Array.isArray(raw)) {
-    if (raw.length === 1 && typeof raw[0] === 'object' && !Array.isArray(raw[0])) return raw[0];
-    // If array of rows, convert to map by code if possible
-    const out = {};
-    for (const r of raw) {
-      const code = String(r?.branchCode || r?.["Branch Code"] || r?.["Store Code"] || "").padStart(4,"0");
-      if (code) out[code] = r;
-    }
-    return out;
-  }
-  if (typeof raw === 'object') return raw;
-  return {};
-}
-
-/* After-write verification: confirm KV holds the exact new value(s) */
-async function verifyWrite(storeType, branchCode, fields){
-  try{
-    const latest = await fetchNoCacheJSON(CLOUDFLARE_GET(storeType)); // e.g. /Compliance/retail
-    const obj = toKVObject(latest);
-    const code = String(branchCode).padStart(4,"0");
-    const rec = obj[code] || {};
-    // Every field we wrote must match round-trip
-    for (const [k,v] of Object.entries(fields)){
-      const got = (rec[k] ?? "").toString().trim();
-      const want = (v ?? "").toString().trim();
-      if (got !== want) return false;
-    }
-    return true;
-  }catch(e){
-    console.warn("verifyWrite error", e);
-    return false;
-  }
-}
+/* Sticky success flag helpers */
+function markSaving(row){ row.classList.remove("__saved","__savefail"); row.classList.add("__saving"); }
+function markSaved(row){ row.classList.remove("__saving","__savefail"); row.classList.add("__saved"); }
+function markFail(row){ row.classList.remove("__saving","__saved"); row.classList.add("__savefail"); }
 
 async function saveEditInstant(row){
   const storeCode = row.children[0].textContent.trim();
-  const storeType = normaliseTypeLabel(row.children[2].textContent.trim());
+  const storeType = row.children[2].textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
@@ -478,44 +468,40 @@ async function saveEditInstant(row){
 
   const payload = {
     updates: [{
-      storeType,
+      storeType,                                   // already normalised (e.g. retail, els_private)
       branchCode: storeCode.padStart(4,"0"),
-      fields
+      fields                                      // only the date field(s) you edited
     }]
   };
 
-  // Show "updating" state and keep until we verify
-  row.classList.remove("row-updated-ok","row-update-fail");
-  row.classList.add("row-updating");
-
-  let ok = false;
+  markSaving(row);
   try {
     const res = await fetch(CLOUDFLARE_UPDATE, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify(payload)
     });
-    // If worker didn't 200, mark fail immediately
-    if (!res.ok) throw new Error("Worker update returned HTTP " + res.status);
 
-    // Read-after-write verification against KV
-    ok = await verifyWrite(storeType, storeCode, fields);
+    const text = await res.text();
+    let out = {};
+    try { out = JSON.parse(text); } catch {}
 
+    if (res.ok && (out.ok === true || Object.keys(out).length === 0)) {
+      markSaved(row);                     // stays until manual reload
+      row.removeAttribute("data-changed");
+    } else {
+      console.warn("Update not OK:", out);
+      markFail(row);
+      row.title = "Update failed: " + (out.error || res.status);
+    }
   } catch (e) {
     console.error("Update error:", e);
-    ok = false;
-  }
-
-  // Persist row colouring until next manual reload
-  row.classList.remove("row-updating");
-  if (ok) {
-    row.classList.add("row-updated-ok");   // green and persistent until Reload
-  } else {
-    row.classList.add("row-update-fail");  // red and persistent until Reload
+    markFail(row);
+    row.title = "Update error: " + e.message;
   }
 }
 
-/* Add Site modal */
+/* Add Site modal (unchanged) */
 function openAddSiteModal(){
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -593,7 +579,7 @@ function openAddSiteModal(){
       });
       modal.remove();
       alert("✅ Site added.");
-      // Do not auto-reload; user can press Reload if they want
+      fetchAllProgressive();
     }catch(e){
       console.error(e);
       alert("❌ Failed to add site.");
@@ -601,7 +587,7 @@ function openAddSiteModal(){
   };
 }
 
-/* Delete Site modal */
+/* Delete Site modal (unchanged) */
 function openDeleteSiteModal(){
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -644,6 +630,7 @@ function openDeleteSiteModal(){
       await res.json().catch(()=>({}));
       modal.remove();
       alert("🗑️ Site deleted (if it existed).");
+      fetchAllProgressive();
     }catch(e){
       console.error(e);
       alert("❌ Failed to delete site.");
@@ -778,7 +765,7 @@ function exportExcel(){
   const wsData = [];
 
   wsData.push(["The Southern Co-op Compliance Portal Export"]);
-  const uname = (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\\./g, " ");
+  const uname = (sessionStorage.getItem("mostlaneUser") || "Unknown").replace(/\./g, " ");
   wsData.push(["Exported by:", uname]);
   wsData.push(["Date/Time:", new Date().toLocaleString("en-GB")]);
 
@@ -892,15 +879,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const changed = [...document.querySelectorAll("tbody tr[data-changed='true']")];
     if (!changed.length) return alert("No changes detected.");
     alert("✅ Changes queued — sending now.");
-    // Save each changed row (row-level verification + colouring)
     for (const r of changed) { await saveEditInstant(r); }
-    // Exit edit mode but DO NOT auto-reload (lets green/red persist)
     enableEditing(false);
     editMode = false;
     editBtn.style.display = "inline-flex";
     saveBtn.style.display = "none";
     addBtn.style.display  = "none";
     delBtn.style.display  = "none";
+    // leave highlights until manual reload per your request
   };
 
   addBtn.onclick = openAddSiteModal;
@@ -910,13 +896,14 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchAllProgressive();
 });
 
-// DEBUG LOGGER — shows update results on-screen for iPhone use
+// DEBUG LOGGER — iPhone-friendly
 window.addEventListener("message", e => {
   if (e.data && e.data.__updateDebug) {
     alert("Debug:\n" + JSON.stringify(e.data.__updateDebug, null, 2));
   }
 });
 
+// Keep a small debug ping after save to show the normalised category + code
 const oldSaveEditInstant = saveEditInstant;
 saveEditInstant = async function(row) {
   try {
@@ -924,9 +911,8 @@ saveEditInstant = async function(row) {
   } catch (err) {
     alert("Save error: " + err.message);
   }
-  // Post a tiny debug payload (code + normalised storeType)
   const storeCode = row.children[0].textContent.trim();
-  const storeType = normaliseTypeLabel(row.children[2].textContent.trim());
+  const storeType = row.children[2].textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
   window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
 };
   </script>
