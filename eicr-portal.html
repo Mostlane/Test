@@ -863,6 +863,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // initial fetch
   fetchAllProgressive();
 });
+    // DEBUG LOGGER — shows update results on-screen for iPhone use
+window.addEventListener("message", e => {
+  if (e.data && e.data.__updateDebug) {
+    alert("Debug:\n" + JSON.stringify(e.data.__updateDebug, null, 2));
+  }
+});
+
+const oldSaveEditInstant = saveEditInstant;
+saveEditInstant = async function(row) {
+  try {
+    await oldSaveEditInstant(row);
+  } catch (err) {
+    alert("Save error: " + err.message);
+  }
+  // Re-run and send debug output to the screen
+  const storeCode = row.children[0].textContent.trim();
+  const storeType = row.children[2].textContent.trim();
+  window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
+};
   </script>
 </body>
 </html>
