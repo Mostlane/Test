@@ -420,9 +420,10 @@ function normaliseTypeLabel(label) {
 
 async function saveEditInstant(row){
   const storeCode = row.children[0].textContent.trim();
-  const storeTypeRaw = row.children[2].textContent.trim();
-  const storeType = normaliseTypeLabel(storeTypeRaw); // << crucial fix
-
+  const storeType = row.children[2].textContent
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
