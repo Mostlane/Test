@@ -402,7 +402,19 @@ function enableEditing(state){
     if (!state) row.removeAttribute("data-changed");
   });
 }
-
+// Canonical storage keys to avoid duplicates like "5 Year" vs "5_Year"
+const KEY_CANONICAL = {
+  "5 Year": "5_Year",
+  "5_Year": "5_Year",
+  "PAT": "PAT",
+  "EM": "EM",
+  "PV": "PV",
+  "EV": "EV",
+  "Pump": "PUMP",
+  "PUMP": "PUMP",
+  "SharePoint": "SharePointURL",
+  "SharePointURL": "SharePointURL"
+};
 async function saveEditInstant(row) {
   const storeCode = row.children[0].textContent.trim();
   const storeType = row.children[2].textContent.trim();
