@@ -878,9 +878,14 @@ saveEditInstant = async function(row) {
   } catch (err) {
     alert("Save error: " + err.message);
   }
-  // Re-run and send debug output to the screen
+
+  // Use same lowercase logic used in saveEditInstant()
   const storeCode = row.children[0].textContent.trim();
-  const storeType = row.children[2].textContent.trim();
+  const storeType = row.children[2].textContent
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+
   window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
 };
   </script>
