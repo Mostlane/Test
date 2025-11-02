@@ -410,11 +410,16 @@ async function saveEditInstant(row){
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
 
-  const editable = ["5 Year","5_Year","PAT","EM","PV","EV","Pump"];
+  // ✅ match actual JSON key names exactly
+  const editable = ["5_Year","PAT","EM","PV","EV","PUMP"];
   const fields = {};
-  editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
-  // ✅ Worker requires 'updates' array wrapper
+  // Map “5 Year” column to “5_Year” key for consistency
+  editable.forEach(k => {
+    if (k === "5_Year" && record["5 Year"]) fields[k] = record["5 Year"];
+    else if (record[k]) fields[k] = record[k];
+  });
+
   const payload = {
     updates: [{
       storeType: storeType.toLowerCase().replace(/\s+/g,"_"),
@@ -434,10 +439,10 @@ async function saveEditInstant(row){
     });
     const out = await res.json().catch(()=>({}));
     console.log("Update response:", out);
-    row.style.background = "#d7ffd9"; // success
+    row.style.background = "#d7ffd9"; // ✅ success
   } catch (e) {
     console.error("Update error:", e);
-    row.style.background = "#ffecec"; // fail
+    row.style.background = "#ffecec"; // ❌ fail
   } finally {
     row.style.opacity = "1";
   }
