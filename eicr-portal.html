@@ -96,6 +96,16 @@
     .loading { text-align:center; padding:20px; font-size:16px; color:#0071CE; }
     .error { text-align:center; padding:20px; font-size:16px; color:#ff0000; }
 
+    /* --- Success / Failure row banners (persist until reload) --- */
+    tr.flag-ok td {
+      background: linear-gradient(to right, rgba(46,204,113,0.25), rgba(46,204,113,0.05)) !important;
+      border-left: 6px solid #2ecc71 !important;
+    }
+    tr.flag-fail td {
+      background: linear-gradient(to right, rgba(231,76,60,0.25), rgba(231,76,60,0.06)) !important;
+      border-left: 6px solid #e74c3c !important;
+    }
+
     @media (max-width:768px){
       .search-input{ width:90%; font-size:16px; }
       th,td{ font-size:12px; padding:6px; }
@@ -252,7 +262,7 @@ function parseDate(d) {
   if (!s) return null;
   if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
     const [dd, mm, yy] = s.split('/');
-    const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
+       const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
     return new Date(y, Number(mm)-1, Number(dd));
   }
   const dt = new Date(s);
@@ -413,9 +423,19 @@ const KEY_CANONICAL = {
 function normaliseTypeLabel(label) {
   return String(label || "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/ig, "_")     // non-alphanumerics -> underscores
-    .replace(/^_+|_+$/g, "")          // trim underscores
-    .replace(/_+/g, "_");             // collapse
+    .replace(/[^a-z0-9]+/ig, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
+/* ---- Row success/fail helpers ---- */
+function markRowOK(row){
+  row.classList.remove('flag-fail');
+  row.classList.add('flag-ok');
+}
+function markRowFail(row){
+  row.classList.remove('flag-ok');
+  row.classList.add('flag-fail');
 }
 
 async function saveEditInstant(row){
@@ -424,6 +444,7 @@ async function saveEditInstant(row){
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_");
+
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
   [...row.children].forEach((td,i)=> record[headers[i]] = td.textContent.trim());
@@ -439,32 +460,33 @@ async function saveEditInstant(row){
 
   const payload = {
     updates: [{
-      storeType,                                   // already normalised
+      storeType,
       branchCode: storeCode.padStart(4,"0"),
       fields
     }]
   };
 
-  row.style.opacity = "0.6";
-  row.style.background = "#eaf6ff";
+  row.style.opacity = "0.9";
+
   try {
     const res = await fetch(CLOUDFLARE_UPDATE, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       body: JSON.stringify(payload)
     });
-    const outText = await res.text();
-    let out; try { out = JSON.parse(outText); } catch { out = {}; }
-    console.log("Update response:", outText);
-    if (res.ok && (out.ok || Object.keys(out).length === 0)) {
-      row.style.background = "#d7ffd9";
+
+    let out = {};
+    try { out = await res.json(); } catch {}
+
+    if (res.ok && (out.ok === true || Object.keys(out).length === 0)) {
+      markRowOK(row);                     // ✅ persist green banner
     } else {
-      row.style.background = "#ffecec";
+      markRowFail(row);                   // ❌ red banner
       console.warn("Update not OK:", out);
     }
   } catch (e) {
     console.error("Update error:", e);
-    row.style.background = "#ffecec";
+    markRowFail(row);                     // ❌ red banner
   } finally {
     row.style.opacity = "1";
   }
@@ -516,7 +538,7 @@ function openAddSiteModal(){
   modal.querySelector('#add_cancel').onclick = ()=> modal.remove();
   modal.querySelector('#add_save').onclick = async ()=>{
     const typeRaw = modal.querySelector('#add_storeType').value;
-    const type = normaliseTypeLabel(typeRaw); // << match Worker KV keys
+    const type = normaliseTypeLabel(typeRaw);
     const code = (modal.querySelector('#add_code').value || '').padStart(4, '0');
     const name = modal.querySelector('#add_name').value || '';
     if (!/^\d{4}$/.test(code)) return alert("Store Code must be 4 digits.");
@@ -548,7 +570,7 @@ function openAddSiteModal(){
       });
       modal.remove();
       alert("✅ Site added.");
-      fetchAllProgressive();
+      // Do not auto-reload here; user can press Reload if they want fresh pull.
     }catch(e){
       console.error(e);
       alert("❌ Failed to add site.");
@@ -599,7 +621,6 @@ function openDeleteSiteModal(){
       await res.json().catch(()=>({}));
       modal.remove();
       alert("🗑️ Site deleted (if it existed).");
-      fetchAllProgressive();
     }catch(e){
       console.error(e);
       alert("❌ Failed to delete site.");
@@ -847,15 +868,17 @@ document.addEventListener('DOMContentLoaded', () => {
   saveBtn.onclick = async ()=>{
     const changed = [...document.querySelectorAll("tbody tr[data-changed='true']")];
     if (!changed.length) return alert("No changes detected.");
-    alert("✅ Changes queued — sending now.");
+
+    // Send each changed row; mark green/red inline and leave as-is until manual reload.
     for (const r of changed) { await saveEditInstant(r); }
+
+    // Exit edit mode but DO NOT reload — banners must persist until user hits Reload
     enableEditing(false);
     editMode = false;
-    editBtn.style.display = "inline-flex";
-    saveBtn.style.display = "none";
-    addBtn.style.display  = "none";
-    delBtn.style.display  = "none";
-    fetchAllProgressive();
+    document.getElementById('editBtn').style.display = "inline-flex";
+    document.getElementById('saveBtn').style.display = "none";
+    document.getElementById('addSiteBtn').style.display  = "none";
+    document.getElementById('deleteSiteBtn').style.display  = "none";
   };
 
   addBtn.onclick = openAddSiteModal;
@@ -864,30 +887,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // initial fetch
   fetchAllProgressive();
 });
-    // DEBUG LOGGER — shows update results on-screen for iPhone use
-window.addEventListener("message", e => {
-  if (e.data && e.data.__updateDebug) {
-    alert("Debug:\n" + JSON.stringify(e.data.__updateDebug, null, 2));
-  }
-});
-
-const oldSaveEditInstant = saveEditInstant;
-saveEditInstant = async function(row) {
-  try {
-    await oldSaveEditInstant(row);
-  } catch (err) {
-    alert("Save error: " + err.message);
-  }
-
-  // Use same lowercase logic used in saveEditInstant()
-  const storeCode = row.children[0].textContent.trim();
-  const storeType = row.children[2].textContent
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_");
-
-  window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
-};
   </script>
 </body>
 </html>
