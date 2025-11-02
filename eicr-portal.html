@@ -35,7 +35,7 @@
       padding: 20px;
       border-radius: 15px;
       max-width: 95%;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     }
     h1 { text-align: center; color: #0071CE; margin-top: 0; }
     .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
@@ -121,7 +121,8 @@
 
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" class="logo">
     <h1>The Southern Co-op Compliance Portal</h1>
-        <!-- Summary bubbles -->
+
+    <!-- Summary bubbles -->
     <div class="summary-bubbles">
       <button class="bubble" id="overdueBtn">Overdue</button>
       <button class="bubble" data-days="30">Due in 30 Days</button>
@@ -178,155 +179,150 @@
 
   <script>
 /* =========================
-   Configuration / Endpoints
+   Hard settings / endpoints
    ========================= */
 const EDIT_PIN = "2025";
 const WORKER_BASE = "https://mostlane-pos.jamie-def.workers.dev/Compliance";
-const CLOUDFLARE_GET = (key) => `${WORKER_BASE}/${key}`;
-const CLOUDFLARE_UPDATE = `${WORKER_BASE}/update`;
-const CLOUDFLARE_DELETE = `${WORKER_BASE}/delete`;
+const CLOUDFLARE_GET   = (key) => `${WORKER_BASE}/${key}`;
+const CLOUDFLARE_UPDATE= `${WORKER_BASE}/update`;
+const CLOUDFLARE_DELETE= `${WORKER_BASE}/delete`;
 
-/* Prevent cached content */
+/* Kill any service workers that might cache */
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
+  navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
 }
 
-/* ========== State ========== */
-let allData = [];
-let currentData = [];
+/* ===== State ===== */
+let allData = [];       // full set (normalised)
+let currentData = [];   // filtered / searched view
 let editMode = false;
 let activeStoreType = 'ALL';
 const activeCategories = new Set();
 
-/* ========== Utilities ========== */
+/* ===== Helpers ===== */
 function bust(url){
   const u = new URL(url);
   u.searchParams.set('v', Date.now() + Math.random());
   return u.toString();
 }
 
-async function fetchNoCacheJSON(url){
-  const res = await fetch(bust(url),{
-    cache:'no-store',
-    headers:{
-      'Cache-Control':'no-cache, no-store, must-revalidate',
-      'Pragma':'no-cache',
-      'Expires':'0'
+async function fetchNoCacheJSON(url) {
+  const res = await fetch(bust(url), {
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     }
   }).catch(()=>null);
-  if(!res||!res.ok)return null;
+  if (!res || !res.ok) return null;
   return res.json().catch(()=>null);
 }
 
-function pad4(v){return String(v??"").replace(/\D/g,"").padStart(4,"0");}
-function pick(o,keys){for(const k of keys){if(o&&o[k]!=null&&String(o[k]).trim()!=="")return o[k];}return"";}
+function pad4(v){ return String(v ?? "").replace(/\D/g,"").padStart(4,"0"); }
+function pick(o, keys){ for (const k of keys){ if(o && o[k]!=null && String(o[k]).trim()!=="") return o[k]; } return ""; }
 
-function normaliseRecord(raw,label){
-  const rawCode=pick(raw,["branchCode","Branch Code","Store Code","StoreCode","Branch","Code"]);
-  const storeCode=pad4(rawCode||"");
-  const siteName=pick(raw,["Store Name","storeName","Site Name","siteName","Name"]);
-  const postcode=pick(raw,["Postcode","postcode"]);
-  const fiveYear=pick(raw,["5_Year","5 Year"]);
-  const pat=pick(raw,["PAT"]);
-  const em=pick(raw,["EM"]);
-  const pv=pick(raw,["PV"]);
-  const ev=pick(raw,["EV"]);
-  const pump=pick(raw,["PUMP"]);
-  const sharePoint=pick(raw,["SharePoint","sharePointURL"]);
-  return{storeCode,siteName,postcode,storeType:label,fiveYear,pat,em,pv,ev,pump,sharePoint};
-}
+/* Normalise each raw site object into our renderable record */
+function normaliseRecord(raw, label){
+  if (!raw || typeof raw !== 'object') return {};
 
-/* ---- Corrected fetchOneSource ---- */
-async function fetchOneSource(s){
-  const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
-  if(!j)return[];
-  let arr=[];
-  if(Array.isArray(j)&&j.length===1&&typeof j[0]==="object"&&!Array.isArray(j[0])){
-    arr=Object.values(j[0]);
-  }else if(Array.isArray(j)){
-    arr=j;
-  }else if(j&&typeof j==="object"){
-    arr=Object.values(j);
-  }else if(j&&Array.isArray(j.data)){
-    arr=j.data;
+  /* If shape is { "9701": {...} }, unwrap */
+  if (Object.keys(raw).length === 1 && typeof Object.values(raw)[0] === 'object') {
+    raw = Object.values(raw)[0];
   }
-  return arr.map(r=>normaliseRecord(r,s.label))
-    .filter(r=>r.storeCode&&r.siteName&&r.siteName.trim()!=="");
+
+  const rawCode = pick(raw, ["branchCode","Branch Code","BranchCode","Store Code","StoreCode","Branch","Code","ID"]);
+  const storeCode = pad4(rawCode || "");
+  const siteName  = pick(raw, ["Store Name","storeName","Site Name","siteName","Name"]);
+  const postcode  = pick(raw, ["Postcode","postcode","Post Code","ZIP","zip"]);
+  const fiveYear  = pick(raw, ["5_Year","5 Year","5year","FiveYear"]);
+  const pat       = pick(raw, ["PAT","Pat"]);
+  const em        = pick(raw, ["EM","Emergency Lighting","EmergencyLighting"]);
+  const pv        = pick(raw, ["PV","Photovoltaic"]);
+  const ev        = pick(raw, ["EV","EVCP","EV_Charge"]);
+  const pump      = pick(raw, ["PUMP","Pump"]);
+  const sharePoint= pick(raw, ["SharePoint","sharePointURL","sharePoint","SP"]);
+
+  return {
+    storeCode,
+    siteName,
+    postcode,
+    storeType: label,
+    fiveYear, pat, em, pv, ev, pump,
+    sharePoint
+  };
 }
 
-/* ---- Sources ---- */
-const SOURCES=[
-  {path:"retail",label:"Retail"},
-  {path:"els",label:"ELS"},
-  {path:"els_private",label:"ELS Private"},
-  {path:"cobra",label:"Cobra"},
-  {path:"wenzels",label:"Wenzel's"}
-];
-
-/* ---- Date parsing + status ---- */
-function parseDate(d){
-  if(!d)return null;
-  const s=String(d).trim().replace(/^\*/,'');
-  if(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)){
-    const[dd,mm,yy]=s.split('/');
-    const y=yy.length===2?2000+Number(yy):Number(yy);
-    return new Date(y,Number(mm)-1,Number(dd));
+function parseDate(d) {
+  if (!d) return null;
+  const s = String(d).trim().replace(/^\*/, '');
+  if (!s) return null;
+  // dd/mm/yyyy support
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
+    const [dd, mm, yy] = s.split('/');
+    const y = yy.length === 2 ? (2000 + Number(yy)) : Number(yy);
+    return new Date(y, Number(mm)-1, Number(dd));
   }
-  const dt=new Date(s);
-  return isNaN(dt)?null:dt;
+  const dt = new Date(s);
+  return isNaN(dt) ? null : dt;
 }
+
 function getStatus(e){
-  const now=new Date();
-  const dates=[e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump].map(parseDate).filter(Boolean);
-  let red=false,amber=false;
-  for(const d of dates){
-    if(d<now)red=true;
-    else if((d-now)/86400000<=30)amber=true;
+  const now = new Date();
+  const ds = [e.fiveYear, e.pat, e.em, e.pv, e.ev, e.pump].map(parseDate).filter(Boolean);
+  let red=false, amber=false;
+  for (const dt of ds) {
+    if (dt < now) { red = true; break; }
+    if ((dt - now) / 86400000 <= 30) amber = true;
   }
-  return red?'🔴':amber?'🟡':'🟢';
+  return red ? '🔴' : amber ? '🟡' : '🟢';
 }
 
-/* ---- Table rendering ---- */
-function renderTable(data){
-  currentData=data;
-  const tb=document.getElementById('tableBody');
-  tb.innerHTML='';
-  const frag=document.createDocumentFragment();
-  data.forEach(e=>{
-    if(!e.storeCode||!e.siteName)return;
-    const tr=document.createElement('tr');
-    tr.dataset.code=e.storeCode;
-    tr.innerHTML=`
+/* ============ Rendering ============ */
+function renderTable(d){
+  currentData = d;
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '';
+  const frag = document.createDocumentFragment();
+
+  d.forEach(e=>{
+    if (!e.storeCode || !e.siteName) return; // filter empties
+    const tr = document.createElement('tr');
+    tr.dataset.code = e.storeCode;
+    tr.innerHTML = `
       <td>${e.storeCode}</td><td>${e.siteName}</td><td>${e.storeType}</td>
       <td>${e.postcode}</td><td>${getStatus(e)}</td>
-      <td>${e.fiveYear||''}</td><td>${e.pat||''}</td><td>${e.em||''}</td>
-      <td>${e.pv||''}</td><td>${e.ev||''}</td><td>${e.pump||''}</td>
-      <td>${e.sharePoint?`<a href="${e.sharePoint}" target="_blank" class="sp-btn">Open</a>`:''}</td>`;
+      <td>${e.fiveYear || ''}</td><td>${e.pat || ''}</td><td>${e.em || ''}</td>
+      <td>${e.pv || ''}</td><td>${e.ev || ''}</td><td>${e.pump || ''}</td>
+      <td>${e.sharePoint ? `<a class="sp-btn" href="${e.sharePoint}" target="_blank">Open</a>` : ''}</td>
+    `;
     frag.appendChild(tr);
   });
+
   tb.appendChild(frag);
-  document.getElementById('loadedCount').textContent=data.length;
-  if(editMode)enableEditing(true);
+  document.getElementById('loadedCount').textContent = d.length;
+  if (editMode) enableEditing(true); // keep cells editable if user toggled edit already
 }
 
-/* ---- Filtering logic ---- */
+/* apply filters + re-render */
 function applyFilters(){
-  let data=[...allData];
-  if(activeStoreType!=='ALL')data=data.filter(e=>e.storeType===activeStoreType);
-  if(activeCategories.size>0){
-    data=data.filter(e=>{
-      for(const c of activeCategories){
-        const val=e[c];if(!val||String(val).trim()==="")return false;
+  let data = [...allData];
+  if (activeStoreType !== 'ALL') data = data.filter(e=>e.storeType === activeStoreType);
+  if (activeCategories.size > 0) {
+    data = data.filter(e=>{
+      for (const cat of activeCategories) {
+        const val = e[cat]; if (!val || String(val).trim()==="") return false;
       }
       return true;
     });
   }
-  const q=document.getElementById('searchBar').value.toLowerCase().trim();
-  if(q){
-    data=data.filter(e=>
-      (e.storeCode||'').toLowerCase().includes(q)||
-      (e.siteName||'').toLowerCase().includes(q)||
-      (e.postcode||'').toLowerCase().includes(q)
+  // search term
+  const q = document.getElementById('searchBar').value.toLowerCase().trim();
+  if (q) {
+    data = data.filter(e =>
+      (e.storeCode || '').toLowerCase().includes(q) ||
+      (e.siteName || '').toLowerCase().includes(q) ||
+      (e.postcode || '').toLowerCase().includes(q)
     );
   }
   renderTable(data);
@@ -334,31 +330,101 @@ function applyFilters(){
 }
 
 function updateFilterSummary(){
-  const el=document.getElementById('filterSummary');
-  const cats=activeCategories.size?Array.from(activeCategories).join(', '):'None';
-  el.textContent=`Store Type: ${activeStoreType} | Compliance: ${cats} | Showing ${currentData.length} of ${allData.length}`;
+  const el = document.getElementById('filterSummary');
+  const cats = activeCategories.size ? Array.from(activeCategories).join(', ') : 'None';
+  el.textContent = `Store Type: ${activeStoreType} | Compliance: ${cats} | Showing ${currentData.length} of ${allData.length}`;
   el.classList.add('visible');
 }
 
-/* ---- Progressive fetch all ---- */
+/* ============ Progressive Live Loads ============ */
+const SOURCES = [
+  { path: 'retail',      label: 'Retail' },
+  { path: 'els',         label: 'ELS' },
+  { path: 'els_private', label: 'ELS Private' },
+  { path: 'cobra',       label: 'Cobra' },
+  { path: 'wenzels',     label: "Wenzel's" }
+];
+
+/* Universal flattener that safely turns ANY worker output into a flat array of site objects */
+function flattenAnyShape(j){
+  if (j == null) return [];
+
+  // If it's already an array of sites (or site-like objects), return as-is (but unwrap single-key wrappers).
+  if (Array.isArray(j)) {
+    // Case: [ { "9701": {...} }, { "9704": {...} } ]  OR  [ {...}, {...} ]
+    return j.flatMap(item=>{
+      if (item && typeof item === 'object' && !Array.isArray(item) &&
+          Object.keys(item).length === 1 && typeof Object.values(item)[0] === 'object') {
+        return Object.values(item);
+      }
+      return item;
+    });
+  }
+
+  // If wrapped like { data: [...] } or { data: { ... } }
+  if (j && typeof j === 'object') {
+    if (Array.isArray(j.data)) {
+      return flattenAnyShape(j.data);
+    }
+    if (j.data && typeof j.data === 'object') {
+      return Object.values(j.data);
+    }
+    // Case: { "9701": {...}, "9704": {...} }
+    return Object.values(j);
+  }
+
+  return [];
+}
+
+async function fetchOneSource(s){
+  const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
+  if (!j) return [];
+
+  let arr = flattenAnyShape(j);
+
+  // Special historical shape: [ { "9701": {...}, "9704": {...} } ]
+  if (!arr.length && Array.isArray(j) && j.length === 1 && typeof j[0] === 'object') {
+    arr = Object.values(j[0]);
+  }
+
+  // Final unwrap if any entries are { "9701": {...} }
+  arr = arr.flatMap(e=>{
+    if (e && typeof e === 'object' && !Array.isArray(e) &&
+        Object.keys(e).length === 1 && typeof Object.values(e)[0] === 'object') {
+      return Object.values(e);
+    }
+    return e;
+  });
+
+  return arr
+    .map(r => normaliseRecord(r, s.label))
+    .filter(r => r.storeCode && r.siteName && r.siteName.trim()!=="");
+}
+
 async function fetchAllProgressive(){
-  allData=[];
-  const tb=document.getElementById('tableBody');
-  tb.innerHTML='<tr><td colspan="12" class="loading">Loading data…</td></tr>';
-  for(const s of SOURCES){
-    const chunk=await fetchOneSource(s).catch(()=>[]);
-    if(chunk.length){
-      allData=allData.concat(chunk);
-      applyFilters();
+  allData = [];
+  renderTable([]); // clear immediately
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '<tr><td colspan="12" class="loading">Loading data…</td></tr>';
+
+  for (const s of SOURCES){
+    try{
+      const chunk = await fetchOneSource(s);
+      if (chunk.length){
+        allData = allData.concat(chunk);
+        applyFilters(); // render incrementally as data arrives
+      }
+    }catch(err){
+      console.error('Source load error', s.path, err);
     }
   }
-  if(!allData.length){
-    tb.innerHTML='<tr><td colspan="12" class="error">No data returned.</td></tr>';
+
+  if (!allData.length) {
+    tb.innerHTML = '<tr><td colspan="12" class="error">No data returned.</td></tr>';
   }
 }
-    /* =========================
-   Edit / Add / Delete
-   ========================= */
+
+/* ============ Edit / Save / Add / Delete ============ */
 function enableEditing(state){
   const editableCols = ["5 Year","PAT","EM","PV","EV","Pump"];
   document.querySelectorAll("table tbody tr").forEach(row=>{
@@ -388,10 +454,11 @@ async function saveEditInstant(row){
   const fields = {};
   editable.forEach(k => { if (record[k]) fields[k] = record[k]; });
 
+  // Worker expects lower snake for type (retail, els_private, etc.)
   const stKey = storeType.toLowerCase().replace(/\s+/g,"_");
   const payload = { updates: [{ storeType: stKey, branchCode: storeCode.padStart(4,"0"), fields }] };
 
-  // UI feedback
+  // row feedback
   row.style.opacity = "0.6";
   row.style.background = "#eaf6ff";
 
@@ -411,7 +478,7 @@ async function saveEditInstant(row){
   }
 }
 
-/* ------- Add Site Modal ------- */
+/* Add Site modal */
 function openAddSiteModal(){
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -488,7 +555,7 @@ function openAddSiteModal(){
       });
       modal.remove();
       alert("✅ Site added.");
-      fetchAllProgressive();
+      fetchAllProgressive(); // refresh live
     }catch(e){
       console.error(e);
       alert("❌ Failed to add site.");
@@ -496,7 +563,7 @@ function openAddSiteModal(){
   };
 }
 
-/* ------- Delete Site Modal ------- */
+/* Delete Site modal */
 function openDeleteSiteModal(){
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -547,26 +614,23 @@ function openDeleteSiteModal(){
   };
 }
 
-/* =========================
-   Date Filters / Search / Summary / Export
-   ========================= */
+/* ============ Date Filters / Search / Summary / Export ============ */
 function filterOverdue(){
   const now = new Date();
-  const filtered = allData.filter(e =>
-    [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
-      .map(parseDate).filter(Boolean).some(d => d < now)
-  );
+  const filtered = allData.filter(e => {
+    return [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
+      .map(parseDate).filter(Boolean).some(d => d < now);
+  });
   renderTable(filtered);
   updateFilterSummary();
 }
-
 function filterDueWithin(days){
   const now = new Date();
   const end = new Date(now.getTime() + days*86400000);
-  const filtered = allData.filter(e =>
-    [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
-      .map(parseDate).filter(Boolean).some(d => d >= now && d <= end)
-  );
+  const filtered = allData.filter(e => {
+    return [e.fiveYear,e.pat,e.em,e.pv,e.ev,e.pump]
+      .map(parseDate).filter(Boolean).some(d => d >= now && d <= end);
+  });
   renderTable(filtered);
   updateFilterSummary();
 }
@@ -625,8 +689,7 @@ function clearFilters(){
   activeStoreType = 'ALL';
   activeCategories.clear();
   document.querySelectorAll('#storeTypeFilters .bubble, #complianceFilters .bubble').forEach(b=>b.classList.remove('active'));
-  const allBtn = document.querySelector('#storeTypeFilters .bubble[data-storetype="ALL"]');
-  if (allBtn) allBtn.classList.add('active');
+  document.querySelector('#storeTypeFilters .bubble[data-storetype="ALL"]').classList.add('active');
   document.getElementById('searchBar').value = '';
   applyFilters();
 }
@@ -701,6 +764,7 @@ function exportExcel(){
   });
 
   const ws = XLSX.utils.aoa_to_sheet(wsData);
+  // add links
   const sharePointCol = headers.indexOf("SharePoint");
   if (sharePointCol !== -1) {
     currentData.forEach((e, i) => {
@@ -715,11 +779,9 @@ function exportExcel(){
   XLSX.writeFile(wb, fileName);
 }
 
-/* =========================
-   Event Wiring
-   ========================= */
+/* ============ Wiring UI ============ */
 document.addEventListener('DOMContentLoaded', () => {
-  // top actions
+  // Buttons
   document.getElementById('reloadBtn').onclick = fetchAllProgressive;
   document.getElementById('overdueBtn').onclick = ()=> {
     document.querySelectorAll('.summary-bubbles .bubble').forEach(b=>b.classList.remove('active'));
@@ -741,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('exportBtn').onclick = exportExcel;
   document.getElementById('summaryBtn').onclick = openSummaryModal;
 
-  // store-type filters
+  // Store type filters
   document.querySelectorAll('#storeTypeFilters .bubble').forEach(b=>{
     b.onclick = ()=>{
       document.querySelectorAll('#storeTypeFilters .bubble').forEach(x=>x.classList.remove('active'));
@@ -751,7 +813,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   });
 
-  // compliance filters
+  // Compliance filters
   document.querySelectorAll('#complianceFilters .bubble').forEach(b=>{
     b.onclick = ()=>{
       const cat = b.dataset.cat;
@@ -761,7 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   });
 
-  // search
+  // Search bar (debounced)
   const searchBar = document.getElementById('searchBar');
   let t;
   searchBar.addEventListener('input', ()=>{
@@ -769,7 +831,7 @@ document.addEventListener('DOMContentLoaded', () => {
     t = setTimeout(applyFilters, 120);
   });
 
-  // edit cluster
+  // Edit flow
   const editBtn = document.getElementById('editBtn');
   const saveBtn = document.getElementById('saveBtn');
   const addBtn  = document.getElementById('addSiteBtn');
@@ -794,6 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const changed = [...document.querySelectorAll("tbody tr[data-changed='true']")];
     if (!changed.length) return alert("No changes detected.");
     alert("✅ Changes queued — sending now.");
+    // send all updates, then reload fresh
     for (const r of changed) { await saveEditInstant(r); }
     enableEditing(false);
     editMode = false;
@@ -801,13 +864,14 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBtn.style.display = "none";
     addBtn.style.display  = "none";
     delBtn.style.display  = "none";
+    // refetch live (no cache)
     fetchAllProgressive();
   };
 
   addBtn.onclick = openAddSiteModal;
   delBtn.onclick = openDeleteSiteModal;
 
-  // initial load
+  // initial fetch
   fetchAllProgressive();
 });
   </script>
