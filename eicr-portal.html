@@ -458,58 +458,6 @@ async function saveEditInstant(row){
     row.style.opacity = "1";
   }
 }
-  // Now use those discovered key names to build the correct fields payload
-  const fields = {};
-  for (const [stdKey, actualKey] of Object.entries(keyMap)) {
-    const val = record[stdKey.replace("_", " ")] || record[stdKey] || record[actualKey] || "";
-    if (val !== "") fields[actualKey] = val;
-  }
-
-  const payload = {
-    updates: [
-      {
-        storeType: storeType.toLowerCase().replace(/\s+/g, "_"),
-        branchCode: storeCode.padStart(4, "0"),
-        fields
-      }
-    ]
-  };
-
-  console.log("⬆️ Sending adaptive payload:", payload);
-
-  row.style.opacity = "0.6";
-  row.style.background = "#eaf6ff";
-
-  try {
-    const res = await fetch("https://mostlane-pos.jamie-def.workers.dev/Compliance/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const text = await res.text();
-    console.log("⬇️ Worker response:", text);
-
-    let json;
-    try { json = JSON.parse(text); } catch { json = {}; }
-
-    if (res.ok && json.ok) {
-      row.style.background = "#d7ffd9";
-      console.log(`✅ Updated ${storeType} ${storeCode} successfully.`);
-    } else {
-      row.style.background = "#ffecec";
-      console.warn(`⚠️ Update failed for ${storeType} ${storeCode}`, json);
-    }
-  } catch (err) {
-    console.error("❌ Update error:", err);
-    row.style.background = "#ffecec";
-  } finally {
-    row.style.opacity = "1";
-  }
-}
 /* Add Site modal */
 function openAddSiteModal(){
   const modal = document.createElement('div');
