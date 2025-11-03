@@ -13,15 +13,29 @@
   <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
 
   <style>
+    :root {
+      --primary: #0071CE;
+      --background: #e6e8eb;
+      --text: #1f2937;
+      --surface: rgba(255, 255, 255, 0.6);
+    }
+
+    body.dark {
+      --background: #121212;
+      --text: #f1f1f1;
+      --surface: rgba(30, 30, 30, 0.8);
+    }
+
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      color: var(--text, #1f2937);
-      background-color: var(--background, #e6e8eb);
+      color: var(--text);
+      background-color: var(--background);
       position: relative;
       min-height: 100vh;
       overflow-x: hidden;
     }
+
     body::before {
       content: "";
       position: fixed;
@@ -29,143 +43,135 @@
       background: url('Mostlane_Embossed.png') no-repeat center/180%;
       z-index: -1;
     }
+
     .container {
-      background-color: var(--surface, rgba(255,255,255,0.6));
+      background-color: var(--surface);
+      backdrop-filter: blur(10px);
       margin: 20px auto;
       padding: 20px;
       border-radius: 15px;
       max-width: 95%;
       box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.25);
     }
-    h1 { text-align: center; color: #0071CE; margin-top: 0; }
-    .logo { display: block; margin: 10px auto 20px auto; max-height: 60px; }
+
+    h1 {
+      text-align: center;
+      color: var(--primary);
+      margin-top: 0;
+    }
+
+    .logo {
+      display: block;
+      margin: 10px auto 20px auto;
+      max-height: 60px;
+    }
 
     .backbar, .summary-bubbles, .filter-bubbles, .search-container, .utilbar {
-      display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-start; margin-bottom:10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-start;
+      margin-bottom: 10px;
     }
-    .summary-bubbles, .filter-bubbles { justify-content:center; margin-bottom: 14px; }
+
+    .summary-bubbles, .filter-bubbles {
+      justify-content: center;
+      margin-bottom: 14px;
+    }
 
     .backlink, .bubble, .btn {
-      display:inline-flex; align-items:center; gap:8px;
-      background: linear-gradient(135deg, #0071CE, #005bb5); color:#fff; text-decoration:none;
-      padding:8px 14px; border-radius:30px; font-weight:bold; border:0; cursor:pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--primary), #005bb5);
+      color: #fff;
+      text-decoration: none;
+      padding: 8px 14px;
+      border-radius: 30px;
+      font-weight: bold;
+      border: 0;
+      cursor: pointer;
       transition: transform 0.2s ease;
     }
-    .bubble:hover, .btn:hover, .backlink:hover { transform: scale(1.05); }
-    .bubble.active { background:#28a745; }
 
-    .search-input { padding:8px; width:300px; border-radius:20px; border:1px solid #ccc; }
-
-    .table-wrapper { overflow-x:auto; overflow-y:auto; max-height:70vh; width:100%; }
-    table { width:100%; border-collapse:collapse; margin-top:10px; }
-    th, td { border:1px solid #999; padding:8px; text-align:center; font-size:14px; }
-    th { background:#0071CE; color:#fff; position:sticky; top:0; z-index:5; }
-    tr:nth-child(even){ background:rgba(255,255,255,0.7); }
-    tr:nth-child(odd){ background:rgba(255,255,255,0.5); }
-    .sp-btn{
-      display:inline-block; padding:6px 10px; border-radius:6px; background:#0071CE; color:#fff;
-      text-decoration:none; font-weight:bold; border:0; cursor:pointer;
-    }
-    [contenteditable="true"]{ background:#fff6d1; }
-
-    .info { font-size:12px; color:#374151; display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:6px 0 10px; }
-
-    .modal {
-      display:none; position:fixed; z-index:999; inset:0; background:rgba(0,0,0,0.5);
-      overflow-y:auto; -webkit-overflow-scrolling:touch;
-    }
-    .modal-content {
-      background:#fff; border-radius:10px; max-width:560px; width:92%;
-      margin:40px auto; padding:20px; box-shadow:0 4px 10px rgba(0,0,0,0.3); position:relative;
-    }
-    .modal h2 { margin:0 0 10px; color:#0071CE; text-align:center; }
-    .modal label { display:block; margin:6px 0; }
-    .modal input[type="text"], .modal input[type="date"], .modal select {
-      width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; box-sizing:border-box;
-    }
-    .modal .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px; }
-    .modal .btn { border-radius:6px; }
-
-    .filter-summary {
-      background:rgba(255,255,255,0.8); border:1px solid #e5e7eb; border-radius:10px;
-      padding:8px 12px; margin:10px auto; max-width:95%; text-align:center; color:#1f2937;
-      font-size:14px; opacity:0; transition:opacity .3s ease; pointer-events:none;
-    }
-    .filter-summary.visible { opacity:1; pointer-events:auto; }
-
-    .loading { text-align:center; padding:20px; font-size:16px; color:#0071CE; }
-    .error { text-align:center; padding:20px; font-size:16px; color:#ff0000; }
-
-    .save-banner {
-      position: fixed; top: 0; left: 0; right: 0;
-      background: #28a745; color: #fff; padding: 10px;
-      text-align: center; font-weight: bold; z-index: 2000; display: none;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    .bubble:hover, .btn:hover, .backlink:hover {
+      transform: scale(1.05);
     }
 
-    /* 🌗 Dark mode support */
-    :root {
-      --primary: #0071CE;
-      --text: #1f2937;
-      --background: #e6e8eb;
-      --surface: rgba(255,255,255,0.6);
-    }
-    body.dark {
-      --background: #121212;
-      --text: #f1f1f1;
-      --surface: rgba(30,30,30,0.7);
+    .bubble.active {
+      background: #28a745;
     }
 
-    /* 🧭 Mobile Enhancements */
-    @media (max-width:768px){
-      .search-input{ width:90%; font-size:16px; }
-      th,td{ font-size:12px; padding:6px; }
-      .modal-content{ max-width:92%; }
-      .modal .row{ grid-template-columns:1fr; }
-
-      table thead {
-        display: none;
-      }
-      table tr {
-        display: block;
-        margin-bottom: 14px;
-        background: #fff;
-        border: 1px solid #ddd;
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      table td {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px 12px;
-        border-bottom: 1px solid #eee;
-        font-size: 14px;
-      }
-      table td:last-child {
-        border-bottom: none;
-      }
+    .search-input {
+      padding: 8px;
+      width: 300px;
+      border-radius: 20px;
+      border: 1px solid #ccc;
     }
 
-    /* 📱 Sticky Mobile Toolbar */
-    .mobile-toolbar {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: var(--surface);
-      display: none;
-      justify-content: space-around;
-      padding: 12px 10px;
-      border-top: 1px solid #ccc;
-      z-index: 999;
-    }
-    .mobile-toolbar .btn {
-      flex: 1;
-      margin: 0 6px;
+    .table-wrapper {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 70vh;
+      width: 100%;
     }
 
-    /* 🔔 Toast Messages */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #999;
+      padding: 8px;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--primary);
+      color: #fff;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    tr:nth-child(odd) {
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    .sp-btn {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      font-weight: bold;
+      border: 0;
+      cursor: pointer;
+    }
+
+    [contenteditable="true"] {
+      background: #fff6d1;
+    }
+
+    .info {
+      font-size: 12px;
+      color: #374151;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 6px 0 10px;
+    }
+
     .toast {
       position: fixed;
       bottom: 20px;
@@ -175,85 +181,114 @@
       color: #fff;
       padding: 12px 20px;
       border-radius: 25px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
       z-index: 9999;
       animation: fadeInOut 3s ease-in-out;
       font-weight: bold;
     }
+
     @keyframes fadeInOut {
       0% { opacity: 0; bottom: 0; }
       10%,90% { opacity: 1; bottom: 20px; }
       100% { opacity: 0; bottom: 0; }
     }
+
+    .mobile-toolbar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--surface);
+      display: none;
+      justify-content: space-around;
+      padding: 12px 10px;
+      border-top: 1px solid #ccc;
+      z-index: 999;
+    }
+
+    .mobile-toolbar .btn {
+      flex: 1;
+      margin: 0 6px;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 999;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .modal-content {
+      background: #fff;
+      border-radius: 10px;
+      max-width: 560px;
+      width: 92%;
+      margin: 40px auto;
+      padding: 20px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
+
+    @media (max-width:768px){
+      .search-input{ width:90%; font-size:16px; }
+      th,td{ font-size:12px; padding:6px; }
+      .modal-content{ max-width:92%; }
+      .modal .row{ grid-template-columns:1fr; }
+    }
   </style>
-</head>
-<body>
-  <div id="saveBanner" class="save-banner">✅ Changes saved. (This notice will clear on reload)</div>
+  <!-- Top bar -->
+<div class="backbar">
+  <a class="backlink" href="https://mostlane.github.io/Test/compliance.html">← Back</a>
+  <button id="reloadBtn" class="btn" title="Reload live data">Reload</button>
+  <span id="liveNote" class="info">Live (no cache) • <span id="loadedCount">0</span> records loaded</span>
 
-  <div class="container">
-    <div class="backbar">
-      <a class="backlink" href="https://mostlane.github.io/Test/compliance.html">← Back</a>
-      <button id="reloadBtn" class="btn" title="Reload live data">Reload</button>
-      <span id="liveNote" class="info">Live (no cache) • <span id="loadedCount">0</span> records loaded</span>
+  <!-- Edit cluster -->
+  <button id="editBtn" class="btn">Edit</button>
+  <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
+  <button id="addSiteBtn" class="btn" style="display:none;">Add Site</button>
+  <button id="deleteSiteBtn" class="btn" style="display:none;">Delete Site</button>
 
-      <button id="editBtn" class="btn">Edit</button>
-      <button id="saveBtn" class="btn" style="display:none;">Save Changes</button>
-      <button id="addSiteBtn" class="btn" style="display:none;">Add Site</button>
-      <button id="deleteSiteBtn" class="btn" style="display:none;">Delete Site</button>
+  <!-- 🌗 Theme toggle -->
+  <button id="themeToggleBtn" class="btn" title="Toggle Theme">🌗 Theme</button>
+</div>
+<!-- 📱 Sticky Mobile Toolbar -->
+<div class="mobile-toolbar" id="editActionsMobile">
+  <button id="saveMobileBtn" class="btn">Save</button>
+  <button id="addMobileBtn" class="btn">Add</button>
+  <button id="deleteMobileBtn" class="btn">Delete</button>
+</div>
+<script>
+// 🌟 Toast Function
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
 
-      <!-- 🌗 Theme toggle -->
-      <button id="themeToggleBtn" class="btn" title="Toggle Light/Dark">🌗 Theme</button>
-    </div>
+// 🌗 Theme Toggle
+document.getElementById('themeToggleBtn').onclick = () => {
+  document.body.classList.toggle('dark');
+  const mode = document.body.classList.contains('dark') ? 'Dark' : 'Light';
+  showToast(`${mode} Mode Enabled`);
+};
 
-    <!-- your existing markup continues here -->
-        <!-- Continue existing elements as is -->
-    <!-- ... -->
+// 📱 Show/Hide Mobile Toolbar when Edit mode toggled
+function showMobileToolbar(show = false) {
+  const bar = document.getElementById('editActionsMobile');
+  if (bar) bar.style.display = show ? 'flex' : 'none';
+}
 
-  </div> <!-- End of .container -->
+// Link main edit buttons to mobile buttons
+document.getElementById('editBtn')?.addEventListener('click', () => showMobileToolbar(true));
+document.getElementById('saveBtn')?.addEventListener('click', () => showMobileToolbar(false));
 
-  <!-- 📱 Sticky Mobile Toolbar -->
-  <div class="mobile-toolbar" id="editActionsMobile">
-    <button id="saveMobileBtn" class="btn">Save</button>
-    <button id="addMobileBtn" class="btn">Add</button>
-    <button id="deleteMobileBtn" class="btn">Delete</button>
-  </div>
-
-  <!-- XLSX for export -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  <script>
-    // 🌟 Toast Function
-    function showToast(msg) {
-      const el = document.createElement('div');
-      el.className = 'toast';
-      el.textContent = msg;
-      document.body.appendChild(el);
-      setTimeout(() => el.remove(), 3000);
-    }
-
-    // 🌗 Theme Toggle
-    document.getElementById('themeToggleBtn').onclick = () => {
-      document.body.classList.toggle('dark');
-      const mode = document.body.classList.contains('dark') ? 'Dark' : 'Light';
-      showToast(`${mode} Mode Enabled`);
-    };
-
-    // 📱 Sync mobile toolbar with edit mode
-    function showMobileToolbar(show = false) {
-      const bar = document.getElementById('editActionsMobile');
-      bar.style.display = show ? 'flex' : 'none';
-    }
-
-    document.getElementById('editBtn').addEventListener('click', () => showMobileToolbar(true));
-    document.getElementById('saveBtn').addEventListener('click', () => showMobileToolbar(false));
-
-    // 📱 Mobile Toolbar button actions
-    document.getElementById('saveMobileBtn').onclick = () => document.getElementById('saveBtn').click();
-    document.getElementById('addMobileBtn').onclick = () => document.getElementById('addSiteBtn').click();
-    document.getElementById('deleteMobileBtn').onclick = () => document.getElementById('deleteSiteBtn').click();
-  </script>
-
-  <!-- 🧠 Your existing massive script block should still remain here untouched -->
-
-</body>
-</html>
+// 📱 Sync mobile buttons to desktop buttons
+document.getElementById('saveMobileBtn')?.addEventListener('click', () => document.getElementById('saveBtn')?.click());
+document.getElementById('addMobileBtn')?.addEventListener('click', () => document.getElementById('addSiteBtn')?.click());
+document.getElementById('deleteMobileBtn')?.addEventListener('click', () => document.getElementById('deleteSiteBtn')?.click());
+</script>
