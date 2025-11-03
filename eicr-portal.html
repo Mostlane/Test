@@ -429,12 +429,11 @@ function normaliseTypeLabel(label) {
     .replace(/_+/g, "_");             // collapse
 }
 
-/* ✅ UPDATED: send payload that the Worker expects */
+/* ✅ UPDATED: send payload that the Worker expects (NO _compliance suffix) */
 async function saveEditInstant(row){
   const storeCode = row.children[0].textContent.trim();
   const rawStoreType = row.children[2].textContent.trim();
-  const typeBase = normaliseTypeLabel(rawStoreType);           // e.g. "retail"
-  const storeType = `${typeBase}_compliance`;                  // e.g. "retail_compliance"
+  const storeType = normaliseTypeLabel(rawStoreType); // e.g. "retail", "els_private"
 
   const headers = [...document.querySelectorAll("thead th")].map(th => th.textContent.trim());
   const record = {};
@@ -539,7 +538,7 @@ function openAddSiteModal(){
 
     const payload = {
       updates: [{
-        storeType: `${type}_compliance`,
+        storeType: type,
         branchCode: code,
         fields: {
           "Store Name": name,
@@ -609,7 +608,7 @@ function openDeleteSiteModal(){
       const res = await fetch(CLOUDFLARE_DELETE, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Cache-Control":"no-store" },
-        body: JSON.stringify({ storeType: `${type}_compliance`, branchCode: code })
+        body: JSON.stringify({ storeType: type, branchCode: code })
       });
       await res.json().catch(()=>({}));
       modal.remove();
@@ -896,7 +895,7 @@ saveEditInstant = async function(row) {
     alert("Save error: " + err.message);
   }
   const storeCode = row.children[0].textContent.trim();
-  const storeType = normaliseTypeLabel(row.children[2].textContent.trim()) + "_compliance";
+  const storeType = normaliseTypeLabel(row.children[2].textContent.trim());
   window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
 };
   </script>
