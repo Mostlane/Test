@@ -298,17 +298,24 @@
   }
 
   function filterSites(){
-    const sel=byId('site');
-    sel.innerHTML='';
-    allSites.forEach(s=>{
-      const opt=document.createElement('option');
-      opt.value=s.code;
-      opt.textContent=`${s.code} ${s.name}`;
-      opt.dataset.siteName=s.name;
-      sel.appendChild(opt);
-    });
-    if(!allSites.length){ sel.innerHTML='<option>(No options)</option>'; }
+  const sel = byId('site');
+  sel.innerHTML = '';
+
+  // ✅ Sort sites by numeric code ascending
+  allSites.sort((a, b) => Number(a.code) - Number(b.code));
+
+  allSites.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.code;
+    opt.textContent = `${s.code} ${s.name}`;
+    opt.dataset.siteName = s.name;
+    sel.appendChild(opt);
+  });
+
+  if (!allSites.length) {
+    sel.innerHTML = '<option>(No options)</option>';
   }
+}
 
   // ======================
   //     PO CREATION FLOW
