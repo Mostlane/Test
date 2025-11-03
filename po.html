@@ -173,16 +173,19 @@
 <script>
   const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
   const USERS_URL = RAW + 'users.json';
-  const SITES_URL = RAW + 'sites.json';
   const SUPPLIERS_URL = RAW + 'suppliers.json';
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // ✅ LIVE Mostlane Cloudflare Worker endpoint
-  const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
-  const API_KEY = ''; // optional security key if you enable it in the Worker
+  // ✅ LIVE Worker endpoints
+  const WORKER_BASE = 'https://mostlane-pos.jamie-def.workers.dev';
+  const GET_SITES = (type) => `${WORKER_BASE}/get-sites?type=${encodeURIComponent(type)}`;
+
+  // optional security key if you enable it in the Worker (unused by default)
+  const CLOUDFLARE_ENDPOINT = `${WORKER_BASE}/add-po`;
+  const API_KEY = '';
 
   const byId = id => document.getElementById(id);
-  const fetchJSON = url => fetch(url + '?v=' + Date.now()).then(r => r.json());
+  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now(), { cache:'no-store' }).then(r => r.json());
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
   const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
   const norm = v => (v||'').toString().toLowerCase().trim();
@@ -210,18 +213,65 @@
     } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
   }
 
-  async function populateSites(){
-    try {
-      allSites = await fetchJSON(SITES_URL);
-      filterSites();
-    } catch { byId('site').innerHTML='<option>(Unable to load)</option>'; }
+  // 🔁 Map UI label to Worker type key (do not change UI labels)
+  function typeKeyFromLabel(label){
+    const t = (label||'').toLowerCase().trim();
+    if (t === 'retail') return 'retail';
+    if (t === 'els') return 'els';
+    if (t === 'cobra') return 'cobra';
+    // Wenzel’s (curly apostrophe) or variations
+    if (t.startsWith('wenzel')) return 'wenzels';
+    // "Site" in your UI corresponds to projects
+    if (t === 'site') return 'projects';
+    // FBC is not needed (keep UI unchanged, but no fetch)
+    if (t === 'fbc') return null;
+    // empty / All Sites -> return null so caller fetches all types
+    if (t === '') return null;
+    return null;
   }
 
+  // ✅ fetch sites from Worker per selected type; for All Sites, fetch and combine all
+  async function populateSites(){
+    const label = byId('siteType').value || '';
+    const typeKey = typeKeyFromLabel(label);
+
+    const typesForAll = ['retail','els','els_private','cobra','wenzels','projects'];
+    let lists = [];
+    try {
+      if (typeKey) {
+        // single type fetch
+        const arr = await fetchJSON(GET_SITES(typeKey));
+        lists = Array.isArray(arr) ? arr : [];
+      } else {
+        // All Sites — fetch all, including els_private and projects
+        const promises = typesForAll.map(t => fetchJSON(GET_SITES(t)).catch(()=>[]));
+        const results = await Promise.all(promises);
+        lists = results.flat().filter(Boolean);
+      }
+    } catch(e){
+      console.warn('Sites fetch failed:', e);
+      lists = [];
+    }
+
+    // Normalise minimal fields expected: siteName + jobNumber + siteType
+    allSites = (lists || []).map(s => ({
+      siteName: s.siteName || s.SiteName || s.name || '',
+      jobNumber: s.jobNumber || s.JobNumber || s.siteCode || s.SiteCode || '',
+      siteType: s.siteType || s.SiteType || ''
+    }));
+
+    // render based on current selection
+    filterSites();
+  }
+
+  // keep logic consistent with your UI (second dropdown shows name — value is jobNumber)
   function filterSites(){
     const sel=byId('site');
     sel.innerHTML='';
-    const type=byId('siteType').value.trim();
-    const filtered = type ? allSites.filter(s => norm(s.siteType) === norm(type)) : allSites;
+    const typeLabel = byId('siteType').value.trim();
+    const normLabel = norm(typeLabel);
+    const filtered = normLabel ? allSites.filter(s => norm(s.siteType) === normLabel) : allSites;
+
     filtered.forEach(s=>{
       const opt=document.createElement('option');
       opt.value=s.jobNumber||'';
@@ -262,7 +312,7 @@
       engineerCode=prefix+String(engNum||'').trim();
     }catch{engineerCode='E0';}
 
-    await populateSites();
+    await populateSites();     // 🔁 now using Worker
     await populateSuppliers();
     await populateVehicles();
 
@@ -287,7 +337,10 @@
       byId('vehicleRow').classList.toggle('hidden',!isVehicle);
     });
 
-    byId('siteType').addEventListener('change', filterSites);
+    // When site type changes, we refetch from Worker to keep it accurate.
+    byId('siteType').addEventListener('change', async ()=>{
+      await populateSites();
+    });
 
     byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
     byId('closeBtn').onclick=hideModal;
