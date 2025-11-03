@@ -169,14 +169,13 @@
       </div>
     </div>
   </div>
-
-<script>
+  <script>
   const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
   const USERS_URL = RAW + 'users.json';
   const SUPPLIERS_URL = RAW + 'suppliers.json';
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // ✅ LIVE Cloudflare site endpoints
+  // ✅ Live Cloudflare Worker endpoints
   const SITE_ENDPOINTS = {
     retail: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=retail',
     els: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=els',
@@ -187,7 +186,7 @@
   };
 
   const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
-  const API_KEY = ''; // optional
+  const API_KEY = '';
 
   const byId = id => document.getElementById(id);
   const fetchJSON = url => fetch(url + '&v=' + Date.now()).then(r => r.json());
@@ -196,59 +195,56 @@
   const norm = v => (v||'').toString().toLowerCase().trim();
 
   let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
-    // ======================
-  //  UNIVERSAL SITE FETCH
-  // ======================
+
+  // =====================================
+  //  FETCH + NORMALISE SITE JSON STRUCTURE
+  // =====================================
   async function fetchSitesForKey(key) {
     const url = SITE_ENDPOINTS[key];
     if (!url) return [];
-
     try {
       const data = await fetchJSON(url);
       if (!data) return [];
 
       let list = [];
 
-      // Case 1: Flat array (ELS, ELS Private, etc.)
+      // Flat array (ELS, Cobra, etc.)
       if (Array.isArray(data)) {
-        // Some (Retail / Cobra) wrap one big object inside array
         if (data.length === 1 && typeof data[0] === "object" && !Array.isArray(data[0])) {
           const big = data[0];
           for (const code in big) {
             const s = big[code];
-            const storeCode = String(s.branchCode || code || "").padStart(4, "0");
+            const storeCode = String(s.branchCode || s["Branch Code"] || code || "").padStart(4, "0");
             const storeName = s.storeName || s["Store Name"] || s.siteName || "";
             list.push({ code: storeCode, name: storeName });
           }
         } else {
-          // Case 1b: Normal flat array
           data.forEach(s => {
             const storeCode = String(s["Branch Code"] || s.branchCode || s.siteCode || "").padStart(4, "0");
             const storeName = s["Store Name"] || s.storeName || s.siteName || "";
             list.push({ code: storeCode, name: storeName });
           });
         }
-      }
-      // Case 2: Top-level object (failsafe)
-      else if (typeof data === "object") {
+      } else if (typeof data === "object") {
         for (const code in data) {
           const s = data[code];
-          const storeCode = String(s.branchCode || code || "").padStart(4, "0");
+          const storeCode = String(s.branchCode || s["Branch Code"] || code || "").padStart(4, "0");
           const storeName = s.storeName || s["Store Name"] || "";
           list.push({ code: storeCode, name: storeName });
         }
       }
 
-      return list.filter(x => x.code && x.name);
+      // Sort numerically ascending
+      return list.filter(x => x.code && x.name).sort((a,b)=>Number(a.code)-Number(b.code));
     } catch (e) {
       console.warn("Sites fetch failed for", key, e);
       return [];
     }
   }
 
-  // ======================
-  //   SUPPLIERS / VEHICLES
-  // ======================
+  // =====================================
+  //     SUPPLIER & VEHICLE POPULATION
+  // =====================================
   async function populateSuppliers(){
     try {
       allSuppliers = await fetchJSON(SUPPLIERS_URL);
@@ -276,50 +272,38 @@
     } catch{}
   }
 
-  // ======================
-  //   SITE HANDLING LOGIC
-  // ======================
+  // =====================================
+  //        SITE SELECTION HANDLER
+  // =====================================
   async function populateSites(){
     allSites = [];
     const type = norm(byId('siteType').value);
     if (!type) { byId('site').innerHTML='<option>Select Site Type</option>'; return; }
 
     const keyMap = {
-  'retail': 'retail',
-  'els': 'els',
-  'els private': 'els_private',
-  'cobra': 'cobra',
-  'wenzel\'s': 'wenzels',
-  'projects': 'projects'
-};
+      'retail':'retail',
+      'els':'els',
+      'els private':'els_private',
+      'cobra':'cobra',
+      'wenzel’s':'wenzels',
+      'projects':'projects'
+    };
     const key = keyMap[type] || 'retail';
     allSites = await fetchSitesForKey(key);
-    filterSites();
+    const sel = byId('site');
+    sel.innerHTML = '';
+    allSites.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.code;
+      opt.textContent = `${s.code} ${s.name}`;
+      sel.appendChild(opt);
+    });
+    if (!allSites.length) sel.innerHTML = '<option>(No options)</option>';
   }
 
-  function filterSites(){
-  const sel = byId('site');
-  sel.innerHTML = '';
-
-  // ✅ Sort sites by numeric code ascending
-  allSites.sort((a, b) => Number(a.code) - Number(b.code));
-
-  allSites.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.code;
-    opt.textContent = `${s.code} ${s.name}`;
-    opt.dataset.siteName = s.name;
-    sel.appendChild(opt);
-  });
-
-  if (!allSites.length) {
-    sel.innerHTML = '<option>(No options)</option>';
-  }
-}
-
-  // ======================
-  //     PO CREATION FLOW
-  // ======================
+  // =====================================
+  //           PO NUMBER GENERATION
+  // =====================================
   function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
     const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
     let n = parseInt(localStorage.getItem(key) || "0",10)+1;
@@ -330,9 +314,9 @@
   function showModal(po){ byId('poCodeText').textContent=po; byId('modalBackdrop').style.display='flex'; }
   function hideModal(){ byId('modalBackdrop').style.display='none'; }
 
-  // ======================
-  //         INIT
-  // ======================
+  // =====================================
+  //           INITIALISATION LOGIC
+  // =====================================
   async function init(){
     const username=sessionStorage.getItem('mostlaneUser')||'';
     engineerName=username?dotToSpace(username):'Unknown';
@@ -387,9 +371,9 @@
     byId('poForm').addEventListener('submit',onSubmit);
   }
 
-  // ======================
-  //     SUBMIT HANDLER
-  // ======================
+  // =====================================
+  //              SUBMIT LOGIC
+  // =====================================
   async function onSubmit(e){
     e.preventDefault();
     const submitBtn=byId('submitBtn'); submitBtn.disabled=true;
