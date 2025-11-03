@@ -127,6 +127,7 @@
           <option value="ELS">ELS</option>
           <option value="COBRA">COBRA</option>
           <option value="Wenzel’s">Wenzel’s</option>
+          <!-- FBC REMOVED -->
           <option value="Site">Site</option>
         </select>
       </div>
@@ -175,21 +176,43 @@
   const SUPPLIERS_URL = RAW + 'suppliers.json';
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // ✅ LIVE Worker endpoints
-  const WORKER_BASE = 'https://mostlane-pos.jamie-def.workers.dev';
-  const GET_SITES = (type) => `${WORKER_BASE}/get-sites?type=${encodeURIComponent(type)}`;
+  // ✅ LIVE Mostlane Cloudflare Worker endpoint (POs)
+  const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
+  const API_KEY = ''; // optional security key if you enable it in the Worker
 
-  // optional security key if you enable it in the Worker (unused by default)
-  const CLOUDFLARE_ENDPOINT = `${WORKER_BASE}/add-po`;
-  const API_KEY = '';
+  // ✅ Cloudflare Worker Site endpoints (for the site dropdown)
+  const SITE_API_BASE = 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=';
+  const SITE_ENDPOINTS = {
+    retail: SITE_API_BASE + 'retail',
+    els: SITE_API_BASE + 'els',
+    els_private: SITE_API_BASE + 'els_private',
+    cobra: SITE_API_BASE + 'cobra',
+    wenzels: SITE_API_BASE + 'wenzels',
+    projects: SITE_API_BASE + 'projects'
+  };
+
+  // Maps UI values to endpoint keys
+  function mapSiteTypeToKey(uiValue) {
+    const v = (uiValue || '').toLowerCase().trim();
+    if (!v) return ''; // All Sites
+    if (v === 'retail') return 'retail';
+    if (v === 'els') return 'els';
+    if (v === 'cobra') return 'cobra';
+    // handle curly apostrophe in “Wenzel’s”
+    if (v.startsWith('wenzel')) return 'wenzels';
+    if (v === 'site') return 'projects'; // your "Site" = projects
+    // fallback
+    return v.replace(/[^a-z0-9]+/g, '_');
+  }
 
   const byId = id => document.getElementById(id);
-  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now(), { cache:'no-store' }).then(r => r.json());
+  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
   const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
   const norm = v => (v||'').toString().toLowerCase().trim();
 
-  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
+  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSuppliers=[];
+  let lastSites = []; // cache last-loaded list for current filter
 
   function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
     const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
@@ -203,107 +226,92 @@
       allSuppliers = await fetchJSON(SUPPLIERS_URL);
       const sel = byId('supplier');
       sel.innerHTML='';
-      allSuppliers.forEach(s=>{
+      (allSuppliers || []).forEach(s=>{
         const opt=document.createElement('option');
-        opt.value=s.supplierNumber;
-        opt.textContent=s.supplierName;
+        opt.value = s.supplierNumber;
+        opt.textContent = s.supplierName;
         sel.appendChild(opt);
       });
     } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
   }
 
-  // 🔁 Map UI label to Worker type key (do not change UI labels)
-  function typeKeyFromLabel(label){
-    const t = (label||'').toLowerCase().trim();
-    if (t === 'retail') return 'retail';
-    if (t === 'els') return 'els';
-    if (t === 'cobra') return 'cobra';
-    // Wenzel’s (curly apostrophe) or variations
-    if (t.startsWith('wenzel')) return 'wenzels';
-    // "Site" in your UI corresponds to projects
-    if (t === 'site') return 'projects';
-    // empty / All Sites -> return null so caller fetches all types
-    if (t === '') return null;
-    return null;
-  }
-
-  // ✅ Helper: display label for a given type key (for tagging when fetching all)
-  function displayLabelFromTypeKey(typeKey){
-    if (typeKey === 'retail') return 'Retail';
-    if (typeKey === 'els') return 'ELS';
-    if (typeKey === 'els_private') return 'ELS Private';
-    if (typeKey === 'cobra') return 'COBRA';
-    if (typeKey === 'wenzels') return 'Wenzel’s';
-    if (typeKey === 'projects') return 'Site';
+  // Robust getters for site fields from Cloudflare data
+  function pick(obj, keys) {
+    for (const k of keys) {
+      if (obj && obj[k] != null && String(obj[k]).trim() !== '') return obj[k];
+    }
     return '';
   }
-
-  // ✅ fetch sites from Worker per selected type; for All Sites, fetch and combine all
-  async function populateSites(){
-    const label = byId('siteType').value || '';
-    const typeKey = typeKeyFromLabel(label);
-
-    const typesForAll = ['retail','els','els_private','cobra','wenzels','projects'];
-    let lists = [];
-
-    try {
-      if (typeKey) {
-        // single type fetch
-        const arr = await fetchJSON(GET_SITES(typeKey));
-        const tagged = (Array.isArray(arr) ? arr : []).map(s => ({
-          siteName: s.siteName || s.SiteName || s.name || '',
-          jobNumber: s.jobNumber || s.JobNumber || s.siteCode || s.SiteCode || '',
-          siteType: label // 🔑 tag with current label so filtering works
-        }));
-        lists = tagged;
-      } else {
-        // All Sites — fetch each and tag with its display label so filters work later
-        const results = await Promise.all(
-          typesForAll.map(async t => {
-            try {
-              const arr = await fetchJSON(GET_SITES(t));
-              const lab = displayLabelFromTypeKey(t);
-              return (Array.isArray(arr) ? arr : []).map(s => ({
-                siteName: s.siteName || s.SiteName || s.name || '',
-                jobNumber: s.jobNumber || s.JobNumber || s.siteCode || s.SiteCode || '',
-                siteType: lab
-              }));
-            } catch { return []; }
-          })
-        );
-        lists = results.flat();
-      }
-    } catch(e){
-      console.warn('Sites fetch failed:', e);
-      lists = [];
-    }
-
-    allSites = lists;
-    filterSites();
+  function getSiteCode(site) {
+    // Expecting siteCode in SITES store; also accept other common keys
+    const code = pick(site, ['siteCode','Store Code','StoreCode','Branch Code','branchCode','code','ID','site_number','siteNumber','jobNumber']);
+    return String(code || '').padStart(4,'0');
+  }
+  function getSiteName(site) {
+    return pick(site, ['siteName','Store Name','Name','name','site']);
   }
 
-  // keep logic consistent with your UI (second dropdown shows name — value is jobNumber)
-  function filterSites(){
-    const sel=byId('site');
-    sel.innerHTML='';
-    const typeLabel = byId('siteType').value.trim();
-    const normLabel = norm(typeLabel);
-    const filtered = normLabel ? allSites.filter(s => norm(s.siteType) === normLabel) : allSites;
+  // Fetch sites for a single key (retail, els, etc.)
+  async function fetchSitesForKey(key) {
+    const url = SITE_ENDPOINTS[key];
+    if (!url) return [];
+    try {
+      const data = await fetchJSON(url);
+      if (!data) return [];
+      // data should already be an array from Worker; keep it robust either way
+      const arr = Array.isArray(data) ? data : (data?.data && Array.isArray(data.data) ? data.data : Object.values(data||{}));
+      return (arr || []).map(s => ({
+        code: getSiteCode(s),
+        name: getSiteName(s),
+        raw: s
+      })).filter(x => x.code || x.name);
+    } catch (e) {
+      console.warn('Sites fetch failed for', key, e);
+      return [];
+    }
+  }
 
-    if (!filtered.length) {
-      const opt=document.createElement('option');
-      opt.value='';
-      opt.textContent='(No options)';
-      sel.appendChild(opt);
+  // Populate the second dropdown depending on selected type
+  async function populateSitesFromCloudflare() {
+    const siteTypeUI = byId('siteType').value;      // e.g., "", "Retail", "ELS", "COBRA", "Wenzel’s", "Site"
+    const key = mapSiteTypeToKey(siteTypeUI);       // "", or "retail", "els", "cobra", "wenzels", "projects"
+
+    const siteSel = byId('site');
+    siteSel.innerHTML = '';
+
+    let list = [];
+
+    if (!key) {
+      // All Sites → fetch all keys and merge
+      const keys = ['retail','els','els_private','cobra','wenzels','projects'];
+      const chunks = await Promise.all(keys.map(k => fetchSitesForKey(k)));
+      list = chunks.flat();
+    } else {
+      list = await fetchSitesForKey(key);
+    }
+
+    lastSites = list.slice(); // cache
+
+    if (!list.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(No options)';
+      siteSel.appendChild(opt);
       return;
     }
 
-    filtered.forEach(s=>{
-      const opt=document.createElement('option');
-      opt.value=s.jobNumber||'';
-      opt.textContent=[s.siteName,s.jobNumber].filter(Boolean).join(' — ');
-      opt.dataset.siteName=s.siteName||'';
-      sel.appendChild(opt);
+    // Sort by code (numeric)
+    list.sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+    list.forEach(s => {
+      const opt = document.createElement('option');
+      // show like "0126 Lee On Solent"
+      const label = [s.code, s.name].filter(Boolean).join(' ');
+      opt.textContent = label;
+      // Use site code as value (your note says “uses Site Number internally”)
+      opt.value = s.code || s.name || '';
+      opt.dataset.siteName = s.name || '';
+      siteSel.appendChild(opt);
     });
   }
 
@@ -338,7 +346,9 @@
       engineerCode=prefix+String(engNum||'').trim();
     }catch{engineerCode='E0';}
 
-    await populateSites();     // 🔁 now using Worker (and tagging type correctly)
+    // Sites now come from Cloudflare Worker
+    await populateSitesFromCloudflare();
+
     await populateSuppliers();
     await populateVehicles();
 
@@ -363,10 +373,7 @@
       byId('vehicleRow').classList.toggle('hidden',!isVehicle);
     });
 
-    // When site type changes, refetch from Worker (ensures fresh + correct tagging)
-    byId('siteType').addEventListener('change', async ()=>{
-      await populateSites();
-    });
+    byId('siteType').addEventListener('change', populateSitesFromCloudflare);
 
     byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
     byId('closeBtn').onclick=hideModal;
