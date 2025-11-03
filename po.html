@@ -285,13 +285,13 @@
     if (!type) { byId('site').innerHTML='<option>Select Site Type</option>'; return; }
 
     const keyMap = {
-      'retail':'retail',
-      'els':'els',
-      'els private':'els_private',
-      'cobra':'cobra',
-      'wenzel’s':'wenzels',
-      'projects':'projects'
-    };
+  'retail': 'retail',
+  'els': 'els',
+  'els private': 'els_private',
+  'cobra': 'cobra',
+  'wenzel\'s': 'wenzels',
+  'projects': 'projects'
+};
     const key = keyMap[type] || 'retail';
     allSites = await fetchSitesForKey(key);
     filterSites();
