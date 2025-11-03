@@ -125,10 +125,10 @@
           <option value="">All Sites</option>
           <option value="Retail">Retail</option>
           <option value="ELS">ELS</option>
-          <option value="COBRA">COBRA</option>
+          <option value="ELS Private">ELS Private</option>
+          <option value="Cobra">Cobra</option>
           <option value="Wenzel’s">Wenzel’s</option>
-          <!-- FBC REMOVED -->
-          <option value="Site">Site</option>
+          <option value="Projects">Projects</option>
         </select>
       </div>
 
@@ -176,143 +176,91 @@
   const SUPPLIERS_URL = RAW + 'suppliers.json';
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // ✅ LIVE Mostlane Cloudflare Worker endpoint (POs)
-  const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
-  const API_KEY = ''; // optional security key if you enable it in the Worker
-
-  // ✅ Cloudflare Worker Site endpoints (for the site dropdown)
-  const SITE_API_BASE = 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=';
+  // ✅ LIVE Cloudflare site endpoints
   const SITE_ENDPOINTS = {
-    retail: SITE_API_BASE + 'retail',
-    els: SITE_API_BASE + 'els',
-    els_private: SITE_API_BASE + 'els_private',
-    cobra: SITE_API_BASE + 'cobra',
-    wenzels: SITE_API_BASE + 'wenzels',
-    projects: SITE_API_BASE + 'projects'
+    retail: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=retail',
+    els: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=els',
+    els_private: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=els_private',
+    cobra: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=cobra',
+    wenzels: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=wenzels',
+    projects: 'https://mostlane-pos.jamie-def.workers.dev/get-sites?type=projects'
   };
 
-  // Maps UI values to endpoint keys
-  function mapSiteTypeToKey(uiValue) {
-    const v = (uiValue || '').toLowerCase().trim();
-    if (!v) return ''; // All Sites
-    if (v === 'retail') return 'retail';
-    if (v === 'els') return 'els';
-    if (v === 'cobra') return 'cobra';
-    // handle curly apostrophe in “Wenzel’s”
-    if (v.startsWith('wenzel')) return 'wenzels';
-    if (v === 'site') return 'projects'; // your "Site" = projects
-    // fallback
-    return v.replace(/[^a-z0-9]+/g, '_');
-  }
+  const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/add-po';
+  const API_KEY = ''; // optional
 
   const byId = id => document.getElementById(id);
-  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
+  const fetchJSON = url => fetch(url + '&v=' + Date.now()).then(r => r.json());
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
   const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
   const norm = v => (v||'').toString().toLowerCase().trim();
 
-  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSuppliers=[];
-  let lastSites = []; // cache last-loaded list for current filter
+  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
+    // ======================
+  //  UNIVERSAL SITE FETCH
+  // ======================
+  async function fetchSitesForKey(key) {
+    const url = SITE_ENDPOINTS[key];
+    if (!url) return [];
 
-  function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
-    const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
-    let n = parseInt(localStorage.getItem(key) || "0",10)+1;
-    localStorage.setItem(key,n);
-    return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
+    try {
+      const data = await fetchJSON(url);
+      if (!data) return [];
+
+      let list = [];
+
+      // Case 1: Flat array (ELS, ELS Private, etc.)
+      if (Array.isArray(data)) {
+        // Some (Retail / Cobra) wrap one big object inside array
+        if (data.length === 1 && typeof data[0] === "object" && !Array.isArray(data[0])) {
+          const big = data[0];
+          for (const code in big) {
+            const s = big[code];
+            const storeCode = String(s.branchCode || code || "").padStart(4, "0");
+            const storeName = s.storeName || s["Store Name"] || s.siteName || "";
+            list.push({ code: storeCode, name: storeName });
+          }
+        } else {
+          // Case 1b: Normal flat array
+          data.forEach(s => {
+            const storeCode = String(s["Branch Code"] || s.branchCode || s.siteCode || "").padStart(4, "0");
+            const storeName = s["Store Name"] || s.storeName || s.siteName || "";
+            list.push({ code: storeCode, name: storeName });
+          });
+        }
+      }
+      // Case 2: Top-level object (failsafe)
+      else if (typeof data === "object") {
+        for (const code in data) {
+          const s = data[code];
+          const storeCode = String(s.branchCode || code || "").padStart(4, "0");
+          const storeName = s.storeName || s["Store Name"] || "";
+          list.push({ code: storeCode, name: storeName });
+        }
+      }
+
+      return list.filter(x => x.code && x.name);
+    } catch (e) {
+      console.warn("Sites fetch failed for", key, e);
+      return [];
+    }
   }
 
+  // ======================
+  //   SUPPLIERS / VEHICLES
+  // ======================
   async function populateSuppliers(){
     try {
       allSuppliers = await fetchJSON(SUPPLIERS_URL);
       const sel = byId('supplier');
       sel.innerHTML='';
-      (allSuppliers || []).forEach(s=>{
+      allSuppliers.forEach(s=>{
         const opt=document.createElement('option');
-        opt.value = s.supplierNumber;
-        opt.textContent = s.supplierName;
+        opt.value=s.supplierNumber;
+        opt.textContent=s.supplierName;
         sel.appendChild(opt);
       });
     } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
-  }
-
-  // Robust getters for site fields from Cloudflare data
-  function pick(obj, keys) {
-    for (const k of keys) {
-      if (obj && obj[k] != null && String(obj[k]).trim() !== '') return obj[k];
-    }
-    return '';
-  }
-  function getSiteCode(site) {
-    // Expecting siteCode in SITES store; also accept other common keys
-    const code = pick(site, ['siteCode','Store Code','StoreCode','Branch Code','branchCode','code','ID','site_number','siteNumber','jobNumber']);
-    return String(code || '').padStart(4,'0');
-  }
-  function getSiteName(site) {
-    return pick(site, ['siteName','Store Name','Name','name','site']);
-  }
-
-  // Fetch sites for a single key (retail, els, etc.)
-  async function fetchSitesForKey(key) {
-    const url = SITE_ENDPOINTS[key];
-    if (!url) return [];
-    try {
-      const data = await fetchJSON(url);
-      if (!data) return [];
-      // data should already be an array from Worker; keep it robust either way
-      const arr = Array.isArray(data) ? data : (data?.data && Array.isArray(data.data) ? data.data : Object.values(data||{}));
-      return (arr || []).map(s => ({
-        code: getSiteCode(s),
-        name: getSiteName(s),
-        raw: s
-      })).filter(x => x.code || x.name);
-    } catch (e) {
-      console.warn('Sites fetch failed for', key, e);
-      return [];
-    }
-  }
-
-  // Populate the second dropdown depending on selected type
-  async function populateSitesFromCloudflare() {
-    const siteTypeUI = byId('siteType').value;      // e.g., "", "Retail", "ELS", "COBRA", "Wenzel’s", "Site"
-    const key = mapSiteTypeToKey(siteTypeUI);       // "", or "retail", "els", "cobra", "wenzels", "projects"
-
-    const siteSel = byId('site');
-    siteSel.innerHTML = '';
-
-    let list = [];
-
-    if (!key) {
-      // All Sites → fetch all keys and merge
-      const keys = ['retail','els','els_private','cobra','wenzels','projects'];
-      const chunks = await Promise.all(keys.map(k => fetchSitesForKey(k)));
-      list = chunks.flat();
-    } else {
-      list = await fetchSitesForKey(key);
-    }
-
-    lastSites = list.slice(); // cache
-
-    if (!list.length) {
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '(No options)';
-      siteSel.appendChild(opt);
-      return;
-    }
-
-    // Sort by code (numeric)
-    list.sort((a,b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-
-    list.forEach(s => {
-      const opt = document.createElement('option');
-      // show like "0126 Lee On Solent"
-      const label = [s.code, s.name].filter(Boolean).join(' ');
-      opt.textContent = label;
-      // Use site code as value (your note says “uses Site Number internally”)
-      opt.value = s.code || s.name || '';
-      opt.dataset.siteName = s.name || '';
-      siteSel.appendChild(opt);
-    });
   }
 
   async function populateVehicles(){
@@ -328,9 +276,56 @@
     } catch{}
   }
 
+  // ======================
+  //   SITE HANDLING LOGIC
+  // ======================
+  async function populateSites(){
+    allSites = [];
+    const type = norm(byId('siteType').value);
+    if (!type) { byId('site').innerHTML='<option>Select Site Type</option>'; return; }
+
+    const keyMap = {
+      'retail':'retail',
+      'els':'els',
+      'els private':'els_private',
+      'cobra':'cobra',
+      'wenzel’s':'wenzels',
+      'projects':'projects'
+    };
+    const key = keyMap[type] || 'retail';
+    allSites = await fetchSitesForKey(key);
+    filterSites();
+  }
+
+  function filterSites(){
+    const sel=byId('site');
+    sel.innerHTML='';
+    allSites.forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s.code;
+      opt.textContent=`${s.code} ${s.name}`;
+      opt.dataset.siteName=s.name;
+      sel.appendChild(opt);
+    });
+    if(!allSites.length){ sel.innerHTML='<option>(No options)</option>'; }
+  }
+
+  // ======================
+  //     PO CREATION FLOW
+  // ======================
+  function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
+    const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
+    let n = parseInt(localStorage.getItem(key) || "0",10)+1;
+    localStorage.setItem(key,n);
+    return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
+  }
+
   function showModal(po){ byId('poCodeText').textContent=po; byId('modalBackdrop').style.display='flex'; }
   function hideModal(){ byId('modalBackdrop').style.display='none'; }
 
+  // ======================
+  //         INIT
+  // ======================
   async function init(){
     const username=sessionStorage.getItem('mostlaneUser')||'';
     engineerName=username?dotToSpace(username):'Unknown';
@@ -345,9 +340,6 @@
       const prefix=empType.includes('self')?'SE':'E';
       engineerCode=prefix+String(engNum||'').trim();
     }catch{engineerCode='E0';}
-
-    // Sites now come from Cloudflare Worker
-    await populateSitesFromCloudflare();
 
     await populateSuppliers();
     await populateVehicles();
@@ -373,7 +365,7 @@
       byId('vehicleRow').classList.toggle('hidden',!isVehicle);
     });
 
-    byId('siteType').addEventListener('change', populateSitesFromCloudflare);
+    byId('siteType').addEventListener('change', populateSites);
 
     byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
     byId('closeBtn').onclick=hideModal;
@@ -388,6 +380,9 @@
     byId('poForm').addEventListener('submit',onSubmit);
   }
 
+  // ======================
+  //     SUBMIT HANDLER
+  // ======================
   async function onSubmit(e){
     e.preventDefault();
     const submitBtn=byId('submitBtn'); submitBtn.disabled=true;
@@ -402,8 +397,14 @@
     const descVal=byId('desc').value.trim();
     const incidentVal=byId('incident').value.trim();
 
-    if(!engineerVal||!dateVal||!descVal||!supplierNumber){alert('All required fields must be completed.');submitBtn.disabled=false;return;}
-    if(geo.lat===null||geo.lon===null){alert('Location required. Enable location.');submitBtn.disabled=false;return;}
+    if(!engineerVal||!dateVal||!descVal||!supplierNumber){
+      alert('All required fields must be completed.');
+      submitBtn.disabled=false; return;
+    }
+    if(geo.lat===null||geo.lon===null){
+      alert('Location required. Enable location.');
+      submitBtn.disabled=false; return;
+    }
 
     const typeLetter=workType==='Reactive'?'R':workType==='Planned'?'P':'V';
     const siteSegment=isVehicle?(vehicleReg||'').replace(/\s+/g,''):siteNumber;
