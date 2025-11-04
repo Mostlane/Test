@@ -266,36 +266,39 @@ function render(){
 
     // Capture Monday van check banner from the actual Monday record if present
 if (idx === 0) { // Monday summary
-  // Look for any Monday-type record from the same week
   const mondayEntries = Object.values(byDate).flat().filter(e => {
     if (!e || typeof e !== "object") return false;
-    const day = new Date(e.date + "T00:00:00").getDay();
-    return day === 1; // Monday
+    const d = new Date(e.date + "T00:00:00");
+    return d.getDay() === 1; // Monday
   });
+
+  console.log("🟦 Monday entries found:", mondayEntries);
 
   const mon = mondayEntries.length ? mondayEntries[0] : null;
 
   if (mon) {
-    const checkVal = String(mon.vanCheck || mon.vanCheckWeekStatus || "").trim().toLowerCase();
+    const rawVal = mon.vanCheck || mon.vanCheckWeekStatus || "";
+    const checkVal = String(rawVal).trim().toLowerCase();
+    console.log("🟩 Monday vanCheck raw:", rawVal);
 
     if (checkVal) {
-      mondayVanCheckText = `Monday Van Check: ${mon.vanCheck || mon.vanCheckWeekStatus}`;
+      mondayVanCheckText = `Monday Van Check: ${rawVal}`;
 
-      if (checkVal === "yes" || checkVal === "passed") {
+      if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
         mondayVanCheckText +=
           ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
       } else if (checkVal === "no" || checkVal === "failed") {
         mondayVanCheckText +=
           ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
-      } else if (checkVal === "n/a") {
+      } else if (checkVal === "n/a" || checkVal === "na") {
         mondayVanCheckText +=
           ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
       }
     } else {
-      mondayVanCheckText = "Monday Van Check: —";
+      mondayVanCheckText = "Monday Van Check: — (no value found)";
     }
   } else {
-    mondayVanCheckText = "Monday Van Check: —";
+    mondayVanCheckText = "Monday Van Check: — (no Monday record found)";
   }
 }
     const start = entry?.leaveHome || "";
