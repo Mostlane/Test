@@ -266,17 +266,28 @@ function render(){
 
     // Capture Monday van check banner from the actual Monday record if present
 if (idx === 0) { // Monday summary
-  // Pull all entries for the current engineer this week
-  const allWeekEntries = Object.values(byDate).flat().filter(e => typeof e === "object");
-  console.log("🟦 All week entries:", allWeekEntries);
+  // ✅ Look through *all entries in the dataset* for this engineer within the same week range
+  const allWeekEntries = Object.values(RAW)
+    .flat()
+    .filter(e =>
+      e &&
+      typeof e === "object" &&
+      String(e.engineer || "").trim().toLowerCase() === currentEngineer.trim().toLowerCase()
+    );
 
-  // Try to find the first record that actually has a vanCheck value
-  const mon = allWeekEntries.find(e => e.vanCheck || e.vanCheckWeekStatus);
+  // Find the first entry for this week that includes vanCheck or vanCheckWeekStatus
+  const mon = allWeekEntries.find(e => {
+    const d = new Date(e.date + "T00:00:00");
+    return (
+      d >= currentWeekMon &&
+      d < addDays(currentWeekMon, 7) &&
+      (e.vanCheck || e.vanCheckWeekStatus)
+    );
+  });
 
   if (mon) {
     const rawVal = mon.vanCheck || mon.vanCheckWeekStatus || "";
     const checkVal = String(rawVal).trim().toLowerCase();
-    console.log("🟩 Detected vanCheck value:", rawVal);
 
     mondayVanCheckText = `Monday Van Check: ${rawVal}`;
 
@@ -289,9 +300,11 @@ if (idx === 0) { // Monday summary
     } else if (checkVal === "n/a" || checkVal === "na") {
       mondayVanCheckText +=
         ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
+    } else {
+      mondayVanCheckText += ` <span style="color:#64748b;">(unrecognised status)</span>`;
     }
   } else {
-    mondayVanCheckText = "Monday Van Check: — (no vanCheck field found)";
+    mondayVanCheckText = "Monday Van Check: —";
   }
 }
     const start = entry?.leaveHome || "";
