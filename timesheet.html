@@ -262,7 +262,7 @@ function render(){
     const entries = byDate[iso] || [];
     let entry = entries
       .filter(e => !e.excludeFromPay) // ignore excluded lines in viewer totals
-      .sort((a,b)=> (parseFloat(b.totalHours||0) - parseFloat(a.totalHours||0)))[0];
+.sort((a,b)=> new Date(b.submittedAt) - new Date(a.submittedAt))[0];
 
     // Capture Monday van check banner from the actual Monday record if present
 if (idx === 0) { // Monday summary
