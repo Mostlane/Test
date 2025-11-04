@@ -1,48 +1,295 @@
-<html><head>
-<script src="auth.js"></script><title>My Timesheet</title><link rel='stylesheet' href='style.css'><script>
-  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    window.location.href = "login.html";
-  }
-</script>
-
-</head><body class="timesheet-body">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Timesheet – Mostlane</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <style>
-  body.timesheet-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
+    :root{
+      --ml-blue:#003366;--ml-accent:#1a73e8;--ml-ink:#27313a;--ml-bg:#e6e8eb;
+      --card:#ffffffee;--muted:#718096;--border:#e8edf3;--ok:#0c7d27;--bad:#b00020;--warn:#b36b00;
+    }
+    html,body{width:100%;max-width:100%;overflow-x:hidden;}
+    body{
+      font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+      background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180% auto;margin:0;padding:40px;color:var(--ml-ink);
+    }
+    .shell{max-width:1200px;margin:0 auto;background:rgba(255,255,255,0.94);
+      border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);overflow:hidden;}
+    header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+      background:linear-gradient(90deg,#fff,#f7f9fc);border-bottom:1px solid var(--border);padding:18px 24px;gap:10px;}
+    header h1{font-size:22px;margin:0;color:var(--ml-blue);}
+    header a{background:var(--ml-accent);color:#fff;text-decoration:none;padding:8px 16px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap;}
+    .content{padding:22px 24px 28px;}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+    .btn{border:1px solid var(--border);background:#eef2f9;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    .btn:hover{filter:brightness(0.98)}
+    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#f8fbff;
+      padding:8px 12px;border-radius:999px;font-weight:600;}
+    .select{height:40px;padding:8px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:15px;background:#fff;}
+    table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+    th,td{padding:10px 12px;border-bottom:1px solid #eef2f7;text-align:left;font-size:14px}
+    thead th{background:#f7f9fc;color:#0f172a}
+    tfoot td{background:#fafcff;font-weight:700}
+    .muted{color:var(--muted)}
+    .summary{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+    .summary .pill{background:#fff}
+    .note{margin-top:8px;color:#64748b;font-size:13px}
+    .center{display:flex;align-items:center;gap:10px}
+    .right{margin-left:auto}
+    @media(max-width:900px){body{padding:16px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>Weekly Timesheet</h1>
+      <a href="main.html">Main Menu</a>
+    </header>
+    <div class="content">
+      <div class="controls">
+        <button id="prevWeek" class="btn">◀ Prev Week</button>
+        <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
+        <button id="nextWeek" class="btn">Next Week ▶</button>
+        <div class="right"></div>
+        <label class="muted" for="engineerSel">Engineer</label>
+        <select id="engineerSel" class="select"></select>
+      </div>
+
+      <div class="muted" id="vanCheckBanner" style="margin:6px 0 12px 0;"></div>
+
+      <div id="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:140px">Date</th>
+              <th style="width:140px">Day</th>
+              <th>Start</th>
+              <th>Finish</th>
+              <th style="width:110px">Total (h)</th>
+              <th style="width:110px">Std (h)</th>
+              <th style="width:110px">OT (h)</th>
+              <th style="width:130px">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <!-- rows injected -->
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Weekly Totals</td>
+              <td id="totTotal">0.00</td>
+              <td id="totStd">0.00</td>
+              <td id="totOT">0.00</td>
+              <td id="totDays" class="muted">—</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="summary">
+        <div class="pill">Standard: <span id="sumStd">0.00</span> h</div>
+        <div class="pill">Overtime: <span id="sumOT">0.00</span> h</div>
+        <div class="pill">Total: <span id="sumTotal">0.00</span> h</div>
+        <div class="pill">Overtime days: <span id="sumOTDays">0</span> / 5</div>
+      </div>
+
+      <div class="note">
+        Start = <b>leaveHome</b> · Finish = <b>arriveHome</b>.  
+        Overtime day = any day with OT &gt; 0 (ignores excluded entries).
+      </div>
+
+      <div id="status" class="muted" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+<script>
+const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+
+const $ = (id)=>document.getElementById(id);
+
+// --- Date helpers ---
+function startOfWeekMonday(date){
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun .. 6=Sat
+  const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+  d.setDate(d.getDate() + diff);
+  d.setHours(12,0,0,0);
+  return d;
+}
+function fmtISODate(d){ return d.toISOString().split("T")[0]; }
+function fmtNice(d){
+  return d.toLocaleDateString("en-GB",{weekday:"short", day:"2-digit", month:"short", year:"numeric"});
+}
+function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+
+// --- State ---
+let RAW = {};                 // GET result from Worker (object keyed by date → arrays)
+let ENGINEERS = [];           // all names discovered
+let currentWeekMon = null;    // Date (Monday)
+let currentEngineer = null;   // string
+
+// Load + init
+window.addEventListener("DOMContentLoaded", async () => {
+  $("status").textContent = "Loading…";
+  try{
+    const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
+    RAW = await res.json();
+  }catch(e){
+    $("status").textContent = "Could not load data.";
+    RAW = {};
   }
 
-  h1 {
-    background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
+  // Build engineer list from all entries
+  const names = new Set();
+  Object.values(RAW).forEach(arr=>{
+    if(Array.isArray(arr)){
+      arr.forEach(e=>{
+        if(e && typeof e === "object" && e.engineer){
+          names.add(String(e.engineer).trim());
+        } else if (typeof e === "string"){
+          names.add(e.trim());
+        }
+      });
+    }
+  });
+  ENGINEERS = Array.from(names).sort((a,b)=>a.localeCompare(b));
+
+  // Fill dropdown
+  const sel = $("engineerSel");
+  sel.innerHTML = "";
+  ENGINEERS.forEach(n=>{
+    const opt = document.createElement("option");
+    opt.value = n; opt.textContent = n;
+    sel.appendChild(opt);
+  });
+  currentEngineer = ENGINEERS[0] || null;
+
+  // Default week = this week's Monday
+  currentWeekMon = startOfWeekMonday(new Date());
+  render();
+
+  $("prevWeek").onclick = ()=>{ currentWeekMon = addDays(currentWeekMon,-7); render(); };
+  $("nextWeek").onclick = ()=>{ currentWeekMon = addDays(currentWeekMon, 7); render(); };
+  sel.onchange = ()=>{ currentEngineer = sel.value; render(); };
+});
+
+// Pull all entries that match weekKey & engineer
+function collectWeekEntries(weekMonISO, engineer){
+  const out = [];
+  for(const [dateKey, arr] of Object.entries(RAW)){
+    if(!Array.isArray(arr)) continue;
+    arr.forEach(e=>{
+      if(!e || typeof e !== "object") return;
+      if(String(e.engineer||"").trim() !== engineer) return;
+      if(String(e.weekKey||"") === weekMonISO){
+        out.push(e);
+      }
+    });
+  }
+  // group by dateStr for easier lookup
+  const byDate = {};
+  out.forEach(e=>{
+    const k = String(e.date);
+    byDate[k] = byDate[k] || [];
+    byDate[k].push(e);
+  });
+  return byDate;
+}
+
+function render(){
+  if(!currentEngineer || !currentWeekMon){
+    $("status").textContent = "Select an engineer.";
+    return;
   }
 
-  </style><h1>My Timesheet</h1></body></html>
+  const weekMonISO = fmtISODate(currentWeekMon);
+  $("weekLabel").textContent = fmtNice(currentWeekMon);
+
+  // Get entries for this engineer + week
+  const byDate = collectWeekEntries(weekMonISO, currentEngineer);
+
+  // Build 5 working days Mon..Fri
+  const days = [0,1,2,3,4].map(i => addDays(currentWeekMon, i));
+  const tbody = $("tbody");
+  tbody.innerHTML = "";
+
+  let totTotal = 0, totStd = 0, totOT = 0, otDays = 0;
+  let mondayVanCheckText = "";
+
+  days.forEach((d, idx)=>{
+    const iso = fmtISODate(d);
+    const dayName = d.toLocaleDateString("en-GB",{weekday:"short"});
+    const pretty = d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
+
+    // choose first non-excluded entry for the day (if multiple, take the one with biggest totalHours)
+    const entries = byDate[iso] || [];
+    let entry = entries
+      .filter(e => !e.excludeFromPay) // ignore excluded lines in viewer totals
+      .sort((a,b)=> (parseFloat(b.totalHours||0) - parseFloat(a.totalHours||0)))[0];
+
+    // Capture Monday van check banner from the actual Monday record if present
+    if(idx===0){ // Monday
+      const mon = (byDate[iso]||[]).find(e => typeof e === "object");
+      if(mon){
+        if(mon.vanCheck){
+          mondayVanCheckText = `Monday Van Check: ${mon.vanCheck}`;
+        } else if (mon.vanCheckWeekStatus){
+          mondayVanCheckText = `Monday Van Check: ${mon.vanCheckWeekStatus}`;
+        } else {
+          mondayVanCheckText = "Monday Van Check: —";
+        }
+      } else {
+        mondayVanCheckText = "Monday Van Check: —";
+      }
+    }
+
+    const start = entry?.leaveHome || "";
+    const finish = entry?.arriveHome || "";
+    const total = parseFloat(entry?.totalHours || 0) || 0;
+    const std   = parseFloat(entry?.standardHours || 0) || 0;
+    const ot    = parseFloat(entry?.overtimeHours || 0) || 0;
+    const notes = entry?.notes ? String(entry.notes).trim() : "";
+
+    if(ot > 0) otDays++;
+
+    totTotal += total;
+    totStd   += std;
+    totOT    += ot;
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${pretty}</td>
+      <td>${dayName}</td>
+      <td>${start || "<span class='muted'>—</span>"}</td>
+      <td>${finish || "<span class='muted'>—</span>"}</td>
+      <td>${total.toFixed(2)}</td>
+      <td>${std.toFixed(2)}</td>
+      <td>${ot.toFixed(2)}</td>
+      <td>${notes ? notes.replace(/</g,"&lt;") : "<span class='muted'>—</span>"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Totals row
+  $("totTotal").textContent = totTotal.toFixed(2);
+  $("totStd").textContent   = totStd.toFixed(2);
+  $("totOT").textContent    = totOT.toFixed(2);
+  $("totDays").textContent  = "—";
+
+  // Summary chips
+  $("sumTotal").textContent  = totTotal.toFixed(2);
+  $("sumStd").textContent    = totStd.toFixed(2);
+  $("sumOT").textContent     = totOT.toFixed(2);
+  $("sumOTDays").textContent = otDays;
+
+  $("vanCheckBanner").textContent = mondayVanCheckText;
+
+  // Status line
+  const foundAny = Object.keys(byDate).length > 0;
+  $("status").textContent = foundAny ? "" : "No entries found for this week for the selected engineer.";
+}
+</script>
+</body>
+</html>
