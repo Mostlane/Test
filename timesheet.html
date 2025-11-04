@@ -296,11 +296,12 @@ if (idx === 0) { // Monday summary
         ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
     } else if (checkVal === "n/a" || checkVal === "na") {
       mondayVanCheckText +=
-        ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
-    } else {
-      mondayVanCheckText +=
-        ` <span style="color:#64748b;">(unrecognised status)</span>`;
-    }
+        ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</} else {
+  mondayVanCheckText = `
+    Monday Van Check: ⚠️ 
+    <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
+  `;
+}
   } else {
     mondayVanCheckText = `
       Monday Van Check: ⚠️ 
