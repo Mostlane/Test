@@ -265,8 +265,16 @@ function render(){
       .sort((a,b)=> (parseFloat(b.totalHours||0) - parseFloat(a.totalHours||0)))[0];
 
     // Capture Monday van check banner from the actual Monday record if present
-if (idx === 0) { // Monday
-  const mon = (byDate[iso] || []).find(e => typeof e === "object");
+if (idx === 0) { // Monday summary
+  // Look for any Monday-type record from the same week
+  const mondayEntries = Object.values(byDate).flat().filter(e => {
+    if (!e || typeof e !== "object") return false;
+    const day = new Date(e.date + "T00:00:00").getDay();
+    return day === 1; // Monday
+  });
+
+  const mon = mondayEntries.length ? mondayEntries[0] : null;
+
   if (mon) {
     const checkVal = String(mon.vanCheck || mon.vanCheckWeekStatus || "").trim().toLowerCase();
 
