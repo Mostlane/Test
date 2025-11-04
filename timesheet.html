@@ -134,8 +134,12 @@ let currentEngineer = null;   // string
 window.addEventListener("DOMContentLoaded", async () => {
   $("status").textContent = "Loading…";
   try{
-    const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
-    RAW = await res.json();
+const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
+const j = await res.json();
+// Some Workers wrap data like { ok:true, data:{...} } or { Hours:{...} }
+if (j.ok && j.data) RAW = j.data;
+else if (j.Hours) RAW = j.Hours;
+else RAW = j;
   }catch(e){
     $("status").textContent = "Could not load data.";
     RAW = {};
