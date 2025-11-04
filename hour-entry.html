@@ -427,7 +427,6 @@ function renderChecklistForDate(dateStr){
   $("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
   // console.debug("Checklist source key:", usedKey ?? "(no match)");
 }
-}
 /* ====== AUTOSAVE ====== */
 const saveDraftDebounced=debounce(saveDraft,400);
 function saveDraft(){
