@@ -280,7 +280,43 @@ opt.textContent = s.supplierName;
   async function populateSites(){
     allSites = [];
     const type = norm(byId('siteType').value);
-    if (!type) { byId('site').innerHTML='<option>Select Site Type</option>'; return; }
+    async function populateSites(){
+  allSites = [];
+  const type = norm(byId('siteType').value);
+  const sel = byId('site');
+  sel.innerHTML = '<option>Loading...</option>';
+
+  const keyMap = {
+    'retail':'retail',
+    'els':'els',
+    'els private':'els_private',
+    'cobra':'cobra',
+    'wenzel’s':'wenzels',
+    'projects':'projects'
+  };
+
+  // ✅ If "All Sites" selected → load every type
+  if (!type) {
+    let combined = [];
+    for (const k of Object.values(keyMap)) {
+      const sites = await fetchSitesForKey(k);
+      combined = combined.concat(sites);
+    }
+    allSites = combined.sort((a,b)=>Number(a.code)-Number(b.code));
+  } else {
+    const key = keyMap[type] || 'retail';
+    allSites = await fetchSitesForKey(key);
+  }
+
+  sel.innerHTML = '';
+  allSites.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.code;
+    opt.textContent = `${s.code} ${s.name}`;
+    sel.appendChild(opt);
+  });
+  if (!allSites.length) sel.innerHTML = '<option>(No options)</option>';
+}
 
     const keyMap = {
       'retail':'retail',
