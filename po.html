@@ -252,8 +252,8 @@ async function populateSuppliers(){
     sel.innerHTML = '';
     allSuppliers.forEach(s => {
       const opt = document.createElement('option');
-      opt.value = s.code;         // ⬅️ previously s.supplierNumber
-      opt.textContent = s.name;   // ⬅️ previously s.supplierName
+opt.value = s.supplierNumber;
+opt.textContent = s.supplierName;
       sel.appendChild(opt);
     });
   } catch {
