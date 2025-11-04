@@ -529,16 +529,17 @@ function showModal(items, title) {
         ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
         : '';
       const n = Number(p.costNet || 0); const g = Number(p.costGross || 0);
-      return `<tr>
-        <td class="nowrap">${p.date || ''}</td>
-        <td class="nowrap">${p.poNumber || ''}</td>
-        <td>${p.engineer || ''}</td>
-        <td>${p.supplierName || ''}</td>
-        <td>${p.description || ''}</td>
-        <td class="right">${fmtGBP(n>0 ? n : 0)}</td>
-        <td class="right">${fmtGBP(g>0 ? g : 0)}</td>
-        <td>${map}</td>
-      </tr>`;
+return `<tr>
+  <td class="nowrap">${p.date || ''}</td>
+  <td class="nowrap">${p.poNumber || ''}</td>
+  <td>${p.engineer || ''}</td>
+  <td>${p.supplierName || ''}</td>
+  <td>${p.incidentNumber || ''}</td>
+  <td>${p.description || ''}</td>
+  <td class="right">${fmtGBP(n>0 ? n : 0)}</td>
+  <td class="right">${fmtGBP(g>0 ? g : 0)}</td>
+  <td>${map}</td>
+</tr>`;
     }).join('');
   m.style.display = 'flex';
 }
