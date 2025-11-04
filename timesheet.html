@@ -368,7 +368,14 @@ if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
 document.getElementById("exportBtn").addEventListener("click", async () => {
   const engineer = document.getElementById("engineerSel").value.replace(/\s+/g, '');
   const weekComm = document.getElementById("weekLabel").textContent.split(',')[0].replace(/\s+/g,'');
-  const filename = `${engineer}_WkComm_${weekComm}.pdf`;
+  // Clean name format: Bradley Graham - WC 17-10-2025.pdf
+const engineerName = document.getElementById("engineerSel").value.trim();
+const monday = new Date(currentWeekMon);
+const dd = String(monday.getDate()).padStart(2, '0');
+const mm = String(monday.getMonth() + 1).padStart(2, '0');
+const yyyy = monday.getFullYear();
+const weekLabelFormatted = `${dd}-${mm}-${yyyy}`;
+const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
 
   // hide buttons & dropdown temporarily for clean export
   const controls = document.querySelector('.controls');
