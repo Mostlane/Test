@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script src="auth.js"></script>
+  <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PO Menu</title>
   <style>
+    /* Page background (embossed) */
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -13,38 +14,57 @@
       margin: 0;
       padding: 0;
     }
-   .main-body {
-  font-family: "Segoe UI", sans-serif;
-  background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-  background-size: cover;
-  margin: 0;
-  padding: 40px 20px;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
- .button {
-  margin: 10px auto;
-  padding: 12px 20px;
-  font-size: 16px;
-  background-color: rgba(0, 74, 153, 0.6);
-  border-radius: 6px;
-  width: 90%;
-  max-width: 300px;
-}
+
+    /* Centered translucent card */
+    .main-body {
+      max-width: 600px;
+      margin: 80px auto;
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px;
+      border-radius: 8px;
+      text-align: center;
+      box-sizing: border-box;
+    }
+
+    /* Standard Mostlane button style (from your first page) */
+    .button {
+      display: block;
+      margin: 10px auto;
+      padding: 12px 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.6);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 300px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+
     .button:hover {
       background-color: rgba(0, 74, 153, 1);
       transform: scale(1.02);
     }
+
+    /* Grey “Back” variant */
     .button.grey {
-      background-color: rgba(120,120,120,0.7);
+      background-color: rgba(120, 120, 120, 0.7);
     }
     .button.grey:hover {
-      background-color: rgba(90,90,90,0.85);
+      background-color: rgba(90, 90, 90, 0.85);
     }
   </style>
 </head>
-<body class="main-body">
+<body>
+  <div class="main-body">
+    <a href="po-start.html" class="button">Create New</a>
+    <a href="my-pos.html" class="button">Previous Generated POs</a>
+    <a href="po-director.html" class="button">PO Director</a>
+    <a href="po-costing.html" class="button">PO Costing</a>
+    <a href="main.html" class="button grey">Back</a>
+  </div>
 </body>
 </html>
