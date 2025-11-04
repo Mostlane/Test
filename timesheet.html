@@ -46,6 +46,9 @@
 <header>
   <h1>Weekly Timesheet</h1>
   <a href="hour-entry.html">Back to Hours Entry</a>
+    <button id="exportBtn" class="btn" style="background:#003366;color:#fff;border:none;">
+    📄 Export PDF
+  </button>
 </header>
     <div class="content">
       <div class="controls">
@@ -355,6 +358,38 @@ if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
   const foundAny = Object.keys(byDate).length > 0;
   $("status").textContent = foundAny ? "" : "No entries found for this week for the selected engineer.";
 }
+</script>
+
+<!-- html2canvas + jsPDF libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script>
+document.getElementById("exportBtn").addEventListener("click", async () => {
+  const engineer = document.getElementById("engineerSel").value.replace(/\s+/g, '');
+  const weekComm = document.getElementById("weekLabel").textContent.split(',')[0].replace(/\s+/g,'');
+  const filename = `${engineer}_WkComm_${weekComm}.pdf`;
+
+  // hide buttons & dropdown temporarily for clean export
+  const controls = document.querySelector('.controls');
+  controls.style.display = 'none';
+  const exportBtn = document.getElementById('exportBtn');
+  exportBtn.style.display = 'none';
+
+  const shell = document.querySelector('.shell');
+  const canvas = await html2canvas(shell, {scale: 2, useCORS: true});
+  const imgData = canvas.toDataURL('image/png');
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const pdfWidth = pdf.internal.pageSize.getWidth();
+  const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+  pdf.save(filename);
+
+  // restore controls
+  controls.style.display = '';
+  exportBtn.style.display = '';
+});
 </script>
 </body>
 </html>
