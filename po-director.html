@@ -320,7 +320,7 @@ function applyFilters() {
     if (sup && p.supplierName !== sup) return false;
     if (job && (p.siteSegment || p.site || '') !== job) return false;
     if (search) {
-      const hay = [p.poNumber, p.description, p.engineer, p.supplierName, (p.siteSegment||p.site||'')].join(' ').toLowerCase();
+  const hay = [p.poNumber, p.description, p.engineer, p.supplierName, p.incidentNumber, (p.siteSegment||p.site||'')].join(' ').toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
