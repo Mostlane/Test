@@ -135,11 +135,24 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("status").textContent = "Loading…";
   try{
 const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
-const j = await res.json();
-// Some Workers wrap data like { ok:true, data:{...} } or { Hours:{...} }
+let j = await res.text();
+
+try {
+  j = JSON.parse(j);
+} catch (e) {
+  console.warn("Non-JSON response from worker:", j);
+  j = {};
+}
+
 if (j.ok && j.data) RAW = j.data;
 else if (j.Hours) RAW = j.Hours;
-else RAW = j;
+else if (typeof j === "object") RAW = j;
+else {
+  console.error("Unexpected data format", j);
+  RAW = {};
+}
+
+console.log("✅ RAW loaded:", RAW);
   }catch(e){
     $("status").textContent = "Could not load data.";
     RAW = {};
