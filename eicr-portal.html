@@ -885,19 +885,6 @@ window.addEventListener("message", e => {
     alert("Debug:\n" + JSON.stringify(e.data.__updateDebug, null, 2));
   }
 });
-
-// Keep your debug hook, but payload is already fixed above
-const oldSaveEditInstant = saveEditInstant;
-saveEditInstant = async function(row) {
-  try {
-    await oldSaveEditInstant(row);
-  } catch (err) {
-    alert("Save error: " + err.message);
-  }
-  const storeCode = row.children[0].textContent.trim();
-  const storeType = normaliseTypeLabel(row.children[2].textContent.trim());
-  window.postMessage({__updateDebug: {storeCode, storeType}}, "*");
-};
   </script>
 </body>
 </html>
