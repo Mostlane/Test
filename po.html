@@ -172,7 +172,7 @@
   <script>
   const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
   const USERS_URL = RAW + 'users.json';
-  const SUPPLIERS_URL = RAW + 'suppliers.json';
+ const SUPPLIERS_URL = "https://mostlane-pos.jamie-def.workers.dev/get-suppliers";
   const VEHICLES_URL = RAW + 'vehicles.json';
 
   // ✅ Live Cloudflare Worker endpoints
@@ -245,19 +245,21 @@
   // =====================================
   //     SUPPLIER & VEHICLE POPULATION
   // =====================================
-  async function populateSuppliers(){
-    try {
-      allSuppliers = await fetchJSON(SUPPLIERS_URL);
-      const sel = byId('supplier');
-      sel.innerHTML='';
-      allSuppliers.forEach(s=>{
-        const opt=document.createElement('option');
-        opt.value=s.supplierNumber;
-        opt.textContent=s.supplierName;
-        sel.appendChild(opt);
-      });
-    } catch { byId('supplier').innerHTML='<option>(Unable to load)</option>'; }
+async function populateSuppliers(){
+  try {
+    allSuppliers = await fetchJSON(SUPPLIERS_URL);
+    const sel = byId('supplier');
+    sel.innerHTML = '';
+    allSuppliers.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.code;         // ⬅️ previously s.supplierNumber
+      opt.textContent = s.name;   // ⬅️ previously s.supplierName
+      sel.appendChild(opt);
+    });
+  } catch {
+    byId('supplier').innerHTML = '<option>(Unable to load)</option>';
   }
+}
 
   async function populateVehicles(){
     try {
