@@ -353,23 +353,80 @@ async function refreshChecklist(){
   }catch{HOURS_LOG_CACHE={};}
   renderChecklistForDate($("date").value);
 }
+// === 🧩 Helper functions for date matching & name extraction ===
+function candidateKeysFor(dateStr){
+  const d = new Date(dateStr + "T12:00:00");
+  if (isNaN(d)) return [dateStr];
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const iso = `${yyyy}-${mm}-${dd}`;
+  const ddmmyyyy_dash = `${dd}-${mm}-${yyyy}`;
+  const ddmmyyyy_slash = `${dd}/${mm}/${yyyy}`;
+  const d_m_yyyy = `${d.getDate()}-${d.getMonth()+1}-${yyyy}`;
+  const ddmmyy_dash = `${dd}-${mm}-${String(yyyy).slice(2)}`;
+  const d_m_yy = `${d.getDate()}-${d.getMonth()+1}-${String(yyyy).slice(2)}`;
+  return [iso, dateStr, ddmmyyyy_dash, ddmmyyyy_slash, d_m_yyyy, ddmmyy_dash, d_m_yy];
+}
+
+function extractEngineerName(entry){
+  if (!entry) return null;
+  if (typeof entry === "string") return entry;
+  if (typeof entry === "object"){
+    if (entry.engineer) return entry.engineer;
+    if (entry.name) return entry.name;
+    if (entry.user) return entry.user;
+    if (entry.entry && entry.entry.engineer) return entry.entry.engineer;
+  }
+  return null;
+}
+
+function getSubmittedForDate(cache, dateStr){
+  const keys = candidateKeysFor(dateStr);
+  for (const k of keys){
+    const arr = cache?.[k];
+    if (Array.isArray(arr)) return {arr, usedKey:k};
+  }
+  return {arr: [], usedKey: null};
+}
+
+// === ✅ Improved renderChecklistForDate (reads Cloudflare Worker JSON correctly) ===
 function renderChecklistForDate(dateStr){
-  const ul=$("checklist");
-  const dateNice=new Date(dateStr+"T12:00").toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});
-  $("checklistDate").textContent=`For: ${dateNice} (${dateStr})`;
-  const logged=new Set((HOURS_LOG_CACHE?.[dateStr]||[]).map(n=>String(n).trim().toLowerCase()));
+  const ul = $("checklist");
+  const dateNice = new Date(dateStr + "T12:00").toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});
+  $("checklistDate").textContent = `For: ${dateNice} (${dateStr})`;
+
+  const { arr, usedKey } = getSubmittedForDate(HOURS_LOG_CACHE, dateStr);
+
+  const submitted = new Set(
+    arr
+      .map(extractEngineerName)
+      .filter(Boolean)
+      .map(n => String(n).trim().toLowerCase())
+  );
+
   document.querySelectorAll(".elog select[id$='_engineer']").forEach(sel=>{
-    const val=sel.value?.trim().toLowerCase();if(val)logged.add(val+" (draft)");
+    const v = sel.value?.trim().toLowerCase();
+    if (v) submitted.add(v + " (draft)");
   });
-  ul.innerHTML="";let done=0;
+
+  ul.innerHTML = "";
+  let done = 0;
   ENGINEERS.forEach(e=>{
-    const match=Array.from(logged).find(n=>n===e.name.toLowerCase()||n===e.name.toLowerCase()+" (draft)");
-    const isDone=Boolean(match);if(isDone)done++;
-    const li=document.createElement("li");li.className="check-item";
-    li.innerHTML=`<div class="check-name">${e.name}${match&&match.endsWith("(draft)")?" • draft":""}</div><div class="tick ${isDone?"ok":"missing"}">${isDone?"✅":"⚪"}</div>`;
+    const lower = e.name.toLowerCase();
+    const match = submitted.has(lower) || submitted.has(lower + " (draft)");
+    if (match) done++;
+    const isDraft = submitted.has(lower + " (draft)") && !submitted.has(lower);
+    const label = `${e.name}${isDraft ? " • draft" : ""}`;
+    const li = document.createElement("li");
+    li.className = "check-item";
+    li.innerHTML = `<div class="check-name">${label}</div><div class="tick ${match?"ok":"missing"}">${match?"✅":"⚪"}</div>`;
     ul.appendChild(li);
   });
-  $("checklistCounts").textContent=`${done} of ${ENGINEERS.length} submitted`;
+
+  $("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
+  // console.debug("Checklist source key:", usedKey ?? "(no match)");
+}
 }
 /* ====== AUTOSAVE ====== */
 const saveDraftDebounced=debounce(saveDraft,400);
