@@ -265,27 +265,24 @@ function render(){
       .sort((a,b)=> (parseFloat(b.totalHours||0) - parseFloat(a.totalHours||0)))[0];
 
     // Capture Monday van check banner from the actual Monday record if present
-    // Capture Monday van check banner from the actual Monday record if present
 if (idx === 0) { // Monday
   const mon = (byDate[iso] || []).find(e => typeof e === "object");
   if (mon) {
-    if (mon.vanCheck) {
-      const checkVal = String(mon.vanCheck).trim().toLowerCase();
-      mondayVanCheckText = `Monday Van Check: ${mon.vanCheck}`;
+    const checkVal = String(mon.vanCheck || mon.vanCheckWeekStatus || "").trim().toLowerCase();
 
-      // ✅ Add colour-coded overtime policy message
-      if (checkVal === "yes") {
+    if (checkVal) {
+      mondayVanCheckText = `Monday Van Check: ${mon.vanCheck || mon.vanCheckWeekStatus}`;
+
+      if (checkVal === "yes" || checkVal === "passed") {
         mondayVanCheckText +=
           ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
-      } else if (checkVal === "no") {
+      } else if (checkVal === "no" || checkVal === "failed") {
         mondayVanCheckText +=
           ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
       } else if (checkVal === "n/a") {
         mondayVanCheckText +=
           ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
       }
-    } else if (mon.vanCheckWeekStatus) {
-      mondayVanCheckText = `Monday Van Check: ${mon.vanCheckWeekStatus}`;
     } else {
       mondayVanCheckText = "Monday Van Check: —";
     }
@@ -293,7 +290,6 @@ if (idx === 0) { // Monday
     mondayVanCheckText = "Monday Van Check: —";
   }
 }
-
     const start = entry?.leaveHome || "";
     const finish = entry?.arriveHome || "";
     const total = parseFloat(entry?.totalHours || 0) || 0;
