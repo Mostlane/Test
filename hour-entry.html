@@ -446,9 +446,12 @@ async function submitAll(){
   const invalid=entries.find(e=>!e.engineer||!e.leaveHome||!e.arriveFirstSite||!e.leaveLastSite||!e.arriveHome);
   if(invalid){$("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Incomplete fields.";return;}
   $("statusMsg").textContent="Submitting…";
-  const payload=new URLSearchParams();entries.forEach(e=>{e.deductLunch=!!e.deductLunch;});payload.append("entries",JSON.stringify(entries));
-  try{
-    const r=await fetch(ZAPIER_WEBHOOK,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:payload});
+  449  try {
+450    const r = await fetch(ZAPIER_WEBHOOK, {
+451      method: "POST",
+452      headers: { "Content-Type": "application/json" },
+453      body: JSON.stringify({ entries })
+454    });
     if(r.ok){$("statusMsg").style.color="var(--ok)";$("statusMsg").textContent="✅ Submitted all logs";
       const d=$("date").value;if(!HOURS_LOG_CACHE[d])HOURS_LOG_CACHE[d]=[];
       entries.forEach(e=>{if(!HOURS_LOG_CACHE[d].includes(e.engineer))HOURS_LOG_CACHE[d].push(e.engineer);});
