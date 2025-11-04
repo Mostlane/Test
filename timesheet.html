@@ -186,18 +186,23 @@ function collectWeekEntries(weekMonISO, engineer){
     if(!Array.isArray(arr)) continue;
     arr.forEach(e=>{
       if(!e || typeof e !== "object") return;
-      if(String(e.engineer||"").trim() !== engineer) // include entry if weekKey matches this Monday OR the Sunday immediately before
-const wk = String(e.weekKey || "");
-const weekMon = new Date(weekMonISO + "T00:00:00");
-const sundayBefore = new Date(weekMon);
-sundayBefore.setDate(sundayBefore.getDate() - 1);
-const sundayKey = sundayBefore.toISOString().split("T")[0];
 
-if (wk === weekMonISO || wk === sundayKey) {
-  out.push(e);
-}
+      // Match engineer name (case-insensitive)
+      if(String(e.engineer||"").trim().toLowerCase() !== engineer.trim().toLowerCase()) return;
+
+      // include entry if weekKey matches this Monday OR the Sunday immediately before
+      const wk = String(e.weekKey || "");
+      const weekMon = new Date(weekMonISO + "T00:00:00");
+      const sundayBefore = new Date(weekMon);
+      sundayBefore.setDate(sundayBefore.getDate() - 1);
+      const sundayKey = sundayBefore.toISOString().split("T")[0];
+
+      if (wk === weekMonISO || wk === sundayKey) {
+        out.push(e);
+      }
     });
   }
+
   // group by dateStr for easier lookup
   const byDate = {};
   out.forEach(e=>{
@@ -207,7 +212,7 @@ if (wk === weekMonISO || wk === sundayKey) {
   });
   return byDate;
 }
-
+  
 function render(){
   if(!currentEngineer || !currentWeekMon){
     $("status").textContent = "Select an engineer.";
