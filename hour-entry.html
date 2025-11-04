@@ -439,25 +439,52 @@ function serializeAllLogs(){
   });
   return arr;
 }
-async function submitAll(){
-  $("statusMsg").style.color="#475569";$("statusMsg").textContent="Validating…";
-  const entries=serializeAllLogs();
-  if(entries.length===0){$("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ No complete logs.";return;}
-  const invalid=entries.find(e=>!e.engineer||!e.leaveHome||!e.arriveFirstSite||!e.leaveLastSite||!e.arriveHome);
-  if(invalid){$("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Incomplete fields.";return;}
-  $("statusMsg").textContent="Submitting…";
-  449  try {
-450    const r = await fetch(ZAPIER_WEBHOOK, {
-451      method: "POST",
-452      headers: { "Content-Type": "application/json" },
-453      body: JSON.stringify({ entries })
-454    });
-    if(r.ok){$("statusMsg").style.color="var(--ok)";$("statusMsg").textContent="✅ Submitted all logs";
-      const d=$("date").value;if(!HOURS_LOG_CACHE[d])HOURS_LOG_CACHE[d]=[];
-      entries.forEach(e=>{if(!HOURS_LOG_CACHE[d].includes(e.engineer))HOURS_LOG_CACHE[d].push(e.engineer);});
-      renderChecklistForDate(d);clearDraft();
-    }else{$("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Submission failed.";}
-  }catch{ $("statusMsg").style.color="var(--bad)";$("statusMsg").textContent="❌ Network error."; }
+async function submitAll() {
+  $("statusMsg").style.color = "#475569";
+  $("statusMsg").textContent = "Validating…";
+  const entries = serializeAllLogs();
+
+  if (entries.length === 0) {
+    $("statusMsg").style.color = "var(--bad)";
+    $("statusMsg").textContent = "❌ No complete logs.";
+    return;
+  }
+
+  const invalid = entries.find(e => !e.engineer || !e.leaveHome || !e.arriveFirstSite || !e.leaveLastSite || !e.arriveHome);
+  if (invalid) {
+    $("statusMsg").style.color = "var(--bad)";
+    $("statusMsg").textContent = "❌ Incomplete fields.";
+    return;
+  }
+
+  $("statusMsg").textContent = "Submitting…";
+
+  try {
+    const r = await fetch(ZAPIER_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries })
+    });
+
+    if (r.ok) {
+      $("statusMsg").style.color = "var(--ok)";
+      $("statusMsg").textContent = "✅ Submitted all logs";
+
+      const d = $("date").value;
+      if (!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
+      entries.forEach(e => {
+        if (!HOURS_LOG_CACHE[d].includes(e.engineer)) HOURS_LOG_CACHE[d].push(e.engineer);
+      });
+      renderChecklistForDate(d);
+      clearDraft();
+    } else {
+      $("statusMsg").style.color = "var(--bad)";
+      $("statusMsg").textContent = "❌ Submission failed.";
+    }
+  } catch {
+    $("statusMsg").style.color = "var(--bad)";
+    $("statusMsg").textContent = "❌ Network error.";
+  }
 }
 /* ====== FINAL ====== */
 function toggleMonFriForLog(id){
