@@ -189,7 +189,7 @@
   const API_KEY = '';
 
   const byId = id => document.getElementById(id);
-  const fetchJSON = url => fetch(url + '&v=' + Date.now()).then(r => r.json());
+  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
   const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
   const norm = v => (v||'').toString().toLowerCase().trim();
