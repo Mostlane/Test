@@ -878,13 +878,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // initial fetch
   fetchAllProgressive();
 });
-
-// DEBUG LOGGER — shows update results on-screen for iPhone use
-window.addEventListener("message", e => {
-  if (e.data && e.data.__updateDebug) {
-    alert("Debug:\n" + JSON.stringify(e.data.__updateDebug, null, 2));
-  }
-});
   </script>
 </body>
 </html>
