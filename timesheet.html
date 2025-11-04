@@ -266,39 +266,32 @@ function render(){
 
     // Capture Monday van check banner from the actual Monday record if present
 if (idx === 0) { // Monday summary
-  const mondayEntries = Object.values(byDate).flat().filter(e => {
-    if (!e || typeof e !== "object") return false;
-    const d = new Date(e.date + "T00:00:00");
-    return d.getDay() === 1; // Monday
-  });
+  // Pull all entries for the current engineer this week
+  const allWeekEntries = Object.values(byDate).flat().filter(e => typeof e === "object");
+  console.log("🟦 All week entries:", allWeekEntries);
 
-  console.log("🟦 Monday entries found:", mondayEntries);
-
-  const mon = mondayEntries.length ? mondayEntries[0] : null;
+  // Try to find the first record that actually has a vanCheck value
+  const mon = allWeekEntries.find(e => e.vanCheck || e.vanCheckWeekStatus);
 
   if (mon) {
     const rawVal = mon.vanCheck || mon.vanCheckWeekStatus || "";
     const checkVal = String(rawVal).trim().toLowerCase();
-    console.log("🟩 Monday vanCheck raw:", rawVal);
+    console.log("🟩 Detected vanCheck value:", rawVal);
 
-    if (checkVal) {
-      mondayVanCheckText = `Monday Van Check: ${rawVal}`;
+    mondayVanCheckText = `Monday Van Check: ${rawVal}`;
 
-      if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
-        mondayVanCheckText +=
-          ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
-      } else if (checkVal === "no" || checkVal === "failed") {
-        mondayVanCheckText +=
-          ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
-      } else if (checkVal === "n/a" || checkVal === "na") {
-        mondayVanCheckText +=
-          ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
-      }
-    } else {
-      mondayVanCheckText = "Monday Van Check: — (no value found)";
+    if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
+      mondayVanCheckText +=
+        ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
+    } else if (checkVal === "no" || checkVal === "failed") {
+      mondayVanCheckText +=
+        ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
+    } else if (checkVal === "n/a" || checkVal === "na") {
+      mondayVanCheckText +=
+        ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
     }
   } else {
-    mondayVanCheckText = "Monday Van Check: — (no Monday record found)";
+    mondayVanCheckText = "Monday Van Check: — (no vanCheck field found)";
   }
 }
     const start = entry?.leaveHome || "";
