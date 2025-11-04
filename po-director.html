@@ -5,7 +5,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Director Dashboard – POs & Job Spend</title>
+
+  <!-- Chart.js (for charts) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
     body {
       font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
@@ -81,6 +84,7 @@
     .chart-card {
       background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px;
     }
+    /* Modal */
     .modal-backdrop {
       position: fixed; inset: 0; background: rgba(0,0,0,0.45);
       display: none; align-items: center; justify-content: center;
@@ -98,6 +102,8 @@
     @media (max-width: 900px) {
       .charts { grid-template-columns: 1fr; }
       .kpis { grid-template-columns: repeat(3, 1fr); }
+      select, input[type="search"] { width: 100%; min-width: 0; }
+      .top-bar, .filters { flex-direction: column; align-items: stretch; }
     }
     @media (max-width: 540px) {
       .kpis { grid-template-columns: repeat(2, 1fr); }
@@ -108,6 +114,7 @@
 <body>
   <div class="container">
     <h1>Director Dashboard – POs & Job Spend</h1>
+
     <div class="top-bar">
       <button class="btn" onclick="window.location.href='main.html'">Main Menu</button>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -117,10 +124,20 @@
     </div>
 
     <div class="filters">
-      <div><label for="engineerFilter">Engineer</label><select id="engineerFilter"><option value="">All Engineers</option></select></div>
-      <div><label for="supplierFilter">Supplier</label><select id="supplierFilter"><option value="">All Suppliers</option></select></div>
-      <div><label for="jobFilter">Job / Site</label><select id="jobFilter"><option value="">All Jobs</option></select></div>
-      <div><label for="dateRange">Show</label>
+      <div>
+        <label for="engineerFilter">Engineer</label>
+        <select id="engineerFilter"><option value="">All Engineers</option></select>
+      </div>
+      <div>
+        <label for="supplierFilter">Supplier</label>
+        <select id="supplierFilter"><option value="">All Suppliers</option></select>
+      </div>
+      <div>
+        <label for="jobFilter">Job / Site</label>
+        <select id="jobFilter"><option value="">All Jobs</option></select>
+      </div>
+      <div>
+        <label for="dateRange">Show</label>
         <select id="dateRange">
           <option value="7">Last 7 Days</option>
           <option value="14">Last 14 Days</option>
@@ -132,7 +149,7 @@
       </div>
       <div style="flex:1; min-width: 200px;">
         <label for="searchBox">Search</label>
-        <input id="searchBox" type="search" placeholder="PO number, description, or incident number…" />
+        <input id="searchBox" type="search" placeholder="PO number, description…" />
       </div>
     </div>
 
@@ -141,8 +158,21 @@
       <div class="kpi"><div class="label">Unique Engineers</div><div class="value" id="k_uniqueEng">-</div></div>
       <div class="kpi"><div class="label">Unique Suppliers</div><div class="value" id="k_uniqueSup">-</div></div>
       <div class="kpi"><div class="label">Unique Jobs</div><div class="value" id="k_uniqueJobs">-</div></div>
-      <div class="kpi"><div class="label">Total Net</div><div class="value" id="k_totalNet">-</div></div>
-      <div class="kpi"><div class="label">Total Gross</div><div class="value" id="k_totalGross">-</div></div>
+      <div class="kpi"><div class="label">Total Net (costed)</div><div class="value" id="k_totalNet">-</div></div>
+      <div class="kpi"><div class="label">Total Gross (costed)</div><div class="value" id="k_totalGross">-</div></div>
+    </div>
+
+    <div class="section-title">Charts</div>
+    <div class="charts">
+      <div class="chart-card">
+        <canvas id="chartEngineer"></canvas>
+      </div>
+      <div class="chart-card">
+        <canvas id="chartSupplier"></canvas>
+      </div>
+    </div>
+    <div class="chart-card" style="margin-top:12px;">
+      <canvas id="chartTrend"></canvas>
     </div>
 
     <div class="section-title">Job Cost Overview</div>
@@ -150,14 +180,14 @@
       <table id="tblJobs">
         <thead>
           <tr>
-            <th>Incident / Description</th>
+            <th>Job</th>
             <th>POs</th>
             <th>Engineers</th>
             <th>Suppliers</th>
-            <th class="right">Net</th>
-            <th class="right">VAT</th>
-            <th class="right">Gross</th>
-            <th>Drill-down</th>
+            <th class="right">Total Net</th>
+            <th class="right">Total VAT</th>
+            <th class="right">Total Gross</th>
+            <th class="nowrap">Drill-down</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -167,7 +197,16 @@
     <div class="section-title">Engineer Spend Summary</div>
     <div class="table-wrapper">
       <table id="tblEngineers">
-        <thead><tr><th>Engineer</th><th>POs</th><th>Suppliers</th><th class="right">Net</th><th class="right">Gross</th><th>Drill-down</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Engineer</th>
+            <th>POs</th>
+            <th>Suppliers</th>
+            <th class="right">Total Net</th>
+            <th class="right">Total Gross</th>
+            <th class="nowrap">Drill-down</th>
+          </tr>
+        </thead>
         <tbody></tbody>
       </table>
     </div>
@@ -175,12 +214,23 @@
     <div class="section-title">Supplier Spend Analysis</div>
     <div class="table-wrapper">
       <table id="tblSuppliers">
-        <thead><tr><th>Supplier</th><th>POs</th><th>Engineers</th><th class="right">Net</th><th class="right">Gross</th><th>Drill-down</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Supplier</th>
+            <th>POs</th>
+            <th>Engineers</th>
+            <th class="right">Total Net</th>
+            <th class="right">Total Gross</th>
+            <th class="nowrap">Drill-down</th>
+          </tr>
+        </thead>
         <tbody></tbody>
       </table>
     </div>
+
   </div>
 
+  <!-- Modal for drill-down lists -->
   <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
       <h2 id="modalTitle">Details</h2>
@@ -188,180 +238,369 @@
         <table id="modalTable">
           <thead>
             <tr>
-              <th>Date</th><th>PO Number</th><th>Engineer</th><th>Supplier</th>
-              <th>Incident / Description</th><th class="right">Net</th><th class="right">Gross</th><th>Map</th>
+              <th>Date</th>
+              <th>PO Number</th>
+              <th>Engineer</th>
+              <th>Supplier</th>
+              <th>Description</th>
+              <th class="right">Net</th>
+              <th class="right">Gross</th>
+              <th>Map</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
-      <div style="margin-top:10px;text-align:right;"><button class="btn close" id="modalClose">Close</button></div>
+      <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn close" id="modalClose">Close</button>
+      </div>
     </div>
   </div>
 
 <script>
 const GET_URL = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
-let ALL = [], FILTERED = [];
-const fmtGBP = n => (n ? '£' + Number(n).toFixed(2) : '');
+
+let ALL = [];
+let FILTERED = [];
+
+const fmtGBP = n => (n === null || n === undefined || isNaN(n)) ? '' : '£' + Number(n).toFixed(2);
 const dotToSpace = s => (s || '').replace(/\./g, ' ');
 
-function parseUKDate(s){if(!s)return null;const[d,m,y]=s.split('/');return new Date(`${y}-${m}-${d}`);}
-function dateInRange(d,days){if(days==='all')return true;const c=new Date();c.setDate(c.getDate()-Number(days));return d>=c;}
-
-function populateFilters(list){
-  const engSel=document.getElementById('engineerFilter');
-  const supSel=document.getElementById('supplierFilter');
-  const jobSel=document.getElementById('jobFilter');
-  engSel.innerHTML='<option value="">All Engineers</option>';
-  supSel.innerHTML='<option value="">All Suppliers</option>';
-  jobSel.innerHTML='<option value="">All Jobs</option>';
-  [...new Set(list.map(p=>p.engineer).filter(Boolean))].sort().forEach(v=>engSel.innerHTML+=`<option>${v}</option>`);
-  [...new Set(list.map(p=>p.supplierName).filter(Boolean))].sort().forEach(v=>supSel.innerHTML+=`<option>${v}</option>`);
-  [...new Set(list.map(p=>p.siteSegment||p.site||'')).filter(Boolean)].sort().forEach(v=>jobSel.innerHTML+=`<option>${v}</option>`);
+// Parse UK date (DD/MM/YYYY) to Date
+function parseUKDate(s) {
+  if (!s) return null;
+  const [d,m,y] = s.split('/');
+  if (!d||!m||!y) return null;
+  return new Date(`${y}-${m}-${d}T00:00:00`);
+}
+function dateInRange(d, days) {
+  if (days === 'all') return true;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - Number(days));
+  return d >= cutoff;
 }
 
-function applyFilters(){
-  const eng=document.getElementById('engineerFilter').value;
-  const sup=document.getElementById('supplierFilter').value;
-  const job=document.getElementById('jobFilter').value;
-  const days=document.getElementById('dateRange').value;
-  const search=(document.getElementById('searchBox').value||'').toLowerCase().trim();
-  FILTERED=ALL.filter(p=>{
-    const d=parseUKDate(p.date); if(!d)return false;
-    if(!dateInRange(d,days))return false;
-    if(eng&&p.engineer!==eng)return false;
-    if(sup&&p.supplierName!==sup)return false;
-    if(job&&(p.siteSegment||p.site||'')!==job)return false;
-    if(search){
-      const hay=[p.poNumber,p.description,p.engineer,p.supplierName,p.incidentNumber,(p.siteSegment||p.site||'')].join(' ').toLowerCase();
-      if(!hay.includes(search))return false;
+// Build dropdowns from visible dataset
+function populateFilters(list) {
+  const engSel = document.getElementById('engineerFilter');
+  const supSel = document.getElementById('supplierFilter');
+  const jobSel = document.getElementById('jobFilter');
+
+  const engKeep = engSel.value, supKeep = supSel.value, jobKeep = jobSel.value;
+
+  engSel.innerHTML = '<option value="">All Engineers</option>';
+  supSel.innerHTML = '<option value="">All Suppliers</option>';
+  jobSel.innerHTML = '<option value="">All Jobs</option>';
+
+  [...new Set(list.map(p => p.engineer).filter(Boolean))].sort()
+    .forEach(v => { const o=document.createElement('option');o.value=v;o.textContent=v;engSel.appendChild(o); });
+
+  [...new Set(list.map(p => p.supplierName).filter(Boolean))].sort()
+    .forEach(v => { const o=document.createElement('option');o.value=v;o.textContent=v;supSel.appendChild(o); });
+
+  // siteSegment from your PO generator (vehicle uses reg; site uses job number)
+  [...new Set(list.map(p => (p.siteSegment || p.site || '')).filter(Boolean))].sort()
+    .forEach(v => { const o=document.createElement('option');o.value=v;o.textContent=v;jobSel.appendChild(o); });
+
+  engSel.value = engKeep; supSel.value = supKeep; jobSel.value = jobKeep;
+}
+
+function applyFilters() {
+  const eng = document.getElementById('engineerFilter').value;
+  const sup = document.getElementById('supplierFilter').value;
+  const job = document.getElementById('jobFilter').value;
+  const days = document.getElementById('dateRange').value;
+  const search = (document.getElementById('searchBox').value || '').toLowerCase().trim();
+
+  FILTERED = ALL.filter(p => {
+    const d = parseUKDate(p.date);
+    if (!d) return false; // ignore invalid dates
+    if (!dateInRange(d, days)) return false;
+    if (eng && p.engineer !== eng) return false;
+    if (sup && p.supplierName !== sup) return false;
+    if (job && (p.siteSegment || p.site || '') !== job) return false;
+    if (search) {
+      const hay = [p.poNumber, p.description, p.engineer, p.supplierName, (p.siteSegment||p.site||'')].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
     }
     return true;
   });
+
   populateFilters(FILTERED);
   updateKpis(FILTERED);
   renderTables(FILTERED);
+  renderCharts(FILTERED);
+  document.getElementById('status').textContent = `${FILTERED.length} PO(s)`;
 }
 
-function updateKpis(list){
-  document.getElementById('k_totalPOs').textContent=list.length;
-  document.getElementById('k_uniqueEng').textContent=new Set(list.map(p=>p.engineer).filter(Boolean)).size;
-  document.getElementById('k_uniqueSup').textContent=new Set(list.map(p=>p.supplierName).filter(Boolean)).size;
-  document.getElementById('k_uniqueJobs').textContent=new Set(list.map(p=>p.siteSegment||p.site||'')).size;
-  const net=list.reduce((a,b)=>a+Number(b.costNet||0),0);
-  const gross=list.reduce((a,b)=>a+Number(b.costGross||0),0);
-  document.getElementById('k_totalNet').textContent=fmtGBP(net);
-  document.getElementById('k_totalGross').textContent=fmtGBP(gross);
-}
+function updateKpis(list) {
+  const totalPOs = list.length;
+  const uniqEng = new Set(list.map(p=>p.engineer).filter(Boolean)).size;
+  const uniqSup = new Set(list.map(p=>p.supplierName).filter(Boolean)).size;
+  const uniqJobs = new Set(list.map(p=> (p.siteSegment||p.site||'') ).filter(Boolean)).size;
 
-function groupBy(arr,keyFn){const m=new Map();arr.forEach(i=>{const k=keyFn(i);if(!m.has(k))m.set(k,[]);m.get(k).push(i);});return m;}
-function totalsFor(list){let net=0,gross=0;list.forEach(p=>{net+=Number(p.costNet||0);gross+=Number(p.costGross||0);});return{net,gross,vat:Math.max(gross-net,0)};}
-
-function renderTables(list){
-  // JOBS
-  const jobsBody=document.querySelector('#tblJobs tbody');
-  jobsBody.innerHTML='';
-  const gJobs=groupBy(list,p=>p.siteSegment||p.site||'Unspecified');
-  [...gJobs.entries()].sort((a,b)=>totalsFor(b[1]).gross-totalsFor(a[1]).gross)
-  .forEach(([job,items])=>{
-    const {net,gross,vat}=totalsFor(items);
-    const engCount=new Set(items.map(p=>p.engineer).filter(Boolean)).size;
-    const supCount=new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
-    const poCount=items.length;
-    // ✅ show incident number if present, else description
-    const showText=items.find(p=>p.incidentNumber)?.incidentNumber || items[0].description || job;
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td>${showText}</td>
-      <td>${poCount}</td>
-      <td>${engCount}</td>
-      <td>${supCount}</td>
-      <td class="right">${fmtGBP(net)}</td>
-      <td class="right">${fmtGBP(vat)}</td>
-      <td class="right">${fmtGBP(gross)}</td>
-      <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Job ${job} – ${poCount} POs");return false;'>View</a></td>`;
-    jobsBody.appendChild(tr);
+  // Only costed totals
+  let net=0, gross=0;
+  list.forEach(p=>{
+    const n = Number(p.costNet || 0);
+    const g = Number(p.costGross || 0);
+    net += n>0 ? n : 0;
+    gross += g>0 ? g : 0;
   });
+  const vat = Math.max(gross - net, 0);
 
-  // ENGINEERS
-  const engBody=document.querySelector('#tblEngineers tbody');
-  engBody.innerHTML='';
-  const gEng=groupBy(list,p=>p.engineer||'Unknown');
-  [...gEng.entries()].forEach(([eng,items])=>{
-    const {net,gross}=totalsFor(items);
-    const supCount=new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
-    const poCount=items.length;
-    engBody.innerHTML+=`
-      <tr><td>${eng}</td><td>${poCount}</td><td>${supCount}</td>
-      <td class="right">${fmtGBP(net)}</td><td class="right">${fmtGBP(gross)}</td>
-      <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Engineer ${eng} – ${poCount} POs");return false;'>View</a></td></tr>`;
-  });
-
-  // SUPPLIERS
-  const supBody=document.querySelector('#tblSuppliers tbody');
-  supBody.innerHTML='';
-  const gSup=groupBy(list,p=>p.supplierName||'Unknown');
-  [...gSup.entries()].forEach(([sup,items])=>{
-    const {net,gross}=totalsFor(items);
-    const engCount=new Set(items.map(p=>p.engineer).filter(Boolean)).size;
-    const poCount=items.length;
-    supBody.innerHTML+=`
-      <tr><td>${sup}</td><td>${poCount}</td><td>${engCount}</td>
-      <td class="right">${fmtGBP(net)}</td><td class="right">${fmtGBP(gross)}</td>
-      <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Supplier ${sup} – ${poCount} POs");return false;'>View</a></td></tr>`;
-  });
+  document.getElementById('k_totalPOs').textContent = totalPOs;
+  document.getElementById('k_uniqueEng').textContent = uniqEng;
+  document.getElementById('k_uniqueSup').textContent = uniqSup;
+  document.getElementById('k_uniqueJobs').textContent = uniqJobs;
+  document.getElementById('k_totalNet').textContent = fmtGBP(net);
+  document.getElementById('k_totalGross').textContent = fmtGBP(gross);
 }
 
-function showModal(items,title){
-  const m=document.getElementById('modalBackdrop');
-  document.getElementById('modalTitle').textContent=title;
-  const tb=document.querySelector('#modalTable tbody');
-  tb.innerHTML=items.map(p=>{
-    const map=(p.latitude&&p.longitude)?`<a href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`:'';
-    return `<tr>
-      <td>${p.date||''}</td><td>${p.poNumber||''}</td><td>${p.engineer||''}</td><td>${p.supplierName||''}</td>
-      <td>${p.incidentNumber||p.description||''}</td>
-      <td class="right">${fmtGBP(p.costNet||0)}</td><td class="right">${fmtGBP(p.costGross||0)}</td><td>${map}</td>
-    </tr>`;
-  }).join('');
-  m.style.display='flex';
+function groupBy(arr, keyFn) {
+  const map = new Map();
+  arr.forEach(item=>{
+    const key = keyFn(item);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(item);
+  });
+  return map;
 }
-document.getElementById('modalClose').onclick=()=>document.getElementById('modalBackdrop').style.display='none';
 
-document.getElementById('exportCsvBtn').onclick=()=>{
-  const rows=[],tables=['tblJobs','tblEngineers','tblSuppliers'];
-  tables.forEach(id=>{
-    const ths=[...document.querySelectorAll(`#${id} thead th`)].map(th=>th.innerText);
-    rows.push(ths);
-    [...document.querySelectorAll(`#${id} tbody tr`)].forEach(tr=>{
-      rows.push([...tr.children].map(td=>td.innerText));
+function totalsFor(list) {
+  // costed totals only
+  let net=0, gross=0;
+  list.forEach(p=>{
+    const n = Number(p.costNet || 0);
+    const g = Number(p.costGross || 0);
+    net += n>0 ? n : 0;
+    gross += g>0 ? g : 0;
+  });
+  return { net, gross, vat: Math.max(gross-net,0) };
+}
+
+function renderTables(list) {
+  // Jobs
+  const jobsBody = document.querySelector('#tblJobs tbody');
+  jobsBody.innerHTML = '';
+  const gJobs = groupBy(list, p => (p.siteSegment || p.site || 'Unspecified'));
+  [...gJobs.entries()]
+    .sort((a,b)=>{
+      const A = totalsFor(a[1]).gross, B = totalsFor(b[1]).gross;
+      return B - A;
+    })
+    .forEach(([job, items])=>{
+      const engCount = new Set(items.map(p=>p.engineer).filter(Boolean)).size;
+      const supCount = new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
+      const poCount = items.length;
+      const {net,gross,vat} = totalsFor(items);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="nowrap">${job}</td>
+        <td>${poCount}</td>
+        <td>${engCount}</td>
+        <td>${supCount}</td>
+        <td class="right">${fmtGBP(net)}</td>
+        <td class="right">${fmtGBP(vat)}</td>
+        <td class="right">${fmtGBP(gross)}</td>
+        <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Job ${job} – ${poCount} POs");return false;'>View</a></td>
+      `;
+      jobsBody.appendChild(tr);
     });
-    rows.push([]);
-  });
-  const csv=rows.map(r=>r.map(v=>`"${(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);a.download='po-director-export.csv';
-  a.click();
-};
 
-async function init(){
-  try{
-    const res=await fetch(GET_URL,{cache:'no-store'});
-    ALL=await res.json();
-    ALL=(ALL||[]).map(p=>({...p,engineer:p.engineer||'',supplierName:p.supplierName||'',date:p.date||''})).filter(p=>p.date);
+  // Engineers
+  const engBody = document.querySelector('#tblEngineers tbody');
+  engBody.innerHTML = '';
+  const gEng = groupBy(list, p => p.engineer || 'Unknown');
+  [...gEng.entries()]
+    .sort((a,b)=> totalsFor(b[1]).gross - totalsFor(a[1]).gross)
+    .forEach(([eng, items])=>{
+      const supCount = new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
+      const poCount = items.length;
+      const {net,gross} = totalsFor(items);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="nowrap">${eng}</td>
+        <td>${poCount}</td>
+        <td>${supCount}</td>
+        <td class="right">${fmtGBP(net)}</td>
+        <td class="right">${fmtGBP(gross)}</td>
+        <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Engineer ${eng} – ${poCount} POs");return false;'>View</a></td>
+      `;
+      engBody.appendChild(tr);
+    });
+
+  // Suppliers
+  const supBody = document.querySelector('#tblSuppliers tbody');
+  supBody.innerHTML = '';
+  const gSup = groupBy(list, p => p.supplierName || 'Unknown');
+  [...gSup.entries()]
+    .sort((a,b)=> totalsFor(b[1]).gross - totalsFor(a[1]).gross)
+    .forEach(([sup, items])=>{
+      const engCount = new Set(items.map(p=>p.engineer).filter(Boolean)).size;
+      const poCount = items.length;
+      const {net,gross} = totalsFor(items);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="nowrap">${sup}</td>
+        <td>${poCount}</td>
+        <td>${engCount}</td>
+        <td class="right">${fmtGBP(net)}</td>
+        <td class="right">${fmtGBP(gross)}</td>
+        <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Supplier ${sup} – ${poCount} POs");return false;'>View</a></td>
+      `;
+      supBody.appendChild(tr);
+    });
+}
+
+// Charts
+let chartEngineer, chartSupplier, chartTrend;
+
+function destroyCharts() {
+  [chartEngineer, chartSupplier, chartTrend].forEach(c => { if (c) c.destroy(); });
+  chartEngineer = chartSupplier = chartTrend = null;
+}
+function renderCharts(list) {
+  destroyCharts();
+
+  // Spend per Engineer (Gross)
+  const gEng = groupBy(list, p => p.engineer || 'Unknown');
+  const engLabels = [], engValues = [];
+  [...gEng.entries()].forEach(([k, items])=>{
+    engLabels.push(k);
+    engValues.push(totalsFor(items).gross);
+  });
+  const ctxE = document.getElementById('chartEngineer').getContext('2d');
+  chartEngineer = new Chart(ctxE, {
+    type: 'bar',
+    data: { labels: engLabels, datasets: [{ label: 'Gross £ by Engineer', data: engValues }]},
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+
+  // Spend by Supplier (Gross)
+  const gSup = groupBy(list, p => p.supplierName || 'Unknown');
+  const supLabels = [], supValues = [];
+  [...gSup.entries()].forEach(([k, items])=>{
+    supLabels.push(k);
+    supValues.push(totalsFor(items).gross);
+  });
+  const ctxS = document.getElementById('chartSupplier').getContext('2d');
+  chartSupplier = new Chart(ctxS, {
+    type: 'pie',
+    data: { labels: supLabels, datasets: [{ label: 'Gross £ by Supplier', data: supValues }]},
+    options: { responsive: true }
+  });
+
+  // Trend over time (Gross per day)
+  const byDay = new Map();
+  list.forEach(p=>{
+    // use createdAt if valid else p.date
+    let d = null;
+    if (p.createdAt) {
+      const cd = new Date(p.createdAt);
+      if (!isNaN(cd)) d = cd;
+    }
+    if (!d) d = parseUKDate(p.date);
+    if (!d) return;
+    const key = d.toISOString().split('T')[0];
+    const g = Number(p.costGross || 0);
+    const cur = byDay.get(key) || 0;
+    byDay.set(key, cur + (g>0 ? g : 0));
+  });
+  const days = [...byDay.keys()].sort();
+  const vals = days.map(k => byDay.get(k));
+  const ctxT = document.getElementById('chartTrend').getContext('2d');
+  chartTrend = new Chart(ctxT, {
+    type: 'line',
+    data: { labels: days, datasets: [{ label: 'Gross £ per day (costed)', data: vals, tension: 0.2 }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+// Modal drill-down
+function showModal(items, title) {
+  const m = document.getElementById('modalBackdrop');
+  document.getElementById('modalTitle').textContent = title;
+  const tb = document.querySelector('#modalTable tbody');
+  tb.innerHTML = items
+    .sort((a,b)=> new Date(b.createdAt||b.date) - new Date(a.createdAt||a.date))
+    .map(p=>{
+      const map = (p.latitude && p.longitude)
+        ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+        : '';
+      const n = Number(p.costNet || 0); const g = Number(p.costGross || 0);
+return `<tr>
+  <td class="nowrap">${p.date || ''}</td>
+  <td class="nowrap">${p.poNumber || ''}</td>
+  <td>${p.engineer || ''}</td>
+  <td>${p.supplierName || ''}</td>
+  <td>${p.incidentNumber || ''}</td>
+  <td>${p.description || ''}</td>
+  <td class="right">${fmtGBP(n>0 ? n : 0)}</td>
+  <td class="right">${fmtGBP(g>0 ? g : 0)}</td>
+  <td>${map}</td>
+</tr>`;
+    }).join('');
+  m.style.display = 'flex';
+}
+document.getElementById('modalClose').addEventListener('click', ()=> {
+  document.getElementById('modalBackdrop').style.display='none';
+});
+
+// CSV export (visible rows only – Jobs, Engineers, Suppliers)
+document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
+  const rows = [];
+  const pushTable = (title, tableId) => {
+    rows.push([title]); // section header
+    const ths = [...document.querySelectorAll(`#${tableId} thead th`)].map(th=>th.innerText.trim());
+    rows.push(ths);
+    const trs = document.querySelectorAll(`#${tableId} tbody tr`);
+    trs.forEach(tr=>{
+      rows.push([...tr.children].map(td=>td.innerText.replace(/\s+/g,' ').trim()));
+    });
+    rows.push([]); // blank line
+  };
+  pushTable('Job Cost Overview', 'tblJobs');
+  pushTable('Engineer Spend Summary', 'tblEngineers');
+  pushTable('Supplier Spend Analysis', 'tblSuppliers');
+
+  const csv = rows.map(r => r.map(v => `"${(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'po-director-export.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+// Load
+async function init() {
+  try {
+    const res = await fetch(GET_URL, { cache: 'no-store' });
+    ALL = await res.json();
+    // Ensure arrays and defaults exist
+    ALL = (ALL || []).map(p => ({
+      ...p,
+      engineer: p.engineer || '',
+      supplierName: p.supplierName || '',
+      date: p.date || '',
+      siteSegment: p.siteSegment || p.site || '',
+    })).filter(p=>p.date);
+
     populateFilters(ALL);
     applyFilters();
-    document.getElementById('status').textContent=`${ALL.length} POs loaded`;
-  }catch(e){
-    document.getElementById('status').textContent='Failed to load: '+e.message;
+  } catch (e) {
+    document.getElementById('status').textContent = 'Failed to load: ' + e.message;
   }
+
+  // Filters wire-up
   ['engineerFilter','supplierFilter','jobFilter','dateRange','searchBox'].forEach(id=>{
-    document.getElementById(id).addEventListener('input',applyFilters);
-    document.getElementById(id).addEventListener('change',applyFilters);
+    document.getElementById(id).addEventListener('input', applyFilters);
+    document.getElementById(id).addEventListener('change', applyFilters);
   });
 }
-document.addEventListener('DOMContentLoaded',init);
+
+document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>
