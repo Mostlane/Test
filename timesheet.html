@@ -195,28 +195,35 @@ console.log("✅ RAW loaded:", RAW);
 // Pull all entries that match weekKey & engineer
 function collectWeekEntries(weekMonISO, engineer){
   const out = [];
+  const weekMon = new Date(weekMonISO + "T00:00:00");
+  const sundayBefore = new Date(weekMon);
+  sundayBefore.setDate(sundayBefore.getDate() - 1);
+  const sundayKey = sundayBefore.toISOString().split("T")[0];
+
   for(const [dateKey, arr] of Object.entries(RAW)){
     if(!Array.isArray(arr)) continue;
     arr.forEach(e=>{
       if(!e || typeof e !== "object") return;
 
-      // Match engineer name (case-insensitive)
+      // Match engineer (case-insensitive)
       if(String(e.engineer||"").trim().toLowerCase() !== engineer.trim().toLowerCase()) return;
 
-      // include entry if weekKey matches this Monday OR the Sunday immediately before
-      const wk = String(e.weekKey || "");
-      const weekMon = new Date(weekMonISO + "T00:00:00");
-      const sundayBefore = new Date(weekMon);
-      sundayBefore.setDate(sundayBefore.getDate() - 1);
-      const sundayKey = sundayBefore.toISOString().split("T")[0];
+      // Normalize weekKey (some are Sunday, some Monday)
+      const wk = String(e.weekKey || "").trim();
 
+      // ✅ Include if this record belongs to this week (Mon–Sun)
       if (wk === weekMonISO || wk === sundayKey) {
         out.push(e);
+      }
+      // Also include if date itself falls within the Mon–Fri window
+      else {
+        const d = new Date(e.date + "T00:00:00");
+        if (d >= weekMon && d < addDays(weekMon,7)) out.push(e);
       }
     });
   }
 
-  // group by dateStr for easier lookup
+  // Group by date
   const byDate = {};
   out.forEach(e=>{
     const k = String(e.date);
