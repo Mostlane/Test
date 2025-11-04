@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>PO Menu</title>
   <style>
-    
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -20,28 +19,42 @@
       background: rgba(255,255,255,0.6);
       padding: 30px;
       border-radius: 8px;
+      text-align: center;
     }
     .button {
       display: block;
-      margin: 20px 0;
+      margin: 18px 0;
       padding: 14px;
-      background-color: rgba(0, 74, 153, 0.6);
-      color: white;
-      font-size: 16px;
+      background-color: rgba(0, 74, 153, 0.85);
+      color: #fff;
+      font-size: 17px;
+      font-weight: 500;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       cursor: pointer;
       text-align: center;
       text-decoration: none;
+      transition: background 0.2s ease, transform 0.1s ease;
     }
-
+    .button:hover {
+      background-color: rgba(0, 74, 153, 1);
+      transform: scale(1.02);
+    }
+    .button.grey {
+      background-color: rgba(120,120,120,0.7);
+    }
+    .button.grey:hover {
+      background-color: rgba(90,90,90,0.85);
+    }
   </style>
 </head>
 <body>
   <div class="main-body">
-<a href="po-start.html" class="button">Create New</a>
+    <a href="po-start.html" class="button">Create New</a>
     <a href="my-pos.html" class="button">Previous Generated POs</a>
-    <a href="main.html" class="button">Back</a>
+    <a href="po-director.html" class="button">PO Director</a>
+    <a href="po-costing.html" class="button">PO Costing</a>
+    <a href="main.html" class="button grey">Back</a>
   </div>
 </body>
 </html>
