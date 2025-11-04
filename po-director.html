@@ -383,30 +383,35 @@ function renderTables(list) {
   // Jobs
   const jobsBody = document.querySelector('#tblJobs tbody');
   jobsBody.innerHTML = '';
-  const gJobs = groupBy(list, p => (p.siteSegment || p.site || 'Unspecified'));
-  [...gJobs.entries()]
-    .sort((a,b)=>{
-      const A = totalsFor(a[1]).gross, B = totalsFor(b[1]).gross;
-      return B - A;
-    })
-    .forEach(([job, items])=>{
-      const engCount = new Set(items.map(p=>p.engineer).filter(Boolean)).size;
-      const supCount = new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
-      const poCount = items.length;
-      const {net,gross,vat} = totalsFor(items);
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="nowrap">${job}</td>
-        <td>${poCount}</td>
-        <td>${engCount}</td>
-        <td>${supCount}</td>
-        <td class="right">${fmtGBP(net)}</td>
-        <td class="right">${fmtGBP(vat)}</td>
-        <td class="right">${fmtGBP(gross)}</td>
-        <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Job ${job} – ${poCount} POs");return false;'>View</a></td>
-      `;
-      jobsBody.appendChild(tr);
-    });
+ [...gJobs.entries()]
+  .sort((a,b)=>{
+    const A = totalsFor(a[1]).gross, B = totalsFor(b[1]).gross;
+    return B - A;
+  })
+  .forEach(([job, items])=>{
+    const engCount = new Set(items.map(p=>p.engineer).filter(Boolean)).size;
+    const supCount = new Set(items.map(p=>p.supplierName).filter(Boolean)).size;
+    const poCount = items.length;
+    const {net,gross,vat} = totalsFor(items);
+
+    // ✅ If any item has an incident number, display that instead of description
+    const showText = items.find(p => p.incidentNumber)?.incidentNumber 
+                     || items[0].description 
+                     || job;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="nowrap">${showText}</td>
+      <td>${poCount}</td>
+      <td>${engCount}</td>
+      <td>${supCount}</td>
+      <td class="right">${fmtGBP(net)}</td>
+      <td class="right">${fmtGBP(vat)}</td>
+      <td class="right">${fmtGBP(gross)}</td>
+      <td><a href="#" class="link" onclick='showModal(${JSON.stringify(items).replace(/'/g,"&#39;")}, "Job ${job} – ${poCount} POs");return false;'>View</a></td>
+    `;
+    jobsBody.appendChild(tr);
+  });
 
   // Engineers
   const engBody = document.querySelector('#tblEngineers tbody');
