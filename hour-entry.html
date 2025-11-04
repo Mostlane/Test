@@ -411,18 +411,27 @@ function renderChecklistForDate(dateStr){
   });
 
   ul.innerHTML = "";
-  let done = 0;
-  ENGINEERS.forEach(e=>{
-    const lower = e.name.toLowerCase();
-    const match = submitted.has(lower) || submitted.has(lower + " (draft)");
-    if (match) done++;
-    const isDraft = submitted.has(lower + " (draft)") && !submitted.has(lower);
-    const label = `${e.name}${isDraft ? " • draft" : ""}`;
-    const li = document.createElement("li");
-    li.className = "check-item";
-    li.innerHTML = `<div class="check-name">${label}</div><div class="tick ${match?"ok":"missing"}">${match?"✅":"⚪"}</div>`;
-    ul.appendChild(li);
-  });
+let done = 0;
+ENGINEERS.forEach(e => {
+  const lower = e.name.toLowerCase();
+  const hasSubmitted = submitted.has(lower); // from Cloudflare (real)
+  const isDraft = submitted.has(lower + " (draft)") && !hasSubmitted;
+
+  if (hasSubmitted) done++; // ✅ count only real submissions
+
+  // label + tick style
+  const label = `${e.name}${isDraft ? " • draft" : ""}`;
+  const li = document.createElement("li");
+  let tickClass = "missing", tickSymbol = "⚪";
+  if (hasSubmitted) { tickClass = "ok"; tickSymbol = "✅"; }
+  else if (isDraft) { tickClass = "draft"; tickSymbol = "🟡"; } // amber/yellow for drafts
+
+  li.className = "check-item";
+  li.innerHTML = `<div class="check-name">${label}</div><div class="tick ${tickClass}">${tickSymbol}</div>`;
+  ul.appendChild(li);
+});
+
+$("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
 
   $("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
   // console.debug("Checklist source key:", usedKey ?? "(no match)");
