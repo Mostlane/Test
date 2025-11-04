@@ -302,7 +302,10 @@ if (idx === 0) { // Monday summary
         ` <span style="color:#64748b;">(unrecognised status)</span>`;
     }
   } else {
-    mondayVanCheckText = "Monday Van Check: —";
+    mondayVanCheckText = `
+      Monday Van Check: ⚠️ 
+      <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
+    `;
   }
 }
     const start = entry?.leaveHome || "";
