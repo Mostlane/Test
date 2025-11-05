@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Admin – Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 30px;
+    }
+    h2 {
+      text-align: center;
+      color: #003366;
+    }
+    .user-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: rgba(255,255,255,0.8);
+    }
+    .user-table th, .user-table td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    .user-table th {
+      background-color: #004a99;
+      color: white;
+    }
+    .controls {
+      margin-top: 15px;
+      text-align: center;
+    }
+    button {
+      background-color: #004a99;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <h2>Users Admin Panel</h2>
+
+  <table class="user-table" id="usersTable">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Status</th>
+        <th>Full Access</th>
+        <th>Purchase Orders</th>
+        <th>Check In/Out</th>
+        <th>Holiday</th>
+        <th>Forms</th>
+        <th>Assets</th>
+        <th>Add Site</th>
+        <th>Compliance</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="controls">
+    <button id="saveBtn">💾 Save Changes to KV</button>
+    <p id="saveStatus" style="margin-top:10px;font-weight:bold;color:#004a99;"></p>
+  </div>
+
+  <script>
+    const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
+    const SAVE_URL = "https://mostlane-users.jamie-def.workers.dev/save";
+
+    let usersData = [];
+
+    async function loadUsers() {
+      const res = await fetch(USERS_URL + '?v=' + Date.now());
+      const data = await res.json();
+      usersData = data.Users;
+      const tbody = document.querySelector('#usersTable tbody');
+      tbody.innerHTML = "";
+
+      usersData.forEach((user, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${user.Username}</td>
+          <td contenteditable="true">${user.Status}</td>
+          <td contenteditable="true">${user.FullAccess}</td>
+          <td contenteditable="true">${user.PurchaseOrders}</td>
+          <td contenteditable="true">${user.CheckInOut}</td>
+          <td contenteditable="true">${user.Holiday}</td>
+          <td contenteditable="true">${user.Forms}</td>
+          <td contenteditable="true">${user.Assets}</td>
+          <td contenteditable="true">${user.AddSite}</td>
+          <td contenteditable="true">${user.Compliance}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function saveUsers() {
+      const rows = document.querySelectorAll('#usersTable tbody tr');
+      rows.forEach((row, i) => {
+        const cells = row.querySelectorAll('td');
+        usersData[i].Status = cells[1].textContent.trim();
+        usersData[i].FullAccess = cells[2].textContent.trim();
+        usersData[i].PurchaseOrders = cells[3].textContent.trim();
+        usersData[i].CheckInOut = cells[4].textContent.trim();
+        usersData[i].Holiday = cells[5].textContent.trim();
+        usersData[i].Forms = cells[6].textContent.trim();
+        usersData[i].Assets = cells[7].textContent.trim();
+        usersData[i].AddSite = cells[8].textContent.trim();
+        usersData[i].Compliance = cells[9].textContent.trim();
+      });
+
+      const payload = JSON.stringify({ Users: usersData });
+
+      const res = await fetch(SAVE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      });
+
+      const result = await res.json();
+      const msg = result.ok ? "✅ Saved successfully!" : "❌ Failed to save.";
+      document.getElementById("saveStatus").textContent = msg;
+    }
+
+    document.getElementById("saveBtn").addEventListener("click", saveUsers);
+
+    loadUsers();
+  </script>
+</body>
+</html>
