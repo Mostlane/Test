@@ -1,190 +1,334 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>User Administration – Mostlane Portal</title>
-  <script src="auth.js"></script>
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      margin: 0; padding: 20px;
+      margin: 0;
+      color: #1f2937;
     }
-    h1 { text-align: center; color: #003366; }
-    .user-list {
-      background: rgba(255,255,255,0.7);
-      padding: 20px;
-      border-radius: 8px;
-      max-width: 800px;
-      margin: 20px auto;
-      overflow-y: auto;
-    }
-    .user-card {
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      margin-bottom: 15px;
-      padding: 10px 15px;
-      background: white;
-    }
-    .user-header {
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #004a99;
+
+    /* Sticky control bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(255,255,255,0.75);
+      backdrop-filter: blur(6px);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      padding: 10px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-    .toggle-group { margin: 5px 0 8px 15px; }
+    .topbar h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #004a99;
+      font-weight: 600;
+    }
+    .bar-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      border: none;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #004a99;
+      color: #fff;
+    }
+    .btn-outline {
+      background: #fff;
+      color: #004a99;
+      border: 1px solid #004a99;
+    }
+
+    /* Success banner */
+    .banner {
+      position: sticky;
+      top: 56px; /* below bar */
+      z-index: 45;
+      margin: 10px 14px 0;
+      background: #e9f7ef;
+      color: #1b5e20;
+      border: 1px solid #c8e6c9;
+      border-radius: 6px;
+      padding: 10px 12px;
+      display: none;
+    }
+    .banner.show { display: block; }
+    .banner .close {
+      float: right;
+      font-weight: bold;
+      color: #2e7d32;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+
+    /* Content wrapper */
+    .wrap {
+      max-width: 900px;
+      margin: 16px auto 60px;
+      padding: 0 14px 30px;
+      background: rgba(255,255,255,0.7);
+      border-radius: 10px;
+    }
+    .subnote {
+      padding: 14px;
+      color: #374151;
+      font-size: 14px;
+    }
+
+    /* User cards (Version 2 look) */
+    .user-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      margin: 14px;
+      padding: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .user-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #004a99;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .user-info {
+      font-size: 13px;
+      color: #4b5563;
+      margin-bottom: 6px;
+    }
+
+    .toggle-group {
+      margin-top: 6px;
+      padding-top: 8px;
+      border-top: 1px dashed #e5e7eb;
+    }
     .toggle {
       display: flex;
       align-items: center;
-      margin: 6px 0;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 2px;
     }
+    .toggle.indent { padding-left: 22px; }
     .toggle label {
-      flex: 1;
       font-size: 14px;
+      color: #111827;
+      flex: 1;
     }
+    /* Switch */
     .switch {
       position: relative;
       display: inline-block;
-      width: 44px;
-      height: 24px;
-      margin-left: 10px;
+      width: 44px; height: 24px;
+      flex: 0 0 auto;
     }
     .switch input { display: none; }
     .slider {
       position: absolute;
       cursor: pointer;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc;
+      background: #d1d5db;
       border-radius: 24px;
-      transition: .4s;
+      transition: .3s;
     }
     .slider:before {
-      position: absolute;
       content: "";
+      position: absolute;
       height: 18px; width: 18px;
       left: 3px; bottom: 3px;
-      background-color: white;
+      background: #fff;
       border-radius: 50%;
-      transition: .4s;
+      transition: .3s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
-    input:checked + .slider { background-color: #004a99; }
+    input:checked + .slider { background: #004a99; }
     input:checked + .slider:before { transform: translateX(20px); }
-    button {
-      background: #004a99;
-      color: white;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-top: 10px;
+
+    /* Add User popup */
+    .modal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: none; align-items: center; justify-content: center;
+      z-index: 60;
     }
-    button:hover { background: #0066cc; }
-    #addUserPopup {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.4);
-      z-index: 100;
-      justify-content: center;
-      align-items: center;
+    .modal.show { display: flex; }
+    .modal-card {
+      background: #fff;
+      width: 92%; max-width: 430px;
+      max-height: 85vh; overflow-y: auto;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
     }
-    #addUserForm {
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      width: 90%;
-      max-width: 400px;
-      max-height: 80vh;
-      overflow-y: auto;
+    .modal h3 {
+      margin: 0 0 10px; color: #004a99;
+      font-size: 18px;
     }
-    input[type=text], input[type=email], input[type=password] {
-      width: 100%;
-      margin: 5px 0 10px;
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      font-size: 14px;
+    .field { margin-bottom: 10px; }
+    .field input {
+      width: 100%; padding: 10px;
+      border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: 14px; box-sizing: border-box;
+      background: #fff;
     }
-    .close-btn {
-      float: right;
-      font-weight: bold;
-      cursor: pointer;
-      color: #999;
+    .modal-actions {
+      display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;
     }
   </style>
 </head>
 <body>
-  <h1>Manage Users</h1>
-  <div class="user-list" id="userList">Loading users...</div>
-  <div style="text-align:center;">
-    <button id="addUserBtn">➕ Add New User</button>
-    <button id="saveBtn">💾 Save Changes</button>
+
+  <!-- Sticky translucent bar -->
+  <div class="topbar">
+    <h1>User Administration</h1>
+    <div class="bar-actions">
+      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
+      <button class="btn btn-outline" id="addUserBtn">➕ Add User</button>
+    </div>
   </div>
 
-  <!-- Popup form -->
-  <div id="addUserPopup">
-    <div id="addUserForm">
-      <span class="close-btn" id="closePopup">&times;</span>
+  <!-- Success banner -->
+  <div id="banner" class="banner">
+    <span class="close" id="bannerClose">✖</span>
+    ✅ Changes saved successfully.
+  </div>
+
+  <!-- Content -->
+  <div class="wrap">
+    <div class="subnote">
+      This page auto-discovers buttons from <b>main.html</b> and any linked sub-menus, then shows matching toggles per user.
+      <br/>“Full Access” overrides everything.
+    </div>
+    <div id="list">Loading users…</div>
+  </div>
+
+  <!-- Add User Modal -->
+  <div id="addUserModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
       <h3>Add New User</h3>
-      <input type="text" id="firstName" placeholder="First Name" required />
-      <input type="text" id="lastName" placeholder="Last Name" required />
-      <input type="email" id="email" placeholder="Email" />
-      <input type="text" id="username" placeholder="Username (e.g. John.Doe)" required />
-      <input type="password" id="password" placeholder="Password" required />
-      <input type="text" id="vehicle" placeholder="Vehicle Assigned (optional)" />
-      <input type="text" id="employmentType" placeholder="Employment Type (Employed/Self Employed)" />
-      <input type="text" id="sharepoint" placeholder="SharePoint Path URL" />
-      <button id="createUserBtn">Create User</button>
+      <div class="field"><input id="firstName" type="text" placeholder="First Name" required></div>
+      <div class="field"><input id="lastName" type="text" placeholder="Last Name" required></div>
+      <div class="field"><input id="email" type="email" placeholder="Email (optional)"></div>
+      <div class="field"><input id="username" type="text" placeholder="Username (e.g. John.Doe)" required></div>
+      <div class="field"><input id="password" type="password" placeholder="Password" required></div>
+      <div class="field"><input id="vehicle" type="text" placeholder="Vehicle Assigned (optional)"></div>
+      <div class="field"><input id="employmentType" type="text" placeholder="Employment Type (Employed / Self Employed)"></div>
+      <div class="field"><input id="sharepoint" type="text" placeholder="SharePoint Path URL"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelAdd">Cancel</button>
+        <button class="btn btn-primary" id="createUserBtn">Create User</button>
+      </div>
     </div>
   </div>
 
   <script>
-    const workerURL = "https://mostlane-users.jamie-def.workers.dev";
-    const currentUser = sessionStorage.getItem("mostlaneUser");
+    // ====== CONFIG ======
+    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+    const USERS_URL = API_BASE + "/users";
+    const SAVE_URL  = API_BASE + "/save";        // change to /update-users if your worker uses that
+    const TOKEN     = sessionStorage.getItem("mostlaneToken"); // if using the secure worker
+    const CURRENT   = sessionStorage.getItem("mostlaneUser");
 
-    // Restrict access
-    if (!currentUser) window.location.href = "login.html";
+    if (!CURRENT) { window.location.href = "login.html"; }
 
-    async function fetchUsers() {
-      const res = await fetch(workerURL + "/users?v=" + Date.now());
-      const data = await res.json();
-      return data.Users || [];
+    // ====== UI helpers ======
+    const banner = document.getElementById('banner');
+    const bannerClose = document.getElementById('bannerClose');
+    function showBanner(msg) {
+      banner.innerHTML = `<span class="close" id="bannerClose">✖</span>${msg}`;
+      banner.classList.add('show');
+      document.getElementById('bannerClose').onclick = () => banner.classList.remove('show');
+      setTimeout(() => banner.classList.remove('show'), 5000);
     }
 
-    async function scanPortalStructure() {
-      const structure = [];
+    // Toggle component
+    function toggleRow(id, label, checked, indent=false) {
+      const row = document.createElement('div');
+      row.className = 'toggle' + (indent ? ' indent' : '');
+      row.innerHTML = `
+        <label for="${id}">${label}</label>
+        <label class="switch">
+          <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
+          <span class="slider"></span>
+        </label>
+      `;
+      return row;
+    }
+
+    // Map button IDs to your existing legacy JSON keys (so main.html still works)
+    function mapIdToLegacyKey(id, label, href) {
+      const map = {
+        checkinBtn: "CheckInOut",
+        holidayBtn: "Holiday",
+        purchaseBtn: "PurchaseOrders",
+        poMenuBtn: "PurchaseOrders",
+        assetsBtn: "Assets",
+        formsBtn: "Forms",
+        "my-documents-btn": "MyDocuments",
+        complianceBtn: "Compliance",
+        "hours-dashboard-btn": "HoursDashboard",
+        weeklyBtn: "Weekly",
+        // Add known subpages if you want fixed names:
+        poDirectorBtn: "PODirector",
+        poCostingBtn:  "POCosting",
+      };
+      if (map[id]) return map[id];
+
+      // Fallback: derive from id (strip 'Btn', camel/pascal-ish)
+      if (id) return id.replace(/Btn$/,'');
+      // Fallback 2: from label (remove spaces)
+      if (label) return label.replace(/\s+/g,'');
+      // Fallback 3: from path
+      if (href) return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
+      return null;
+    }
+
+    // ====== Portal scan (main + subpages) ======
+    async function scanPortal() {
       const parser = new DOMParser();
+      const structure = [];
 
-      const mainRes = await fetch("main.html?v=" + Date.now());
-      const mainText = await mainRes.text();
-      const mainDoc = parser.parseFromString(mainText, "text/html");
-      const buttons = [...mainDoc.querySelectorAll("a.button")];
+      const mainRes = await fetch('main.html?v=' + Date.now(), { cache: 'no-store' });
+      const mainHtml = await mainRes.text();
+      const mainDoc = parser.parseFromString(mainHtml, 'text/html');
 
-      for (const btn of buttons) {
-        const entry = {
-          id: btn.id,
-          label: btn.textContent.trim(),
-          path: btn.getAttribute("href"),
-          subpages: []
-        };
-        // Try to scan sub-menus
-        if (entry.path && entry.path.endsWith(".html") && !entry.path.includes("login.html")) {
+      const mainButtons = [...mainDoc.querySelectorAll('a.button')];
+
+      for (const b of mainButtons) {
+        const id    = b.id || '';
+        const label = (b.textContent || '').trim();
+        const href  = b.getAttribute('href') || '';
+
+        const entry = { id, label, href, subpages: [] };
+        // attempt to discover submenus by fetching that page
+        if (href && /\.html($|\?)/.test(href) && !/login\.html/i.test(href)) {
           try {
-            const subRes = await fetch(entry.path);
-            const subText = await subRes.text();
-            const subDoc = parser.parseFromString(subText, "text/html");
-            const subButtons = [...subDoc.querySelectorAll("a.button")];
-            entry.subpages = subButtons.map(s => ({
-              id: s.id,
-              label: s.textContent.trim(),
-              path: s.getAttribute("href")
+            const subRes = await fetch(href, { cache: 'no-store' });
+            const subHtml = await subRes.text();
+            const subDoc = parser.parseFromString(subHtml, 'text/html');
+            const subs = [...subDoc.querySelectorAll('a.button')];
+            entry.subpages = subs.map(sb => ({
+              id: sb.id || '',
+              label: (sb.textContent || '').trim(),
+              href: sb.getAttribute('href') || ''
             }));
           } catch (e) {
-            console.warn("No subpage for", entry.path);
+            // no-op if not reachable; safe
           }
         }
         structure.push(entry);
@@ -192,121 +336,214 @@
       return structure;
     }
 
-    function createToggle(id, label, checked, indent=false) {
-      const div = document.createElement("div");
-      div.className = "toggle";
-      if (indent) div.style.marginLeft = "25px";
-      div.innerHTML = `
-        <label>${label}</label>
-        <label class="switch">
-          <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
-          <span class="slider"></span>
-        </label>
-      `;
-      return div;
+    async function fetchAllUsers() {
+      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
+        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+      });
+      const data = await res.json();
+      return data.Users || [];
+    }
+
+    function userCard(user, structure) {
+      const card = document.createElement('div');
+      card.className = 'user-card';
+
+      const header = document.createElement('div');
+      header.className = 'user-header';
+      const name = `${user.EngineerNumber ? ('#' + user.EngineerNumber + ' – ') : ''}${user.FirstName || ''} ${user.LastName || ''}`.trim();
+      header.innerHTML = `<div>${name} <span style="color:#6b7280;font-weight:500;">(${user.Username})</span></div>`;
+
+      const fa = document.createElement('div');
+      const faId = `fa_${user.Username}`;
+      fa.appendChild(toggleRow(faId, 'Full Access', ((user.FullAccess||'').toLowerCase() === 'yes')));
+      header.appendChild(fa);
+      card.appendChild(header);
+
+      const info = document.createElement('div');
+      info.className = 'user-info';
+      info.textContent = `${user.EmploymentType || ''} · ${user.Status || ''} · ${user.Email || ''}`;
+      card.appendChild(info);
+
+      const group = document.createElement('div');
+      group.className = 'toggle-group';
+
+      structure.forEach(p => {
+        const primaryId = p.id || (p.href || '').replace(/[^\w]/g,'');
+        const legacyKey = mapIdToLegacyKey(primaryId, p.label, p.href);
+        const currentOn = ((user[legacyKey] || user[primaryId] || '').toLowerCase() === 'yes');
+
+        const row = toggleRow(`${user.Username}::${primaryId}`, p.label, currentOn);
+        group.appendChild(row);
+
+        // subpages (indented)
+        if (Array.isArray(p.subpages) && p.subpages.length) {
+          p.subpages.forEach(sp => {
+            const subId = sp.id || (sp.href || '').replace(/[^\w]/g,'');
+            const subLegacy = mapIdToLegacyKey(subId, sp.label, sp.href);
+            const on = ((user[subLegacy] || user[subId] || '').toLowerCase() === 'yes');
+            group.appendChild(toggleRow(`${user.Username}::${subId}`, `↳ ${sp.label}`, on, true));
+          });
+        }
+      });
+
+      card.appendChild(group);
+      return card;
     }
 
     async function buildUI() {
-      const [users, structure] = await Promise.all([fetchUsers(), scanPortalStructure()]);
-      const list = document.getElementById("userList");
-      list.innerHTML = "";
+      const list = document.getElementById('list');
+      list.textContent = 'Loading…';
+      const [users, structure] = await Promise.all([fetchAllUsers(), scanPortal()]);
+
+      // render
+      list.innerHTML = '';
+      users.forEach(u => list.appendChild(userCard(u, structure)));
+
+      // store for save()
+      window.__USERS = users;
+      window.__STRUCT = structure;
+    }
+
+    // Gather and save
+    async function saveAll() {
+      if (!window.__USERS || !window.__STRUCT) return;
+
+      const users = JSON.parse(JSON.stringify(window.__USERS)); // clone
+      const struct = window.__STRUCT;
 
       users.forEach(u => {
-        const card = document.createElement("div");
-        card.className = "user-card";
+        // Full Access
+        u.FullAccess = (document.getElementById(`fa_${u.Username}`)?.querySelector('input')?.checked) ? 'Yes' : 'No';
 
-        const header = document.createElement("div");
-        header.className = "user-header";
-        header.innerHTML = `<span>${u.EngineerNumber ? ("#" + u.EngineerNumber + " – ") : ""}${u.FirstName} ${u.LastName}</span>`;
-        const faToggle = createToggle(`fa_${u.Username}`, "Full Access", (u.FullAccess||"").toLowerCase()==="yes");
-        header.appendChild(faToggle);
-        card.appendChild(header);
+        // For each discovered button/sub-button, set both the legacy key and the dynamic id key
+        struct.forEach(p => {
+          const pid = p.id || (p.href || '').replace(/[^\w]/g,'');
+          const legacy = mapIdToLegacyKey(pid, p.label, p.href);
+          const chk = document.getElementById(`${u.Username}::${pid}`)?.querySelector('input');
+          const val = chk && chk.checked ? 'Yes' : 'No';
+          if (legacy) u[legacy] = val;
+          if (pid)    u[pid]    = val;
 
-        const tg = document.createElement("div");
-        tg.className = "toggle-group";
-
-        structure.forEach(page => {
-          const t = createToggle(`${u.Username}_${page.id}`, page.label, (u[page.id]||"").toLowerCase()==="yes");
-          tg.appendChild(t);
-          if (page.subpages.length) {
-            page.subpages.forEach(sp => {
-              const st = createToggle(`${u.Username}_${sp.id}`, sp.label, (u[sp.id]||"").toLowerCase()==="yes", true);
-              tg.appendChild(st);
+          if (Array.isArray(p.subpages)) {
+            p.subpages.forEach(sp => {
+              const sid = sp.id || (sp.href || '').replace(/[^\w]/g,'');
+              const sLegacy = mapIdToLegacyKey(sid, sp.label, sp.href);
+              const schk = document.getElementById(`${u.Username}::${sid}`)?.querySelector('input');
+              const sval = schk && schk.checked ? 'Yes' : 'No';
+              if (sLegacy) u[sLegacy] = sval;
+              if (sid)     u[sid]     = sval;
             });
           }
         });
-
-        card.appendChild(tg);
-        list.appendChild(card);
-      });
-    }
-
-    async function saveChanges() {
-      const res = await fetch(workerURL + "/users?v=" + Date.now());
-      const data = await res.json();
-      const users = data.Users;
-
-      users.forEach(u => {
-        u.FullAccess = document.getElementById(`fa_${u.Username}`)?.checked ? "Yes" : "No";
-        document.querySelectorAll(`[id^="${u.Username}_"]`).forEach(chk => {
-          const key = chk.id.split("_")[1];
-          u[key] = chk.checked ? "Yes" : "No";
-        });
       });
 
-      await fetch(workerURL + "/update-users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      // Save to KV
+      const res = await fetch(SAVE_URL, {
+        method: 'POST',
+        headers: Object.assign(
+          { 'Content-Type': 'application/json' },
+          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+        ),
         body: JSON.stringify({ Users: users })
       });
 
-      alert("✅ Changes saved successfully!");
+      if (!res.ok) {
+        showBanner('❌ Save failed. Please try again.');
+        return;
+      }
+      showBanner('✅ Changes saved successfully.');
+      // Refresh the in-memory copy to keep UI consistent
+      window.__USERS = users;
     }
 
-    document.getElementById("saveBtn").addEventListener("click", saveChanges);
+    // ===== Add User modal =====
+    const modal = document.getElementById('addUserModal');
+    const openAdd = () => { modal.classList.add('show'); modal.setAttribute('aria-hidden','false'); };
+    const closeAdd = () => { modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); };
 
-    // Add new user popup
-    const popup = document.getElementById("addUserPopup");
-    document.getElementById("addUserBtn").onclick = () => popup.style.display = "flex";
-    document.getElementById("closePopup").onclick = () => popup.style.display = "none";
+    document.getElementById('addUserBtn').addEventListener('click', openAdd);
+    document.getElementById('cancelAdd').addEventListener('click', closeAdd);
 
-    document.getElementById("createUserBtn").addEventListener("click", async () => {
-      const res = await fetch(workerURL + "/users?v=" + Date.now());
-      const data = await res.json();
-      const users = data.Users;
-
+    async function sha256Hex(s) {
       const enc = new TextEncoder();
-      const pw = document.getElementById("password").value;
-      const hashBuffer = await crypto.subtle.digest("SHA-256", enc.encode(pw));
-      const hashedPassword = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode((s || '').trim()));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
 
-      const newEngineerNumber = String(users.length + 1);
+    document.getElementById('createUserBtn').addEventListener('click', async () => {
+      // current users
+      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
+        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+      });
+      const data = await res.json();
+      const users = data.Users || [];
+
+      // next EngineerNumber (max + 1)
+      const maxNum = users.reduce((m,u) => {
+        const n = parseInt(u.EngineerNumber, 10);
+        return isNaN(n) ? m : Math.max(m, n);
+      }, 0);
+      const nextNum = String(maxNum + 1);
+
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName  = document.getElementById('lastName').value.trim();
+      const email     = document.getElementById('email').value.trim();
+      const username  = document.getElementById('username').value.trim();
+      const password  = document.getElementById('password').value;
+      const vehicle   = document.getElementById('vehicle').value.trim();
+      const empType   = document.getElementById('employmentType').value.trim();
+      const spPath    = document.getElementById('sharepoint').value.trim();
+
+      if (!firstName || !lastName || !username || !password) {
+        showBanner('❌ Please complete First, Last, Username and Password.');
+        return;
+      }
+
+      const hashedPassword = await sha256Hex(password);
+
       const newUser = {
-        EngineerNumber: newEngineerNumber,
-        FirstName: document.getElementById("firstName").value,
-        LastName: document.getElementById("lastName").value,
-        Username: document.getElementById("username").value,
-        Email: document.getElementById("email").value,
+        EngineerNumber: nextNum,
+        FirstName: firstName,
+        LastName: lastName,
+        Username: username,
+        Email: email,
         HashedPassword: hashedPassword,
-        VehicleAssigned: document.getElementById("vehicle").value,
-        EmploymentType: document.getElementById("employmentType").value,
-        Status: "Active",
-        FullAccess: "No",
-        SharePointPath: document.getElementById("sharepoint").value
+        VehicleAssigned: vehicle,
+        EmploymentType: empType || 'Employed',
+        Status: 'Active',
+        FullAccess: 'No',
+        SharePointPath: spPath
       };
 
       users.push(newUser);
-      await fetch(workerURL + "/update-users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+
+      // Save
+      const saveRes = await fetch(SAVE_URL, {
+        method: 'POST',
+        headers: Object.assign(
+          { 'Content-Type': 'application/json' },
+          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+        ),
         body: JSON.stringify({ Users: users })
       });
 
-      alert("✅ User added!");
-      popup.style.display = "none";
+      if (!saveRes.ok) {
+        showBanner('❌ Could not add user.');
+        return;
+      }
+
+      closeAdd();
+      showBanner('✅ User added.');
       buildUI();
     });
 
+    // Save & Banner close
+    document.getElementById('saveBtn').addEventListener('click', saveAll);
+
+    // Close banner
+    bannerClose.addEventListener('click', () => banner.classList.remove('show'));
+
+    // Initial build
     buildUI();
   </script>
 </body>
