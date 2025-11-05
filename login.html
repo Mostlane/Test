@@ -61,7 +61,8 @@
   </div>
 
   <script>
-    const usersJsonURL = "https://raw.githubusercontent.com/Mostlane/Test/main/users.json";
+    // ✅ Updated to your Cloudflare Worker URL
+    const usersJsonURL = "https://mostlane-users.jamie-def.workers.dev/users";
 
     async function hashPassword(password) {
       const enc = new TextEncoder();
@@ -80,34 +81,35 @@
       errorBox.textContent = "";
 
       try {
+        // ✅ Fetch live JSON from Cloudflare KV
         const res = await fetch(usersJsonURL + '?v=' + Date.now());
         if (!res.ok) throw new Error('Network error');
         const data = await res.json();
         const users = data.Users || [];
 
-        // Find user (case-insensitive just in case Excel capitalisation differs)
+        // Find user (case-insensitive)
         const user = users.find(u => u.Username.toLowerCase() === usernameInput.toLowerCase());
         if (!user) {
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // Check status (if present)
+        // Check account status
         if ((user.Status || '').toLowerCase() !== 'active') {
           errorBox.textContent = "Account is not active.";
           return;
         }
 
-        // Compare hash
+        // Compare SHA-256 hash
         const hashedInput = await hashPassword(passwordInput);
-        if (hashedInput !== user.HashedPassword.toLowerCase()) {
+        if (hashedInput !== (user.HashedPassword || '').toLowerCase()) {
           console.log('Expected:', user.HashedPassword);
           console.log('Entered :', hashedInput);
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // ✅ Success — store everything
+        // ✅ Success — store session info
         sessionStorage.setItem('mostlaneLoggedIn', 'true');
         sessionStorage.setItem('mostlaneUser', user.Username);
         sessionStorage.setItem('mostlaneFolder', user.SharePointPath || '');
