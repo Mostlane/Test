@@ -1,550 +1,629 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>User Administration – Mostlane Portal</title>
+  <meta charset="UTF-8" />
+  <title>Mostlane – Users Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
+    :root { --ml-blue:#004a99; --ml-blue-2:#0066cc; }
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      margin: 0;
-      color: #1f2937;
+      margin:0;
+      font-family:"Segoe UI", system-ui, Arial, sans-serif;
+      color:#1f2937;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
     }
-
-    /* Sticky control bar */
+    /* Fixed translucent top bar */
     .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      background: rgba(255,255,255,0.75);
-      backdrop-filter: blur(6px);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-      padding: 10px 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      position:fixed; top:0; left:0; right:0; z-index:1000;
+      backdrop-filter: blur(8px);
+      background: rgba(255,255,255,0.6);
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 12px;
     }
-    .topbar h1 {
-      margin: 0;
-      font-size: 18px;
-      color: #004a99;
-      font-weight: 600;
-    }
-    .bar-actions {
-      display: flex;
-      gap: 10px;
-    }
+    .topbar .title { font-weight:700; color:var(--ml-blue); }
+    .topbar .actions { display:flex; gap:8px; }
     .btn {
-      border: none;
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 14px;
-      cursor: pointer;
+      border:none; border-radius:8px; padding:10px 14px; cursor:pointer;
+      color:#fff; background:var(--ml-blue);
     }
-    .btn-primary {
-      background: #004a99;
-      color: #fff;
-    }
-    .btn-outline {
-      background: #fff;
-      color: #004a99;
-      border: 1px solid #004a99;
-    }
+    .btn.secondary { background: #245caa; }
+    .btn.ghost { background:transparent; color:var(--ml-blue); border:1px solid var(--ml-blue); }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
 
-    /* Success banner */
-    .banner {
-      position: sticky;
-      top: 56px; /* below bar */
-      z-index: 45;
-      margin: 10px 14px 0;
-      background: #e9f7ef;
-      color: #1b5e20;
-      border: 1px solid #c8e6c9;
-      border-radius: 6px;
-      padding: 10px 12px;
-      display: none;
-    }
-    .banner.show { display: block; }
-    .banner .close {
-      float: right;
-      font-weight: bold;
-      color: #2e7d32;
-      cursor: pointer;
-      margin-left: 10px;
-    }
-
-    /* Content wrapper */
     .wrap {
-      max-width: 900px;
-      margin: 16px auto 60px;
-      padding: 0 14px 30px;
-      background: rgba(255,255,255,0.7);
-      border-radius: 10px;
-    }
-    .subnote {
-      padding: 14px;
-      color: #374151;
-      font-size: 14px;
+      padding:90px 14px 24px;
+      max-width:1100px; margin:0 auto;
     }
 
-    /* User cards (Version 2 look) */
+    /* Card for user row */
     .user-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      margin: 14px;
-      padding: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      background: rgba(255,255,255,0.6);
+      border-radius:10px; padding:14px;
+      margin:10px 0;
+      box-shadow:0 2px 10px rgba(0,0,0,0.05);
     }
-    .user-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #004a99;
-      font-weight: 600;
-      margin-bottom: 8px;
+    .user-head {
+      display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;
+      border-bottom:1px dashed rgba(0,0,0,0.1); padding-bottom:10px; margin-bottom:10px;
     }
-    .user-info {
-      font-size: 13px;
-      color: #4b5563;
-      margin-bottom: 6px;
+    .user-id {
+      font-weight:700; color:#0f172a; display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    }
+    .pill {
+      background: rgba(0,74,153,0.08); color:var(--ml-blue);
+      border:1px solid rgba(0,74,153,0.25);
+      border-radius:999px; padding:4px 10px; font-size:12px;
+    }
+    .grid {
+      display:grid; gap:10px;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+    }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
     }
 
-    .toggle-group {
-      margin-top: 6px;
-      padding-top: 8px;
-      border-top: 1px dashed #e5e7eb;
+    .field {
+      display:flex; flex-direction:column; gap:6px;
+      background: rgba(255,255,255,0.6); border:1px solid rgba(0,0,0,0.06);
+      border-radius:8px; padding:10px;
     }
+    .field label { font-size:12px; color:#475569; }
+    .field input, .field select {
+      border:1px solid #cbd5e1; border-radius:6px; padding:10px;
+      font-size:14px; background:#fff; width:100%;
+    }
+
+    /* Toggle switch */
     .toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 6px 2px;
+      position:relative; width:48px; height:26px; flex:0 0 auto;
     }
-    .toggle.indent { padding-left: 22px; }
-    .toggle label {
-      font-size: 14px;
-      color: #111827;
-      flex: 1;
-    }
-    /* Switch */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px; height: 24px;
-      flex: 0 0 auto;
-    }
-    .switch input { display: none; }
+    .toggle input { display:none; }
     .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #d1d5db;
-      border-radius: 24px;
-      transition: .3s;
+      position:absolute; cursor:pointer; inset:0;
+      background:#cbd5e1; border-radius:999px; transition:.2s;
     }
     .slider:before {
-      content: "";
-      position: absolute;
-      height: 18px; width: 18px;
-      left: 3px; bottom: 3px;
-      background: #fff;
-      border-radius: 50%;
-      transition: .3s;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+      content:""; position:absolute; height:20px; width:20px; left:3px; top:3px;
+      background:#fff; border-radius:50%; transition:.2s;
+      box-shadow:0 1px 3px rgba(0,0,0,0.24);
     }
-    input:checked + .slider { background: #004a99; }
-    input:checked + .slider:before { transform: translateX(20px); }
+    .toggle input:checked + .slider { background:var(--ml-blue-2); }
+    .toggle input:checked + .slider:before { transform:translateX(22px); }
 
-    /* Add User popup */
+    .perm-grid {
+      display:grid; gap:8px;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      margin-top:8px;
+    }
+    @media (max-width: 900px) { .perm-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    @media (max-width: 520px) { .perm-grid { grid-template-columns: 1fr; } }
+
+    .perm {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:8px; padding:8px 10px; border:1px solid rgba(0,0,0,0.06);
+      background: rgba(255,255,255,0.6); border-radius:8px;
+    }
+    .perm .name { font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .hint { font-size:12px; color:#64748b; }
+
+    /* Modal */
     .modal {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.35);
-      display: none; align-items: center; justify-content: center;
-      z-index: 60;
+      position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:2000;
+      background:rgba(0,0,0,0.35);
+      padding:18px;
     }
-    .modal.show { display: flex; }
+    .modal.open { display:flex; }
     .modal-card {
-      background: #fff;
-      width: 92%; max-width: 430px;
-      max-height: 85vh; overflow-y: auto;
-      border-radius: 10px;
-      padding: 16px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+      width:100%; max-width:520px; max-height:90vh; overflow:auto;
+      background:#fff; border-radius:12px; padding:16px;
     }
-    .modal h3 {
-      margin: 0 0 10px; color: #004a99;
-      font-size: 18px;
+    .modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .modal-head h3 { margin:0; color:var(--ml-blue); }
+    .spacer { height:8px; }
+    .loading {
+      display:flex; align-items:center; gap:8px; color:#334155; font-size:14px; padding:8px 0;
     }
-    .field { margin-bottom: 10px; }
-    .field input {
-      width: 100%; padding: 10px;
-      border: 1px solid #d1d5db; border-radius: 6px;
-      font-size: 14px; box-sizing: border-box;
-      background: #fff;
-    }
-    .modal-actions {
-      display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;
-    }
+    .loading .dot { width:8px; height:8px; border-radius:50%; background:#334155; animation:b 1s infinite alternate; }
+    .loading .dot:nth-child(2){ animation-delay:.2s }
+    .loading .dot:nth-child(3){ animation-delay:.4s }
+    @keyframes b { to { transform: translateY(-3px); opacity:.5; } }
+    .hr { height:1px; background:rgba(0,0,0,0.08); margin:10px 0; }
+
+    .danger { color:#b91c1c; font-size:12px; }
+    .ok { color:#166534; font-size:12px; }
   </style>
 </head>
 <body>
 
-  <!-- Sticky translucent bar -->
+  <!-- Top bar -->
   <div class="topbar">
-    <h1>User Administration</h1>
-    <div class="bar-actions">
-      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-      <button class="btn btn-outline" id="addUserBtn">➕ Add User</button>
+    <div class="title">Users</div>
+    <div class="actions">
+      <button id="scanBtn" class="btn ghost" title="Scan portal for new buttons">Scan Pages</button>
+      <button id="addBtn" class="btn secondary">Add User</button>
+      <button id="saveBtn" class="btn">Save Changes</button>
     </div>
   </div>
 
-  <!-- Success banner -->
-  <div id="banner" class="banner">
-    <span class="close" id="bannerClose">✖</span>
-    ✅ Changes saved successfully.
-  </div>
-
-  <!-- Content -->
   <div class="wrap">
-    <div class="subnote">
-      This page auto-discovers buttons from <b>main.html</b> and any linked sub-menus, then shows matching toggles per user.
-      <br/>“Full Access” overrides everything.
+    <div id="status" class="loading" style="display:none;">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      <span>Scanning pages & loading users…</span>
     </div>
-    <div id="list">Loading users…</div>
+
+    <div id="guardMsg" class="danger" style="display:none;"></div>
+
+    <div id="usersContainer"></div>
   </div>
 
   <!-- Add User Modal -->
-  <div id="addUserModal" class="modal" aria-hidden="true">
+  <div id="addModal" class="modal" aria-hidden="true">
     <div class="modal-card">
-      <h3>Add New User</h3>
-      <div class="field"><input id="firstName" type="text" placeholder="First Name" required></div>
-      <div class="field"><input id="lastName" type="text" placeholder="Last Name" required></div>
-      <div class="field"><input id="email" type="email" placeholder="Email (optional)"></div>
-      <div class="field"><input id="username" type="text" placeholder="Username (e.g. John.Doe)" required></div>
-      <div class="field"><input id="password" type="password" placeholder="Password" required></div>
-      <div class="field"><input id="vehicle" type="text" placeholder="Vehicle Assigned (optional)"></div>
-      <div class="field"><input id="employmentType" type="text" placeholder="Employment Type (Employed / Self Employed)"></div>
-      <div class="field"><input id="sharepoint" type="text" placeholder="SharePoint Path URL"></div>
-      <div class="modal-actions">
-        <button class="btn btn-outline" id="cancelAdd">Cancel</button>
-        <button class="btn btn-primary" id="createUserBtn">Create User</button>
+      <div class="modal-head">
+        <h3>Add New User</h3>
+        <button id="closeAdd" class="btn ghost">Close</button>
       </div>
+      <div class="grid">
+        <div class="field">
+          <label>Engineer Number (auto)</label>
+          <input id="nu_eng" type="text" readonly />
+        </div>
+        <div class="field">
+          <label>Employment Type</label>
+          <select id="nu_emp">
+            <option>Employed</option>
+            <option>Self Employed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>First Name</label>
+          <input id="nu_first" type="text" />
+        </div>
+        <div class="field">
+          <label>Last Name</label>
+          <input id="nu_last" type="text" />
+        </div>
+        <div class="field">
+          <label>Username (auto-suggest)</label>
+          <input id="nu_user" type="text" placeholder="e.g., First.Last" />
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input id="nu_email" type="email" />
+        </div>
+        <div class="field">
+          <label>Phone Number</label>
+          <input id="nu_phone" type="tel" />
+        </div>
+        <div class="field">
+          <label>Hourly Rate (£)</label>
+          <input id="nu_rate" type="number" step="0.01" />
+        </div>
+        <div class="field">
+          <label>Vehicle Assigned</label>
+          <input id="nu_vehicle" type="text" />
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>SharePoint Path</label>
+          <input id="nu_sp" type="text" placeholder="https://mostlane.sharepoint.com/..." />
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>Temporary Password (will be hashed)</label>
+          <input id="nu_pass" type="password" placeholder="Enter temp password" />
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <button id="nu_create" class="btn">Create User</button>
+      <div class="spacer"></div>
+      <div id="nu_msg" class="hint"></div>
     </div>
   </div>
 
-  <script>
-    // ====== CONFIG ======
-    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
-    const USERS_URL = API_BASE + "/users";
-    const SAVE_URL  = API_BASE + "/save";        // change to /update-users if your worker uses that
-    const TOKEN     = sessionStorage.getItem("mostlaneToken"); // if using the secure worker
-    const CURRENT   = sessionStorage.getItem("mostlaneUser");
+<script>
+/** CONFIG **/
+const WORKER_GET = "https://mostlane-users.jamie-def.workers.dev/users";
+const WORKER_SAVE = "https://mostlane-users.jamie-def.workers.dev/update-users";
+const PORTAL_BASE = "https://portal.mostlane-portal.com/";
 
-    if (!CURRENT) { window.location.href = "login.html"; }
+/** Access guard: only Jamie.Line */
+(function guard(){
+  const u = sessionStorage.getItem("mostlaneUser");
+  if (u !== "Jamie.Line") {
+    document.getElementById('guardMsg').style.display = 'block';
+    document.getElementById('guardMsg').textContent =
+      "Access restricted. You must be logged in as Jamie.Line to view Users Admin.";
+    setTimeout(()=>window.location.href="main.html", 1400);
+  }
+})();
 
-    // ====== UI helpers ======
-    const banner = document.getElementById('banner');
-    const bannerClose = document.getElementById('bannerClose');
-    function showBanner(msg) {
-      banner.innerHTML = `<span class="close" id="bannerClose">✖</span>${msg}`;
-      banner.classList.add('show');
-      document.getElementById('bannerClose').onclick = () => banner.classList.remove('show');
-      setTimeout(() => banner.classList.remove('show'), 5000);
-    }
+/** State */
+let USERS = [];
+let BUTTON_IDS = new Set(); // discovered permission keys
+let FULL_PERM_KEY = "FullAccess";
 
-    // Toggle component
-    function toggleRow(id, label, checked, indent=false) {
-      const row = document.createElement('div');
-      row.className = 'toggle' + (indent ? ' indent' : '');
-      row.innerHTML = `
-        <label for="${id}">${label}</label>
-        <label class="switch">
-          <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
-          <span class="slider"></span>
-        </label>
-      `;
-      return row;
-    }
+/** UI Helpers */
+const $ = sel => document.querySelector(sel);
+function showLoading(on=true){
+  $('#status').style.display = on ? 'flex' : 'none';
+}
+function toastOK(msg){ $('#status').innerHTML = `<span class="ok">${msg}</span>`; $('#status').style.display='block'; setTimeout(()=>$('#status').style.display='none',1500); }
+function toastERR(msg){ $('#status').innerHTML = `<span class="danger">${msg}</span>`; $('#status').style.display='block'; }
 
-    // Map button IDs to your existing legacy JSON keys (so main.html still works)
-    function mapIdToLegacyKey(id, label, href) {
-      const map = {
-        checkinBtn: "CheckInOut",
-        holidayBtn: "Holiday",
-        purchaseBtn: "PurchaseOrders",
-        poMenuBtn: "PurchaseOrders",
-        assetsBtn: "Assets",
-        formsBtn: "Forms",
-        "my-documents-btn": "MyDocuments",
-        complianceBtn: "Compliance",
-        "hours-dashboard-btn": "HoursDashboard",
-        weeklyBtn: "Weekly",
-        // Add known subpages if you want fixed names:
-        poDirectorBtn: "PODirector",
-        poCostingBtn:  "POCosting",
-      };
-      if (map[id]) return map[id];
+/** Password hash */
+async function sha256(text){
+  const buf = new TextEncoder().encode((text||"").trim());
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 
-      // Fallback: derive from id (strip 'Btn', camel/pascal-ish)
-      if (id) return id.replace(/Btn$/,'');
-      // Fallback 2: from label (remove spaces)
-      if (label) return label.replace(/\s+/g,'');
-      // Fallback 3: from path
-      if (href) return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
-      return null;
-    }
+/** Fetch Users */
+async function loadUsers(){
+  const r = await fetch(WORKER_GET + "?v=" + Date.now());
+  if(!r.ok) throw new Error("Failed to load users");
+  const data = await r.json();
+  USERS = (data && data.Users) ? data.Users : [];
+}
 
-    // ====== Portal scan (main + subpages) ======
-    async function scanPortal() {
-      const parser = new DOMParser();
-      const structure = [];
+/** Crawl portal to find .html pages (same-origin), then collect <a>/<button> ids */
+async function discoverButtons(){
+  // start with main.html
+  const visited = new Set();
+  const queue = [ "main.html" ];
+  const pageHrefs = new Set(["main.html"]);
 
-      const mainRes = await fetch('main.html?v=' + Date.now(), { cache: 'no-store' });
-      const mainHtml = await mainRes.text();
-      const mainDoc = parser.parseFromString(mainHtml, 'text/html');
-
-      const mainButtons = [...mainDoc.querySelectorAll('a.button')];
-
-      for (const b of mainButtons) {
-        const id    = b.id || '';
-        const label = (b.textContent || '').trim();
-        const href  = b.getAttribute('href') || '';
-
-        const entry = { id, label, href, subpages: [] };
-        // attempt to discover submenus by fetching that page
-        if (href && /\.html($|\?)/.test(href) && !/login\.html/i.test(href)) {
-          try {
-            const subRes = await fetch(href, { cache: 'no-store' });
-            const subHtml = await subRes.text();
-            const subDoc = parser.parseFromString(subHtml, 'text/html');
-            const subs = [...subDoc.querySelectorAll('a.button')];
-            entry.subpages = subs.map(sb => ({
-              id: sb.id || '',
-              label: (sb.textContent || '').trim(),
-              href: sb.getAttribute('href') || ''
-            }));
-          } catch (e) {
-            // no-op if not reachable; safe
+  async function fetchPage(rel){
+    const url = new URL(rel, PORTAL_BASE).toString();
+    if(visited.has(url)) return;
+    visited.add(url);
+    try{
+      const res = await fetch(url, { mode:'cors' });
+      if(!res.ok) return;
+      const html = await res.text();
+      // collect ids from <a> and <button>
+      const ids = Array.from(html.matchAll(/<(a|button)\b[^>]*\sid\s*=\s*["']([^"']+)["']/gi)).map(m=>m[2].trim());
+      ids.forEach(id => {
+        // don't include empty or generic items
+        if(id && id.length < 120) BUTTON_IDS.add(id);
+      });
+      // crawl more links within same origin, limit to .html
+      const links = Array.from(html.matchAll(/\shref\s*=\s*["']([^"']+)["']/gi)).map(m=>m[1]);
+      links.forEach(href=>{
+        try{
+          const u = new URL(href, PORTAL_BASE);
+          if(u.origin === new URL(PORTAL_BASE).origin && u.pathname.endsWith(".html")){
+            const relPath = u.pathname.split("/").pop(); // only file
+            if(!pageHrefs.has(relPath)) {
+              pageHrefs.add(relPath);
+              queue.push(relPath);
+            }
           }
-        }
-        structure.push(entry);
+        }catch(e){}
+      });
+    }catch(e){ /* ignore CORS errors silently */ }
+  }
+
+  // breadth-limited crawl
+  const LIMIT = 40;
+  let steps = 0;
+  while(queue.length && steps<LIMIT){
+    const next = queue.shift();
+    await fetchPage(next);
+    steps++;
+  }
+
+  // Always include hard-known keys your main page logic already expects
+  ["checkinBtn","holidayBtn","purchaseBtn","assetsBtn","my-documents-btn","weeklyBtn","formsBtn","complianceBtn","hours-dashboard-btn","poMenuBtn","usersAdminBtn"].forEach(id=>BUTTON_IDS.add(id));
+}
+
+/** Render Users */
+function render(){
+  const box = $('#usersContainer');
+  box.innerHTML = "";
+  // Sort by EngineerNumber (numeric if possible)
+  USERS.sort((a,b)=> (parseInt(a.EngineerNumber||0)||0) - (parseInt(b.EngineerNumber||0)||0));
+  USERS.forEach((u, idx)=>{
+    const card = document.createElement('div');
+    card.className = "user-card";
+    card.dataset.index = idx;
+
+    const name = `${u.FirstName||""} ${u.LastName||""}`.trim() || u.Username || '(No name)';
+    const eng = u.EngineerNumber || "";
+    const status = (u.Status||"").toLowerCase() || "active";
+    const full = (u[FULL_PERM_KEY]||"No").toString().toLowerCase() === "yes";
+
+    card.innerHTML = `
+      <div class="user-head">
+        <div class="user-id">
+          <span>${name}</span>
+          <span class="pill">#${eng || "—"}</span>
+          <span class="pill">${u.Username||""}</span>
+          <span class="pill" style="border-color:${status==='active'?'#16a34a':'#b91c1c'}; background:${status==='active'?'rgba(22,163,74,.08)':'rgba(185,28,28,.08)'}; color:${status==='active'?'#166534':'#b91c1c'}">
+            ${status === 'active' ? 'Active' : 'Not Active'}
+          </span>
+          <span class="pill" style="border-color:${full?'#2563eb':'#94a3b8'}; color:${full?'#1d4ed8':'#475569'}; background:${full?'rgba(37,99,235,.08)':'rgba(148,163,184,.12)'}">
+            Full Access: ${full ? 'On' : 'Off'}
+          </span>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label>First Name</label>
+          <input data-k="FirstName" value="${u.FirstName||''}">
+        </div>
+        <div class="field">
+          <label>Last Name</label>
+          <input data-k="LastName" value="${u.LastName||''}">
+        </div>
+        <div class="field">
+          <label>Username</label>
+          <input data-k="Username" value="${u.Username||''}">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input data-k="Email" type="email" value="${u.Email||''}">
+        </div>
+        <div class="field">
+          <label>Phone Number</label>
+          <input data-k="PhoneNumber" value="${u.PhoneNumber||''}">
+        </div>
+        <div class="field">
+          <label>Hourly Rate (£)</label>
+          <input data-k="HourlyRate" type="number" step="0.01" value="${u.HourlyRate||''}">
+        </div>
+        <div class="field">
+          <label>Engineer Number</label>
+          <input data-k="EngineerNumber" value="${u.EngineerNumber||''}">
+        </div>
+        <div class="field">
+          <label>Employment Type</label>
+          <select data-k="EmploymentType">
+            <option ${u.EmploymentType==='Employed'?'selected':''}>Employed</option>
+            <option ${u.EmploymentType==='Self Employed'?'selected':''}>Self Employed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Vehicle Assigned</label>
+          <input data-k="VehicleAssigned" value="${u.VehicleAssigned||''}">
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label>SharePoint Path</label>
+          <input data-k="SharePointPath" value="${u.SharePointPath||''}">
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <select data-k="Status">
+            <option ${ (u.Status||'').toLowerCase()==='active' ? 'selected':'' }>Active</option>
+            <option ${ (u.Status||'').toLowerCase()==='not active' ? 'selected':'' }>Not Active</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Full Access</label>
+          <div class="perm" style="justify-content:flex-start; gap:12px;">
+            <span class="name">Enabled</span>
+            <label class="toggle">
+              <input data-k="${FULL_PERM_KEY}" type="checkbox" ${full?'checked':''}>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="hint">When Full Access is ON, all buttons are shown (including Users Admin).</div>
+        </div>
+      </div>
+      <div class="hr"></div>
+      <div class="hint">Button Visibility</div>
+      <div class="perm-grid">
+        ${[...BUTTON_IDS].sort().map(key=>{
+          const v = (u[key]||'No').toString().toLowerCase()==='yes';
+          return `
+            <div class="perm" data-perm="${key}">
+              <span class="name">${key}</span>
+              <label class="toggle">
+                <input type="checkbox" ${v?'checked':''} data-perm="${key}">
+                <span class="slider"></span>
+              </label>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <div class="hr"></div>
+      <div class="field">
+        <label>Set/Reset Password (optional)</label>
+        <input type="password" placeholder="Enter new password to change (leave blank to keep existing)" data-k="__SetPassword">
+      </div>
+    `;
+    box.appendChild(card);
+  });
+}
+
+/** Save all changes with merge */
+async function saveAll(){
+  // Build payload
+  const out = { Users: [] };
+  document.querySelectorAll('.user-card').forEach(card=>{
+    const idx = parseInt(card.dataset.index,10);
+    const src = USERS[idx] || {};
+    const obj = { ...src }; // start from existing (so we don't drop unrendered fields)
+
+    // profile fields
+    card.querySelectorAll('[data-k]').forEach(inp=>{
+      const key = inp.getAttribute('data-k');
+      let val = (inp.value||'').trim();
+      if(key === FULL_PERM_KEY){
+        val = (inp.checked ? "Yes" : "No");
       }
-      return structure;
-    }
-
-    async function fetchAllUsers() {
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-      });
-      const data = await res.json();
-      return data.Users || [];
-    }
-
-    function userCard(user, structure) {
-      const card = document.createElement('div');
-      card.className = 'user-card';
-
-      const header = document.createElement('div');
-      header.className = 'user-header';
-      const name = `${user.EngineerNumber ? ('#' + user.EngineerNumber + ' – ') : ''}${user.FirstName || ''} ${user.LastName || ''}`.trim();
-      header.innerHTML = `<div>${name} <span style="color:#6b7280;font-weight:500;">(${user.Username})</span></div>`;
-
-      const fa = document.createElement('div');
-      const faId = `fa_${user.Username}`;
-      fa.appendChild(toggleRow(faId, 'Full Access', ((user.FullAccess||'').toLowerCase() === 'yes')));
-      header.appendChild(fa);
-      card.appendChild(header);
-
-      const info = document.createElement('div');
-      info.className = 'user-info';
-      info.textContent = `${user.EmploymentType || ''} · ${user.Status || ''} · ${user.Email || ''}`;
-      card.appendChild(info);
-
-      const group = document.createElement('div');
-      group.className = 'toggle-group';
-
-      structure.forEach(p => {
-        const primaryId = p.id || (p.href || '').replace(/[^\w]/g,'');
-        const legacyKey = mapIdToLegacyKey(primaryId, p.label, p.href);
-        const currentOn = ((user[legacyKey] || user[primaryId] || '').toLowerCase() === 'yes');
-
-        const row = toggleRow(`${user.Username}::${primaryId}`, p.label, currentOn);
-        group.appendChild(row);
-
-        // subpages (indented)
-        if (Array.isArray(p.subpages) && p.subpages.length) {
-          p.subpages.forEach(sp => {
-            const subId = sp.id || (sp.href || '').replace(/[^\w]/g,'');
-            const subLegacy = mapIdToLegacyKey(subId, sp.label, sp.href);
-            const on = ((user[subLegacy] || user[subId] || '').toLowerCase() === 'yes');
-            group.appendChild(toggleRow(`${user.Username}::${subId}`, `↳ ${sp.label}`, on, true));
-          });
-        }
-      });
-
-      card.appendChild(group);
-      return card;
-    }
-
-    async function buildUI() {
-      const list = document.getElementById('list');
-      list.textContent = 'Loading…';
-      const [users, structure] = await Promise.all([fetchAllUsers(), scanPortal()]);
-
-      // render
-      list.innerHTML = '';
-      users.forEach(u => list.appendChild(userCard(u, structure)));
-
-      // store for save()
-      window.__USERS = users;
-      window.__STRUCT = structure;
-    }
-
-    // Gather and save
-    async function saveAll() {
-      if (!window.__USERS || !window.__STRUCT) return;
-
-      const users = JSON.parse(JSON.stringify(window.__USERS)); // clone
-      const struct = window.__STRUCT;
-
-      users.forEach(u => {
-        // Full Access
-        u.FullAccess = (document.getElementById(`fa_${u.Username}`)?.querySelector('input')?.checked) ? 'Yes' : 'No';
-
-        // For each discovered button/sub-button, set both the legacy key and the dynamic id key
-        struct.forEach(p => {
-          const pid = p.id || (p.href || '').replace(/[^\w]/g,'');
-          const legacy = mapIdToLegacyKey(pid, p.label, p.href);
-          const chk = document.getElementById(`${u.Username}::${pid}`)?.querySelector('input');
-          const val = chk && chk.checked ? 'Yes' : 'No';
-          if (legacy) u[legacy] = val;
-          if (pid)    u[pid]    = val;
-
-          if (Array.isArray(p.subpages)) {
-            p.subpages.forEach(sp => {
-              const sid = sp.id || (sp.href || '').replace(/[^\w]/g,'');
-              const sLegacy = mapIdToLegacyKey(sid, sp.label, sp.href);
-              const schk = document.getElementById(`${u.Username}::${sid}`)?.querySelector('input');
-              const sval = schk && schk.checked ? 'Yes' : 'No';
-              if (sLegacy) u[sLegacy] = sval;
-              if (sid)     u[sid]     = sval;
-            });
-          }
-        });
-      });
-
-      // Save to KV
-      const res = await fetch(SAVE_URL, {
-        method: 'POST',
-        headers: Object.assign(
-          { 'Content-Type': 'application/json' },
-          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-        ),
-        body: JSON.stringify({ Users: users })
-      });
-
-      if (!res.ok) {
-        showBanner('❌ Save failed. Please try again.');
-        return;
+      if(key === "__SetPassword"){
+        // handled after
+      }else{
+        obj[key] = val;
       }
-      showBanner('✅ Changes saved successfully.');
-      // Refresh the in-memory copy to keep UI consistent
-      window.__USERS = users;
-    }
-
-    // ===== Add User modal =====
-    const modal = document.getElementById('addUserModal');
-    const openAdd = () => { modal.classList.add('show'); modal.setAttribute('aria-hidden','false'); };
-    const closeAdd = () => { modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); };
-
-    document.getElementById('addUserBtn').addEventListener('click', openAdd);
-    document.getElementById('cancelAdd').addEventListener('click', closeAdd);
-
-    async function sha256Hex(s) {
-      const enc = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', enc.encode((s || '').trim()));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    }
-
-    document.getElementById('createUserBtn').addEventListener('click', async () => {
-      // current users
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-      });
-      const data = await res.json();
-      const users = data.Users || [];
-
-      // next EngineerNumber (max + 1)
-      const maxNum = users.reduce((m,u) => {
-        const n = parseInt(u.EngineerNumber, 10);
-        return isNaN(n) ? m : Math.max(m, n);
-      }, 0);
-      const nextNum = String(maxNum + 1);
-
-      const firstName = document.getElementById('firstName').value.trim();
-      const lastName  = document.getElementById('lastName').value.trim();
-      const email     = document.getElementById('email').value.trim();
-      const username  = document.getElementById('username').value.trim();
-      const password  = document.getElementById('password').value;
-      const vehicle   = document.getElementById('vehicle').value.trim();
-      const empType   = document.getElementById('employmentType').value.trim();
-      const spPath    = document.getElementById('sharepoint').value.trim();
-
-      if (!firstName || !lastName || !username || !password) {
-        showBanner('❌ Please complete First, Last, Username and Password.');
-        return;
-      }
-
-      const hashedPassword = await sha256Hex(password);
-
-      const newUser = {
-        EngineerNumber: nextNum,
-        FirstName: firstName,
-        LastName: lastName,
-        Username: username,
-        Email: email,
-        HashedPassword: hashedPassword,
-        VehicleAssigned: vehicle,
-        EmploymentType: empType || 'Employed',
-        Status: 'Active',
-        FullAccess: 'No',
-        SharePointPath: spPath
-      };
-
-      users.push(newUser);
-
-      // Save
-      const saveRes = await fetch(SAVE_URL, {
-        method: 'POST',
-        headers: Object.assign(
-          { 'Content-Type': 'application/json' },
-          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-        ),
-        body: JSON.stringify({ Users: users })
-      });
-
-      if (!saveRes.ok) {
-        showBanner('❌ Could not add user.');
-        return;
-      }
-
-      closeAdd();
-      showBanner('✅ User added.');
-      buildUI();
     });
 
-    // Save & Banner close
-    document.getElementById('saveBtn').addEventListener('click', saveAll);
+    // password hashing if provided
+    const pass = card.querySelector('[data-k="__SetPassword"]')?.value || "";
+    if(pass.trim()){
+      // store to HashedPassword
+      obj.HashedPassword = ""; // placeholder until hashed
+      obj.__PendingPassword = pass.trim();
+    }
 
-    // Close banner
-    bannerClose.addEventListener('click', () => banner.classList.remove('show'));
+    // permissions from discovered buttons
+    [...BUTTON_IDS].forEach(key=>{
+      const chk = card.querySelector(`input[type="checkbox"][data-perm="${key}"]`);
+      const on = chk ? chk.checked : false;
+      obj[key] = on ? "Yes" : "No";
+    });
 
-    // Initial build
-    buildUI();
-  </script>
+    out.Users.push(obj);
+  });
+
+  // hash any pending passwords
+  for (const u of out.Users){
+    if(u.__PendingPassword){
+      u.HashedPassword = await sha256(u.__PendingPassword);
+      delete u.__PendingPassword;
+    }
+  }
+
+  // Merge save
+  const res = await fetch(WORKER_SAVE, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(out)
+  });
+  if(!res.ok){
+    const t = await res.text();
+    throw new Error("Save failed: " + t);
+  }
+}
+
+/** Add user modal helpers */
+function openAdd(){ $('#addModal').classList.add('open'); }
+function closeAdd(){ $('#addModal').classList.remove('open'); }
+
+function nextEngineerNumber(){
+  const nums = USERS.map(u=>parseInt(u.EngineerNumber||0,10)).filter(n=>!isNaN(n));
+  const max = nums.length ? Math.max(...nums) : 0;
+  return String(max + 1);
+}
+
+function autosuggestUsername(first,last){
+  const f = (first||"").trim().replace(/\s+/g,'');
+  const l = (last||"").trim().replace(/\s+/g,'');
+  if(!f && !l) return "";
+  return `${f}.${l}`;
+}
+
+/** Event wiring */
+document.getElementById('addBtn').addEventListener('click', ()=>{
+  $('#nu_eng').value = nextEngineerNumber();
+  $('#nu_first').value = ""; $('#nu_last').value = "";
+  $('#nu_user').value = ""; $('#nu_email').value = "";
+  $('#nu_phone').value = ""; $('#nu_rate').value = "";
+  $('#nu_vehicle').value = ""; $('#nu_sp').value = "";
+  $('#nu_pass').value = ""; $('#nu_emp').value = "Employed";
+  $('#nu_msg').textContent = "";
+  openAdd();
+});
+document.getElementById('closeAdd').addEventListener('click', closeAdd);
+$('#nu_first').addEventListener('input', ()=> {
+  $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value);
+});
+$('#nu_last').addEventListener('input', ()=> {
+  $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value);
+});
+document.getElementById('nu_create').addEventListener('click', async ()=>{
+  const msg = $('#nu_msg');
+  msg.textContent = "";
+  const eng = $('#nu_eng').value.trim();
+  const emp = $('#nu_emp').value.trim();
+  const first = $('#nu_first').value.trim();
+  const last = $('#nu_last').value.trim();
+  const user = $('#nu_user').value.trim();
+  const email = $('#nu_email').value.trim();
+  const phone = $('#nu_phone').value.trim();
+  const rate = $('#nu_rate').value.trim();
+  const veh = $('#nu_vehicle').value.trim();
+  const sp = $('#nu_sp').value.trim();
+  const pass = $('#nu_pass').value;
+
+  if(!first || !last || !user){
+    msg.textContent = "First, Last and Username are required.";
+    return;
+  }
+  const hashed = pass ? await sha256(pass) : "";
+
+  // New user object with safe defaults
+  const nu = {
+    EngineerNumber: eng,
+    FirstName: first,
+    LastName: last,
+    Username: user,
+    Email: email,
+    PhoneNumber: phone,
+    HourlyRate: rate,
+    VehicleAssigned: veh,
+    EmploymentType: emp,
+    Status: "Active",
+    FullAccess: "No",
+    SharePointPath: sp,
+    HashedPassword: hashed || "",
+  };
+
+  // Initialize discovered button permissions to "No"
+  [...BUTTON_IDS].forEach(k => nu[k] = "No");
+
+  USERS.push(nu);
+  render();
+  msg.textContent = "User staged. Click 'Save Changes' to commit.";
+});
+
+/** Save button */
+document.getElementById('saveBtn').addEventListener('click', async ()=>{
+  try{
+    showLoading(true);
+    await saveAll();
+    toastOK("Saved!");
+    await loadUsers(); // reload to reflect merge output
+    render();
+  }catch(e){
+    toastERR(e.message||"Save failed");
+  }finally{
+    showLoading(false);
+  }
+});
+
+/** Scan button (re-scan pages to discover new buttons, then re-render) */
+document.getElementById('scanBtn').addEventListener('click', async ()=>{
+  try{
+    showLoading(true);
+    BUTTON_IDS.clear();
+    await discoverButtons();
+    render(); // re-render with potentially new toggles
+    toastOK("Scan complete");
+  }catch(e){
+    toastERR("Scan error");
+  }finally{
+    showLoading(false);
+  }
+});
+
+/** Boot */
+(async function init(){
+  try{
+    showLoading(true);
+    // 1) Discover buttons across portal (from main.html seed, crawl links)
+    await discoverButtons();
+    // 2) Load users
+    await loadUsers();
+    // 3) Render
+    render();
+  }catch(e){
+    toastERR("Init failed");
+  }finally{
+    showLoading(false);
+  }
+})();
+</script>
 </body>
 </html>
