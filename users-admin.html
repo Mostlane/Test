@@ -144,22 +144,8 @@
     </div>
   </div>
 
-  <!-- ✅ User Table -->
   <table class="user-table" id="usersTable">
-    <thead>
-      <tr>
-        <th>Username</th>
-        <th>Status</th>
-        <th>Full Access</th>
-        <th>Purchase Orders</th>
-        <th>Check In/Out</th>
-        <th>Holiday</th>
-        <th>Forms</th>
-        <th>Assets</th>
-        <th>Add Site</th>
-        <th>Compliance</th>
-      </tr>
-    </thead>
+    <thead><tr id="headerRow"></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -171,39 +157,59 @@
   <script>
     const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
     const SAVE_URL = "https://mostlane-users.jamie-def.workers.dev/save";
-    let usersData = [];
+    const MAIN_HTML_URL = "https://mostlane.github.io/Test/main.html";
 
-    // Hash helper
+    let usersData = [];
+    let buttonFields = [];
+
     async function hashPassword(password) {
       const enc = new TextEncoder();
       const data = enc.encode(password.trim());
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
+      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     function makeToggle(value) {
       const checked = (value || "").toLowerCase() === "yes";
       return `
-        <td>
-          <label class="switch">
-            <input type="checkbox" ${checked ? "checked" : ""}>
-            <span class="slider"></span>
-          </label>
-        </td>
+        <label class="switch">
+          <input type="checkbox" ${checked ? "checked" : ""}>
+          <span class="slider"></span>
+        </label>
       `;
     }
 
+    async function loadButtonsFromMain() {
+      const html = await fetch(MAIN_HTML_URL + "?v=" + Date.now()).then(r => r.text());
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      const buttons = Array.from(doc.querySelectorAll("a.button"));
+      return buttons.map(btn => ({
+        id: btn.id,
+        label: btn.textContent.trim()
+      }));
+    }
+
     async function loadUsers() {
-      const res = await fetch(USERS_URL + '?v=' + Date.now());
+      // Load dynamic button list
+      buttonFields = await loadButtonsFromMain();
+
+      // Load user data from KV
+      const res = await fetch(USERS_URL + "?v=" + Date.now());
       const data = await res.json();
       usersData = data.Users;
-      const tbody = document.querySelector('#usersTable tbody');
+
+      const headerRow = document.getElementById("headerRow");
+      headerRow.innerHTML = "<th>Username</th><th>Status</th>";
+      buttonFields.forEach(b => {
+        headerRow.innerHTML += `<th>${b.label}</th>`;
+      });
+
+      const tbody = document.querySelector("#usersTable tbody");
       tbody.innerHTML = "";
 
-      usersData.forEach((user, index) => {
-        const row = document.createElement('tr');
+      usersData.forEach(user => {
+        const row = document.createElement("tr");
         row.innerHTML = `
           <td>${user.Username}</td>
           <td>
@@ -212,33 +218,29 @@
               <option value="Not Active" ${user.Status === "Not Active" ? "selected" : ""}>Not Active</option>
             </select>
           </td>
-          ${makeToggle(user.FullAccess)}
-          ${makeToggle(user.PurchaseOrders)}
-          ${makeToggle(user.CheckInOut)}
-          ${makeToggle(user.Holiday)}
-          ${makeToggle(user.Forms)}
-          ${makeToggle(user.Assets)}
-          ${makeToggle(user.AddSite)}
-          ${makeToggle(user.Compliance)}
         `;
+
+        buttonFields.forEach(field => {
+          const key = field.label.replace(/\s+/g, '');
+          const val = user[key] || "No";
+          row.innerHTML += `<td>${makeToggle(val)}</td>`;
+        });
+
         tbody.appendChild(row);
       });
     }
 
     async function saveUsers() {
-      const rows = document.querySelectorAll('#usersTable tbody tr');
+      const rows = document.querySelectorAll("#usersTable tbody tr");
       rows.forEach((row, i) => {
-        const selects = row.querySelectorAll('select');
-        const switches = row.querySelectorAll('input[type="checkbox"]');
+        const selects = row.querySelectorAll("select");
+        const switches = row.querySelectorAll("input[type='checkbox']");
         usersData[i].Status = selects[0].value;
-        usersData[i].FullAccess = switches[0].checked ? "Yes" : "No";
-        usersData[i].PurchaseOrders = switches[1].checked ? "Yes" : "No";
-        usersData[i].CheckInOut = switches[2].checked ? "Yes" : "No";
-        usersData[i].Holiday = switches[3].checked ? "Yes" : "No";
-        usersData[i].Forms = switches[4].checked ? "Yes" : "No";
-        usersData[i].Assets = switches[5].checked ? "Yes" : "No";
-        usersData[i].AddSite = switches[6].checked ? "Yes" : "No";
-        usersData[i].Compliance = switches[7].checked ? "Yes" : "No";
+
+        buttonFields.forEach((field, j) => {
+          const key = field.label.replace(/\s+/g, '');
+          usersData[i][key] = switches[j].checked ? "Yes" : "No";
+        });
       });
 
       const payload = JSON.stringify({ Users: usersData });
@@ -247,7 +249,6 @@
         headers: { "Content-Type": "application/json" },
         body: payload
       });
-
       const result = await res.json();
       document.getElementById("saveStatus").textContent = result.ok ? "✅ Saved successfully!" : "❌ Failed to save.";
     }
@@ -266,60 +267,41 @@
       }
 
       const hashed = await hashPassword(password);
-
       const newUser = {
         EngineerNumber: (usersData.length + 1).toString(),
-        FirstName: first,
-        LastName: last,
-        Username: username,
-        Email: email,
-        HashedPassword: hashed,
-        VehicleAssigned: "",
-        EmploymentType: employment,
-        Status: "Active",
-        FullAccess: "No",
-        PurchaseOrders: "No",
-        CheckInOut: "No",
-        Holiday: "No",
-        Forms: "No",
-        Assets: "No",
-        AddSite: "No",
-        MyDocuments: "No",
-        Compliance: "No",
-        HoursDashboard: "No",
-        SharePointPath: ""
+        FirstName: first, LastName: last, Username: username, Email: email,
+        HashedPassword: hashed, VehicleAssigned: "", EmploymentType: employment,
+        Status: "Active"
       };
+
+      buttonFields.forEach(field => {
+        const key = field.label.replace(/\s+/g, '');
+        newUser[key] = "No";
+      });
 
       usersData.push(newUser);
       await saveUsers();
       await loadUsers();
 
       document.getElementById("saveStatus").textContent = "✅ New user added & saved.";
-
-      // Reset and close modal
       ["newFirstName","newLastName","newUsername","newEmail","newPassword"].forEach(id => document.getElementById(id).value = "");
       document.getElementById("addUserModal").style.display = "none";
       document.body.style.overflow = "auto";
     }
 
-    document.getElementById("saveBtn").addEventListener("click", saveUsers);
-    document.getElementById("addUserBtn").addEventListener("click", addNewUser);
-
-    // ✅ Modal open/close logic
+    // Modal logic
     const modal = document.getElementById("addUserModal");
     const openBtn = document.getElementById("openAddUser");
     const closeBtn = document.querySelector(".close");
 
     openBtn.onclick = () => { modal.style.display = "block"; document.body.style.overflow = "hidden"; };
     closeBtn.onclick = () => { modal.style.display = "none"; document.body.style.overflow = "auto"; };
-    window.onclick = (event) => {
-      if (event.target === modal) {
-        modal.style.display = "none";
-        document.body.style.overflow = "auto";
-      }
-    };
+    window.onclick = (e) => { if (e.target === modal) { modal.style.display = "none"; document.body.style.overflow = "auto"; } };
 
-    // Restrict access – only Jamie.Line can load this page
+    document.getElementById("saveBtn").addEventListener("click", saveUsers);
+    document.getElementById("addUserBtn").addEventListener("click", addNewUser);
+
+    // Restrict access – only Jamie.Line
     if (sessionStorage.getItem("mostlaneUser") !== "Jamie.Line") {
       document.body.innerHTML = "<h2 style='color:red;text-align:center;margin-top:50px;'>Access Denied</h2>";
     } else {
