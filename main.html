@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!username) return;
 
   try {
-    const res = await fetch("https://raw.githubusercontent.com/Mostlane/Test/main/users.json?v=" + Date.now());
+    const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users?v=" + Date.now());
     const data = await res.json();
     const users = data.Users || [];
     const user = users.find(u => u.Username === username);
