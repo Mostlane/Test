@@ -28,6 +28,8 @@
       cursor: pointer; margin: 4px;
     }
     button:hover { opacity: 0.9; }
+
+    /* Toggle */
     .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
@@ -73,11 +75,12 @@
     <div class="modal-content">
       <span class="close">&times;</span>
       <h3>Add New User</h3>
-      <input type="text" id="newFirstName" placeholder="First Name">
-      <input type="text" id="newLastName" placeholder="Last Name">
-      <input type="text" id="newUsername" placeholder="Username (e.g. Jamie.Line)">
-      <input type="email" id="newEmail" placeholder="Email">
-      <input type="password" id="newPassword" placeholder="Password">
+      <input type="text" id="newFirstName" placeholder="First Name" />
+      <input type="text" id="newLastName" placeholder="Last Name" />
+      <input type="text" id="newUsername" placeholder="Username (e.g. Jamie.Line)" />
+      <input type="email" id="newEmail" placeholder="Email" />
+      <input type="password" id="newPassword" placeholder="Password" />
+      <input type="url" id="newSharePointPath" placeholder="SharePoint URL" />
       <select id="newEmployment">
         <option value="Employed">Employed</option>
         <option value="Self Employed">Self Employed</option>
@@ -124,12 +127,13 @@
       const data = await res.json();
       usersData = data.Users;
       const header = document.getElementById("headerRow");
-      header.innerHTML="<th>Username</th><th>Status</th><th>Full Access</th>";
+      header.innerHTML="<th>Engineer #</th><th>Username</th><th>Status</th><th>Full Access</th>";
       buttonFields.forEach(b=>header.innerHTML+=`<th>${b.label}</th>`);
       const tbody=document.querySelector("#usersTable tbody"); tbody.innerHTML="";
       usersData.forEach(u=>{
         const row=document.createElement("tr");
-        row.innerHTML=`<td>${u.Username}</td>
+        row.innerHTML=`<td>${u.EngineerNumber || ''}</td>
+          <td>${u.Username}</td>
           <td><select><option ${u.Status==="Active"?"selected":""}>Active</option>
           <option ${u.Status==="Not Active"?"selected":""}>Not Active</option></select></td>
           <td>${makeToggle(u.FullAccess)}</td>`;
@@ -162,18 +166,25 @@
       const f=n=>document.getElementById(n).value.trim();
       if(!f("newFirstName")||!f("newLastName")||!f("newUsername")||!f("newPassword")){alert("Please fill all required fields.");return;}
       const hashed=await hashPassword(f("newPassword"));
+
+      // Automatically allocate next engineer number
+      const currentNumbers = usersData
+        .map(u => parseInt(u.EngineerNumber || 0))
+        .filter(n => !isNaN(n));
+      const nextNumber = Math.max(0, ...currentNumbers) + 1;
+
       const newU={
-        EngineerNumber:(usersData.length+1).toString(),
+        EngineerNumber: nextNumber.toString(),
         FirstName:f("newFirstName"),LastName:f("newLastName"),
         Username:f("newUsername"),Email:f("newEmail"),
         HashedPassword:hashed,VehicleAssigned:"",
         EmploymentType:f("newEmployment"),Status:"Active",
-        FullAccess:"No"
+        FullAccess:"No", SharePointPath:f("newSharePointPath")
       };
       buttonFields.forEach(fld=>{newU[fld.label.replace(/\s+/g,"")]="No";});
       usersData.push(newU);
       await saveUsers(); await loadUsers();
-      ["newFirstName","newLastName","newUsername","newEmail","newPassword"].forEach(id=>document.getElementById(id).value="");
+      ["newFirstName","newLastName","newUsername","newEmail","newPassword","newSharePointPath"].forEach(id=>document.getElementById(id).value="");
       document.getElementById("addUserModal").style.display="none"; document.body.style.overflow="auto";
     }
 
