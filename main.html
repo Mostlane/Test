@@ -12,6 +12,8 @@
 </head>
 
 <body class="main-body">
+
+<!-- ✅ Status box -->
 <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
 <script>
   const currentUser = sessionStorage.getItem("mostlaneUser");
@@ -28,6 +30,7 @@
   document.getElementById("statusBox").textContent = "Current Status: " + statusText;
 </script>
 
+<!-- ✅ User display -->
 <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
 <script>
   const user = sessionStorage.getItem("mostlaneUser");
@@ -64,7 +67,7 @@
   }
 </style>
 
-<!-- ✅ BUTTONS -->
+<!-- ✅ Buttons (your standard layout) -->
 <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
 <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
 <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
@@ -75,58 +78,47 @@
 <a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
 <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
 <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
-  <a class="button" href="users-admin.html" id="usersAdminBtn">Users</a>
+<a class="button" href="users-admin.html" id="usersAdminBtn">Users</a>
 <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
 
-<!-- ✅ PERMISSION LOGIC -->
+<!-- ✅ Dynamic Permission Logic -->
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
   const username = sessionStorage.getItem("mostlaneUser");
   if (!username) return;
 
   try {
+    // 🔹 Load user data from KV Worker
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users?v=" + Date.now());
     const data = await res.json();
     const users = data.Users || [];
     const user = users.find(u => u.Username === username);
     if (!user) return;
 
-    const full = (user.FullAccess || "").toLowerCase() === "yes";
+    const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
-    function toggle(id, key) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      if (full) {
-        el.style.display = "block"; // Show everything for FullAccess
+    // 🔹 Get all visible buttons
+    const buttons = document.querySelectorAll("a.button");
+
+    buttons.forEach(btn => {
+      const label = btn.textContent.trim();
+      const key = label.replace(/\s+/g, ""); // Match field naming in JSON
+      const allowed = (user[key] || "").toLowerCase() === "yes";
+
+      // ✅ Full Access overrides everything (shows all buttons)
+      if (fullAccess) {
+        btn.style.display = "block";
         return;
       }
-      if ((user[key] || "").toLowerCase() !== "yes") {
-        el.style.display = "none";
-      }
-    }
 
-    // Apply permissions from users.json
-    toggle("checkinBtn", "CheckInOut");
-    toggle("holidayBtn", "Holiday");
-    toggle("purchaseBtn", "PurchaseOrders");
-    toggle("poMenuBtn", "PurchaseOrders");
-    toggle("assetsBtn", "Assets");
-    toggle("formsBtn", "Forms");
-    toggle("my-documents-btn", "MyDocuments");
-    toggle("complianceBtn", "Compliance");
-    toggle("hours-dashboard-btn", "HoursDashboard");
-    toggle("weeklyBtn", "Weekly"); // Optional future expansion
+      // ✅ Hide button if permission is not "Yes"
+      if (!allowed) btn.style.display = "none";
+    });
 
-    // Optional: Auto-link My Documents button to user SharePointPath
+    // 🔹 Link SharePoint folder for "My Documents"
     const docBtn = document.getElementById("my-documents-btn");
     if (docBtn && user.SharePointPath) {
       docBtn.href = user.SharePointPath;
-    }
-
-    // ✅ Show the "Users" button only for Jamie.Line
-    const usersAdminBtn = document.getElementById("usersAdminBtn");
-    if (sessionStorage.getItem("mostlaneUser") !== "Jamie.Line") {
-      usersAdminBtn.style.display = "none";
     }
 
   } catch (err) {
