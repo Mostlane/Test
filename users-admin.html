@@ -12,23 +12,25 @@
       background-size: cover;
       margin: 0;
       padding: 30px;
+      color: #1f2937;
     }
     h2 {
       text-align: center;
       color: #003366;
     }
-    .user-table {
+    table.user-table {
       width: 100%;
       border-collapse: collapse;
       margin-top: 20px;
-      background: rgba(255,255,255,0.8);
+      background: rgba(255,255,255,0.9);
+      font-size: 14px;
     }
-    .user-table th, .user-table td {
+    table.user-table th, table.user-table td {
       border: 1px solid #ccc;
       padding: 8px;
-      text-align: left;
+      text-align: center;
     }
-    .user-table th {
+    table.user-table th {
       background-color: #004a99;
       color: white;
     }
@@ -44,15 +46,75 @@
       border-radius: 6px;
       font-size: 15px;
       cursor: pointer;
+      margin: 4px;
     }
-    button:hover {
-      opacity: 0.9;
+    button:hover { opacity: 0.9; }
+
+    /* Toggle switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 20px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc;
+      transition: .3s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #004a99; }
+    input:checked + .slider:before { transform: translateX(18px); }
+
+    /* Add-user form */
+    .add-user {
+      background: rgba(255,255,255,0.8);
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .add-user input {
+      padding: 6px;
+      margin: 4px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
     }
   </style>
 </head>
 <body>
   <h2>Users Admin Panel</h2>
 
+  <!-- ✅ Add New User Section -->
+  <div class="add-user">
+    <h3>Add New User</h3>
+    <input type="text" id="newFirstName" placeholder="First Name">
+    <input type="text" id="newLastName" placeholder="Last Name">
+    <input type="text" id="newUsername" placeholder="Username (e.g. Jamie.Line)">
+    <input type="email" id="newEmail" placeholder="Email">
+    <input type="password" id="newPassword" placeholder="Password">
+    <select id="newEmployment">
+      <option value="Employed">Employed</option>
+      <option value="Self Employed">Self Employed</option>
+    </select>
+    <button id="addUserBtn">➕ Add User</button>
+  </div>
+
+  <!-- ✅ User Table -->
   <table class="user-table" id="usersTable">
     <thead>
       <tr>
@@ -79,8 +141,29 @@
   <script>
     const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
     const SAVE_URL = "https://mostlane-users.jamie-def.workers.dev/save";
-
     let usersData = [];
+
+    // Hash helper
+    async function hashPassword(password) {
+      const enc = new TextEncoder();
+      const data = enc.encode(password.trim());
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    }
+
+    function makeToggle(value) {
+      const checked = (value || "").toLowerCase() === "yes";
+      return `
+        <td>
+          <label class="switch">
+            <input type="checkbox" ${checked ? "checked" : ""}>
+            <span class="slider"></span>
+          </label>
+        </td>
+      `;
+    }
 
     async function loadUsers() {
       const res = await fetch(USERS_URL + '?v=' + Date.now());
@@ -93,15 +176,20 @@
         const row = document.createElement('tr');
         row.innerHTML = `
           <td>${user.Username}</td>
-          <td contenteditable="true">${user.Status}</td>
-          <td contenteditable="true">${user.FullAccess}</td>
-          <td contenteditable="true">${user.PurchaseOrders}</td>
-          <td contenteditable="true">${user.CheckInOut}</td>
-          <td contenteditable="true">${user.Holiday}</td>
-          <td contenteditable="true">${user.Forms}</td>
-          <td contenteditable="true">${user.Assets}</td>
-          <td contenteditable="true">${user.AddSite}</td>
-          <td contenteditable="true">${user.Compliance}</td>
+          <td>
+            <select>
+              <option value="Active" ${user.Status === "Active" ? "selected" : ""}>Active</option>
+              <option value="Not Active" ${user.Status === "Not Active" ? "selected" : ""}>Not Active</option>
+            </select>
+          </td>
+          ${makeToggle(user.FullAccess)}
+          ${makeToggle(user.PurchaseOrders)}
+          ${makeToggle(user.CheckInOut)}
+          ${makeToggle(user.Holiday)}
+          ${makeToggle(user.Forms)}
+          ${makeToggle(user.Assets)}
+          ${makeToggle(user.AddSite)}
+          ${makeToggle(user.Compliance)}
         `;
         tbody.appendChild(row);
       });
@@ -110,20 +198,20 @@
     async function saveUsers() {
       const rows = document.querySelectorAll('#usersTable tbody tr');
       rows.forEach((row, i) => {
-        const cells = row.querySelectorAll('td');
-        usersData[i].Status = cells[1].textContent.trim();
-        usersData[i].FullAccess = cells[2].textContent.trim();
-        usersData[i].PurchaseOrders = cells[3].textContent.trim();
-        usersData[i].CheckInOut = cells[4].textContent.trim();
-        usersData[i].Holiday = cells[5].textContent.trim();
-        usersData[i].Forms = cells[6].textContent.trim();
-        usersData[i].Assets = cells[7].textContent.trim();
-        usersData[i].AddSite = cells[8].textContent.trim();
-        usersData[i].Compliance = cells[9].textContent.trim();
+        const selects = row.querySelectorAll('select');
+        const switches = row.querySelectorAll('input[type="checkbox"]');
+        usersData[i].Status = selects[0].value;
+        usersData[i].FullAccess = switches[0].checked ? "Yes" : "No";
+        usersData[i].PurchaseOrders = switches[1].checked ? "Yes" : "No";
+        usersData[i].CheckInOut = switches[2].checked ? "Yes" : "No";
+        usersData[i].Holiday = switches[3].checked ? "Yes" : "No";
+        usersData[i].Forms = switches[4].checked ? "Yes" : "No";
+        usersData[i].Assets = switches[5].checked ? "Yes" : "No";
+        usersData[i].AddSite = switches[6].checked ? "Yes" : "No";
+        usersData[i].Compliance = switches[7].checked ? "Yes" : "No";
       });
 
       const payload = JSON.stringify({ Users: usersData });
-
       const res = await fetch(SAVE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -131,13 +219,68 @@
       });
 
       const result = await res.json();
-      const msg = result.ok ? "✅ Saved successfully!" : "❌ Failed to save.";
-      document.getElementById("saveStatus").textContent = msg;
+      document.getElementById("saveStatus").textContent = result.ok ? "✅ Saved successfully!" : "❌ Failed to save.";
+    }
+
+    async function addNewUser() {
+      const first = document.getElementById("newFirstName").value.trim();
+      const last = document.getElementById("newLastName").value.trim();
+      const username = document.getElementById("newUsername").value.trim();
+      const email = document.getElementById("newEmail").value.trim();
+      const password = document.getElementById("newPassword").value.trim();
+      const employment = document.getElementById("newEmployment").value;
+
+      if (!first || !last || !username || !password) {
+        alert("Please fill in all required fields.");
+        return;
+      }
+
+      const hashed = await hashPassword(password);
+
+      const newUser = {
+        EngineerNumber: (usersData.length + 1).toString(),
+        FirstName: first,
+        LastName: last,
+        Username: username,
+        Email: email,
+        HashedPassword: hashed,
+        VehicleAssigned: "",
+        EmploymentType: employment,
+        Status: "Active",
+        FullAccess: "No",
+        PurchaseOrders: "No",
+        CheckInOut: "No",
+        Holiday: "No",
+        Forms: "No",
+        Assets: "No",
+        AddSite: "No",
+        MyDocuments: "No",
+        Compliance: "No",
+        HoursDashboard: "No",
+        SharePointPath: ""
+      };
+
+      usersData.push(newUser);
+      await saveUsers();
+      await loadUsers();
+
+      document.getElementById("saveStatus").textContent = "✅ New user added & saved.";
+      document.getElementById("newFirstName").value = "";
+      document.getElementById("newLastName").value = "";
+      document.getElementById("newUsername").value = "";
+      document.getElementById("newEmail").value = "";
+      document.getElementById("newPassword").value = "";
     }
 
     document.getElementById("saveBtn").addEventListener("click", saveUsers);
+    document.getElementById("addUserBtn").addEventListener("click", addNewUser);
 
-    loadUsers();
+    // Restrict access – only Jamie.Line can load this page
+    if (sessionStorage.getItem("mostlaneUser") !== "Jamie.Line") {
+      document.body.innerHTML = "<h2 style='color:red;text-align:center;margin-top:50px;'>Access Denied</h2>";
+    } else {
+      loadUsers();
+    }
   </script>
 </body>
 </html>
