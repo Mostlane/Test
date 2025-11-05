@@ -10,122 +10,65 @@
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      margin: 0;
-      padding: 30px;
-      color: #1f2937;
+      margin: 0; padding: 30px; color: #1f2937;
     }
-    h2 {
-      text-align: center;
-      color: #003366;
-    }
+    h2 { text-align: center; color: #003366; }
     table.user-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-      background: rgba(255,255,255,0.9);
-      font-size: 14px;
+      width: 100%; border-collapse: collapse; margin-top: 20px;
+      background: rgba(255,255,255,0.9); font-size: 14px;
     }
     table.user-table th, table.user-table td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: center;
+      border: 1px solid #ccc; padding: 8px; text-align: center;
     }
-    table.user-table th {
-      background-color: #004a99;
-      color: white;
-    }
-    .controls {
-      margin-top: 15px;
-      text-align: center;
-    }
+    table.user-table th { background-color: #004a99; color: white; }
+    .controls { margin-top: 15px; text-align: center; }
     button {
-      background-color: #004a99;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-size: 15px;
-      cursor: pointer;
-      margin: 4px;
+      background-color: #004a99; color: white; border: none;
+      padding: 10px 20px; border-radius: 6px; font-size: 15px;
+      cursor: pointer; margin: 4px;
     }
     button:hover { opacity: 0.9; }
-
-    /* Toggle switch */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 38px;
-      height: 20px;
-    }
+    .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc;
-      transition: .3s;
-      border-radius: 20px;
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc; transition: .3s; border-radius: 20px;
     }
     .slider:before {
-      position: absolute;
-      content: "";
-      height: 16px;
-      width: 16px;
-      left: 2px;
-      bottom: 2px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
+      position: absolute; content: ""; height: 16px; width: 16px;
+      left: 2px; bottom: 2px; background-color: white;
+      transition: .3s; border-radius: 50%;
     }
     input:checked + .slider { background-color: #004a99; }
     input:checked + .slider:before { transform: translateX(18px); }
 
-    /* ✅ Modal styles */
+    /* Modal */
     .modal {
-      display: none;
-      position: fixed;
-      z-index: 999;
-      left: 0; top: 0;
-      width: 100%; height: 100%;
-      overflow-y: auto;
-      background-color: rgba(0,0,0,0.6);
+      display: none; position: fixed; z-index: 999;
+      left: 0; top: 0; width: 100%; height: 100%;
+      overflow-y: auto; background-color: rgba(0,0,0,0.6);
     }
     .modal-content {
-      background-color: #fff;
-      margin: 60px auto;
-      padding: 20px;
-      border-radius: 10px;
-      width: 90%;
-      max-width: 400px;
+      background-color: #fff; margin: 60px auto; padding: 20px;
+      border-radius: 10px; width: 90%; max-width: 400px;
       box-shadow: 0 0 15px rgba(0,0,0,0.2);
     }
     .modal-content input, .modal-content select {
-      width: 95%;
-      margin: 6px 0;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-      font-size: 14px;
+      width: 95%; margin: 6px 0; padding: 10px;
+      border: 1px solid #ccc; border-radius: 5px; font-size: 14px;
     }
-    .close {
-      float: right;
-      font-size: 24px;
-      font-weight: bold;
-      color: #555;
-      cursor: pointer;
-    }
+    .close { float: right; font-size: 24px; font-weight: bold; color: #555; cursor: pointer; }
     .close:hover { color: #000; }
   </style>
 </head>
 <body>
   <h2>Users Admin Panel</h2>
 
-  <!-- ✅ Button to open popup -->
   <div class="controls" style="text-align:right;">
     <button id="openAddUser">➕ Add New User</button>
   </div>
 
-  <!-- ✅ Hidden popup modal -->
+  <!-- Add User Popup -->
   <div id="addUserModal" class="modal">
     <div class="modal-content">
       <span class="close">&times;</span>
@@ -138,8 +81,7 @@
       <select id="newEmployment">
         <option value="Employed">Employed</option>
         <option value="Self Employed">Self Employed</option>
-      </select>
-      <br><br>
+      </select><br><br>
       <button id="addUserBtn">✅ Save User</button>
     </div>
   </div>
@@ -156,157 +98,99 @@
 
   <script>
     const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
-    const SAVE_URL = "https://mostlane-users.jamie-def.workers.dev/save";
+    const SAVE_URL  = "https://mostlane-users.jamie-def.workers.dev/save";
     const MAIN_HTML_URL = "https://mostlane.github.io/Test/main.html";
 
     let usersData = [];
     let buttonFields = [];
 
-    async function hashPassword(password) {
-      const enc = new TextEncoder();
-      const data = enc.encode(password.trim());
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    async function hashPassword(pw) {
+      const data = new TextEncoder().encode(pw.trim());
+      const buf = await crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+    }
+    const makeToggle = (v)=>`<label class="switch"><input type="checkbox" ${(v||"").toLowerCase()==="yes"?"checked":""}><span class="slider"></span></label>`;
+
+    async function loadButtonsFromMain(){
+      const html = await fetch(MAIN_HTML_URL+"?v="+Date.now()).then(r=>r.text());
+      const doc = new DOMParser().parseFromString(html,"text/html");
+      const buttons=[...doc.querySelectorAll("a.button")];
+      return buttons.map(b=>({id:b.id,label:b.textContent.trim()}));
     }
 
-    function makeToggle(value) {
-      const checked = (value || "").toLowerCase() === "yes";
-      return `
-        <label class="switch">
-          <input type="checkbox" ${checked ? "checked" : ""}>
-          <span class="slider"></span>
-        </label>
-      `;
-    }
-
-    async function loadButtonsFromMain() {
-      const html = await fetch(MAIN_HTML_URL + "?v=" + Date.now()).then(r => r.text());
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, "text/html");
-      const buttons = Array.from(doc.querySelectorAll("a.button"));
-      return buttons.map(btn => ({
-        id: btn.id,
-        label: btn.textContent.trim()
-      }));
-    }
-
-    async function loadUsers() {
-      // Load dynamic button list
+    async function loadUsers(){
       buttonFields = await loadButtonsFromMain();
-
-      // Load user data from KV
-      const res = await fetch(USERS_URL + "?v=" + Date.now());
+      const res = await fetch(USERS_URL+"?v="+Date.now());
       const data = await res.json();
       usersData = data.Users;
-
-      const headerRow = document.getElementById("headerRow");
-      headerRow.innerHTML = "<th>Username</th><th>Status</th>";
-      buttonFields.forEach(b => {
-        headerRow.innerHTML += `<th>${b.label}</th>`;
-      });
-
-      const tbody = document.querySelector("#usersTable tbody");
-      tbody.innerHTML = "";
-
-      usersData.forEach(user => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${user.Username}</td>
-          <td>
-            <select>
-              <option value="Active" ${user.Status === "Active" ? "selected" : ""}>Active</option>
-              <option value="Not Active" ${user.Status === "Not Active" ? "selected" : ""}>Not Active</option>
-            </select>
-          </td>
-        `;
-
-        buttonFields.forEach(field => {
-          const key = field.label.replace(/\s+/g, '');
-          const val = user[key] || "No";
-          row.innerHTML += `<td>${makeToggle(val)}</td>`;
+      const header = document.getElementById("headerRow");
+      header.innerHTML="<th>Username</th><th>Status</th><th>Full Access</th>";
+      buttonFields.forEach(b=>header.innerHTML+=`<th>${b.label}</th>`);
+      const tbody=document.querySelector("#usersTable tbody"); tbody.innerHTML="";
+      usersData.forEach(u=>{
+        const row=document.createElement("tr");
+        row.innerHTML=`<td>${u.Username}</td>
+          <td><select><option ${u.Status==="Active"?"selected":""}>Active</option>
+          <option ${u.Status==="Not Active"?"selected":""}>Not Active</option></select></td>
+          <td>${makeToggle(u.FullAccess)}</td>`;
+        buttonFields.forEach(f=>{
+          const key=f.label.replace(/\s+/g,"");
+          row.innerHTML+=`<td>${makeToggle(u[key])}</td>`;
         });
-
         tbody.appendChild(row);
       });
     }
 
-    async function saveUsers() {
-      const rows = document.querySelectorAll("#usersTable tbody tr");
-      rows.forEach((row, i) => {
-        const selects = row.querySelectorAll("select");
-        const switches = row.querySelectorAll("input[type='checkbox']");
-        usersData[i].Status = selects[0].value;
-
-        buttonFields.forEach((field, j) => {
-          const key = field.label.replace(/\s+/g, '');
-          usersData[i][key] = switches[j].checked ? "Yes" : "No";
+    async function saveUsers(){
+      const rows=document.querySelectorAll("#usersTable tbody tr");
+      rows.forEach((r,i)=>{
+        const selects=r.querySelectorAll("select");
+        const checks=r.querySelectorAll("input[type='checkbox']");
+        usersData[i].Status=selects[0].value;
+        usersData[i].FullAccess=checks[0].checked?"Yes":"No";
+        buttonFields.forEach((f,j)=>{
+          const key=f.label.replace(/\s+/g,"");
+          usersData[i][key]=checks[j+1].checked?"Yes":"No";
         });
       });
-
-      const payload = JSON.stringify({ Users: usersData });
-      const res = await fetch(SAVE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      });
-      const result = await res.json();
-      document.getElementById("saveStatus").textContent = result.ok ? "✅ Saved successfully!" : "❌ Failed to save.";
+      const res=await fetch(SAVE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({Users:usersData})});
+      const result=await res.json();
+      document.getElementById("saveStatus").textContent=result.ok?"✅ Saved successfully!":"❌ Save failed.";
     }
 
-    async function addNewUser() {
-      const first = document.getElementById("newFirstName").value.trim();
-      const last = document.getElementById("newLastName").value.trim();
-      const username = document.getElementById("newUsername").value.trim();
-      const email = document.getElementById("newEmail").value.trim();
-      const password = document.getElementById("newPassword").value.trim();
-      const employment = document.getElementById("newEmployment").value;
-
-      if (!first || !last || !username || !password) {
-        alert("Please fill in all required fields.");
-        return;
-      }
-
-      const hashed = await hashPassword(password);
-      const newUser = {
-        EngineerNumber: (usersData.length + 1).toString(),
-        FirstName: first, LastName: last, Username: username, Email: email,
-        HashedPassword: hashed, VehicleAssigned: "", EmploymentType: employment,
-        Status: "Active"
+    async function addNewUser(){
+      const f=n=>document.getElementById(n).value.trim();
+      if(!f("newFirstName")||!f("newLastName")||!f("newUsername")||!f("newPassword")){alert("Please fill all required fields.");return;}
+      const hashed=await hashPassword(f("newPassword"));
+      const newU={
+        EngineerNumber:(usersData.length+1).toString(),
+        FirstName:f("newFirstName"),LastName:f("newLastName"),
+        Username:f("newUsername"),Email:f("newEmail"),
+        HashedPassword:hashed,VehicleAssigned:"",
+        EmploymentType:f("newEmployment"),Status:"Active",
+        FullAccess:"No"
       };
-
-      buttonFields.forEach(field => {
-        const key = field.label.replace(/\s+/g, '');
-        newUser[key] = "No";
-      });
-
-      usersData.push(newUser);
-      await saveUsers();
-      await loadUsers();
-
-      document.getElementById("saveStatus").textContent = "✅ New user added & saved.";
-      ["newFirstName","newLastName","newUsername","newEmail","newPassword"].forEach(id => document.getElementById(id).value = "");
-      document.getElementById("addUserModal").style.display = "none";
-      document.body.style.overflow = "auto";
+      buttonFields.forEach(fld=>{newU[fld.label.replace(/\s+/g,"")]="No";});
+      usersData.push(newU);
+      await saveUsers(); await loadUsers();
+      ["newFirstName","newLastName","newUsername","newEmail","newPassword"].forEach(id=>document.getElementById(id).value="");
+      document.getElementById("addUserModal").style.display="none"; document.body.style.overflow="auto";
     }
 
-    // Modal logic
-    const modal = document.getElementById("addUserModal");
-    const openBtn = document.getElementById("openAddUser");
-    const closeBtn = document.querySelector(".close");
+    // Modal handling
+    const modal=document.getElementById("addUserModal"),
+          openBtn=document.getElementById("openAddUser"),
+          closeBtn=document.querySelector(".close");
+    openBtn.onclick=()=>{modal.style.display="block";document.body.style.overflow="hidden";};
+    closeBtn.onclick=()=>{modal.style.display="none";document.body.style.overflow="auto";};
+    window.onclick=e=>{if(e.target===modal){modal.style.display="none";document.body.style.overflow="auto";}};
+    document.getElementById("saveBtn").onclick=saveUsers;
+    document.getElementById("addUserBtn").onclick=addNewUser;
 
-    openBtn.onclick = () => { modal.style.display = "block"; document.body.style.overflow = "hidden"; };
-    closeBtn.onclick = () => { modal.style.display = "none"; document.body.style.overflow = "auto"; };
-    window.onclick = (e) => { if (e.target === modal) { modal.style.display = "none"; document.body.style.overflow = "auto"; } };
-
-    document.getElementById("saveBtn").addEventListener("click", saveUsers);
-    document.getElementById("addUserBtn").addEventListener("click", addNewUser);
-
-    // Restrict access – only Jamie.Line
-    if (sessionStorage.getItem("mostlaneUser") !== "Jamie.Line") {
-      document.body.innerHTML = "<h2 style='color:red;text-align:center;margin-top:50px;'>Access Denied</h2>";
-    } else {
-      loadUsers();
-    }
+    // Restrict access
+    if(sessionStorage.getItem("mostlaneUser")!=="Jamie.Line"){
+      document.body.innerHTML="<h2 style='color:red;text-align:center;margin-top:50px;'>Access Denied</h2>";
+    }else{loadUsers();}
   </script>
 </body>
 </html>
