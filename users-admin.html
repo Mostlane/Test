@@ -2,206 +2,312 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>User Admin – Mostlane Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User Administration – Mostlane Portal</title>
   <script src="auth.js"></script>
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      margin: 0; padding: 30px; color: #1f2937;
+      margin: 0; padding: 20px;
     }
-    h2 { text-align: center; color: #003366; }
-    table.user-table {
-      width: 100%; border-collapse: collapse; margin-top: 20px;
-      background: rgba(255,255,255,0.9); font-size: 14px;
+    h1 { text-align: center; color: #003366; }
+    .user-list {
+      background: rgba(255,255,255,0.7);
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 800px;
+      margin: 20px auto;
+      overflow-y: auto;
     }
-    table.user-table th, table.user-table td {
-      border: 1px solid #ccc; padding: 8px; text-align: center;
+    .user-card {
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      padding: 10px 15px;
+      background: white;
     }
-    table.user-table th { background-color: #004a99; color: white; }
-    .controls { margin-top: 15px; text-align: center; }
-    button {
-      background-color: #004a99; color: white; border: none;
-      padding: 10px 20px; border-radius: 6px; font-size: 15px;
-      cursor: pointer; margin: 4px;
+    .user-header {
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #004a99;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    button:hover { opacity: 0.9; }
-
-    /* Toggle */
-    .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-group { margin: 5px 0 8px 15px; }
+    .toggle {
+      display: flex;
+      align-items: center;
+      margin: 6px 0;
+    }
+    .toggle label {
+      flex: 1;
+      font-size: 14px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+      margin-left: 10px;
+    }
+    .switch input { display: none; }
     .slider {
-      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc; transition: .3s; border-radius: 20px;
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc;
+      border-radius: 24px;
+      transition: .4s;
     }
     .slider:before {
-      position: absolute; content: ""; height: 16px; width: 16px;
-      left: 2px; bottom: 2px; background-color: white;
-      transition: .3s; border-radius: 50%;
+      position: absolute;
+      content: "";
+      height: 18px; width: 18px;
+      left: 3px; bottom: 3px;
+      background-color: white;
+      border-radius: 50%;
+      transition: .4s;
     }
     input:checked + .slider { background-color: #004a99; }
-    input:checked + .slider:before { transform: translateX(18px); }
-
-    /* Modal */
-    .modal {
-      display: none; position: fixed; z-index: 999;
-      left: 0; top: 0; width: 100%; height: 100%;
-      overflow-y: auto; background-color: rgba(0,0,0,0.6);
+    input:checked + .slider:before { transform: translateX(20px); }
+    button {
+      background: #004a99;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
     }
-    .modal-content {
-      background-color: #fff; margin: 60px auto; padding: 20px;
-      border-radius: 10px; width: 90%; max-width: 400px;
-      box-shadow: 0 0 15px rgba(0,0,0,0.2);
+    button:hover { background: #0066cc; }
+    #addUserPopup {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
     }
-    .modal-content input, .modal-content select {
-      width: 95%; margin: 6px 0; padding: 10px;
-      border: 1px solid #ccc; border-radius: 5px; font-size: 14px;
+    #addUserForm {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 400px;
+      max-height: 80vh;
+      overflow-y: auto;
     }
-    .close { float: right; font-size: 24px; font-weight: bold; color: #555; cursor: pointer; }
-    .close:hover { color: #000; }
+    input[type=text], input[type=email], input[type=password] {
+      width: 100%;
+      margin: 5px 0 10px;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    .close-btn {
+      float: right;
+      font-weight: bold;
+      cursor: pointer;
+      color: #999;
+    }
   </style>
 </head>
 <body>
-  <h2>Users Admin Panel</h2>
-
-  <div class="controls" style="text-align:right;">
-    <button id="openAddUser">➕ Add New User</button>
+  <h1>Manage Users</h1>
+  <div class="user-list" id="userList">Loading users...</div>
+  <div style="text-align:center;">
+    <button id="addUserBtn">➕ Add New User</button>
+    <button id="saveBtn">💾 Save Changes</button>
   </div>
 
-  <!-- Add User Popup -->
-  <div id="addUserModal" class="modal">
-    <div class="modal-content">
-      <span class="close">&times;</span>
+  <!-- Popup form -->
+  <div id="addUserPopup">
+    <div id="addUserForm">
+      <span class="close-btn" id="closePopup">&times;</span>
       <h3>Add New User</h3>
-      <input type="text" id="newFirstName" placeholder="First Name" />
-      <input type="text" id="newLastName" placeholder="Last Name" />
-      <input type="text" id="newUsername" placeholder="Username (e.g. Jamie.Line)" />
-      <input type="email" id="newEmail" placeholder="Email" />
-      <input type="password" id="newPassword" placeholder="Password" />
-      <input type="url" id="newSharePointPath" placeholder="SharePoint URL" />
-      <select id="newEmployment">
-        <option value="Employed">Employed</option>
-        <option value="Self Employed">Self Employed</option>
-      </select><br><br>
-      <button id="addUserBtn">✅ Save User</button>
+      <input type="text" id="firstName" placeholder="First Name" required />
+      <input type="text" id="lastName" placeholder="Last Name" required />
+      <input type="email" id="email" placeholder="Email" />
+      <input type="text" id="username" placeholder="Username (e.g. John.Doe)" required />
+      <input type="password" id="password" placeholder="Password" required />
+      <input type="text" id="vehicle" placeholder="Vehicle Assigned (optional)" />
+      <input type="text" id="employmentType" placeholder="Employment Type (Employed/Self Employed)" />
+      <input type="text" id="sharepoint" placeholder="SharePoint Path URL" />
+      <button id="createUserBtn">Create User</button>
     </div>
   </div>
 
-  <table class="user-table" id="usersTable">
-    <thead><tr id="headerRow"></tr></thead>
-    <tbody></tbody>
-  </table>
-
-  <div class="controls">
-    <button id="saveBtn">💾 Save Changes to KV</button>
-    <p id="saveStatus" style="margin-top:10px;font-weight:bold;color:#004a99;"></p>
-  </div>
-
   <script>
-    const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
-    const SAVE_URL  = "https://mostlane-users.jamie-def.workers.dev/save";
-    const MAIN_HTML_URL = "https://mostlane.github.io/Test/main.html";
-
-    let usersData = [];
-    let buttonFields = [];
-
-    async function hashPassword(pw) {
-      const data = new TextEncoder().encode(pw.trim());
-      const buf = await crypto.subtle.digest("SHA-256", data);
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
-    }
-    const makeToggle = (v)=>`<label class="switch"><input type="checkbox" ${(v||"").toLowerCase()==="yes"?"checked":""}><span class="slider"></span></label>`;
-
-    async function loadButtonsFromMain(){
-      const html = await fetch(MAIN_HTML_URL+"?v="+Date.now()).then(r=>r.text());
-      const doc = new DOMParser().parseFromString(html,"text/html");
-      const buttons=[...doc.querySelectorAll("a.button")];
-      return buttons.map(b=>({id:b.id,label:b.textContent.trim()}));
-    }
-
-    async function loadUsers(){
-      buttonFields = await loadButtonsFromMain();
-      const res = await fetch(USERS_URL+"?v="+Date.now());
-      const data = await res.json();
-      usersData = data.Users;
-      const header = document.getElementById("headerRow");
-      header.innerHTML="<th>Engineer #</th><th>Username</th><th>Status</th><th>Full Access</th>";
-      buttonFields.forEach(b=>header.innerHTML+=`<th>${b.label}</th>`);
-      const tbody=document.querySelector("#usersTable tbody"); tbody.innerHTML="";
-      usersData.forEach(u=>{
-        const row=document.createElement("tr");
-        row.innerHTML=`<td>${u.EngineerNumber || ''}</td>
-          <td>${u.Username}</td>
-          <td><select><option ${u.Status==="Active"?"selected":""}>Active</option>
-          <option ${u.Status==="Not Active"?"selected":""}>Not Active</option></select></td>
-          <td>${makeToggle(u.FullAccess)}</td>`;
-        buttonFields.forEach(f=>{
-          const key=f.label.replace(/\s+/g,"");
-          row.innerHTML+=`<td>${makeToggle(u[key])}</td>`;
-        });
-        tbody.appendChild(row);
-      });
-    }
-
-    async function saveUsers(){
-      const rows=document.querySelectorAll("#usersTable tbody tr");
-      rows.forEach((r,i)=>{
-        const selects=r.querySelectorAll("select");
-        const checks=r.querySelectorAll("input[type='checkbox']");
-        usersData[i].Status=selects[0].value;
-        usersData[i].FullAccess=checks[0].checked?"Yes":"No";
-        buttonFields.forEach((f,j)=>{
-          const key=f.label.replace(/\s+/g,"");
-          usersData[i][key]=checks[j+1].checked?"Yes":"No";
-        });
-      });
-      const res=await fetch(SAVE_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({Users:usersData})});
-      const result=await res.json();
-      document.getElementById("saveStatus").textContent=result.ok?"✅ Saved successfully!":"❌ Save failed.";
-    }
-
-    async function addNewUser(){
-      const f=n=>document.getElementById(n).value.trim();
-      if(!f("newFirstName")||!f("newLastName")||!f("newUsername")||!f("newPassword")){alert("Please fill all required fields.");return;}
-      const hashed=await hashPassword(f("newPassword"));
-
-      // Automatically allocate next engineer number
-      const currentNumbers = usersData
-        .map(u => parseInt(u.EngineerNumber || 0))
-        .filter(n => !isNaN(n));
-      const nextNumber = Math.max(0, ...currentNumbers) + 1;
-
-      const newU={
-        EngineerNumber: nextNumber.toString(),
-        FirstName:f("newFirstName"),LastName:f("newLastName"),
-        Username:f("newUsername"),Email:f("newEmail"),
-        HashedPassword:hashed,VehicleAssigned:"",
-        EmploymentType:f("newEmployment"),Status:"Active",
-        FullAccess:"No", SharePointPath:f("newSharePointPath")
-      };
-      buttonFields.forEach(fld=>{newU[fld.label.replace(/\s+/g,"")]="No";});
-      usersData.push(newU);
-      await saveUsers(); await loadUsers();
-      ["newFirstName","newLastName","newUsername","newEmail","newPassword","newSharePointPath"].forEach(id=>document.getElementById(id).value="");
-      document.getElementById("addUserModal").style.display="none"; document.body.style.overflow="auto";
-    }
-
-    // Modal handling
-    const modal=document.getElementById("addUserModal"),
-          openBtn=document.getElementById("openAddUser"),
-          closeBtn=document.querySelector(".close");
-    openBtn.onclick=()=>{modal.style.display="block";document.body.style.overflow="hidden";};
-    closeBtn.onclick=()=>{modal.style.display="none";document.body.style.overflow="auto";};
-    window.onclick=e=>{if(e.target===modal){modal.style.display="none";document.body.style.overflow="auto";}};
-    document.getElementById("saveBtn").onclick=saveUsers;
-    document.getElementById("addUserBtn").onclick=addNewUser;
+    const workerURL = "https://mostlane-users.jamie-def.workers.dev";
+    const currentUser = sessionStorage.getItem("mostlaneUser");
 
     // Restrict access
-    if(sessionStorage.getItem("mostlaneUser")!=="Jamie.Line"){
-      document.body.innerHTML="<h2 style='color:red;text-align:center;margin-top:50px;'>Access Denied</h2>";
-    }else{loadUsers();}
+    if (!currentUser) window.location.href = "login.html";
+
+    async function fetchUsers() {
+      const res = await fetch(workerURL + "/users?v=" + Date.now());
+      const data = await res.json();
+      return data.Users || [];
+    }
+
+    async function scanPortalStructure() {
+      const structure = [];
+      const parser = new DOMParser();
+
+      const mainRes = await fetch("main.html?v=" + Date.now());
+      const mainText = await mainRes.text();
+      const mainDoc = parser.parseFromString(mainText, "text/html");
+      const buttons = [...mainDoc.querySelectorAll("a.button")];
+
+      for (const btn of buttons) {
+        const entry = {
+          id: btn.id,
+          label: btn.textContent.trim(),
+          path: btn.getAttribute("href"),
+          subpages: []
+        };
+        // Try to scan sub-menus
+        if (entry.path && entry.path.endsWith(".html") && !entry.path.includes("login.html")) {
+          try {
+            const subRes = await fetch(entry.path);
+            const subText = await subRes.text();
+            const subDoc = parser.parseFromString(subText, "text/html");
+            const subButtons = [...subDoc.querySelectorAll("a.button")];
+            entry.subpages = subButtons.map(s => ({
+              id: s.id,
+              label: s.textContent.trim(),
+              path: s.getAttribute("href")
+            }));
+          } catch (e) {
+            console.warn("No subpage for", entry.path);
+          }
+        }
+        structure.push(entry);
+      }
+      return structure;
+    }
+
+    function createToggle(id, label, checked, indent=false) {
+      const div = document.createElement("div");
+      div.className = "toggle";
+      if (indent) div.style.marginLeft = "25px";
+      div.innerHTML = `
+        <label>${label}</label>
+        <label class="switch">
+          <input type="checkbox" id="${id}" ${checked ? "checked" : ""}>
+          <span class="slider"></span>
+        </label>
+      `;
+      return div;
+    }
+
+    async function buildUI() {
+      const [users, structure] = await Promise.all([fetchUsers(), scanPortalStructure()]);
+      const list = document.getElementById("userList");
+      list.innerHTML = "";
+
+      users.forEach(u => {
+        const card = document.createElement("div");
+        card.className = "user-card";
+
+        const header = document.createElement("div");
+        header.className = "user-header";
+        header.innerHTML = `<span>${u.EngineerNumber ? ("#" + u.EngineerNumber + " – ") : ""}${u.FirstName} ${u.LastName}</span>`;
+        const faToggle = createToggle(`fa_${u.Username}`, "Full Access", (u.FullAccess||"").toLowerCase()==="yes");
+        header.appendChild(faToggle);
+        card.appendChild(header);
+
+        const tg = document.createElement("div");
+        tg.className = "toggle-group";
+
+        structure.forEach(page => {
+          const t = createToggle(`${u.Username}_${page.id}`, page.label, (u[page.id]||"").toLowerCase()==="yes");
+          tg.appendChild(t);
+          if (page.subpages.length) {
+            page.subpages.forEach(sp => {
+              const st = createToggle(`${u.Username}_${sp.id}`, sp.label, (u[sp.id]||"").toLowerCase()==="yes", true);
+              tg.appendChild(st);
+            });
+          }
+        });
+
+        card.appendChild(tg);
+        list.appendChild(card);
+      });
+    }
+
+    async function saveChanges() {
+      const res = await fetch(workerURL + "/users?v=" + Date.now());
+      const data = await res.json();
+      const users = data.Users;
+
+      users.forEach(u => {
+        u.FullAccess = document.getElementById(`fa_${u.Username}`)?.checked ? "Yes" : "No";
+        document.querySelectorAll(`[id^="${u.Username}_"]`).forEach(chk => {
+          const key = chk.id.split("_")[1];
+          u[key] = chk.checked ? "Yes" : "No";
+        });
+      });
+
+      await fetch(workerURL + "/update-users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Users: users })
+      });
+
+      alert("✅ Changes saved successfully!");
+    }
+
+    document.getElementById("saveBtn").addEventListener("click", saveChanges);
+
+    // Add new user popup
+    const popup = document.getElementById("addUserPopup");
+    document.getElementById("addUserBtn").onclick = () => popup.style.display = "flex";
+    document.getElementById("closePopup").onclick = () => popup.style.display = "none";
+
+    document.getElementById("createUserBtn").addEventListener("click", async () => {
+      const res = await fetch(workerURL + "/users?v=" + Date.now());
+      const data = await res.json();
+      const users = data.Users;
+
+      const enc = new TextEncoder();
+      const pw = document.getElementById("password").value;
+      const hashBuffer = await crypto.subtle.digest("SHA-256", enc.encode(pw));
+      const hashedPassword = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+
+      const newEngineerNumber = String(users.length + 1);
+      const newUser = {
+        EngineerNumber: newEngineerNumber,
+        FirstName: document.getElementById("firstName").value,
+        LastName: document.getElementById("lastName").value,
+        Username: document.getElementById("username").value,
+        Email: document.getElementById("email").value,
+        HashedPassword: hashedPassword,
+        VehicleAssigned: document.getElementById("vehicle").value,
+        EmploymentType: document.getElementById("employmentType").value,
+        Status: "Active",
+        FullAccess: "No",
+        SharePointPath: document.getElementById("sharepoint").value
+      };
+
+      users.push(newUser);
+      await fetch(workerURL + "/update-users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Users: users })
+      });
+
+      alert("✅ User added!");
+      popup.style.display = "none";
+      buildUI();
+    });
+
+    buildUI();
   </script>
 </body>
 </html>
