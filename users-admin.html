@@ -231,10 +231,12 @@ const PORTAL_BASE = "https://portal.mostlane-portal.com/";
 (function guard(){
   const u = sessionStorage.getItem("mostlaneUser");
   if (u !== "Jamie.Line") {
-    document.getElementById('guardMsg').style.display = 'block';
-    document.getElementById('guardMsg').textContent =
-      "Access restricted. You must be logged in as Jamie.Line to view Users Admin.";
-    setTimeout(()=>window.location.href="main.html", 1400);
+    const g = document.getElementById('guardMsg');
+    if (g) {
+      g.style.display = 'block';
+      g.textContent = "Access restricted. You must be logged in as Jamie.Line to view Users Admin.";
+    }
+    setTimeout(()=>window.location.href="main.html", 1200);
   }
 })();
 
@@ -246,10 +248,12 @@ let FULL_PERM_KEY = "FullAccess";
 /** UI Helpers */
 const $ = sel => document.querySelector(sel);
 function showLoading(on=true){
-  $('#status').style.display = on ? 'flex' : 'none';
+  const s = $('#status'); if (!s) return;
+  s.style.display = on ? 'flex' : 'none';
+  if (on) s.innerHTML = `<div class="dot"></div><div class="dot"></div><div class="dot"></div><span>Working…</span>`;
 }
-function toastOK(msg){ $('#status').innerHTML = `<span class="ok">${msg}</span>`; $('#status').style.display='block'; setTimeout(()=>$('#status').style.display='none',1500); }
-function toastERR(msg){ $('#status').innerHTML = `<span class="danger">${msg}</span>`; $('#status').style.display='block'; }
+function toastOK(msg){ const s=$('#status'); if(!s) return; s.innerHTML = `<span class="ok">${msg}</span>`; s.style.display='block'; setTimeout(()=>s.style.display='none',1500); }
+function toastERR(msg){ const s=$('#status'); if(!s) return; s.innerHTML = `<span class="danger">${msg}</span>`; s.style.display='block'; }
 
 /** Password hash */
 async function sha256(text){
@@ -258,20 +262,40 @@ async function sha256(text){
   return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-/** Fetch Users */
-async function loadUsers(){
-  const r = await fetch(WORKER_GET + "?v=" + Date.now());
-  if(!r.ok) throw new Error("Failed to load users");
-  const data = await r.json();
-  USERS = (data && data.Users) ? data.Users : [];
+/** Normalize users from any payload shape */
+function normalizeUsersPayload(data){
+  if (!data) return [];
+  if (Array.isArray(data)) return data;                 // [ {...}, {...} ]
+  if (data.Users && Array.isArray(data.Users)) return data.Users;           // { Users: [...] }
+  if (data.data && Array.isArray(data.data.Users)) return data.data.Users;  // { data:{ Users:[...] } }
+  if (data.users && Array.isArray(data.users)) return data.users;           // { users:[...] }
+  return [];
 }
 
-/** Crawl portal to find .html pages (same-origin), then collect <a>/<button> ids */
+/** Fetch Users (robust) */
+async function loadUsers(){
+  const r = await fetch(WORKER_GET + "?v=" + Date.now(), { cache: "no-store" });
+  if(!r.ok) throw new Error("Failed to load users ("+r.status+")");
+  const data = await r.json();
+  const arr = normalizeUsersPayload(data);
+  USERS = Array.isArray(arr) ? arr : [];
+  // If still empty, surface a clear message
+  if (USERS.length === 0) {
+    const c = $('#usersContainer');
+    if (c) c.innerHTML = `<div class="user-card"><div class="hint">No users found from Worker. Check your Worker GET JSON shape and KV key "Users".</div></div>`;
+  }
+}
+
+/** Crawl portal to find .html pages (same-origin preferred), then collect <a>/<button> ids */
 async function discoverButtons(){
-  // start with main.html
+  // Always include known keys your main page already expects
+  ["checkinBtn","holidayBtn","purchaseBtn","assetsBtn","my-documents-btn","weeklyBtn","formsBtn","complianceBtn","hours-dashboard-btn","poMenuBtn","usersAdminBtn"].forEach(id=>BUTTON_IDS.add(id));
+
+  // Try to crawl starting at main.html on the portal domain
   const visited = new Set();
   const queue = [ "main.html" ];
   const pageHrefs = new Set(["main.html"]);
+  const ORIGIN = new URL(PORTAL_BASE).origin;
 
   async function fetchPage(rel){
     const url = new URL(rel, PORTAL_BASE).toString();
@@ -283,17 +307,14 @@ async function discoverButtons(){
       const html = await res.text();
       // collect ids from <a> and <button>
       const ids = Array.from(html.matchAll(/<(a|button)\b[^>]*\sid\s*=\s*["']([^"']+)["']/gi)).map(m=>m[2].trim());
-      ids.forEach(id => {
-        // don't include empty or generic items
-        if(id && id.length < 120) BUTTON_IDS.add(id);
-      });
-      // crawl more links within same origin, limit to .html
+      ids.forEach(id => { if(id && id.length < 120) BUTTON_IDS.add(id); });
+      // follow links within same origin ending with .html
       const links = Array.from(html.matchAll(/\shref\s*=\s*["']([^"']+)["']/gi)).map(m=>m[1]);
       links.forEach(href=>{
         try{
           const u = new URL(href, PORTAL_BASE);
-          if(u.origin === new URL(PORTAL_BASE).origin && u.pathname.endsWith(".html")){
-            const relPath = u.pathname.split("/").pop(); // only file
+          if(u.origin === ORIGIN && u.pathname.endsWith(".html")){
+            const relPath = u.pathname.split("/").pop();
             if(!pageHrefs.has(relPath)) {
               pageHrefs.add(relPath);
               queue.push(relPath);
@@ -301,10 +322,11 @@ async function discoverButtons(){
           }
         }catch(e){}
       });
-    }catch(e){ /* ignore CORS errors silently */ }
+    }catch(e){
+      // Ignore CORS/network issues; we still keep defaults + anything we managed to read
+    }
   }
 
-  // breadth-limited crawl
   const LIMIT = 40;
   let steps = 0;
   while(queue.length && steps<LIMIT){
@@ -312,16 +334,15 @@ async function discoverButtons(){
     await fetchPage(next);
     steps++;
   }
-
-  // Always include hard-known keys your main page logic already expects
-  ["checkinBtn","holidayBtn","purchaseBtn","assetsBtn","my-documents-btn","weeklyBtn","formsBtn","complianceBtn","hours-dashboard-btn","poMenuBtn","usersAdminBtn"].forEach(id=>BUTTON_IDS.add(id));
 }
 
 /** Render Users */
 function render(){
   const box = $('#usersContainer');
+  if (!box) return;
+  if (!USERS || USERS.length === 0) return; // loadUsers prints a hint already when empty
+
   box.innerHTML = "";
-  // Sort by EngineerNumber (numeric if possible)
   USERS.sort((a,b)=> (parseInt(a.EngineerNumber||0)||0) - (parseInt(b.EngineerNumber||0)||0));
   USERS.forEach((u, idx)=>{
     const card = document.createElement('div');
@@ -330,7 +351,7 @@ function render(){
 
     const name = `${u.FirstName||""} ${u.LastName||""}`.trim() || u.Username || '(No name)';
     const eng = u.EngineerNumber || "";
-    const status = (u.Status||"").toLowerCase() || "active";
+    const status = (u.Status||"Active").toLowerCase();
     const full = (u[FULL_PERM_KEY]||"No").toString().toLowerCase() === "yes";
 
     card.innerHTML = `
@@ -348,51 +369,22 @@ function render(){
         </div>
       </div>
       <div class="grid">
-        <div class="field">
-          <label>First Name</label>
-          <input data-k="FirstName" value="${u.FirstName||''}">
-        </div>
-        <div class="field">
-          <label>Last Name</label>
-          <input data-k="LastName" value="${u.LastName||''}">
-        </div>
-        <div class="field">
-          <label>Username</label>
-          <input data-k="Username" value="${u.Username||''}">
-        </div>
-        <div class="field">
-          <label>Email</label>
-          <input data-k="Email" type="email" value="${u.Email||''}">
-        </div>
-        <div class="field">
-          <label>Phone Number</label>
-          <input data-k="PhoneNumber" value="${u.PhoneNumber||''}">
-        </div>
-        <div class="field">
-          <label>Hourly Rate (£)</label>
-          <input data-k="HourlyRate" type="number" step="0.01" value="${u.HourlyRate||''}">
-        </div>
-        <div class="field">
-          <label>Engineer Number</label>
-          <input data-k="EngineerNumber" value="${u.EngineerNumber||''}">
-        </div>
-        <div class="field">
-          <label>Employment Type</label>
+        <div class="field"><label>First Name</label><input data-k="FirstName" value="${u.FirstName||''}"></div>
+        <div class="field"><label>Last Name</label><input data-k="LastName" value="${u.LastName||''}"></div>
+        <div class="field"><label>Username</label><input data-k="Username" value="${u.Username||''}"></div>
+        <div class="field"><label>Email</label><input data-k="Email" type="email" value="${u.Email||''}"></div>
+        <div class="field"><label>Phone Number</label><input data-k="PhoneNumber" value="${u.PhoneNumber||''}"></div>
+        <div class="field"><label>Hourly Rate (£)</label><input data-k="HourlyRate" type="number" step="0.01" value="${u.HourlyRate||''}"></div>
+        <div class="field"><label>Engineer Number</label><input data-k="EngineerNumber" value="${u.EngineerNumber||''}"></div>
+        <div class="field"><label>Employment Type</label>
           <select data-k="EmploymentType">
             <option ${u.EmploymentType==='Employed'?'selected':''}>Employed</option>
             <option ${u.EmploymentType==='Self Employed'?'selected':''}>Self Employed</option>
           </select>
         </div>
-        <div class="field">
-          <label>Vehicle Assigned</label>
-          <input data-k="VehicleAssigned" value="${u.VehicleAssigned||''}">
-        </div>
-        <div class="field" style="grid-column:1/-1;">
-          <label>SharePoint Path</label>
-          <input data-k="SharePointPath" value="${u.SharePointPath||''}">
-        </div>
-        <div class="field">
-          <label>Status</label>
+        <div class="field"><label>Vehicle Assigned</label><input data-k="VehicleAssigned" value="${u.VehicleAssigned||''}"></div>
+        <div class="field" style="grid-column:1/-1;"><label>SharePoint Path</label><input data-k="SharePointPath" value="${u.SharePointPath||''}"></div>
+        <div class="field"><label>Status</label>
           <select data-k="Status">
             <option ${ (u.Status||'').toLowerCase()==='active' ? 'selected':'' }>Active</option>
             <option ${ (u.Status||'').toLowerCase()==='not active' ? 'selected':'' }>Not Active</option>
@@ -402,10 +394,7 @@ function render(){
           <label>Full Access</label>
           <div class="perm" style="justify-content:flex-start; gap:12px;">
             <span class="name">Enabled</span>
-            <label class="toggle">
-              <input data-k="${FULL_PERM_KEY}" type="checkbox" ${full?'checked':''}>
-              <span class="slider"></span>
-            </label>
+            <label class="toggle"><input data-k="${FULL_PERM_KEY}" type="checkbox" ${full?'checked':''}><span class="slider"></span></label>
           </div>
           <div class="hint">When Full Access is ON, all buttons are shown (including Users Admin).</div>
         </div>
@@ -438,31 +427,26 @@ function render(){
 
 /** Save all changes with merge */
 async function saveAll(){
-  // Build payload
   const out = { Users: [] };
   document.querySelectorAll('.user-card').forEach(card=>{
     const idx = parseInt(card.dataset.index,10);
     const src = USERS[idx] || {};
-    const obj = { ...src }; // start from existing (so we don't drop unrendered fields)
+    const obj = { ...src }; // preserve fields not shown
 
     // profile fields
     card.querySelectorAll('[data-k]').forEach(inp=>{
       const key = inp.getAttribute('data-k');
-      let val = (inp.value||'').trim();
-      if(key === FULL_PERM_KEY){
-        val = (inp.checked ? "Yes" : "No");
-      }
-      if(key === "__SetPassword"){
-        // handled after
-      }else{
-        obj[key] = val;
+      if (key === "__SetPassword") return;
+      if (key === FULL_PERM_KEY) {
+        obj[key] = inp.checked ? "Yes" : "No";
+      } else {
+        obj[key] = (inp.value||'').trim();
       }
     });
 
     // password hashing if provided
     const pass = card.querySelector('[data-k="__SetPassword"]')?.value || "";
     if(pass.trim()){
-      // store to HashedPassword
       obj.HashedPassword = ""; // placeholder until hashed
       obj.__PendingPassword = pass.trim();
     }
@@ -485,7 +469,6 @@ async function saveAll(){
     }
   }
 
-  // Merge save
   const res = await fetch(WORKER_SAVE, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -498,15 +481,14 @@ async function saveAll(){
 }
 
 /** Add user modal helpers */
-function openAdd(){ $('#addModal').classList.add('open'); }
-function closeAdd(){ $('#addModal').classList.remove('open'); }
+function openAdd(){ const m=$('#addModal'); if(m) m.classList.add('open'); }
+function closeAdd(){ const m=$('#addModal'); if(m) m.classList.remove('open'); }
 
 function nextEngineerNumber(){
   const nums = USERS.map(u=>parseInt(u.EngineerNumber||0,10)).filter(n=>!isNaN(n));
   const max = nums.length ? Math.max(...nums) : 0;
   return String(max + 1);
 }
-
 function autosuggestUsername(first,last){
   const f = (first||"").trim().replace(/\s+/g,'');
   const l = (last||"").trim().replace(/\s+/g,'');
@@ -514,8 +496,8 @@ function autosuggestUsername(first,last){
   return `${f}.${l}`;
 }
 
-/** Event wiring */
-document.getElementById('addBtn').addEventListener('click', ()=>{
+/** Events */
+document.getElementById('addBtn')?.addEventListener('click', ()=>{
   $('#nu_eng').value = nextEngineerNumber();
   $('#nu_first').value = ""; $('#nu_last').value = "";
   $('#nu_user').value = ""; $('#nu_email').value = "";
@@ -525,15 +507,11 @@ document.getElementById('addBtn').addEventListener('click', ()=>{
   $('#nu_msg').textContent = "";
   openAdd();
 });
-document.getElementById('closeAdd').addEventListener('click', closeAdd);
-$('#nu_first').addEventListener('input', ()=> {
-  $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value);
-});
-$('#nu_last').addEventListener('input', ()=> {
-  $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value);
-});
-document.getElementById('nu_create').addEventListener('click', async ()=>{
-  const msg = $('#nu_msg');
+document.getElementById('closeAdd')?.addEventListener('click', closeAdd);
+$('#nu_first')?.addEventListener('input', ()=> $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value));
+$('#nu_last')?.addEventListener('input',  ()=> $('#nu_user').value = autosuggestUsername($('#nu_first').value, $('#nu_last').value));
+document.getElementById('nu_create')?.addEventListener('click', async ()=>{
+  const msg = $('#nu_msg'); if(!msg) return;
   msg.textContent = "";
   const eng = $('#nu_eng').value.trim();
   const emp = $('#nu_emp').value.trim();
@@ -553,7 +531,6 @@ document.getElementById('nu_create').addEventListener('click', async ()=>{
   }
   const hashed = pass ? await sha256(pass) : "";
 
-  // New user object with safe defaults
   const nu = {
     EngineerNumber: eng,
     FirstName: first,
@@ -569,8 +546,6 @@ document.getElementById('nu_create').addEventListener('click', async ()=>{
     SharePointPath: sp,
     HashedPassword: hashed || "",
   };
-
-  // Initialize discovered button permissions to "No"
   [...BUTTON_IDS].forEach(k => nu[k] = "No");
 
   USERS.push(nu);
@@ -579,12 +554,12 @@ document.getElementById('nu_create').addEventListener('click', async ()=>{
 });
 
 /** Save button */
-document.getElementById('saveBtn').addEventListener('click', async ()=>{
+document.getElementById('saveBtn')?.addEventListener('click', async ()=>{
   try{
     showLoading(true);
     await saveAll();
     toastOK("Saved!");
-    await loadUsers(); // reload to reflect merge output
+    await loadUsers();
     render();
   }catch(e){
     toastERR(e.message||"Save failed");
@@ -593,13 +568,13 @@ document.getElementById('saveBtn').addEventListener('click', async ()=>{
   }
 });
 
-/** Scan button (re-scan pages to discover new buttons, then re-render) */
-document.getElementById('scanBtn').addEventListener('click', async ()=>{
+/** Scan button */
+document.getElementById('scanBtn')?.addEventListener('click', async ()=>{
   try{
     showLoading(true);
     BUTTON_IDS.clear();
     await discoverButtons();
-    render(); // re-render with potentially new toggles
+    render();
     toastOK("Scan complete");
   }catch(e){
     toastERR("Scan error");
@@ -612,18 +587,13 @@ document.getElementById('scanBtn').addEventListener('click', async ()=>{
 (async function init(){
   try{
     showLoading(true);
-    // 1) Discover buttons across portal (from main.html seed, crawl links)
     await discoverButtons();
-    // 2) Load users
     await loadUsers();
-    // 3) Render
     render();
   }catch(e){
-    toastERR("Init failed");
+    toastERR("Init failed: " + (e.message||e));
   }finally{
     showLoading(false);
   }
 })();
 </script>
-</body>
-</html>
