@@ -123,6 +123,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       docBtn.href = user.SharePointPath;
     }
 
+    // ✅ Show the "Users" button only for Jamie.Line
+    const usersAdminBtn = document.getElementById("usersAdminBtn");
+    if (sessionStorage.getItem("mostlaneUser") !== "Jamie.Line") {
+      usersAdminBtn.style.display = "none";
+    }
+
   } catch (err) {
     console.error("Failed to load permissions", err);
   }
