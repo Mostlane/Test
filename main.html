@@ -1,146 +1,166 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Main Menu</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="style.css">
-<script>
-  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    window.location.href = "login.html";
-  }
-</script>
+  <title>Main Menu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  </script>
 </head>
 
 <body class="main-body">
-
-<!-- ✅ Status box -->
-<div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
-<script>
-  const currentUser = sessionStorage.getItem("mostlaneUser");
-  const status = localStorage.getItem("mostlaneStatus_" + currentUser);
-  const site = localStorage.getItem("mostlaneSite_" + currentUser);
-  const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
-  let statusText = "Status unknown";
-  if (status === "checked-in") {
-    statusText = "Checked In" + (site ? ` at ${site}` : "");
-  } else if (status === "checked-out") {
-    statusText = "Last Checkout: " + (timestamp ? timestamp : "unknown time");
-    if (site) statusText += " at " + site;
-  }
-  document.getElementById("statusBox").textContent = "Current Status: " + statusText;
-</script>
-
-<!-- ✅ User display -->
-<div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
-<script>
-  const user = sessionStorage.getItem("mostlaneUser");
-  if (user) {
-    document.getElementById("user-display").textContent = "You are logged in as " + user;
-  }
-</script>
-
-<style>
-  html, body { height: 100%; }
-  .main-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: cover;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
-  }
-</style>
-
-<!-- ✅ Buttons -->
-<a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
-<a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
-<a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
-<a class="button" href="my-assets.html" id="assetsBtn">Plant &amp; Equipment</a>
-<a class="button" href="#" id="my-documents-btn">My Documents</a>
-<a class="button" href="weekly.html" id="weeklyBtn">Weekly Summary</a>
-<a class="button" href="forms.html" id="formsBtn">Forms</a>
-<a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
-<a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
-<a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
-<a class="button" href="users-admin.html" id="usersAdminBtn">Users</a>
-<a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
-
-<!-- ✅ Dynamic Permission Logic -->
-<script>
-document.addEventListener('DOMContentLoaded', async () => {
-  const username = sessionStorage.getItem("mostlaneUser");
-  if (!username) {
-    console.warn("⚠️ No username found in sessionStorage");
-    return;
-  }
-
-  try {
-    // 🔹 Fetch this user's permissions from Worker
-    const res = await fetch(`https://mostlane-users.jamie-def.workers.dev/user?u=${encodeURIComponent(username)}&v=${Date.now()}`);
-    const data = await res.json();
-    if (!data.found) {
-      console.warn("⚠️ User not found in KV");
-      return;
+  <!-- ✅ Status box -->
+  <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
+  <script>
+    const currentUser = sessionStorage.getItem("mostlaneUser");
+    const status = localStorage.getItem("mostlaneStatus_" + currentUser);
+    const site = localStorage.getItem("mostlaneSite_" + currentUser);
+    const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
+    let statusText = "Status unknown";
+    if (status === "checked-in") {
+      statusText = "Checked In" + (site ? ` at ${site}` : "");
+    } else if (status === "checked-out") {
+      statusText = "Last Checkout: " + (timestamp ? timestamp : "unknown time");
+      if (site) statusText += " at " + site;
     }
+    document.getElementById("statusBox").textContent = "Current Status: " + statusText;
+  </script>
 
-    const user = data.user;
-    const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
+  <!-- ✅ User display -->
+  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
+  <script>
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (user) {
+      document.getElementById("user-display").textContent = "You are logged in as " + user;
+    }
+  </script>
 
-    // 🔹 If Full Access, show all buttons
-    if (fullAccess) {
-      console.log("✅ Full Access – all buttons visible");
-      document.querySelectorAll("a.button").forEach(btn => btn.style.display = "block");
-    } else {
-      // 🔹 Otherwise, show/hide based on permissions
-      document.querySelectorAll("a.button").forEach(btn => {
+  <style>
+    html, body { height: 100%; }
+    .main-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .button {
+      display: block;
+      margin: 10px auto;
+      padding: 12px 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.6);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 300px;
+      transition: opacity 0.3s;
+    }
+    .hidden-btn {
+      display: block !important;
+      opacity: 0.3;
+    }
+    .admin-toggle {
+      margin-top: 20px;
+      font-size: 14px;
+      color: #004a99;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+  </style>
+
+  <!-- ✅ Buttons (all possible) -->
+  <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
+  <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
+  <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
+  <a class="button" href="my-assets.html" id="assetsBtn">Plant & Equipment</a>
+  <a class="button" href="#" id="my-documents-btn">My Documents</a>
+  <a class="button" href="weekly.html" id="weeklyBtn">Weekly Summary</a>
+  <a class="button" href="forms.html" id="formsBtn">Forms</a>
+  <a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
+  <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
+  <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
+  <a class="button" href="users-admin.html" id="usersAdminBtn">Users</a>
+  <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
+
+  <!-- ✅ Admin Toggle -->
+  <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
+
+  <!-- ✅ Dynamic Permission Logic -->
+  <script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    const username = sessionStorage.getItem("mostlaneUser");
+    if (!username) return;
+
+    try {
+      // 🔹 Fetch user data from KV Worker
+      const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
+      const data = await res.json();
+      if (!data.found) return;
+
+      const user = data.user;
+      const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
+      const buttons = document.querySelectorAll("a.button");
+
+      buttons.forEach(btn => {
         const id = btn.id || "";
-        const href = btn.getAttribute("href") || "";
-        const keyCandidates = [
-          id,
-          href.replace(/[^\w]/g, ''),      // e.g. purchasehtml
-          (btn.textContent || "").replace(/\s+/g, '') // e.g. HolidayRequests
-        ];
+        const label = (btn.textContent || "").trim().replace(/\s+/g, '');
+        const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
 
+        // All possible matching keys
+        const keyCandidates = [id, label, href];
+
+        // Check if any match in JSON with value "Yes"
         let allowed = false;
-        for (const key of keyCandidates) {
-          if ((user[key] || "").toLowerCase() === "yes") {
-            allowed = true;
-            break;
-          }
+        keyCandidates.forEach(k => {
+          if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
+        });
+
+        console.log(`🔍 Button "${label}" checked keys: ${keyCandidates.join(", ")} -> Allowed: ${allowed}`);
+
+        // Handle visibility
+        if (fullAccess || allowed) {
+          btn.style.display = "block";
+        } else {
+          btn.style.display = "none";
         }
 
-        if (!allowed) btn.style.display = "none";
+        // Link SharePoint folder for My Documents
+        if (id === "my-documents-btn" && user.SharePointPath) {
+          btn.href = user.SharePointPath;
+        }
       });
+
+      // 🔧 Admin view toggle
+      const toggle = document.getElementById("toggleView");
+      let adminMode = false;
+      toggle.addEventListener("click", () => {
+        adminMode = !adminMode;
+        buttons.forEach(btn => {
+          if (btn.style.display === "none") {
+            if (adminMode) {
+              btn.classList.add("hidden-btn");
+            } else {
+              btn.classList.remove("hidden-btn");
+            }
+          }
+        });
+        toggle.textContent = adminMode ? "Hide Hidden Buttons" : "Show All (Admin View)";
+      });
+
+    } catch (err) {
+      console.error("Failed to load permissions", err);
     }
-
-    // 🔹 Link SharePoint folder for “My Documents”
-    const docBtn = document.getElementById("my-documents-btn");
-    if (docBtn && user.SharePointPath) {
-      docBtn.href = user.SharePointPath;
-      docBtn.target = "_blank";
-    }
-
-  } catch (err) {
-    console.error("❌ Error loading user permissions:", err);
-  }
-});
-</script>
-
+  });
+  </script>
 </body>
 </html>
