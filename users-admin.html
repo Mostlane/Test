@@ -13,7 +13,6 @@
       color: #1f2937;
     }
 
-    /* Sticky control bar */
     .topbar {
       position: sticky;
       top: 0;
@@ -32,519 +31,230 @@
       color: #004a99;
       font-weight: 600;
     }
-    .bar-actions {
-      display: flex;
-      gap: 10px;
-    }
+    .bar-actions { display: flex; gap: 10px; }
     .btn {
-      border: none;
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 14px;
-      cursor: pointer;
+      border: none; border-radius: 6px; padding: 10px 14px;
+      font-size: 14px; cursor: pointer;
     }
-    .btn-primary {
-      background: #004a99;
-      color: #fff;
-    }
-    .btn-outline {
-      background: #fff;
-      color: #004a99;
-      border: 1px solid #004a99;
-    }
+    .btn-primary { background: #004a99; color: #fff; }
+    .btn-outline { background: #fff; color: #004a99; border: 1px solid #004a99; }
 
-    /* Success banner */
     .banner {
-      position: sticky;
-      top: 56px; /* below bar */
-      z-index: 45;
-      margin: 10px 14px 0;
-      background: #e9f7ef;
-      color: #1b5e20;
-      border: 1px solid #c8e6c9;
-      border-radius: 6px;
-      padding: 10px 12px;
-      display: none;
+      position: sticky; top: 56px;
+      z-index: 45; margin: 10px 14px 0;
+      background: #e9f7ef; color: #1b5e20;
+      border: 1px solid #c8e6c9; border-radius: 6px;
+      padding: 10px 12px; display: none;
     }
     .banner.show { display: block; }
-    .banner .close {
-      float: right;
-      font-weight: bold;
-      color: #2e7d32;
-      cursor: pointer;
-      margin-left: 10px;
-    }
+    .banner .close { float: right; font-weight: bold; color: #2e7d32; cursor: pointer; margin-left: 10px; }
 
-    /* Content wrapper */
     .wrap {
-      max-width: 900px;
-      margin: 16px auto 60px;
+      max-width: 900px; margin: 16px auto 60px;
       padding: 0 14px 30px;
       background: rgba(255,255,255,0.7);
       border-radius: 10px;
     }
-    .subnote {
-      padding: 14px;
-      color: #374151;
-      font-size: 14px;
-    }
+    .subnote { padding: 14px; color: #374151; font-size: 14px; }
 
-    /* User cards (Version 2 look) */
     .user-card {
-      background: #fff;
-      border: 1px solid #e5e7eb;
-      border-radius: 10px;
-      margin: 14px;
-      padding: 12px;
+      background: #fff; border: 1px solid #e5e7eb;
+      border-radius: 10px; margin: 14px; padding: 12px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     .user-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      color: #004a99;
-      font-weight: 600;
-      margin-bottom: 8px;
+      display: flex; justify-content: space-between; align-items: center;
+      color: #004a99; font-weight: 600; margin-bottom: 8px;
     }
-    .user-info {
-      font-size: 13px;
-      color: #4b5563;
-      margin-bottom: 6px;
-    }
-
-    .toggle-group {
-      margin-top: 6px;
-      padding-top: 8px;
-      border-top: 1px dashed #e5e7eb;
-    }
-    .toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 6px 2px;
-    }
+    .user-info { font-size: 13px; color: #4b5563; margin-bottom: 6px; }
+    .toggle-group { margin-top: 6px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+    .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px; }
     .toggle.indent { padding-left: 22px; }
-    .toggle label {
-      font-size: 14px;
-      color: #111827;
-      flex: 1;
-    }
-    /* Switch */
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px; height: 24px;
-      flex: 0 0 auto;
-    }
+    .toggle label { font-size: 14px; color: #111827; flex: 1; }
+
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }
     .switch input { display: none; }
     .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #d1d5db;
-      border-radius: 24px;
-      transition: .3s;
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background: #d1d5db; border-radius: 24px; transition: .3s;
     }
     .slider:before {
-      content: "";
-      position: absolute;
-      height: 18px; width: 18px;
-      left: 3px; bottom: 3px;
-      background: #fff;
-      border-radius: 50%;
-      transition: .3s;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+      content: ""; position: absolute; height: 18px; width: 18px;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%;
+      transition: .3s; box-shadow: 0 1px 2px rgba(0,0,0,0.15);
     }
     input:checked + .slider { background: #004a99; }
     input:checked + .slider:before { transform: translateX(20px); }
 
-    /* Add User popup */
-    .modal {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.35);
-      display: none; align-items: center; justify-content: center;
-      z-index: 60;
-    }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; z-index: 60; }
     .modal.show { display: flex; }
     .modal-card {
-      background: #fff;
-      width: 92%; max-width: 430px;
-      max-height: 85vh; overflow-y: auto;
-      border-radius: 10px;
-      padding: 16px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+      background: #fff; width: 92%; max-width: 430px;
+      max-height: 85vh; overflow-y: auto; border-radius: 10px;
+      padding: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
     }
-    .modal h3 {
-      margin: 0 0 10px; color: #004a99;
-      font-size: 18px;
-    }
+    .modal h3 { margin: 0 0 10px; color: #004a99; font-size: 18px; }
     .field { margin-bottom: 10px; }
     .field input {
-      width: 100%; padding: 10px;
-      border: 1px solid #d1d5db; border-radius: 6px;
-      font-size: 14px; box-sizing: border-box;
-      background: #fff;
+      width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: 14px; background: #fff; box-sizing: border-box;
     }
-    .modal-actions {
-      display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;
-    }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
   </style>
 </head>
 <body>
 
-  <!-- Sticky translucent bar -->
-  <div class="topbar">
-    <h1>User Administration</h1>
-    <div class="bar-actions">
-      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-      <button class="btn btn-outline" id="addUserBtn">➕ Add User</button>
+<div class="topbar">
+  <h1>User Administration</h1>
+  <div class="bar-actions">
+    <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
+    <button class="btn btn-outline" id="addUserBtn">➕ Add User</button>
+  </div>
+</div>
+
+<div id="banner" class="banner"><span class="close" id="bannerClose">✖</span>✅ Changes saved successfully.</div>
+
+<div class="wrap">
+  <div class="subnote">
+    This page auto-discovers buttons from <b>main.html</b> and any linked sub-menus, then shows matching toggles per user.
+    <br/>“Full Access” overrides everything.
+  </div>
+  <div id="list">Loading users…</div>
+</div>
+
+<div id="addUserModal" class="modal" aria-hidden="true">
+  <div class="modal-card">
+    <h3>Add New User</h3>
+    <div class="field"><input id="firstName" type="text" placeholder="First Name" required></div>
+    <div class="field"><input id="lastName" type="text" placeholder="Last Name" required></div>
+    <div class="field"><input id="email" type="email" placeholder="Email (optional)"></div>
+    <div class="field"><input id="username" type="text" placeholder="Username (e.g. John.Doe)" required></div>
+    <div class="field"><input id="password" type="password" placeholder="Password" required></div>
+    <div class="field"><input id="vehicle" type="text" placeholder="Vehicle Assigned (optional)"></div>
+    <div class="field"><input id="employmentType" type="text" placeholder="Employment Type (Employed / Self Employed)"></div>
+    <div class="field"><input id="sharepoint" type="text" placeholder="SharePoint Path URL"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="cancelAdd">Cancel</button>
+      <button class="btn btn-primary" id="createUserBtn">Create User</button>
     </div>
   </div>
+</div>
 
-  <!-- Success banner -->
-  <div id="banner" class="banner">
-    <span class="close" id="bannerClose">✖</span>
-    ✅ Changes saved successfully.
-  </div>
+<script>
+const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+const USERS_URL = API_BASE + "/users";
+const UPDATE_PERM_URL = API_BASE + "/update-permissions";
+const TOKEN = sessionStorage.getItem("mostlaneToken");
+const CURRENT = sessionStorage.getItem("mostlaneUser");
+if (!CURRENT) window.location.href = "login.html";
 
-  <!-- Content -->
-  <div class="wrap">
-    <div class="subnote">
-      This page auto-discovers buttons from <b>main.html</b> and any linked sub-menus, then shows matching toggles per user.
-      <br/>“Full Access” overrides everything.
-    </div>
-    <div id="list">Loading users…</div>
-  </div>
+const banner = document.getElementById('banner');
+function showBanner(msg){ banner.innerHTML=`<span class="close" id="bannerClose">✖</span>${msg}`; banner.classList.add('show'); document.getElementById('bannerClose').onclick=()=>banner.classList.remove('show'); setTimeout(()=>banner.classList.remove('show'),4000); }
 
-  <!-- Add User Modal -->
-  <div id="addUserModal" class="modal" aria-hidden="true">
-    <div class="modal-card">
-      <h3>Add New User</h3>
-      <div class="field"><input id="firstName" type="text" placeholder="First Name" required></div>
-      <div class="field"><input id="lastName" type="text" placeholder="Last Name" required></div>
-      <div class="field"><input id="email" type="email" placeholder="Email (optional)"></div>
-      <div class="field"><input id="username" type="text" placeholder="Username (e.g. John.Doe)" required></div>
-      <div class="field"><input id="password" type="password" placeholder="Password" required></div>
-      <div class="field"><input id="vehicle" type="text" placeholder="Vehicle Assigned (optional)"></div>
-      <div class="field"><input id="employmentType" type="text" placeholder="Employment Type (Employed / Self Employed)"></div>
-      <div class="field"><input id="sharepoint" type="text" placeholder="SharePoint Path URL"></div>
-      <div class="modal-actions">
-        <button class="btn btn-outline" id="cancelAdd">Cancel</button>
-        <button class="btn btn-primary" id="createUserBtn">Create User</button>
-      </div>
-    </div>
-  </div>
+function toggleRow(id,label,checked,indent=false){
+  const row=document.createElement('div');row.className='toggle'+(indent?' indent':'');
+  row.innerHTML=`<label>${label}</label><label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="slider"></span></label>`;
+  return row;
+}
 
-  <script>
-    // ====== CONFIG ======
-    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
-    const USERS_URL = API_BASE + "/users";
-    const SAVE_URL  = API_BASE + "/save";        // change to /update-users if your worker uses that
-    const TOKEN     = sessionStorage.getItem("mostlaneToken"); // if using the secure worker
-    const CURRENT   = sessionStorage.getItem("mostlaneUser");
+function mapIdToLegacyKey(id,label,href){
+  const map={checkinBtn:"CheckInOut",holidayBtn:"Holiday",purchaseBtn:"PurchaseOrders",poMenuBtn:"PurchaseOrders",assetsBtn:"Assets",formsBtn:"Forms","my-documents-btn":"MyDocuments",complianceBtn:"Compliance","hours-dashboard-btn":"HoursDashboard",weeklyBtn:"Weekly"};
+  if(map[id])return map[id];
+  if(id)return id.replace(/Btn$/,'');
+  if(label)return label.replace(/\s+/g,'');
+  if(href)return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
+  return null;
+}
 
-    if (!CURRENT) { window.location.href = "login.html"; }
-
-    // ====== UI helpers ======
-    const banner = document.getElementById('banner');
-    const bannerClose = document.getElementById('bannerClose');
-    function showBanner(msg) {
-      banner.innerHTML = `<span class="close" id="bannerClose">✖</span>${msg}`;
-      banner.classList.add('show');
-      document.getElementById('bannerClose').onclick = () => banner.classList.remove('show');
-      setTimeout(() => banner.classList.remove('show'), 5000);
+async function scanPortal(){
+  const parser=new DOMParser();const structure=[];
+  const mainRes=await fetch('main.html?v='+Date.now(),{cache:'no-store'});const mainHtml=await mainRes.text();const mainDoc=parser.parseFromString(mainHtml,'text/html');
+  const mainButtons=[...mainDoc.querySelectorAll('a.button')];
+  for(const b of mainButtons){
+    const id=b.id||'';const label=(b.textContent||'').trim();const href=b.getAttribute('href')||'';
+    const entry={id,label,href,subpages:[]};
+    if(href&&/\.html/i.test(href)&&!/login\.html/i.test(href)){
+      try{
+        const subRes=await fetch(href,{cache:'no-store'});const subHtml=await subRes.text();const subDoc=parser.parseFromString(subHtml,'text/html');
+        const subs=[...subDoc.querySelectorAll('a.button')];
+        entry.subpages=subs.map(sb=>({id:sb.id||'',label:(sb.textContent||'').trim(),href:sb.getAttribute('href')||''}));
+      }catch{}
     }
+    structure.push(entry);
+  }
+  return structure;
+}
 
-    // Toggle component
-    function toggleRow(id, label, checked, indent=false) {
-      const row = document.createElement('div');
-      row.className = 'toggle' + (indent ? ' indent' : '');
-      row.innerHTML = `
-        <label for="${id}">${label}</label>
-        <label class="switch">
-          <input type="checkbox" id="${id}" ${checked ? 'checked' : ''}>
-          <span class="slider"></span>
-        </label>
-      `;
-      return row;
-    }
+async function fetchAllUsers(){const res=await fetch(USERS_URL+'?v='+Date.now());const data=await res.json();return data.Users||[];}
 
-    // Map button IDs to your existing legacy JSON keys (so main.html still works)
-    function mapIdToLegacyKey(id, label, href) {
-      const map = {
-        checkinBtn: "CheckInOut",
-        holidayBtn: "Holiday",
-        purchaseBtn: "PurchaseOrders",
-        poMenuBtn: "PurchaseOrders",
-        assetsBtn: "Assets",
-        formsBtn: "Forms",
-        "my-documents-btn": "MyDocuments",
-        complianceBtn: "Compliance",
-        "hours-dashboard-btn": "HoursDashboard",
-        weeklyBtn: "Weekly",
-        // Add known subpages if you want fixed names:
-        poDirectorBtn: "PODirector",
-        poCostingBtn:  "POCosting",
-      };
-      if (map[id]) return map[id];
-
-      // Fallback: derive from id (strip 'Btn', camel/pascal-ish)
-      if (id) return id.replace(/Btn$/,'');
-      // Fallback 2: from label (remove spaces)
-      if (label) return label.replace(/\s+/g,'');
-      // Fallback 3: from path
-      if (href) return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
-      return null;
-    }
-
-    // ====== Portal scan (main + subpages) ======
-    async function scanPortal() {
-      const parser = new DOMParser();
-      const structure = [];
-
-      const mainRes = await fetch('main.html?v=' + Date.now(), { cache: 'no-store' });
-      const mainHtml = await mainRes.text();
-      const mainDoc = parser.parseFromString(mainHtml, 'text/html');
-
-      const mainButtons = [...mainDoc.querySelectorAll('a.button')];
-
-      for (const b of mainButtons) {
-        const id    = b.id || '';
-        const label = (b.textContent || '').trim();
-        const href  = b.getAttribute('href') || '';
-
-        const entry = { id, label, href, subpages: [] };
-        // attempt to discover submenus by fetching that page
-        if (href && /\.html($|\?)/.test(href) && !/login\.html/i.test(href)) {
-          try {
-            const subRes = await fetch(href, { cache: 'no-store' });
-            const subHtml = await subRes.text();
-            const subDoc = parser.parseFromString(subHtml, 'text/html');
-            const subs = [...subDoc.querySelectorAll('a.button')];
-            entry.subpages = subs.map(sb => ({
-              id: sb.id || '',
-              label: (sb.textContent || '').trim(),
-              href: sb.getAttribute('href') || ''
-            }));
-          } catch (e) {
-            // no-op if not reachable; safe
-          }
-        }
-        structure.push(entry);
-      }
-      return structure;
-    }
-
-    async function fetchAllUsers() {
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+function userCard(user,structure){
+  const card=document.createElement('div');card.className='user-card';
+  const header=document.createElement('div');header.className='user-header';
+  const name=`${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`.trim();
+  header.innerHTML=`<div>${name} <span style="color:#6b7280;font-weight:500;">(${user.Username})</span></div>`;
+  const fa=document.createElement('div');const faId=`fa_${user.Username}`;fa.appendChild(toggleRow(faId,'Full Access',((user.FullAccess||'').toLowerCase()==='yes')));header.appendChild(fa);card.appendChild(header);
+  const info=document.createElement('div');info.className='user-info';info.textContent=`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`;card.appendChild(info);
+  const group=document.createElement('div');group.className='toggle-group';
+  structure.forEach(p=>{
+    const pid=p.id||(p.href||'').replace(/[^\w]/g,'');const legacy=mapIdToLegacyKey(pid,p.label,p.href);
+    const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
+    group.appendChild(toggleRow(`${user.Username}::${pid}`,p.label,currentOn));
+    if(Array.isArray(p.subpages)&&p.subpages.length){
+      p.subpages.forEach(sp=>{
+        const sid=sp.id||(sp.href||'').replace(/[^\w]/g,'');const sLegacy=mapIdToLegacyKey(sid,sp.label,sp.href);
+        const on=((user[sLegacy]||user[sid]||'').toLowerCase()==='yes');
+        group.appendChild(toggleRow(`${user.Username}::${sid}`,`↳ ${sp.label}`,on,true));
       });
-      const data = await res.json();
-      return data.Users || [];
     }
+  });
+  card.appendChild(group);return card;
+}
 
-    function userCard(user, structure) {
-      const card = document.createElement('div');
-      card.className = 'user-card';
+async function buildUI(){
+  const list=document.getElementById('list');
+  list.textContent='Loading…';
+  const [users,structure]=await Promise.all([fetchAllUsers(),scanPortal()]);
+  list.innerHTML='';users.forEach(u=>list.appendChild(userCard(u,structure)));
+  window.__USERS=users;window.__STRUCT=structure;
+}
 
-      const header = document.createElement('div');
-      header.className = 'user-header';
-      const name = `${user.EngineerNumber ? ('#' + user.EngineerNumber + ' – ') : ''}${user.FirstName || ''} ${user.LastName || ''}`.trim();
-      header.innerHTML = `<div>${name} <span style="color:#6b7280;font-weight:500;">(${user.Username})</span></div>`;
+// ✅ UPDATED SAVE LOGIC
+async function saveAll(){
+  if(!window.__USERS||!window.__STRUCT)return;
+  const users=JSON.parse(JSON.stringify(window.__USERS));const struct=window.__STRUCT;
 
-      const fa = document.createElement('div');
-      const faId = `fa_${user.Username}`;
-      fa.appendChild(toggleRow(faId, 'Full Access', ((user.FullAccess||'').toLowerCase() === 'yes')));
-      header.appendChild(fa);
-      card.appendChild(header);
-
-      const info = document.createElement('div');
-      info.className = 'user-info';
-      info.textContent = `${user.EmploymentType || ''} · ${user.Status || ''} · ${user.Email || ''}`;
-      card.appendChild(info);
-
-      const group = document.createElement('div');
-      group.className = 'toggle-group';
-
-      structure.forEach(p => {
-        const primaryId = p.id || (p.href || '').replace(/[^\w]/g,'');
-        const legacyKey = mapIdToLegacyKey(primaryId, p.label, p.href);
-        const currentOn = ((user[legacyKey] || user[primaryId] || '').toLowerCase() === 'yes');
-
-        const row = toggleRow(`${user.Username}::${primaryId}`, p.label, currentOn);
-        group.appendChild(row);
-
-        // subpages (indented)
-        if (Array.isArray(p.subpages) && p.subpages.length) {
-          p.subpages.forEach(sp => {
-            const subId = sp.id || (sp.href || '').replace(/[^\w]/g,'');
-            const subLegacy = mapIdToLegacyKey(subId, sp.label, sp.href);
-            const on = ((user[subLegacy] || user[subId] || '').toLowerCase() === 'yes');
-            group.appendChild(toggleRow(`${user.Username}::${subId}`, `↳ ${sp.label}`, on, true));
-          });
-        }
-      });
-
-      card.appendChild(group);
-      return card;
-    }
-
-    async function buildUI() {
-      const list = document.getElementById('list');
-      list.textContent = 'Loading…';
-      const [users, structure] = await Promise.all([fetchAllUsers(), scanPortal()]);
-
-      // render
-      list.innerHTML = '';
-      users.forEach(u => list.appendChild(userCard(u, structure)));
-
-      // store for save()
-      window.__USERS = users;
-      window.__STRUCT = structure;
-    }
-
-    // Gather and save
-    async function saveAll() {
-      if (!window.__USERS || !window.__STRUCT) return;
-
-      const users = JSON.parse(JSON.stringify(window.__USERS)); // clone
-      const struct = window.__STRUCT;
-
-      users.forEach(u => {
-        // Full Access
-        u.FullAccess = (document.getElementById(`fa_${u.Username}`)?.querySelector('input')?.checked) ? 'Yes' : 'No';
-
-        // For each discovered button/sub-button, set both the legacy key and the dynamic id key
-        struct.forEach(p => {
-          const pid = p.id || (p.href || '').replace(/[^\w]/g,'');
-          const legacy = mapIdToLegacyKey(pid, p.label, p.href);
-          const chk = document.getElementById(`${u.Username}::${pid}`)?.querySelector('input');
-          const val = chk && chk.checked ? 'Yes' : 'No';
-          if (legacy) u[legacy] = val;
-          if (pid)    u[pid]    = val;
-
-          if (Array.isArray(p.subpages)) {
-            p.subpages.forEach(sp => {
-              const sid = sp.id || (sp.href || '').replace(/[^\w]/g,'');
-              const sLegacy = mapIdToLegacyKey(sid, sp.label, sp.href);
-              const schk = document.getElementById(`${u.Username}::${sid}`)?.querySelector('input');
-              const sval = schk && schk.checked ? 'Yes' : 'No';
-              if (sLegacy) u[sLegacy] = sval;
-              if (sid)     u[sid]     = sval;
-            });
-          }
+  for(const u of users){
+    u.FullAccess=document.getElementById(`fa_${u.Username}`)?.querySelector('input')?.checked?'Yes':'No';
+    struct.forEach(p=>{
+      const pid=p.id||(p.href||'').replace(/[^\w]/g,'');const legacy=mapIdToLegacyKey(pid,p.label,p.href);
+      const chk=document.getElementById(`${u.Username}::${pid}`)?.querySelector('input');
+      const val=chk&&chk.checked?'Yes':'No';
+      if(legacy)u[legacy]=val;if(pid)u[pid]=val;
+      if(Array.isArray(p.subpages)){
+        p.subpages.forEach(sp=>{
+          const sid=sp.id||(sp.href||'').replace(/[^\w]/g,'');const sLegacy=mapIdToLegacyKey(sid,sp.label,sp.href);
+          const schk=document.getElementById(`${u.Username}::${sid}`)?.querySelector('input');
+          const sval=schk&&schk.checked?'Yes':'No';
+          if(sLegacy)u[sLegacy]=sval;if(sid)u[sid]=sval;
         });
-      });
-
-      // Save to KV
-      const res = await fetch(SAVE_URL, {
-        method: 'POST',
-        headers: Object.assign(
-          { 'Content-Type': 'application/json' },
-          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-        ),
-        body: JSON.stringify({ Users: users })
-      });
-
-      if (!res.ok) {
-        showBanner('❌ Save failed. Please try again.');
-        return;
       }
-      showBanner('✅ Changes saved successfully.');
-      // Refresh the in-memory copy to keep UI consistent
-      window.__USERS = users;
-    }
-
-    // ===== Add User modal =====
-    const modal = document.getElementById('addUserModal');
-    const openAdd = () => { modal.classList.add('show'); modal.setAttribute('aria-hidden','false'); };
-    const closeAdd = () => { modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); };
-
-    document.getElementById('addUserBtn').addEventListener('click', openAdd);
-    document.getElementById('cancelAdd').addEventListener('click', closeAdd);
-
-    async function sha256Hex(s) {
-      const enc = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', enc.encode((s || '').trim()));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    }
-
-    document.getElementById('createUserBtn').addEventListener('click', async () => {
-      // current users
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-      });
-      const data = await res.json();
-      const users = data.Users || [];
-
-      // next EngineerNumber (max + 1)
-      const maxNum = users.reduce((m,u) => {
-        const n = parseInt(u.EngineerNumber, 10);
-        return isNaN(n) ? m : Math.max(m, n);
-      }, 0);
-      const nextNum = String(maxNum + 1);
-
-      const firstName = document.getElementById('firstName').value.trim();
-      const lastName  = document.getElementById('lastName').value.trim();
-      const email     = document.getElementById('email').value.trim();
-      const username  = document.getElementById('username').value.trim();
-      const password  = document.getElementById('password').value;
-      const vehicle   = document.getElementById('vehicle').value.trim();
-      const empType   = document.getElementById('employmentType').value.trim();
-      const spPath    = document.getElementById('sharepoint').value.trim();
-
-      if (!firstName || !lastName || !username || !password) {
-        showBanner('❌ Please complete First, Last, Username and Password.');
-        return;
-      }
-
-      const hashedPassword = await sha256Hex(password);
-
-      const newUser = {
-        EngineerNumber: nextNum,
-        FirstName: firstName,
-        LastName: lastName,
-        Username: username,
-        Email: email,
-        HashedPassword: hashedPassword,
-        VehicleAssigned: vehicle,
-        EmploymentType: empType || 'Employed',
-        Status: 'Active',
-        FullAccess: 'No',
-        SharePointPath: spPath
-      };
-
-      users.push(newUser);
-
-      // Save
-      const saveRes = await fetch(SAVE_URL, {
-        method: 'POST',
-        headers: Object.assign(
-          { 'Content-Type': 'application/json' },
-          TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-        ),
-        body: JSON.stringify({ Users: users })
-      });
-
-      if (!saveRes.ok) {
-        showBanner('❌ Could not add user.');
-        return;
-      }
-
-      closeAdd();
-      showBanner('✅ User added.');
-      buildUI();
     });
 
-    // Save & Banner close
-    document.getElementById('saveBtn').addEventListener('click', saveAll);
+    // 🔹 Send individual user updates to Worker
+    const res=await fetch(UPDATE_PERM_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:u.Username,permissions:u})
+    });
+    if(!res.ok)console.warn('Failed to update',u.Username);
+  }
 
-    // Close banner
-    bannerClose.addEventListener('click', () => banner.classList.remove('show'));
+  showBanner('✅ Changes saved successfully.');
+  window.__USERS=users;
+}
 
-    // Initial build
-    buildUI();
-  </script>
+document.getElementById('saveBtn').addEventListener('click',saveAll);
+buildUI();
+</script>
 </body>
 </html>
