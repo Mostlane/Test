@@ -155,7 +155,6 @@
   </style>
 </head>
 <body>
-
   <!-- Top bar -->
   <div class="topbar">
     <h1>User Administration</h1>
@@ -180,7 +179,6 @@
       then shows matching toggles per user. <b>Full Access</b> overrides everything.
       <div class="small">Mapped keys are saved BOTH as your legacy fields (so existing pages continue to work) and as the discovered id/href (future-proof for new buttons).</div>
     </div>
-
     <div class="util">
       <input id="searchBox" class="input" placeholder="Search users (name / username / number)…" />
       <div class="spacer"></div>
@@ -188,7 +186,6 @@
       <a class="mini" href="main.html" target="_blank" rel="noopener">Open main.html</a>
       <a class="mini" id="debugLink" href="https://mostlane-users.jamie-def.workers.dev/debug/bindings" target="_blank" rel="noopener">Bindings</a>
     </div>
-
     <div id="list">Loading users…</div>
   </div>
 
@@ -196,43 +193,15 @@
   <div id="addUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Add New User</h3>
-      <div class="field">
-        <label>First Name</label>
-        <input id="firstName" type="text" placeholder="First Name" required>
-      </div>
-      <div class="field">
-        <label>Last Name</label>
-        <input id="lastName" type="text" placeholder="Last Name" required>
-      </div>
-      <div class="field">
-        <label>Email (optional)</label>
-        <input id="email" type="email" placeholder="name@company.com">
-      </div>
-      <div class="field">
-        <label>Username</label>
-        <input id="username" type="text" placeholder="e.g. John.Doe" required>
-      </div>
-      <div class="field">
-        <label>Password</label>
-        <input id="password" type="password" placeholder="Initial password" required>
-      </div>
-      <div class="field">
-        <label>Vehicle Assigned (optional)</label>
-        <input id="vehicle" type="text" placeholder="e.g. WP64 EJD">
-      </div>
-      <div class="field">
-        <label>Employment Type</label>
-        <input id="employmentType" type="text" placeholder="Employed / Self Employed">
-      </div>
-      <div class="field">
-        <label>SharePoint Path URL</label>
-        <input id="sharepoint" type="text" placeholder="Full SharePoint folder link">
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn btn-outline" id="cancelAdd">Cancel</button>
-        <button class="btn btn-primary" id="createUserBtn">Create User</button>
-      </div>
+      <div class="field"><label>First Name</label><input id="firstName" type="text" placeholder="First Name" required></div>
+      <div class="field"><label>Last Name</label><input id="lastName" type="text" placeholder="Last Name" required></div>
+      <div class="field"><label>Email (optional)</label><input id="email" type="email" placeholder="name@company.com"></div>
+      <div class="field"><label>Username</label><input id="username" type="text" placeholder="e.g. John.Doe" required></div>
+      <div class="field"><label>Password</label><input id="password" type="password" placeholder="Initial password" required></div>
+      <div class="field"><label>Vehicle Assigned (optional)</label><input id="vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="employmentType" type="text" placeholder="Employed / Self Employed"></div>
+      <div class="field"><label>SharePoint Path URL</label><input id="sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
+      <div class="modal-actions"><button class="btn btn-outline" id="cancelAdd">Cancel</button><button class="btn btn-primary" id="createUserBtn">Create User</button></div>
     </div>
   </div>
 
@@ -240,448 +209,130 @@
   <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
   <script>
-    // =========================
-    // CONFIG
-    // =========================
     const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
     const USERS_URL = API_BASE + "/users";
     const SAVE_URL  = API_BASE + "/save";
-    const TOKEN     = sessionStorage.getItem("mostlaneToken"); // optional
+    const TOKEN     = sessionStorage.getItem("mostlaneToken");
     const CURRENT   = sessionStorage.getItem("mostlaneUser");
     if (!CURRENT) { window.location.href = "login.html"; }
 
-    // =========================
-    // UI helpers
-    // =========================
-    const banner = document.getElementById('banner');
-    const bannerText = document.getElementById('bannerText');
-    const bannerClose = document.getElementById('bannerClose');
-    const mask = document.getElementById('mask');
-    const list = document.getElementById('list');
-    const structCount = document.getElementById('structCount');
+    const banner=document.getElementById('banner');const bannerText=document.getElementById('bannerText');
+    const bannerClose=document.getElementById('bannerClose');const mask=document.getElementById('mask');
+    const list=document.getElementById('list');const structCount=document.getElementById('structCount');
+    function showMask(on=true){mask.classList.toggle('show',!!on);}
+    function showBanner(msg,type='ok'){banner.classList.remove('ok','err','warn');banner.classList.add(type);
+      bannerText.textContent=msg;banner.classList.add('show');setTimeout(()=>banner.classList.remove('show'),5000);}
+    bannerClose.addEventListener('click',()=>banner.classList.remove('show'));
 
-    function showMask(on=true){ mask.classList.toggle('show', !!on); }
-    function showBanner(msg, type='ok'){
-      banner.classList.remove('ok','err','warn');
-      banner.classList.add(type);
-      bannerText.textContent = msg;
-      banner.classList.add('show');
-      setTimeout(()=>banner.classList.remove('show'), 5000);
-    }
-    bannerClose.addEventListener('click', () => banner.classList.remove('show'));
+    function h(tag,attrs={},...children){const el=document.createElement(tag);
+      for(const[k,v]of Object.entries(attrs||{})){if(k==='class')el.className=v;
+      else if(k.startsWith('on')&&typeof v==='function')el.addEventListener(k.slice(2),v);
+      else el.setAttribute(k,v);}for(const c of children){if(c==null)continue;
+      if(typeof c==='string')el.appendChild(document.createTextNode(c));else el.appendChild(c);}return el;}
 
-    function h(tag, attrs={}, ...children){
-      const el = document.createElement(tag);
-      for (const [k,v] of Object.entries(attrs||{})){
-        if (k === 'class') el.className = v;
-        else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
-        else el.setAttribute(k, v);
-      }
-      for (const c of children){
-        if (c == null) continue;
-        if (typeof c === 'string') el.appendChild(document.createTextNode(c));
-        else el.appendChild(c);
-      }
-      return el;
-    }
+    function debounce(fn,ms=250){let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};}
+    async function sha256Hex(s){const enc=new TextEncoder();const buf=await crypto.subtle.digest('SHA-256',enc.encode((s||'').trim()));
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
 
-    function debounce(fn, ms=250){
-      let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
-    }
-
-    async function sha256Hex(s){
-      const enc = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', enc.encode((s || '').trim()));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    }
+    function mapIdToLegacyKey(id,label,href){const map={checkinBtn:"CheckInOut",holidayBtn:"Holiday",purchaseBtn:"PurchaseOrders",
+      poMenuBtn:"PurchaseOrders",assetsBtn:"Assets",formsBtn:"Forms","my-documents-btn":"MyDocuments",complianceBtn:"Compliance",
+      "hours-dashboard-btn":"HoursDashboard",weeklyBtn:"Weekly",usersAdminBtn:"Users",poDirectorBtn:"PODirector",poCostingBtn:"POCosting",
+      "Check In / Out":"CheckInOut","Holiday Requests":"Holiday","Generate Purchase Order Reference":"PurchaseOrders",
+      "Plant & Equipment":"Assets","Weekly Summary":"Weekly","Purchase Orders":"PurchaseOrders","Users":"Users","My Documents":"MyDocuments",
+      "Compliance":"Compliance","Hours Dashboard":"HoursDashboard"};if(id&&map[id])return map[id];if(label&&map[label])return map[label];
+      if(href){const clean=href.toLowerCase();if(clean.includes('podirector'))return'PODirector';if(clean.includes('pocosting'))return'POCosting';
+      if(clean.includes('po-menu'))return'PurchaseOrders';if(clean.includes('weekly'))return'Weekly';if(clean.includes('compliance'))return'Compliance';
+      if(clean.includes('forms'))return'Forms';if(clean.includes('assets'))return'Assets';if(clean.includes('purchase'))return'PurchaseOrders';
+      if(clean.includes('holiday'))return'Holiday';if(clean.includes('hours-dashboard'))return'HoursDashboard';
+      if(clean.includes('users-admin'))return'Users';}if(id)return id.replace(/Btn$/,'');if(label)return label.replace(/\s+/g,'');
+      if(href)return href.replace(/\.html$/,'').replace(/[^\w]/g,'');return null;}
+    function normalizeIdForKey(s){return(s||'').trim().toLowerCase().replace(/[^\w]+/g,'');}
 
     // =========================
-    // Mapping & Normalization
-    // =========================
-    // Convert discovered ids/labels/hrefs to your legacy JSON keys so existing pages keep working.
-    function mapIdToLegacyKey(id, label, href){
-      const map = {
-        // main buttons you’ve shown across pages
-        checkinBtn: "CheckInOut",
-        holidayBtn: "Holiday",
-        purchaseBtn: "PurchaseOrders",
-        poMenuBtn: "PurchaseOrders",
-        assetsBtn: "Assets",
-        formsBtn: "Forms",
-        "my-documents-btn": "MyDocuments",
-        complianceBtn: "Compliance",
-        "hours-dashboard-btn": "HoursDashboard",
-        weeklyBtn: "Weekly",
-        usersAdminBtn: "Users",
-
-        // frequent sub-pages you’ve referenced
-        poDirectorBtn: "PODirector",
-        poCostingBtn:  "POCosting",
-
-        // label fallbacks (from your JSON history)
-        "Check In / Out": "CheckInOut",
-        "Holiday Requests": "Holiday",
-        "Generate Purchase Order Reference": "PurchaseOrders",
-        "Plant & Equipment": "Assets",
-        "Weekly Summary": "Weekly",
-        "Purchase Orders": "PurchaseOrders",
-        "Users": "Users",
-        "My Documents": "MyDocuments",
-        "Compliance": "Compliance",
-        "Hours Dashboard": "HoursDashboard",
-      };
-      if (id && map[id]) return map[id];
-      if (label && map[label]) return map[label];
-
-      // href fallbacks
-      if (href){
-        const clean = href.toLowerCase();
-        if (clean.includes('podirector')) return 'PODirector';
-        if (clean.includes('pocosting'))  return 'POCosting';
-        if (clean.includes('po-menu'))    return 'PurchaseOrders';
-        if (clean.includes('weekly'))     return 'Weekly';
-        if (clean.includes('compliance')) return 'Compliance';
-        if (clean.includes('forms'))      return 'Forms';
-        if (clean.includes('assets'))     return 'Assets';
-        if (clean.includes('purchase'))   return 'PurchaseOrders';
-        if (clean.includes('holiday'))    return 'Holiday';
-        if (clean.includes('hours-dashboard')) return 'HoursDashboard';
-        if (clean.includes('users-admin')) return 'Users';
-      }
-
-      // reasonable generic fallback
-      if (id)    return id.replace(/Btn$/,'');
-      if (label) return label.replace(/\s+/g,'');
-      if (href)  return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
-      return null;
-    }
-
-    function normalizeIdForKey(s){
-      return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
-    }
-
-    // =========================
-    // Portal scan (main + submenus)
+    // Portal scan (recursive v2)
     // =========================
     async function scanPortal(){
-      const parser = new DOMParser();
-      const struct = [];
+      const parser=new DOMParser();const visited=new Set();const struct=[];
+      async function scanPage(url,depth=0){if(!url||visited.has(url))return[];visited.add(url);
+        try{const res=await fetch(url+(url.includes('?')?'&':'?')+'v='+Date.now(),{cache:'no-store'});
+          const html=await res.text();const doc=parser.parseFromString(html,'text/html');
+          const buttons=[...doc.querySelectorAll('a.button')].map(b=>({id:b.id||'',label:(b.textContent||'').trim(),href:b.getAttribute('href')||''}));
+          if(depth<2){for(const btn of buttons){if(btn.href&&/\.html$/i.test(btn.href)&&!/login\.html/i.test(btn.href)){
+              btn.subpages=await scanPage(btn.href,depth+1);}}}
+          return buttons;}catch(e){console.warn('Scan failed for',url,e);return[];}}
+      struct.push(...await scanPage('main.html'));structCount.textContent=`Discovered ${struct.length} main buttons (deep scan)`;return struct;}
 
-      const mainRes = await fetch('main.html?v=' + Date.now(), { cache: 'no-store' });
-      const mainHtml = await mainRes.text();
-      const mainDoc = parser.parseFromString(mainHtml, 'text/html');
+    async function fetchAllUsers(){const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});if(!res.ok)throw new Error('Failed to fetch users');
+      const data=await res.json();return data.Users||[];}
+    async function saveUsers(users){const res=await fetch(SAVE_URL,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),body:JSON.stringify({Users:users})});
+      if(!res.ok){const txt=await res.text().catch(()=> '');throw new Error('Save failed: '+txt);}}
 
-      const mainButtons = [...mainDoc.querySelectorAll('a.button')];
+    function switchControl(id,checked){const boxId=id+'__chk';return h('label',{class:'switch'},
+      h('input',{type:'checkbox',id:boxId,...(checked?{checked:true}:{})}),h('span',{class:'slider'}));}
+    function toggleRow(user,id,label,href,checked,indent=false){const pathSpan=href?h('span',{class:'path'},href):null;
+      return h('div',{class:'toggle-row'+(indent?' indent':'')},h('div',{class:'lbl'},label||id||'(unnamed)',pathSpan?h('div',null,pathSpan):null),
+        switchControl(`${user.Username}::${id||href||label||'unknown'}`,!!checked));}
+    function userCard(user,structure){const header=h('div',{class:'user-header'},h('div',null,
+      `${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`,' ',
+      h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)),
+      h('div',null,h('div',{class:'toggle-row'},h('span',{class:'lbl'},'Full Access'),
+      switchControl(`fa_${user.Username}`,(user.FullAccess||'').toLowerCase()==='yes'))));
+      const sub=h('div',{class:'user-sub'},`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`);
+      const grid=h('div',{class:'grid'});
+      grid.appendChild(h('div',{class:'section-title'},'Main Menu',h('span',{class:'pill'},'auto')));
+      structure.forEach(p=>{const pid=p.id||normalizeIdForKey(p.href||p.label);
+        const legacy=mapIdToLegacyKey(pid,p.label,p.href);const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
+        grid.appendChild(toggleRow(user,pid,p.label,p.href,currentOn,false));});
+      const subs=structure.flatMap(s=>s.subpages||[]);if(subs.length){grid.appendChild(h('div',{class:'section-title',style:'grid-column:1/-1'},'Sub-menus',h('span',{class:'pill'},String(subs.length))));
+        subs.forEach(sp=>{const sid=sp.id||normalizeIdForKey(sp.href||sp.label);const sleg=mapIdToLegacyKey(sid,sp.label,sp.href);
+          const on=((user[sleg]||user[sid]||'').toLowerCase()==='yes');grid.appendChild(toggleRow(user,sid,sp.label,sp.href,on,true));});}
+      return h('div',{class:'user-card'},header,sub,grid);}
+    function renderUsers(users,structure){list.innerHTML='';if(!users.length){list.textContent='No users found.';return;}
+      users.forEach(u=>list.appendChild(userCard(u,structure)));}
+    let __USERS=[],__STRUCT=[];
+    async function buildUI(){showMask(true);try{const[users,struct]=await Promise.all([fetchAllUsers(),scanPortal()]);__USERS=users;__STRUCT=struct;renderUsers(__USERS,__STRUCT);}
+      catch(err){console.error(err);list.textContent='Failed to load. Check Worker and network.';showBanner('❌ Failed to load users or scan portal','err');}
+      finally{showMask(false);}}
 
-      for (const b of mainButtons){
-        const id    = b.id || '';
-        const label = (b.textContent || '').trim();
-        const href  = b.getAttribute('href') || '';
-        const entry = { id, label, href, subpages: [] };
+    let saving=false;async function saveAll(){if(saving)return;if(!__USERS||!__STRUCT)return;saving=true;showMask(true);
+      try{const users=JSON.parse(JSON.stringify(__USERS));const struct=__STRUCT;
+        users.forEach(u=>{const faEl=document.getElementById(`fa_${u.Username}__chk`);u.FullAccess=(faEl&&faEl.checked)?'Yes':'No';
+          const assign=(id,label,href)=>{const pid=id||normalizeIdForKey(href||label);const legacy=mapIdToLegacyKey(pid,label,href);
+            const chk=document.getElementById(`${u.Username}::${pid}__chk`);const val=(chk&&chk.checked)?'Yes':'No';
+            if(legacy)u[legacy]=val;if(pid)u[pid]=val;};
+          struct.forEach(p=>{assign(p.id,p.label,p.href);(p.subpages||[]).forEach(sp=>assign(sp.id,sp.label,sp.href));});});
+        await saveUsers(users);__USERS=users;showBanner('✅ Changes saved successfully.','ok');}
+      catch(err){console.error(err);showBanner('❌ Save failed. '+(err?.message||''),'err');}
+      finally{showMask(false);saving=false;}}
 
-        if (href && /\.html(?:$|\?)/.test(href) && !/login\.html/i.test(href)){
-          try{
-            const subRes = await fetch(href, { cache: 'no-store' });
-            const subHtml = await subRes.text();
-            const subDoc = parser.parseFromString(subHtml, 'text/html');
-            const subs = [...subDoc.querySelectorAll('a.button')];
-            entry.subpages = subs.map(sb => ({
-              id: sb.id || '',
-              label: (sb.textContent || '').trim(),
-              href: sb.getAttribute('href') || ''
-            }));
-          }catch(e){ /* ignore subpage fetch errors */ }
-        }
-        struct.push(entry);
-      }
-      structCount.textContent = `Discovered ${struct.length} buttons`;
-      return struct;
-    }
+    const modal=document.getElementById('addUserModal');const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
+    const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
+    document.getElementById('addUserBtn').addEventListener('click',openAdd);document.getElementById('cancelAdd').addEventListener('click',closeAdd);
+    async function createUser(){try{showMask(true);const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});const data=await res.json();
+      const users=data.Users||[];const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
+      const nextNum=String(maxNum+1);const firstName=document.getElementById('firstName').value.trim();const lastName=document.getElementById('lastName').value.trim();
+      const email=document.getElementById('email').value.trim();const username=document.getElementById('username').value.trim();
+      const password=document.getElementById('password').value;const vehicle=document.getElementById('vehicle').value.trim();
+      const empType=document.getElementById('employmentType').value.trim();const spPath=document.getElementById('sharepoint').value.trim();
+      if(!firstName||!lastName||!username||!password){showBanner('❌ Please complete First, Last, Username and Password.','err');return;}
+      const hashedPassword=await sha256Hex(password);
+      const newUser={EngineerNumber:nextNum,FirstName:firstName,LastName:lastName,Username:username,Email:email,HashedPassword:hashedPassword,
+        VehicleAssigned:vehicle,EmploymentType:empType||'Employed',Status:'Active',FullAccess:'No',SharePointPath:spPath};
+      users.push(newUser);await saveUsers(users);closeAdd();showBanner('✅ User added.','ok');buildUI();}
+      catch(err){console.error(err);showBanner('❌ Could not add user. '+(err?.message||''),'err');}
+      finally{showMask(false);}}
 
-    // =========================
-    // Data I/O
-    // =========================
-    async function fetchAllUsers(){
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-      });
-      if (!res.ok) throw new Error('Failed to fetch users');
-      const data = await res.json();
-      return data.Users || [];
-    }
-
-    async function saveUsers(users){
-      const res = await fetch(SAVE_URL, {
-        method:'POST',
-        headers: Object.assign(
-          { 'Content-Type':'application/json' },
-          TOKEN ? { 'Authorization':'Bearer ' + TOKEN } : {}
-        ),
-        body: JSON.stringify({ Users: users })
-      });
-      if (!res.ok){
-        const txt = await res.text().catch(()=> '');
-        throw new Error('Save failed: ' + txt);
-      }
-    }
-
-    // =========================
-    // Rendering
-    // =========================
-    function switchControl(id, checked){
-      const boxId = id + '__chk';
-      return h('label', { class:'switch' },
-        h('input', { type:'checkbox', id:boxId, ...(checked?{checked:true}:{}) }),
-        h('span', { class:'slider' })
-      );
-    }
-
-    function toggleRow(user, id, label, href, checked, indent=false){
-      const legacy = mapIdToLegacyKey(id, label, href);
-      const pathSpan = href ? h('span', { class:'path' }, href) : null;
-      return h('div', { class:'toggle-row' + (indent?' indent':'') },
-        h('div', { class:'lbl' },
-          label || id || '(unnamed)',
-          pathSpan ? h('div', null, pathSpan) : null
-        ),
-        switchControl(`${user.Username}::${id||href||label||'unknown'}`, !!checked)
-      );
-    }
-
-    function userCard(user, structure){
-      const header = h('div', { class:'user-header' },
-        h('div', null,
-          `${user.EngineerNumber ? ('#' + user.EngineerNumber + ' – ') : ''}${user.FirstName || ''} ${user.LastName || ''}`,
-          ' ',
-          h('span', { style:'color:#6b7280;font-weight:500' }, `(${user.Username})`)
-        ),
-        h('div', null,
-          // Full Access toggle
-          h('div', { class:'toggle-row' },
-            h('span', { class:'lbl' }, 'Full Access'),
-            switchControl(`fa_${user.Username}`, (user.FullAccess||'').toLowerCase()==='yes')
-          )
-        )
-      );
-
-      const sub = h('div', { class:'user-sub' },
-        `${user.EmploymentType || ''} · ${user.Status || ''} · ${user.Email || ''}`
-      );
-
-      const grid = h('div', { class:'grid' });
-
-      // Primary page toggles
-      grid.appendChild(h('div', { class:'section-title' }, 'Main Menu', h('span', { class:'pill' }, 'auto')));
-      structure.forEach(p=>{
-        const primaryId = p.id || normalizeIdForKey(p.href || p.label);
-        const legacyKey = mapIdToLegacyKey(primaryId, p.label, p.href);
-        const currentOn = ((user[legacyKey] || user[primaryId] || '').toLowerCase() === 'yes');
-        grid.appendChild(toggleRow(user, primaryId, p.label, p.href, currentOn, false));
-      });
-
-      // Subpage toggles
-      const subs = structure.flatMap(s => s.subpages || []);
-      if (subs.length){
-        grid.appendChild(h('div', { class:'section-title', style:'grid-column:1/-1' }, 'Sub-menus', h('span', { class:'pill' }, String(subs.length))));
-        subs.forEach(sp=>{
-          const subId = sp.id || normalizeIdForKey(sp.href || sp.label);
-          const subLegacy = mapIdToLegacyKey(subId, sp.label, sp.href);
-          const on = ((user[subLegacy] || user[subId] || '').toLowerCase() === 'yes');
-          grid.appendChild(toggleRow(user, subId, sp.label, sp.href, on, true));
-        });
-      }
-
-      const card = h('div', { class:'user-card' },
-        header, sub, grid
-      );
-      return card;
-    }
-
-    function renderUsers(users, structure){
-      list.innerHTML = '';
-      if (!users.length){
-        list.textContent = 'No users found.'; return;
-      }
-      users.forEach(u => list.appendChild(userCard(u, structure)));
-    }
-
-    // =========================
-    // Build UI
-    // =========================
-    let __USERS = [];
-    let __STRUCT = [];
-
-    async function buildUI(){
-      showMask(true);
-      try{
-        const [users, struct] = await Promise.all([fetchAllUsers(), scanPortal()]);
-        __USERS = users;
-        __STRUCT = struct;
-        renderUsers(__USERS, __STRUCT);
-      }catch(err){
-        console.error(err);
-        list.textContent = 'Failed to load. Check Worker and network.';
-        showBanner('❌ Failed to load users or scan portal', 'err');
-      }finally{
-        showMask(false);
-      }
-    }
-
-    // =========================
-    // Collect & Save
-    // =========================
-    let saving = false;
-    async function saveAll(){
-      if (saving) return;
-      if (!__USERS || !__STRUCT) return;
-      saving = true;
-      showMask(true);
-      try{
-        const users = JSON.parse(JSON.stringify(__USERS)); // clone
-        const struct = __STRUCT;
-
-        users.forEach(u=>{
-          // Full Access
-          const faEl = document.getElementById(`fa_${u.Username}__chk`);
-          u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
-
-          // For each discovered button/sub-button, set both the legacy key and the dynamic id key
-          const assignToggle = (id,label,href)=>{
-            const pid = id || normalizeIdForKey(href || label);
-            const legacy = mapIdToLegacyKey(pid, label, href);
-            const chk = document.getElementById(`${u.Username}::${pid}__chk`);
-            const val = (chk && chk.checked) ? 'Yes' : 'No';
-            if (legacy) u[legacy] = val;
-            if (pid)    u[pid]    = val;
-          };
-
-          struct.forEach(p=>{
-            assignToggle(p.id, p.label, p.href);
-            (p.subpages||[]).forEach(sp=> assignToggle(sp.id, sp.label, sp.href));
-          });
-        });
-
-        await saveUsers(users);
-        __USERS = users; // keep in sync after save
-        showBanner('✅ Changes saved successfully.', 'ok');
-      }catch(err){
-        console.error(err);
-        showBanner('❌ Save failed. ' + (err?.message || ''), 'err');
-      }finally{
-        showMask(false);
-        saving = false;
-      }
-    }
-
-    // =========================
-    // Add User modal
-    // =========================
-    const modal = document.getElementById('addUserModal');
-    const openAdd = () => { modal.classList.add('show'); modal.setAttribute('aria-hidden','false'); };
-    const closeAdd = () => { modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); };
-
-    document.getElementById('addUserBtn').addEventListener('click', openAdd);
-    document.getElementById('cancelAdd').addEventListener('click', closeAdd);
-
-    async function createUser(){
-      try{
-        showMask(true);
-        const res = await fetch(USERS_URL + '?v=' + Date.now(), {
-          headers: TOKEN ? { 'Authorization':'Bearer ' + TOKEN } : {}
-        });
-        const data = await res.json();
-        const users = data.Users || [];
-
-        // next EngineerNumber (max + 1)
-        const maxNum = users.reduce((m,u)=>{
-          const n = parseInt(u.EngineerNumber, 10);
-          return isNaN(n) ? m : Math.max(m, n);
-        }, 0);
-        const nextNum = String(maxNum + 1);
-
-        const firstName = document.getElementById('firstName').value.trim();
-        const lastName  = document.getElementById('lastName').value.trim();
-        const email     = document.getElementById('email').value.trim();
-        const username  = document.getElementById('username').value.trim();
-        const password  = document.getElementById('password').value;
-        const vehicle   = document.getElementById('vehicle').value.trim();
-        const empType   = document.getElementById('employmentType').value.trim();
-        const spPath    = document.getElementById('sharepoint').value.trim();
-
-        if (!firstName || !lastName || !username || !password){
-          showBanner('❌ Please complete First, Last, Username and Password.', 'err');
-          return;
-        }
-
-        const hashedPassword = await sha256Hex(password);
-
-        const newUser = {
-          EngineerNumber: nextNum,
-          FirstName: firstName,
-          LastName: lastName,
-          Username: username,
-          Email: email,
-          HashedPassword: hashedPassword,
-          VehicleAssigned: vehicle,
-          EmploymentType: empType || 'Employed',
-          Status: 'Active',
-          FullAccess: 'No',
-          SharePointPath: spPath
-        };
-
-        users.push(newUser);
-        await saveUsers(users);
-
-        closeAdd();
-        showBanner('✅ User added.', 'ok');
-        buildUI();
-      }catch(err){
-        console.error(err);
-        showBanner('❌ Could not add user. ' + (err?.message||''), 'err');
-      }finally{
-        showMask(false);
-      }
-    }
-    document.getElementById('createUserBtn').addEventListener('click', createUser);
-
-    // =========================
-    // Search
-    // =========================
-    const searchBox = document.getElementById('searchBox');
-    searchBox.addEventListener('input', debounce(()=>{
-      const q = (searchBox.value||'').trim().toLowerCase();
-      const filtered = !q ? __USERS : __USERS.filter(u=>{
-        return (u.FirstName||'').toLowerCase().includes(q)
-            || (u.LastName||'').toLowerCase().includes(q)
-            || (u.Username||'').toLowerCase().includes(q)
-            || String(u.EngineerNumber||'').includes(q);
-      });
-      renderUsers(filtered, __STRUCT);
-    }, 150));
-
-    // =========================
-    // Buttons
-    // =========================
-    document.getElementById('saveBtn').addEventListener('click', saveAll);
-    document.getElementById('reloadBtn').addEventListener('click', buildUI);
-    document.getElementById('rescanBtn').addEventListener('click', async ()=>{
-      showMask(true);
-      try{
-        __STRUCT = await scanPortal();
-        renderUsers(__USERS, __STRUCT);
-        showBanner('🔄 Scan complete. Buttons refreshed.', 'ok');
-      }catch(e){
-        console.error(e);
-        showBanner('❌ Scan failed', 'err');
-      }finally{
-        showMask(false);
-      }
-    });
-
-    // =========================
-    // Init
-    // =========================
-    (async ()=>{ await buildUI(); })();
+    document.getElementById('createUserBtn').addEventListener('click',createUser);
+    const searchBox=document.getElementById('searchBox');
+    searchBox.addEventListener('input',debounce(()=>{const q=(searchBox.value||'').trim().toLowerCase();
+      const filtered=!q?__USERS:__USERS.filter(u=>(u.FirstName||'').toLowerCase().includes(q)||(u.LastName||'').toLowerCase().includes(q)
+      ||(u.Username||'').toLowerCase().includes(q)||String(u.EngineerNumber||'').includes(q));renderUsers(filtered,__STRUCT);},150));
+    document.getElementById('saveBtn').addEventListener('click',saveAll);
+    document.getElementById('reloadBtn').addEventListener('click',buildUI);
+    document.getElementById('rescanBtn').addEventListener('click',async()=>{showMask(true);
+      try{__STRUCT=await scanPortal();renderUsers(__USERS,__STRUCT);showBanner('🔄 Scan complete. Buttons refreshed.','ok');}
+      catch(e){console.error(e);showBanner('❌ Scan failed','err');}finally{showMask(false);}});
+    (async()=>{await buildUI();})();
   </script>
 </body>
 </html>
