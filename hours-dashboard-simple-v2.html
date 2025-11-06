@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Mostlane • Weekly Hours Watch (v2)</title>
+<title>Mostlane • Weekly Hours Watch (v2 Fixed)</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
@@ -101,20 +101,19 @@
 
 <script>
 const HOURS_API = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
-const WEEKLY_CAP = 40; // global cap (can be made per-person later)
+const WEEKLY_CAP = 40;
 
 let rawData = null;
-let currentWeekAnchor = new Date(); // we’ll normalise to Monday/Sunday keys
+let currentWeekAnchor = new Date();
 let charts = { bar:null, donut:null, ot:null };
 
 function getVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
 function colorFor(pred,cap){ if(pred>cap) return getVar('--bad'); if(pred>cap*0.9) return getVar('--warn'); return getVar('--ok'); }
 
-// --- Date helpers (Mon–Sun weeks, weekKey = Sunday date "YYYY-MM-DD")
 function startOfWeekMonday(d){
   const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = dt.getUTCDay(); // 0=Sun
-  const diff = (day===0 ? -6 : 1 - day); // move to Monday
+  const day = dt.getUTCDay();
+  const diff = (day===0 ? -6 : 1 - day);
   dt.setUTCDate(dt.getUTCDate()+diff);
   dt.setUTCHours(0,0,0,0);
   return dt;
@@ -127,16 +126,14 @@ function endOfWeekSunday(d){
   return sun;
 }
 function getWeekKeyForDate(d){
-  // weekKey is the SUNDAY yyyy-mm-dd
   const sun = endOfWeekSunday(d);
   return sun.toISOString().slice(0,10);
 }
 function fmtUK(d){
-  const opts = { weekday: undefined, year:'numeric', month:'short', day:'numeric', timeZone:'UTC' };
+  const opts = { year:'numeric', month:'short', day:'numeric', timeZone:'UTC' };
   return d.toLocaleDateString('en-GB', opts);
 }
 function clampToCurrentWeek(){
-  // Disable "Next" if selected week is current week or in future
   const selSun = endOfWeekSunday(currentWeekAnchor);
   const todaySun = endOfWeekSunday(new Date());
   document.getElementById('nextBtn').disabled = selSun >= todaySun;
@@ -147,9 +144,8 @@ function updateWeekLabel(){
   document.getElementById('weekLabel').textContent = `Week commencing ${fmtUK(mon)} – ${fmtUK(sun)}`;
 }
 
-// Deduplicate entries per engineer+date by latest submittedAt
 function dedupeEntries(entries){
-  const byKey = new Map(); // key: engineer|date
+  const byKey = new Map();
   for(const e of entries){
     if(!e.engineer || !e.date) continue;
     const key = `${e.engineer}||${e.date}`;
@@ -168,24 +164,35 @@ async function fetchData(){
   return res.json();
 }
 
+// ✅ FIXED FUNCTION — now correctly matches your JSON weekKey structure
 function getEntriesForWeek(data, anchorDate){
-  const weekKey = getWeekKeyForDate(anchorDate); // Sunday yyyy-mm-dd
-  // If the data is grouped by date keys, gather those dates within the week
+  const currentKey = getWeekKeyForDate(anchorDate); // Sunday key
+  const prevKeyDate = new Date(currentKey);
+  prevKeyDate.setUTCDate(prevKeyDate.getUTCDate() - 7);
+  const prevKey = prevKeyDate.toISOString().slice(0,10);
+
+  const all = [];
+  for(const list of Object.values(data)){
+    if(Array.isArray(list)) all.push(...list);
+  }
+
+  // try direct match first
+  let filtered = all.filter(e => e.weekKey === currentKey);
+  if(!filtered.length){
+    // try the offset weekKey if JSON weekKey is one week behind
+    filtered = all.filter(e => e.weekKey === prevKey);
+  }
+
+  if(filtered.length) return dedupeEntries(filtered);
+
+  // fallback: date-range filter
   const mon = startOfWeekMonday(anchorDate);
   const sun = endOfWeekSunday(anchorDate);
-  const out = [];
-  // If your Worker also stores weekKey inside each entry, we can filter faster by entry.weekKey===weekKey.
-  for(const [dayKey, list] of Object.entries(data)){
-    const dt = new Date(dayKey+"T00:00:00Z");
-    if(dt>=mon && dt<=sun && Array.isArray(list)){
-      out.push(...list.filter(e => {
-        // Prefer internal weekKey match if provided, else rely on the date key
-        if(e.weekKey && e.weekKey !== weekKey) return false;
-        return true;
-      }));
-    }
-  }
-  return dedupeEntries(out);
+  const rangeFiltered = all.filter(e=>{
+    const d = new Date(e.date+"T00:00:00Z");
+    return d>=mon && d<=sun;
+  });
+  return dedupeEntries(rangeFiltered);
 }
 
 function isCurrentWeek(anchor){
@@ -194,64 +201,40 @@ function isCurrentWeek(anchor){
   return selSun.getTime() === todaySun.getTime();
 }
 
-// Mon–Fri projection only
 function buildEngineerStats(entries, anchor){
-  // Group by engineer
   const per = new Map();
-  // Also track which dates are Mon–Fri
   const mon = startOfWeekMonday(anchor);
   const fri = new Date(mon); fri.setUTCDate(mon.getUTCDate()+4);
 
   for(const e of entries){
     const name = e.engineer;
     if(!name) continue;
-
-    // paid hours are in totalHours string like "9.52"
     const total = parseFloat(e.totalHours) || 0;
     const ot = parseFloat(e.overtimeHours) || 0;
-
-    // Count only Mon–Fri towards averages, but include OT sums for the week
     const d = new Date(e.date+"T00:00:00Z");
     const isWeekday = (d>=mon && d<=fri);
 
-    if(!per.has(name)) per.set(name, { name, sumPaid:0, days:0, sumOT:0, sumPaidWeekdays:0, weekdayDays:0 });
+    if(!per.has(name)) per.set(name,{name,sumPaid:0,sumPaidWeekdays:0,weekdayDays:0,sumOT:0});
     const row = per.get(name);
-
-    row.sumPaid += total;       // full week actual paid hours
-    row.sumOT   += ot;
-
-    if(isWeekday){
-      row.sumPaidWeekdays += total;
-      row.weekdayDays += 1;
-    }
-
-    // we'll also count "days worked so far" as distinct weekday days for average
-    if(isWeekday) row.days += 1;
+    row.sumPaid += total;
+    row.sumOT += ot;
+    if(isWeekday){ row.sumPaidWeekdays += total; row.weekdayDays++; }
   }
 
-  // Compute predicted = avg weekday hours so far * 5 (Mon–Fri)
   const pastWeek = !isCurrentWeek(anchor);
   const stats = [];
   per.forEach(v=>{
-    const avg = v.weekdayDays > 0 ? (v.sumPaidWeekdays / v.weekdayDays) : 0;
+    const avg = v.weekdayDays ? (v.sumPaidWeekdays/v.weekdayDays) : 0;
     const predicted = pastWeek ? v.sumPaidWeekdays : (avg * 5);
-    stats.push({
-      name: v.name,
-      workedSoFar: v.sumPaidWeekdays, // Mon–Fri actual so far
-      predicted,
-      overtime: v.sumOT,
-      daysCount: v.weekdayDays
-    });
+    stats.push({name:v.name,workedSoFar:v.sumPaidWeekdays,predicted,overtime:v.sumOT,daysCount:v.weekdayDays});
   });
   return stats;
 }
 
-function sum(arr, f){ return arr.reduce((s,x)=>s+(f?f(x):x),0); }
+function sum(arr,f){return arr.reduce((s,x)=>s+(f?f(x):x),0);}
 
 function destroyCharts(){
-  if(charts.bar){ charts.bar.destroy(); charts.bar=null; }
-  if(charts.donut){ charts.donut.destroy(); charts.donut=null; }
-  if(charts.ot){ charts.ot.destroy(); charts.ot=null; }
+  for(const k in charts){ if(charts[k]){ charts[k].destroy(); charts[k]=null; } }
 }
 
 function drawCharts(stats){
@@ -264,113 +247,85 @@ function drawCharts(stats){
   const predicted = stats.map(e=>e.predicted);
   const colors = stats.map(e=>colorFor(e.predicted, WEEKLY_CAP));
 
-  charts.bar = new Chart(ctxBar, {
+  charts.bar = new Chart(ctxBar,{
     type:'bar',
-    data:{
-      labels,
-      datasets:[
-        { label:'Predicted hours (Mon–Fri)', data:predicted, backgroundColor:colors },
-        { type:'line', label:'Cap (40h)', data:labels.map(_=>WEEKLY_CAP), borderColor:getVar('--ml-blue'), borderWidth:2, pointRadius:0 }
-      ]
-    },
-    options:{
-      plugins:{ legend:{ display:false } },
-      scales:{ y:{ beginAtZero:true, suggestedMax:50 } }
-    }
+    data:{labels,datasets:[
+      {label:'Predicted hours (Mon–Fri)',data:predicted,backgroundColor:colors},
+      {type:'line',label:'Cap (40h)',data:labels.map(_=>WEEKLY_CAP),
+       borderColor:getVar('--ml-blue'),borderWidth:2,pointRadius:0}
+    ]},
+    options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,suggestedMax:50}}}
   });
 
-  const ok = stats.filter(e=>e.predicted <= 0.9*WEEKLY_CAP).length;
-  const warn = stats.filter(e=>e.predicted > 0.9*WEEKLY_CAP && e.predicted <= WEEKLY_CAP).length;
-  const bad = stats.filter(e=>e.predicted > WEEKLY_CAP).length;
+  const ok = stats.filter(e=>e.predicted<=0.9*WEEKLY_CAP).length;
+  const warn = stats.filter(e=>e.predicted>0.9*WEEKLY_CAP && e.predicted<=WEEKLY_CAP).length;
+  const bad = stats.filter(e=>e.predicted>WEEKLY_CAP).length;
 
-  charts.donut = new Chart(ctxDonut, {
+  charts.donut = new Chart(ctxDonut,{
     type:'doughnut',
-    data:{
-      labels:['On track','Close','Over'],
-      datasets:[{ data:[ok,warn,bad], backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')] }]
-    },
-    options:{ plugins:{ legend:{ position:'bottom' } }, cutout:'60%' }
+    data:{labels:['On track','Close','Over'],
+      datasets:[{data:[ok,warn,bad],backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')]}]},
+    options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}
   });
 
   const overtime = stats.map(e=>e.overtime);
-  charts.ot = new Chart(ctxOT, {
+  charts.ot = new Chart(ctxOT,{
     type:'bar',
-    data:{
-      labels,
-      datasets:[{ label:'Overtime hours (week)', data:overtime, backgroundColor:getVar('--ml-blue') }]
-    },
-    options:{
-      plugins:{ legend:{ display:true } },
-      scales:{ y:{ beginAtZero:true } }
-    }
+    data:{labels,datasets:[{label:'Overtime hours (week)',data:overtime,backgroundColor:getVar('--ml-blue')}]},
+    options:{plugins:{legend:{display:true}},scales:{y:{beginAtZero:true}}}
   });
 }
 
 function updateKPIs(stats){
   const count = stats.length;
   document.getElementById('kpiCount').textContent = count;
-
-  const avgHoursSoFar = count ? (sum(stats, e=>e.workedSoFar)/count) : 0;
+  const avgHoursSoFar = count ? sum(stats,e=>e.workedSoFar)/count : 0;
   document.getElementById('kpiAvg').textContent = avgHoursSoFar.toFixed(1)+'h';
-
-  const totalPred = sum(stats, e=>e.predicted);
+  const totalPred = sum(stats,e=>e.predicted);
   document.getElementById('kpiTotal').textContent = totalPred.toFixed(1)+'h';
-
-  const over = stats.filter(e=>e.predicted > WEEKLY_CAP).length;
+  const over = stats.filter(e=>e.predicted>WEEKLY_CAP).length;
   document.getElementById('kpiOver').textContent = over;
-
-  const otTotal = sum(stats, e=>e.overtime);
-  const otAvg = count ? otTotal / count : 0;
+  const otTotal = sum(stats,e=>e.overtime);
+  const otAvg = count ? otTotal/count : 0;
   document.getElementById('kpiOTTotal').textContent = otTotal.toFixed(1)+'h';
   document.getElementById('kpiOTAvg').textContent = otAvg.toFixed(1)+'h';
 }
 
 async function refresh(){
-  const errorMsg = document.getElementById('errorMsg');
-  errorMsg.textContent = '';
+  const errorMsg=document.getElementById('errorMsg');
+  errorMsg.textContent='';
   try{
-    if(!rawData){
-      rawData = await fetchData();
-    }
-    updateWeekLabel();
-    clampToCurrentWeek();
+    if(!rawData) rawData=await fetchData();
+    updateWeekLabel(); clampToCurrentWeek();
 
-    const weekEntries = getEntriesForWeek(rawData, currentWeekAnchor);
+    const weekEntries=getEntriesForWeek(rawData,currentWeekAnchor);
     if(!weekEntries.length){
-      destroyCharts();
-      updateKPIs([]);
-      errorMsg.textContent = "No entries found for this week.";
+      destroyCharts(); updateKPIs([]);
+      errorMsg.textContent="No entries found for this week.";
       return;
     }
 
-    const stats = buildEngineerStats(weekEntries, currentWeekAnchor);
-    updateKPIs(stats);
-    drawCharts(stats);
-
+    const stats=buildEngineerStats(weekEntries,currentWeekAnchor);
+    updateKPIs(stats); drawCharts(stats);
   }catch(err){
     console.error(err);
-    destroyCharts();
-    updateKPIs([]);
-    errorMsg.textContent = "❌ Error loading or processing data.";
+    destroyCharts(); updateKPIs([]);
+    errorMsg.textContent="❌ Error loading or processing data.";
   }
 }
 
-// Week navigation
-document.getElementById('prevBtn').addEventListener('click', ()=>{
-  const mon = startOfWeekMonday(currentWeekAnchor);
+document.getElementById('prevBtn').addEventListener('click',()=>{
+  const mon=startOfWeekMonday(currentWeekAnchor);
   mon.setUTCDate(mon.getUTCDate()-7);
-  currentWeekAnchor = mon;
-  refresh();
+  currentWeekAnchor=mon; refresh();
 });
-document.getElementById('nextBtn').addEventListener('click', ()=>{
-  const mon = startOfWeekMonday(currentWeekAnchor);
+document.getElementById('nextBtn').addEventListener('click',()=>{
+  const mon=startOfWeekMonday(currentWeekAnchor);
   mon.setUTCDate(mon.getUTCDate()+7);
-  currentWeekAnchor = mon;
-  refresh();
+  currentWeekAnchor=mon; refresh();
 });
 
-// Init to current week (today as anchor)
-currentWeekAnchor = new Date();
+currentWeekAnchor=new Date();
 refresh();
 </script>
 </body>
