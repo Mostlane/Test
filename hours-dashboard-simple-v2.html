@@ -26,6 +26,7 @@
   .grid{display:grid;gap:12px;grid-template-columns:2fr 1fr}
   .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
+  #errorMsg{text-align:center;color:var(--bad);font-weight:600;margin-top:20px}
   @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)} .grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -54,56 +55,87 @@
         <canvas id="donutAtRisk" height="150"></canvas>
       </div>
     </div>
+    <div id="errorMsg"></div>
   </div>
 
 <script>
-// Dummy data for demo
-const ENGINEERS = [
-  { name: "Jamie Line", worked: 24, predicted: 44, cap: 40 },
-  { name: "Chris Cooke", worked: 22, predicted: 42, cap: 40 },
-  { name: "Bradley Graham", worked: 18, predicted: 39, cap: 40 },
-  { name: "Connor Brady", worked: 20, predicted: 38, cap: 40 },
-  { name: "Ciprian", worked: 17, predicted: 34, cap: 40 }
-];
-function colorFor(pred,cap){
-  if(pred>cap) return getVar('--bad');
-  if(pred>cap*0.9) return getVar('--warn');
-  return getVar('--ok');
+const HOURS_API = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+const WEEKLY_CAP = 40;
+
+function getVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function colorFor(pred,cap){if(pred>cap)return getVar('--bad');if(pred>cap*0.9)return getVar('--warn');return getVar('--ok');}
+
+async function loadData(){
+  const errorMsg=document.getElementById('errorMsg');
+  try{
+    const res=await fetch(HOURS_API+"?v="+Date.now(),{cache:"no-store"});
+    if(!res.ok)throw new Error(res.status+" "+res.statusText);
+    const data=await res.json();
+
+    // Data format: { "2025-11-05": [ {...}, {...} ], "2025-11-06": [ {...} ] }
+    const engineerMap={};
+    for(const [date,entries] of Object.entries(data)){
+      if(!Array.isArray(entries))continue;
+      entries.forEach(e=>{
+        const name=e.engineer||e.name;
+        if(!name)return;
+        const hours=parseFloat(e.totalHours)||0;
+        if(!engineerMap[name])engineerMap[name]={name,worked:0,count:0};
+        engineerMap[name].worked+=hours;
+        engineerMap[name].count++;
+      });
+    }
+
+    const ENGINEERS=Object.values(engineerMap).map(e=>{
+      const avg=e.worked/e.count;
+      const predicted=avg*5; // projection for week (5 days)
+      return{...e,worked:avg,predicted,cap:WEEKLY_CAP};
+    });
+
+    if(!ENGINEERS.length){errorMsg.textContent="No entries found yet.";return;}
+
+    // KPIs
+    document.getElementById('kpiCount').textContent=ENGINEERS.length;
+    const avg=ENGINEERS.reduce((s,e)=>s+e.worked,0)/ENGINEERS.length;
+    document.getElementById('kpiAvg').textContent=avg.toFixed(1)+'h';
+    document.getElementById('kpiOver').textContent=ENGINEERS.filter(e=>e.predicted>e.cap).length;
+    document.getElementById('kpiTotal').textContent=ENGINEERS.reduce((s,e)=>s+e.predicted,0).toFixed(1)+'h';
+
+    // Bar chart
+    new Chart(document.getElementById('barByEngineer').getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:ENGINEERS.map(e=>e.name),
+        datasets:[{
+          label:'Predicted hours',
+          data:ENGINEERS.map(e=>e.predicted),
+          backgroundColor:ENGINEERS.map(e=>colorFor(e.predicted,e.cap))
+        },{
+          type:'line',label:'Cap',data:ENGINEERS.map(e=>e.cap),
+          borderColor:getVar('--ml-blue'),borderWidth:2,pointRadius:0
+        }]
+      },
+      options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:50}}}
+    });
+
+    // Donut chart
+    const ok=ENGINEERS.filter(e=>e.predicted<=0.9*e.cap).length;
+    const warn=ENGINEERS.filter(e=>e.predicted>0.9*e.cap&&e.predicted<=e.cap).length;
+    const bad=ENGINEERS.filter(e=>e.predicted>e.cap).length;
+    new Chart(document.getElementById('donutAtRisk').getContext('2d'),{
+      type:'doughnut',
+      data:{labels:['On track','Close','Over'],
+        datasets:[{data:[ok,warn,bad],backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')]}]},
+      options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}
+    });
+
+  }catch(err){
+    console.error(err);
+    errorMsg.textContent="❌ Error loading data from Worker.";
+  }
 }
-function getVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
-// KPIs
-document.getElementById('kpiCount').textContent = ENGINEERS.length;
-const avg = ENGINEERS.reduce((s,e)=>s+e.worked,0)/ENGINEERS.length;
-document.getElementById('kpiAvg').textContent = avg.toFixed(1)+'h';
-document.getElementById('kpiOver').textContent = ENGINEERS.filter(e=>e.predicted>e.cap).length;
-document.getElementById('kpiTotal').textContent = ENGINEERS.reduce((s,e)=>s+e.predicted,0).toFixed(1)+'h';
-
-// Bar
-new Chart(document.getElementById('barByEngineer').getContext('2d'),{
-  type:'bar',
-  data:{
-    labels:ENGINEERS.map(e=>e.name),
-    datasets:[{
-      label:'Predicted hours',
-      data:ENGINEERS.map(e=>e.predicted),
-      backgroundColor:ENGINEERS.map(e=>colorFor(e.predicted,e.cap))
-    },{
-      type:'line', label:'Cap', data:ENGINEERS.map(e=>e.cap),
-      borderColor:getVar('--ml-blue'), borderWidth:2, pointRadius:0
-    }]
-  }, options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:50}}}
-});
-
-// Donut
-const ok = ENGINEERS.filter(e=>e.predicted<=0.9*e.cap).length;
-const warn = ENGINEERS.filter(e=>e.predicted>0.9*e.cap && e.predicted<=e.cap).length;
-const bad = ENGINEERS.filter(e=>e.predicted>e.cap).length;
-new Chart(document.getElementById('donutAtRisk').getContext('2d'),{
-  type:'doughnut',
-  data:{labels:['On track','Close','Over'],datasets:[{data:[ok,warn,bad],backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')]}]},
-  options:{plugins:{legend:{position:'bottom'}}, cutout:'60%'}
-});
+loadData();
 </script>
 </body>
 </html>
