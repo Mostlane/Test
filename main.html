@@ -67,7 +67,7 @@
   }
 </style>
 
-<!-- ✅ Buttons (your standard layout) -->
+<!-- ✅ Buttons -->
 <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
 <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
 <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
@@ -85,44 +85,59 @@
 <script>
 document.addEventListener('DOMContentLoaded', async () => {
   const username = sessionStorage.getItem("mostlaneUser");
-  if (!username) return;
+  if (!username) {
+    console.warn("⚠️ No username found in sessionStorage");
+    return;
+  }
 
   try {
-    // 🔹 Load user data from KV Worker
-    const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users?v=" + Date.now());
+    // 🔹 Fetch this user's permissions from Worker
+    const res = await fetch(`https://mostlane-users.jamie-def.workers.dev/user?u=${encodeURIComponent(username)}&v=${Date.now()}`);
     const data = await res.json();
-    const users = data.Users || [];
-    const user = users.find(u => u.Username === username);
-    if (!user) return;
+    if (!data.found) {
+      console.warn("⚠️ User not found in KV");
+      return;
+    }
 
+    const user = data.user;
     const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
-    // 🔹 Get all visible buttons
-    const buttons = document.querySelectorAll("a.button");
+    // 🔹 If Full Access, show all buttons
+    if (fullAccess) {
+      console.log("✅ Full Access – all buttons visible");
+      document.querySelectorAll("a.button").forEach(btn => btn.style.display = "block");
+    } else {
+      // 🔹 Otherwise, show/hide based on permissions
+      document.querySelectorAll("a.button").forEach(btn => {
+        const id = btn.id || "";
+        const href = btn.getAttribute("href") || "";
+        const keyCandidates = [
+          id,
+          href.replace(/[^\w]/g, ''),      // e.g. purchasehtml
+          (btn.textContent || "").replace(/\s+/g, '') // e.g. HolidayRequests
+        ];
 
-    buttons.forEach(btn => {
-      const label = btn.textContent.trim();
-      const key = label.replace(/\s+/g, ""); // Match field naming in JSON
-      const allowed = (user[key] || "").toLowerCase() === "yes";
+        let allowed = false;
+        for (const key of keyCandidates) {
+          if ((user[key] || "").toLowerCase() === "yes") {
+            allowed = true;
+            break;
+          }
+        }
 
-      // ✅ Full Access overrides everything (shows all buttons)
-      if (fullAccess) {
-        btn.style.display = "block";
-        return;
-      }
+        if (!allowed) btn.style.display = "none";
+      });
+    }
 
-      // ✅ Hide button if permission is not "Yes"
-      if (!allowed) btn.style.display = "none";
-    });
-
-    // 🔹 Link SharePoint folder for "My Documents"
+    // 🔹 Link SharePoint folder for “My Documents”
     const docBtn = document.getElementById("my-documents-btn");
     if (docBtn && user.SharePointPath) {
       docBtn.href = user.SharePointPath;
+      docBtn.target = "_blank";
     }
 
   } catch (err) {
-    console.error("Failed to load permissions", err);
+    console.error("❌ Error loading user permissions:", err);
   }
 });
 </script>
