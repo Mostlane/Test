@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Engineers Hours Menu – Mostlane Portal</title>
+  <script src="auth.js"></script>
+
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .page-box {
+      background: rgba(255,255,255,0.65);
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+      text-align: center;
+      max-width: 400px;
+      width: 100%;
+    }
+
+    h1 {
+      color: #004a99;
+      margin-bottom: 25px;
+      font-size: 22px;
+    }
+
+    .button {
+      display: block;
+      margin: 10px auto;
+      padding: 12px 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #ffffff;
+      background-color: rgba(0, 74, 153, 0.75);
+      text-decoration: none;
+      border-radius: 6px;
+      width: 90%;
+      max-width: 280px;
+      transition: background 0.2s ease;
+    }
+
+    .button:hover {
+      background-color: rgba(0, 74, 153, 0.9);
+    }
+
+    footer {
+      margin-top: 30px;
+      color: #444;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page-box">
+    <h1>Engineers Hours Menu</h1>
+
+    <!-- ✅ Main Buttons -->
+    <a class="button" href="hour-entry.html" id="hourEntryBtn">Hour Entry</a>
+    <a class="button" href="main.html" id="mainMenuBtn">Main Menu</a>
+  </div>
+
+  <footer>
+    Mostlane Portal
+  </footer>
+</body>
+</html>
