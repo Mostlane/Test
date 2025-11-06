@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Mostlane • Advanced Hours Dashboard v3 (Live, Fixed)</title>
+  <title>Mostlane • Advanced Hours Dashboard v3.1 (Live)</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
@@ -12,25 +12,51 @@
       --bg:#0f172a; --panel:#111827; --panelEdge:#0b1222; --text:#e5e7eb; --muted:#9ca3af;
       --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
       --blue:#3b82f6; --indigo:#6366f1; --cyan:#22d3ee; --yellow:#facc15; --teal:#14b8a6;
+      --rowAlt:rgba(255,255,255,0.03);
     }
     body{margin:0;background:linear-gradient(180deg,#0b132a,#0a0f1f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-    .wrap{display:grid;grid-template-columns: 1fr 320px; gap:16px; padding:16px}
+    .wrap{display:grid;grid-template-columns: 1fr 360px; gap:16px; padding:16px}
     .area{display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:16px}
     .panel{background:var(--panel); border:1px solid #1f2937; border-radius:10px; padding:14px; box-shadow:inset 0 0 0 1px var(--panelEdge), 0 6px 16px rgba(0,0,0,.35)}
     .title{font-weight:600; font-size:14px; color:var(--muted); margin-bottom:8px}
     .kpiGrid{display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:16px}
     .kpi .num{font-size:28px; font-weight:800}
     .kpi .sub{color:var(--muted); font-size:12px}
-    .leaderboard .row{display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #334155}
-    .leaderboard .row:last-child{border-bottom:none}
-    .pill{display:inline-block; font-size:11px; border-radius:999px; padding:2px 8px}
-    .ok{background:#04281e;color:#34d399} .warn{background:#422d14;color:#fbbf24} .bad{background:#3b0e0e;color:#fca5a5}
     .topbar{grid-column:1/3; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px}
     .btn{appearance:none; border:1px solid #334155; background:#0b132a; color:#fff; padding:8px 10px; border-radius:8px; cursor:pointer; text-decoration:none}
     .highlight{font-size:18px;font-weight:700;color:var(--blue)}
-    .muted{color:var(--muted)}
     .hint{font-size:12px;color:var(--muted);margin-top:4px}
     canvas{max-width:100%}
+
+    /* Leaderboards */
+    .leaderboard .sectionHeader{
+      margin:14px -14px 6px -14px; padding:8px 14px;
+      font-weight:700; color:#d1d5db; background:rgba(59,130,246,0.08);
+      border-top:1px solid #1f2937; border-bottom:1px solid #1f2937;
+    }
+    .leaderboard .sectionHeader .small{font-weight:500;color:var(--muted);font-size:12px;margin-left:6px}
+    .leaderboard .rows{margin-top:4px}
+    .row{
+      display:flex; justify-content:space-between; gap:10px; padding:8px 0;
+      border-bottom:1px dashed #334155; align-items:center;
+    }
+    .row:nth-child(odd){ background:var(--rowAlt); }
+    .row:last-child{border-bottom:none}
+    .metric{white-space:nowrap; font-variant-numeric:tabular-nums}
+    .name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+    /* Severity highlights */
+    .sev-ok .metric{color:var(--ok); font-weight:700}
+    .sev-warn .metric{color:var(--warn); font-weight:700}
+    .sev-bad .metric{color:var(--bad); font-weight:800}
+
+    /* Suggestions */
+    .suggestions .item{display:flex; gap:8px; align-items:flex-start; padding:8px 0; border-bottom:1px dashed #334155}
+    .suggestions .item:last-child{border-bottom:none}
+    .suggestions .icon{width:22px; text-align:center}
+    .suggestions .text{flex:1; color:#e5e7eb}
+    .suggestions .text .small{color:var(--muted); font-size:12px}
+
     @media(max-width:1100px){ .wrap{grid-template-columns:1fr} .area{grid-template-columns:1fr} .kpiGrid{grid-template-columns:repeat(2,1fr)} }
   </style>
 </head>
@@ -67,12 +93,16 @@
       <div class="panel" style="grid-column:1/3"><div class="title">Hours by day (current week)</div><canvas id="byDay" height="140"></canvas></div>
     </div>
 
-    <!-- Right Column Leaderboards -->
+    <!-- Right Column: Leaderboards + AI Suggestions -->
     <div class="panel leaderboard" style="max-height:calc(100vh - 32px);overflow:auto">
-      <div class="title">Leaderboards • This Week</div>
-      <div id="lb-week"></div>
-      <div class="title" style="margin-top:12px">Leaderboards • Last 6 Weeks</div>
-      <div id="lb-hist"></div>
+      <div class="sectionHeader">Weekly Leaderboards <span class="small">This week only</span></div>
+      <div id="lb-week" class="rows"></div>
+
+      <div class="sectionHeader" style="margin-top:14px">6-Week Leaderboards <span class="small">Trends</span></div>
+      <div id="lb-hist" class="rows"></div>
+
+      <div class="sectionHeader" style="margin-top:14px">⚡ Insights & Suggestions <span class="small">Analytical & factual</span></div>
+      <div id="suggestions" class="suggestions"></div>
     </div>
   </div>
 
@@ -82,20 +112,26 @@ const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
 const CAP_PER_ENGINEER = 40;
 const WEEKDAYS_TARGET = 5; // projection uses Monday–Friday only
 
+// thresholds used for severity & suggestions
+const OT_WARN = 2;           // hours this week
+const OT_BAD = 4;
+const PRED_NEAR = 0.9;       // % of cap
+const LONG_WEEK_BAD = 45;    // worked/predicted consistently over this
+const LONG_DAY_BAD = 12;     // avg daily hours current week
+const VC_BAD = 0.80;         // van check pass ratio threshold across 6 weeks
+
 /** ======= HELPERS ======= **/
 const $ = (id) => document.getElementById(id);
 const toFloat = (v) => v==null ? 0 : parseFloat(v)||0;
 
 function parseISODate(s){
-  // force UTC noon to avoid TZ edge cases
   const d = new Date(s + "T12:00:00Z");
   return isNaN(d) ? null : d;
 }
-function uniq(arr){ return [...new Set(arr)]; }
 function sum(arr){ return arr.reduce((a,b)=>a+toFloat(b),0); }
+function avg(arr){ return arr.length ? sum(arr)/arr.length : 0; }
 function fmtHours(n){ return (Math.round(n*100)/100).toFixed(2) + "h"; }
 function weekLabel(weekKey){
-  // weekKey is Sunday ISO; label as "w/c Mon DD MMM"
   const sun = parseISODate(weekKey);
   if(!sun) return weekKey;
   const mon = new Date(sun); mon.setUTCDate(sun.getUTCDate()+1);
@@ -109,11 +145,6 @@ async function loadHours(){
   return await res.json();
 }
 
-/**
- * Flatten Worker store to an array of entries with weekKey/date/engineer etc.
- * Input shape: { "YYYY-MM-DD":[ {entry}, {entry}, ... ], ... }
- * We also dedupe by (engineer|date) keeping the latest submittedAt.
- */
 function flattenAndDedupe(json){
   const all = [];
   for(const k of Object.keys(json||{})){
@@ -137,10 +168,15 @@ function flattenAndDedupe(json){
   return Array.from(map.values());
 }
 
-/**
- * Use entry.weekKey when present; fallback: derive Sunday from date.
- * Return sorted ASC, valid YYYY-MM-DD only.
- */
+function deriveWeekKey(dateStr){
+  const d = parseISODate(dateStr);
+  if(!d) return null;
+  const sun = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = sun.getUTCDay(); // 0=Sun..6=Sat
+  sun.setUTCDate(sun.getUTCDate() - day);
+  return sun.toISOString().split("T")[0];
+}
+
 function weekKeysFromEntries(entries){
   const keys = new Set();
   for(const e of entries){
@@ -151,21 +187,7 @@ function weekKeysFromEntries(entries){
   return sorted;
 }
 
-function deriveWeekKey(dateStr){
-  const d = parseISODate(dateStr);
-  if(!d) return null;
-  const sun = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  // move to Sunday of that week (0=Sunday)
-  const day = sun.getUTCDay(); // 0..6
-  sun.setUTCDate(sun.getUTCDate() - day);
-  return sun.toISOString().split("T")[0];
-}
-
 /** ======= COMPUTE METRICS ======= **/
-/**
- * Build per-engineer aggregates for a given weekKey (Mon–Fri prediction only).
- * Returns map: name -> { name, worked, overtime, travel, predicted, cap, vanCheck }
- */
 function aggregateWeek(entries, weekKey){
   const cur = entries.filter(e => (e.weekKey || deriveWeekKey(e.date)) === weekKey);
 
@@ -189,7 +211,6 @@ function aggregateWeek(entries, weekKey){
     }
     const rec = byEng.get(name);
 
-    // safe numeric parsing
     const total = toFloat(e.totalHours);
     const overtime = toFloat(e.overtimeHours);
     const travel = toFloat(e.totalTravelHours);
@@ -198,17 +219,15 @@ function aggregateWeek(entries, weekKey){
     rec.overtime += overtime;
     rec.travel += travel;
 
-    // Mon–Fri counting for prediction
     const d = parseISODate(e.date);
     if(d){
-      const dow = d.getUTCDay(); // 0 Sun .. 6 Sat
+      const dow = d.getUTCDay();
       if(dow >= 1 && dow <= 5){
         rec.weekdayWorked += total;
         rec.weekdayDays += 1;
       }
     }
 
-    // Van check mapping (support both fields)
     const vc = ((e.vanCheckWeekStatus || e.vanCheck || "") + "").trim();
     if(vc === "Failed" || vc === "No"){ rec.vanCheck = "No"; }
     else if(vc === "Passed" || vc === "Yes"){
@@ -216,7 +235,6 @@ function aggregateWeek(entries, weekKey){
     }
   }
 
-  // Finalise predicted using avg weekday hours so far × 5 (Mon–Fri)
   for(const rec of byEng.values()){
     const daysWorked = rec.weekdayDays || 0;
     const avgPerDay = daysWorked ? (rec.weekdayWorked / daysWorked) : 0;
@@ -225,10 +243,6 @@ function aggregateWeek(entries, weekKey){
   return byEng;
 }
 
-/**
- * Build 6-week history per engineer:
- * history[name] = [{weekKey, worked, overtime, travel, vanCheck}, ...] (sorted ascending)
- */
 function buildHistory(entries, weekKeys, limit=6){
   const last = weekKeys.slice(-limit);
   const out = new Map();
@@ -241,6 +255,7 @@ function buildHistory(entries, weekKeys, limit=6){
         worked: rec.worked,
         overtime: rec.overtime,
         travel: rec.travel,
+        predicted: rec.predicted,
         vanCheck: rec.vanCheck
       });
     });
@@ -250,49 +265,161 @@ function buildHistory(entries, weekKeys, limit=6){
 
 /** ======= SCORING ======= **/
 function weeklyScore(rec){
-  // score using worked, overtime, travel efficiency, van check, closeness to cap
   const worked = rec.worked;
   const overtime = rec.overtime;
   const travel = rec.travel;
   const eff = worked ? Math.max(0, (worked - travel) / worked) : 1;
 
   let s = 100;
-  s -= 2 * Math.max(0, overtime);               // penalise OT
-  if(eff < 0.75) s -= 15; else if(eff < 0.85) s -= 7; else if(eff > 0.92) s += 5; // efficiency
-  if(rec.vanCheck === "No") s -= 20; else if(rec.vanCheck === "Yes") s += 2;      // van checks
-  const diff = Math.abs(CAP_PER_ENGINEER - Math.min(rec.predicted, 1e6));         // closeness to cap
+  s -= 2 * Math.max(0, overtime);
+  if(eff < 0.75) s -= 15; else if(eff < 0.85) s -= 7; else if(eff > 0.92) s += 5;
+  if(rec.vanCheck === "No") s -= 20; else if(rec.vanCheck === "Yes") s += 2;
+  const diff = Math.abs(CAP_PER_ENGINEER - Math.min(rec.predicted, 1e6));
   if(diff <= 4) s += 4;
   return Math.max(0, Math.min(100, s));
 }
-
 function historicScore(historyArr){
   if(!historyArr || !historyArr.length) return 0;
-  const workedAvg = sum(historyArr.map(h=>h.worked))/historyArr.length;
-  const otAvg = sum(historyArr.map(h=>h.overtime))/historyArr.length;
-  const travelAvg = sum(historyArr.map(h=>h.travel))/historyArr.length;
+  const workedAvg = avg(historyArr.map(h=>h.worked));
+  const otAvg = avg(historyArr.map(h=>h.overtime));
+  const travelAvg = avg(historyArr.map(h=>h.travel));
   const eff = workedAvg ? Math.max(0,(workedAvg - travelAvg)/workedAvg) : 1;
   const checksGood = historyArr.filter(h=>h.vanCheck==="Yes").length / historyArr.length;
 
   let s = 100;
   const diff = Math.abs(CAP_PER_ENGINEER - workedAvg);
   if(diff <= 2) s += 5; else if(diff > 8) s -= 5;
-  s -= 1.5 * otAvg;                   // sustained OT penalty
+  s -= 1.5 * otAvg;
   if(eff < 0.8) s -= 10; else if(eff > 0.92) s += 5;
-  s += 10 * (checksGood - 0.8);       // van checks trend
+  s += 10 * (checksGood - 0.8);
   return Math.max(0, Math.min(100, s));
 }
 
-/** ======= RENDER ======= **/
-function pill(val,type){return `<span class="pill ${type}">${val}</span>`}
-function addBoard(container,title,rows){
-  const div=document.createElement('div');
-  div.innerHTML=`<div style="font-weight:600;margin-top:10px">${title}</div>`+rows.map(r=>`<div class='row'>${r}</div>`).join("");
-  container.appendChild(div);
-}
+/** ======= RENDER HELPERS ======= **/
 function colorFor(pred,cap){
   if(pred>cap) return "#ef4444"; // bad
   if(pred>cap*0.9) return "#f59e0b"; // warn
   return "#10b981"; // ok
+}
+function rowSeverityByPred(pred){
+  if(pred>CAP_PER_ENGINEER) return 'sev-bad';
+  if(pred>CAP_PER_ENGINEER*PRED_NEAR) return 'sev-warn';
+  return 'sev-ok';
+}
+function rowSeverityByOT(ot){
+  if(ot>=OT_BAD) return 'sev-bad';
+  if(ot>=OT_WARN) return 'sev-warn';
+  return 'sev-ok';
+}
+function rowSeverityByEff(e){
+  const eff = e.worked ? (e.worked-e.travel)/e.worked : 1;
+  if(eff < 0.75) return 'sev-bad';
+  if(eff < 0.85) return 'sev-warn';
+  return 'sev-ok';
+}
+function emojiFor(sev){
+  if(sev==='sev-bad') return '🔴';
+  if(sev==='sev-warn') return '🟠';
+  return '🟢';
+}
+function addRows(container, rows){
+  rows.forEach(r=>{
+    const div=document.createElement('div');
+    div.className='row '+(r.sev||'');
+    div.innerHTML=`<div class="name">${r.lead}</div><div class="metric">${r.tail}</div>`;
+    container.appendChild(div);
+  });
+}
+function addSection(container, title, subtitle){
+  const hdr=document.createElement('div');
+  hdr.className='sectionHeader';
+  hdr.innerHTML = `${title}${subtitle?` <span class="small">${subtitle}</span>`:''}`;
+  container.appendChild(hdr);
+  const rows=document.createElement('div');
+  rows.className='rows';
+  container.appendChild(rows);
+  return rows;
+}
+
+/** ======= SUGGESTION ENGINE (Analytical & factual) ======= **/
+function buildSuggestions(engineers, hist){
+  const items = [];
+
+  // Map: name => history array
+  const history = hist.history;
+  const histWeeks = hist.weeks;
+
+  // 1) Serial van-check offenders (pass ratio < 80% over last 6 weeks)
+  history.forEach((arr, name)=>{
+    const total = arr.length;
+    if(!total) return;
+    const pass = arr.filter(x=>x.vanCheck==="Yes").length;
+    const ratio = total ? pass/total : 0;
+    if(ratio < VC_BAD){
+      items.push({
+        icon:'🚚',
+        text:`${name} van-check pass rate ${Math.round(ratio*100)}% across last ${total} week(s).`,
+        small:`Threshold ${Math.round(VC_BAD*100)}%.`
+      });
+    }
+  });
+
+  // 2) Consistently high weekly hours (>45h worked or predicted) for >= 4 of last 6 weeks
+  history.forEach((arr, name)=>{
+    const count = arr.filter(x => (x.worked > LONG_WEEK_BAD) || (x.predicted > LONG_WEEK_BAD)).length;
+    if(count >= 4){
+      items.push({
+        icon:'⏱️',
+        text:`${name} exceeded ${LONG_WEEK_BAD}h in ${count} of the last ${arr.length} week(s).`,
+        small:`Includes worked or predicted totals.`
+      });
+    }
+  });
+
+  // 3) Consistently high overtime (avg >= 4h/week across last 6)
+  history.forEach((arr, name)=>{
+    const otAvg = avg(arr.map(x=>x.overtime));
+    if(otAvg >= OT_BAD){
+      items.push({
+        icon:'🔥',
+        text:`${name} averages ${otAvg.toFixed(1)}h overtime per week across last ${arr.length} week(s).`,
+        small:`Review workload or scheduling.`
+      });
+    }
+  });
+
+  // 4) Long days this week (avg > 12h/day across Mon–Fri actuals)
+  engineers.forEach(e=>{
+    const days = e.weekdayDays || 0;
+    const avgDay = days ? e.weekdayWorked / days : 0;
+    if(avgDay > LONG_DAY_BAD){
+      items.push({
+        icon:'⚠️',
+        text:`${e.name} averaging ${avgDay.toFixed(1)}h per working day this week.`,
+        small:`Mon–Fri only.`
+      });
+    }
+  });
+
+  // 5) Positive notes (100% van checks with low overtime this week)
+  engineers.forEach(e=>{
+    const histArr = history.get(e.name) || [];
+    const total = histArr.length;
+    if(total){
+      const pass = histArr.filter(x=>x.vanCheck==="Yes").length;
+      const passRatio = pass/total;
+      if(passRatio===1 && e.overtime < OT_WARN){
+        items.push({
+          icon:'✅',
+          text:`${e.name} maintains 100% van-check compliance with ${e.overtime.toFixed(1)}h overtime this week.`,
+          small:`Consistent good practice.`
+        });
+      }
+    }
+  });
+
+  // Limit to 10 most pertinent
+  return items.slice(0,10);
 }
 
 /** ======= MAIN ======= **/
@@ -302,21 +429,23 @@ function colorFor(pred,cap){
     const entries = flattenAndDedupe(json);
     if(!entries.length){
       ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
+      $("suggestions").innerHTML = `<div class="item"><div class="icon">ℹ️</div><div class="text">No entries found in the Hours feed.</div></div>`;
       return;
     }
 
     const weeks = weekKeysFromEntries(entries);
     if(!weeks.length){
       ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
+      $("suggestions").innerHTML = `<div class="item"><div class="icon">ℹ️</div><div class="text">No week keys found.</div></div>`;
       return;
     }
-    const currentWeekKey = weeks[weeks.length-1]; // latest available week in JSON
+    const currentWeekKey = weeks[weeks.length-1];
 
     const curAgg = aggregateWeek(entries, currentWeekKey);
     const engineers = [...curAgg.values()].sort((a,b)=>a.name.localeCompare(b.name));
 
-    // History (last 6 weeks) for trends/leaderboards
-    const { weeks:histWeeks, history } = buildHistory(entries, weeks, 6);
+    // History (last 6 weeks) for trends/leaderboards & suggestions
+    const hist = buildHistory(entries, weeks, 6);
 
     // KPIs
     const teamWorked = sum(engineers.map(e=>e.worked));
@@ -330,81 +459,127 @@ function colorFor(pred,cap){
 
     // Top engineer (week & historic)
     const weekRank = engineers
-      .map(e=>({ name:e.name, score: weeklyScore(e)}))
+      .map(e=>({ name:e.name, score: (function(rec){ // inline score
+        return weeklyScore(rec);
+      })(e)}))
       .sort((a,b)=>b.score-a.score);
     $("topWeek").textContent = weekRank.length? `${weekRank[0].name} (${weekRank[0].score.toFixed(0)})` : "–";
 
-    const histRank = [...history.entries()]
+    const histRank = [...hist.history.entries()]
       .map(([name,arr])=>({ name, score: historicScore(arr) }))
       .sort((a,b)=>b.score-a.score);
     $("topHist").textContent = histRank.length? `${histRank[0].name} (${histRank[0].score.toFixed(0)})` : "–";
 
-    // Leaderboards (this week)
+    /** ===== Weekly Leaderboards (This Week) ===== **/
     const lbw = $("lb-week"); lbw.innerHTML="";
-    addBoard(lbw,"Highest Hours (Predicted)",
-      [...engineers].sort((a,b)=>b.predicted-a.predicted).map(e=>`${e.name} ${e.predicted.toFixed(2)}h`));
-    addBoard(lbw,"Overtime (This Week)",
-      [...engineers].sort((a,b)=>b.overtime-a.overtime).map(e=>`${e.name} ${e.overtime.toFixed(2)}h`));
-    addBoard(lbw,"Efficiency (Worked–Travel / Worked)",
+    // Highest Predicted Hours
+    addSection(lbw.parentElement, "This Week • Highest Predicted");
+    const sec1 = lbw.parentElement.querySelectorAll('.rows')[0];
+    addRows(sec1,
+      [...engineers].sort((a,b)=>b.predicted-a.predicted).map(e=>{
+        const sev=rowSeverityByPred(e.predicted);
+        return { sev, lead:`${emojiFor(sev)} ${e.name}`, tail:`${e.predicted.toFixed(2)}h` };
+      })
+    );
+
+    // Overtime
+    addSection(lbw.parentElement, "This Week • Overtime");
+    const sec2 = lbw.parentElement.querySelectorAll('.rows')[1];
+    addRows(sec2,
+      [...engineers].sort((a,b)=>b.overtime-a.overtime).map(e=>{
+        const sev=rowSeverityByOT(e.overtime);
+        return { sev, lead:`${emojiFor(sev)} ${e.name}`, tail:`${e.overtime.toFixed(2)}h` };
+      })
+    );
+
+    // Efficiency (Worked–Travel / Worked)
+    addSection(lbw.parentElement, "This Week • Efficiency");
+    const sec3 = lbw.parentElement.querySelectorAll('.rows')[2];
+    addRows(sec3,
       [...engineers].sort((a,b)=>((b.worked-b.travel)/Math.max(0.1,b.worked)) - ((a.worked-a.travel)/Math.max(0.1,a.worked)))
       .map(e=>{
         const eff = e.worked ? 100*(e.worked-e.travel)/e.worked : 100;
-        return `${e.name} ${eff.toFixed(0)}%`;
+        const sev = eff<75? 'sev-bad' : eff<85? 'sev-warn' : 'sev-ok';
+        return { sev, lead:`${emojiFor(sev)} ${e.name}`, tail:`${eff.toFixed(0)}%` };
       })
     );
-    addBoard(lbw,"Van Checks",
-      engineers.map(e=>`${e.name} ${e.vanCheck==="Yes"?"✅":"❌"}`));
 
-    // Leaderboards (6-week trends)
+    // Van Checks
+    addSection(lbw.parentElement, "This Week • Van Checks");
+    const sec4 = lbw.parentElement.querySelectorAll('.rows')[3];
+    addRows(sec4,
+      engineers.map(e=>{
+        const icon = e.vanCheck==="Yes" ? '🟢' : (e.vanCheck==="No" ? '🔴' : '⚪');
+        const sev = e.vanCheck==="No" ? 'sev-bad' : (e.vanCheck==="Yes" ? 'sev-ok' : '');
+        return { sev, lead:`${icon} ${e.name}`, tail:(e.vanCheck==="Yes"?'Passed':e.vanCheck==="No"?'Failed':'—') };
+      })
+    );
+
+    /** ===== 6-Week Leaderboards (Trends) ===== **/
     const lbh = $("lb-hist"); lbh.innerHTML="";
-    // Avg Weekly Hours
-    addBoard(lbh,"Avg Weekly Hours",
-      [...history.entries()].sort((a,b)=>{
-        const avga = sum(a[1].map(x=>x.worked))/a[1].length;
-        const avgb = sum(b[1].map(x=>x.worked))/b[1].length;
+
+    // Avg Weekly Hours (6 weeks)
+    addSection(lbh.parentElement, "6-Week • Avg Weekly Hours");
+    const h1 = lbh.parentElement.querySelectorAll('.rows')[4];
+    addRows(h1,
+      [...hist.history.entries()].sort((a,b)=>{
+        const avga = avg(a[1].map(x=>x.worked));
+        const avgb = avg(b[1].map(x=>x.worked));
         return avgb-avga;
       }).map(([name,arr])=>{
-        const avg = sum(arr.map(x=>x.worked))/arr.length;
-        return `${name} ${avg.toFixed(1)}h`;
+        const a = avg(arr.map(x=>x.worked));
+        const sev = a>LONG_WEEK_BAD ? 'sev-bad' : a>CAP_PER_ENGINEER ? 'sev-warn' : 'sev-ok';
+        return { sev, lead:`${emojiFor(sev)} ${name}`, tail:`${a.toFixed(1)}h` };
       })
     );
+
     // Overtime (6 weeks sum)
-    addBoard(lbh,"Overtime (6 wks)",
-      [...history.entries()].sort((a,b)=>{
+    addSection(lbh.parentElement, "6-Week • Total Overtime");
+    const h2 = lbh.parentElement.querySelectorAll('.rows')[5];
+    addRows(h2,
+      [...hist.history.entries()].sort((a,b)=>{
         const sa = sum(a[1].map(x=>x.overtime));
         const sb = sum(b[1].map(x=>x.overtime));
         return sb-sa;
       }).map(([name,arr])=>{
         const tot = sum(arr.map(x=>x.overtime));
-        return `${name} ${tot.toFixed(1)}h`;
+        const sev = tot/(arr.length||1) >= OT_BAD ? 'sev-bad' : tot/(arr.length||1) >= OT_WARN ? 'sev-warn' : 'sev-ok';
+        return { sev, lead:`${emojiFor(sev)} ${name}`, tail:`${tot.toFixed(1)}h` };
       })
     );
-    // Efficiency Avg
-    addBoard(lbh,"Efficiency Avg",
-      [...history.entries()].sort((a,b)=>{
+
+    // Efficiency Avg (6 weeks)
+    addSection(lbh.parentElement, "6-Week • Efficiency Avg");
+    const h3 = lbh.parentElement.querySelectorAll('.rows')[6];
+    addRows(h3,
+      [...hist.history.entries()].sort((a,b)=>{
         const effA = (()=>{ const w=sum(a[1].map(x=>x.worked)), t=sum(a[1].map(x=>x.travel)); return w? (w-t)/w : 1; })();
         const effB = (()=>{ const w=sum(b[1].map(x=>x.worked)), t=sum(b[1].map(x=>x.travel)); return w? (w-t)/w : 1; })();
         return effB-effA;
       }).map(([name,arr])=>{
         const w=sum(arr.map(x=>x.worked)), t=sum(arr.map(x=>x.travel));
         const eff = w? 100*(w-t)/w : 100;
-        return `${name} ${eff.toFixed(0)}%`;
+        const sev = eff<75? 'sev-bad' : eff<85? 'sev-warn' : 'sev-ok';
+        return { sev, lead:`${emojiFor(sev)} ${name}`, tail:`${eff.toFixed(0)}%` };
       })
     );
-    // Van Checks Avg
-    addBoard(lbh,"Van Checks Avg",
-      [...history.entries()].sort((a,b)=>{
-        const ra = a[1].filter(x=>x.vanCheck==="Yes").length / a[1].length;
-        const rb = b[1].filter(x=>x.vanCheck==="Yes").length / b[1].length;
+
+    // Van Checks Avg (6 weeks)
+    addSection(lbh.parentElement, "6-Week • Van-Check Pass Rate");
+    const h4 = lbh.parentElement.querySelectorAll('.rows')[7];
+    addRows(h4,
+      [...hist.history.entries()].sort((a,b)=>{
+        const ra = a[1].filter(x=>x.vanCheck==="Yes").length / (a[1].length||1);
+        const rb = b[1].filter(x=>x.vanCheck==="Yes").length / (b[1].length||1);
         return rb-ra;
       }).map(([name,arr])=>{
-        const r = 100 * (arr.filter(x=>x.vanCheck==="Yes").length/arr.length);
-        return `${name} ${r.toFixed(0)}%`;
+        const r = 100 * (arr.filter(x=>x.vanCheck==="Yes").length/(arr.length||1));
+        const sev = (r/100)<VC_BAD ? 'sev-bad' : (r<95? 'sev-warn':'sev-ok');
+        return { sev, lead:`${emojiFor(sev)} ${name}`, tail:`${r.toFixed(0)}%` };
       })
     );
 
     /** ===== Charts ===== **/
-    // Team progress (Worked vs Team Cap) — label with current week
     const labelWeek = weekLabel(currentWeekKey);
     new Chart($("progressTeam").getContext("2d"),{
       type:"bar",
@@ -417,7 +592,6 @@ function colorFor(pred,cap){
       options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
     });
 
-    // Avg engineer vs 40h cap (predicted)
     const avgPred = engineers.length ? teamPred/engineers.length : 0;
     new Chart($("progressAvg").getContext("2d"),{
       type:"bar",
@@ -430,7 +604,6 @@ function colorFor(pred,cap){
       options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
     });
 
-    // Risk donut (based on predicted vs cap)
     const ok = engineers.filter(e=>e.predicted<=0.9*e.cap).length;
     const warn = engineers.filter(e=>e.predicted>0.9*e.cap && e.predicted<=e.cap).length;
     const bad = engineers.filter(e=>e.predicted>e.cap).length;
@@ -442,7 +615,6 @@ function colorFor(pred,cap){
       options:{ plugins:{ legend:{ position:"bottom" } }, cutout:"60%" }
     });
 
-    // By engineer (worked bars + cap line + predicted dots)
     new Chart($("stackedByEngineer").getContext("2d"),{
       type:"bar",
       data:{
@@ -456,7 +628,6 @@ function colorFor(pred,cap){
       options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
     });
 
-    // Hours by day (current week): team totals per weekday (Mon..Fri)
     const curEntries = entries.filter(e => (e.weekKey||deriveWeekKey(e.date)) === currentWeekKey);
     const byDayTotals = {Mon:0,Tue:0,Wed:0,Thu:0,Fri:0};
     for(const e of curEntries){
@@ -476,10 +647,21 @@ function colorFor(pred,cap){
       options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
     });
 
+    /** ===== Suggestions ===== **/
+    const suggestions = buildSuggestions(engineers, hist);
+    const sug = $("suggestions");
+    sug.innerHTML = suggestions.length ? "" : `<div class="item"><div class="icon">ℹ️</div><div class="text">No notable patterns detected this week.</div></div>`;
+    suggestions.forEach(s=>{
+      const row = document.createElement('div');
+      row.className='item';
+      row.innerHTML = `<div class="icon">${s.icon}</div><div class="text">${s.text}<div class="small">${s.small||""}</div></div>`;
+      sug.appendChild(row);
+    });
+
   }catch(err){
     console.error(err);
     ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
-    alert("Failed to load hours: " + err.message);
+    $("suggestions").innerHTML = `<div class="item"><div class="icon">❌</div><div class="text">Failed to load hours: ${err.message}</div></div>`;
   }
 })();
 </script>
