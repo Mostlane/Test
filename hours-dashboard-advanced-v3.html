@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Mostlane • Advanced Hours Dashboard v3.1 (Live)</title>
+  <title>Mostlane • Advanced Hours Dashboard v3.2 (Live)</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
@@ -13,6 +13,7 @@
       --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
       --blue:#3b82f6; --indigo:#6366f1; --cyan:#22d3ee; --yellow:#facc15; --teal:#14b8a6;
       --rowAlt:rgba(255,255,255,0.03);
+      --tooltipBg:#0b1222; --tooltipBorder:#1f2a44; --tooltipShadow:0 12px 30px rgba(0,0,0,.45);
     }
     body{margin:0;background:linear-gradient(180deg,#0b132a,#0a0f1f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
     .wrap{display:grid;grid-template-columns: 1fr 360px; gap:16px; padding:16px}
@@ -30,15 +31,16 @@
 
     /* Leaderboards */
     .leaderboard .sectionHeader{
-      margin:14px -14px 6px -14px; padding:8px 14px;
-      font-weight:700; color:#d1d5db; background:rgba(59,130,246,0.08);
+      margin:16px -14px 6px -14px; padding:10px 14px;
+      font-weight:700; color:#e5e7eb; background:rgba(59,130,246,0.08);
       border-top:1px solid #1f2937; border-bottom:1px solid #1f2937;
+      display:flex; align-items:center; gap:8px;
     }
-    .leaderboard .sectionHeader .small{font-weight:500;color:var(--muted);font-size:12px;margin-left:6px}
+    .leaderboard .sectionHeader .small{font-weight:500;color:var(--muted);font-size:12px;margin-left:auto}
     .leaderboard .rows{margin-top:4px}
     .row{
-      display:flex; justify-content:space-between; gap:10px; padding:8px 0;
-      border-bottom:1px dashed #334155; align-items:center;
+      display:flex; justify-content:space-between; gap:10px; padding:8px 10px;
+      border-bottom:1px dashed #334155; align-items:center; border-radius:6px;
     }
     .row:nth-child(odd){ background:var(--rowAlt); }
     .row:last-child{border-bottom:none}
@@ -48,7 +50,11 @@
     /* Severity highlights */
     .sev-ok .metric{color:var(--ok); font-weight:700}
     .sev-warn .metric{color:var(--warn); font-weight:700}
-    .sev-bad .metric{color:var(--bad); font-weight:800}
+    .sev-bad{
+      background:linear-gradient(90deg, rgba(239,68,68,0.18), transparent);
+      border-left:3px solid var(--bad);
+    }
+    .sev-bad .metric{color:#fecaca; font-weight:800}
 
     /* Suggestions */
     .suggestions .item{display:flex; gap:8px; align-items:flex-start; padding:8px 0; border-bottom:1px dashed #334155}
@@ -57,6 +63,22 @@
     .suggestions .text{flex:1; color:#e5e7eb}
     .suggestions .text .small{color:var(--muted); font-size:12px}
 
+    /* Header tooltip chip */
+    .infoChip{
+      display:inline-flex; align-items:center; gap:6px; font-weight:600;
+      background:rgba(148,163,184,0.08); padding:3px 8px; border-radius:999px; border:1px solid #243044;
+    }
+    .infoChip .i{font-size:12px; color:#9ca3af}
+
+    /* Pretty tooltips */
+    .tooltip{
+      position:fixed; z-index:9999; pointer-events:none; opacity:0; transform:translateY(-4px);
+      background:var(--tooltipBg); color:#e5e7eb; border:1px solid var(--tooltipBorder);
+      border-radius:10px; padding:10px 12px; box-shadow:var(--tooltipShadow);
+      max-width:320px; line-height:1.4; font-size:13px; transition:opacity .12s ease, transform .12s ease;
+    }
+    .tooltip.show{opacity:1; transform:translateY(0)}
+    .tooltip .tip{position:absolute; width:10px; height:10px; background:var(--tooltipBg); transform:rotate(45deg); border-left:1px solid var(--tooltipBorder); border-top:1px solid var(--tooltipBorder)}
     @media(max-width:1100px){ .wrap{grid-template-columns:1fr} .area{grid-template-columns:1fr} .kpiGrid{grid-template-columns:repeat(2,1fr)} }
   </style>
 </head>
@@ -95,16 +117,31 @@
 
     <!-- Right Column: Leaderboards + AI Suggestions -->
     <div class="panel leaderboard" style="max-height:calc(100vh - 32px);overflow:auto">
-      <div class="sectionHeader">Weekly Leaderboards <span class="small">This week only</span></div>
-      <div id="lb-week" class="rows"></div>
+      <!-- Weekly -->
+      <div class="sectionHeader" data-tooltip="Shows this week's live picture. Use these to spot who needs attention right now.">
+        <span class="infoChip"><span>Weekly Leaderboards</span><span class="i">ⓘ</span></span>
+        <span class="small">This week</span>
+      </div>
+      <div id="weekly-sections"></div>
 
-      <div class="sectionHeader" style="margin-top:14px">6-Week Leaderboards <span class="small">Trends</span></div>
-      <div id="lb-hist" class="rows"></div>
+      <!-- Historical -->
+      <div class="sectionHeader" data-tooltip="Six-week trends. Helps you separate one-off spikes from consistent patterns.">
+        <span class="infoChip"><span>6-Week Leaderboards</span><span class="i">ⓘ</span></span>
+        <span class="small">Trends</span>
+      </div>
+      <div id="hist-sections"></div>
 
-      <div class="sectionHeader" style="margin-top:14px">⚡ Insights & Suggestions <span class="small">Analytical & factual</span></div>
+      <!-- Suggestions -->
+      <div class="sectionHeader" data-tooltip="Highlights likely issues or stand-out positives based on hours, overtime, travel and van checks.">
+        <span class="infoChip"><span>⚡ Insights & Suggestions</span><span class="i">ⓘ</span></span>
+        <span class="small">Analytical & factual</span>
+      </div>
       <div id="suggestions" class="suggestions"></div>
     </div>
   </div>
+
+  <!-- Pretty tooltip element -->
+  <div id="tooltip" class="tooltip" role="tooltip" aria-hidden="true"><div class="tip" id="tooltip-tip"></div><div id="tooltip-text"></div></div>
 
 <script>
 /** ======= CONFIG ======= **/
@@ -322,6 +359,20 @@ function emojiFor(sev){
   if(sev==='sev-warn') return '🟠';
   return '🟢';
 }
+
+/* Build a header+rows inside a container and return the rows div */
+function addSection(container, title, tooltip, subtitle){
+  const header=document.createElement('div');
+  header.className='sectionHeader';
+  header.setAttribute('data-tooltip', tooltip || '');
+  header.setAttribute('title', tooltip || ''); // native fallback
+  header.innerHTML = `<span class="infoChip"><span>${title}</span><span class="i">ⓘ</span></span>${subtitle?`<span class="small">${subtitle}</span>`:''}`;
+  container.appendChild(header);
+  const rows=document.createElement('div');
+  rows.className='rows';
+  container.appendChild(rows);
+  return rows;
+}
 function addRows(container, rows){
   rows.forEach(r=>{
     const div=document.createElement('div');
@@ -330,24 +381,11 @@ function addRows(container, rows){
     container.appendChild(div);
   });
 }
-function addSection(container, title, subtitle){
-  const hdr=document.createElement('div');
-  hdr.className='sectionHeader';
-  hdr.innerHTML = `${title}${subtitle?` <span class="small">${subtitle}</span>`:''}`;
-  container.appendChild(hdr);
-  const rows=document.createElement('div');
-  rows.className='rows';
-  container.appendChild(rows);
-  return rows;
-}
 
 /** ======= SUGGESTION ENGINE (Analytical & factual) ======= **/
 function buildSuggestions(engineers, hist){
   const items = [];
-
-  // Map: name => history array
   const history = hist.history;
-  const histWeeks = hist.weeks;
 
   // 1) Serial van-check offenders (pass ratio < 80% over last 6 weeks)
   history.forEach((arr, name)=>{
@@ -418,9 +456,63 @@ function buildSuggestions(engineers, hist){
     }
   });
 
-  // Limit to 10 most pertinent
   return items.slice(0,10);
 }
+
+/** ======= PRETTY TOOLTIP WIDGET ======= **/
+(function enableTooltips(){
+  const el = $("tooltip");
+  const tip = $("tooltip-tip");
+  const text = document.getElementById("tooltip-text");
+
+  function showTooltip(target, content, evt){
+    if(!content){ hideTooltip(); return; }
+    el.setAttribute('aria-hidden','false');
+    text.textContent = content;
+    el.classList.add('show');
+
+    const pad = 10;
+    const rect = target.getBoundingClientRect();
+    const ttRect = el.getBoundingClientRect();
+
+    // Position below header, left-aligned
+    let top = rect.bottom + 8 + window.scrollY;
+    let left = rect.left + window.scrollX;
+
+    // Avoid off-right
+    if(left + ttRect.width + pad > window.scrollX + window.innerWidth){
+      left = window.scrollX + window.innerWidth - ttRect.width - pad;
+    }
+    // Avoid off-left
+    if(left < pad) left = pad;
+
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+
+    // little diamond tip
+    tip.style.left = `${Math.min(Math.max(rect.left + rect.width/2 - left - 5, 12), ttRect.width - 22)}px`;
+    tip.style.top = `-5px`;
+  }
+  function hideTooltip(){
+    el.classList.remove('show');
+    el.setAttribute('aria-hidden','true');
+  }
+
+  // Delegate over headers with data-tooltip
+  document.addEventListener('mouseover', (e)=>{
+    const header = e.target.closest('.sectionHeader');
+    if(header && header.dataset.tooltip){
+      showTooltip(header, header.dataset.tooltip, e);
+    } else {
+      hideTooltip();
+    }
+  });
+  document.addEventListener('scroll', hideTooltip, {passive:true});
+  document.addEventListener('mouseout', (e)=>{
+    const to = e.relatedTarget;
+    if(!to || !to.closest || !e.target.closest('.sectionHeader')) return;
+  });
+})();
 
 /** ======= MAIN ======= **/
 (async function init(){
@@ -459,9 +551,7 @@ function buildSuggestions(engineers, hist){
 
     // Top engineer (week & historic)
     const weekRank = engineers
-      .map(e=>({ name:e.name, score: (function(rec){ // inline score
-        return weeklyScore(rec);
-      })(e)}))
+      .map(e=>({ name:e.name, score: weeklyScore(e)}))
       .sort((a,b)=>b.score-a.score);
     $("topWeek").textContent = weekRank.length? `${weekRank[0].name} (${weekRank[0].score.toFixed(0)})` : "–";
 
@@ -470,32 +560,43 @@ function buildSuggestions(engineers, hist){
       .sort((a,b)=>b.score-a.score);
     $("topHist").textContent = histRank.length? `${histRank[0].name} (${histRank[0].score.toFixed(0)})` : "–";
 
-    /** ===== Weekly Leaderboards (This Week) ===== **/
-    const lbw = $("lb-week"); lbw.innerHTML="";
-    // Highest Predicted Hours
-    addSection(lbw.parentElement, "This Week • Highest Predicted");
-    const sec1 = lbw.parentElement.querySelectorAll('.rows')[0];
-    addRows(sec1,
+    /** ===== Build Leaderboards with human tooltips ===== **/
+    const weekly = $("weekly-sections");
+    const histBox = $("hist-sections");
+
+    // Weekly • Highest Predicted
+    const w1 = addSection(
+      weekly,
+      "This Week • Highest Predicted",
+      "Shows who’s expected to log the most hours by Friday based on their current average. Green = steady, red = likely over cap."
+    );
+    addRows(w1,
       [...engineers].sort((a,b)=>b.predicted-a.predicted).map(e=>{
         const sev=rowSeverityByPred(e.predicted);
         return { sev, lead:`${emojiFor(sev)} ${e.name}`, tail:`${e.predicted.toFixed(2)}h` };
       })
     );
 
-    // Overtime
-    addSection(lbw.parentElement, "This Week • Overtime");
-    const sec2 = lbw.parentElement.querySelectorAll('.rows')[1];
-    addRows(sec2,
+    // Weekly • Overtime
+    const w2 = addSection(
+      weekly,
+      "This Week • Overtime",
+      "Engineers working beyond normal paid hours. Small bits are fine, but regular red here means someone’s over-stretching."
+    );
+    addRows(w2,
       [...engineers].sort((a,b)=>b.overtime-a.overtime).map(e=>{
         const sev=rowSeverityByOT(e.overtime);
         return { sev, lead:`${emojiFor(sev)} ${e.name}`, tail:`${e.overtime.toFixed(2)}h` };
       })
     );
 
-    // Efficiency (Worked–Travel / Worked)
-    addSection(lbw.parentElement, "This Week • Efficiency");
-    const sec3 = lbw.parentElement.querySelectorAll('.rows')[2];
-    addRows(sec3,
+    // Weekly • Efficiency
+    const w3 = addSection(
+      weekly,
+      "This Week • Efficiency",
+      "How much of their time is productive vs travel. Higher is better — red usually means long journeys or wasted time."
+    );
+    addRows(w3,
       [...engineers].sort((a,b)=>((b.worked-b.travel)/Math.max(0.1,b.worked)) - ((a.worked-a.travel)/Math.max(0.1,a.worked)))
       .map(e=>{
         const eff = e.worked ? 100*(e.worked-e.travel)/e.worked : 100;
@@ -504,10 +605,13 @@ function buildSuggestions(engineers, hist){
       })
     );
 
-    // Van Checks
-    addSection(lbw.parentElement, "This Week • Van Checks");
-    const sec4 = lbw.parentElement.querySelectorAll('.rows')[3];
-    addRows(sec4,
+    // Weekly • Van Checks
+    const w4 = addSection(
+      weekly,
+      "This Week • Van Checks",
+      "Quick look at vehicle compliance for the week. Red = missed checks, which need chasing."
+    );
+    addRows(w4,
       engineers.map(e=>{
         const icon = e.vanCheck==="Yes" ? '🟢' : (e.vanCheck==="No" ? '🔴' : '⚪');
         const sev = e.vanCheck==="No" ? 'sev-bad' : (e.vanCheck==="Yes" ? 'sev-ok' : '');
@@ -515,12 +619,12 @@ function buildSuggestions(engineers, hist){
       })
     );
 
-    /** ===== 6-Week Leaderboards (Trends) ===== **/
-    const lbh = $("lb-hist"); lbh.innerHTML="";
-
-    // Avg Weekly Hours (6 weeks)
-    addSection(lbh.parentElement, "6-Week • Avg Weekly Hours");
-    const h1 = lbh.parentElement.querySelectorAll('.rows')[4];
+    // 6-Week • Avg Weekly Hours
+    const h1 = addSection(
+      histBox,
+      "6-Week • Avg Weekly Hours",
+      "Average total hours per week over the last six weeks. Red means they’re consistently over 45h — possible burnout or mis-tracking."
+    );
     addRows(h1,
       [...hist.history.entries()].sort((a,b)=>{
         const avga = avg(a[1].map(x=>x.worked));
@@ -533,9 +637,12 @@ function buildSuggestions(engineers, hist){
       })
     );
 
-    // Overtime (6 weeks sum)
-    addSection(lbh.parentElement, "6-Week • Total Overtime");
-    const h2 = lbh.parentElement.querySelectorAll('.rows')[5];
+    // 6-Week • Total Overtime
+    const h2 = addSection(
+      histBox,
+      "6-Week • Total Overtime",
+      "Sum of all overtime over six weeks. If it’s high, either the workload’s too heavy or someone’s logging late finishes every week."
+    );
     addRows(h2,
       [...hist.history.entries()].sort((a,b)=>{
         const sa = sum(a[1].map(x=>x.overtime));
@@ -548,9 +655,12 @@ function buildSuggestions(engineers, hist){
       })
     );
 
-    // Efficiency Avg (6 weeks)
-    addSection(lbh.parentElement, "6-Week • Efficiency Avg");
-    const h3 = lbh.parentElement.querySelectorAll('.rows')[6];
+    // 6-Week • Efficiency Avg
+    const h3 = addSection(
+      histBox,
+      "6-Week • Efficiency Avg",
+      "Average efficiency over the last six weeks. A dip here can flag someone with heavy travel or low productivity."
+    );
     addRows(h3,
       [...hist.history.entries()].sort((a,b)=>{
         const effA = (()=>{ const w=sum(a[1].map(x=>x.worked)), t=sum(a[1].map(x=>x.travel)); return w? (w-t)/w : 1; })();
@@ -564,9 +674,12 @@ function buildSuggestions(engineers, hist){
       })
     );
 
-    // Van Checks Avg (6 weeks)
-    addSection(lbh.parentElement, "6-Week • Van-Check Pass Rate");
-    const h4 = lbh.parentElement.querySelectorAll('.rows')[7];
+    // 6-Week • Van-Check Pass Rate
+    const h4 = addSection(
+      histBox,
+      "6-Week • Van-Check Pass Rate",
+      "Percentage of weeks each engineer completed their van checks properly. Red = repeatedly missed, needs a reminder."
+    );
     addRows(h4,
       [...hist.history.entries()].sort((a,b)=>{
         const ra = a[1].filter(x=>x.vanCheck==="Yes").length / (a[1].length||1);
