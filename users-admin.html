@@ -5,250 +5,683 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>User Administration – Mostlane Portal</title>
   <style>
+    :root{
+      --ml-blue:#004a99;
+      --ml-blue-50:rgba(0,74,153,.08);
+      --ink:#1f2937;
+      --muted:#4b5563;
+      --bg:#e6e8eb;
+      --card:#fff;
+      --glass:rgba(255,255,255,.75);
+      --ok:#1b5e20;
+      --ok-bg:#e9f7ef;
+      --ok-bd:#c8e6c9;
+      --err:#7f1d1d;
+      --err-bg:#fee2e2;
+      --err-bd:#fecaca;
+      --warn:#8a5a00;
+      --warn-bg:#fff6e5;
+      --warn-bd:#ffe0b2;
+    }
+    html,body{height:100%}
     body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+      background: var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
       margin: 0;
-      color: #1f2937;
+      color: var(--ink);
     }
 
+    /* Top bar */
     .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      background: rgba(255,255,255,0.75);
-      backdrop-filter: blur(6px);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      position: sticky; top: 0; z-index: 50;
+      background: var(--glass); backdrop-filter: blur(6px);
+      box-shadow: 0 2px 10px rgba(0,0,0,.08);
       padding: 10px 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px;
     }
-    .topbar h1 {
-      margin: 0;
-      font-size: 18px;
-      color: #004a99;
-      font-weight: 600;
+    .topbar h1{margin:0; font-size:18px; color:var(--ml-blue); font-weight:600}
+    .bar-actions{display:flex; gap:10px; align-items:center}
+    .btn{
+      border:none; border-radius:6px; padding:10px 14px; font-size:14px; cursor:pointer;
     }
-    .bar-actions { display: flex; gap: 10px; }
-    .btn {
-      border: none; border-radius: 6px; padding: 10px 14px;
-      font-size: 14px; cursor: pointer;
-    }
-    .btn-primary { background: #004a99; color: #fff; }
-    .btn-outline { background: #fff; color: #004a99; border: 1px solid #004a99; }
+    .btn-primary{background:var(--ml-blue); color:#fff}
+    .btn-outline{background:#fff; color:var(--ml-blue); border:1px solid var(--ml-blue)}
+    .btn-ghost{background:transparent; color:var(--ml-blue); border:1px dashed var(--ml-blue)}
+    .btn:disabled{opacity:.6; cursor:not-allowed}
 
+    .mini{
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:12px; padding:6px 10px; border-radius:999px;
+      color:var(--ml-blue); background:#fff; border:1px solid var(--ml-blue);
+    }
+
+    /* Banner */
     .banner {
-      position: sticky; top: 56px;
-      z-index: 45; margin: 10px 14px 0;
-      background: #e9f7ef; color: #1b5e20;
-      border: 1px solid #c8e6c9; border-radius: 6px;
-      padding: 10px 12px; display: none;
+      position: sticky; top: 56px; z-index: 45;
+      margin: 10px 14px 0;
+      border-radius:6px; padding:10px 12px; display:none;
     }
-    .banner.show { display: block; }
-    .banner .close { float: right; font-weight: bold; color: #2e7d32; cursor: pointer; margin-left: 10px; }
+    .banner.show{display:block}
+    .banner.ok{background:var(--ok-bg); border:1px solid var(--ok-bd); color:var(--ok)}
+    .banner.err{background:var(--err-bg); border:1px solid var(--err-bd); color:var(--err)}
+    .banner.warn{background:var(--warn-bg); border:1px solid var(--warn-bd); color:var(--warn)}
+    .banner .close{float:right; cursor:pointer; margin-left:10px; font-weight:700}
 
-    .wrap {
-      max-width: 900px; margin: 16px auto 60px;
+    /* Wrap */
+    .wrap{
+      max-width: 1100px;
+      margin: 16px auto 70px;
       padding: 0 14px 30px;
-      background: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,.7);
       border-radius: 10px;
     }
-    .subnote { padding: 14px; color: #374151; font-size: 14px; }
+    .subnote{padding:14px; color:#374151; font-size:14px}
 
-    .user-card {
-      background: #fff; border: 1px solid #e5e7eb;
-      border-radius: 10px; margin: 14px; padding: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    /* Utility row */
+    .util {
+      display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding: 0 14px 10px;
     }
-    .user-header {
-      display: flex; justify-content: space-between; align-items: center;
-      color: #004a99; font-weight: 600; margin-bottom: 8px;
+    .input{
+      background:#fff; border:1px solid #d1d5db; border-radius:6px; padding:10px 12px; font-size:14px;
     }
-    .user-info { font-size: 13px; color: #4b5563; margin-bottom: 6px; }
-    .toggle-group { margin-top: 6px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
-    .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 2px; }
-    .toggle.indent { padding-left: 22px; }
-    .toggle label { font-size: 14px; color: #111827; flex: 1; }
+    .input:focus{outline:none; border-color:var(--ml-blue)}
+    .spacer{flex:1}
 
-    .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }
-    .switch input { display: none; }
-    .slider {
-      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background: #d1d5db; border-radius: 24px; transition: .3s;
+    /* Cards */
+    .user-card{
+      background:#fff; border:1px solid #e5e7eb; border-radius:10px; margin:14px; padding:12px;
+      box-shadow:0 1px 3px rgba(0,0,0,.04)
     }
-    .slider:before {
-      content: ""; position: absolute; height: 18px; width: 18px;
-      left: 3px; bottom: 3px; background: #fff; border-radius: 50%;
-      transition: .3s; box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    .user-header{
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+      color:var(--ml-blue); font-weight:600; margin-bottom:8px
     }
-    input:checked + .slider { background: #004a99; }
-    input:checked + .slider:before { transform: translateX(20px); }
+    .user-sub{font-size:13px; color:var(--muted); margin-bottom:6px}
+    .grid{
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px
+    }
+    @media (max-width: 700px){ .grid{grid-template-columns:1fr} }
 
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: none; align-items: center; justify-content: center; z-index: 60; }
-    .modal.show { display: flex; }
-    .modal-card {
-      background: #fff; width: 92%; max-width: 430px;
-      max-height: 85vh; overflow-y: auto; border-radius: 10px;
-      padding: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+    .section-title{
+      margin:10px 2px 4px; font-size:13px; font-weight:600; color:#374151;
+      display:flex; align-items:center; gap:6px
     }
-    .modal h3 { margin: 0 0 10px; color: #004a99; font-size: 18px; }
-    .field { margin-bottom: 10px; }
-    .field input {
-      width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px;
-      font-size: 14px; background: #fff; box-sizing: border-box;
+    .section-title .pill{
+      font-size:11px; background:var(--ml-blue-50); color:var(--ml-blue);
+      padding:4px 8px; border-radius:999px; border:1px solid var(--ml-blue)
     }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+
+    .toggle-row{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 2px;
+    }
+    .toggle-row .lbl{font-size:14px; color:#111827; flex:1}
+    .toggle-row .path{font-size:11px; color:#6b7280}
+    .toggle-row.indent{ padding-left:22px; }
+
+    .switch{ position:relative; display:inline-block; width:44px; height:24px; flex:0 0 auto }
+    .switch input{display:none}
+    .slider{
+      position:absolute; cursor:pointer; inset:0; background:#d1d5db; border-radius:24px; transition:.25s
+    }
+    .slider:before{
+      content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px;
+      background:#fff; border-radius:50%; transition:.25s; box-shadow:0 1px 2px rgba(0,0,0,.15)
+    }
+    input:checked + .slider{background:var(--ml-blue)}
+    input:checked + .slider:before{transform:translateX(20px)}
+
+    /* Modal */
+    .modal{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:60 }
+    .modal.show{display:flex}
+    .modal-card{ background:#fff; width:92%; max-width:480px; max-height:85vh; overflow:auto; border-radius:10px; padding:16px; box-shadow:0 10px 25px rgba(0,0,0,.15) }
+    .modal h3{margin:0 0 10px; color:var(--ml-blue); font-size:18px}
+    .field{margin-bottom:10px}
+    .field label{display:block; font-size:12px; color:#374151; margin-bottom:4px}
+    .field input{width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; background:#fff; box-sizing:border-box}
+    .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:8px}
+
+    /* Spinner overlay */
+    .mask{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:70; background:rgba(255,255,255,.55); backdrop-filter: blur(2px)}
+    .mask.show{display:flex}
+    .spinner{
+      width:46px; height:46px; border-radius:50%; border:4px solid #c7d2fe; border-top-color: var(--ml-blue); animation:spin 1s linear infinite
+    }
+    @keyframes spin{ to{ transform: rotate(360deg) } }
+
+    .small{font-size:12px; color:#6b7280}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:4px; padding:1px 4px}
   </style>
 </head>
 <body>
 
-<div class="topbar">
-  <h1>User Administration</h1>
-  <div class="bar-actions">
-    <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-    <button class="btn btn-outline" id="addUserBtn">➕ Add User</button>
+  <!-- Top bar -->
+  <div class="topbar">
+    <h1>User Administration</h1>
+    <div class="bar-actions">
+      <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
+      <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
+      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
+      <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
+    </div>
   </div>
-</div>
 
-<div id="banner" class="banner"><span class="close" id="bannerClose">✖</span>✅ Changes saved successfully.</div>
-
-<div class="wrap">
-  <div class="subnote">
-    This page auto-discovers buttons from <b>main.html</b> and any linked sub-menus, then shows matching toggles per user.
-    <br/>“Full Access” overrides everything.
+  <!-- Banner -->
+  <div id="banner" class="banner">
+    <span class="close" id="bannerClose">✖</span>
+    <span id="bannerText">Status…</span>
   </div>
-  <div id="list">Loading users…</div>
-</div>
 
-<script>
-const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
-const USERS_URL = API_BASE + "/users";
-const UPDATE_PERM_URL = API_BASE + "/update-permissions";
-const CURRENT = sessionStorage.getItem("mostlaneUser");
-if (!CURRENT) window.location.href = "login.html";
+  <!-- Body -->
+  <div class="wrap">
+    <div class="subnote">
+      This page auto-discovers buttons from <b>main.html</b> (and linked sub-menus),
+      then shows matching toggles per user. <b>Full Access</b> overrides everything.
+      <div class="small">Mapped keys are saved BOTH as your legacy fields (so existing pages continue to work) and as the discovered id/href (future-proof for new buttons).</div>
+    </div>
 
-const banner = document.getElementById('banner');
-function showBanner(msg){
-  banner.innerHTML=`<span class="close" id="bannerClose">✖</span>${msg}`;
-  banner.classList.add('show');
-  document.getElementById('bannerClose').onclick=()=>banner.classList.remove('show');
-  setTimeout(()=>banner.classList.remove('show'),4000);
-}
+    <div class="util">
+      <input id="searchBox" class="input" placeholder="Search users (name / username / number)…" />
+      <div class="spacer"></div>
+      <span class="mini" id="structCount">Scanning…</span>
+      <a class="mini" href="main.html" target="_blank" rel="noopener">Open main.html</a>
+      <a class="mini" id="debugLink" href="https://mostlane-users.jamie-def.workers.dev/debug/bindings" target="_blank" rel="noopener">Bindings</a>
+    </div>
 
-function toggleRow(id,label,checked,indent=false){
-  const row=document.createElement('div');
-  row.className='toggle'+(indent?' indent':'');
-  row.innerHTML=`<label>${label}</label><label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="slider"></span></label>`;
-  return row;
-}
+    <div id="list">Loading users…</div>
+  </div>
 
-function mapIdToLegacyKey(id,label,href){
-  const map={checkinBtn:"CheckInOut",holidayBtn:"Holiday",purchaseBtn:"PurchaseOrders",poMenuBtn:"PurchaseOrders",assetsBtn:"Assets",formsBtn:"Forms","my-documents-btn":"MyDocuments",complianceBtn:"Compliance","hours-dashboard-btn":"HoursDashboard",weeklyBtn:"Weekly"};
-  if(map[id])return map[id];
-  if(id)return id.replace(/Btn$/,'');
-  if(label)return label.replace(/\s+/g,'');
-  if(href)return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
-  return null;
-}
+  <!-- Add User Modal -->
+  <div id="addUserModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Add New User</h3>
+      <div class="field">
+        <label>First Name</label>
+        <input id="firstName" type="text" placeholder="First Name" required>
+      </div>
+      <div class="field">
+        <label>Last Name</label>
+        <input id="lastName" type="text" placeholder="Last Name" required>
+      </div>
+      <div class="field">
+        <label>Email (optional)</label>
+        <input id="email" type="email" placeholder="name@company.com">
+      </div>
+      <div class="field">
+        <label>Username</label>
+        <input id="username" type="text" placeholder="e.g. John.Doe" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="password" type="password" placeholder="Initial password" required>
+      </div>
+      <div class="field">
+        <label>Vehicle Assigned (optional)</label>
+        <input id="vehicle" type="text" placeholder="e.g. WP64 EJD">
+      </div>
+      <div class="field">
+        <label>Employment Type</label>
+        <input id="employmentType" type="text" placeholder="Employed / Self Employed">
+      </div>
+      <div class="field">
+        <label>SharePoint Path URL</label>
+        <input id="sharepoint" type="text" placeholder="Full SharePoint folder link">
+      </div>
 
-async function scanPortal(){
-  const parser=new DOMParser();const structure=[];
-  const mainRes=await fetch('main.html?v='+Date.now(),{cache:'no-store'});const mainHtml=await mainRes.text();const mainDoc=parser.parseFromString(mainHtml,'text/html');
-  const mainButtons=[...mainDoc.querySelectorAll('a.button')];
-  for(const b of mainButtons){
-    const id=b.id||'';const label=(b.textContent||'').trim();const href=b.getAttribute('href')||'';
-    const entry={id,label,href,subpages:[]};
-    structure.push(entry);
-  }
-  return structure;
-}
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelAdd">Cancel</button>
+        <button class="btn btn-primary" id="createUserBtn">Create User</button>
+      </div>
+    </div>
+  </div>
 
-async function fetchAllUsers(){
-  const res=await fetch(USERS_URL+'?v='+Date.now());
-  const data=await res.json();
-  return data.Users||[];
-}
+  <!-- Spinner -->
+  <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
-function userCard(user,structure){
-  const card=document.createElement('div');
-  card.className='user-card';
-  const header=document.createElement('div');
-  header.className='user-header';
-  const name=`${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`.trim();
-  header.innerHTML=`<div>${name} <span style="color:#6b7280;font-weight:500;">(${user.Username})</span></div>`;
-  const fa=document.createElement('div');const faId=`fa_${user.Username}`;
-  fa.appendChild(toggleRow(faId,'Full Access',((user.FullAccess||'').toLowerCase()==='yes')));
-  header.appendChild(fa);card.appendChild(header);
-  const info=document.createElement('div');
-  info.className='user-info';
-  info.textContent=`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`;
-  card.appendChild(info);
-  const group=document.createElement('div');
-  group.className='toggle-group';
-  structure.forEach(p=>{
-    const pid=p.id||(p.href||'').replace(/[^\w]/g,'');
-    const legacy=mapIdToLegacyKey(pid,p.label,p.href);
-    const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
-    group.appendChild(toggleRow(`${user.Username}::${pid}`,p.label,currentOn));
-  });
-  card.appendChild(group);
-  return card;
-}
+  <script>
+    // =========================
+    // CONFIG
+    // =========================
+    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+    const USERS_URL = API_BASE + "/users";
+    const SAVE_URL  = API_BASE + "/save";
+    const TOKEN     = sessionStorage.getItem("mostlaneToken"); // optional
+    const CURRENT   = sessionStorage.getItem("mostlaneUser");
+    if (!CURRENT) { window.location.href = "login.html"; }
 
-async function buildUI(){
-  const list=document.getElementById('list');
-  list.textContent='Loading…';
-  const [users,structure]=await Promise.all([fetchAllUsers(),scanPortal()]);
-  list.innerHTML='';
-  users.forEach(u=>list.appendChild(userCard(u,structure)));
-  window.__USERS=users;
-  window.__STRUCT=structure;
-}
+    // =========================
+    // UI helpers
+    // =========================
+    const banner = document.getElementById('banner');
+    const bannerText = document.getElementById('bannerText');
+    const bannerClose = document.getElementById('bannerClose');
+    const mask = document.getElementById('mask');
+    const list = document.getElementById('list');
+    const structCount = document.getElementById('structCount');
 
-// ✅ DEBUGGING SAVE FUNCTION
-async function saveAll(){
-  if(!window.__USERS||!window.__STRUCT)return;
-  const users=JSON.parse(JSON.stringify(window.__USERS));
-  const struct=window.__STRUCT;
-
-  console.log("Saving", users.length, "users...");
-
-  for(const u of users){
-    u.FullAccess=document.getElementById(`fa_${u.Username}`)?.querySelector('input')?.checked?'Yes':'No';
-    struct.forEach(p=>{
-      const pid=p.id||(p.href||'').replace(/[^\w]/g,'');
-      const legacy=mapIdToLegacyKey(pid,p.label,p.href);
-      const chk=document.getElementById(`${u.Username}::${pid}`)?.querySelector('input');
-      const val=chk&&chk.checked?'Yes':'No';
-      if(legacy)u[legacy]=val;if(pid)u[pid]=val;
-    });
-
-    console.log("Posting to Worker for",u.Username,u.FullAccess);
-
-    const res=await fetch(UPDATE_PERM_URL,{
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify({ username:u.Username, permissions:u })
-    });
-
-    console.log("Response",res.status);
-    if(!res.ok){
-      const txt=await res.text();
-      console.error("❌ Failed update for",u.Username,"–",txt);
-      showBanner("❌ Save failed for "+u.Username);
-      return;
+    function showMask(on=true){ mask.classList.toggle('show', !!on); }
+    function showBanner(msg, type='ok'){
+      banner.classList.remove('ok','err','warn');
+      banner.classList.add(type);
+      bannerText.textContent = msg;
+      banner.classList.add('show');
+      setTimeout(()=>banner.classList.remove('show'), 5000);
     }
-  }
+    bannerClose.addEventListener('click', () => banner.classList.remove('show'));
 
-  showBanner("✅ Changes saved successfully.");
-  console.log("✅ All saved");
-  window.__USERS=users;
-}
+    function h(tag, attrs={}, ...children){
+      const el = document.createElement(tag);
+      for (const [k,v] of Object.entries(attrs||{})){
+        if (k === 'class') el.className = v;
+        else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+        else el.setAttribute(k, v);
+      }
+      for (const c of children){
+        if (c == null) continue;
+        if (typeof c === 'string') el.appendChild(document.createTextNode(c));
+        else el.appendChild(c);
+      }
+      return el;
+    }
 
-document.getElementById('saveBtn').addEventListener('click',saveAll);
-buildUI();
-</script>
+    function debounce(fn, ms=250){
+      let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), ms); };
+    }
+
+    async function sha256Hex(s){
+      const enc = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode((s || '').trim()));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+
+    // =========================
+    // Mapping & Normalization
+    // =========================
+    // Convert discovered ids/labels/hrefs to your legacy JSON keys so existing pages keep working.
+    function mapIdToLegacyKey(id, label, href){
+      const map = {
+        // main buttons you’ve shown across pages
+        checkinBtn: "CheckInOut",
+        holidayBtn: "Holiday",
+        purchaseBtn: "PurchaseOrders",
+        poMenuBtn: "PurchaseOrders",
+        assetsBtn: "Assets",
+        formsBtn: "Forms",
+        "my-documents-btn": "MyDocuments",
+        complianceBtn: "Compliance",
+        "hours-dashboard-btn": "HoursDashboard",
+        weeklyBtn: "Weekly",
+        usersAdminBtn: "Users",
+
+        // frequent sub-pages you’ve referenced
+        poDirectorBtn: "PODirector",
+        poCostingBtn:  "POCosting",
+
+        // label fallbacks (from your JSON history)
+        "Check In / Out": "CheckInOut",
+        "Holiday Requests": "Holiday",
+        "Generate Purchase Order Reference": "PurchaseOrders",
+        "Plant & Equipment": "Assets",
+        "Weekly Summary": "Weekly",
+        "Purchase Orders": "PurchaseOrders",
+        "Users": "Users",
+        "My Documents": "MyDocuments",
+        "Compliance": "Compliance",
+        "Hours Dashboard": "HoursDashboard",
+      };
+      if (id && map[id]) return map[id];
+      if (label && map[label]) return map[label];
+
+      // href fallbacks
+      if (href){
+        const clean = href.toLowerCase();
+        if (clean.includes('podirector')) return 'PODirector';
+        if (clean.includes('pocosting'))  return 'POCosting';
+        if (clean.includes('po-menu'))    return 'PurchaseOrders';
+        if (clean.includes('weekly'))     return 'Weekly';
+        if (clean.includes('compliance')) return 'Compliance';
+        if (clean.includes('forms'))      return 'Forms';
+        if (clean.includes('assets'))     return 'Assets';
+        if (clean.includes('purchase'))   return 'PurchaseOrders';
+        if (clean.includes('holiday'))    return 'Holiday';
+        if (clean.includes('hours-dashboard')) return 'HoursDashboard';
+        if (clean.includes('users-admin')) return 'Users';
+      }
+
+      // reasonable generic fallback
+      if (id)    return id.replace(/Btn$/,'');
+      if (label) return label.replace(/\s+/g,'');
+      if (href)  return href.replace(/\.html$/,'').replace(/[^\w]/g,'');
+      return null;
+    }
+
+    function normalizeIdForKey(s){
+      return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
+    }
+
+    // =========================
+    // Portal scan (main + submenus)
+    // =========================
+    async function scanPortal(){
+      const parser = new DOMParser();
+      const struct = [];
+
+      const mainRes = await fetch('main.html?v=' + Date.now(), { cache: 'no-store' });
+      const mainHtml = await mainRes.text();
+      const mainDoc = parser.parseFromString(mainHtml, 'text/html');
+
+      const mainButtons = [...mainDoc.querySelectorAll('a.button')];
+
+      for (const b of mainButtons){
+        const id    = b.id || '';
+        const label = (b.textContent || '').trim();
+        const href  = b.getAttribute('href') || '';
+        const entry = { id, label, href, subpages: [] };
+
+        if (href && /\.html(?:$|\?)/.test(href) && !/login\.html/i.test(href)){
+          try{
+            const subRes = await fetch(href, { cache: 'no-store' });
+            const subHtml = await subRes.text();
+            const subDoc = parser.parseFromString(subHtml, 'text/html');
+            const subs = [...subDoc.querySelectorAll('a.button')];
+            entry.subpages = subs.map(sb => ({
+              id: sb.id || '',
+              label: (sb.textContent || '').trim(),
+              href: sb.getAttribute('href') || ''
+            }));
+          }catch(e){ /* ignore subpage fetch errors */ }
+        }
+        struct.push(entry);
+      }
+      structCount.textContent = `Discovered ${struct.length} buttons`;
+      return struct;
+    }
+
+    // =========================
+    // Data I/O
+    // =========================
+    async function fetchAllUsers(){
+      const res = await fetch(USERS_URL + '?v=' + Date.now(), {
+        headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+      });
+      if (!res.ok) throw new Error('Failed to fetch users');
+      const data = await res.json();
+      return data.Users || [];
+    }
+
+    async function saveUsers(users){
+      const res = await fetch(SAVE_URL, {
+        method:'POST',
+        headers: Object.assign(
+          { 'Content-Type':'application/json' },
+          TOKEN ? { 'Authorization':'Bearer ' + TOKEN } : {}
+        ),
+        body: JSON.stringify({ Users: users })
+      });
+      if (!res.ok){
+        const txt = await res.text().catch(()=> '');
+        throw new Error('Save failed: ' + txt);
+      }
+    }
+
+    // =========================
+    // Rendering
+    // =========================
+    function switchControl(id, checked){
+      const boxId = id + '__chk';
+      return h('label', { class:'switch' },
+        h('input', { type:'checkbox', id:boxId, ...(checked?{checked:true}:{}) }),
+        h('span', { class:'slider' })
+      );
+    }
+
+    function toggleRow(user, id, label, href, checked, indent=false){
+      const legacy = mapIdToLegacyKey(id, label, href);
+      const pathSpan = href ? h('span', { class:'path' }, href) : null;
+      return h('div', { class:'toggle-row' + (indent?' indent':'') },
+        h('div', { class:'lbl' },
+          label || id || '(unnamed)',
+          pathSpan ? h('div', null, pathSpan) : null
+        ),
+        switchControl(`${user.Username}::${id||href||label||'unknown'}`, !!checked)
+      );
+    }
+
+    function userCard(user, structure){
+      const header = h('div', { class:'user-header' },
+        h('div', null,
+          `${user.EngineerNumber ? ('#' + user.EngineerNumber + ' – ') : ''}${user.FirstName || ''} ${user.LastName || ''}`,
+          ' ',
+          h('span', { style:'color:#6b7280;font-weight:500' }, `(${user.Username})`)
+        ),
+        h('div', null,
+          // Full Access toggle
+          h('div', { class:'toggle-row' },
+            h('span', { class:'lbl' }, 'Full Access'),
+            switchControl(`fa_${user.Username}`, (user.FullAccess||'').toLowerCase()==='yes')
+          )
+        )
+      );
+
+      const sub = h('div', { class:'user-sub' },
+        `${user.EmploymentType || ''} · ${user.Status || ''} · ${user.Email || ''}`
+      );
+
+      const grid = h('div', { class:'grid' });
+
+      // Primary page toggles
+      grid.appendChild(h('div', { class:'section-title' }, 'Main Menu', h('span', { class:'pill' }, 'auto')));
+      structure.forEach(p=>{
+        const primaryId = p.id || normalizeIdForKey(p.href || p.label);
+        const legacyKey = mapIdToLegacyKey(primaryId, p.label, p.href);
+        const currentOn = ((user[legacyKey] || user[primaryId] || '').toLowerCase() === 'yes');
+        grid.appendChild(toggleRow(user, primaryId, p.label, p.href, currentOn, false));
+      });
+
+      // Subpage toggles
+      const subs = structure.flatMap(s => s.subpages || []);
+      if (subs.length){
+        grid.appendChild(h('div', { class:'section-title', style:'grid-column:1/-1' }, 'Sub-menus', h('span', { class:'pill' }, String(subs.length))));
+        subs.forEach(sp=>{
+          const subId = sp.id || normalizeIdForKey(sp.href || sp.label);
+          const subLegacy = mapIdToLegacyKey(subId, sp.label, sp.href);
+          const on = ((user[subLegacy] || user[subId] || '').toLowerCase() === 'yes');
+          grid.appendChild(toggleRow(user, subId, sp.label, sp.href, on, true));
+        });
+      }
+
+      const card = h('div', { class:'user-card' },
+        header, sub, grid
+      );
+      return card;
+    }
+
+    function renderUsers(users, structure){
+      list.innerHTML = '';
+      if (!users.length){
+        list.textContent = 'No users found.'; return;
+      }
+      users.forEach(u => list.appendChild(userCard(u, structure)));
+    }
+
+    // =========================
+    // Build UI
+    // =========================
+    let __USERS = [];
+    let __STRUCT = [];
+
+    async function buildUI(){
+      showMask(true);
+      try{
+        const [users, struct] = await Promise.all([fetchAllUsers(), scanPortal()]);
+        __USERS = users;
+        __STRUCT = struct;
+        renderUsers(__USERS, __STRUCT);
+      }catch(err){
+        console.error(err);
+        list.textContent = 'Failed to load. Check Worker and network.';
+        showBanner('❌ Failed to load users or scan portal', 'err');
+      }finally{
+        showMask(false);
+      }
+    }
+
+    // =========================
+    // Collect & Save
+    // =========================
+    let saving = false;
+    async function saveAll(){
+      if (saving) return;
+      if (!__USERS || !__STRUCT) return;
+      saving = true;
+      showMask(true);
+      try{
+        const users = JSON.parse(JSON.stringify(__USERS)); // clone
+        const struct = __STRUCT;
+
+        users.forEach(u=>{
+          // Full Access
+          const faEl = document.getElementById(`fa_${u.Username}__chk`);
+          u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
+
+          // For each discovered button/sub-button, set both the legacy key and the dynamic id key
+          const assignToggle = (id,label,href)=>{
+            const pid = id || normalizeIdForKey(href || label);
+            const legacy = mapIdToLegacyKey(pid, label, href);
+            const chk = document.getElementById(`${u.Username}::${pid}__chk`);
+            const val = (chk && chk.checked) ? 'Yes' : 'No';
+            if (legacy) u[legacy] = val;
+            if (pid)    u[pid]    = val;
+          };
+
+          struct.forEach(p=>{
+            assignToggle(p.id, p.label, p.href);
+            (p.subpages||[]).forEach(sp=> assignToggle(sp.id, sp.label, sp.href));
+          });
+        });
+
+        await saveUsers(users);
+        __USERS = users; // keep in sync after save
+        showBanner('✅ Changes saved successfully.', 'ok');
+      }catch(err){
+        console.error(err);
+        showBanner('❌ Save failed. ' + (err?.message || ''), 'err');
+      }finally{
+        showMask(false);
+        saving = false;
+      }
+    }
+
+    // =========================
+    // Add User modal
+    // =========================
+    const modal = document.getElementById('addUserModal');
+    const openAdd = () => { modal.classList.add('show'); modal.setAttribute('aria-hidden','false'); };
+    const closeAdd = () => { modal.classList.remove('show'); modal.setAttribute('aria-hidden','true'); };
+
+    document.getElementById('addUserBtn').addEventListener('click', openAdd);
+    document.getElementById('cancelAdd').addEventListener('click', closeAdd);
+
+    async function createUser(){
+      try{
+        showMask(true);
+        const res = await fetch(USERS_URL + '?v=' + Date.now(), {
+          headers: TOKEN ? { 'Authorization':'Bearer ' + TOKEN } : {}
+        });
+        const data = await res.json();
+        const users = data.Users || [];
+
+        // next EngineerNumber (max + 1)
+        const maxNum = users.reduce((m,u)=>{
+          const n = parseInt(u.EngineerNumber, 10);
+          return isNaN(n) ? m : Math.max(m, n);
+        }, 0);
+        const nextNum = String(maxNum + 1);
+
+        const firstName = document.getElementById('firstName').value.trim();
+        const lastName  = document.getElementById('lastName').value.trim();
+        const email     = document.getElementById('email').value.trim();
+        const username  = document.getElementById('username').value.trim();
+        const password  = document.getElementById('password').value;
+        const vehicle   = document.getElementById('vehicle').value.trim();
+        const empType   = document.getElementById('employmentType').value.trim();
+        const spPath    = document.getElementById('sharepoint').value.trim();
+
+        if (!firstName || !lastName || !username || !password){
+          showBanner('❌ Please complete First, Last, Username and Password.', 'err');
+          return;
+        }
+
+        const hashedPassword = await sha256Hex(password);
+
+        const newUser = {
+          EngineerNumber: nextNum,
+          FirstName: firstName,
+          LastName: lastName,
+          Username: username,
+          Email: email,
+          HashedPassword: hashedPassword,
+          VehicleAssigned: vehicle,
+          EmploymentType: empType || 'Employed',
+          Status: 'Active',
+          FullAccess: 'No',
+          SharePointPath: spPath
+        };
+
+        users.push(newUser);
+        await saveUsers(users);
+
+        closeAdd();
+        showBanner('✅ User added.', 'ok');
+        buildUI();
+      }catch(err){
+        console.error(err);
+        showBanner('❌ Could not add user. ' + (err?.message||''), 'err');
+      }finally{
+        showMask(false);
+      }
+    }
+    document.getElementById('createUserBtn').addEventListener('click', createUser);
+
+    // =========================
+    // Search
+    // =========================
+    const searchBox = document.getElementById('searchBox');
+    searchBox.addEventListener('input', debounce(()=>{
+      const q = (searchBox.value||'').trim().toLowerCase();
+      const filtered = !q ? __USERS : __USERS.filter(u=>{
+        return (u.FirstName||'').toLowerCase().includes(q)
+            || (u.LastName||'').toLowerCase().includes(q)
+            || (u.Username||'').toLowerCase().includes(q)
+            || String(u.EngineerNumber||'').includes(q);
+      });
+      renderUsers(filtered, __STRUCT);
+    }, 150));
+
+    // =========================
+    // Buttons
+    // =========================
+    document.getElementById('saveBtn').addEventListener('click', saveAll);
+    document.getElementById('reloadBtn').addEventListener('click', buildUI);
+    document.getElementById('rescanBtn').addEventListener('click', async ()=>{
+      showMask(true);
+      try{
+        __STRUCT = await scanPortal();
+        renderUsers(__USERS, __STRUCT);
+        showBanner('🔄 Scan complete. Buttons refreshed.', 'ok');
+      }catch(e){
+        console.error(e);
+        showBanner('❌ Scan failed', 'err');
+      }finally{
+        showMask(false);
+      }
+    });
+
+    // =========================
+    // Init
+    // =========================
+    (async ()=>{ await buildUI(); })();
+  </script>
 </body>
 </html>
