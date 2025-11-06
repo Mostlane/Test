@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Mostlane • Weekly Hours Watch (Simple)</title>
+<title>Mostlane • Weekly Hours Watch (v2)</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
@@ -14,128 +14,364 @@
     --ok:#10b981;
     --warn:#f59e0b;
     --bad:#ef4444;
-    --panel:rgba(255,255,255,0.9);
+    --panel:rgba(255,255,255,0.6);
   }
-  html,body{height:100%;margin:0;background:#e6e8eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
-  .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
-  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-  .btn{appearance:none;border:1px solid rgba(0,0,0,.1);background:var(--ml-blue);color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
-  .panel{background:var(--panel);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.06);}
-  .kpis{display:grid;gap:12px;grid-template-columns:repeat(4,1fr);margin-bottom:12px}
+  html,body{
+    height:100%;margin:0;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    color:var(--text);
+    background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size:cover;
+  }
+  .wrap{max-width:1150px;margin:24px auto;padding:0 16px}
+  .top{display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .left{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  h2{margin:0}
+  .btn{appearance:none;border:1px solid rgba(0,0,0,.08);background:var(--ml-blue);color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
+  .btn.secondary{background:#fff;color:var(--text)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .weeklabel{font-size:14px;color:var(--muted)}
+  .panel{background:var(--panel);backdrop-filter: blur(2px);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.06);}
+  .kpis{display:grid;gap:12px;grid-template-columns:repeat(6,1fr);margin-bottom:12px}
   .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:24px;font-weight:700}
-  .grid{display:grid;gap:12px;grid-template-columns:2fr 1fr}
-  .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px}
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  .charts{display:grid;gap:12px;grid-template-columns:1fr}
+  .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
   #errorMsg{text-align:center;color:var(--bad);font-weight:600;margin-top:20px}
-  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)} .grid{grid-template-columns:1fr}}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
+  @media(min-width:1000px){
+    .charts{grid-template-columns:2fr 1fr}
+  }
+  @media(max-width:1100px){
+    .kpis{grid-template-columns:repeat(3,1fr)}
+  }
+  @media(max-width:700px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="top">
-      <h2>Weekly Hours Watch (Simple)</h2>
-      <a href="hours-dashboard-advanced-v3.html" class="btn">Advanced View</a>
+      <div class="left">
+        <h2>Weekly Hours Watch (v2)</h2>
+        <div class="weeklabel" id="weekLabel">Loading week…</div>
+      </div>
+      <div class="controls">
+        <button class="btn secondary" id="prevBtn">◀ Previous</button>
+        <button class="btn secondary" id="nextBtn">Next ▶</button>
+        <a href="hours-dashboard-advanced-v3.html" class="btn">Advanced View</a>
+      </div>
     </div>
+
     <div class="kpis">
       <div class="panel kpi"><div class="label">Engineers</div><div class="value" id="kpiCount">–</div></div>
       <div class="panel kpi"><div class="label">Avg hours so far</div><div class="value" id="kpiAvg">–</div></div>
-      <div class="panel kpi"><div class="label">Projected over-cap</div><div class="value" id="kpiOver">–</div></div>
-      <div class="panel kpi"><div class="label">Total predicted</div><div class="value" id="kpiTotal">–</div></div>
+      <div class="panel kpi"><div class="label">Projected (Mon–Fri)</div><div class="value" id="kpiTotal">–</div></div>
+      <div class="panel kpi"><div class="label">Over 40h (predicted)</div><div class="value" id="kpiOver">–</div></div>
+      <div class="panel kpi"><div class="label">Total OT (week)</div><div class="value" id="kpiOTTotal">–</div></div>
+      <div class="panel kpi"><div class="label">Avg OT / engineer</div><div class="value" id="kpiOTAvg">–</div></div>
     </div>
+
     <div class="grid">
       <div class="panel">
-        <canvas id="barByEngineer" height="150"></canvas>
+        <canvas id="barByEngineer" height="140"></canvas>
         <div class="legend">
           <span><span class="dot" style="background:var(--ok)"></span>On track</span>
           <span><span class="dot" style="background:var(--warn)"></span>Close</span>
           <span><span class="dot" style="background:var(--bad)"></span>Over</span>
+          <span><span class="dot" style="background:var(--ml-blue)"></span>Cap line (40h)</span>
         </div>
       </div>
-      <div class="panel">
-        <canvas id="donutAtRisk" height="150"></canvas>
+
+      <div class="charts">
+        <div class="panel">
+          <canvas id="barOvertime" height="140"></canvas>
+        </div>
+        <div class="panel">
+          <canvas id="donutAtRisk" height="140"></canvas>
+        </div>
       </div>
     </div>
+
     <div id="errorMsg"></div>
   </div>
 
 <script>
 const HOURS_API = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
-const WEEKLY_CAP = 40;
+const WEEKLY_CAP = 40; // global cap (can be made per-person later)
+
+let rawData = null;
+let currentWeekAnchor = new Date(); // we’ll normalise to Monday/Sunday keys
+let charts = { bar:null, donut:null, ot:null };
 
 function getVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
-function colorFor(pred,cap){if(pred>cap)return getVar('--bad');if(pred>cap*0.9)return getVar('--warn');return getVar('--ok');}
+function colorFor(pred,cap){ if(pred>cap) return getVar('--bad'); if(pred>cap*0.9) return getVar('--warn'); return getVar('--ok'); }
 
-async function loadData(){
-  const errorMsg=document.getElementById('errorMsg');
-  try{
-    const res=await fetch(HOURS_API+"?v="+Date.now(),{cache:"no-store"});
-    if(!res.ok)throw new Error(res.status+" "+res.statusText);
-    const data=await res.json();
+// --- Date helpers (Mon–Sun weeks, weekKey = Sunday date "YYYY-MM-DD")
+function startOfWeekMonday(d){
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = dt.getUTCDay(); // 0=Sun
+  const diff = (day===0 ? -6 : 1 - day); // move to Monday
+  dt.setUTCDate(dt.getUTCDate()+diff);
+  dt.setUTCHours(0,0,0,0);
+  return dt;
+}
+function endOfWeekSunday(d){
+  const mon = startOfWeekMonday(d);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate()+6);
+  sun.setUTCHours(23,59,59,999);
+  return sun;
+}
+function getWeekKeyForDate(d){
+  // weekKey is the SUNDAY yyyy-mm-dd
+  const sun = endOfWeekSunday(d);
+  return sun.toISOString().slice(0,10);
+}
+function fmtUK(d){
+  const opts = { weekday: undefined, year:'numeric', month:'short', day:'numeric', timeZone:'UTC' };
+  return d.toLocaleDateString('en-GB', opts);
+}
+function clampToCurrentWeek(){
+  // Disable "Next" if selected week is current week or in future
+  const selSun = endOfWeekSunday(currentWeekAnchor);
+  const todaySun = endOfWeekSunday(new Date());
+  document.getElementById('nextBtn').disabled = selSun >= todaySun;
+}
+function updateWeekLabel(){
+  const mon = startOfWeekMonday(currentWeekAnchor);
+  const sun = endOfWeekSunday(currentWeekAnchor);
+  document.getElementById('weekLabel').textContent = `Week commencing ${fmtUK(mon)} – ${fmtUK(sun)}`;
+}
 
-    // Data format: { "2025-11-05": [ {...}, {...} ], "2025-11-06": [ {...} ] }
-    const engineerMap={};
-    for(const [date,entries] of Object.entries(data)){
-      if(!Array.isArray(entries))continue;
-      entries.forEach(e=>{
-        const name=e.engineer||e.name;
-        if(!name)return;
-        const hours=parseFloat(e.totalHours)||0;
-        if(!engineerMap[name])engineerMap[name]={name,worked:0,count:0};
-        engineerMap[name].worked+=hours;
-        engineerMap[name].count++;
-      });
+// Deduplicate entries per engineer+date by latest submittedAt
+function dedupeEntries(entries){
+  const byKey = new Map(); // key: engineer|date
+  for(const e of entries){
+    if(!e.engineer || !e.date) continue;
+    const key = `${e.engineer}||${e.date}`;
+    const prev = byKey.get(key);
+    if(!prev) { byKey.set(key, e); continue; }
+    const prevT = prev.submittedAt ? Date.parse(prev.submittedAt) : 0;
+    const curT  = e.submittedAt ? Date.parse(e.submittedAt) : 0;
+    if(curT >= prevT) byKey.set(key, e);
+  }
+  return Array.from(byKey.values());
+}
+
+async function fetchData(){
+  const res = await fetch(HOURS_API+"?v="+Date.now(),{cache:"no-store"});
+  if(!res.ok) throw new Error(res.status+" "+res.statusText);
+  return res.json();
+}
+
+function getEntriesForWeek(data, anchorDate){
+  const weekKey = getWeekKeyForDate(anchorDate); // Sunday yyyy-mm-dd
+  // If the data is grouped by date keys, gather those dates within the week
+  const mon = startOfWeekMonday(anchorDate);
+  const sun = endOfWeekSunday(anchorDate);
+  const out = [];
+  // If your Worker also stores weekKey inside each entry, we can filter faster by entry.weekKey===weekKey.
+  for(const [dayKey, list] of Object.entries(data)){
+    const dt = new Date(dayKey+"T00:00:00Z");
+    if(dt>=mon && dt<=sun && Array.isArray(list)){
+      out.push(...list.filter(e => {
+        // Prefer internal weekKey match if provided, else rely on the date key
+        if(e.weekKey && e.weekKey !== weekKey) return false;
+        return true;
+      }));
+    }
+  }
+  return dedupeEntries(out);
+}
+
+function isCurrentWeek(anchor){
+  const selSun = endOfWeekSunday(anchor);
+  const todaySun = endOfWeekSunday(new Date());
+  return selSun.getTime() === todaySun.getTime();
+}
+
+// Mon–Fri projection only
+function buildEngineerStats(entries, anchor){
+  // Group by engineer
+  const per = new Map();
+  // Also track which dates are Mon–Fri
+  const mon = startOfWeekMonday(anchor);
+  const fri = new Date(mon); fri.setUTCDate(mon.getUTCDate()+4);
+
+  for(const e of entries){
+    const name = e.engineer;
+    if(!name) continue;
+
+    // paid hours are in totalHours string like "9.52"
+    const total = parseFloat(e.totalHours) || 0;
+    const ot = parseFloat(e.overtimeHours) || 0;
+
+    // Count only Mon–Fri towards averages, but include OT sums for the week
+    const d = new Date(e.date+"T00:00:00Z");
+    const isWeekday = (d>=mon && d<=fri);
+
+    if(!per.has(name)) per.set(name, { name, sumPaid:0, days:0, sumOT:0, sumPaidWeekdays:0, weekdayDays:0 });
+    const row = per.get(name);
+
+    row.sumPaid += total;       // full week actual paid hours
+    row.sumOT   += ot;
+
+    if(isWeekday){
+      row.sumPaidWeekdays += total;
+      row.weekdayDays += 1;
     }
 
-    const ENGINEERS=Object.values(engineerMap).map(e=>{
-      const avg=e.worked/e.count;
-      const predicted=avg*5; // projection for week (5 days)
-      return{...e,worked:avg,predicted,cap:WEEKLY_CAP};
+    // we'll also count "days worked so far" as distinct weekday days for average
+    if(isWeekday) row.days += 1;
+  }
+
+  // Compute predicted = avg weekday hours so far * 5 (Mon–Fri)
+  const pastWeek = !isCurrentWeek(anchor);
+  const stats = [];
+  per.forEach(v=>{
+    const avg = v.weekdayDays > 0 ? (v.sumPaidWeekdays / v.weekdayDays) : 0;
+    const predicted = pastWeek ? v.sumPaidWeekdays : (avg * 5);
+    stats.push({
+      name: v.name,
+      workedSoFar: v.sumPaidWeekdays, // Mon–Fri actual so far
+      predicted,
+      overtime: v.sumOT,
+      daysCount: v.weekdayDays
     });
+  });
+  return stats;
+}
 
-    if(!ENGINEERS.length){errorMsg.textContent="No entries found yet.";return;}
+function sum(arr, f){ return arr.reduce((s,x)=>s+(f?f(x):x),0); }
 
-    // KPIs
-    document.getElementById('kpiCount').textContent=ENGINEERS.length;
-    const avg=ENGINEERS.reduce((s,e)=>s+e.worked,0)/ENGINEERS.length;
-    document.getElementById('kpiAvg').textContent=avg.toFixed(1)+'h';
-    document.getElementById('kpiOver').textContent=ENGINEERS.filter(e=>e.predicted>e.cap).length;
-    document.getElementById('kpiTotal').textContent=ENGINEERS.reduce((s,e)=>s+e.predicted,0).toFixed(1)+'h';
+function destroyCharts(){
+  if(charts.bar){ charts.bar.destroy(); charts.bar=null; }
+  if(charts.donut){ charts.donut.destroy(); charts.donut=null; }
+  if(charts.ot){ charts.ot.destroy(); charts.ot=null; }
+}
 
-    // Bar chart
-    new Chart(document.getElementById('barByEngineer').getContext('2d'),{
-      type:'bar',
-      data:{
-        labels:ENGINEERS.map(e=>e.name),
-        datasets:[{
-          label:'Predicted hours',
-          data:ENGINEERS.map(e=>e.predicted),
-          backgroundColor:ENGINEERS.map(e=>colorFor(e.predicted,e.cap))
-        },{
-          type:'line',label:'Cap',data:ENGINEERS.map(e=>e.cap),
-          borderColor:getVar('--ml-blue'),borderWidth:2,pointRadius:0
-        }]
-      },
-      options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:50}}}
-    });
+function drawCharts(stats){
+  destroyCharts();
+  const ctxBar = document.getElementById('barByEngineer').getContext('2d');
+  const ctxDonut = document.getElementById('donutAtRisk').getContext('2d');
+  const ctxOT = document.getElementById('barOvertime').getContext('2d');
 
-    // Donut chart
-    const ok=ENGINEERS.filter(e=>e.predicted<=0.9*e.cap).length;
-    const warn=ENGINEERS.filter(e=>e.predicted>0.9*e.cap&&e.predicted<=e.cap).length;
-    const bad=ENGINEERS.filter(e=>e.predicted>e.cap).length;
-    new Chart(document.getElementById('donutAtRisk').getContext('2d'),{
-      type:'doughnut',
-      data:{labels:['On track','Close','Over'],
-        datasets:[{data:[ok,warn,bad],backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')]}]},
-      options:{plugins:{legend:{position:'bottom'}},cutout:'60%'}
-    });
+  const labels = stats.map(e=>e.name);
+  const predicted = stats.map(e=>e.predicted);
+  const colors = stats.map(e=>colorFor(e.predicted, WEEKLY_CAP));
+
+  charts.bar = new Chart(ctxBar, {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        { label:'Predicted hours (Mon–Fri)', data:predicted, backgroundColor:colors },
+        { type:'line', label:'Cap (40h)', data:labels.map(_=>WEEKLY_CAP), borderColor:getVar('--ml-blue'), borderWidth:2, pointRadius:0 }
+      ]
+    },
+    options:{
+      plugins:{ legend:{ display:false } },
+      scales:{ y:{ beginAtZero:true, suggestedMax:50 } }
+    }
+  });
+
+  const ok = stats.filter(e=>e.predicted <= 0.9*WEEKLY_CAP).length;
+  const warn = stats.filter(e=>e.predicted > 0.9*WEEKLY_CAP && e.predicted <= WEEKLY_CAP).length;
+  const bad = stats.filter(e=>e.predicted > WEEKLY_CAP).length;
+
+  charts.donut = new Chart(ctxDonut, {
+    type:'doughnut',
+    data:{
+      labels:['On track','Close','Over'],
+      datasets:[{ data:[ok,warn,bad], backgroundColor:[getVar('--ok'),getVar('--warn'),getVar('--bad')] }]
+    },
+    options:{ plugins:{ legend:{ position:'bottom' } }, cutout:'60%' }
+  });
+
+  const overtime = stats.map(e=>e.overtime);
+  charts.ot = new Chart(ctxOT, {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{ label:'Overtime hours (week)', data:overtime, backgroundColor:getVar('--ml-blue') }]
+    },
+    options:{
+      plugins:{ legend:{ display:true } },
+      scales:{ y:{ beginAtZero:true } }
+    }
+  });
+}
+
+function updateKPIs(stats){
+  const count = stats.length;
+  document.getElementById('kpiCount').textContent = count;
+
+  const avgHoursSoFar = count ? (sum(stats, e=>e.workedSoFar)/count) : 0;
+  document.getElementById('kpiAvg').textContent = avgHoursSoFar.toFixed(1)+'h';
+
+  const totalPred = sum(stats, e=>e.predicted);
+  document.getElementById('kpiTotal').textContent = totalPred.toFixed(1)+'h';
+
+  const over = stats.filter(e=>e.predicted > WEEKLY_CAP).length;
+  document.getElementById('kpiOver').textContent = over;
+
+  const otTotal = sum(stats, e=>e.overtime);
+  const otAvg = count ? otTotal / count : 0;
+  document.getElementById('kpiOTTotal').textContent = otTotal.toFixed(1)+'h';
+  document.getElementById('kpiOTAvg').textContent = otAvg.toFixed(1)+'h';
+}
+
+async function refresh(){
+  const errorMsg = document.getElementById('errorMsg');
+  errorMsg.textContent = '';
+  try{
+    if(!rawData){
+      rawData = await fetchData();
+    }
+    updateWeekLabel();
+    clampToCurrentWeek();
+
+    const weekEntries = getEntriesForWeek(rawData, currentWeekAnchor);
+    if(!weekEntries.length){
+      destroyCharts();
+      updateKPIs([]);
+      errorMsg.textContent = "No entries found for this week.";
+      return;
+    }
+
+    const stats = buildEngineerStats(weekEntries, currentWeekAnchor);
+    updateKPIs(stats);
+    drawCharts(stats);
 
   }catch(err){
     console.error(err);
-    errorMsg.textContent="❌ Error loading data from Worker.";
+    destroyCharts();
+    updateKPIs([]);
+    errorMsg.textContent = "❌ Error loading or processing data.";
   }
 }
 
-loadData();
+// Week navigation
+document.getElementById('prevBtn').addEventListener('click', ()=>{
+  const mon = startOfWeekMonday(currentWeekAnchor);
+  mon.setUTCDate(mon.getUTCDate()-7);
+  currentWeekAnchor = mon;
+  refresh();
+});
+document.getElementById('nextBtn').addEventListener('click', ()=>{
+  const mon = startOfWeekMonday(currentWeekAnchor);
+  mon.setUTCDate(mon.getUTCDate()+7);
+  currentWeekAnchor = mon;
+  refresh();
+});
+
+// Init to current week (today as anchor)
+currentWeekAnchor = new Date();
+refresh();
 </script>
 </body>
 </html>
