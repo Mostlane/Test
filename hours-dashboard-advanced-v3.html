@@ -1,35 +1,37 @@
 <!doctype html>
 <html lang="en">
 <head>
-<script src="auth.js"></script>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mostlane • Advanced Hours Dashboard v3</title>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<style>
-  :root{
-    --bg:#0f172a; --panel:#111827; --panelEdge:#0b1222; --text:#e5e7eb; --muted:#9ca3af;
-    --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
-    --blue:#3b82f6; --indigo:#6366f1; --cyan:#22d3ee; --yellow:#facc15;
-  }
-  body{margin:0;background:linear-gradient(180deg,#0b132a,#0a0f1f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-  .wrap{display:grid;grid-template-columns: 1fr 320px; gap:16px; padding:16px}
-  .area{display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:16px}
-  .panel{background:var(--panel); border:1px solid #1f2937; border-radius:10px; padding:14px; box-shadow:inset 0 0 0 1px var(--panelEdge), 0 6px 16px rgba(0,0,0,.35)}
-  .title{font-weight:600; font-size:14px; color:var(--muted); margin-bottom:8px}
-  .kpiGrid{display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:16px}
-  .kpi .num{font-size:28px; font-weight:800}
-  .kpi .sub{color:var(--muted); font-size:12px}
-  .leaderboard .row{display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #334155}
-  .leaderboard .row:last-child{border-bottom:none}
-  .pill{display:inline-block; font-size:11px; border-radius:999px; padding:2px 8px}
-  .ok{background:#04281e;color:#34d399} .warn{background:#422d14;color:#fbbf24} .bad{background:#3b0e0e;color:#fca5a5}
-  .topbar{grid-column:1/3; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px}
-  .btn{appearance:none; border:1px solid #334155; background:#0b132a; color:#fff; padding:8px 10px; border-radius:8px; cursor:pointer}
-  .highlight{font-size:18px;font-weight:700;color:var(--blue)}
-  @media(max-width:1100px){ .wrap{grid-template-columns:1fr} .area{grid-template-columns:1fr} .kpiGrid{grid-template-columns:repeat(2,1fr)} }
-</style>
+  <script src="auth.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mostlane • Advanced Hours Dashboard v3 (Live)</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --panelEdge:#0b1222; --text:#e5e7eb; --muted:#9ca3af;
+      --ok:#10b981; --warn:#f59e0b; --bad:#ef4444;
+      --blue:#3b82f6; --indigo:#6366f1; --cyan:#22d3ee; --yellow:#facc15;
+    }
+    body{margin:0;background:linear-gradient(180deg,#0b132a,#0a0f1f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{display:grid;grid-template-columns: 1fr 320px; gap:16px; padding:16px}
+    .area{display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:16px}
+    .panel{background:var(--panel); border:1px solid #1f2937; border-radius:10px; padding:14px; box-shadow:inset 0 0 0 1px var(--panelEdge), 0 6px 16px rgba(0,0,0,.35)}
+    .title{font-weight:600; font-size:14px; color:var(--muted); margin-bottom:8px}
+    .kpiGrid{display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:16px}
+    .kpi .num{font-size:28px; font-weight:800}
+    .kpi .sub{color:var(--muted); font-size:12px}
+    .leaderboard .row{display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed #334155}
+    .leaderboard .row:last-child{border-bottom:none}
+    .pill{display:inline-block; font-size:11px; border-radius:999px; padding:2px 8px}
+    .ok{background:#04281e;color:#34d399} .warn{background:#422d14;color:#fbbf24} .bad{background:#3b0e0e;color:#fca5a5}
+    .topbar{grid-column:1/3; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px}
+    .btn{appearance:none; border:1px solid #334155; background:#0b132a; color:#fff; padding:8px 10px; border-radius:8px; cursor:pointer; text-decoration:none}
+    .highlight{font-size:18px;font-weight:700;color:var(--blue)}
+    .muted{color:var(--muted)}
+    .hint{font-size:12px;color:var(--muted);margin-top:4px}
+    @media(max-width:1100px){ .wrap{grid-template-columns:1fr} .area{grid-template-columns:1fr} .kpiGrid{grid-template-columns:repeat(2,1fr)} }
+  </style>
 </head>
 <body>
   <div class="wrap">
@@ -37,6 +39,7 @@
       <div class="topbar" style="grid-column:1/3">
         <div>
           <div style="font-weight:700;font-size:20px">Team Dashboard v3</div>
+          <div class="hint">Data source: Cloudflare Worker (Hours)</div>
           <div style="margin-top:6px">
             🏆 Top Engineer – This Week: <span class="highlight" id="topWeek">–</span><br>
             🏆 Top Engineer – Last 6 Weeks: <span class="highlight" id="topHist">–</span>
@@ -47,18 +50,18 @@
 
       <!-- KPI TILES -->
       <div class="panel kpiGrid" style="grid-column:1/3">
-        <div class="panel kpi"><div class="num" id="kpi-engineers">–</div><div class="sub">Engineers</div></div>
-        <div class="panel kpi"><div class="num" id="kpi-worked">–</div><div class="sub">Hours worked so far</div></div>
-        <div class="panel kpi"><div class="num" id="kpi-pred">–</div><div class="sub">Predicted total this week</div></div>
-        <div class="panel kpi"><div class="num" id="kpi-remaining">–</div><div class="sub">Team hours remaining</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-engineers">–</div><div class="sub">Engineers (active this week)</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-worked">–</div><div class="sub">Hours worked so far (team)</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-pred">–</div><div class="sub">Predicted total this week (team)</div></div>
+        <div class="panel kpi"><div class="num" id="kpi-remaining">–</div><div class="sub">Team hours remaining vs cap</div></div>
       </div>
 
       <!-- Charts -->
-      <div class="panel"><div class="title">Team progress</div><canvas id="progressTeam" height="100"></canvas></div>
+      <div class="panel"><div class="title">Team progress (Worked vs Cap)</div><canvas id="progressTeam" height="100"></canvas></div>
       <div class="panel"><div class="title">Avg engineer vs 40h cap</div><canvas id="progressAvg" height="100"></canvas></div>
       <div class="panel"><div class="title">Risk distribution</div><canvas id="donutRisk" height="120"></canvas></div>
-      <div class="panel"><div class="title">By engineer</div><canvas id="stackedByEngineer" height="140"></canvas></div>
-      <div class="panel" style="grid-column:1/3"><div class="title">Hours by day</div><canvas id="byDay" height="140"></canvas></div>
+      <div class="panel"><div class="title">By engineer (worked & predicted)</div><canvas id="stackedByEngineer" height="140"></canvas></div>
+      <div class="panel" style="grid-column:1/3"><div class="title">Hours by day (current week)</div><canvas id="byDay" height="140"></canvas></div>
     </div>
 
     <!-- Right Column Leaderboards -->
@@ -71,86 +74,394 @@
   </div>
 
 <script>
-const CAP=40;
-const engineers=[
-  {name:"Jamie Line", worked:24, predicted:44, onsite:19, drive:5, mileage:210, overtime:4, weekend:0, score:77, vancheck:"done", history:[41,43,45,44,42,46], checks:[1,1,1,1,1,0], scores:[75,78,80,76,77,78]},
-  {name:"Chris Cooke", worked:22, predicted:42, onsite:18, drive:4, mileage:180, overtime:2, weekend:0, score:82, vancheck:"missed", history:[40,41,43,42,42,40], checks:[1,1,1,1,1,1], scores:[80,82,83,81,80,79]},
-  {name:"Bradley Graham", worked:18, predicted:39, onsite:15, drive:3, mileage:150, overtime:0, weekend:4, score:65, vancheck:"done", history:[37,39,38,40,39,37], checks:[1,0,1,1,0,1], scores:[66,67,64,65,66,67]},
-  {name:"Connor Brady", worked:20, predicted:38, onsite:16, drive:4, mileage:200, overtime:1, weekend:0, score:70, vancheck:"done", history:[36,38,37,39,38,36], checks:[1,1,1,0,1,1], scores:[70,71,72,69,70,71]},
-  {name:"Ciprian", worked:17, predicted:34, onsite:14, drive:3, mileage:170, overtime:0, weekend:0, score:85, vancheck:"done", history:[33,34,35,34,33,36], checks:[1,1,1,1,1,1], scores:[84,85,83,86,84,85]}
-];
+/** ======= CONFIG ======= **/
+const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+const CAP_PER_ENGINEER = 40;
+const WEEKDAYS_TARGET = 5; // projection uses 5 working days
 
-// Composite weekly scoring
-function weeklyScore(e){
-  let s=100;
-  if(e.overtime) s-=2*e.overtime;
-  if(e.weekend) s-=e.weekend*1.5;
-  const eff=e.onsite/(e.onsite+e.drive);
-  if(eff<0.8) s-=10;
-  if(eff>0.9) s+=5;
-  if(e.score<70) s-=(70-e.score);
-  if(e.vancheck!=="done") s-=20;
-  return s;
-}
-function historicScore(e){
-  let s=100;
-  const avgHours=e.history.reduce((a,b)=>a+b,0)/e.history.length;
-  if(avgHours>CAP) s-=2*(avgHours-CAP);
-  const eff=e.onsite/(e.onsite+e.drive);
-  if(eff<0.8) s-=5;
-  const avgScore=e.scores.reduce((a,b)=>a+b,0)/e.scores.length;
-  if(avgScore<70) s-=(70-avgScore);
-  const checks=e.checks.reduce((a,b)=>a+b,0)/e.checks.length;
-  if(checks<1) s-=20*(1-checks);
-  return s;
+/** ======= HELPERS ======= **/
+const $ = (id) => document.getElementById(id);
+const toFloat = (v) => v==null ? 0 : parseFloat(v)||0;
+function parseISODate(s){ const d = new Date(s+"T12:00:00"); return isNaN(d)?null:d; }
+function uniq(arr){ return [...new Set(arr)]; }
+function sum(arr){ return arr.reduce((a,b)=>a+toFloat(b),0); }
+function fmtHours(n){ return (Math.round(n*100)/100).toFixed(2) + "h"; }
+function weekLabel(weekKey){
+  // weekKey is Sunday ISO (as produced by hours-entry v4). Show as "w/c Mon DD MMM"
+  const sun = parseISODate(weekKey);
+  if(!sun) return weekKey;
+  const mon = new Date(sun); mon.setDate(sun.getDate()+1);
+  return "w/c " + mon.toLocaleDateString("en-GB",{day:"2-digit", month:"short"});
 }
 
-const weekTop=engineers.map(e=>({name:e.name,score:weeklyScore(e)})).sort((a,b)=>b.score-a.score)[0];
-const histTop=engineers.map(e=>({name:e.name,score:historicScore(e)})).sort((a,b)=>b.score-a.score)[0];
-document.getElementById('topWeek').textContent=weekTop.name+" ("+weekTop.score.toFixed(0)+")";
-document.getElementById('topHist').textContent=histTop.name+" ("+histTop.score.toFixed(0)+")";
+/** ======= FETCH & SHAPE DATA ======= **/
+async function loadHours(){
+  const res = await fetch(HOURS_URL + "?t=" + Date.now(), { cache: "no-store" });
+  if(!res.ok) throw new Error("Failed to load Hours JSON");
+  return await res.json();
+}
 
-// KPIs
-const teamWorked=engineers.reduce((s,e)=>s+e.worked,0);
-const teamPred=engineers.reduce((s,e)=>s+e.predicted,0);
-document.getElementById('kpi-engineers').textContent=engineers.length;
-document.getElementById('kpi-worked').textContent=teamWorked+"h";
-document.getElementById('kpi-pred').textContent=teamPred+"h";
-document.getElementById('kpi-remaining').textContent=Math.max(0,engineers.length*CAP-teamPred)+"h";
+/**
+ * Flatten Worker store to an array of entries with weekKey/date/engineer etc.
+ * Input shape: { "YYYY-MM-DD":[ {entry}, {entry}, ... ], ... }
+ */
+function flattenData(json){
+  const entries = [];
+  for(const k of Object.keys(json||{})){
+    const arr = Array.isArray(json[k]) ? json[k] : [];
+    for(const e of arr){
+      // Keep only objects with a date + engineer
+      if(e && typeof e === "object" && e.date && e.engineer){
+        entries.push(e);
+      }else if(typeof e === "string"){
+        // string-only values (old checklist entries) are ignored in metrics
+      }
+    }
+  }
+  return entries;
+}
 
-// Leaderboards rendering
+/**
+ * Collect weekKeys from entries (use entry.weekKey; if missing, derive from date)
+ * Return sorted ascending; we take latest as current
+ */
+function weekKeysFromEntries(entries){
+  const keys = new Set();
+  for(const e of entries){
+    if(e.weekKey) keys.add(e.weekKey);
+    else if(e.date){
+      // fallback: compute Sunday of week for the date (to match entry.weekKey schema)
+      const d = parseISODate(e.date);
+      if(!d) continue;
+      const sun = new Date(d); sun.setDate(d.getDate()-d.getDay());
+      keys.add(sun.toISOString().split("T")[0]);
+    }
+  }
+  return [...keys].sort(); // lexicographic works on YYYY-MM-DD
+}
+
+/** ======= COMPUTE METRICS ======= **/
+/**
+ * Build per-engineer aggregates for a given weekKey
+ * Returns map: name -> {
+ *   name, dates[], worked, overtime, travel, daysWorked, predicted, cap, vanCheck
+ * }
+ */
+function aggregateWeek(entries, weekKey){
+  const cur = entries.filter(e => (e.weekKey || deriveWeekKey(e.date)) === weekKey);
+
+  const byEng = new Map();
+  for(const e of cur){
+    const name = (e.engineer||"").trim();
+    if(!name) continue;
+
+    if(!byEng.has(name)){
+      byEng.set(name, {
+        name,
+        dates: new Set(),
+        worked: 0,
+        overtime: 0,
+        travel: 0,
+        predicted: 0,
+        cap: CAP_PER_ENGINEER,
+        vanCheck: null // "Yes" if any Monday Yes; "No" if any Monday No; null otherwise
+      });
+    }
+    const rec = byEng.get(name);
+    rec.dates.add(e.date);
+    rec.worked += toFloat(e.totalHours);
+    rec.overtime += toFloat(e.overtimeHours);
+    rec.travel += toFloat(e.totalTravelHours);
+
+    // Van check weekly status preference: any "No" dominates; else any "Yes"
+    if(e.vanCheck === "No") rec.vanCheck = "No";
+    else if(e.vanCheck === "Yes" && rec.vanCheck !== "No") rec.vanCheck = "Yes";
+  }
+
+  // finalise predicted using avg per day × 5
+  for(const rec of byEng.values()){
+    const daysWorked = rec.dates.size || 1;
+    const avgPerDay = rec.worked / daysWorked;
+    rec.predicted = avgPerDay * WEEKDAYS_TARGET;
+  }
+  return byEng;
+}
+
+function deriveWeekKey(dateStr){
+  const d = parseISODate(dateStr);
+  if(!d) return null;
+  const sun = new Date(d); sun.setDate(d.getDate()-d.getDay());
+  return sun.toISOString().split("T")[0];
+}
+
+/**
+ * Build 6-week history per engineer:
+ *  history[name] = [{weekKey, worked, overtime, travel, vanCheck}, ...] (sorted ascending)
+ */
+function buildHistory(entries, weekKeys, limit=6){
+  const last = weekKeys.slice(-limit);
+  const out = new Map();
+  for(const wk of last){
+    const agg = aggregateWeek(entries, wk);
+    agg.forEach((rec, name)=>{
+      if(!out.has(name)) out.set(name, []);
+      out.get(name).push({
+        weekKey: wk,
+        worked: rec.worked,
+        overtime: rec.overtime,
+        travel: rec.travel,
+        vanCheck: rec.vanCheck
+      });
+    });
+  }
+  return { weeks:last, history:out };
+}
+
+/** ======= SCORING (same vibe as your placeholder, but data-driven) ======= **/
+function weeklyScore(rec){
+  // Use worked, overtime, travel ratio, van check
+  const worked = rec.worked;
+  const overtime = rec.overtime;
+  const travel = rec.travel;
+  const eff = worked ? Math.max(0, (worked - travel) / worked) : 1;
+
+  let s = 100;
+  // penalise overtime gently
+  s -= 2 * Math.max(0, overtime);
+  // reward efficiency
+  if(eff < 0.75) s -= 15;
+  else if(eff < 0.85) s -= 7;
+  else if(eff > 0.92) s += 5;
+
+  // van check
+  if(rec.vanCheck === "No") s -= 20;
+  else if(rec.vanCheck === "Yes") s += 2;
+
+  // closeness to cap (closer to 40 is slightly better than way under)
+  const diff = Math.abs(CAP_PER_ENGINEER - Math.min(rec.predicted, 1e6));
+  if(diff <= 4) s += 4;
+  return Math.max(0, Math.min(100, s));
+}
+
+function historicScore(historyArr){
+  // Average of last weeks: reward steady work near cap, low overtime, good efficiency, good checks
+  if(!historyArr || !historyArr.length) return 0;
+  const workedAvg = sum(historyArr.map(h=>h.worked))/historyArr.length;
+  const otAvg = sum(historyArr.map(h=>h.overtime))/historyArr.length;
+  const travelAvg = sum(historyArr.map(h=>h.travel))/historyArr.length;
+  const eff = workedAvg ? Math.max(0,(workedAvg - travelAvg)/workedAvg) : 1;
+  const checksGood = historyArr.filter(h=>h.vanCheck==="Yes").length / historyArr.length;
+
+  let s = 100;
+  // keep near cap
+  const diff = Math.abs(CAP_PER_ENGINEER - workedAvg);
+  if(diff <= 2) s += 5; else if(diff > 8) s -= 5;
+
+  // penalise sustained overtime
+  s -= 1.5 * otAvg;
+
+  // efficiency trend
+  if(eff < 0.8) s -= 10; else if(eff > 0.92) s += 5;
+
+  // van checks
+  s += 10 * (checksGood - 0.8); // ~+2 if 100%, ~-6 if 20%
+  return Math.max(0, Math.min(100, s));
+}
+
+/** ======= RENDER ======= **/
 function pill(val,type){return `<span class="pill ${type}">${val}</span>`}
-function renderLeaderboards(){
-  const lbw=document.getElementById('lb-week'); lbw.innerHTML="";
-  const lbh=document.getElementById('lb-hist'); lbh.innerHTML="";
-  // Weekly leaderboards
-  addBoard(lbw,"Highest Hours",engineers.sort((a,b)=>b.predicted-a.predicted).map(e=>`${e.name} ${e.predicted}h`));
-  addBoard(lbw,"Overtime",engineers.sort((a,b)=>b.overtime-a.overtime).map(e=>`${e.name} ${e.overtime}h`));
-  addBoard(lbw,"Efficiency",engineers.sort((a,b)=>(b.onsite/(b.onsite+b.drive))-(a.onsite/(a.onsite+a.drive))).map(e=>`${e.name} ${(100*e.onsite/(e.onsite+e.drive)).toFixed(0)}%`));
-  addBoard(lbw,"Driving Score",engineers.sort((a,b)=>b.score-a.score).map(e=>`${e.name} ${e.score}`));
-  addBoard(lbw,"Van Checks",engineers.map(e=>`${e.name} ${e.vancheck==="done"?"✅":"❌"}`));
-  // Historic leaderboards
-  addBoard(lbh,"Avg Weekly Hours",engineers.sort((a,b)=>avg(b.history)-avg(a.history)).map(e=>`${e.name} ${avg(e.history).toFixed(0)}h`));
-  addBoard(lbh,"Overtime (6wks)",engineers.sort((a,b)=>b.overtime-a.overtime).map(e=>`${e.name} ${(e.overtime*6).toFixed(1)}h`));
-  addBoard(lbh,"Efficiency Avg",engineers.sort((a,b)=>(b.onsite/(b.onsite+b.drive))-(a.onsite/(a.onsite+a.drive))).map(e=>`${e.name} ${(100*e.onsite/(e.onsite+e.drive)).toFixed(0)}%`));
-  addBoard(lbh,"Driving Score Avg",engineers.sort((a,b)=>avg(b.scores)-avg(a.scores)).map(e=>`${e.name} ${avg(e.scores).toFixed(0)}`));
-  addBoard(lbh,"Van Checks Avg",engineers.sort((a,b)=>avg(b.checks)-avg(a.checks)).map(e=>`${e.name} ${(100*avg(e.checks)).toFixed(0)}%`));
-}
 function addBoard(container,title,rows){
   const div=document.createElement('div');
   div.innerHTML=`<div style="font-weight:600;margin-top:10px">${title}</div>`+rows.map(r=>`<div class='row'>${r}</div>`).join("");
   container.appendChild(div);
 }
-function avg(arr){return arr.reduce((a,b)=>a+b,0)/arr.length}
 
-renderLeaderboards();
+function colorFor(pred,cap){
+  if(pred>cap) return "#ef4444"; // bad
+  if(pred>cap*0.9) return "#f59e0b"; // warn
+  return "#10b981"; // ok
+}
 
-// Charts (team/hours by day) kept simple dummy
-new Chart(document.getElementById('progressTeam').getContext('2d'),{type:'bar',data:{labels:['Team'],datasets:[{label:'Worked',data:[teamWorked],backgroundColor:'#2563eb'}]}});
-new Chart(document.getElementById('progressAvg').getContext('2d'),{type:'bar',data:{labels:['Avg engineer'],datasets:[{data:[teamPred/engineers.length],backgroundColor:'#10b981'}]}});
-new Chart(document.getElementById('donutRisk').getContext('2d'),{type:'doughnut',data:{labels:['On track','Close','Over'],datasets:[{data:[3,1,1],backgroundColor:['#10b981','#f59e0b','#ef4444']} ]}});
-new Chart(document.getElementById('stackedByEngineer').getContext('2d'),{type:'bar',data:{labels:engineers.map(e=>e.name),datasets:[{label:'Worked',data:engineers.map(e=>e.worked),backgroundColor:'#3b82f6'}]}});
-new Chart(document.getElementById('byDay').getContext('2d'),{type:'bar',data:{labels:['Mon','Tue','Wed','Thu','Fri'],datasets:engineers.map((e,i)=>({label:e.name,data:e.history.slice(0,5),backgroundColor:['#3b82f6','#6366f1','#22d3ee','#facc15','#14b8a6'][i%5]}))}});
+/** ======= MAIN ======= **/
+(async function init(){
+  try{
+    const json = await loadHours();
+    const entries = flattenData(json);
+    if(!entries.length){
+      ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
+      return;
+    }
+
+    const weeks = weekKeysFromEntries(entries);
+    const currentWeekKey = weeks[weeks.length-1]; // latest
+    const curAgg = aggregateWeek(entries, currentWeekKey);
+
+    // History (last 6 weeks) for trends/leaderboards
+    const { weeks:histWeeks, history } = buildHistory(entries, weeks, 6);
+
+    // Build arrays for UI
+    const engineers = [...curAgg.values()];
+    engineers.sort((a,b)=>a.name.localeCompare(b.name));
+
+    // KPIs
+    const teamWorked = sum(engineers.map(e=>e.worked));
+    const teamPred = sum(engineers.map(e=>e.predicted));
+    const teamCap = engineers.length * CAP_PER_ENGINEER;
+    $("kpi-engineers").textContent = String(engineers.length);
+    $("kpi-worked").textContent = fmtHours(teamWorked);
+    $("kpi-pred").textContent = fmtHours(teamPred);
+    $("kpi-remaining").textContent = fmtHours(Math.max(0,teamCap - teamPred));
+
+    // Top engineer (week & historic)
+    const weekRank = engineers
+      .map(e=>({ name:e.name, score: weeklyScore(e)}))
+      .sort((a,b)=>b.score-a.score);
+    $("topWeek").textContent = weekRank.length? `${weekRank[0].name} (${weekRank[0].score.toFixed(0)})` : "–";
+
+    const histRank = [...history.entries()]
+      .map(([name,arr])=>({ name, score: historicScore(arr) }))
+      .sort((a,b)=>b.score-a.score);
+    $("topHist").textContent = histRank.length? `${histRank[0].name} (${histRank[0].score.toFixed(0)})` : "–";
+
+    // Leaderboards (this week)
+    const lbw = $("lb-week"); lbw.innerHTML="";
+    addBoard(lbw,"Highest Hours (Predicted)",
+      [...engineers].sort((a,b)=>b.predicted-a.predicted).map(e=>`${e.name} ${e.predicted.toFixed(2)}h`));
+    addBoard(lbw,"Overtime",
+      [...engineers].sort((a,b)=>b.overtime-a.overtime).map(e=>`${e.name} ${e.overtime.toFixed(2)}h`));
+    addBoard(lbw,"Efficiency",
+      [...engineers].sort((a,b)=>((b.worked-b.travel)/Math.max(0.1,b.worked)) - ((a.worked-a.travel)/Math.max(0.1,a.worked)))
+      .map(e=>{
+        const eff = e.worked ? 100*(e.worked-e.travel)/e.worked : 100;
+        return `${e.name} ${eff.toFixed(0)}%`;
+      })
+    );
+    addBoard(lbw,"Van Checks",
+      engineers.map(e=>`${e.name} ${e.vanCheck==="Yes"?"✅":"❌"}`));
+
+    // Leaderboards (6-week trends)
+    const lbh = $("lb-hist"); lbh.innerHTML="";
+    // Avg Weekly Hours
+    addBoard(lbh,"Avg Weekly Hours",
+      [...history.entries()].sort((a,b)=>{
+        const avga = sum(a[1].map(x=>x.worked))/a[1].length;
+        const avgb = sum(b[1].map(x=>x.worked))/b[1].length;
+        return avgb-avga;
+      }).map(([name,arr])=>{
+        const avg = sum(arr.map(x=>x.worked))/arr.length;
+        return `${name} ${avg.toFixed(1)}h`;
+      })
+    );
+    // Overtime (6 weeks sum)
+    addBoard(lbh,"Overtime (6 wks)",
+      [...history.entries()].sort((a,b)=>{
+        const sa = sum(a[1].map(x=>x.overtime));
+        const sb = sum(b[1].map(x=>x.overtime));
+        return sb-sa;
+      }).map(([name,arr])=>{
+        const tot = sum(arr.map(x=>x.overtime));
+        return `${name} ${tot.toFixed(1)}h`;
+      })
+    );
+    // Efficiency Avg
+    addBoard(lbh,"Efficiency Avg",
+      [...history.entries()].sort((a,b)=>{
+        const effA = (()=>{ const w=sum(a[1].map(x=>x.worked)), t=sum(a[1].map(x=>x.travel)); return w? (w-t)/w : 1; })();
+        const effB = (()=>{ const w=sum(b[1].map(x=>x.worked)), t=sum(b[1].map(x=>x.travel)); return w? (w-t)/w : 1; })();
+        return effB-effA;
+      }).map(([name,arr])=>{
+        const w=sum(arr.map(x=>x.worked)), t=sum(arr.map(x=>x.travel));
+        const eff = w? 100*(w-t)/w : 100;
+        return `${name} ${eff.toFixed(0)}%`;
+      })
+    );
+    // Van Checks Avg
+    addBoard(lbh,"Van Checks Avg",
+      [...history.entries()].sort((a,b)=>{
+        const ra = a[1].filter(x=>x.vanCheck==="Yes").length / a[1].length;
+        const rb = b[1].filter(x=>x.vanCheck==="Yes").length / b[1].length;
+        return rb-ra;
+      }).map(([name,arr])=>{
+        const r = 100 * (arr.filter(x=>x.vanCheck==="Yes").length/arr.length);
+        return `${name} ${r.toFixed(0)}%`;
+      })
+    );
+
+    /** ===== Charts ===== **/
+    // Team progress (Worked vs Team Cap)
+    new Chart($("progressTeam").getContext("2d"),{
+      type:"bar",
+      data:{ labels:[`${weekLabel(currentWeekKey)}`],
+        datasets:[
+          { label:"Worked", data:[teamWorked], backgroundColor:"#2563eb" },
+          { label:"Team Cap", data:[teamCap], backgroundColor:"#334155" }
+        ]
+      },
+      options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
+    });
+
+    // Avg engineer vs 40h cap (predicted)
+    const avgPred = engineers.length ? teamPred/engineers.length : 0;
+    new Chart($("progressAvg").getContext("2d"),{
+      type:"bar",
+      data:{ labels:["Avg engineer"],
+        datasets:[
+          { label:"Predicted", data:[avgPred], backgroundColor:"#10b981" },
+          { label:"Cap", data:[CAP_PER_ENGINEER], backgroundColor:"#334155" }
+        ]
+      },
+      options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
+    });
+
+    // Risk donut (based on predicted vs cap)
+    const ok = engineers.filter(e=>e.predicted<=0.9*e.cap).length;
+    const warn = engineers.filter(e=>e.predicted>0.9*e.cap && e.predicted<=e.cap).length;
+    const bad = engineers.filter(e=>e.predicted>e.cap).length;
+    new Chart($("donutRisk").getContext("2d"),{
+      type:"doughnut",
+      data:{ labels:["On track","Close","Over"],
+        datasets:[{ data:[ok,warn,bad], backgroundColor:["#10b981","#f59e0b","#ef4444"] }]
+      },
+      options:{ plugins:{ legend:{ position:"bottom" } }, cutout:"60%" }
+    });
+
+    // By engineer (worked bars + cap line + predicted dots)
+    new Chart($("stackedByEngineer").getContext("2d"),{
+      type:"bar",
+      data:{
+        labels: engineers.map(e=>e.name),
+        datasets:[
+          { label:"Worked", data: engineers.map(e=>+e.worked.toFixed(2)), backgroundColor: engineers.map(e=>colorFor(e.predicted,e.cap)) },
+          { type:"line", label:"Cap", data: engineers.map(()=>CAP_PER_ENGINEER), borderColor:"#3b82f6", borderWidth:2, pointRadius:0 },
+          { type:"line", label:"Predicted", data: engineers.map(e=>+e.predicted.toFixed(2)), borderColor:"#f59e0b", borderWidth:2, pointRadius:3 }
+        ]
+      },
+      options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
+    });
+
+    // Hours by day (current week): team totals per weekday (Mon..Sun)
+    const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const curEntries = entries.filter(e => (e.weekKey||deriveWeekKey(e.date)) === currentWeekKey);
+    const byDayTotals = new Array(7).fill(0);
+    for(const e of curEntries){
+      const d = parseISODate(e.date); if(!d) continue;
+      byDayTotals[d.getDay()] += toFloat(e.totalHours);
+    }
+    // Show Mon..Fri primarily
+    const labels = ["Mon","Tue","Wed","Thu","Fri"];
+    const data = [1,2,3,4,5].map(idx => byDayTotals[idx] || 0);
+    new Chart($("byDay").getContext("2d"),{
+      type:"bar",
+      data:{ labels, datasets:[{ label:"Team hours", data, backgroundColor:"#14b8a6" }]},
+      options:{ plugins:{ legend:{ position:"bottom" } }, scales:{ y:{ beginAtZero:true } } }
+    });
+
+  }catch(err){
+    console.error(err);
+    ["topWeek","topHist","kpi-engineers","kpi-worked","kpi-pred","kpi-remaining"].forEach(id=>$(id).textContent="–");
+    alert("Failed to load hours: " + err.message);
+  }
+})();
 </script>
 </body>
 </html>
