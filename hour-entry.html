@@ -97,7 +97,33 @@
   font-weight: 600;
   color: var(--ml-blue);
 }
+/* === Tooltip styling for override buttons === */
+.override-btn {
+  position: relative;
+}
 
+.override-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 10;
+}
+
+.override-btn:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-4px);
+}
 </style>
 </head>
 <body>
@@ -264,11 +290,22 @@ function addEngineerLog(initial={}) {
         </div>
         <div class="divider"></div>
         <div class="title" style="font-size:15px;">Override Options</div>
-        <div class="overrides">
-          <div class="override-btn" id="${id}_btnOneOff">One-Off Overtime</div>
-          <div class="override-btn" id="${id}_btnForceEnh">Force Enhanced OT</div>
-          <div class="override-btn" id="${id}_btnExclude">Exclude from Pay</div>
-        </div>
+       <div class="overrides">
+  <div class="override-btn" id="${id}_btnOneOff" 
+       data-tooltip="Use this if the entire day should be paid as overtime — for example, a weekend shift or emergency callout.">
+       One-Off Overtime
+  </div>
+
+  <div class="override-btn" id="${id}_btnForceEnh" 
+       data-tooltip="Forces enhanced (1.5x) overtime pay even if the system wouldn’t normally allow it — use sparingly and with justification.">
+       Force Enhanced OT
+  </div>
+
+  <div class="override-btn" id="${id}_btnExclude" 
+       data-tooltip="Marks this day as unpaid — for example, if the engineer forgot to check in or wasn’t scheduled to work.">
+       Exclude from Pay
+  </div>
+</div>
         <div class="muted" id="${id}_logicNote" style="margin-top:8px;"></div>
       </div>
     </div>
