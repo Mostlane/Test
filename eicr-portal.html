@@ -347,24 +347,34 @@ const SOURCES = [
   { path: 'wenzels',     label: "Wenzel's" }
 ];
 
-async function fetchOneSource(s){
+async function fetchOneSource(s) {
   const j = await fetchNoCacheJSON(CLOUDFLARE_GET(s.path));
   if (!j) return [];
+
   let arr = [];
-  if (Array.isArray(j) && j.length === 1 && typeof j[0] === 'object' && !Array.isArray(j[0])) {
-    arr = Object.values(j[0]);
-  } else if (Array.isArray(j)) {
-    arr = j;
-  } else if (j && Array.isArray(j.data)) {
-    arr = j.data;
-  } else if (j && typeof j === 'object') {
+
+  // Case 1: array of objects [{...}, {...}]
+  if (Array.isArray(j) && j.length > 0 && !j.some(v => typeof v !== 'object')) {
+    // Handle nested object arrays like [ { "9701": {...}, "9704": {...} } ]
+    if (Object.keys(j[0] || {}).some(k => typeof j[0][k] === "object")) {
+      arr = Object.values(j[0]);
+    } else {
+      arr = j;
+    }
+  }
+  // Case 2: plain object {"9701": {...}}
+  else if (j && typeof j === "object" && !Array.isArray(j)) {
     arr = Object.values(j);
   }
+  // Case 3: wrapped under "data" key
+  else if (j && Array.isArray(j.data)) {
+    arr = j.data;
+  }
+
   return arr
     .map(r => normaliseRecord(r, s.label))
-    .filter(r => r.storeCode && r.siteName && r.storeName !== '');
+    .filter(r => r.storeCode && r.siteName);
 }
-
 async function fetchAllProgressive(){
   allData = [];
   renderTable([]);
