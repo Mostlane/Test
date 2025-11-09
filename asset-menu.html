@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mostlane • Asset Menu</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      color: #1f2937;
+    }
+    .container {
+      background: rgba(255,255,255,0.6);
+      margin: 80px auto;
+      padding: 30px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 600px;
+      text-align: center;
+    }
+    h1 {
+      color: white;
+      background: rgba(0,74,153,0.6);
+      padding: 12px;
+      border-radius: 12px 12px 0 0;
+      margin: -30px -30px 30px -30px;
+    }
+    .button {
+      display: block;
+      width: 100%;
+      background-color: rgba(0,74,153,0.6);
+      color: white;
+      padding: 14px;
+      margin: 10px 0;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    .button:hover {
+      background-color: rgba(0,74,153,0.8);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Plant & Equipment</h1>
+    <a href="main.html" class="button">Main Menu</a>
+    <div id="buttonArea">
+      <p>Loading menu...</p>
+    </div>
+  </div>
+
+  <script>
+    async function loadMenu(){
+      const username = sessionStorage.getItem("mostlaneUser");
+      const res = await fetch("role-type.txt");
+      const text = await res.text();
+      const roleLine = text.split("\n").find(l => l.toLowerCase().includes(username.toLowerCase()));
+      const isOffice = roleLine && roleLine.toLowerCase().includes("office");
+
+      let html = `
+        <a href="my-assets.html" class="button">My Assets</a>
+        <a href="shared-assets.html" class="button">Shared Assets</a>
+      `;
+      if (isOffice) {
+        html += `<a href="assets-admin.html" class="button">All Assets (Admin)</a>`;
+      }
+      document.getElementById("buttonArea").innerHTML = html;
+    }
+    loadMenu();
+  </script>
+</body>
+</html>
