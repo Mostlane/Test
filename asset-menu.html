@@ -49,30 +49,16 @@
 <body>
   <div class="container">
     <h1>Plant & Equipment</h1>
-    <a href="main.html" class="button">Main Menu</a>
-    <div id="buttonArea">
-      <p>Loading menu...</p>
-    </div>
+
+    <!-- Return button -->
+    <a href="main.html" class="button" data-page="main.html">Main Menu</a>
+
+    <!-- Core asset pages (all users can see) -->
+    <a href="my-assets.html" class="button" data-page="my-assets.html">My Assets</a>
+    <a href="shared-assets.html" class="button" data-page="shared-assets.html">Shared Assets</a>
+
+    <!-- Office/Admin-only page (will still be detected for permissions) -->
+    <a href="assets-admin.html" class="button" data-page="assets-admin.html">All Assets (Admin)</a>
   </div>
-
-  <script>
-    async function loadMenu(){
-      const username = sessionStorage.getItem("mostlaneUser");
-      const res = await fetch("role-type.txt");
-      const text = await res.text();
-      const roleLine = text.split("\n").find(l => l.toLowerCase().includes(username.toLowerCase()));
-      const isOffice = roleLine && roleLine.toLowerCase().includes("office");
-
-      let html = `
-        <a href="my-assets.html" class="button">My Assets</a>
-        <a href="shared-assets.html" class="button">Shared Assets</a>
-      `;
-      if (isOffice) {
-        html += `<a href="assets-admin.html" class="button">All Assets (Admin)</a>`;
-      }
-      document.getElementById("buttonArea").innerHTML = html;
-    }
-    loadMenu();
-  </script>
 </body>
 </html>
