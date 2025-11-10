@@ -71,6 +71,7 @@
         <input id="searchInput" type="text" placeholder="Search name / number / postcode"/>
         <button class="btn" id="btnAdd">Add Site</button>
         <button class="btn outline" id="btnReload">Reload</button>
+        <button class="btn outline" id="btnRecalc">Recalculate All</button>
       </div>
     </div>
 
@@ -479,6 +480,40 @@ btnAdd.onclick=()=>openModal("retail","");
   await ensureHQ();
   loadSites();
 })();
+    document.getElementById("btnRecalc").onclick = async () => {
+  if (!confirm("Recalculate mileage for ALL sites?")) return;
+  const cat = filterEl.value;
+  const url = cat === "all"
+    ? `${workerBase}/get-sites`
+    : `${workerBase}/get-sites?category=${cat}`;
+  const res = await fetch(url);
+  const sites = await res.json();
+
+  await ensureMapsLoaded();
+  await ensureHQ();
+  if (!distanceService)
+    distanceService = new google.maps.DistanceMatrixService();
+
+  let count = 0;
+  for (const s of sites) {
+    if (s.lat && s.lon) {
+      const miles = await calcMileageFromHQ({ lat: Number(s.lat), lng: Number(s.lon) });
+      if (miles) {
+        await fetch(`${workerBase}/update-site?category=${s.client || cat}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            siteNumber: s.siteNumber,
+            mileageFromHQ: miles
+          })
+        });
+        count++;
+      }
+    }
+  }
+  alert(`Updated ${count} sites successfully.`);
+  loadSites();
+};
 </script>
 </body>
 </html>
