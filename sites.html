@@ -2,16 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Mostlane • Site Manager</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <!-- Optional: protect page if you use sessionStorage -->
-  <script>
-    // Uncomment if you want auth gate
-    // if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    //   window.location.href = "login.html";
-    // }
-  </script>
   <style>
     :root{
       --ml-blue:#1e66ff;
@@ -19,14 +12,14 @@
       --muted:#6b7280;
       --ok:#10b981;
       --bad:#ef4444;
-      --panel:rgba(255,255,255,0.7);
+      --panel:rgba(255,255,255,0.70);
     }
     html,body{height:100%;margin:0;background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:cover;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
-    .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.08)}
+    .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
     .controls{display:flex;flex-wrap:wrap;gap:10px}
-    select, input[type="text"]{
+    select,input[type="text"]{
       padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px
     }
     .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
@@ -35,34 +28,32 @@
     table{width:100%;border-collapse:separate;border-spacing:0 8px}
     thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:0 10px}
     tbody tr{background:#fff}
-    tbody td{padding:12px 10px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb}
+    tbody td{padding:12px 10px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;vertical-align:middle}
     tbody tr td:first-child{border-left:1px solid #e5e7eb;border-top-left-radius:8px;border-bottom-left-radius:8px}
     tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
-    .badge{font-size:12px;padding:4px 8px;border-radius:999px;background:#eef2ff;color:#334155}
+    .muted{color:var(--muted)}
+    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
     .switch{position:relative;display:inline-block;width:42px;height:24px}
     .switch input{opacity:0;width:0;height:0}
     .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#d1d5db;transition:.3s;border-radius:24px}
     .slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:white;transition:.3s;border-radius:50%}
     input:checked + .slider{background:#34d399}
     input:checked + .slider:before{transform:translateX(18px)}
-    .actions{display:flex;gap:8px}
     .icon-btn{border:1px solid #cfd6e4;background:#fff;border-radius:8px;padding:8px;cursor:pointer}
     .icon-btn.danger{border-color:#fecaca;color:#b91c1c}
-    .muted{color:var(--muted)}
-    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
-
+    .num{font-variant-numeric:tabular-nums}
     /* Modal */
     .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
-    .modal{background:#fff;max-width:920px;width:100%;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden}
+    .modal{background:#fff;max-width:980px;width:100%;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden}
     .modal .bar{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
     .modal .bar h3{margin:0;font-size:18px}
     .modal .body{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;padding:16px}
     .modal label{font-size:12px;color:#374151;display:block;margin-bottom:6px}
     .modal input,.modal select,.modal textarea{width:100%;padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px}
-    #map{width:100%;height:360px;border-radius:8px;border:1px solid #cfd6e4}
     .modal .rows{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    #map{width:100%;height:380px;border-radius:8px;border:1px solid #cfd6e4}
     .modal .foot{padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end}
-    .pill{display:inline-flex;align-items:center;gap:8px}
+    .hint{font-size:12px;color:#6b7280;margin-top:6px}
   </style>
 </head>
 <body>
@@ -89,7 +80,7 @@
       <thead>
         <tr>
           <th>#</th>
-          <th>Site Name</th>
+          <th>Site Name</</th>
           <th>Client</th>
           <th>Postcode</th>
           <th>Active</th>
@@ -114,7 +105,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="bar">
         <h3 id="modalTitle">Add Site</h3>
-        <button class="icon-btn" id="btnClose">&times;</button>
+        <button class="icon-btn" id="btnClose" title="Close">&times;</button>
       </div>
       <div class="body">
         <div>
@@ -131,10 +122,388 @@
               </select>
             </div>
             <div>
-              <label>Site Number (auto for Retail if empty)</label>
+              <label>Site Number <span class="muted">(Retail can be left blank to auto-assign)</span></label>
               <input id="mSiteNumber" placeholder="e.g. 9701"/>
             </div>
           </div>
 
           <label>Site Name</label>
-          <input id="mSiteName" placeholder="Port
+          <input id="mSiteName" placeholder="Portsmouth Elm Grove"/>
+
+          <div class="rows">
+            <div>
+              <label>Postcode</label>
+              <input id="mPostcode" placeholder="PO15 5RQ"/>
+              <div class="hint">Change postcode → click “Locate by Postcode” to update map & lat/lon</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end;">
+              <button class="btn" id="btnLocate">Locate by Postcode</button>
+              <button class="btn outline" id="btnUseMarker" title="Use current map pin to set Lat/Lon">Use Marker Lat/Lon</button>
+            </div>
+          </div>
+
+          <div class="rows">
+            <div>
+              <label>Latitude</label>
+              <input id="mLat" class="num" placeholder="50.8612"/>
+            </div>
+            <div>
+              <label>Longitude</label>
+              <input id="mLon" class="num" placeholder="-1.2167"/>
+            </div>
+          </div>
+
+          <div class="rows">
+            <div>
+              <label>Mileage from HQ (PO15 5RQ)</label>
+              <input id="mMileage" class="num" placeholder="0"/>
+            </div>
+            <div>
+              <label>Active</label>
+              <select id="mActive">
+                <option value="true" selected>Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <label>SharePoint URL (optional)</label>
+          <input id="mSharepoint" placeholder="https://mostlane.sharepoint.com/..."/>
+
+        </div>
+        <div>
+          <div id="map"></div>
+          <div class="hint">Drag the pin to refine location. Lat/Lon fields will update when you click “Use Marker Lat/Lon”.</div>
+        </div>
+      </div>
+      <div class="foot">
+        <button class="btn outline" id="btnMileage">Recalculate Mileage</button>
+        <button class="btn" id="btnSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
+    const HQ_POSTCODE = "PO15 5RQ";
+    const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
+
+    // ====== DOM ======
+    const rowsEl = document.getElementById("rows");
+    const filterEl = document.getElementById("filterCategory");
+    const searchEl = document.getElementById("searchInput");
+    const statusEl = document.getElementById("status");
+    const countEl = document.getElementById("count");
+
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const modalTitle = document.getElementById("modalTitle");
+    const mCategory = document.getElementById("mCategory");
+    const mSiteNumber = document.getElementById("mSiteNumber");
+    const mSiteName = document.getElementById("mSiteName");
+    const mPostcode = document.getElementById("mPostcode");
+    const mLat = document.getElementById("mLat");
+    const mLon = document.getElementById("mLon");
+    const mMileage = document.getElementById("mMileage");
+    const mActive = document.getElementById("mActive");
+    const mSharepoint = document.getElementById("mSharepoint");
+    const btnClose = document.getElementById("btnClose");
+    const btnLocate = document.getElementById("btnLocate");
+    const btnUseMarker = document.getElementById("btnUseMarker");
+    const btnSave = document.getElementById("btnSave");
+    const btnMileage = document.getElementById("btnMileage");
+
+    const btnAdd = document.getElementById("btnAdd");
+    const btnReload = document.getElementById("btnReload");
+
+    // ====== MAP ======
+    let map, marker, geocoder, distanceService;
+    let hqLatLng = null;
+
+    function ensureMapsLoaded() {
+      return new Promise((resolve) => {
+        if (window.google && window.google.maps) return resolve();
+        const s = document.createElement("script");
+        s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
+        s.async = true;
+        s.onload = resolve;
+        document.head.appendChild(s);
+      });
+    }
+
+    async function initMap(centerOnHQ = true) {
+      await ensureMapsLoaded();
+      geocoder = geocoder || new google.maps.Geocoder();
+      distanceService = distanceService || new google.maps.DistanceMatrixService();
+
+      if (!hqLatLng) {
+        // Geocode HQ once
+        hqLatLng = await geocodePostcode(HQ_POSTCODE);
+      }
+
+      const center = centerOnHQ && hqLatLng ? hqLatLng : { lat: 50.8585, lng: -1.2170 };
+      map = new google.maps.Map(document.getElementById("map"), {
+        center,
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false
+      });
+
+      marker = new google.maps.Marker({
+        position: center,
+        map,
+        draggable: true
+      });
+
+      marker.addListener("dragend", () => {
+        const p = marker.getPosition();
+        if (!p) return;
+        // Only update into fields when user clicks "Use Marker Lat/Lon" to avoid accidental overwrites
+      });
+    }
+
+    function geocodePostcode(postcode) {
+      return new Promise((resolve) => {
+        geocoder.geocode({ address: postcode }, (res, status) => {
+          if (status === "OK" && res && res[0]) {
+            const loc = res[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else {
+            alert("Unable to locate postcode.");
+            resolve(null);
+          }
+        });
+      });
+    }
+
+    function calcMileageFromHQ(destLatLon) {
+      return new Promise((resolve) => {
+        if (!hqLatLng) return resolve(null);
+        distanceService.getDistanceMatrix({
+          origins: [hqLatLng],
+          destinations: [destLatLon],
+          travelMode: google.maps.TravelMode.DRIVING,
+          unitSystem: google.maps.UnitSystem.IMPERIAL
+        }, (resp, status) => {
+          if (status !== "OK" || !resp.rows?.[0]?.elements?.[0]) return resolve(null);
+          const el = resp.rows[0].elements[0];
+          if (el.status !== "OK") return resolve(null);
+          // distance in meters -> miles
+          const miles = el.distance.value / 1609.344;
+          resolve(Math.round(miles * 10) / 10);
+        });
+      });
+    }
+
+    // ====== LOAD & RENDER ======
+    async function loadSites() {
+      try {
+        statusEl.textContent = "Loading sites...";
+        rowsEl.innerHTML = "";
+
+        const cat = filterEl.value;
+        const url = cat === "all" ? `${workerBase}/get-sites` : `${workerBase}/get-sites?category=${cat}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        let filtered = data;
+        const q = searchEl.value.trim().toLowerCase();
+        if (q) {
+          filtered = data.filter(s =>
+            (s.siteName || "").toLowerCase().includes(q) ||
+            (s.siteNumber || "").toLowerCase().includes(q) ||
+            (s.postcode || "").toLowerCase().includes(q)
+          );
+        }
+
+        if (!filtered.length) {
+          rowsEl.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#999;">No sites found</td></tr>`;
+          countEl.textContent = "";
+          statusEl.textContent = "Ready";
+          return;
+        }
+
+        for (const s of filtered) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="num">${s.siteNumber || "-"}</td>
+            <td>${s.siteName || "-"}</td>
+            <td>${s.client || "-"}</td>
+            <td>${s.postcode || "-"}</td>
+            <td>
+              <label class="switch">
+                <input type="checkbox" ${s.active ? "checked" : ""} data-num="${s.siteNumber}" data-cat="${s.client}">
+                <span class="slider"></span>
+              </label>
+            </td>
+            <td class="num">${s.lat?.toFixed ? s.lat.toFixed(5) : "-"}</td>
+            <td class="num">${s.lon?.toFixed ? s.lon.toFixed(5) : "-"}</td>
+            <td class="num">${s.mileageFromHQ ?? "-"}</td>
+            <td><button class="icon-btn" title="Edit" onclick="openModal('${s.client}','${s.siteNumber}')">✏️</button></td>
+            <td><button class="icon-btn danger" title="Delete" onclick="deleteSite('${s.client}','${s.siteNumber}')">🗑️</button></td>
+          `;
+          rowsEl.appendChild(tr);
+        }
+
+        countEl.textContent = `${filtered.length} site${filtered.length !== 1 ? "s" : ""}`;
+        statusEl.textContent = "Ready";
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Error loading sites";
+      }
+    }
+
+    // Toggle active
+    rowsEl.addEventListener("change", async (e) => {
+      const box = e.target;
+      if (box.tagName !== "INPUT") return;
+      const cat = box.dataset.cat;
+      const num = box.dataset.num;
+      const active = box.checked;
+      await fetch(`${workerBase}/update-site?category=${cat}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteNumber: num, active })
+      });
+    });
+
+    // Delete
+    async function deleteSite(cat, num) {
+      if (!confirm(`Delete site ${num}?`)) return;
+      await fetch(`${workerBase}/delete-site?category=${cat}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteNumber: num })
+      });
+      loadSites();
+    }
+    window.deleteSite = deleteSite; // expose for onclick
+
+    // ====== MODAL (ADD / EDIT) ======
+    let editContext = { mode: "add", category: "retail", siteNumber: "" };
+
+    function openBackdrop(show) {
+      modalBackdrop.style.display = show ? "flex" : "none";
+      modalBackdrop.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+
+    function resetModal() {
+      mCategory.value = "retail";
+      mSiteNumber.value = "";
+      mSiteName.value = "";
+      mPostcode.value = HQ_POSTCODE;
+      mLat.value = "";
+      mLon.value = "";
+      mMileage.value = "";
+      mActive.value = "true";
+      mSharepoint.value = "";
+    }
+
+    async function openModal(cat, num) {
+      editContext = { mode: num ? "edit" : "add", category: cat || "retail", siteNumber: num || "" };
+      modalTitle.textContent = editContext.mode === "add" ? "Add Site" : `Edit Site ${num}`;
+      resetModal();
+      mCategory.value = editContext.category;
+      if (editContext.mode === "add") {
+        await initMap(true); // center on HQ for adds
+      } else {
+        // load the single site from list to prefill
+        const res = await fetch(`${workerBase}/get-sites?category=${cat}`);
+        const list = await res.json();
+        const rec = list.find(s => String(s.siteNumber) === String(num));
+        await initMap(false);
+        if (rec) {
+          mSiteNumber.value = rec.siteNumber || "";
+          mSiteName.value = rec.siteName || "";
+          mPostcode.value = rec.postcode || "";
+          mLat.value = rec.lat ?? "";
+          mLon.value = rec.lon ?? "";
+          mMileage.value = rec.mileageFromHQ ?? "";
+          mActive.value = String(!!rec.active);
+          mSharepoint.value = rec.sharepointURL || "";
+          if (rec.lat && rec.lon) {
+            const p = { lat: Number(rec.lat), lng: Number(rec.lon) };
+            map.setCenter(p);
+            map.setZoom(14);
+            marker.setPosition(p);
+          }
+        }
+      }
+      openBackdrop(true);
+    }
+    window.openModal = openModal; // expose for onclick
+
+    btnClose.addEventListener("click", () => openBackdrop(false));
+
+    btnLocate.addEventListener("click", async () => {
+      const pc = mPostcode.value.trim();
+      if (!pc) return alert("Enter a postcode first.");
+      const loc = await geocodePostcode(pc);
+      if (!loc) return;
+      map.setCenter(loc); map.setZoom(14);
+      marker.setPosition(loc);
+    });
+
+    btnUseMarker.addEventListener("click", () => {
+      const p = marker.getPosition();
+      if (!p) return;
+      mLat.value = p.lat().toFixed(6);
+      mLon.value = p.lng().toFixed(6);
+    });
+
+    btnMileage.addEventListener("click", async () => {
+      const lat = parseFloat(mLat.value), lon = parseFloat(mLon.value);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return alert("Set Lat/Lon first.");
+      const miles = await calcMileageFromHQ({ lat, lng: lon });
+      if (miles == null) return alert("Could not calculate mileage.");
+      mMileage.value = miles;
+    });
+
+    btnSave.addEventListener("click", async () => {
+      const category = mCategory.value;
+      const body = {
+        siteNumber: mSiteNumber.value.trim() || undefined, // retail can be undefined to auto-assign
+        siteName: mSiteName.value.trim(),
+        postcode: mPostcode.value.trim(),
+        lat: parseFloat(mLat.value),
+        lon: parseFloat(mLon.value),
+        mileageFromHQ: parseFloat(mMileage.value),
+        active: mActive.value === "true",
+        sharepointURL: mSharepoint.value.trim() || undefined
+      };
+
+      // Basic checks
+      if (!body.siteName) return alert("Site Name is required.");
+      if (!body.postcode) return alert("Postcode is required.");
+
+      const endpoint = editContext.mode === "add" ? "add-site" : "update-site";
+      const resp = await fetch(`${workerBase}/${endpoint}?category=${category}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await resp.json();
+      if (!resp.ok || json.success === false) {
+        console.error(json);
+        alert("Save failed.");
+        return;
+      }
+      openBackdrop(false);
+      loadSites();
+    });
+
+    // ====== CONTROLS ======
+    filterEl.addEventListener("change", loadSites);
+    searchEl.addEventListener("input", () => { clearTimeout(window.__srch); window.__srch = setTimeout(loadSites, 300); });
+    btnReload.addEventListener("click", loadSites);
+    btnAdd.addEventListener("click", () => openModal("retail", "")); // default add modal
+
+    // ====== INIT ======
+    (async function init(){
+      await ensureMapsLoaded();
+      await initMap(true); // prepare map instance quietly (won't show until modal opens)
+      loadSites();
+    })();
+  </script>
+</body>
+</html>
