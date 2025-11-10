@@ -289,7 +289,9 @@ async function loadSites() {
   statusEl.textContent = "Loading sites...";
   rowsEl.innerHTML = "";
   const cat = filterEl.value;
-  const url = cat === "all" ? `${workerBase}/get-sites` : `${workerBase}/get-sites?category=${cat}`;
+  const url = cat === "all"
+    ? `${workerBase}/get-sites`
+    : `${workerBase}/get-sites?category=${cat}`;
   const res = await fetch(url);
   const data = await res.json();
 
@@ -311,6 +313,27 @@ async function loadSites() {
   }
 
   for (const s of filtered) {
+    // === Auto-calc mileage if missing ===
+    if ((!s.mileageFromHQ || s.mileageFromHQ === 0) && (s.lat && s.lon)) {
+      try {
+        const miles = await calcMileageFromHQ({ lat: Number(s.lat), lng: Number(s.lon) });
+        if (miles) {
+          s.mileageFromHQ = miles;
+          // Save back to KV
+          await fetch(`${workerBase}/update-site?category=${s.client}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              siteNumber: s.siteNumber,
+              mileageFromHQ: miles
+            })
+          });
+        }
+      } catch (err) {
+        console.warn("Mileage calc failed for", s.siteNumber, err);
+      }
+    }
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.siteNumber || "-"}</td>
@@ -334,19 +357,6 @@ async function loadSites() {
   countEl.textContent = `${filtered.length} site${filtered.length !== 1 ? "s" : ""}`;
   statusEl.textContent = "Ready";
 }
-
-rowsEl.addEventListener("change", async (e) => {
-  const box = e.target;
-  if (box.tagName !== "INPUT") return;
-  const cat = box.dataset.cat;
-  const num = box.dataset.num;
-  const active = box.checked;
-  await fetch(`${workerBase}/update-site?category=${cat}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ siteNumber: num, active })
-  });
-});
 
 async function deleteSite(cat, num) {
   if (!confirm(`Delete site ${num}?`)) return;
