@@ -197,7 +197,17 @@
 
       <label>Image URL (square image works best)</label>
       <input id="editImageUrl" placeholder="https://.../store.jpg">
-
+<!-- Image Upload (auto-push to GitHub) -->
+<div class="row2">
+  <div>
+    <label>Upload New Image</label>
+    <input type="file" id="uploadImage" accept="image/*">
+  </div>
+  <div style="display:flex;align-items:end;">
+    <button class="btn outline" id="btnUploadImage" style="width:100%;">Upload to GitHub</button>
+  </div>
+</div>
+<div id="uploadStatus" class="muted" style="margin-top:6px;font-size:13px;"></div>
       <div class="row2">
         <div>
           <label>Latitude</label>
@@ -576,7 +586,51 @@
     if (!confirm("Recalculate mileage for the current selection?")) return;
     alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
   };
+  // --- Upload image to GitHub via Worker ---
+  const uploadInput = document.getElementById("uploadImage");
+  const uploadBtn = document.getElementById("btnUploadImage");
+  const uploadStatus = document.getElementById("uploadStatus");
 
+  uploadBtn.onclick = async () => {
+    try {
+      const file = uploadInput.files[0];
+      if (!file) return alert("Please choose an image first");
+      if (!currentEditing?.siteNumber) return alert("Please enter a site number before uploading");
+
+      uploadStatus.textContent = "Uploading...";
+      const base64 = await fileToBase64(file);
+
+      const payload = {
+        siteNumber: currentEditing.siteNumber,
+        client: (currentEditing.client || "retail").toLowerCase(),
+        imageData: base64
+      };
+
+      const res = await fetch(`${workerBase}/upload-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json();
+      if (!res.ok || !j.success) throw new Error(j.error || "Upload failed");
+
+      editImageUrl.value = j.url;
+      currentEditing.imageURL = j.url;
+      uploadStatus.textContent = "✅ Uploaded successfully";
+    } catch (err) {
+      console.error(err);
+      uploadStatus.textContent = "❌ Upload failed: " + err.message;
+    }
+  };
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
