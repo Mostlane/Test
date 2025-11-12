@@ -1,139 +1,248 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8"/>
   <title>Mostlane • Site Manager</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
   <style>
-    body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      margin: 0;
-      padding: 20px;
-      color: #1f2937;
+    :root{
+      --ml-blue:#1e66ff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --ok:#10b981;
+      --bad:#ef4444;
+      --panel:rgba(255,255,255,0.70);
     }
-    h1 {
-      text-align: center;
-      margin-bottom: 24px;
-      color: #003366;
-    }
-    .category {
-      background: rgba(255, 255, 255, 0.8);
-      border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      margin-bottom: 24px;
-      overflow: hidden;
-    }
-    .category h2 {
-      margin: 0;
-      padding: 12px 16px;
-      background: #1e66ff;
-      color: white;
-      font-size: 1.1rem;
-      cursor: pointer;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .category h2 span {
-      font-size: 0.9rem;
-      opacity: 0.8;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: white;
-      font-size: 0.9rem;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: left;
-    }
-    th {
-      background: #f3f4f6;
-    }
-    tr:nth-child(even) {
-      background: #fafafa;
-    }
-    .hidden {
-      display: none;
-    }
-    .loading {
-      text-align: center;
-      margin-top: 60px;
-      font-size: 1.2rem;
-      color: #555;
-    }
+    html,body{height:100%;margin:0;background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:cover;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+    .title{font-size:22px;font-weight:700;letter-spacing:.2px}
+    .controls{display:flex;flex-wrap:wrap;gap:10px}
+    select,input[type="text"]{padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px}
+    .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue)}
+    table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:0 10px}
+    tbody tr{background:#fff}
+    tbody td{padding:12px 10px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    tbody tr td:first-child{border-left:1px solid #e5e7eb;border-top-left-radius:8px;border-bottom-left-radius:8px}
+    tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
+    .muted{color:var(--muted)}
+    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
+    .switch{position:relative;display:inline-block;width:42px;height:24px}
+    .switch input{opacity:0;width:0;height:0}
+    .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#d1d5db;transition:.3s;border-radius:24px}
+    .slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:white;transition:.3s;border-radius:50%}
+    input:checked + .slider{background:#34d399}
+    input:checked + .slider:before{transform:translateX(18px)}
+    .icon-btn{border:1px solid #cfd6e4;background:#fff;border-radius:8px;padding:8px;cursor:pointer}
+    .icon-btn.danger{border-color:#fecaca;color:#b91c1c}
+    .num{font-variant-numeric:tabular-nums}
+    /* Modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+    .modal{background:#fff;max-width:980px;width:100%;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden}
+    .modal .bar{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
+    .modal .bar h3{margin:0;font-size:18px}
+    .modal .body{display:grid;grid-template-columns:1.2fr .8fr;gap:16px;padding:16px}
+    .modal label{font-size:12px;color:#374151;display:block;margin-bottom:6px}
+    .modal input,.modal select{width:100%;padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px}
+    .modal .rows{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    #map{width:100%;height:380px;border-radius:8px;border:1px solid #cfd6e4}
+    .modal .foot{padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;justify-content:flex-end}
+    .hint{font-size:12px;color:#6b7280;margin-top:6px}
   </style>
 </head>
 <body>
-  <h1>Mostlane Site Manager</h1>
-  <div id="content" class="loading">Loading site data...</div>
+  <div class="wrap">
+    <div class="head">
+      <div class="title">Site Manager</div>
+      <div class="controls">
+        <select id="filterCategory">
+          <option value="all">All Types</option>
+          <option value="retail">Retail</option>
+          <option value="els">ELS</option>
+          <option value="els_private">ELS Private</option>
+          <option value="cobra">Cobra</option>
+          <option value="projects">Projects</option>
+          <option value="wenzels">Wenzels</option>
+        </select>
+        <input id="searchInput" type="text" placeholder="Search name / number / postcode"/>
+        <button class="btn" id="btnAdd">Add Site</button>
+        <button class="btn outline" id="btnReload">Reload</button>
+        <button class="btn outline" id="btnRecalc">Recalculate All</button>
+      </div>
+    </div>
 
-  <script>
-    const API_BASE = "https://mostlane-sites.jamie-def.workers.dev/Sites/combined";
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Site Name</th><th>Client</th><th>Postcode</th>
+          <th>Active</th><th>Lat</th><th>Lon</th><th>Mileage</th><th>Edit</th><th>Delete</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
 
-    async function loadSites() {
-      const content = document.getElementById("content");
-      try {
-        const res = await fetch(API_BASE);
-        if (!res.ok) throw new Error("Failed to fetch");
-        const data = await res.json();
-        content.innerHTML = "";
+    <div class="foot">
+      <div id="status" class="muted">Ready</div>
+      <div id="count" class="muted"></div>
+    </div>
+  </div>
 
-        const categories = Object.keys(data);
-        categories.forEach(cat => {
-          const catData = data[cat];
-          if (!Array.isArray(catData) || catData.length === 0) return;
+  <!-- Modal -->
+  <div class="modal-backdrop" id="modalBackdrop" aria-hidden="true">
+    <div class="modal">
+      <div class="bar">
+        <h3 id="modalTitle">Add Site</h3>
+        <button class="icon-btn" id="btnClose">&times;</button>
+      </div>
+      <div class="body">
+        <div>
+          <div class="rows">
+            <div>
+              <label>Client / Category</label>
+              <select id="mCategory">
+                <option value="retail">Retail</option><option value="els">ELS</option>
+                <option value="els_private">ELS Private</option><option value="cobra">Cobra</option>
+                <option value="projects">Projects</option><option value="wenzels">Wenzels</option>
+              </select>
+            </div>
+            <div>
+              <label>Site Number</label><input id="mSiteNumber" placeholder="e.g. 9701"/>
+            </div>
+          </div>
+          <label>Site Name</label><input id="mSiteName" placeholder="Portsmouth Elm Grove"/>
+          <div class="rows">
+            <div>
+              <label>Postcode</label><input id="mPostcode" placeholder="PO15 5RQ"/>
+              <div class="hint">Click “Locate by Postcode” to update map & lat/lon</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end;">
+              <button class="btn" id="btnLocate">Locate by Postcode</button>
+              <button class="btn outline" id="btnUseMarker">Use Marker Lat/Lon</button>
+            </div>
+          </div>
+          <div class="rows">
+            <div><label>Latitude</label><input id="mLat" class="num"/></div>
+            <div><label>Longitude</label><input id="mLon" class="num"/></div>
+          </div>
+          <div class="rows">
+            <div><label>Mileage from HQ</label><input id="mMileage" class="num"/></div>
+            <div><label>Active</label>
+              <select id="mActive"><option value="true">Active</option><option value="false">Inactive</option></select>
+            </div>
+          </div>
+          <label>SharePoint URL</label><input id="mSharepoint"/>
+        </div>
+        <div><div id="map"></div></div>
+      </div>
+      <div class="foot">
+        <button class="btn outline" id="btnMileage">Recalculate Mileage</button>
+        <button class="btn" id="btnSave">Save</button>
+      </div>
+    </div>
+  </div>
 
-          const container = document.createElement("div");
-          container.className = "category";
+<script>
+const workerBase="https://mostlane-sites.jamie-def.workers.dev";
+const HQ_POSTCODE="PO15 5RQ";
+const GOOGLE_MAPS_KEY="AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
 
-          const header = document.createElement("h2");
-          header.textContent = `${cat.toUpperCase()} (${catData.length})`;
-          const expand = document.createElement("span");
-          expand.textContent = "▼";
-          header.appendChild(expand);
+const rowsEl=document.getElementById("rows"),filterEl=document.getElementById("filterCategory"),searchEl=document.getElementById("searchInput"),statusEl=document.getElementById("status"),countEl=document.getElementById("count");
+const modalBackdrop=document.getElementById("modalBackdrop"),modalTitle=document.getElementById("modalTitle");
+const mCategory=mCategory=document.getElementById("mCategory"),mSiteNumber=document.getElementById("mSiteNumber"),mSiteName=document.getElementById("mSiteName"),mPostcode=document.getElementById("mPostcode"),mLat=document.getElementById("mLat"),mLon=document.getElementById("mLon"),mMileage=document.getElementById("mMileage"),mActive=document.getElementById("mActive"),mSharepoint=document.getElementById("mSharepoint");
+const btnClose=document.getElementById("btnClose"),btnLocate=document.getElementById("btnLocate"),btnUseMarker=document.getElementById("btnUseMarker"),btnSave=document.getElementById("btnSave"),btnMileage=document.getElementById("btnMileage"),btnAdd=document.getElementById("btnAdd"),btnReload=document.getElementById("btnReload");
+let map,marker,geocoder,distanceService,hqLatLng=null;
 
-          const table = document.createElement("table");
-          const thead = document.createElement("thead");
-          const tbody = document.createElement("tbody");
+async function ensureMapsLoaded(){
+  return new Promise(r=>{
+    if(window.google&&window.google.maps)return r();
+    const s=document.createElement("script");
+    s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
+    s.onload=r;document.head.appendChild(s);
+  });
+}
+async function geocodePostcode(pc){
+  if(!geocoder)geocoder=new google.maps.Geocoder();
+  return new Promise(res=>geocoder.geocode({address:pc},(r,s)=>res(s==="OK"?r[0].geometry.location:null)));
+}
+async function ensureHQ(){if(hqLatLng)return hqLatLng;const l=await geocodePostcode(HQ_POSTCODE);if(l)hqLatLng={lat:l.lat(),lng:l.lng()};return hqLatLng;}
+async function initMap(center){await ensureHQ();map=new google.maps.Map(document.getElementById("map"),{center:center||hqLatLng,zoom:12});marker=new google.maps.Marker({map,position:center||hqLatLng,draggable:true});}
+function calcMileageFromHQ(dest){return new Promise(async res=>{await ensureHQ();if(!hqLatLng)return res(null);if(!distanceService)distanceService=new google.maps.DistanceMatrixService();distanceService.getDistanceMatrix({origins:[hqLatLng],destinations:[dest],travelMode:"DRIVING",unitSystem:google.maps.UnitSystem.IMPERIAL},(r,s)=>{try{if(s!=="OK")return res(null);const el=r.rows[0].elements[0];if(!el||el.status!=="OK")return res(null);res(Math.round(el.distance.value/1609.34*10)/10);}catch{res(null);}});});}
 
-          // Collect all field names dynamically from first record
-          const fields = Object.keys(catData[0] || {});
-          thead.innerHTML = "<tr>" + fields.map(f => `<th>${f}</th>`).join("") + "</tr>";
+// === LOAD ALL OR FILTERED ===
+async function loadSites(){
+  rowsEl.innerHTML="";statusEl.textContent="Loading...";
+  const cat=filterEl.value;
+  const url=cat==="all"?`${workerBase}/Sites/combined`:`${workerBase}/Sites/${cat}`;
+  const res=await fetch(url);const j=await res.json();
+  const data=Array.isArray(j)?j:Object.values(j).flat().filter(Array.isArray).flat();
+  const q=searchEl.value.toLowerCase();
+  const list=data.filter(s=>(!q||JSON.stringify(s).toLowerCase().includes(q)));
 
-          catData.forEach(site => {
-            const row = document.createElement("tr");
-            row.innerHTML = fields.map(f => `<td>${site[f] ?? ""}</td>`).join("");
-            tbody.appendChild(row);
-          });
+  if(!list.length){rowsEl.innerHTML=`<tr><td colspan="10" style="text-align:center;">No results</td></tr>`;countEl.textContent="";statusEl.textContent="Ready";return;}
+  for(const s of list){
+    const tr=document.createElement("tr");
+    const cat=s.client||cat;
+    tr.innerHTML=`
+      <td>${s.siteNumber||"-"}</td><td>${s.siteName||s.storeName||"-"}</td>
+      <td>${s.client||cat}</td><td>${s.postcode||"-"}</td>
+      <td><label class="switch"><input type="checkbox" ${s.active?"checked":""} data-num="${s.siteNumber}" data-cat="${cat}"><span class="slider"></span></label></td>
+      <td>${s.lat??"-"}</td><td>${s.lon??"-"}</td><td>${s.mileageFromHQ??"-"}</td>
+      <td><button class="icon-btn" onclick="openModal('${cat}','${s.siteNumber}')">✏️</button></td>
+      <td><button class="icon-btn danger" onclick="deleteSite('${cat}','${s.siteNumber}')">🗑️</button></td>`;
+    rowsEl.appendChild(tr);
+  }
+  countEl.textContent=`${list.length} site${list.length!==1?"s":""}`;statusEl.textContent="Ready";
+}
 
-          table.appendChild(thead);
-          table.appendChild(tbody);
+// === DELETE / ADD / UPDATE ===
+async function deleteSite(cat,num){
+  if(!confirm(`Delete ${num}?`))return;
+  await fetch(`${workerBase}/Sites/delete`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({client:cat,siteNumber:num})});
+  loadSites();
+}
+window.deleteSite=deleteSite;
 
-          const tableWrap = document.createElement("div");
-          tableWrap.classList.add("tableWrap");
-          tableWrap.appendChild(table);
-          container.appendChild(header);
-          container.appendChild(tableWrap);
-          content.appendChild(container);
+let editContext={mode:"add",category:"retail",siteNumber:""};
+function openBackdrop(v){modalBackdrop.style.display=v?"flex":"none";}
+async function openModal(cat,num){
+  editContext={mode:num?"edit":"add",category:cat||"retail",siteNumber:num||""};
+  modalTitle.textContent=editContext.mode==="add"?"Add Site":`Edit ${num}`;
+  mCategory.value=editContext.category;mSiteNumber.value="";mSiteName.value="";mPostcode.value=HQ_POSTCODE;mLat.value="";mLon.value="";mMileage.value="";mActive.value="true";mSharepoint.value="";
+  await ensureMapsLoaded();await initMap(hqLatLng);
+  if(num){const r=await fetch(`${workerBase}/Sites/${cat}`);const arr=await r.json();const s=arr.find(x=>String(x.siteNumber)===String(num));if(s){mSiteNumber.value=s.siteNumber;mSiteName.value=s.siteName;mPostcode.value=s.postcode;mLat.value=s.lat;mLon.value=s.lon;mMileage.value=s.mileageFromHQ;mActive.value=String(!!s.active);mSharepoint.value=s.sharepointURL||"";}}
+  openBackdrop(true);
+}
+window.openModal=openModal;
 
-          // toggle open/close
-          header.addEventListener("click", () => {
-            tableWrap.classList.toggle("hidden");
-            expand.textContent = tableWrap.classList.contains("hidden") ? "▶" : "▼";
-          });
-        });
-      } catch (err) {
-        console.error(err);
-        content.innerHTML = "<p style='color:red;text-align:center;'>Failed to load site data.</p>";
-      }
-    }
+// === MODAL ACTIONS ===
+btnClose.onclick=()=>openBackdrop(false);
+btnLocate.onclick=async()=>{const pc=mPostcode.value.trim();if(!pc)return;const l=await geocodePostcode(pc);if(!l)return alert("Not found");map.setCenter(l);marker.setPosition(l);mLat.value=l.lat().toFixed(6);mLon.value=l.lng().toFixed(6);};
+btnUseMarker.onclick=()=>{const p=marker.getPosition();mLat.value=p.lat().toFixed(6);mLon.value=p.lng().toFixed(6);};
+btnMileage.onclick=async()=>{const lat=+mLat.value,lon=+mLon.value;if(!lat||!lon)return;const miles=await calcMileageFromHQ({lat,lng:lon});mMileage.value=miles||"";};
+btnSave.onclick=async()=>{
+  const body={client:mCategory.value,siteNumber:mSiteNumber.value||undefined,siteName:mSiteName.value,postcode:mPostcode.value,lat:+mLat.value,lon:+mLon.value,mileageFromHQ:+mMileage.value,active:mActive.value==="true",sharepointURL:mSharepoint.value};
+  const url=`${workerBase}/Sites/${editContext.mode==="add"?"add":"update"}`;
+  await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  openBackdrop(false);loadSites();
+};
 
-    loadSites();
-  </script>
+// === INIT ===
+filterEl.onchange=loadSites;
+searchEl.oninput=()=>{clearTimeout(window._t);window._t=setTimeout(loadSites,300);};
+btnReload.onclick=loadSites;
+btnAdd.onclick=()=>openModal("retail","");
+(async()=>{await ensureMapsLoaded();await ensureHQ();loadSites();})();
+document.getElementById("btnRecalc").onclick=async()=>{
+  if(!confirm("Recalculate mileage for all?"))return;
+  const res=await fetch(`${workerBase}/Sites/combined`);const data=await res.json();const arr=Object.values(data).flat();
+  await ensureHQ();let updated=0;
+  for(const s of arr){if(s.lat&&s.lon){const m=await calcMileageFromHQ({lat:+s.lat,lng:+s.lon});if(m){await fetch(`${workerBase}/Sites/update`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({client:s.client,siteNumber:s.siteNumber,mileageFromHQ:m})});updated++;}}}
+  alert(`Updated ${updated} sites.`);loadSites();
+};
+</script>
 </body>
 </html>
