@@ -14,7 +14,14 @@
       --bad:#ef4444;
       --panel:rgba(255,255,255,0.70);
     }
-    html,body{height:100%;margin:0;background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:cover;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
+    html,body{
+      height:100%;
+      margin:0;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:cover;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:var(--text)
+    }
     .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
@@ -31,18 +38,6 @@
     tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
     .muted{color:var(--muted)}
     .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
-    .switch{position:relative;display:inline-block;width:42px;height:24px}
-    .switch input{opacity:0;width:0;height:0}
-    .slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#d1d5db;transition:.3s;border-radius:24px}
-    .slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:white;transition:.3s;border-radius:50%}
-    input:checked + .slider{background:#34d399}
-    input:checked + .slider:before{transform:translateX(18px)}
-    .icon-btn{border:1px solid #cfd6e4;background:#fff;border-radius:8px;padding:8px;cursor:pointer}
-    .icon-btn.danger{border-color:#fecaca;color:#b91c1c}
-    .num{font-variant-numeric:tabular-nums}
-    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
-    .modal{background:#fff;max-width:980px;width:100%;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);overflow:hidden}
-    #map{width:100%;height:380px;border-radius:8px;border:1px solid #cfd6e4}
   </style>
 </head>
 <body>
@@ -69,7 +64,14 @@
     <table>
       <thead>
         <tr>
-          <th>#</th><th>Site Name</th><th>Client</th><th>Postcode</th><th>Active</th><th>Lat</th><th>Lon</th><th>Mileage</th><th>Edit</th><th>Delete</th>
+          <th>#</th>
+          <th>Site Name</th>
+          <th>Client</th>
+          <th>Postcode</th>
+          <th>Active</th>
+          <th>Lat</th>
+          <th>Lon</th>
+          <th>Mileage</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -81,111 +83,80 @@
     </div>
   </div>
 
-  <div class="modal-backdrop" id="modalBackdrop">
-    <div class="modal">
-      <div style="padding:16px;display:flex;justify-content:space-between;align-items:center;background:#f8fafc;">
-        <h3 id="modalTitle">Add Site</h3>
-        <button id="btnClose" class="icon-btn">&times;</button>
-      </div>
-      <div style="padding:16px;">
-        <label>Postcode</label>
-        <input id="mPostcode" placeholder="PO15 5RQ"/><br/>
-        <button class="btn" id="btnLocate">Locate by Postcode</button>
-        <button class="btn outline" id="btnMileage">Recalculate Mileage</button>
-        <div id="map"></div>
-      </div>
-    </div>
-  </div>
+  <script>
+  const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
+  const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
 
-<script>
-const workerBase="https://mostlane-sites.jamie-def.workers.dev";
-const GOOGLE_MAPS_KEY="AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
-const HQ_POSTCODE="PO15 5RQ";
+  const rowsEl = document.getElementById("rows");
+  const statusEl = document.getElementById("status");
+  const filterEl = document.getElementById("filterCategory");
+  const searchEl = document.getElementById("searchInput");
 
-let map,marker,geocoder,distanceService,hqLatLng=null;
-const btnAdd=document.getElementById("btnAdd");
-const btnClose=document.getElementById("btnClose");
-const btnLocate=document.getElementById("btnLocate");
-const btnMileage=document.getElementById("btnMileage");
-const modalBackdrop=document.getElementById("modalBackdrop");
-const mPostcode=document.getElementById("mPostcode");
+  let ALL_SITES = [];
 
-async function ensureMapsLoaded(){
-  return new Promise(resolve=>{
-    if(window.google&&window.google.maps)return resolve();
-    const s=document.createElement("script");
-    s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
-    s.async=true;
-    s.onload=resolve;
-    document.head.appendChild(s);
-  });
-}
-async function ensureHQ(){
-  if(hqLatLng)return hqLatLng;
-  geocoder=geocoder||new google.maps.Geocoder();
-  return new Promise(res=>{
-    geocoder.geocode({address:HQ_POSTCODE},(r,status)=>{
-      if(status==="OK"&&r&&r[0])hqLatLng=r[0].geometry.location.toJSON();
-      else hqLatLng={lat:50.8585,lng:-1.217};
-      res(hqLatLng);
-    });
-  });
-}
-async function initMap(center){
-  await ensureMapsLoaded();
-  await ensureHQ();
-  geocoder=geocoder||new google.maps.Geocoder();
-  distanceService=distanceService||new google.maps.DistanceMatrixService();
-  map=new google.maps.Map(document.getElementById("map"),{center:center||hqLatLng,zoom:12});
-  marker=new google.maps.Marker({position:center||hqLatLng,map,draggable:true});
-}
-async function geocodePostcode(pc){
-  await ensureMapsLoaded();
-  geocoder=geocoder||new google.maps.Geocoder();
-  return new Promise(r=>{
-    geocoder.geocode({address:pc},(res,status)=>{
-      if(status==="OK"&&res[0])r(res[0].geometry.location.toJSON());
-      else r(null);
-    });
-  });
-}
-async function calcMileageFromHQ(dest){
-  await ensureMapsLoaded();distanceService=distanceService||new google.maps.DistanceMatrixService();
-  await ensureHQ();
-  return new Promise(resolve=>{
-    distanceService.getDistanceMatrix({
-      origins:[hqLatLng],destinations:[dest],
-      travelMode:google.maps.TravelMode.DRIVING,
-      unitSystem:google.maps.UnitSystem.IMPERIAL
-    },(r,status)=>{
-      if(status!=="OK")return resolve(null);
-      const el=r.rows[0].elements[0];
-      if(!el||el.status!=="OK")return resolve(null);
-      resolve(Math.round(el.distance.value/1609.34*10)/10);
-    });
-  });
-}
+  async function fetchAllSites() {
+    statusEl.textContent = "Loading sites...";
+    const res = await fetch(`${workerBase}/get-sites?category=all`);
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error("Invalid response");
+    ALL_SITES = data;
+    renderRows();
+    statusEl.textContent = "Ready";
+  }
 
-// --- Modal logic
-btnAdd.onclick=async()=>{await ensureMapsLoaded();await ensureHQ();await initMap(hqLatLng);modalBackdrop.style.display="flex";}
-btnClose.onclick=()=>modalBackdrop.style.display="none";
+  function getFiltered() {
+    const cat = filterEl.value;
+    const q = searchEl.value.trim().toLowerCase();
+    let list = ALL_SITES;
+    if (cat !== "all") list = list.filter(s => (s.client || "").toLowerCase() === cat);
+    if (q) {
+      list = list.filter(s =>
+        (s.siteName || "").toLowerCase().includes(q) ||
+        (s.siteNumber || "").toLowerCase().includes(q) ||
+        (s.postcode || "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }
 
-btnLocate.onclick=async()=>{
-  await ensureMapsLoaded();
-  const pc=mPostcode.value.trim();
-  if(!pc)return alert("Enter postcode");
-  const loc=await geocodePostcode(pc);
-  if(!loc)return alert("Not found");
-  map.setCenter(loc);marker.setPosition(loc);
-};
-btnMileage.onclick=async()=>{
-  await ensureMapsLoaded();
-  const p=marker.getPosition();
-  if(!p)return alert("Move pin first");
-  const miles=await calcMileageFromHQ({lat:p.lat(),lng:p.lng()});
-  if(!miles)return alert("Could not calc mileage");
-  alert("Distance from HQ: "+miles+" miles");
-};
-</script>
+  function renderRows() {
+    const filtered = getFiltered();
+    rowsEl.innerHTML = "";
+    if (!filtered.length) {
+      rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999;">No sites found</td></tr>`;
+      return;
+    }
+    for (const s of filtered) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${s.siteNumber || "-"}</td>
+        <td>${s.siteName || "-"}</td>
+        <td>${s.client || "-"}</td>
+        <td>${s.postcode || "-"}</td>
+        <td>${s.active ? "✅" : "❌"}</td>
+        <td>${s.lat ?? "-"}</td>
+        <td>${s.lon ?? "-"}</td>
+        <td>${s.mileageFromHQ ?? "-"}</td>
+      `;
+      rowsEl.appendChild(tr);
+    }
+    document.getElementById("count").textContent = `${filtered.length} site${filtered.length!==1?"s":""}`;
+  }
+
+  filterEl.onchange = renderRows;
+  searchEl.oninput = () => {
+    clearTimeout(window.__srch);
+    window.__srch = setTimeout(renderRows, 250);
+  };
+
+  (async () => {
+    try {
+      await fetchAllSites();
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = "Error loading sites.";
+    }
+  })();
+  </script>
 </body>
 </html>
