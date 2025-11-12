@@ -23,7 +23,7 @@
       color:var(--text)
     }
     .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
-    .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+    .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
     .controls{display:flex;flex-wrap:wrap;gap:10px}
     select,input[type="text"]{padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px}
@@ -38,6 +38,15 @@
     tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
     .muted{color:var(--muted)}
     .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
+    /* Modal */
+    .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:10}
+    .modal.active{display:flex}
+    .modal-content{background:#fff;padding:20px;border-radius:12px;max-width:600px;width:90%;max-height:90%;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .modal-content h3{margin-top:0}
+    .map{width:100%;height:250px;margin:10px 0;border-radius:8px}
+    label{font-size:14px;font-weight:600;display:block;margin-top:10px}
+    input,select{width:100%;box-sizing:border-box}
+    .close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#555}
   </style>
 </head>
 <body>
@@ -72,6 +81,7 @@
           <th>Lat</th>
           <th>Lon</th>
           <th>Mileage</th>
+          <th>Edit</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -83,27 +93,95 @@
     </div>
   </div>
 
+  <!-- Edit Modal -->
+  <div class="modal" id="editModal">
+    <div class="modal-content">
+      <button class="close-btn" id="closeModal">&times;</button>
+      <h3 id="modalTitle">Edit Site</h3>
+      <label>Site Number</label>
+      <input id="editNumber" placeholder="e.g. 1234">
+      <label>Site Name</label>
+      <input id="editName" placeholder="e.g. Portsmouth">
+      <label>Postcode</label>
+      <input id="editPostcode" placeholder="e.g. PO15 5RQ">
+      <label>Latitude</label>
+      <input id="editLat" readonly>
+      <label>Longitude</label>
+      <input id="editLon" readonly>
+      <label>Mileage from HQ (mi)</label>
+      <input id="editMileage" readonly>
+      <div id="map" class="map"></div>
+      <button class="btn" id="btnLocate">Locate Postcode</button>
+      <button class="btn" id="btnSave">Save Changes</button>
+    </div>
+  </div>
+
   <script>
   const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
   const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
+  const HQ_POSTCODE = "PO15 5RQ";
 
   const rowsEl = document.getElementById("rows");
   const statusEl = document.getElementById("status");
   const filterEl = document.getElementById("filterCategory");
   const searchEl = document.getElementById("searchInput");
+  const modal = document.getElementById("editModal");
 
   let ALL_SITES = [];
+  let map, marker;
+  let currentCategory = "all";
+  let currentEditing = null;
 
+  // ---------- Google Maps ----------
+  function ensureMapsLoaded() {
+    return new Promise((res, rej)=>{
+      if (window.google && window.google.maps) return res();
+      const s=document.createElement("script");
+      s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
+      s.onload=res; s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function geocodePostcode(pc){
+    const resp=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(pc)}&key=${GOOGLE_MAPS_KEY}`);
+    const j=await resp.json();
+    if(j.status==="OK")return j.results[0].geometry.location;
+    throw new Error("Postcode not found");
+  }
+
+  async function calcMileage(lat,lon){
+    const hq="PO15 5RQ";
+    const url=`https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(hq)}&destinations=${lat},${lon}&key=${GOOGLE_MAPS_KEY}`;
+    try{
+      const resp=await fetch(url);
+      const j=await resp.json();
+      const dist=j.rows?.[0]?.elements?.[0]?.distance?.text;
+      if(dist)return parseFloat(dist.replace(/[^\d.]/g,""));
+    }catch{}
+    return "";
+  }
+
+  // ---------- Worker ----------
   async function fetchAllSites() {
     statusEl.textContent = "Loading sites...";
     const res = await fetch(`${workerBase}/get-sites?category=all`);
     const data = await res.json();
-    if (!Array.isArray(data)) throw new Error("Invalid response");
-    ALL_SITES = data;
+    ALL_SITES = Array.isArray(data)?data:[];
     renderRows();
     statusEl.textContent = "Ready";
   }
 
+  async function saveSiteChanges(site){
+    const cat=(site.client||"").toLowerCase();
+    await fetch(`${workerBase}/update-site?category=${cat}`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(site)
+    });
+  }
+
+  // ---------- Render ----------
   function getFiltered() {
     const cat = filterEl.value;
     const q = searchEl.value.trim().toLowerCase();
@@ -123,7 +201,7 @@
     const filtered = getFiltered();
     rowsEl.innerHTML = "";
     if (!filtered.length) {
-      rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999;">No sites found</td></tr>`;
+      rowsEl.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#999;">No sites found</td></tr>`;
       return;
     }
     for (const s of filtered) {
@@ -137,25 +215,78 @@
         <td>${s.lat ?? "-"}</td>
         <td>${s.lon ?? "-"}</td>
         <td>${s.mileageFromHQ ?? "-"}</td>
+        <td><button class="btn outline btnSmall">Edit</button></td>
       `;
+      tr.querySelector("button").onclick=()=>openModal(s);
       rowsEl.appendChild(tr);
     }
     document.getElementById("count").textContent = `${filtered.length} site${filtered.length!==1?"s":""}`;
   }
 
-  filterEl.onchange = renderRows;
-  searchEl.oninput = () => {
-    clearTimeout(window.__srch);
-    window.__srch = setTimeout(renderRows, 250);
+  // ---------- Modal ----------
+  function openModal(site){
+    currentEditing=site;
+    document.getElementById("modalTitle").textContent=`Edit ${site.siteName||"Site"}`;
+    document.getElementById("editNumber").value=site.siteNumber||"";
+    document.getElementById("editName").value=site.siteName||"";
+    document.getElementById("editPostcode").value=site.postcode||"";
+    document.getElementById("editLat").value=site.lat||"";
+    document.getElementById("editLon").value=site.lon||"";
+    document.getElementById("editMileage").value=site.mileageFromHQ||"";
+    modal.classList.add("active");
+    initMap(site.lat,site.lon);
+  }
+
+  function closeModal(){modal.classList.remove("active");}
+
+  document.getElementById("closeModal").onclick=closeModal;
+
+  async function initMap(lat,lon){
+    await ensureMapsLoaded();
+    const center={lat:parseFloat(lat)||50.86, lng:parseFloat(lon)||-1.24};
+    map=new google.maps.Map(document.getElementById("map"),{center,zoom:10});
+    marker=new google.maps.Marker({map,position:center,draggable:true});
+    marker.addListener("dragend",()=>{
+      const pos=marker.getPosition();
+      document.getElementById("editLat").value=pos.lat().toFixed(6);
+      document.getElementById("editLon").value=pos.lng().toFixed(6);
+    });
+  }
+
+  document.getElementById("btnLocate").onclick=async()=>{
+    try{
+      const pc=document.getElementById("editPostcode").value;
+      const loc=await geocodePostcode(pc);
+      map.setCenter(loc);marker.setPosition(loc);
+      document.getElementById("editLat").value=loc.lat.toFixed(6);
+      document.getElementById("editLon").value=loc.lng.toFixed(6);
+      const miles=await calcMileage(loc.lat,loc.lng);
+      document.getElementById("editMileage").value=miles;
+    }catch{alert("Unable to locate postcode");}
   };
 
-  (async () => {
-    try {
-      await fetchAllSites();
-    } catch (err) {
-      console.error(err);
-      statusEl.textContent = "Error loading sites.";
-    }
+  document.getElementById("btnSave").onclick=async()=>{
+    const s=currentEditing;
+    s.siteNumber=document.getElementById("editNumber").value;
+    s.siteName=document.getElementById("editName").value;
+    s.postcode=document.getElementById("editPostcode").value;
+    s.lat=parseFloat(document.getElementById("editLat").value)||"";
+    s.lon=parseFloat(document.getElementById("editLon").value)||"";
+    s.mileageFromHQ=document.getElementById("editMileage").value||"";
+    statusEl.textContent="Saving...";
+    await saveSiteChanges(s);
+    closeModal();
+    await fetchAllSites();
+  };
+
+  // ---------- Events ----------
+  filterEl.onchange=renderRows;
+  searchEl.oninput=()=>{clearTimeout(window.__srch);window.__srch=setTimeout(renderRows,250);};
+  document.getElementById("btnReload").onclick=fetchAllSites;
+  document.getElementById("btnAdd").onclick=()=>openModal({client:filterEl.value||"retail"});
+
+  (async()=>{
+    try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
   })();
   </script>
 </body>
