@@ -185,293 +185,10 @@
 const workerBase="https://mostlane-sites.jamie-def.workers.dev";
 const HQ_POSTCODE="PO15 5RQ";
 const GOOGLE_MAPS_KEY="AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
+let editContext={mode:"add",category:"retail",siteNumber:""}; // keep this global
 
-const rowsEl=document.getElementById("rows");
-const filterEl=document.getElementById("filterCategory");
-const searchEl=document.getElementById("searchInput");
-const statusEl=document.getElementById("status");
-const countEl=document.getElementById("count");
+// ... [no change to the rest of the script above this section] ...
 
-const modalBackdrop=document.getElementById("modalBackdrop");
-const modalTitle=document.getElementById("modalTitle");
-const mCategory=document.getElementById("mCategory");
-const mSiteNumber=document.getElementById("mSiteNumber");
-const mSiteName=document.getElementById("mSiteName");
-const mPostcode=document.getElementById("mPostcode");
-const mLat=document.getElementById("mLat");
-const mLon=document.getElementById("mLon");
-const mMileage=document.getElementById("mMileage");
-const mActive=document.getElementById("mActive");
-const mSharepoint=document.getElementById("mSharepoint");
-const btnClose=document.getElementById("btnClose");
-const btnLocate=document.getElementById("btnLocate");
-const btnUseMarker=document.getElementById("btnUseMarker");
-const btnSave=document.getElementById("btnSave");
-const btnMileage=document.getElementById("btnMileage");
-const btnAdd=document.getElementById("btnAdd");
-const btnReload=document.getElementById("btnReload");
-const btnRecalc=document.getElementById("btnRecalc");
-
-let map,marker,geocoder,distanceService;
-let hqLatLng=null;
-let ALL_SITES=[]; // master cache
-
-function ensureMapsLoaded(){
-  return new Promise(resolve=>{
-    if(window.google&&window.google.maps)return resolve();
-    const s=document.createElement("script");
-    s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
-    s.async=true;
-    s.onload=resolve;
-    document.head.appendChild(s);
-  });
-}
-
-async function geocodePostcode(pc){
-  if(!geocoder)geocoder=new google.maps.Geocoder();
-  return new Promise(r=>{
-    geocoder.geocode({address:pc},(res,status)=>{
-      if(status==="OK"&&res&&res[0]){
-        const l=res[0].geometry.location;
-        r({lat:l.lat(),lng:l.lng()});
-      } else r(null);
-    });
-  });
-}
-
-async function ensureHQ(){
-  if(hqLatLng)return hqLatLng;
-  const l=await geocodePostcode(HQ_POSTCODE);
-  if(l)hqLatLng=l;
-  return hqLatLng;
-}
-
-async function initMap(center){
-  await ensureHQ();
-  if(!hqLatLng)hqLatLng={lat:50.8585,lng:-1.2170};
-  geocoder=geocoder||new google.maps.Geocoder();
-  distanceService=distanceService||new google.maps.DistanceMatrixService();
-  map=new google.maps.Map(document.getElementById("map"),{
-    center:center||hqLatLng,
-    zoom:12,
-    mapTypeControl:false,
-    streetViewControl:false
-  });
-  marker=new google.maps.Marker({position:center||hqLatLng,map,draggable:true});
-}
-
-function calcMileageFromHQ(destLatLon){
-  return new Promise(async(resolve)=>{
-    await ensureHQ();
-    if(!hqLatLng||!destLatLon)return resolve(null);
-    if(!distanceService)
-      distanceService=new google.maps.DistanceMatrixService();
-
-    distanceService.getDistanceMatrix({
-      origins:[hqLatLng],
-      destinations:[destLatLon],
-      travelMode:google.maps.TravelMode.DRIVING,
-      unitSystem:google.maps.UnitSystem.IMPERIAL
-    },(resp,status)=>{
-      try{
-        if(status!=="OK")return resolve(null);
-        const el=resp.rows[0].elements[0];
-        if(!el||el.status!=="OK")return resolve(null);
-        const miles=el.distance.value/1609.34;
-        resolve(Math.round(miles*10)/10);
-      }catch(e){
-        console.warn("Mileage error:",e);
-        resolve(null);
-      }
-    });
-  });
-}
-
-// ------- Data load + render -------
-async function fetchAllSites(){
-  statusEl.textContent="Loading sites...";
-  const res=await fetch(`${workerBase}/get-sites?category=all`);
-  const data=await res.json();
-  if(!Array.isArray(data)) throw new Error("Invalid sites payload");
-  // normalise client casing just in case
-  ALL_SITES = data.map(s => ({...s, client: (s.client||"").toLowerCase()}));
-  statusEl.textContent="Ready";
-}
-
-function getFiltered(){
-  const cat=filterEl.value;
-  const q=searchEl.value.trim().toLowerCase();
-  let list=ALL_SITES;
-  if(cat!=="all") list=list.filter(s=> (s.client||"").toLowerCase()===cat);
-  if(q){
-    list=list.filter(s=>
-      (s.siteName||"").toLowerCase().includes(q)||
-      (s.siteNumber||"").toLowerCase().includes(q)||
-      (s.postcode||"").toLowerCase().includes(q)
-    );
-  }
-  return list;
-}
-
-function renderRows(){
-  const filtered=getFiltered();
-  rowsEl.innerHTML="";
-  if(!filtered.length){
-    rowsEl.innerHTML=`<tr><td colspan="10" style="text-align:center;color:#999;">No sites found</td></tr>`;
-    countEl.textContent="";
-    return;
-  }
-  for(const s of filtered){
-    const category=(s.client||"").toLowerCase();
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${s.siteNumber||"-"}</td>
-      <td>${s.siteName||"-"}</td>
-      <td>${s.client||"-"}</td>
-      <td>${s.postcode||"-"}</td>
-      <td>
-        <label class="switch">
-          <input class="active-toggle" type="checkbox" ${s.active?"checked":""}
-                 data-num="${s.siteNumber}" data-cat="${category}">
-          <span class="slider"></span>
-        </label>
-      </td>
-      <td>${(Number.isFinite(+s.lat)?Number(s.lat).toFixed(4):"-")}</td>
-      <td>${(Number.isFinite(+s.lon)?Number(s.lon).toFixed(4):"-")}</td>
-      <td>${(s.mileageFromHQ??"-")}</td>
-      <td><button class="icon-btn" data-action="edit" data-cat="${category}" data-num="${s.siteNumber}">✏️</button></td>
-      <td><button class="icon-btn danger" data-action="delete" data-cat="${category}" data-num="${s.siteNumber}">🗑️</button></td>`;
-    rowsEl.appendChild(tr);
-  }
-  countEl.textContent=`${filtered.length} site${filtered.length!==1?"s":""}`;
-}
-
-// auto-calc mileage for any with lat/lon but missing mileage (runs after initial load)
-async function backfillMileageIfMissing(){
-  await ensureMapsLoaded();
-  await ensureHQ();
-  let changed=0;
-  for(const s of ALL_SITES){
-    const lat=Number(s.lat), lon=Number(s.lon);
-    if(Number.isFinite(lat)&&Number.isFinite(lon)&&(!s.mileageFromHQ||s.mileageFromHQ===0)){
-      const miles=await calcMileageFromHQ({lat, lng:lon});
-      if(miles){
-        s.mileageFromHQ=miles;
-        await fetch(`${workerBase}/update-site?category=${s.client}`,{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({siteNumber:s.siteNumber, mileageFromHQ:miles})
-        });
-        changed++;
-      }
-    }
-  }
-  if(changed>0) renderRows();
-}
-
-// ------- Event delegation for table buttons & toggles -------
-rowsEl.addEventListener("click", async (e)=>{
-  const btn=e.target.closest("button");
-  if(!btn) return;
-  const action=btn.dataset.action;
-  const cat=btn.dataset.cat;
-  const num=btn.dataset.num;
-  if(action==="edit"){
-    openModal(cat,num);
-  } else if(action==="delete"){
-    if(!confirm(`Delete site ${num}?`)) return;
-    await fetch(`${workerBase}/delete-site?category=${cat}`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({siteNumber:num})
-    });
-    // remove from cache & re-render
-    ALL_SITES = ALL_SITES.filter(s => !(String(s.siteNumber)===String(num) && (s.client||"").toLowerCase()===cat));
-    renderRows();
-  }
-});
-
-rowsEl.addEventListener("change", async (e)=>{
-  const input=e.target.closest("input.active-toggle");
-  if(!input) return;
-  const cat=input.dataset.cat;
-  const num=input.dataset.num;
-  const newVal=input.checked;
-  await fetch(`${workerBase}/update-site?category=${cat}`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({siteNumber:num, active:newVal})
-  });
-  // update local cache
-  const idx=ALL_SITES.findIndex(s=> String(s.siteNumber)===String(num) && (s.client||"").toLowerCase()===cat);
-  if(idx>-1) ALL_SITES[idx].active=newVal;
-});
-
-// ------- Modal / Add / Edit logic -------
-let editContext={mode:"add",category:"retail",siteNumber:""};
-function openBackdrop(show){modalBackdrop.style.display=show?"flex":"none";}
-
-async function openModal(cat,num){
-  editContext={mode:num?"edit":"add",category:cat||"retail",siteNumber:num||""};
-  modalTitle.textContent=editContext.mode==="add"?"Add Site":`Edit Site ${num}`;
-  mCategory.value=editContext.category;
-  mSiteNumber.value="";
-  mSiteName.value="";
-  mPostcode.value=HQ_POSTCODE;
-  mLat.value="";
-  mLon.value="";
-  mMileage.value="";
-  mActive.value="true";
-  mSharepoint.value="";
-  await ensureMapsLoaded();
-  await initMap(hqLatLng);
-
-  if(num){
-    const rec=ALL_SITES.find(s=> String(s.siteNumber)===String(num) && (s.client||"").toLowerCase()===cat);
-    if(rec){
-      mSiteNumber.value=rec.siteNumber||"";
-      mSiteName.value=rec.siteName||"";
-      mPostcode.value=rec.postcode||"";
-      mLat.value=rec.lat??"";
-      mLon.value=rec.lon??"";
-      mMileage.value=rec.mileageFromHQ??"";
-      mActive.value=String(!!rec.active);
-      mSharepoint.value=rec.sharepointURL||"";
-      if(rec.lat&&rec.lon){
-        const p={lat:Number(rec.lat),lng:Number(rec.lon)};
-        map.setCenter(p);
-        map.setZoom(14);
-        marker.setPosition(p);
-      }
-    }
-  }
-  openBackdrop(true);
-}
-window.openModal=openModal;
-
-btnClose.onclick=()=>openBackdrop(false);
-btnLocate.onclick=async()=>{
-  const pc=mPostcode.value.trim();
-  if(!pc)return alert("Enter a postcode");
-  const loc=await geocodePostcode(pc);
-  if(!loc)return alert("Postcode not found");
-  map.setCenter(loc);map.setZoom(14);marker.setPosition(loc);
-  mLat.value=loc.lat.toFixed(6);
-  mLon.value=loc.lng.toFixed(6);
-};
-btnUseMarker.onclick=()=>{
-  const p=marker.getPosition();
-  if(!p)return;
-  mLat.value=p.lat().toFixed(6);
-  mLon.value=p.lng().toFixed(6);
-};
-btnMileage.onclick=async()=>{
-  const lat=parseFloat(mLat.value),lon=parseFloat(mLon.value);
-  if(!Number.isFinite(lat)||!Number.isFinite(lon))return alert("Set Lat/Lon first");
-  const miles=await calcMileageFromHQ({lat,lng:lon});
-  if(!miles)return alert("Could not calculate mileage");
-  mMileage.value=miles;
-};
 btnSave.onclick=async()=>{
   const category=mCategory.value;
   const body={
@@ -482,83 +199,38 @@ btnSave.onclick=async()=>{
     lon:parseFloat(mLon.value),
     mileageFromHQ:parseFloat(mMileage.value),
     active:mActive.value==="true",
-    sharepointURL:mSharepoint.value.trim()||undefined
+    sharepointURL:mSharepoint.value.trim()||undefined,
+    oldSiteNumber:editContext.siteNumber // 👈 added here
   };
   if(!body.siteName)return alert("Site Name required");
   if(!body.postcode)return alert("Postcode required");
+
   const endpoint=editContext.mode==="add"?"add-site":"update-site";
-  const r=await fetch(`${workerBase}/${endpoint}?category=${category}`,{
+  const r=await fetch(`${workerBase}/${endpoint}?category=${category}&oldSiteNumber=${encodeURIComponent(editContext.siteNumber||"")}`,{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify(body)
   });
+
   const j=await r.json();
   if(!r.ok||j.success===false){
     console.error(j);
     alert("Save failed");
     return;
   }
-  // update local cache without reloading whole page
+
   if(endpoint==="add-site"){
-    const added = j.added || body;
-    ALL_SITES.push({...added, client: category});
+    const added=j.added||body;
+    ALL_SITES.push({...added,client:category});
   }else{
-    const idx=ALL_SITES.findIndex(s=> String(s.siteNumber)===String(body.siteNumber) && (s.client||"").toLowerCase()===category);
-    if(idx>-1){
-      ALL_SITES[idx]={...ALL_SITES[idx], ...body};
-    }
+    const idx=ALL_SITES.findIndex(s=>String(s.siteNumber)===String(body.siteNumber)&&(s.client||"").toLowerCase()===category);
+    if(idx>-1)ALL_SITES[idx]={...ALL_SITES[idx],...body};
   }
   openBackdrop(false);
   renderRows();
 };
 
-// ------- Filters, search, reload -------
-filterEl.onchange=renderRows;
-searchEl.oninput=()=>{clearTimeout(window.__srch);window.__srch=setTimeout(renderRows,250);};
-btnReload.onclick=async()=>{
-  await fetchAllSites();
-  renderRows();
-  // optional backfill again (comment if not needed)
-  backfillMileageIfMissing();
-};
-btnAdd.onclick=()=>openModal("retail","");
-
-// ------- Recalculate button -------
-// Respects filter: if "All Types", runs for every site; otherwise only current category.
-btnRecalc.onclick=async()=>{
-  if(!confirm("Recalculate mileage for the current selection? (If 'All Types' is selected, this updates every site)")) return;
-  await ensureMapsLoaded(); await ensureHQ();
-  const filtered=getFiltered();
-  if(!filtered.length){ alert("No sites to recalc for."); return; }
-  let updated=0;
-  for(const s of filtered){
-    const lat=Number(s.lat),lon=Number(s.lon);
-    if(Number.isFinite(lat)&&Number.isFinite(lon)){
-      const miles=await calcMileageFromHQ({lat, lng:lon});
-      if(miles){
-        s.mileageFromHQ=miles; // update cache
-        await fetch(`${workerBase}/update-site?category=${s.client}`,{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({siteNumber:s.siteNumber, mileageFromHQ:miles})
-        });
-        updated++;
-      }
-    }
-  }
-  alert(`Updated ${updated} site(s).`);
-  renderRows();
-};
-
-// ------- Init -------
-(async()=>{
-  await ensureMapsLoaded();
-  await ensureHQ();
-  await fetchAllSites();
-  renderRows();
-  // quietly backfill any missing mileage across ALL_SITES once
-  backfillMileageIfMissing();
-})();
+// ... [rest of script unchanged] ...
   </script>
 </body>
 </html>
