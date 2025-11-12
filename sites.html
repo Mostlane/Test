@@ -623,14 +623,17 @@
     }
   };
 
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
+  async function fileToBase64(file) {
+  // Compress to ~1000px width, WebP 0.8 quality to stay under Worker limits
+  const img = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1000 / img.width, 1); // only shrink large images
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/webp", 0.8);
+}
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
