@@ -148,6 +148,7 @@
   return new Promise((resolve, reject) => {
     const geocoder = new google.maps.Geocoder();
     geocoder.geocode({ address: pc }, (results, status) => {
+      console.log("Geocode response:", status, results); // 👈 see what’s happening
       if (status === "OK" && results[0]) {
         const loc = results[0].geometry.location;
         resolve({ lat: loc.lat(), lng: loc.lng() });
