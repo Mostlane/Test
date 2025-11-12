@@ -15,8 +15,7 @@
       --panel:rgba(255,255,255,0.70);
     }
     html,body{
-      height:100%;
-      margin:0;
+      height:100%; margin:0;
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:cover;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
@@ -25,11 +24,15 @@
     .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
     .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
-    .controls{display:flex;flex-wrap:wrap;gap:10px}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
     select,input[type="text"]{padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px}
     .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
     .btn:disabled{opacity:.6;cursor:not-allowed}
     .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue)}
+    .tabs{display:flex;gap:8px}
+    .tab{padding:8px 12px;border-radius:999px;border:1px solid #cfd6e4;background:#fff;cursor:pointer;font-weight:600}
+    .tab.active{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue)}
+
     table{width:100%;border-collapse:separate;border-spacing:0 8px}
     thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:0 10px}
     tbody tr{background:#fff}
@@ -37,35 +40,47 @@
     tbody tr td:first-child{border-left:1px solid #e5e7eb;border-top-left-radius:8px;border-bottom-left-radius:8px}
     tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
     .muted{color:var(--muted)}
+    .linklike{color:var(--ml-blue);font-weight:700;cursor:pointer;text-decoration:none}
     .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
 
-    /* Tabs */
-    .tabs{display:flex;gap:6px;flex-wrap:wrap}
-    .tab{background:#fff;border:1px solid #cfd6e4;border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600}
-    .tab.active{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue)}
-
-    /* Link-like button for site name */
-    .link-btn{background:none;border:none;color:var(--ml-blue);font-weight:600;cursor:pointer;padding:0}
-
-    /* Modal (shared base) */
+    /* Modal base */
     .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:10}
     .modal.active{display:flex}
-    .modal-content{background:#fff;padding:20px;border-radius:12px;max-width:800px;width:92%;max-height:90%;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .modal-content{background:#fff;padding:20px;border-radius:12px;max-width:980px;width:95%;max-height:90%;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)}
     .modal-content h3{margin-top:0}
     .close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#555}
 
-    /* Edit modal specifics */
-    .map{width:100%;height:250px;margin:10px 0;border-radius:8px;border:1px solid #cfd6e4}
-    label{font-size:14px;font-weight:600;display:block;margin-top:10px}
+    /* Details layout */
+    .details-grid{
+      display:grid;
+      grid-template-columns:320px 1fr;
+      gap:16px;
+    }
+    @media (max-width: 800px){
+      .details-grid{grid-template-columns:1fr;gap:12px}
+    }
+    .image-box{
+      width:300px;height:300px;max-width:100%;
+      border:1px solid #e5e7eb;border-radius:12px;background:#f3f4f6;
+      display:flex;align-items:center;justify-content:center;overflow:hidden
+    }
+    .image-box img{width:100%;height:100%;object-fit:cover}
+    .image-box .placeholder{color:#6b7280;font-size:14px}
+
+    .kv{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .kv .row{display:grid;grid-template-columns:220px 1fr;border-top:1px solid #e5e7eb}
+    .kv .row:first-child{border-top:none}
+    .kv .k{background:#f9fafb;padding:10px 12px;font-weight:600}
+    .kv .v{padding:10px 12px;word-break:break-word}
+
+    .row-actions{display:flex;gap:8px;margin-top:10px}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700}
+
+    /* Edit-specific bits */
+    .map{width:100%;height:250px;margin:10px 0;border-radius:8px;border:1px solid #e5e7eb}
+    label{font-size:13px;font-weight:600;display:block;margin-top:10px}
     input,select,textarea{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px}
     .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-
-    /* Details modal */
-    .detail-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
-    .detail-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
-    .detail-list dt{font-weight:700;margin-top:8px}
-    .detail-list dd{margin:0 0 6px 0;color:#374151}
-    .detail-img{width:100%;border-radius:8px;border:1px solid #e5e7eb;object-fit:cover;max-height:260px}
   </style>
 </head>
 <body>
@@ -101,7 +116,8 @@
           <th>Client</th>
           <th>Postcode</th>
           <th>Phone</th>
-          <th>Mileage (mi)</th>
+          <th>Active</th>
+          <th>Mileage</th>
           <th>Edit</th>
         </tr>
       </thead>
@@ -114,35 +130,41 @@
     </div>
   </div>
 
-  <!-- Details Modal -->
-  <div class="modal" id="viewModal">
+  <!-- DETAILS MODAL -->
+  <div class="modal" id="detailsModal">
     <div class="modal-content">
-      <button class="close-btn" id="closeView">&times;</button>
-      <h3 id="viewTitle">Site Details</h3>
-      <div class="detail-grid">
-        <div class="detail-card">
-          <dl class="detail-list" id="detailsList"></dl>
-        </div>
-        <div class="detail-card">
-          <img id="detailImage" class="detail-img" alt="Site image"/>
-          <div style="margin-top:10px">
-            <a id="detailSharepoint" class="btn outline" target="_blank" rel="noopener">Open SharePoint</a>
+      <button class="close-btn" id="closeDetails">&times;</button>
+      <h3 id="detailsTitle">Site details</h3>
+      <div class="details-grid">
+        <div>
+          <div class="image-box" id="detailsImageBox">
+            <div class="placeholder">No Image Available</div>
           </div>
+          <div class="row-actions">
+            <a id="detailsSharepoint" class="btn outline" target="_blank" rel="noopener">Open SharePoint</a>
+          </div>
+        </div>
+        <div>
+          <div class="kv" id="detailsKV"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Edit Modal -->
+  <!-- EDIT MODAL -->
   <div class="modal" id="editModal">
     <div class="modal-content">
       <button class="close-btn" id="closeModal">&times;</button>
       <h3 id="modalTitle">Edit Site</h3>
 
-      <label>Active</label>
-      <select id="editActive">
-        <option value="true">Active</option>
-        <option value="false">Inactive</option>
+      <label>Client / Category</label>
+      <select id="editClient">
+        <option value="retail">Retail</option>
+        <option value="els">ELS</option>
+        <option value="els_private">ELS Private</option>
+        <option value="cobra">Cobra</option>
+        <option value="projects">Projects</option>
+        <option value="wenzels">Wenzels</option>
       </select>
 
       <div class="row2">
@@ -151,14 +173,10 @@
           <input id="editNumber" placeholder="e.g. 1234">
         </div>
         <div>
-          <label>Client / Category</label>
-          <select id="editCategory">
-            <option value="retail">Retail</option>
-            <option value="els">ELS</option>
-            <option value="els_private">ELS Private</option>
-            <option value="cobra">Cobra</option>
-            <option value="projects">Projects</option>
-            <option value="wenzels">Wenzels</option>
+          <label>Active</label>
+          <select id="editActive">
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
           </select>
         </div>
       </div>
@@ -173,28 +191,28 @@
         </div>
         <div>
           <label>Phone</label>
-          <input id="editPhone" placeholder="e.g. 02392 450045">
+          <input id="editPhone" placeholder="e.g. 02392 123456">
         </div>
       </div>
 
-      <label>Image URL (for details preview)</label>
-      <input id="editImageURL" placeholder="https://...">
+      <label>Image URL (square image works best)</label>
+      <input id="editImageUrl" placeholder="https://.../store.jpg">
 
       <div class="row2">
         <div>
           <label>Latitude</label>
-          <input id="editLat" readonly>
+          <input id="editLat" placeholder="">
         </div>
         <div>
           <label>Longitude</label>
-          <input id="editLon" readonly>
+          <input id="editLon" placeholder="">
         </div>
       </div>
 
       <div class="row2">
         <div>
           <label>Mileage from HQ (mi)</label>
-          <input id="editMileage" readonly>
+          <input id="editMileage" placeholder="">
         </div>
         <div>
           <label>SharePoint URL</label>
@@ -203,7 +221,8 @@
       </div>
 
       <div id="map" class="map"></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+
+      <div class="row-actions">
         <button class="btn" id="btnLocate">Locate Postcode</button>
         <button class="btn" id="btnSave">Save Changes</button>
       </div>
@@ -212,7 +231,7 @@
 
   <script>
   const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
-  const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4";
+  const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4"; // you’ll fix auth later
   const HQ_POSTCODE = "PO15 5RQ";
 
   const rowsEl = document.getElementById("rows");
@@ -222,78 +241,105 @@
   const tabActiveBtn = document.getElementById("tabActive");
   const tabInactiveBtn = document.getElementById("tabInactive");
 
-  const viewModal = document.getElementById("viewModal");
-  const closeView = document.getElementById("closeView");
-  const viewTitle = document.getElementById("viewTitle");
-  const detailsList = document.getElementById("detailsList");
-  const detailImage = document.getElementById("detailImage");
-  const detailSharepoint = document.getElementById("detailSharepoint");
+  const detailsModal = document.getElementById("detailsModal");
+  const closeDetailsBtn = document.getElementById("closeDetails");
+  const detailsTitle = document.getElementById("detailsTitle");
+  const detailsImageBox = document.getElementById("detailsImageBox");
+  const detailsKV = document.getElementById("detailsKV");
+  const detailsSharepoint = document.getElementById("detailsSharepoint");
 
   const editModal = document.getElementById("editModal");
-  const closeModal = document.getElementById("closeModal");
+  const closeModalBtn = document.getElementById("closeModal");
   const modalTitle = document.getElementById("modalTitle");
-  const editActive = document.getElementById("editActive");
+
+  const editClient = document.getElementById("editClient");
   const editNumber = document.getElementById("editNumber");
-  const editCategory = document.getElementById("editCategory");
+  const editActive = document.getElementById("editActive");
   const editName = document.getElementById("editName");
   const editPostcode = document.getElementById("editPostcode");
   const editPhone = document.getElementById("editPhone");
-  const editImageURL = document.getElementById("editImageURL");
+  const editImageUrl = document.getElementById("editImageUrl");
   const editLat = document.getElementById("editLat");
   const editLon = document.getElementById("editLon");
   const editMileage = document.getElementById("editMileage");
   const editSharepoint = document.getElementById("editSharepoint");
+
   const btnLocate = document.getElementById("btnLocate");
   const btnSave = document.getElementById("btnSave");
+  const btnReload = document.getElementById("btnReload");
+  const btnAdd = document.getElementById("btnAdd");
+  const btnRecalc = document.getElementById("btnRecalc");
 
   let ALL_SITES = [];
-  let map, marker;
   let currentEditing = null;
-  let originalSiteNumber = null;
-  let showInactive = false; // Active tab by default
+  let showInactive = false;
 
-  // ---------- Maps helpers ----------
+  // Maps bits (no-op if key auth not ready)
+  let map, marker;
   function ensureMapsLoaded() {
-    return new Promise((res, rej)=>{
+    return new Promise((res)=>{
       if (window.google && window.google.maps) return res();
       const s=document.createElement("script");
-      s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places`;
-      s.onload=res; s.onerror=rej;
+      s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places&loading=async`;
+      s.onload=res; s.onerror=()=>res(); // swallow errors so UI still works
       document.head.appendChild(s);
     });
   }
-
-  async function geocodePostcode(pc){
-    // Will fail until you enable Geocoding API for your key — keeping logic intact.
+  async function initMap(lat,lon){
     await ensureMapsLoaded();
-    return new Promise((resolve, reject) => {
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode({ address: pc }, (results, status) => {
-        console.log("Geocode response:", status, results);
-        if (status === "OK" && results[0]) {
-          const loc = results[0].geometry.location;
-          resolve({ lat: loc.lat(), lng: loc.lng() });
-        } else {
-          reject(new Error("Geocode failed: " + status));
-        }
-      });
+    if (!(window.google && google.maps)) return;
+    const center={lat:parseFloat(lat)||50.86, lng:parseFloat(lon)||-1.24};
+    map=new google.maps.Map(document.getElementById("map"),{center,zoom:10});
+    marker=new google.maps.Marker({map,position:center,draggable:true});
+    marker.addListener("dragend",()=>{
+      const pos=marker.getPosition();
+      editLat.value=pos.lat().toFixed(6);
+      editLon.value=pos.lng().toFixed(6);
     });
   }
-
-  async function calcMileage(lat,lon){
-    // Uses Distance Matrix HTTP API; optional until key is sorted.
-    const hq="PO15 5RQ";
-    const url=`https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(hq)}&destinations=${lat},${lon}&key=${GOOGLE_MAPS_KEY}`;
+  async function geocodePostcode(pc){
     try{
-      const resp=await fetch(url);
-      const j=await resp.json();
-      const dist=j.rows?.[0]?.elements?.[0]?.distance?.text;
-      if(dist)return parseFloat(dist.replace(/[^\d.]/g,""));
-    }catch{}
+      await ensureMapsLoaded();
+      if (!(window.google && google.maps)) throw new Error("Maps not ready");
+      return await new Promise((resolve, reject)=>{
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ address: pc }, (results, status) => {
+          if (status === "OK" && results[0]) {
+            const loc = results[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else reject(new Error(status));
+        });
+      });
+    }catch{
+      return null;
+    }
+  }
+  async function calcMileage(lat,lon){
+    // leave as blank if Distance Matrix isn’t set up
     return "";
   }
 
-  // ---------- Worker ----------
+  // Helpers
+  function ucClient(k){
+    const v = (k||"").toLowerCase();
+    if (v==="els") return "ELS";
+    if (v==="els_private") return "ELS Private";
+    if (v==="wenzels") return "Wenzel’s";
+    if (v==="cobra") return "Cobra";
+    if (v==="projects" || v==="project") return "Project";
+    if (v==="retail") return "Retail";
+    return k || "";
+  }
+  function roundTrip(m){
+    const n = parseFloat(m);
+    if (isNaN(n)) return "-";
+    return (Math.round(n*2*10)/10);
+  }
+  function telOf(site){
+    return site.telephone || site.phone || site.managerPhone || site.areaManagerPhone || "";
+  }
+
+  // Worker IO
   async function fetchAllSites() {
     statusEl.textContent = "Loading sites...";
     const res = await fetch(`${workerBase}/get-sites?category=all`);
@@ -302,65 +348,31 @@
     renderRows();
     statusEl.textContent = "Ready";
   }
-
-  async function saveSiteChanges(site, oldNumberOpt){
+  async function saveSiteChanges(site, oldSiteNumberIfChanged=null){
     const cat=(site.client||"").toLowerCase();
-    const url = oldNumberOpt
-      ? `${workerBase}/update-site?category=${cat}&oldSiteNumber=${encodeURIComponent(oldNumberOpt)}`
-      : `${workerBase}/update-site?category=${cat}`;
-    const resp = await fetch(url,{
+    const url = new URL(`${workerBase}/update-site?category=${cat}`);
+    if (oldSiteNumberIfChanged) url.searchParams.set("oldSiteNumber", oldSiteNumberIfChanged);
+    const r = await fetch(url.toString(),{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify(site)
     });
-    const j = await resp.json().catch(()=>({}));
-    if(!resp.ok || j.success===false){
-      console.error(j);
-      throw new Error("Save failed");
-    }
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok || j.success===false) throw new Error("Save failed");
   }
 
-  // ---------- Utilities ----------
-  function formatClient(raw){
-    const v = String(raw||"").toLowerCase();
-    if (v==="els") return "ELS";
-    if (v==="els_private") return "ELS Private";
-    if (v==="wenzels") return "Wenzel’s";
-    if (v==="cobra") return "Cobra";
-    if (v==="retail") return "Retail";
-    if (v==="project") return "Project";
-    if (v==="projects") return "Projects";
-    // Fallback: Title Case
-    return v.replace(/(^|\s|_)[a-z]/g, m => m.toUpperCase()).replaceAll("_"," ");
-  }
-
-  function phoneFromSite(s){
-    return s.telephone || s.managerPhone || s.areaManagerPhone || "";
-  }
-
-  function roundTripText(m){
-    const n = parseFloat(m);
-    if (!isFinite(n)) return "-";
-    const rt = Math.round(n*2*10)/10;
-    return `${n} (round ${rt})`;
-  }
-
-  // ---------- Filtered + Render ----------
+  // Filtering + render
   function getFiltered() {
     const cat = filterEl.value;
     const q = searchEl.value.trim().toLowerCase();
-    let list = ALL_SITES;
-
-    // Active / Inactive tab filter
-    list = list.filter(s => (showInactive ? !s.active === true || s.active === false : !!s.active));
-
+    let list = ALL_SITES.filter(s => (showInactive ? !s.active : s.active!==false));
     if (cat !== "all") list = list.filter(s => (s.client || "").toLowerCase() === cat);
     if (q) {
       list = list.filter(s =>
         (s.siteName || "").toLowerCase().includes(q) ||
         (s.siteNumber || "").toLowerCase().includes(q) ||
         (s.postcode || "").toLowerCase().includes(q) ||
-        (phoneFromSite(s) || "").toLowerCase().includes(q)
+        (telOf(s) || "").toLowerCase().includes(q)
       );
     }
     return list;
@@ -370,202 +382,202 @@
     const filtered = getFiltered();
     rowsEl.innerHTML = "";
     if (!filtered.length) {
-      rowsEl.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#999;">No sites found</td></tr>`;
+      rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999;">No sites found</td></tr>`;
       document.getElementById("count").textContent = "0 sites";
       return;
     }
     for (const s of filtered) {
       const tr = document.createElement("tr");
-      const clientNice = formatClient(s.client);
-      const phone = phoneFromSite(s);
-      const mileageTxt = roundTripText(s.mileageFromHQ);
-
+      const mileageTxt = (s.mileageFromHQ ?? "-");
+      const rt = roundTrip(s.mileageFromHQ);
       tr.innerHTML = `
         <td>${s.siteNumber || "-"}</td>
-        <td><button class="link-btn" data-action="view">${s.siteName || "-"}</button></td>
-        <td>${clientNice}</td>
+        <td><a class="linklike" data-action="details">${s.siteName || "-"}</a></td>
+        <td><span class="badge">${ucClient(s.client)}</span></td>
         <td>${s.postcode || "-"}</td>
-        <td>${phone || "-"}</td>
-        <td>${mileageTxt}</td>
-        <td><button class="btn outline btnSmall" data-action="edit">Edit</button></td>
+        <td>${telOf(s) || "-"}</td>
+        <td>
+          <label style="display:inline-flex;align-items:center;gap:6px;">
+            <input type="checkbox" data-action="toggle-active" ${s.active!==false?'checked':''}>
+            <span>${s.active!==false?'Active':'Inactive'}</span>
+          </label>
+        </td>
+        <td>${mileageTxt} mi <span class="muted">(round trip ${rt} mi)</span></td>
+        <td><button class="btn outline" data-action="edit">Edit</button></td>
       `;
-
-      // click handlers
-      tr.querySelector('[data-action="view"]').onclick = () => openView(s);
-      tr.querySelector('[data-action="edit"]').onclick = () => openEdit(s);
-
+      tr.querySelector('[data-action="details"]').onclick = ()=>openDetails(s);
+      tr.querySelector('[data-action="edit"]').onclick = ()=>openEdit(s);
+      tr.querySelector('[data-action="toggle-active"]').onchange = async (ev)=>{
+        const newVal = !!ev.target.checked;
+        const old = s.active!==false;
+        try{
+          s.active = newVal;
+          await saveSiteChanges({ ...s, active:newVal });
+          renderRows(); // may move rows between tabs
+        }catch(e){
+          s.active = old;
+          ev.target.checked = old;
+          alert("Failed to update active status");
+        }
+      };
       rowsEl.appendChild(tr);
     }
     document.getElementById("count").textContent = `${filtered.length} site${filtered.length!==1?"s":""}`;
   }
 
-  // ---------- Details modal ----------
-  function openView(site){
-    viewTitle.textContent = `${site.siteName || "Site"} — ${formatClient(site.client)}`;
-    detailsList.innerHTML = `
-      <dt>Site Number</dt><dd>${site.siteNumber || "-"}</dd>
-      <dt>Client</dt><dd>${formatClient(site.client)}</dd>
-      <dt>Postcode</dt><dd>${site.postcode || "-"}</dd>
-      <dt>Phone</dt><dd>${phoneFromSite(site) || "-"}</dd>
-      <dt>Active</dt><dd>${site.active ? "Yes" : "No"}</dd>
-      <dt>Latitude</dt><dd>${site.lat ?? "-"}</dd>
-      <dt>Longitude</dt><dd>${site.lon ?? "-"}</dd>
-      <dt>Mileage</dt><dd>${roundTripText(site.mileageFromHQ)}</dd>
-      <dt>SharePoint</dt><dd>${site.sharepointURL ? "Available" : "-"}</dd>
-      <dt>Image URL</dt><dd>${site.imageURL || "-"}</dd>
-    `;
-
-    if (site.imageURL) {
-      detailImage.src = site.imageURL;
-      detailImage.style.display = "block";
+  // DETAILS
+  function openDetails(site){
+    detailsTitle.textContent = `${site.siteName || "Site"} (${site.siteNumber || "-"})`;
+    // image
+    detailsImageBox.innerHTML = "";
+    const imgURL = site.imageURL || site.image || "";
+    if (imgURL) {
+      const img = new Image();
+      img.onload = ()=> detailsImageBox.appendChild(img);
+      img.onerror = ()=> detailsImageBox.innerHTML = `<div class="placeholder">Image failed to load</div>`;
+      img.src = imgURL;
     } else {
-      detailImage.removeAttribute("src");
-      detailImage.style.display = "none";
+      detailsImageBox.innerHTML = `<div class="placeholder">No Image Available</div>`;
     }
-
+    // SharePoint
     if (site.sharepointURL) {
-      detailSharepoint.href = site.sharepointURL;
-      detailSharepoint.style.display = "inline-block";
+      detailsSharepoint.style.display = "inline-block";
+      detailsSharepoint.href = site.sharepointURL;
     } else {
-      detailSharepoint.removeAttribute("href");
-      detailSharepoint.style.display = "none";
+      detailsSharepoint.style.display = "none";
     }
-
-    viewModal.classList.add("active");
+    // all fields
+    const preferredOrder = [
+      "client","siteNumber","siteName","postcode","telephone","phone",
+      "email","managerName","managerPhone","managerEmail",
+      "area","areaManager","areaManagerPhone","areaClientExperienceManager","areaClientExperienceManagerPhone",
+      "street","address1","address2","town","county","carPark",
+      "mondayHours","tuesdayHours","wednesdayHours","thursdayHours","fridayHours","saturdayHours","sundayHours",
+      "mileageFromHQ","lat","lon","openDate","closedDate","storeType","sharepointURL","imageURL","lastUpdated","active"
+    ];
+    const niceLabel = (k)=>{
+      const map = {
+        client:"Client", siteNumber:"#", siteName:"Site Name", postcode:"Postcode",
+        telephone:"Telephone", phone:"Phone", email:"Email",
+        managerName:"Manager", managerPhone:"Manager Phone", managerEmail:"Manager Email",
+        area:"Area", areaManager:"Area Manager", areaManagerPhone:"Area Manager Phone",
+        areaClientExperienceManager:"Area Client Experience Manager",
+        areaClientExperienceManagerPhone:"ACEM Phone",
+        street:"Street", address1:"Address 1", address2:"Address 2", town:"Town", county:"County",
+        carPark:"Parking", mondayHours:"Monday Hours", tuesdayHours:"Tuesday Hours", wednesdayHours:"Wednesday Hours",
+        thursdayHours:"Thursday Hours", fridayHours:"Friday Hours", saturdayHours:"Saturday Hours", sundayHours:"Sunday Hours",
+        mileageFromHQ:"Mileage (one way, mi)", lat:"Latitude", lon:"Longitude",
+        openDate:"Open Date", closedDate:"Closed Date", storeType:"Store Type",
+        sharepointURL:"SharePoint URL", imageURL:"Image URL", lastUpdated:"Last Updated", active:"Active"
+      };
+      return map[k] || k.replace(/([A-Z])/g,' $1').replace(/^\w/,c=>c.toUpperCase());
+    };
+    // Build kv table
+    const seen = new Set();
+    const rows = [];
+    const pushRow = (k,v)=>{
+      if (v===undefined || v===null || v==="") return;
+      seen.add(k);
+      rows.push(`<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`);
+    };
+    preferredOrder.forEach(k=>pushRow(k, site[k]));
+    // add the rest
+    Object.keys(site).sort().forEach(k=>{
+      if (seen.has(k)) return;
+      pushRow(k, site[k]);
+    });
+    detailsKV.innerHTML = rows.join("") || `<div class="row"><div class="k">Info</div><div class="v">No data</div></div>`;
+    detailsModal.classList.add("active");
   }
-  closeView.onclick = () => viewModal.classList.remove("active");
+  document.getElementById("closeDetails").onclick = ()=>detailsModal.classList.remove("active");
 
-  // ---------- Edit modal ----------
+  // EDIT
   function openEdit(site){
-    currentEditing = { ...site }; // shallow copy
-    originalSiteNumber = site.siteNumber || null;
-
-    modalTitle.textContent = `Edit ${site.siteName || "Site"}`;
-    editActive.value = String(!!site.active);
-    editNumber.value = site.siteNumber || "";
-    editCategory.value = (site.client || "retail").toLowerCase();
-    editName.value = site.siteName || "";
-    editPostcode.value = site.postcode || "";
-    editPhone.value = phoneFromSite(site) || "";
-    editImageURL.value = site.imageURL || "";
-    editLat.value = site.lat || "";
-    editLon.value = site.lon || "";
-    editMileage.value = site.mileageFromHQ || "";
-    editSharepoint.value = site.sharepointURL || "";
+    currentEditing = structuredClone(site || { client: filterEl.value || "retail", active:true });
+    modalTitle.textContent = site?.siteNumber ? `Edit ${site.siteNumber}` : "Add Site";
+    editClient.value = (currentEditing.client||"retail").toLowerCase();
+    editNumber.value = currentEditing.siteNumber || "";
+    editActive.value = (currentEditing.active!==false) ? "true" : "false";
+    editName.value = currentEditing.siteName || "";
+    editPostcode.value = currentEditing.postcode || "";
+    editPhone.value = telOf(currentEditing) || "";
+    editImageUrl.value = currentEditing.imageURL || currentEditing.image || "";
+    editLat.value = currentEditing.lat ?? "";
+    editLon.value = currentEditing.lon ?? "";
+    editMileage.value = currentEditing.mileageFromHQ ?? "";
+    editSharepoint.value = currentEditing.sharepointURL || "";
 
     editModal.classList.add("active");
-    initMap(site.lat, site.lon);
+    initMap(currentEditing.lat, currentEditing.lon);
   }
-  closeModal.onclick = () => editModal.classList.remove("active");
+  function closeEdit(){ editModal.classList.remove("active"); }
+  closeModalBtn.onclick = closeEdit;
 
-  async function initMap(lat,lon){
-    try{
-      await ensureMapsLoaded();
-      const center={lat:parseFloat(lat)||50.86, lng:parseFloat(lon)||-1.24};
-      map=new google.maps.Map(document.getElementById("map"),{center,zoom:10});
-      marker=new google.maps.Marker({map,position:center,draggable:true});
-      marker.addListener("dragend",()=>{
-        const pos=marker.getPosition();
-        editLat.value=pos.lat().toFixed(6);
-        editLon.value=pos.lng().toFixed(6);
-      });
-    }catch(e){
-      console.warn("Map init skipped (likely API setup):", e);
-    }
-  }
-
-  document.getElementById("btnLocate").onclick=async()=>{
-    try{
-      const pc=editPostcode.value.trim();
-      if(!pc){ alert("Enter a postcode"); return; }
-      const loc=await geocodePostcode(pc);
-      if(map && marker){ map.setCenter(loc); marker.setPosition(loc); }
-      editLat.value=loc.lat.toFixed(6);
-      editLon.value=loc.lng.toFixed(6);
-      const miles=await calcMileage(loc.lat,loc.lng);
-      editMileage.value=miles || "";
-    }catch{
-      alert("Unable to locate postcode");
-    }
+  btnLocate.onclick = async ()=>{
+    const pc = editPostcode.value.trim();
+    if (!pc) return alert("Enter a postcode");
+    const loc = await geocodePostcode(pc);
+    if (!loc) { alert("Unable to locate postcode"); return; }
+    if (map && marker) { map.setCenter(loc); marker.setPosition(loc); }
+    editLat.value = Number(loc.lat).toFixed(6);
+    editLon.value = Number(loc.lng).toFixed(6);
+    const miles = await calcMileage(loc.lat, loc.lng);
+    if (miles!=="") editMileage.value = miles;
   };
 
-  document.getElementById("btnSave").onclick=async()=>{
+  btnSave.onclick = async ()=>{
     try{
-      const cat = editCategory.value;
-      // merge edits back into the object we’ll POST
-      currentEditing.client = cat;
+      const oldNum = currentEditing.siteNumber;
+      currentEditing.client = editClient.value;
+      currentEditing.siteNumber = editNumber.value.trim() || undefined;
       currentEditing.active = (editActive.value === "true");
-      currentEditing.siteNumber = editNumber.value.trim();
       currentEditing.siteName = editName.value.trim();
       currentEditing.postcode = editPostcode.value.trim();
-      currentEditing.imageURL = editImageURL.value.trim() || undefined;
+      // phone normalisation: prefer "telephone"
+      const phone = editPhone.value.trim();
+      if (phone) currentEditing.telephone = phone;
+
+      currentEditing.imageURL = editImageUrl.value.trim() || undefined;
       currentEditing.lat = editLat.value ? parseFloat(editLat.value) : "";
       currentEditing.lon = editLon.value ? parseFloat(editLon.value) : "";
-      currentEditing.mileageFromHQ = editMileage.value || "";
+      currentEditing.mileageFromHQ = editMileage.value ? parseFloat(editMileage.value) : "";
       currentEditing.sharepointURL = editSharepoint.value.trim() || undefined;
 
-      // phone consolidation back to a single key (telephone) for simplicity
-      const ph = editPhone.value.trim();
-      if (ph) currentEditing.telephone = ph;
+      if (!currentEditing.siteName) return alert("Site Name required");
+      if (!currentEditing.postcode) return alert("Postcode required");
 
-      statusEl.textContent="Saving...";
-      const changingNumber = originalSiteNumber && originalSiteNumber !== currentEditing.siteNumber;
-      await saveSiteChanges(currentEditing, changingNumber ? originalSiteNumber : undefined);
-      editModal.classList.remove("active");
+      statusEl.textContent = "Saving...";
 
-      // refresh list
+      // Save via worker (supports renumber via oldSiteNumber)
+      await saveSiteChanges(currentEditing, oldNum && oldNum !== currentEditing.siteNumber ? oldNum : null);
+
+      // Refresh local cache
       await fetchAllSites();
+      closeEdit();
+      statusEl.textContent = "Ready";
     }catch(e){
       console.error(e);
-      alert(e.message || "Save failed");
-      statusEl.textContent="Ready";
+      alert("Save failed");
+      statusEl.textContent = "Ready";
     }
   };
 
-  // ---------- Buttons / Tabs ----------
+  // Events
   filterEl.onchange=renderRows;
   searchEl.oninput=()=>{clearTimeout(window.__srch);window.__srch=setTimeout(renderRows,250);};
-  document.getElementById("btnReload").onclick=fetchAllSites;
-  document.getElementById("btnAdd").onclick=()=>openEdit({client:(filterEl.value==="all"?"retail":filterEl.value), active:true});
+  btnReload.onclick=fetchAllSites;
+  btnAdd.onclick=()=>openEdit({ client: filterEl.value || "retail", active:true });
 
-  tabActiveBtn.onclick = () => {
-    showInactive = false;
-    tabActiveBtn.classList.add("active");
-    tabInactiveBtn.classList.remove("active");
-    renderRows();
-  };
-  tabInactiveBtn.onclick = () => {
-    showInactive = true;
-    tabInactiveBtn.classList.add("active");
-    tabActiveBtn.classList.remove("active");
-    renderRows();
+  tabActiveBtn.onclick = ()=>{ showInactive=false; tabActiveBtn.classList.add("active"); tabInactiveBtn.classList.remove("active"); renderRows(); };
+  tabInactiveBtn.onclick = ()=>{ showInactive=true; tabInactiveBtn.classList.add("active"); tabActiveBtn.classList.remove("active"); renderRows(); };
+
+  // Recalculate (kept stubbed for now — mileage calculation left to your later Maps setup)
+  btnRecalc.onclick = async ()=>{
+    if (!confirm("Recalculate mileage for the current selection?")) return;
+    alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
   };
 
-  // ------- Recalculate button -------
-  document.getElementById("btnRecalc").onclick=async()=>{
-    if(!confirm("Recalculate mileage for the current selection?")) return;
-    try{
-      const filtered=getFiltered();
-      let updated=0;
-      for(const s of filtered){
-        const lat=Number(s.lat),lon=Number(s.lon);
-        if(Number.isFinite(lat)&&Number.isFinite(lon)){
-          const miles=await calcMileage(lat,lon);
-          if(miles){
-            s.mileageFromHQ=miles;
-            await saveSiteChanges({ ...s, mileageFromHQ:miles });
-            updated++;
-          }
-        }
-      }
-      alert(`Updated ${updated} site(s).`);
-      renderRows();
-    }catch(e){
-      console.warn("Recalc partial:", e);
-    }
-  };
-
-  // ---------- Init ----------
+  // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
   })();
