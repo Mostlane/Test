@@ -21,34 +21,150 @@
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text)
     }
-    .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
-    .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+    .wrap{
+      max-width:1200px;
+      margin:32px auto;
+      padding:24px;
+      background:var(--panel);
+      border-radius:12px;
+      box-shadow:0 8px 24px rgba(0,0,0,.08)
+    }
+    .head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:16px;
+      flex-wrap:wrap
+    }
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
-    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-    select,input[type="text"]{padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px}
-    .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center
+    }
+    select,input[type="text"]{
+      padding:10px 12px;
+      border:1px solid #cfd6e4;
+      border-radius:8px;
+      background:#fff;
+      font-size:14px;
+      min-width:180px
+    }
+    .btn{
+      background:var(--ml-blue);
+      color:#fff;
+      border:none;
+      border-radius:8px;
+      padding:10px 14px;
+      font-weight:600;
+      cursor:pointer
+    }
     .btn:disabled{opacity:.6;cursor:not-allowed}
-    .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue)}
+    .btn.outline{
+      background:#fff;
+      color:var(--ml-blue);
+      border:1px solid var(--ml-blue)
+    }
     .tabs{display:flex;gap:8px}
-    .tab{padding:8px 12px;border-radius:999px;border:1px solid #cfd6e4;background:#fff;cursor:pointer;font-weight:600}
-    .tab.active{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue)}
+    .tab{
+      padding:8px 12px;
+      border-radius:999px;
+      border:1px solid #cfd6e4;
+      background:#fff;
+      cursor:pointer;
+      font-weight:600
+    }
+    .tab.active{
+      background:var(--ml-blue);
+      color:#fff;
+      border-color:var(--ml-blue)
+    }
 
-    table{width:100%;border-collapse:separate;border-spacing:0 8px}
-    thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:0 10px}
+    /* Table + scroll wrapper */
+    .table-wrap{
+      width:100%;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0 8px
+    }
+    thead th{
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.06em;
+      color:var(--muted);
+      text-align:left;
+      padding:0 10px
+    }
     tbody tr{background:#fff}
-    tbody td{padding:12px 10px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;vertical-align:middle}
-    tbody tr td:first-child{border-left:1px solid #e5e7eb;border-top-left-radius:8px;border-bottom-left-radius:8px}
-    tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
+    tbody td{
+      padding:12px 10px;
+      border-top:1px solid #e5e7eb;
+      border-bottom:1px solid #e5e7eb;
+      vertical-align:middle
+    }
+    tbody tr td:first-child{
+      border-left:1px solid #e5e7eb;
+      border-top-left-radius:8px;
+      border-bottom-left-radius:8px
+    }
+    tbody tr td:last-child{
+      border-right:1px solid #e5e7eb;
+      border-top-right-radius:8px;
+      border-bottom-right-radius:8px
+    }
     .muted{color:var(--muted)}
-    .linklike{color:var(--ml-blue);font-weight:700;cursor:pointer;text-decoration:none}
-    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
+    .linklike{
+      color:var(--ml-blue);
+      font-weight:700;
+      cursor:pointer;
+      text-decoration:none
+    }
+    .foot{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:12px;
+      color:var(--muted);
+      font-size:13px
+    }
 
     /* Modal base */
-    .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:10}
+    .modal{
+      position:fixed;
+      top:0;left:0;
+      width:100%;height:100%;
+      background:rgba(0,0,0,.5);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:10
+    }
     .modal.active{display:flex}
-    .modal-content{background:#fff;padding:20px;border-radius:12px;max-width:980px;width:95%;max-height:90%;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+    .modal-content{
+      background:#fff;
+      padding:20px;
+      border-radius:12px;
+      max-width:980px;
+      width:95%;
+      max-height:90%;
+      overflow:auto;
+      box-shadow:0 6px 20px rgba(0,0,0,.25)
+    }
     .modal-content h3{margin-top:0}
-    .close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#555}
+    .close-btn{
+      float:right;
+      background:none;
+      border:none;
+      font-size:18px;
+      cursor:pointer;
+      color:#555
+    }
 
     /* Details layout */
     .details-grid{
@@ -61,26 +177,133 @@
     }
     .image-box{
       width:300px;height:300px;max-width:100%;
-      border:1px solid #e5e7eb;border-radius:12px;background:#f3f4f6;
-      display:flex;align-items:center;justify-content:center;overflow:hidden
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      background:#f3f4f6;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden
     }
     .image-box img{width:100%;height:100%;object-fit:cover}
     .image-box .placeholder{color:#6b7280;font-size:14px}
 
-    .kv{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
-    .kv .row{display:grid;grid-template-columns:220px 1fr;border-top:1px solid #e5e7eb}
+    .kv{
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      overflow:hidden;
+      background:#fff
+    }
+    .kv .row{
+      display:grid;
+      grid-template-columns:220px 1fr;
+      border-top:1px solid #e5e7eb
+    }
     .kv .row:first-child{border-top:none}
-    .kv .k{background:#f9fafb;padding:10px 12px;font-weight:600}
-    .kv .v{padding:10px 12px;word-break:break-word}
+    .kv .k{
+      background:#f9fafb;
+      padding:10px 12px;
+      font-weight:600
+    }
+    .kv .v{
+      padding:10px 12px;
+      word-break:break-word
+    }
 
     .row-actions{display:flex;gap:8px;margin-top:10px}
-    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700}
+    .badge{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      background:#eef2ff;
+      color:#3730a3;
+      font-size:12px;
+      font-weight:700
+    }
 
     /* Edit-specific bits */
-    .map{width:100%;height:250px;margin:10px 0;border-radius:8px;border:1px solid #e5e7eb}
-    label{font-size:13px;font-weight:600;display:block;margin-top:10px}
-    input,select,textarea{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px}
-    .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .map{
+      width:100%;
+      height:250px;
+      margin:10px 0;
+      border-radius:8px;
+      border:1px solid #e5e7eb
+    }
+    label{
+      font-size:13px;
+      font-weight:600;
+      display:block;
+      margin-top:10px
+    }
+    input,select,textarea{
+      width:100%;
+      box-sizing:border-box;
+      padding:10px 12px;
+      border:1px solid #cfd6e4;
+      border-radius:8px;
+      background:#fff;
+      font-size:14px
+    }
+    .row2{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px
+    }
+
+    /* 📱 Mobile-friendly tweaks */
+    @media (max-width: 768px){
+      .wrap{
+        margin:12px auto;
+        padding:12px;
+      }
+      .head{
+        align-items:flex-start;
+      }
+      .controls{
+        flex-direction:column;
+        align-items:stretch;
+      }
+      .controls > *{
+        width:100%;
+      }
+      .tabs{
+        width:100%;
+        justify-content:space-between;
+      }
+      select,
+      input[type="text"],
+      .btn{
+        width:100%;
+      }
+      table{
+        font-size:12px;
+      }
+      thead th,
+      tbody td{
+        padding:8px 6px;
+        white-space:nowrap;
+      }
+      .modal-content{
+        width:100%;
+        height:100%;
+        max-width:none;
+        max-height:none;
+        border-radius:0;
+        margin:0;
+        box-sizing:border-box;
+      }
+      .image-box{
+        width:100%;
+        height:auto;
+        aspect-ratio:1/1;
+      }
+      .kv .row{
+        grid-template-columns:140px 1fr;
+      }
+      .row2{
+        grid-template-columns:1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -108,21 +331,24 @@
       </div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Site Name</th>
-          <th>Client</th>
-          <th>Postcode</th>
-          <th>Phone</th>
-          <th>Active</th>
-          <th>Mileage</th>
-          <th>Edit</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
+    <!-- 📱 Scrollable table wrapper -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Site Name</th>
+            <th>Client</th>
+            <th>Postcode</th>
+            <th>Phone</th>
+            <th>Active</th>
+            <th>Mileage</th>
+            <th>Edit</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
 
     <div class="foot">
       <div id="status" class="muted">Ready</div>
@@ -197,17 +423,7 @@
 
       <label>Image URL (square image works best)</label>
       <input id="editImageUrl" placeholder="https://.../store.jpg">
-<!-- Image Upload (auto-push to GitHub) -->
-<div class="row2">
-  <div>
-    <label>Upload New Image</label>
-    <input type="file" id="uploadImage" accept="image/*">
-  </div>
-  <div style="display:flex;align-items:end;">
-    <button class="btn outline" id="btnUploadImage" style="width:100%;">Upload to GitHub</button>
-  </div>
-</div>
-<div id="uploadStatus" class="muted" style="margin-top:6px;font-size:13px;"></div>
+
       <div class="row2">
         <div>
           <label>Latitude</label>
@@ -229,16 +445,7 @@
           <input id="editSharepoint" placeholder="https://mostlane.sharepoint.com/...">
         </div>
       </div>
-      <label>Upload Image</label>
-      <div class="row2">
-        <div>
-          <input type="file" id="uploadImage" accept="image/*">
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <button class="btn outline" id="btnUploadImage" type="button">Upload</button>
-          <span id="uploadStatus" class="muted">No file chosen</span>
-        </div>
-      </div>
+
       <div id="map" class="map"></div>
 
       <div class="row-actions">
@@ -497,7 +704,9 @@
     const pushRow = (k,v)=>{
       if (v===undefined || v===null || v==="") return;
       seen.add(k);
-      rows.push(`<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`);
+      rows.push(
+        `<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`
+      );
     };
     preferredOrder.forEach(k=>pushRow(k, site[k]));
     // add the rest
@@ -505,7 +714,8 @@
       if (seen.has(k)) return;
       pushRow(k, site[k]);
     });
-    detailsKV.innerHTML = rows.join("") || `<div class="row"><div class="k">Info</div><div class="v">No data</div></div>`;
+    detailsKV.innerHTML = rows.join("") ||
+      `<div class="row"><div class="k">Info</div><div class="v">No data</div></div>`;
     detailsModal.classList.add("active");
   }
   document.getElementById("closeDetails").onclick = ()=>detailsModal.classList.remove("active");
@@ -587,99 +797,25 @@
   btnReload.onclick=fetchAllSites;
   btnAdd.onclick=()=>openEdit({ client: filterEl.value || "retail", active:true });
 
-  tabActiveBtn.onclick = ()=>{ showInactive=false; tabActiveBtn.classList.add("active"); tabInactiveBtn.classList.remove("active"); renderRows(); };
-  tabInactiveBtn.onclick = ()=>{ showInactive=true; tabInactiveBtn.classList.add("active"); tabActiveBtn.classList.remove("active"); renderRows(); };
+  tabActiveBtn.onclick = ()=>{
+    showInactive=false;
+    tabActiveBtn.classList.add("active");
+    tabInactiveBtn.classList.remove("active");
+    renderRows();
+  };
+  tabInactiveBtn.onclick = ()=>{
+    showInactive=true;
+    tabInactiveBtn.classList.add("active");
+    tabActiveBtn.classList.remove("active");
+    renderRows();
+  };
 
-  // Recalculate (kept stubbed for now — mileage calculation left to your later Maps setup)
+  // Recalculate (stub for now)
   btnRecalc.onclick = async ()=>{
     if (!confirm("Recalculate mileage for the current selection?")) return;
     alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
   };
-  // --- Upload image to GitHub via Worker (FormData + client-side compress) ---
-  const uploadInput = document.getElementById("uploadImage");
-  const uploadBtn = document.getElementById("btnUploadImage");
-  const uploadStatus = document.getElementById("uploadStatus");
 
-  uploadBtn.onclick = async () => {
-    try {
-      const originalFile = uploadInput.files[0];
-      if (!originalFile) return alert("Please choose an image first");
-      if (!currentEditing?.siteNumber) return alert("Please enter a site number before uploading");
-
-      uploadStatus.textContent = "Uploading...";
-
-      // 🔹 Compress large images before upload (Cloudflare body size limit)
-      const file = await maybeCompressImage(originalFile);
-
-      const form = new FormData();
-      form.append("siteNumber", currentEditing.siteNumber);
-      form.append("client", (currentEditing.client || "retail").toLowerCase());
-      form.append("file", file);
-
-      const res = await fetch(`${workerBase}/upload-image`, {
-        method: "POST",
-        body: form
-      });
-
-      // If Cloudflare/GitHub return HTML (e.g. "Request body too large"),
-      // this will throw. We catch it and show a nicer message.
-      let j;
-      try {
-        j = await res.json();
-      } catch (parseErr) {
-        throw new Error(
-          "Upload failed (likely image too large / Cloudflare limit). " +
-          "Try a smaller image."
-        );
-      }
-
-      if (!res.ok || !j.success) {
-        throw new Error(j.error || "Upload failed");
-      }
-
-      editImageUrl.value = j.url;
-      currentEditing.imageURL = j.url;
-      uploadStatus.textContent = "✅ Uploaded successfully";
-    } catch (err) {
-      console.error(err);
-      uploadStatus.textContent = "❌ Upload failed: " + err.message;
-    }
-  };
-
-  // Compress image on the client if it's large
-  async function maybeCompressImage(file) {
-    // Only touch images
-    if (!file.type.startsWith("image/")) return file;
-
-    // If already small (< 700 KB), just send as-is
-    if (file.size <= 700 * 1024) return file;
-
-    // Use canvas + createImageBitmap to shrink & convert to WebP
-    const bitmap = await createImageBitmap(file);
-    const maxWidth = 1000; // px
-    const scale = Math.min(maxWidth / bitmap.width, 1); // only shrink, never enlarge
-
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("Compression failed"))),
-        "image/webp",
-        0.8
-      );
-    });
-
-    // Wrap the compressed blob back into a File so FormData looks normal
-    const newName =
-      (file.name.replace(/\.[^.]+$/, "") || "image") + ".webp";
-
-    return new File([blob], newName, { type: "image/webp" });
-  }
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
