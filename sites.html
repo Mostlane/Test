@@ -229,7 +229,16 @@
           <input id="editSharepoint" placeholder="https://mostlane.sharepoint.com/...">
         </div>
       </div>
-
+      <label>Upload Image</label>
+      <div class="row2">
+        <div>
+          <input type="file" id="uploadImage" accept="image/*">
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn outline" id="btnUploadImage" type="button">Upload</button>
+          <span id="uploadStatus" class="muted">No file chosen</span>
+        </div>
+      </div>
       <div id="map" class="map"></div>
 
       <div class="row-actions">
