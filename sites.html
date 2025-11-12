@@ -21,150 +21,133 @@
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text)
     }
-    .wrap{
-      max-width:1200px;
-      margin:32px auto;
-      padding:24px;
-      background:var(--panel);
-      border-radius:12px;
-      box-shadow:0 8px 24px rgba(0,0,0,.08)
-    }
-    .head{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      margin-bottom:16px;
-      flex-wrap:wrap
-    }
+    .wrap{max-width:1200px;margin:32px auto;padding:24px;background:var(--panel);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
+    .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
     .title{font-size:22px;font-weight:700;letter-spacing:.2px}
-    .controls{
+    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    select,input[type="text"]{padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px;min-width:180px}
+    .btn{background:var(--ml-blue);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue)}
+    .tabs{display:flex;gap:8px}
+    .tab{padding:8px 12px;border-radius:999px;border:1px solid #cfd6e4;background:#fff;cursor:pointer;font-weight:600}
+    .tab.active{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue)}
+
+    table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:0 10px}
+    tbody tr{background:#fff}
+    tbody td{padding:12px 10px;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    tbody tr td:first-child{border-left:1px solid #e5e7eb;border-top-left-radius:8px;border-bottom-left-radius:8px}
+    tbody tr td:last-child{border-right:1px solid #e5e7eb;border-top-right-radius:8px;border-bottom-right-radius:8px}
+    .muted{color:var(--muted)}
+    .linklike{color:var(--ml-blue);font-weight:700;cursor:pointer;text-decoration:none}
+    .foot{display:flex;justify-content:space-between;align-items:center;margin-top:12px;color:var(--muted);font-size:13px}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700}
+
+    /* MOBILE CARD LAYOUT */
+    .cards-list{
+      display:none;
+      margin-top:8px;
+      display:none;
+      gap:10px;
+      flex-direction:column;
+    }
+    .site-card{
+      background:#fff;
+      border-radius:12px;
+      padding:12px 14px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.06);
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .card-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:8px;
+    }
+    .card-title{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .card-name{
+      font-weight:700;
+      color:var(--ml-blue);
+      cursor:pointer;
+    }
+    .card-num{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .card-row{
+      font-size:13px;
+      color:var(--text);
       display:flex;
       flex-wrap:wrap;
-      gap:10px;
-      align-items:center
+      gap:8px;
     }
-    select,input[type="text"]{
-      padding:10px 12px;
-      border:1px solid #cfd6e4;
-      border-radius:8px;
-      background:#fff;
-      font-size:14px;
-      min-width:180px
+    .card-row span{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
     }
-    .btn{
-      background:var(--ml-blue);
-      color:#fff;
-      border:none;
-      border-radius:8px;
-      padding:10px 14px;
+    .card-row .label{
       font-weight:600;
-      cursor:pointer
-    }
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-    .btn.outline{
-      background:#fff;
-      color:var(--ml-blue);
-      border:1px solid var(--ml-blue)
-    }
-    .tabs{display:flex;gap:8px}
-    .tab{
-      padding:8px 12px;
-      border-radius:999px;
-      border:1px solid #cfd6e4;
-      background:#fff;
-      cursor:pointer;
-      font-weight:600
-    }
-    .tab.active{
-      background:var(--ml-blue);
-      color:#fff;
-      border-color:var(--ml-blue)
-    }
-
-    /* Table + scroll wrapper */
-    .table-wrap{
-      width:100%;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-    }
-    table{
-      width:100%;
-      border-collapse:separate;
-      border-spacing:0 8px
-    }
-    thead th{
-      font-size:12px;
-      text-transform:uppercase;
-      letter-spacing:.06em;
       color:var(--muted);
-      text-align:left;
-      padding:0 10px
     }
-    tbody tr{background:#fff}
-    tbody td{
-      padding:12px 10px;
-      border-top:1px solid #e5e7eb;
-      border-bottom:1px solid #e5e7eb;
-      vertical-align:middle
-    }
-    tbody tr td:first-child{
-      border-left:1px solid #e5e7eb;
-      border-top-left-radius:8px;
-      border-bottom-left-radius:8px
-    }
-    tbody tr td:last-child{
-      border-right:1px solid #e5e7eb;
-      border-top-right-radius:8px;
-      border-bottom-right-radius:8px
-    }
-    .muted{color:var(--muted)}
-    .linklike{
-      color:var(--ml-blue);
-      font-weight:700;
-      cursor:pointer;
-      text-decoration:none
-    }
-    .foot{
+    .card-footer{
       display:flex;
       justify-content:space-between;
       align-items:center;
-      margin-top:12px;
+      margin-top:6px;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .card-footer-left{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:12px;
       color:var(--muted);
-      font-size:13px
+    }
+    .card-footer-right{
+      display:flex;
+      gap:6px;
+    }
+    .btn-small{
+      padding:8px 10px;
+      font-size:13px;
+    }
+
+    .card-toggle{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-size:12px;
+    }
+    .card-toggle input{
+      transform:scale(1.15);
+    }
+
+    /* Responsive behaviour */
+    @media (max-width: 820px){
+      table{display:none;}
+      .cards-list{display:flex;}
+      .wrap{margin:16px auto;padding:16px;}
+      .head{align-items:flex-start;}
+    }
+    @media (min-width: 821px){
+      .cards-list{display:none;}
     }
 
     /* Modal base */
-    .modal{
-      position:fixed;
-      top:0;left:0;
-      width:100%;height:100%;
-      background:rgba(0,0,0,.5);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:10
-    }
+    .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:10}
     .modal.active{display:flex}
-    .modal-content{
-      background:#fff;
-      padding:20px;
-      border-radius:12px;
-      max-width:980px;
-      width:95%;
-      max-height:90%;
-      overflow:auto;
-      box-shadow:0 6px 20px rgba(0,0,0,.25)
-    }
+    .modal-content{background:#fff;padding:20px;border-radius:12px;max-width:980px;width:95%;max-height:90%;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)}
     .modal-content h3{margin-top:0}
-    .close-btn{
-      float:right;
-      background:none;
-      border:none;
-      font-size:18px;
-      cursor:pointer;
-      color:#555
-    }
+    .close-btn{float:right;background:none;border:none;font-size:18px;cursor:pointer;color:#555}
 
     /* Details layout */
     .details-grid{
@@ -177,133 +160,29 @@
     }
     .image-box{
       width:300px;height:300px;max-width:100%;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      background:#f3f4f6;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden
+      border:1px solid #e5e7eb;border-radius:12px;background:#f3f4f6;
+      display:flex;align-items:center;justify-content:center;overflow:hidden
     }
     .image-box img{width:100%;height:100%;object-fit:cover}
     .image-box .placeholder{color:#6b7280;font-size:14px}
 
-    .kv{
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      overflow:hidden;
-      background:#fff
-    }
-    .kv .row{
-      display:grid;
-      grid-template-columns:220px 1fr;
-      border-top:1px solid #e5e7eb
-    }
+    .kv{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#fff}
+    .kv .row{display:grid;grid-template-columns:220px 1fr;border-top:1px solid #e5e7eb}
     .kv .row:first-child{border-top:none}
-    .kv .k{
-      background:#f9fafb;
-      padding:10px 12px;
-      font-weight:600
-    }
-    .kv .v{
-      padding:10px 12px;
-      word-break:break-word
-    }
+    .kv .k{background:#f9fafb;padding:10px 12px;font-weight:600}
+    .kv .v{padding:10px 12px;word-break:break-word}
 
     .row-actions{display:flex;gap:8px;margin-top:10px}
-    .badge{
-      display:inline-block;
-      padding:2px 8px;
-      border-radius:999px;
-      background:#eef2ff;
-      color:#3730a3;
-      font-size:12px;
-      font-weight:700
-    }
 
     /* Edit-specific bits */
-    .map{
-      width:100%;
-      height:250px;
-      margin:10px 0;
-      border-radius:8px;
-      border:1px solid #e5e7eb
+    .map{width:100%;height:250px;margin:10px 0;border-radius:8px;border:1px solid #e5e7eb}
+    label{font-size:13px;font-weight:600;display:block;margin-top:10px}
+    input,select,textarea{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cfd6e4;border-radius:8px;background:#fff;font-size:14px}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width: 700px){
+      .row2{grid-template-columns:1fr;}
     }
-    label{
-      font-size:13px;
-      font-weight:600;
-      display:block;
-      margin-top:10px
-    }
-    input,select,textarea{
-      width:100%;
-      box-sizing:border-box;
-      padding:10px 12px;
-      border:1px solid #cfd6e4;
-      border-radius:8px;
-      background:#fff;
-      font-size:14px
-    }
-    .row2{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:12px
-    }
-
-    /* 📱 Mobile-friendly tweaks */
-    @media (max-width: 768px){
-      .wrap{
-        margin:12px auto;
-        padding:12px;
-      }
-      .head{
-        align-items:flex-start;
-      }
-      .controls{
-        flex-direction:column;
-        align-items:stretch;
-      }
-      .controls > *{
-        width:100%;
-      }
-      .tabs{
-        width:100%;
-        justify-content:space-between;
-      }
-      select,
-      input[type="text"],
-      .btn{
-        width:100%;
-      }
-      table{
-        font-size:12px;
-      }
-      thead th,
-      tbody td{
-        padding:8px 6px;
-        white-space:nowrap;
-      }
-      .modal-content{
-        width:100%;
-        height:100%;
-        max-width:none;
-        max-height:none;
-        border-radius:0;
-        margin:0;
-        box-sizing:border-box;
-      }
-      .image-box{
-        width:100%;
-        height:auto;
-        aspect-ratio:1/1;
-      }
-      .kv .row{
-        grid-template-columns:140px 1fr;
-      }
-      .row2{
-        grid-template-columns:1fr;
-      }
-    }
+    #uploadStatus{font-size:12px;color:var(--muted);margin-top:4px}
   </style>
 </head>
 <body>
@@ -331,24 +210,25 @@
       </div>
     </div>
 
-    <!-- 📱 Scrollable table wrapper -->
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Site Name</th>
-            <th>Client</th>
-            <th>Postcode</th>
-            <th>Phone</th>
-            <th>Active</th>
-            <th>Mileage</th>
-            <th>Edit</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
+    <!-- Desktop table -->
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Site Name</th>
+          <th>Client</th>
+          <th>Postcode</th>
+          <th>Phone</th>
+          <th>Active</th>
+          <th>Mileage</th>
+          <th>Edit</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <!-- Mobile cards -->
+    <div id="cards" class="cards-list"></div>
 
     <div class="foot">
       <div id="status" class="muted">Ready</div>
@@ -424,6 +304,12 @@
       <label>Image URL (square image works best)</label>
       <input id="editImageUrl" placeholder="https://.../store.jpg">
 
+      <!-- Optional upload section (already wired in your JS) -->
+      <label>Upload Store Image</label>
+      <input id="uploadImage" type="file" accept="image/*">
+      <button class="btn outline" id="btnUploadImage" type="button">Upload</button>
+      <div id="uploadStatus"></div>
+
       <div class="row2">
         <div>
           <label>Latitude</label>
@@ -449,18 +335,19 @@
       <div id="map" class="map"></div>
 
       <div class="row-actions">
-        <button class="btn" id="btnLocate">Locate Postcode</button>
-        <button class="btn" id="btnSave">Save Changes</button>
+        <button class="btn" id="btnLocate" type="button">Locate Postcode</button>
+        <button class="btn" id="btnSave" type="button">Save Changes</button>
       </div>
     </div>
   </div>
 
   <script>
   const workerBase = "https://mostlane-sites.jamie-def.workers.dev";
-  const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4"; // you’ll fix auth later
+  const GOOGLE_MAPS_KEY = "AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4"; // key usage still stubbed
   const HQ_POSTCODE = "PO15 5RQ";
 
   const rowsEl = document.getElementById("rows");
+  const cardsEl = document.getElementById("cards");
   const statusEl = document.getElementById("status");
   const filterEl = document.getElementById("filterCategory");
   const searchEl = document.getElementById("searchInput");
@@ -496,11 +383,15 @@
   const btnAdd = document.getElementById("btnAdd");
   const btnRecalc = document.getElementById("btnRecalc");
 
+  const uploadInput = document.getElementById("uploadImage");
+  const uploadBtn = document.getElementById("btnUploadImage");
+  const uploadStatus = document.getElementById("uploadStatus");
+
   let ALL_SITES = [];
   let currentEditing = null;
   let showInactive = false;
 
-  // Maps bits (no-op if key auth not ready)
+  // Maps bits (still optional)
   let map, marker;
   function ensureMapsLoaded() {
     return new Promise((res)=>{
@@ -541,7 +432,7 @@
     }
   }
   async function calcMileage(lat,lon){
-    // leave as blank if Distance Matrix isn’t set up
+    // stub – you’ll wire Distance Matrix later
     return "";
   }
 
@@ -604,18 +495,38 @@
     return list;
   }
 
+  async function handleToggleActive(site, inputEl){
+    const newVal = !!inputEl.checked;
+    const old = site.active!==false;
+    try{
+      site.active = newVal;
+      await saveSiteChanges({ ...site, active:newVal });
+      renderRows(); // may move between tabs
+    }catch(e){
+      console.error(e);
+      site.active = old;
+      inputEl.checked = old;
+      alert("Failed to update active status");
+    }
+  }
+
   function renderRows() {
     const filtered = getFiltered();
     rowsEl.innerHTML = "";
+    cardsEl.innerHTML = "";
+
     if (!filtered.length) {
       rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999;">No sites found</td></tr>`;
       document.getElementById("count").textContent = "0 sites";
       return;
     }
+
     for (const s of filtered) {
-      const tr = document.createElement("tr");
       const mileageTxt = (s.mileageFromHQ ?? "-");
       const rt = roundTrip(s.mileageFromHQ);
+
+      // TABLE ROW (desktop)
+      const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${s.siteNumber || "-"}</td>
         <td><a class="linklike" data-action="details">${s.siteName || "-"}</a></td>
@@ -633,21 +544,54 @@
       `;
       tr.querySelector('[data-action="details"]').onclick = ()=>openDetails(s);
       tr.querySelector('[data-action="edit"]').onclick = ()=>openEdit(s);
-      tr.querySelector('[data-action="toggle-active"]').onchange = async (ev)=>{
-        const newVal = !!ev.target.checked;
-        const old = s.active!==false;
-        try{
-          s.active = newVal;
-          await saveSiteChanges({ ...s, active:newVal });
-          renderRows(); // may move rows between tabs
-        }catch(e){
-          s.active = old;
-          ev.target.checked = old;
-          alert("Failed to update active status");
-        }
-      };
+      tr.querySelector('[data-action="toggle-active"]').onchange = (ev)=>handleToggleActive(s, ev.target);
       rowsEl.appendChild(tr);
+
+      // CARD (mobile)
+      const card = document.createElement("div");
+      card.className = "site-card";
+      card.innerHTML = `
+        <div class="card-header">
+          <div class="card-title">
+            <span class="card-name" data-action="details">${s.siteName || "-"}</span>
+            <span class="card-num">#${s.siteNumber || "-"}</span>
+          </div>
+          <span class="badge">${ucClient(s.client)}</span>
+        </div>
+        <div class="card-row">
+          <span><span class="label">Postcode:</span> ${s.postcode || "-"}</span>
+          <span><span class="label">Phone:</span> ${telOf(s) || "-"}</span>
+        </div>
+        <div class="card-row">
+          <span class="card-toggle">
+            <input type="checkbox" data-action="toggle-active" ${s.active!==false?'checked':''}>
+            <span>${s.active!==false?'Active':'Inactive'}</span>
+          </span>
+        </div>
+        <div class="card-footer">
+          <div class="card-footer-left">
+            <span>${mileageTxt} mi</span>
+            <span class="muted">(RT ${rt} mi)</span>
+          </div>
+          <div class="card-footer-right">
+            <button class="btn outline btn-small" data-action="edit">Edit</button>
+            <button class="btn btn-small" data-action="view">View</button>
+          </div>
+        </div>
+      `;
+      const cDetails = card.querySelector('[data-action="details"]');
+      const cEdit = card.querySelector('[data-action="edit"]');
+      const cView = card.querySelector('[data-action="view"]');
+      const cToggle = card.querySelector('[data-action="toggle-active"]');
+
+      cDetails.onclick = ()=>openDetails(s);
+      cView.onclick = ()=>openDetails(s);
+      cEdit.onclick = ()=>openEdit(s);
+      cToggle.onchange = (ev)=>handleToggleActive(s, ev.target);
+
+      cardsEl.appendChild(card);
     }
+
     document.getElementById("count").textContent = `${filtered.length} site${filtered.length!==1?"s":""}`;
   }
 
@@ -698,27 +642,22 @@
       };
       return map[k] || k.replace(/([A-Z])/g,' $1').replace(/^\w/,c=>c.toUpperCase());
     };
-    // Build kv table
     const seen = new Set();
     const rows = [];
     const pushRow = (k,v)=>{
       if (v===undefined || v===null || v==="") return;
       seen.add(k);
-      rows.push(
-        `<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`
-      );
+      rows.push(`<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`);
     };
     preferredOrder.forEach(k=>pushRow(k, site[k]));
-    // add the rest
     Object.keys(site).sort().forEach(k=>{
       if (seen.has(k)) return;
       pushRow(k, site[k]);
     });
-    detailsKV.innerHTML = rows.join("") ||
-      `<div class="row"><div class="k">Info</div><div class="v">No data</div></div>`;
+    detailsKV.innerHTML = rows.join("") || `<div class="row"><div class="k">Info</div><div class="v">No data</div></div>`;
     detailsModal.classList.add("active");
   }
-  document.getElementById("closeDetails").onclick = ()=>detailsModal.classList.remove("active");
+  closeDetailsBtn.onclick = ()=>detailsModal.classList.remove("active");
 
   // EDIT
   function openEdit(site){
@@ -735,6 +674,7 @@
     editLon.value = currentEditing.lon ?? "";
     editMileage.value = currentEditing.mileageFromHQ ?? "";
     editSharepoint.value = currentEditing.sharepointURL || "";
+    uploadStatus.textContent = "";
 
     editModal.classList.add("active");
     initMap(currentEditing.lat, currentEditing.lon);
@@ -762,10 +702,8 @@
       currentEditing.active = (editActive.value === "true");
       currentEditing.siteName = editName.value.trim();
       currentEditing.postcode = editPostcode.value.trim();
-      // phone normalisation: prefer "telephone"
       const phone = editPhone.value.trim();
       if (phone) currentEditing.telephone = phone;
-
       currentEditing.imageURL = editImageUrl.value.trim() || undefined;
       currentEditing.lat = editLat.value ? parseFloat(editLat.value) : "";
       currentEditing.lon = editLon.value ? parseFloat(editLon.value) : "";
@@ -776,11 +714,7 @@
       if (!currentEditing.postcode) return alert("Postcode required");
 
       statusEl.textContent = "Saving...";
-
-      // Save via worker (supports renumber via oldSiteNumber)
       await saveSiteChanges(currentEditing, oldNum && oldNum !== currentEditing.siteNumber ? oldNum : null);
-
-      // Refresh local cache
       await fetchAllSites();
       closeEdit();
       statusEl.textContent = "Ready";
@@ -791,26 +725,53 @@
     }
   };
 
+  // Upload image via Worker (FormData)
+  if (uploadBtn) {
+    uploadBtn.onclick = async () => {
+      try {
+        const file = uploadInput.files[0];
+        if (!file) return alert("Please choose an image first");
+        if (!currentEditing?.siteNumber) return alert("Please enter a site number before uploading");
+
+        uploadStatus.textContent = "Uploading...";
+
+        const form = new FormData();
+        form.append("siteNumber", currentEditing.siteNumber);
+        form.append("client", (currentEditing.client || "retail").toLowerCase());
+        form.append("file", file);
+
+        const res = await fetch(`${workerBase}/upload-image`, {
+          method: "POST",
+          body: form
+        });
+
+        const text = await res.text();
+        let j;
+        try { j = JSON.parse(text); } catch(e) {
+          throw new Error(text.slice(0,120));
+        }
+
+        if (!res.ok || !j.success) throw new Error(j.error || "Upload failed");
+
+        editImageUrl.value = j.url;
+        currentEditing.imageURL = j.url;
+        uploadStatus.textContent = "✅ Uploaded successfully";
+      } catch (err) {
+        console.error(err);
+        uploadStatus.textContent = "❌ Upload failed: " + err.message;
+      }
+    };
+  }
+
   // Events
   filterEl.onchange=renderRows;
   searchEl.oninput=()=>{clearTimeout(window.__srch);window.__srch=setTimeout(renderRows,250);};
   btnReload.onclick=fetchAllSites;
   btnAdd.onclick=()=>openEdit({ client: filterEl.value || "retail", active:true });
 
-  tabActiveBtn.onclick = ()=>{
-    showInactive=false;
-    tabActiveBtn.classList.add("active");
-    tabInactiveBtn.classList.remove("active");
-    renderRows();
-  };
-  tabInactiveBtn.onclick = ()=>{
-    showInactive=true;
-    tabInactiveBtn.classList.add("active");
-    tabActiveBtn.classList.remove("active");
-    renderRows();
-  };
+  tabActiveBtn.onclick = ()=>{ showInactive=false; tabActiveBtn.classList.add("active"); tabInactiveBtn.classList.remove("active"); renderRows(); };
+  tabInactiveBtn.onclick = ()=>{ showInactive=true; tabInactiveBtn.classList.add("active"); tabActiveBtn.classList.remove("active"); renderRows(); };
 
-  // Recalculate (stub for now)
   btnRecalc.onclick = async ()=>{
     if (!confirm("Recalculate mileage for the current selection?")) return;
     alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
