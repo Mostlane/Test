@@ -595,18 +595,21 @@
     if (!confirm("Recalculate mileage for the current selection?")) return;
     alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
   };
-  // --- Upload image to GitHub via Worker (FormData stream version) ---
+  // --- Upload image to GitHub via Worker (FormData + client-side compress) ---
   const uploadInput = document.getElementById("uploadImage");
   const uploadBtn = document.getElementById("btnUploadImage");
   const uploadStatus = document.getElementById("uploadStatus");
 
   uploadBtn.onclick = async () => {
     try {
-      const file = uploadInput.files[0];
-      if (!file) return alert("Please choose an image first");
+      const originalFile = uploadInput.files[0];
+      if (!originalFile) return alert("Please choose an image first");
       if (!currentEditing?.siteNumber) return alert("Please enter a site number before uploading");
 
       uploadStatus.textContent = "Uploading...";
+
+      // 🔹 Compress large images before upload (Cloudflare body size limit)
+      const file = await maybeCompressImage(originalFile);
 
       const form = new FormData();
       form.append("siteNumber", currentEditing.siteNumber);
@@ -618,8 +621,21 @@
         body: form
       });
 
-      const j = await res.json();
-      if (!res.ok || !j.success) throw new Error(j.error || "Upload failed");
+      // If Cloudflare/GitHub return HTML (e.g. "Request body too large"),
+      // this will throw. We catch it and show a nicer message.
+      let j;
+      try {
+        j = await res.json();
+      } catch (parseErr) {
+        throw new Error(
+          "Upload failed (likely image too large / Cloudflare limit). " +
+          "Try a smaller image."
+        );
+      }
+
+      if (!res.ok || !j.success) {
+        throw new Error(j.error || "Upload failed");
+      }
 
       editImageUrl.value = j.url;
       currentEditing.imageURL = j.url;
@@ -629,6 +645,41 @@
       uploadStatus.textContent = "❌ Upload failed: " + err.message;
     }
   };
+
+  // Compress image on the client if it's large
+  async function maybeCompressImage(file) {
+    // Only touch images
+    if (!file.type.startsWith("image/")) return file;
+
+    // If already small (< 700 KB), just send as-is
+    if (file.size <= 700 * 1024) return file;
+
+    // Use canvas + createImageBitmap to shrink & convert to WebP
+    const bitmap = await createImageBitmap(file);
+    const maxWidth = 1000; // px
+    const scale = Math.min(maxWidth / bitmap.width, 1); // only shrink, never enlarge
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error("Compression failed"))),
+        "image/webp",
+        0.8
+      );
+    });
+
+    // Wrap the compressed blob back into a File so FormData looks normal
+    const newName =
+      (file.name.replace(/\.[^.]+$/, "") || "image") + ".webp";
+
+    return new File([blob], newName, { type: "image/webp" });
+  }
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
