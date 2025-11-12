@@ -144,12 +144,19 @@
   }
 
   async function geocodePostcode(pc){
-    const resp=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(pc)}&key=${GOOGLE_MAPS_KEY}`);
-    const j=await resp.json();
-    if(j.status==="OK")return j.results[0].geometry.location;
-    throw new Error("Postcode not found");
-  }
-
+  await ensureMapsLoaded();
+  return new Promise((resolve, reject) => {
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address: pc }, (results, status) => {
+      if (status === "OK" && results[0]) {
+        const loc = results[0].geometry.location;
+        resolve({ lat: loc.lat(), lng: loc.lng() });
+      } else {
+        reject(new Error("Geocode failed: " + status));
+      }
+    });
+  });
+}
   async function calcMileage(lat,lon){
     const hq="PO15 5RQ";
     const url=`https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(hq)}&destinations=${lat},${lon}&key=${GOOGLE_MAPS_KEY}`;
