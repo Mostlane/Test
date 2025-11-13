@@ -471,11 +471,39 @@
       return null;
     }
   }
-  async function calcMileage(lat,lon){
-    // stub – you’ll wire Distance Matrix later
+ async function calcMileage(lat, lon) {
+  try {
+    await ensureMapsLoaded();
+    const service = new google.maps.DistanceMatrixService();
+
+    return await new Promise((resolve) => {
+      service.getDistanceMatrix(
+        {
+          origins: [HQ_POSTCODE],
+          destinations: [{ lat: parseFloat(lat), lng: parseFloat(lon) }],
+          travelMode: google.maps.TravelMode.DRIVING,
+          unitSystem: google.maps.UnitSystem.IMPERIAL,
+        },
+        (result, status) => {
+          if (status !== "OK") return resolve("");
+
+          const row = result.rows[0];
+          if (!row || !row.elements || !row.elements[0]) return resolve("");
+
+          const dist = row.elements[0].distance?.value; // metres
+
+          if (!dist) return resolve("");
+
+          const miles = dist / 1609.34; // convert to miles
+          resolve(miles.toFixed(1));
+        }
+      );
+    });
+  } catch (err) {
+    console.error("Mileage error:", err);
     return "";
   }
-
+}
   // Helpers
   function ucClient(k){
     const v = (k||"").toLowerCase();
