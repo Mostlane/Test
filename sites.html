@@ -45,13 +45,12 @@
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700}
 
     /* MOBILE CARD LAYOUT */
-    .cards-list{
-      display:none;
-      margin-top:8px;
-      display:none;
-      gap:10px;
-      flex-direction:column;
-    }
+.cards-list{
+  margin-top:8px;
+  gap:10px;
+  flex-direction:column;
+  display:none;
+}
     .site-card{
       background:#fff;
       border-radius:12px;
@@ -393,27 +392,68 @@
 
   // Maps bits (still optional)
   let map, marker;
-  function ensureMapsLoaded() {
-    return new Promise((res)=>{
-      if (window.google && window.google.maps) return res();
-      const s=document.createElement("script");
-      s.src=`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}&libraries=places&loading=async`;
-      s.onload=res; s.onerror=()=>res(); // swallow errors so UI still works
-      document.head.appendChild(s);
+ function ensureMapsLoaded() {
+  // If already loaded, resolve immediately
+  if (window.google && window.google.maps) return Promise.resolve();
+
+  // If script tag (with callback) hasn’t run yet, wait for __gmapsReady flip
+  return new Promise((resolve, reject) => {
+    let waited = 0;
+    const maxWait = 15000; // 15s
+    const tick = 50;
+
+    const check = () => {
+      if (window.google && window.google.maps) return resolve();
+      if (window.__gmapsReady === true && window.google && window.google.maps) return resolve();
+      waited += tick;
+      if (waited >= maxWait) return reject(new Error("Google Maps failed to load"));
+      setTimeout(check, tick);
+    };
+    check();
+  });
+}
+ async function initMap(lat, lon) {
+  await ensureMapsLoaded();
+  if (!(window.google && google.maps)) return;
+
+  const center = {
+    lat: parseFloat(lat) || 50.86,
+    lng: parseFloat(lon) || -1.24
+  };
+
+  const el = document.getElementById("map");
+  if (!el) return;
+
+  map = new google.maps.Map(el, {
+  center,
+  zoom: 12,
+  mapTypeControl: false,
+  streetViewControl: false,
+});
+  // Use AdvancedMarker if available; otherwise Marker
+  if (google.maps.marker && google.maps.marker.AdvancedMarkerElement) {
+    new google.maps.marker.AdvancedMarkerElement({
+      map,
+      position: center,
+      gmpDraggable: true
+    }).addListener?.("dragend", (ev) => {
+      const p = ev.latLng;
+      editLat.value = p.lat().toFixed(6);
+      editLon.value = p.lng().toFixed(6);
+    });
+  } else {
+    marker = new google.maps.Marker({
+  map,
+  position: center,
+  draggable: true
+});
+    marker.addListener("dragend", () => {
+      const p = marker.getPosition();
+      editLat.value = p.lat().toFixed(6);
+      editLon.value = p.lng().toFixed(6);
     });
   }
-  async function initMap(lat,lon){
-    await ensureMapsLoaded();
-    if (!(window.google && google.maps)) return;
-    const center={lat:parseFloat(lat)||50.86, lng:parseFloat(lon)||-1.24};
-    map=new google.maps.Map(document.getElementById("map"),{center,zoom:10});
-    marker=new google.maps.Marker({map,position:center,draggable:true});
-    marker.addListener("dragend",()=>{
-      const pos=marker.getPosition();
-      editLat.value=pos.lat().toFixed(6);
-      editLon.value=pos.lng().toFixed(6);
-    });
-  }
+}
   async function geocodePostcode(pc){
     try{
       await ensureMapsLoaded();
@@ -687,7 +727,10 @@
     if (!pc) return alert("Enter a postcode");
     const loc = await geocodePostcode(pc);
     if (!loc) { alert("Unable to locate postcode"); return; }
-    if (map && marker) { map.setCenter(loc); marker.setPosition(loc); }
+    if (map) map.setCenter(loc);
+if (marker && marker.setPosition) {
+  marker.setPosition(loc);
+}
     editLat.value = Number(loc.lat).toFixed(6);
     editLon.value = Number(loc.lng).toFixed(6);
     const miles = await calcMileage(loc.lat, loc.lng);
@@ -782,5 +825,18 @@
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
   })();
   </script>
+
+<!-- Google Maps loader -->
+<script>
+  window.__gmapsReady = false;
+  window.__mlMapsReady = () => { window.__gmapsReady = true; };
+</script>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&libraries=places&callback=__mlMapsReady">
+</script>
+
 </body>
 </html>
+
+ 
