@@ -843,11 +843,34 @@ if (marker && marker.setPosition) {
   tabActiveBtn.onclick = ()=>{ showInactive=false; tabActiveBtn.classList.add("active"); tabInactiveBtn.classList.remove("active"); renderRows(); };
   tabInactiveBtn.onclick = ()=>{ showInactive=true; tabInactiveBtn.classList.add("active"); tabActiveBtn.classList.remove("active"); renderRows(); };
 
-  btnRecalc.onclick = async ()=>{
-    if (!confirm("Recalculate mileage for the current selection?")) return;
-    alert("Distance Matrix not configured yet. Once your key is ready, we’ll enable this.");
-  };
+btnRecalc.onclick = async () => {
+  if (!confirm("Recalculate mileage for all currently displayed sites?")) return;
 
+  const list = getFiltered();
+  if (!list.length) return alert("No sites to recalculate");
+
+  statusEl.textContent = "Recalculating… this may take a moment";
+  let updatedCount = 0;
+
+  for (const s of list) {
+    if (!s.lat || !s.lon) continue;
+
+    const miles = await calcMileage(s.lat, s.lon);
+    if (!miles) continue;
+
+    s.mileageFromHQ = parseFloat(miles);
+    try {
+      await saveSiteChanges(s);
+      updatedCount++;
+    } catch (e) {
+      console.error("Failed saving site:", s.siteNumber, e);
+    }
+  }
+
+  await fetchAllSites();
+  statusEl.textContent = `Recalculated ${updatedCount} site(s)`;
+  alert(`Mileage updated for ${updatedCount} sites`);
+};
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
