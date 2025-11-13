@@ -533,19 +533,39 @@
     renderRows();
     statusEl.textContent = "Ready";
   }
-  async function saveSiteChanges(site, oldSiteNumberIfChanged=null){
-    const cat=(site.client||"").toLowerCase();
-    const url = new URL(`${workerBase}/update-site?category=${cat}`);
-    if (oldSiteNumberIfChanged) url.searchParams.set("oldSiteNumber", oldSiteNumberIfChanged);
-    const r = await fetch(url.toString(),{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(site)
-    });
-    const j = await r.json().catch(()=>({}));
-    if(!r.ok || j.success===false) throw new Error("Save failed");
+ async function saveSiteChanges(site, oldSiteNumberIfChanged = null) {
+  const cat = (site.client || "").toLowerCase();
+
+  // Decide if this is a brand-new site (no existing record with same siteNumber + client)
+  const trimmedNew = String(site.siteNumber || "").trim();
+  const isNew =
+    !oldSiteNumberIfChanged &&
+    !ALL_SITES.some(
+      s =>
+        String(s.siteNumber || "").trim() === trimmedNew &&
+        (s.client || "").toLowerCase() === cat
+    );
+
+  const endpoint = isNew ? "add-site" : "update-site";
+
+  const url = new URL(`${workerBase}/${endpoint}?category=${cat}`);
+  if (!isNew && oldSiteNumberIfChanged) {
+    url.searchParams.set("oldSiteNumber", oldSiteNumberIfChanged);
   }
 
+  const r = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(site)
+  });
+
+  const j = await r.json().catch(() => ({}));
+
+  if (!r.ok || j.success === false) {
+    console.error("Worker save error:", j);
+    throw new Error("Save failed");
+  }
+}
   // Filtering + render
   function getFiltered() {
     const cat = filterEl.value;
