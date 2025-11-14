@@ -552,7 +552,12 @@
   function telOf(site){
     return site.telephone || site.phone || site.managerPhone || site.areaManagerPhone || "";
   }
-
+function hasFerryFlag(site) {
+  return (site.postcode || "").endsWith("*");
+}
+function cleanPostcode(site) {
+  return (site.postcode || "").replace(/\*+$/, "");
+}
   // Worker IO
   async function fetchAllSites() {
     statusEl.textContent = "Loading sites...";
@@ -605,7 +610,7 @@
       list = list.filter(s =>
         (s.siteName || "").toLowerCase().includes(q) ||
         (s.siteNumber || "").toLowerCase().includes(q) ||
-        (s.postcode || "").toLowerCase().includes(q) ||
+cleanPostcode(s).toLowerCase().includes(q) ||
         (telOf(s) || "").toLowerCase().includes(q)
       );
     }
@@ -643,14 +648,19 @@
       const rt = roundTrip(s.mileageFromHQ);
 
       // TABLE ROW (desktop)
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-       <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
-        <td><a class="linklike" data-action="details">${s.siteName || "-"}</a></td>
-        <td><span class="badge">${ucClient(s.client)}</span></td>
-        <td>${s.postcode || "-"}</td>
-        <td>${telOf(s) || "-"}</td>
-        <td>
+const tr = document.createElement("tr");
+tr.innerHTML = `
+ <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
+ <td>
+   <a class="linklike" data-action="details">
+     ${s.siteName || "-"} ${hasFerryFlag(s) ? "🚢" : ""}
+   </a>
+ </td>
+ <td><span class="badge">${ucClient(s.client)}</span></td>
+ <td>${cleanPostcode(s) || "-"}</td>
+ <td>${telOf(s) || "-"}</td>
+ <td>
+
           <label style="display:inline-flex;align-items:center;gap:6px;">
             <input type="checkbox" data-action="toggle-active" ${s.active!==false?'checked':''}>
             <span>${s.active!==false?'Active':'Inactive'}</span>
@@ -665,42 +675,44 @@
       rowsEl.appendChild(tr);
 
       // CARD (mobile)
-      const card = document.createElement("div");
-      card.className = "site-card";
-      card.innerHTML = `
-        <div class="card-header">
-          <div class="card-title">
-            <span class="card-name" data-action="details">${s.siteName || "-"}</span>
-     <span class="card-num">
-  ${s.client==="projects"
-    ? `Job ${s.jobNumber || "(pending)"}`
-    : `#${s.siteNumber || "-"}`
-  }
-</span>
-          </div>
-          <span class="badge">${ucClient(s.client)}</span>
-        </div>
-        <div class="card-row">
-          <span><span class="label">Postcode:</span> ${s.postcode || "-"}</span>
-          <span><span class="label">Phone:</span> ${telOf(s) || "-"}</span>
-        </div>
-        <div class="card-row">
-          <span class="card-toggle">
-            <input type="checkbox" data-action="toggle-active" ${s.active!==false?'checked':''}>
-            <span>${s.active!==false?'Active':'Inactive'}</span>
-          </span>
-        </div>
-        <div class="card-footer">
-          <div class="card-footer-left">
-            <span>${mileageTxt} mi</span>
-            <span class="muted">(RT ${rt} mi)</span>
-          </div>
-          <div class="card-footer-right">
-            <button class="btn outline btn-small" data-action="edit">Edit</button>
-            <button class="btn btn-small" data-action="view">View</button>
-          </div>
-        </div>
-      `;
+const card = document.createElement("div");
+card.className = "site-card";
+card.innerHTML = `
+  <div class="card-header">
+    <div class="card-title">
+      <span class="card-name" data-action="details">
+        ${s.siteName || "-"} ${hasFerryFlag(s) ? "🚢" : ""}
+      </span>
+      <span class="card-num">
+        ${s.client==="projects"
+          ? `Job ${s.jobNumber || "(pending)"}`
+          : `#${s.siteNumber || "-"}`
+        }
+      </span>
+    </div>
+    <span class="badge">${ucClient(s.client)}</span>
+  </div>
+  <div class="card-row">
+    <span><span class="label">Postcode:</span> ${cleanPostcode(s) || "-"}</span>
+    <span><span class="label">Phone:</span> ${telOf(s) || "-"}</span>
+  </div>
+  <div class="card-row">
+    <span class="card-toggle">
+      <input type="checkbox" data-action="toggle-active" ${s.active!==false?'checked':''}>
+      <span>${s.active!==false?'Active':'Inactive'}</span>
+    </span>
+  </div>
+  <div class="card-footer">
+    <div class="card-footer-left">
+      <span>${mileageTxt} mi</span>
+      <span class="muted">(RT ${rt} mi)</span>
+    </div>
+    <div class="card-footer-right">
+      <button class="btn outline btn-small" data-action="edit">Edit</button>
+      <button class="btn btn-small" data-action="view">View</button>
+    </div>
+  </div>
+`;
       const cDetails = card.querySelector('[data-action="details"]');
       const cEdit = card.querySelector('[data-action="edit"]');
       const cView = card.querySelector('[data-action="view"]');
@@ -719,7 +731,12 @@
 
   // DETAILS
   function openDetails(site){
-    detailsTitle.textContent = `${site.siteName || "Site"} (${site.siteNumber || "-"})`;
+detailsTitle.textContent =
+  `${site.siteName || "Site"} ${hasFerryFlag(site) ? "🚢" : ""} (${
+    (site.client || "").toLowerCase() === "projects"
+      ? (site.jobNumber || "(pending)")
+      : (site.siteNumber || "-")
+  })`;
     // image
     detailsImageBox.innerHTML = "";
     const imgURL = site.imageURL || site.image || "";
@@ -771,7 +788,16 @@
       seen.add(k);
       rows.push(`<div class="row"><div class="k">${niceLabel(k)}</div><div class="v">${(k==="client")?ucClient(v):v}</div></div>`);
     };
-    preferredOrder.forEach(k=>pushRow(k, site[k]));
+preferredOrder.forEach(k => {
+  let v = site[k];
+
+  // Hide * in postcode
+  if (k === "postcode") {
+    v = cleanPostcode(site);
+  }
+
+  pushRow(k, v);
+});
     Object.keys(site).sort().forEach(k=>{
       if (seen.has(k)) return;
       pushRow(k, site[k]);
@@ -813,7 +839,7 @@ jobInput.value = isProject
     }
     editActive.value = (currentEditing.active!==false) ? "true" : "false";
     editName.value = currentEditing.siteName || "";
-    editPostcode.value = currentEditing.postcode || "";
+editPostcode.value = cleanPostcode(currentEditing) || "";
     editPhone.value = telOf(currentEditing) || "";
     editImageUrl.value = currentEditing.imageURL || currentEditing.image || "";
     editLat.value = currentEditing.lat ?? "";
@@ -860,7 +886,9 @@ if (!isProjectSave) delete currentEditing.jobNumber;
 
       currentEditing.active = (editActive.value === "true");
       currentEditing.siteName = editName.value.trim();
-      currentEditing.postcode = editPostcode.value.trim();
+currentEditing.postcode = editPostcode.value.trim();  
+// never allow saving a postcode with *
+currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       const phone = editPhone.value.trim();
       if (phone) currentEditing.telephone = phone;
       currentEditing.imageURL = editImageUrl.value.trim() || undefined;
