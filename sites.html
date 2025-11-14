@@ -199,8 +199,10 @@
           <option value="els">ELS</option>
           <option value="els_private">ELS Private</option>
           <option value="cobra">Cobra</option>
-          <option value="projects">Projects</option>
           <option value="wenzels">Wenzels</option>
+          <option value="projects">Projects</option>
+          <option value="fbc">Fareham Borough Council</option>
+
         </select>
         <input id="searchInput" type="text" placeholder="Search name / number / postcode / phone"/>
         <button class="btn" id="btnAdd">Add Site</button>
@@ -268,8 +270,10 @@
         <option value="els">ELS</option>
         <option value="els_private">ELS Private</option>
         <option value="cobra">Cobra</option>
-        <option value="projects">Projects</option>
         <option value="wenzels">Wenzels</option>
+        <option value="projects">Projects</option>
+        <option value="fbc">Fareham Borough Council</option>
+
       </select>
 
       <!-- Site Number (only for non-projects) -->
@@ -337,6 +341,32 @@
           <input id="editSharepoint" placeholder="https://mostlane.sharepoint.com/...">
         </div>
       </div>
+<!-- FBC Extra Fields -->
+<div id="fbcExtraFields" style="display:none; margin-top:20px;">
+  <h4 style="margin-top:0; font-size:16px; font-weight:700;">Fareham Borough Council – Extra Details</h4>
+
+  <label>Contact Name</label>
+  <input id="fbcContactName" placeholder="e.g. John Smith">
+
+  <label>Contact Number</label>
+  <input id="fbcContactNumber" placeholder="e.g. 07700 900123">
+
+  <label>Contact Email</label>
+  <input id="fbcContactEmail" placeholder="e.g. john.smith@fareham.gov.uk">
+
+  <label>Keys Required (one per line)</label>
+  <textarea id="fbcKeys" placeholder="e.g.
+Padlock Key – Bin Store
+Fob – Main Gate
+1234 – Boiler Room Code"
+    style="height:90px; resize:vertical;"></textarea>
+
+  <label>Gate Access Codes</label>
+  <input id="fbcGateCodes" placeholder="e.g. 4729#">
+
+  <label>What3Words Location</label>
+  <input id="fbcWhat3Words" placeholder="e.g. flame.tiger.rock">
+</div>
 
       <div id="map" class="map"></div>
 
@@ -542,6 +572,7 @@
     if (v==="cobra") return "Cobra";
     if (v==="projects" || v==="project") return "Project";
     if (v==="retail") return "Retail";
+    if (v === "fbc") return "Fareham BC";
     return k || "";
   }
   function roundTrip(m){
@@ -762,11 +793,22 @@ detailsTitle.textContent =
       "area","areaManager","areaManagerPhone","areaClientExperienceManager","areaClientExperienceManagerPhone",
       "street","address1","address2","town","county","carPark",
       "mondayHours","tuesdayHours","wednesdayHours","thursdayHours","fridayHours","saturdayHours","sundayHours",
-      "mileageFromHQ","lat","lon","openDate","closedDate","storeType","sharepointURL","imageURL","lastUpdated","active"
+      "mileageFromHQ","lat","lon","openDate","closedDate","storeType","fbcContactName",
+"fbcContactNumber",
+"fbcContactEmail",
+"fbcKeys",
+"fbcGateCodes",
+"fbcWhat3Words",
+"sharepointURL","imageURL","lastUpdated","active"
     ];
     const niceLabel = (k)=>{
       const map = {
-        client:"Client", siteNumber:"#",jobNumber:"Job Number", siteName:"Site Name", postcode:"Postcode",
+        client:"Client", siteNumber:"#",jobNumber:"Job Number", siteName:"Site Name", postcode:"Postcode",fbcContactName: "FBC Contact Name",
+fbcContactNumber: "FBC Contact Number",
+fbcContactEmail: "FBC Contact Email",
+fbcKeys: "Keys Required",
+fbcGateCodes: "Gate Access Codes",
+fbcWhat3Words: "What3Words Location",
         telephone:"Telephone", phone:"Phone", email:"Email",
         managerName:"Manager", managerPhone:"Manager Phone", managerEmail:"Manager Email",
         area:"Area", areaManager:"Area Manager", areaManagerPhone:"Area Manager Phone",
@@ -846,6 +888,24 @@ editPostcode.value = cleanPostcode(currentEditing) || "";
     editLon.value = currentEditing.lon ?? "";
     editMileage.value = currentEditing.mileageFromHQ ?? "";
     editSharepoint.value = currentEditing.sharepointURL || "";
+      // ---- FBC Custom Fields ----
+  const isFBC = (currentEditing.client || "").toLowerCase() === "fbc";
+document.getElementById("fbcExtraFields").style.display = isFBC ? "block" : "none";
+
+  // Populate FBC-only fields
+  const fbcContactName = document.getElementById("fbcContactName");
+  const fbcContactNumber = document.getElementById("fbcContactNumber");
+  const fbcContactEmail = document.getElementById("fbcContactEmail");
+  const fbcKeys = document.getElementById("fbcKeys");
+  const fbcGateCodes = document.getElementById("fbcGateCodes");
+  const fbcWhat3Words = document.getElementById("fbcWhat3Words");
+
+  fbcContactName.value = currentEditing.fbcContactName || "";
+  fbcContactNumber.value = currentEditing.fbcContactNumber || "";
+  fbcContactEmail.value = currentEditing.fbcContactEmail || "";
+  fbcKeys.value = (currentEditing.fbcKeys || []).join("\n");
+  fbcGateCodes.value = currentEditing.fbcGateCodes || "";
+  fbcWhat3Words.value = currentEditing.fbcWhat3Words || "";
     uploadStatus.textContent = "";
 
     editModal.classList.add("active");
@@ -896,7 +956,30 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       currentEditing.lon = editLon.value ? parseFloat(editLon.value) : "";
       currentEditing.mileageFromHQ = editMileage.value ? parseFloat(editMileage.value) : "";
       currentEditing.sharepointURL = editSharepoint.value.trim() || undefined;
+            // ---- Save FBC extra fields ----
+      const isFBCSave = (currentEditing.client || "").toLowerCase() === "fbc";
 
+      if (isFBCSave) {
+        currentEditing.fbcContactName   = document.getElementById("fbcContactName").value.trim() || undefined;
+        currentEditing.fbcContactNumber = document.getElementById("fbcContactNumber").value.trim() || undefined;
+        currentEditing.fbcContactEmail  = document.getElementById("fbcContactEmail").value.trim() || undefined;
+        
+        const keysRaw = document.getElementById("fbcKeys").value.trim();
+        currentEditing.fbcKeys = keysRaw 
+          ? keysRaw.split("\n").map(k => k.trim()).filter(k => k)
+          : [];
+
+        currentEditing.fbcGateCodes  = document.getElementById("fbcGateCodes").value.trim() || undefined;
+        currentEditing.fbcWhat3Words = document.getElementById("fbcWhat3Words").value.trim() || undefined;
+      } else {
+        // Remove FBC fields if switching client away from FBC
+        delete currentEditing.fbcContactName;
+        delete currentEditing.fbcContactNumber;
+        delete currentEditing.fbcContactEmail;
+        delete currentEditing.fbcKeys;
+        delete currentEditing.fbcGateCodes;
+        delete currentEditing.fbcWhat3Words;
+      }
       if (!currentEditing.siteName) return alert("Site Name required");
       if (!currentEditing.postcode) return alert("Postcode required");
 
