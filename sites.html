@@ -272,19 +272,26 @@
         <option value="wenzels">Wenzels</option>
       </select>
 
-      <div class="row2">
-        <div>
-          <label>Site Number</label>
-          <input id="editNumber" placeholder="e.g. 1234">
-        </div>
-        <div>
-          <label>Active</label>
-          <select id="editActive">
-            <option value="true">Active</option>
-            <option value="false">Inactive</option>
-          </select>
-        </div>
-      </div>
+      <!-- Site Number (only for non-projects) -->
+<div class="row2" id="siteNumberRow">
+  <div>
+    <label>Site Number</label>
+    <input id="editNumber" placeholder="e.g. 1234">
+  </div>
+  <div>
+    <label>Active</label>
+    <select id="editActive">
+      <option value="true">Active</option>
+      <option value="false">Inactive</option>
+    </select>
+  </div>
+</div>
+
+<!-- Job Number (projects only) -->
+<div id="jobNumberRow" style="display:none; margin-top:10px;">
+  <label>Job Number (auto-assigned)</label>
+  <input id="editJobNumber" readonly style="background:#f9fafb;">
+</div>
 
       <label>Site Name</label>
       <input id="editName" placeholder="e.g. Portsmouth">
@@ -616,7 +623,7 @@
       // TABLE ROW (desktop)
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${s.siteNumber || "-"}</td>
+       <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
         <td><a class="linklike" data-action="details">${s.siteName || "-"}</a></td>
         <td><span class="badge">${ucClient(s.client)}</span></td>
         <td>${s.postcode || "-"}</td>
@@ -642,7 +649,12 @@
         <div class="card-header">
           <div class="card-title">
             <span class="card-name" data-action="details">${s.siteName || "-"}</span>
-            <span class="card-num">#${s.siteNumber || "-"}</span>
+     <span class="card-num">
+  ${s.client==="projects"
+    ? `Job ${s.jobNumber || "(pending)"}`
+    : `#${s.siteNumber || "-"}`
+  }
+</span>
           </div>
           <span class="badge">${ucClient(s.client)}</span>
         </div>
@@ -706,7 +718,7 @@
     }
     // all fields
     const preferredOrder = [
-      "client","siteNumber","siteName","postcode","telephone","phone",
+      "client","siteNumber","jobNumber","siteName","postcode","telephone","phone",
       "email","managerName","managerPhone","managerEmail",
       "area","areaManager","areaManagerPhone","areaClientExperienceManager","areaClientExperienceManagerPhone",
       "street","address1","address2","town","county","carPark",
@@ -715,7 +727,7 @@
     ];
     const niceLabel = (k)=>{
       const map = {
-        client:"Client", siteNumber:"#", siteName:"Site Name", postcode:"Postcode",
+        client:"Client", siteNumber:"#",jobNumber:"Job Number", siteName:"Site Name", postcode:"Postcode",
         telephone:"Telephone", phone:"Phone", email:"Email",
         managerName:"Manager", managerPhone:"Manager Phone", managerEmail:"Manager Email",
         area:"Area", areaManager:"Area Manager", areaManagerPhone:"Area Manager Phone",
@@ -753,6 +765,17 @@
     modalTitle.textContent = site?.siteNumber ? `Edit ${site.siteNumber}` : "Add Site";
     editClient.value = (currentEditing.client||"retail").toLowerCase();
     editNumber.value = currentEditing.siteNumber || "";
+    // Project mode → hide Site Number, show Job Number
+const isProject = (currentEditing.client || "").toLowerCase() === "projects";
+
+document.getElementById("siteNumberRow").style.display = isProject ? "none" : "flex";
+document.getElementById("jobNumberRow").style.display = isProject ? "block" : "none";
+
+// Populate read-only job number if editing an existing project
+const jobInput = document.getElementById("editJobNumber");
+jobInput.value = isProject
+  ? (currentEditing.jobNumber || "(auto on save)")
+  : "";
     editActive.value = (currentEditing.active!==false) ? "true" : "false";
     editName.value = currentEditing.siteName || "";
     editPostcode.value = currentEditing.postcode || "";
@@ -789,7 +812,17 @@ if (marker && marker.setPosition) {
     try{
       const oldNum = currentEditing.siteNumber;
       currentEditing.client = editClient.value;
-      currentEditing.siteNumber = editNumber.value.trim() || undefined;
+      const isProjectSave = (currentEditing.client || "").toLowerCase() === "projects";
+
+// If project → Worker assigns jobNumber, so we NEVER keep siteNumber
+if (isProjectSave) {
+  delete currentEditing.siteNumber;
+} else {
+  currentEditing.siteNumber = editNumber.value.trim() || undefined;
+}
+// Preserve jobNumber only for projects
+if (!isProjectSave) delete currentEditing.jobNumber;
+
       currentEditing.active = (editActive.value === "true");
       currentEditing.siteName = editName.value.trim();
       currentEditing.postcode = editPostcode.value.trim();
