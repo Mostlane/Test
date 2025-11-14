@@ -372,6 +372,28 @@
   const modalTitle = document.getElementById("modalTitle");
 
   const editClient = document.getElementById("editClient");
+    editClient.onchange = () => {
+  const isProject = editClient.value.toLowerCase() === "projects";
+
+  document.getElementById("siteNumberRow").style.display = isProject ? "none" : "flex";
+  document.getElementById("jobNumberRow").style.display = isProject ? "block" : "none";
+
+  const jobInput = document.getElementById("editJobNumber");
+
+  if (isProject) {
+    jobInput.value = "Loading...";
+
+    fetch(`${workerBase}/next-project-job-number`)
+      .then(r => r.json())
+      .then(j => {
+        if (j?.next) jobInput.value = `Next: ${j.next}`;
+        else jobInput.value = "(auto on save)";
+      })
+      .catch(() => jobInput.value = "(auto on save)");
+  } else {
+    jobInput.value = "";
+  }
+};
   const editNumber = document.getElementById("editNumber");
   const editActive = document.getElementById("editActive");
   const editName = document.getElementById("editName");
@@ -761,7 +783,7 @@
 
   // EDIT
   function openEdit(site){
-    currentEditing = structuredClone(site || { client: filterEl.value || "retail", active:true });
+  currentEditing = structuredClone(site || { client: filterEl.value || "retail", active:true, siteNumber: undefined });
     modalTitle.textContent = site?.siteNumber ? `Edit ${site.siteNumber}` : "Add Site";
     editClient.value = (currentEditing.client||"retail").toLowerCase();
     editNumber.value = currentEditing.siteNumber || "";
@@ -776,6 +798,19 @@ const jobInput = document.getElementById("editJobNumber");
 jobInput.value = isProject
   ? (currentEditing.jobNumber || "(auto on save)")
   : "";
+        // --- NEW: fetch preview job number for new Projects ---
+    if (isProject && !currentEditing.jobNumber) {
+      jobInput.value = "Loading...";
+      fetch(`${workerBase}/next-project-job-number`)
+        .then(r => r.json())
+        .then(j => {
+          if (j?.next) jobInput.value = `Next: ${j.next}`;
+          else jobInput.value = "(auto on save)";
+        })
+        .catch(() => {
+          jobInput.value = "(auto on save)";
+        });
+    }
     editActive.value = (currentEditing.active!==false) ? "true" : "false";
     editName.value = currentEditing.siteName || "";
     editPostcode.value = currentEditing.postcode || "";
@@ -891,8 +926,15 @@ if (!isProjectSave) delete currentEditing.jobNumber;
   filterEl.onchange=renderRows;
   searchEl.oninput=()=>{clearTimeout(window.__srch);window.__srch=setTimeout(renderRows,250);};
   btnReload.onclick=fetchAllSites;
-  btnAdd.onclick=()=>openEdit({ client: filterEl.value || "retail", active:true });
-
+btnAdd.onclick = () => {
+  const cat = filterEl.value || "retail";
+  openEdit({
+    client: cat,
+    active: true,
+    siteNumber: undefined, // ← critical
+    jobNumber: undefined   // ← ALSO critical
+  });
+};
   tabActiveBtn.onclick = ()=>{ showInactive=false; tabActiveBtn.classList.add("active"); tabInactiveBtn.classList.remove("active"); renderRows(); };
   tabInactiveBtn.onclick = ()=>{ showInactive=true; tabInactiveBtn.classList.add("active"); tabActiveBtn.classList.remove("active"); renderRows(); };
 
