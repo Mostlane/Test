@@ -117,7 +117,9 @@ window.addEventListener("online", flushPendingChecks);
    Automatic Check-In
 ------------------------------------------------------------------------ */
 function startCheckIn() {
-  const username = sessionStorage.getItem("mostlaneLoggedInUser") || "Unknown";
+
+  /* ★★★ THE ONLY CHANGE ★★★ */
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
 
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
