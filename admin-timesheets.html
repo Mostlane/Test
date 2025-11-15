@@ -739,18 +739,30 @@
       alert("Failed to approve week.");
     }
   }
+async function loadUserList() {
+  try {
+    const res = await fetch(`${TIMESHEET_WORKER}/get-users`);
+    if (!res.ok) throw new Error("Cannot load users");
 
-  function init(){
-    // Populate userSelect with at least the current user for now.
+    const list = await res.json(); // array of usernames
     const sel = document.getElementById("userSelect");
-    const me = sessionStorage.getItem("mostlaneUser");
-    if (me){
+
+    // Clear current items except the first option
+    sel.innerHTML = `<option value="">Select Engineer...</option>`;
+
+    list.forEach(u => {
       const opt = document.createElement("option");
-      opt.value = me;
-      opt.textContent = me;
+      opt.value = u;
+      opt.textContent = u;
       sel.appendChild(opt);
-      sel.value = me;
-    }
+    });
+  } catch (e) {
+    console.error("User load error:", e);
+  }
+}
+  function init(){
+// Load real user list from Worker
+loadUserList();
 
     // Default week start to this Monday
     const monday = getMonday(new Date());
