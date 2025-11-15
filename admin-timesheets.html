@@ -767,12 +767,12 @@ async function loadUserList() {
     // Clear current items except the first option
     sel.innerHTML = `<option value="">Select Engineer...</option>`;
 
-    list.forEach(u => {
-      const opt = document.createElement("option");
-      opt.value = u;
-      opt.textContent = u;
-      sel.appendChild(opt);
-    });
+list.forEach(u => {
+  const opt = document.createElement("option");
+  opt.value = u;                      
+  opt.textContent = u.replace(/\./g, " "); 
+  sel.appendChild(opt);
+});
   } catch (e) {
     console.error("User load error:", e);
   }
