@@ -13,33 +13,6 @@
 </script>
 
 <style>
-.device-warning {
-  background-color: rgba(255, 255, 255, 0.9);
-  color: #d00000;
-  font-weight: bold;
-  border-radius: 10px;
-  padding: 20px;
-  margin: 20px auto;
-  max-width: 500px;
-  text-align: center;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-  font-size: 18px;
-  border: 2px solid #d00000;
-  display: none;
-}
-</style>
-</head>
-
-<body class="checkin-body">
-
-<!-- DEVICE WARNING -->
-<div id="deviceWarning" style="display:none; padding: 20px; background-color: #ffdddd; border: 1px solid red; color: black; font-weight: bold; border-radius: 8px; margin-bottom: 20px;">
-  Unable to Check In/Out.<br><br>
-  This device is not recognised by Mostlane Portal. Either this device is being used in Incognito mode or the device has changed. Please ensure you are using your normal device and not in private browser. If you have recently changed device or cleared Cache, please follow “Sign Up” from login screen and proceed with “Change Device” steps.<br><br>
-  If issues persist, please call Mostlane office on 02380 262000.
-</div>
-
-<style>
   body.checkin-body {
     font-family: "Segoe UI", sans-serif;
     background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -79,42 +52,25 @@
     text-align: center;
   }
 </style>
+</head>
+
+<body class="checkin-body">
 
 <h1>Checking In...</h1>
 
-<!-- DEVICE VERIFICATION -->
 <script>
-window.addEventListener('DOMContentLoaded', function () {
-  const loggedInUser = sessionStorage.getItem('mostlaneLoggedInUser');
-  const storedDeviceID = localStorage.getItem('deviceID');
-
-  fetch('Users.txt')
-    .then(response => response.text())
-    .then(data => {
-      const lines = data.split('\n');
-      const userLine = lines.find(line => line.includes(loggedInUser));
-      if (userLine) {
-        const expectedDeviceID = userLine.split(',')[1].trim();
-        if (expectedDeviceID !== storedDeviceID) {
-          document.getElementById('deviceWarning').style.display = 'block';
-          window.blockCheckIn = true;
-        }
-      }
-    });
-});
-</script>
-
-<!-- BLOCK IF NO DEVICE ID -->
-<script>
-if (!localStorage.getItem("mostlane_device_id")) {
-  document.getElementById("deviceWarning").style.display = "block";
-  window.blockCheckIn = true;
+/* ------------------------------------------------------------------------
+   Device ID (still generated + used, but NOT validated)
+------------------------------------------------------------------------ */
+let deviceID = localStorage.getItem("mostlane_device_id");
+if (!deviceID) {
+  deviceID = "dev-" + Math.random().toString(36).substring(2, 10);
+  localStorage.setItem("mostlane_device_id", deviceID);
 }
-</script>
 
-
-<!-- NEW CLOUDLARE WORKER CHECK-IN SYSTEM -->
-<script>
+/* ------------------------------------------------------------------------
+   Cloudflare Worker + Offline Queue
+------------------------------------------------------------------------ */
 const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
 
@@ -157,11 +113,11 @@ async function flushPendingChecks() {
 window.addEventListener("load", flushPendingChecks);
 window.addEventListener("online", flushPendingChecks);
 
+/* ------------------------------------------------------------------------
+   Automatic Check-In
+------------------------------------------------------------------------ */
 function startCheckIn() {
-  if (window.blockCheckIn) return;
-
   const username = sessionStorage.getItem("mostlaneLoggedInUser") || "Unknown";
-  const deviceID = localStorage.getItem("mostlane_device_id") || localStorage.getItem("deviceID") || "";
 
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
@@ -183,13 +139,14 @@ function startCheckIn() {
       const pending = getPendingChecks();
       pending.push(payload);
       savePendingChecks(pending);
-      window.location.href = `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(new Date().toLocaleString())}`;
+
+      window.location.href =
+        `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(new Date().toLocaleString())}`;
       return;
     }
 
-    try {
-      await sendToWorker(payload);
-    } catch {
+    try { await sendToWorker(payload); }
+    catch {
       payload.offlineEvent = true;
       const pending = getPendingChecks();
       pending.push(payload);
@@ -197,12 +154,12 @@ function startCheckIn() {
     }
 
     const now = new Date().toLocaleString();
-    window.location.href = `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(now)}`;
-  },
-  err => {
+    window.location.href =
+      `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(now)}`;
+
+  }, err => {
     alert("Please enable location to check in.\n" + err.message);
-  },
-  { enableHighAccuracy: true, timeout: 20000 });
+  }, { enableHighAccuracy: true, timeout: 20000 });
 }
 
 window.onload = startCheckIn;
