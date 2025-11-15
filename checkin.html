@@ -1,93 +1,16 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <script src="auth.js"></script>
-  <title>Check In</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
-  <script>
-    window.onload = function() {
-      navigator.geolocation.getCurrentPosition(success, error);
-      function success(position) {
-        const data = {
-          status: "Check In",
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-          device: (function() {
-          let id = localStorage.getItem("mostlane_device_id");
-          if (!id) {
-            id = "dev-" + Math.random().toString(36).substring(2, 10);
-            localStorage.setItem("mostlane_device_id", id);
-          }
-          return id;
-        })(),
-          engineer: sessionStorage.getItem("mostlaneUser") || "Unknown"
-        };
-        
-    const queueKey = "mostlaneOfflineQueue";
-    const queue = JSON.parse(localStorage.getItem(queueKey) || "[]");
+<title>Check In</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="style.css" />
 
-    // Attempt resending old logs first
-    if (navigator.onLine && queue.length > 0) {
-      queue.forEach(payload => {
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(payload).toString()
-        });
-      });
-      localStorage.setItem(queueKey, "[]");
-    }
-
-    fetch("https://hooks.zapier.com/hooks/catch/20261714/2nkzvev/", {
-
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(data).toString()
-        }).then(() => {
-
-        setTimeout(() => {
-          try {
-            fetch("https://1d24d222-2e9f-4bd9-b4e3-650d8bcf24cf-00-ugqjxf7cv4sj.worf.replit.dev/", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                user: data.engineer,
-                type: "checkin",
-                datetime: new Date().toISOString(),
-                location: "GPS: " + data.lat + "," + data.lon
-              })
-            });
-          } catch (e) {
-            console.warn("GitHub log error:", e);
-          }
-        }, 500);
-
-          const now = new Date().toLocaleString();
-          
-        localStorage.setItem("mostlaneStatus_" + data.engineer, "checked-in");
-        localStorage.setItem("mostlaneSite_" + data.engineer, "Matched Site"); // You may dynamically assign site if needed
-        localStorage.setItem("mostlaneTimestamp_" + data.engineer, now);
-        window.location.href = `confirm.html?status=${data.status}&lat=${data.lat}&lon=${data.lon}&time=${encodeURIComponent(now)}`;
-        
-        }).catch(() => {
-          queue.push(data);
-          localStorage.setItem(queueKey, JSON.stringify(queue));
-          alert("You are offline. Your check-in will be uploaded automatically when you reconnect.");
-        });
-      }
-      function error() {
-        alert("Please enable location to check in.");
-      }
-    }
-  </script>
 <script>
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
   }
 </script>
-
 
 <style>
 .device-warning {
@@ -106,15 +29,17 @@
 }
 </style>
 </head>
+
 <body class="checkin-body">
 
+<!-- DEVICE WARNING -->
 <div id="deviceWarning" style="display:none; padding: 20px; background-color: #ffdddd; border: 1px solid red; color: black; font-weight: bold; border-radius: 8px; margin-bottom: 20px;">
   Unable to Check In/Out.<br><br>
   This device is not recognised by Mostlane Portal. Either this device is being used in Incognito mode or the device has changed. Please ensure you are using your normal device and not in private browser. If you have recently changed device or cleared Cache, please follow “Sign Up” from login screen and proceed with “Change Device” steps.<br><br>
   If issues persist, please call Mostlane office on 02380 262000.
 </div>
 
-  <style>
+<style>
   body.checkin-body {
     font-family: "Segoe UI", sans-serif;
     background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -127,6 +52,7 @@
     align-items: center;
     text-align: center;
   }
+
   .button {
     display: block;
     margin: 10px auto;
@@ -152,14 +78,16 @@
     max-width: 90%;
     text-align: center;
   }
+</style>
 
-  </style>
-  <h1>Checking In...</h1>
+<h1>Checking In...</h1>
 
+<!-- DEVICE VERIFICATION -->
 <script>
 window.addEventListener('DOMContentLoaded', function () {
   const loggedInUser = sessionStorage.getItem('mostlaneLoggedInUser');
   const storedDeviceID = localStorage.getItem('deviceID');
+
   fetch('Users.txt')
     .then(response => response.text())
     .then(data => {
@@ -169,19 +97,116 @@ window.addEventListener('DOMContentLoaded', function () {
         const expectedDeviceID = userLine.split(',')[1].trim();
         if (expectedDeviceID !== storedDeviceID) {
           document.getElementById('deviceWarning').style.display = 'block';
+          window.blockCheckIn = true;
         }
       }
     });
 });
 </script>
 
+<!-- BLOCK IF NO DEVICE ID -->
+<script>
+if (!localStorage.getItem("mostlane_device_id")) {
+  document.getElementById("deviceWarning").style.display = "block";
+  window.blockCheckIn = true;
+}
+</script>
+
+
+<!-- NEW CLOUDLARE WORKER CHECK-IN SYSTEM -->
+<script>
+const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
+const PENDING_KEY = "ml_pending_check_events_v1";
+
+function getPendingChecks() {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function savePendingChecks(list) {
+  localStorage.setItem(PENDING_KEY, JSON.stringify(list));
+}
+
+async function sendToWorker(payload) {
+  const res = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error("Worker error");
+  return res.json();
+}
+
+async function flushPendingChecks() {
+  const pending = getPendingChecks();
+  if (!pending.length || !navigator.onLine) return;
+
+  const remaining = [];
+
+  for (const ev of pending) {
+    try { await sendToWorker(ev); }
+    catch { remaining.push(ev); }
+  }
+
+  savePendingChecks(remaining);
+}
+
+window.addEventListener("load", flushPendingChecks);
+window.addEventListener("online", flushPendingChecks);
+
+function startCheckIn() {
+  if (window.blockCheckIn) return;
+
+  const username = sessionStorage.getItem("mostlaneLoggedInUser") || "Unknown";
+  const deviceID = localStorage.getItem("mostlane_device_id") || localStorage.getItem("deviceID") || "";
+
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const datetime = new Date().toISOString();
+
+    const payload = {
+      type: "checkin",
+      username,
+      deviceID,
+      datetime,
+      lat,
+      lon,
+      fuelClaim: null,
+      offlineEvent: !navigator.onLine
+    };
+
+    if (!navigator.onLine) {
+      const pending = getPendingChecks();
+      pending.push(payload);
+      savePendingChecks(pending);
+      window.location.href = `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(new Date().toLocaleString())}`;
+      return;
+    }
+
+    try {
+      await sendToWorker(payload);
+    } catch {
+      payload.offlineEvent = true;
+      const pending = getPendingChecks();
+      pending.push(payload);
+      savePendingChecks(pending);
+    }
+
+    const now = new Date().toLocaleString();
+    window.location.href = `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(now)}`;
+  },
+  err => {
+    alert("Please enable location to check in.\n" + err.message);
+  },
+  { enableHighAccuracy: true, timeout: 20000 });
+}
+
+window.onload = startCheckIn;
+</script>
+
 </body>
 </html>
-
-<script>
-  if (!localStorage.getItem("mostlane_device_id")) {
-    document.getElementById("deviceWarning").style.display = "block";
-    // Stop script execution by removing geolocation handler
-    window.onload = null;
-  }
-</script>
