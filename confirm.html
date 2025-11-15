@@ -1,79 +1,120 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <script src="auth.js"></script>
-  <title>Check In Confirmation</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
+  <title>Check-In Confirmation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    .confirmation-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .content-box {
+      background: rgba(255, 255, 255, 0.6);
+      padding: 30px 20px;
+      max-width: 400px;
+      width: 90%;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+
+    h1 {
+      color: #0078D4;
+      margin-bottom: 20px;
+      font-size: 22px;
+    }
+
+    .details {
+      color: #1a1a1a;
+      font-size: 16px;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .static-map {
+      width: 100%;
+      border-radius: 8px;
+      margin: 20px 0;
+    }
+
+    a.button {
+      display: inline-block;
+      margin-top: 15px;
+      padding: 10px 20px;
+      background-color: #0078D4;
+      color: white;
+      text-decoration: none;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+
+    img {
+      display: block;
+      margin: 0 auto 20px;
+      max-width: 180px;
+      height: auto;
+    }
+  </style>
+</head>
+
+<body class="confirmation-body">
+
+<div class="content-box">
+  
+  <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="height: 60px; margin-bottom: 20px;">
+
+  <h1 id="statusHeading">Success</h1>
+
+  <p class="details" id="detailText">Recording details...</p>
+
+  <!-- STATIC MAP WITH PIN -->
+  <img id="mapImage" class="static-map" src="" alt="Map Location">
+
+  <a class="button" href="main.html">Return to Main Menu</a>
+
+</div>
+
 <script>
-  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-    window.location.href = "login.html";
+  // Extract URL parameters
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status") || "Action Completed";
+  const lat = params.get("lat") || "";
+  const lon = params.get("lon") || "";
+  const time = params.get("time") || new Date().toLocaleString();
+
+  // Heading
+  document.getElementById("statusHeading").textContent =
+    status === "Check In" ? "Checked In Successfully" :
+    status === "Check Out" ? "Checked Out Successfully" :
+    "Action Completed";
+
+  // Text details
+  document.getElementById("detailText").innerHTML =
+    `<strong>Time:</strong> ${time}<br>
+     <strong>Location Recorded:</strong><br>${lat}, ${lon}`;
+
+  // Create static map URL
+  if (lat && lon) {
+    const mapUrl =
+      `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}` +
+      `&zoom=17&size=400x300&markers=color:red%7C${lat},${lon}` +
+      `&key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM`;
+
+    document.getElementById("mapImage").src = mapUrl;
+  } else {
+    document.getElementById("mapImage").style.display = "none";
   }
 </script>
 
-</head>
-<body class="confirm-body">
-  <style>
-  body.confirm-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
-  }
-
-  h1 {
-    background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
-  }
-
-  </style>
-  <h1 id="status"></h1>
-  <p id="datetime"></p>
-  <img id="map" class="map" src="" style="width: 90%; max-width: 500px;" />
-  <br>
-  <a class="button" href="main.html">Back to Main Menu</a>
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const lat = params.get("lat");
-    const lon = params.get("lon");
-    const time = decodeURIComponent(params.get("time"));
-    const status = params.get("status");
-
-    document.getElementById("status").innerText = "You have successfully logged " + status;
-    document.getElementById("datetime").innerText = "at " + time;
-    document.getElementById("map").src =
-      "https://maps.googleapis.com/maps/api/staticmap?center=" +
-      lat + "," + lon +
-      "&zoom=15&size=600x300&markers=color:red%7C" +
-      lat + "," + lon +
-      "&key=AIzaSyCKy2bleP7tFz6s8RcsSpwciPb9xn-id9o";
-  </script>
 </body>
 </html>
