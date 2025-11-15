@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-<script src="auth.js"></script>
-  <title>Check-In Confirmation</title>
+  <meta charset="utf-8">
+  <title>Mostlane • Confirm</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <script src="auth.js"></script>
+
   <style>
-    .confirmation-body {
+    body.confirmation-body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
@@ -16,104 +18,104 @@
       display: flex;
       align-items: center;
       justify-content: center;
-    }
-
-    .content-box {
-      background: rgba(255, 255, 255, 0.6);
-      padding: 30px 20px;
-      max-width: 400px;
-      width: 90%;
-      border-radius: 10px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.05);
       text-align: center;
     }
 
+    .content-box {
+      background: rgba(255, 255, 255, 0.70);
+      padding: 30px 20px;
+      width: 90%;
+      max-width: 430px;
+      border-radius: 14px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.08);
+    }
+
     h1 {
-      color: #0078D4;
-      margin-bottom: 20px;
-      font-size: 22px;
+      color: #004a99;
+      margin-bottom: 10px;
+      font-size: 24px;
+      font-weight: 700;
     }
 
-    .details {
-      color: #1a1a1a;
+    p {
       font-size: 16px;
-      margin-bottom: 20px;
-      line-height: 1.5;
+      color: #1f2937;
+      margin: 6px 0;
     }
 
-    .static-map {
-      width: 100%;
-      border-radius: 8px;
-      margin: 20px 0;
+    .label {
+      font-weight: 600;
+      color: #004a99;
     }
 
-    a.button {
+    .button {
       display: inline-block;
-      margin-top: 15px;
-      padding: 10px 20px;
-      background-color: #0078D4;
+      margin-top: 25px;
+      padding: 12px 20px;
+      background-color: #004a99;
       color: white;
       text-decoration: none;
-      border-radius: 5px;
+      border-radius: 8px;
       font-size: 16px;
+      width: 80%;
+      max-width: 260px;
     }
 
-    img {
-      display: block;
-      margin: 0 auto 20px;
-      max-width: 180px;
-      height: auto;
+    #staticMap {
+      margin-top: 16px;
+      width: 100%;
+      max-width: 390px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
     }
   </style>
 </head>
 
 <body class="confirmation-body">
 
-<div class="content-box">
-  
-  <img src="mostlane-logo.jpg" alt="Mostlane Logo" style="height: 60px; margin-bottom: 20px;">
+  <div class="content-box">
+    <img src="mostlane-logo.jpg" style="height: 60px; margin-bottom: 15px;">
 
-  <h1 id="statusHeading">Success</h1>
+    <h1 id="statusText">Success</h1>
 
-  <p class="details" id="detailText">Recording details...</p>
+    <p><span class="label">Time:</span> <span id="timeText"></span></p>
+    <p><span class="label">Latitude:</span> <span id="latText"></span></p>
+    <p><span class="label">Longitude:</span> <span id="lonText"></span></p>
 
-  <!-- STATIC MAP WITH PIN -->
-  <img id="mapImage" class="static-map" src="" alt="Map Location">
+    <!-- STATIC MAP -->
+    <img id="staticMap" src="">
 
-  <a class="button" href="main.html">Return to Main Menu</a>
-
-</div>
+    <a class="button" href="main.html">Return to Main Menu</a>
+  </div>
 
 <script>
-  // Extract URL parameters
+(function() {
   const params = new URLSearchParams(window.location.search);
-  const status = params.get("status") || "Action Completed";
+
+  const status = params.get("status") || "Completed";
   const lat = params.get("lat") || "";
   const lon = params.get("lon") || "";
-  const time = params.get("time") || new Date().toLocaleString();
+  const time = params.get("time") || "";
 
-  // Heading
-  document.getElementById("statusHeading").textContent =
-    status === "Check In" ? "Checked In Successfully" :
-    status === "Check Out" ? "Checked Out Successfully" :
-    "Action Completed";
+  document.getElementById("statusText").textContent = status;
+  document.getElementById("timeText").textContent = time;
+  document.getElementById("latText").textContent = lat;
+  document.getElementById("lonText").textContent = lon;
 
-  // Text details
-  document.getElementById("detailText").innerHTML =
-    `<strong>Time:</strong> ${time}<br>
-     <strong>Location Recorded:</strong><br>${lat}, ${lon}`;
-
-  // Create static map URL
   if (lat && lon) {
-    const mapUrl =
-      `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}` +
-      `&zoom=17&size=400x300&markers=color:red%7C${lat},${lon}` +
-      `&key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM`;
+    const apiKey = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM";
+    const url =
+      "https://maps.googleapis.com/maps/api/staticmap" +
+      `?center=${lat},${lon}` +
+      `&zoom=17` +
+      `&size=600x400` +
+      `&maptype=roadmap` +
+      `&markers=color:red%7C${lat},${lon}` +
+      `&key=${apiKey}`;
 
-    document.getElementById("mapImage").src = mapUrl;
-  } else {
-    document.getElementById("mapImage").style.display = "none";
+    document.getElementById("staticMap").src = url;
   }
+})();
 </script>
 
 </body>
