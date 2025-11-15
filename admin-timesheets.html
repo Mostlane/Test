@@ -223,6 +223,121 @@
     .toolbar{ flex-direction:column; }
     .settings{ width:100%; }
   }
+    /* ---------- MOBILE OPTIMISATION ---------- */
+@media (max-width: 700px) {
+
+  body, html {
+    overflow-x: hidden;
+  }
+
+  .wrap {
+    margin: 12px;
+    padding: 18px;
+    border-radius: 14px;
+  }
+
+  .head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .controls {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  /* Filters / toolbar stack nicely */
+  .toolbar {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .settings {
+    width: 100%;
+  }
+
+  select,
+  input[type="date"],
+  input[type="number"] {
+    width: 100%;
+    min-width: 100%;
+    font-size: 15px;
+  }
+
+  .summary-strip {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .summary-card {
+    width: 100%;
+    min-width: unset;
+  }
+
+  /* Table optimisation */
+  table {
+    font-size: 13px;
+    border-spacing: 0 6px;
+  }
+
+  thead {
+    display: none; /* hide table header for mobile */
+  }
+
+  tbody tr {
+    display: block;
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 14px;
+  }
+
+  tbody td {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 4px;
+    border: none;
+  }
+
+  tbody td:first-child, 
+  tbody td:last-child {
+    border: none;
+    border-radius: 0;
+  }
+
+  /* Cell labels in mobile view */
+  tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--muted);
+    margin-right: 10px;
+  }
+
+  /* Inputs inside table rows */
+  tbody input[type="number"] {
+    width: 80px;
+    padding: 6px;
+    font-size: 13px;
+  }
+
+  .btn {
+    width: 100%;
+    text-align: center;
+    padding: 12px;
+  }
+
+  .foot {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+}
   </style>
 </head>
 <body>
