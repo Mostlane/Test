@@ -551,7 +551,24 @@ const TIMESHEET_WORKER = "https://timesheet.jamie-def.workers.dev";
       if (firstIn){
         const { site, recognised } = findNearestSite(firstIn.lat, firstIn.lon);
         if (site){
-          siteName = `${site.siteName || "Site"} (${site.siteNumber || ""})`;
+let ref = "";
+
+// Prefer siteNumber
+if (site.siteNumber && site.siteNumber.trim() !== "") {
+  ref = site.siteNumber.trim();
+}
+
+// If no siteNumber, use jobNumber
+else if (site.jobNumber && site.jobNumber.trim() !== "") {
+  ref = site.jobNumber.trim();
+}
+
+// Build display text
+if (ref) {
+  siteName = `${site.siteName} (${ref})`;
+} else {
+  siteName = site.siteName || "Site";
+}
         }else{
           siteName = "Unknown";
         }
