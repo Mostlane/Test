@@ -12,52 +12,75 @@
     background-size: 180%;
     margin: 0;
     padding: 0;
+
+    /* Ensure perfect centering on all screens */
     min-height: 100vh;
     display: flex;
-    align-items: center;
     justify-content: center;
+    align-items: center;
   }
 
   .content-box {
-    background: rgba(255, 255, 255, 0.6);
-    padding: 30px 20px;
-    width: 90%;
-    max-width: 400px;
-    border-radius: 12px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.08);
+    background: rgba(255, 255, 255, 0.65);
+    padding: 35px 24px;
+    width: 92%;
+    max-width: 420px;
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+
+    /* Correct centering of everything inside */
     text-align: center;
   }
 
+  .content-box img {
+    width: 150px;
+    max-width: 60%;
+    margin: 0 auto 25px;
+    display: block;
+  }
+
   h1 {
-    background-color: rgba(0, 74, 153, 0.6);
+    background-color: rgba(0, 74, 153, 0.65);
     color: white;
-    padding: 12px 20px;
-    border-radius: 8px;
+    padding: 14px 20px;
+    border-radius: 10px;
     font-weight: bold;
     font-size: 22px;
-    margin-bottom: 25px;
+    margin-bottom: 28px;
   }
 
   a.button {
     display: block;
     width: 100%;
-    padding: 14px 20px;
-    margin: 10px 0;
+    padding: 15px 20px;
+    margin: 12px 0;
     font-size: 17px;
+
+    background-color: rgba(0, 74, 153, 0.75);
     color: white;
-    background-color: rgba(0, 74, 153, 0.7);
     text-decoration: none;
     text-align: center;
     border-radius: 8px;
+
+    /* Smooth look */
+    transition: 0.15s;
   }
 
-  img {
-    display: block;
-    margin: 0 auto 20px;
-    max-width: 140px;
+  a.button:hover {
+    background-color: rgba(0, 74, 153, 0.90);
+  }
+
+  /* Make sure spacing looks perfect on small phones */
+  @media (max-width: 400px) {
+    h1 {
+      font-size: 20px;
+      padding: 12px 16px;
+    }
+    .content-box {
+      padding: 28px 18px;
+    }
   }
 </style>
-
 </head>
 
 <body class="index-body">
