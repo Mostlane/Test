@@ -75,11 +75,8 @@ const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
 
 function getPendingChecks() {
-  try {
-    return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); }
+  catch { return []; }
 }
 
 function savePendingChecks(list) {
@@ -101,12 +98,10 @@ async function flushPendingChecks() {
   if (!pending.length || !navigator.onLine) return;
 
   const remaining = [];
-
   for (const ev of pending) {
     try { await sendToWorker(ev); }
     catch { remaining.push(ev); }
   }
-
   savePendingChecks(remaining);
 }
 
@@ -118,7 +113,7 @@ window.addEventListener("online", flushPendingChecks);
 ------------------------------------------------------------------------ */
 function startCheckIn() {
 
-  /* ★★★ THE ONLY CHANGE ★★★ */
+  // ⭐ FIX: username loaded AFTER auth.js has run
   const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
 
   navigator.geolocation.getCurrentPosition(async pos => {
@@ -164,7 +159,8 @@ function startCheckIn() {
   }, { enableHighAccuracy: true, timeout: 20000 });
 }
 
-window.onload = startCheckIn;
+// ⭐ FIX: run AFTER whole page + auth.js load
+window.onload = () => startCheckIn();
 </script>
 
 </body>
