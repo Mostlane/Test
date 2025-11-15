@@ -217,7 +217,154 @@
     font-size:14px;
     color:var(--muted);
   }
+/* ---------------------------------------------------
+   PREMIUM VISUAL UPGRADE — MOSTLANE AESTHETIC
+---------------------------------------------------- */
 
+/* Softer shadow + more premium panels */
+.wrap {
+  border-radius: 20px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+}
+
+/* Title cleaner */
+.title {
+  font-size: 24px;
+  letter-spacing: -0.5px;
+  font-weight: 650;
+  color: #1d2b3a;
+}
+
+/* --- Buttons (premium styling) --- */
+
+.btn {
+  padding: 10px 18px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: 0.25s ease;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #1e66ff, #1450d2);
+  color: white;
+  box-shadow: 0 3px 8px rgba(30,102,255,0.35);
+}
+
+.btn.primary:hover {
+  box-shadow: 0 6px 14px rgba(30,102,255,0.55);
+  transform: translateY(-2px);
+}
+
+.btn.outline {
+  background: white;
+  border: 1px solid #a3b4ce;
+  color: #2f4a6c;
+}
+
+.btn.outline:hover {
+  background: #f3f7fc;
+}
+
+.btn-small {
+  padding: 6px 10px;
+  font-size: 12px !important;
+}
+
+/* --- Dropdowns (premium pill design) --- */
+
+select {
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1px solid #cdd7e5;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+  font-size: 14px;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg fill='%23667' height='20' width='20' viewBox='0 0 20 20'%3E%3Cpath d='M5.516 7.548l4.484 4.485 4.484-4.485L16 8.548l-6 6-6-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* Inputs refined */
+input[type="number"], input[type="date"] {
+  border-radius: 12px;
+  padding: 8px 12px;
+  border: 1px solid #d2dce8;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+}
+
+/* Status chips cleaner */
+.chip {
+  border-radius: 20px;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+
+.chip.ok {
+  background: #e7f9ef;
+  color: #117a39;
+}
+
+.chip.warn {
+  background: #fff5d6;
+  color: #ad6a00;
+}
+
+.chip.bad {
+  background: #ffe4e4;
+  color: #b31f1f;
+}
+
+.chip.info {
+  background: #eef2ff;
+  color: #4a56c4;
+}
+
+/* Summary cards cleaner */
+.summary-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+}
+
+.summary-label {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: #6c7c92;
+}
+
+.summary-value {
+  font-size: 20px;
+  color: #2a3b52;
+}
+
+/* Table card rows */
+tbody tr {
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.06);
+}
+
+tbody td {
+  padding: 10px 12px;
+}
+
+/* Refined table typography */
+tbody td, thead th {
+  font-size: 13px;
+}
+
+/* Emphasise day names */
+tbody td:nth-child(2) {
+  font-weight: 600;
+  color: #2f3a48;
+}
+
+/* Improve mobile typography later */
   @media (max-width:900px){
     .summary-strip{ flex-direction:column; }
     .toolbar{ flex-direction:column; }
