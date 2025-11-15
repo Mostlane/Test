@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <title>Mostlane • Confirm</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <script src="auth.js"></script>
 
   <style>
@@ -74,7 +73,7 @@
 <body class="confirmation-body">
 
   <div class="content-box">
-    <img src="mostlane-logo.jpg" style="height: 60px; margin-bottom: 15px;">
+    <img src="mostlane-logo.jpg" style="height:60px; margin-bottom:15px;">
 
     <h1 id="statusText">Success</h1>
 
@@ -82,19 +81,21 @@
     <p><span class="label">Latitude:</span> <span id="latText"></span></p>
     <p><span class="label">Longitude:</span> <span id="lonText"></span></p>
 
-    <!-- STATIC MAP -->
+    <p><span class="label">Nearest Site:</span> <span id="siteNameText">Loading…</span></p>
+
     <img id="staticMap" src="">
 
     <a class="button" href="main.html">Return to Main Menu</a>
   </div>
 
+
 <script>
-(function() {
+(async function() {
   const params = new URLSearchParams(window.location.search);
 
   const status = params.get("status") || "Completed";
-  const lat = params.get("lat") || "";
-  const lon = params.get("lon") || "";
+  const lat = parseFloat(params.get("lat") || "");
+  const lon = parseFloat(params.get("lon") || "");
   const time = params.get("time") || "";
 
   document.getElementById("statusText").textContent = status;
@@ -102,19 +103,65 @@
   document.getElementById("latText").textContent = lat;
   document.getElementById("lonText").textContent = lon;
 
+  // STATIC MAP
   if (lat && lon) {
     const apiKey = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM";
-    const url =
+    const mapURL =
       "https://maps.googleapis.com/maps/api/staticmap" +
       `?center=${lat},${lon}` +
-      `&zoom=17` +
-      `&size=600x400` +
-      `&maptype=roadmap` +
+      `&zoom=17&size=600x400&maptype=roadmap` +
       `&markers=color:red%7C${lat},${lon}` +
       `&key=${apiKey}`;
-
-    document.getElementById("staticMap").src = url;
+    document.getElementById("staticMap").src = mapURL;
   }
+
+  // ─────────────────────────────────────────────
+  // 🔍 FIND NEAREST SITE WITHIN 100M
+  // ─────────────────────────────────────────────
+
+  const siteNameEl = document.getElementById("siteNameText");
+
+  try {
+    const res = await fetch("https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all");
+    const sites = await res.json();
+
+    let nearest = null;
+    let nearestDist = Infinity;
+
+    function distanceMeters(aLat, aLon, bLat, bLon) {
+      const R = 6371000; // metres
+      const dLat = (bLat - aLat) * Math.PI/180;
+      const dLon = (bLon - aLon) * Math.PI/180;
+      const sLat = Math.sin(dLat/2);
+      const sLon = Math.sin(dLon/2);
+      const c = sLat*sLat + Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*sLon*sLon;
+      return 2 * R * Math.atan2(Math.sqrt(c), Math.sqrt(1-c));
+    }
+
+    for (const s of sites) {
+      if (!s.lat || !s.lon) continue;
+
+      const d = distanceMeters(lat, lon, s.lat, s.lon);
+
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = s;
+      }
+    }
+
+    if (nearest && nearestDist <= 100) {
+      // Show site number & name in Mostlane style
+      const num = nearest.siteNumber ? ` (${nearest.siteNumber})` : "";
+      siteNameEl.textContent = `${nearest.siteName}${num}`;
+    } else {
+      siteNameEl.textContent = "Unrecognised Location";
+    }
+
+  } catch (err) {
+    console.error("Site matching failed:", err);
+    siteNameEl.textContent = "Unavailable";
+  }
+
 })();
 </script>
 
