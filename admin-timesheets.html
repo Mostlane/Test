@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mostlane • Timesheet Manager</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#1e66ff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --ok:#10b981;
+      --warn:#f59e0b;
+      --bad:#ef4444;
+      --panel:rgba(255,255,255,0.75);
+    }
+    html,body{
+      height:100%;margin:0;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:var(--text);
+    }
+    .wrap{
+      max-width:1200px;
+      margin:24px auto;
+      padding:20px;
+      background:var(--panel);
+      border-radius:12px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.10);
+    }
+    .head{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:16px;
+    }
+    .title{
+      font-size:22px;
+      font-weight:700;
+    }
+    .controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+    }
+    select,input[type="date"],input[type="number"]{
+      padding:8px 10px;
+      border-radius:8px;
+      border:1px solid #cfd6e4;
+      font-size:14px;
+      min-width:140px;
+      background:#fff;
+    }
+    .btn{
+      border:none;
+      border-radius:8px;
+      padding:8px 12px;
+      font-size:14px;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .btn.primary{background:var(--ml-blue);color:#fff;}
+    .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue);}
+    .btn.danger{background:var(--bad);color:#fff;}
+    .toolbar{
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+      font-size:14px;
+    }
+    .summary-strip{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .summary-card{
+      background:#ffffff;
+      border-radius:10px;
+      padding:10px 12px;
+      min-width:120px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.06);
+    }
+    .summary-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;}
+    .summary-value{font-size:16px;font-weight:700;margin-top:4px;}
+
+    .settings{
+      background:#ffffff;
+      border-radius:10px;
+      padding:10px 12px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.06);
+      min-width:230px;
+    }
+    .settings h3{
+      margin:0 0 6px;
+      font-size:14px;
+    }
+    .settings-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:6px;
+      margin:4px 0;
+      font-size:13px;
+    }
+    .settings-row input{
+      max-width:90px;
+      text-align:right;
+    }
+
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0 6px;
+      margin-top:12px;
+      font-size:14px;
+    }
+    thead th{
+      text-align:left;
+      padding:6px 8px;
+      color:var(--muted);
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.06em;
+    }
+    tbody tr{
+      background:#ffffff;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    }
+    tbody td{
+      padding:8px 8px;
+      border-top:1px solid #e5e7eb;
+      border-bottom:1px solid #e5e7eb;
+      vertical-align:middle;
+    }
+    tbody td:first-child{
+      border-left:1px solid #e5e7eb;
+      border-top-left-radius:8px;
+      border-bottom-left-radius:8px;
+    }
+    tbody td:last-child{
+      border-right:1px solid #e5e7eb;
+      border-top-right-radius:8px;
+      border-bottom-right-radius:8px;
+    }
+    tbody input[type="number"]{
+      width:80px;
+      padding:4px 6px;
+      font-size:13px;
+      border-radius:6px;
+      border:1px solid #d1d5db;
+    }
+    tbody input[type="checkbox"]{
+      transform:scale(1.2);
+    }
+    .muted{color:var(--muted);}
+    .chip{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:600;
+    }
+    .chip.ok{background:#ecfdf3;color:#166534;}
+    .chip.warn{background:#fffbeb;color:#92400e;}
+    .chip.bad{background:#fef2f2;color:#b91c1c;}
+    .chip.info{background:#eef2ff;color:#3730a3;}
+
+    .foot{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:12px;
+      font-size:13px;
+      color:var(--muted);
+      flex-wrap:wrap;
+      gap:8px;
+    }
+
+    @media (max-width: 800px){
+      .wrap{margin:12px auto;padding:14px;}
+      table{font-size:12px;}
+      tbody input[type="number"]{width:70px;}
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="head">
+    <div class="title">Timesheet Manager</div>
+    <div class="controls">
+      <button class="btn outline" onclick="goMain()">Main Menu</button>
+      <button class="btn outline" onclick="reloadWeek()">Reload</button>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="toolbar">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <select id="userSelect">
+        <option value="">Select Engineer...</option>
+      </select>
+      <div>
+        <label style="font-size:12px;color:var(--muted);display:block;">Week starting (Monday)</label>
+        <input type="date" id="weekStartInput">
+      </div>
+      <button class="btn primary" onclick="loadWeek()">Load Week</button>
+    </div>
+    <div class="settings">
+      <h3>Fuel Settings</h3>
+      <div class="settings-row">
+        <span>Rate (£/mile)</span>
+        <input type="number" id="fuelRateInput" step="0.01" min="0">
+      </div>
+      <div class="settings-row">
+        <span>Free miles radius</span>
+        <input type="number" id="freeMilesInput" step="1" min="0">
+      </div>
+      <button class="btn outline" style="margin-top:6px;width:100%;" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+
+  <!-- Summary strip -->
+  <div class="summary-strip">
+    <div class="summary-card">
+      <div class="summary-label">Total Hours</div>
+      <div class="summary-value" id="sumHours">0.0</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Paid Miles</div>
+      <div class="summary-value" id="sumMiles">0.0</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Fuel (£)</div>
+      <div class="summary-value" id="sumFuel">£0.00</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Unknown Locations</div>
+      <div class="summary-value" id="sumUnknown">0</div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Day</th>
+        <th>Check In</th>
+        <th>Check Out</th>
+        <th>Site</th>
+        <th>Status</th>
+        <th>Hours</th>
+        <th>Pay Fuel?</th>
+        <th>Distance (mi)</th>
+        <th>Paid Miles</th>
+        <th>Fuel (£)</th>
+        <th>Calc</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <div class="foot">
+    <div id="status">Select a user and week to begin.</div>
+    <button class="btn primary" onclick="approveWeek()">Approve Week</button>
+  </div>
+</div>
+
+<script>
+  // Basic auth gate
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+
+  const TIMESHEET_WORKER = "https://timesheets.mostlane.workers.dev";
+  const SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
+  const GOOGLE_MAPS_KEY = "AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM"; // latest portal key
+  const HQ_POSTCODE = "PO15 5RQ"; // can be changed later
+
+  let CURRENT_USER = "";
+  let CURRENT_WEEK_START = null; // Date
+  let CURRENT_EVENTS = [];
+  let ALL_SITES = [];
+  let SETTINGS = { fuelRate: 0.25, freeMilesRadius: 20 };
+
+  function goMain(){
+    window.location.href = "main.html";
+  }
+
+  function setStatus(msg){
+    document.getElementById("status").textContent = msg;
+  }
+
+  // --- Load settings on startup ---
+  async function loadSettings(){
+    try{
+      const res = await fetch(`${TIMESHEET_WORKER}/settings`);
+      if (!res.ok) throw new Error("Settings not available");
+      SETTINGS = await res.json();
+    }catch{
+      SETTINGS = { fuelRate: 0.25, freeMilesRadius: 20 };
+    }
+    document.getElementById("fuelRateInput").value = SETTINGS.fuelRate;
+    document.getElementById("freeMilesInput").value = SETTINGS.freeMilesRadius;
+  }
+
+  async function saveSettings(){
+    const rate = parseFloat(document.getElementById("fuelRateInput").value);
+    const free = parseFloat(document.getElementById("freeMilesInput").value);
+    const body = {
+      fuelRate: isNaN(rate) ? 0.25 : rate,
+      freeMilesRadius: isNaN(free) ? 20 : free
+    };
+    try{
+      const res = await fetch(`${TIMESHEET_WORKER}/settings`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Failed");
+      const j = await res.json();
+      SETTINGS = j.settings || body;
+      setStatus("Settings saved.");
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to save settings.");
+    }
+  }
+
+  // --- Utility: get Monday of week for a date ---
+  function getMonday(d){
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = (day === 0 ? -6 : 1) - day;
+    date.setDate(date.getDate() + diff);
+    date.setHours(0,0,0,0);
+    return date;
+  }
+
+  function dateToYMD(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const dd = String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  function dayName(d){
+    return d.toLocaleDateString(undefined,{ weekday:"short" });
+  }
+
+  function reloadWeek(){
+    if (!CURRENT_USER || !CURRENT_WEEK_START) return;
+    loadWeek(true);
+  }
+
+  async function loadSitesOnce(){
+    if (ALL_SITES.length) return;
+    try{
+      const res = await fetch(`${SITES_WORKER}/get-sites?category=all`);
+      const data = await res.json();
+      ALL_SITES = Array.isArray(data) ? data : [];
+    }catch(e){
+      console.error("Sites load error:", e);
+      ALL_SITES = [];
+    }
+  }
+
+  // Haversine distance in metres
+  function distanceMeters(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = (x)=>x*Math.PI/180;
+    const dLat = toRad(lat2-lat1);
+    const dLon = toRad(lon2-lon1);
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    const c = 2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    return R*c;
+  }
+
+  function findNearestSite(lat, lon){
+    if (!ALL_SITES.length) return { site:null, recognised:false };
+    let best = null;
+    let bestDist = Infinity;
+    for (const s of ALL_SITES){
+      if (s.lat == null || s.lon == null) continue;
+      const d = distanceMeters(lat, lon, s.lat, s.lon);
+      if (d < bestDist){
+        bestDist = d;
+        best = s;
+      }
+    }
+    const recognised = bestDist <= 100; // within 100m
+    return { site: best, recognised, distMeters: bestDist };
+  }
+
+  // Maps bits (for optional DistanceMatrix per row)
+  function ensureMapsLoaded(){
+    if (window.google && window.google.maps) return Promise.resolve();
+    return new Promise((resolve,reject)=>{
+      let waited=0;
+      const max=15000;
+      const tick=50;
+      function check(){
+        if (window.google && window.google.maps) return resolve();
+        waited+=tick;
+        if (waited>=max) return reject(new Error("Maps failed to load"));
+        setTimeout(check,tick);
+      }
+      check();
+    });
+  }
+
+  async function calcMileageFromHQ(lat, lon){
+    try{
+      await ensureMapsLoaded();
+      const service = new google.maps.DistanceMatrixService();
+      return await new Promise((resolve)=>{
+        service.getDistanceMatrix(
+          {
+            origins:[HQ_POSTCODE],
+            destinations:[{lat:parseFloat(lat),lng:parseFloat(lon)}],
+            travelMode:google.maps.TravelMode.DRIVING,
+            unitSystem:google.maps.UnitSystem.IMPERIAL
+          },
+          (res,status)=>{
+            if (status!=="OK"){
+              console.warn("DM status",status);
+              return resolve(null);
+            }
+            const row = res.rows[0];
+            if (!row || !row.elements || !row.elements[0]) return resolve(null);
+            const dist = row.elements[0].distance?.value;
+            if (!dist) return resolve(null);
+            const miles = dist/1609.34;
+            resolve(miles);
+          }
+        );
+      });
+    }catch(e){
+      console.error("Mileage error:", e);
+      return null;
+    }
+  }
+
+  async function loadWeek(skipInput=false){
+    const userSel = document.getElementById("userSelect");
+    const user = userSel.value || sessionStorage.getItem("mostlaneUser");
+    if (!user){
+      alert("Select a user first");
+      return;
+    }
+    CURRENT_USER = user;
+
+    let monday;
+    if (!skipInput){
+      const val = document.getElementById("weekStartInput").value;
+      if (val){
+        monday = getMonday(new Date(val));
+      }else{
+        monday = getMonday(new Date());
+      }
+      document.getElementById("weekStartInput").value = dateToYMD(monday);
+    }else{
+      monday = CURRENT_WEEK_START || getMonday(new Date());
+    }
+    CURRENT_WEEK_START = monday;
+
+    const fromStr = dateToYMD(monday);
+    const to = new Date(monday);
+    to.setDate(to.getDate()+7);
+    const toStr = dateToYMD(to);
+
+    setStatus("Loading events...");
+    await loadSitesOnce();
+
+    try{
+      const res = await fetch(`${TIMESHEET_WORKER}/logs?user=${encodeURIComponent(user)}&from=${fromStr}&to=${toStr}`);
+      if (!res.ok) throw new Error("Failed to load logs");
+      const j = await res.json();
+      CURRENT_EVENTS = Array.isArray(j.events) ? j.events : [];
+      buildWeekTable();
+      setStatus("Week loaded.");
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to load events.");
+    }
+  }
+
+  function buildWeekTable(){
+    const tbody = document.getElementById("rows");
+    tbody.innerHTML = "";
+    const monday = new Date(CURRENT_WEEK_START);
+    let totalHours=0;
+    let totalMiles=0;
+    let totalFuel=0;
+    let unknownCount=0;
+
+    for (let i=0;i<7;i++){
+      const dayDate = new Date(monday);
+      dayDate.setDate(monday.getDate()+i);
+      const dayStr = dateToYMD(dayDate);
+
+      const eventsForDay = CURRENT_EVENTS.filter(ev=>{
+        const d = new Date(ev.datetime);
+        return dateToYMD(d) === dayStr;
+      });
+
+      let firstIn = null;
+      let lastOut = null;
+      let anyUnknown = false;
+      let matchedNearest = null;
+
+      for (const ev of eventsForDay){
+        if (ev.type === "checkin"){
+          if (!firstIn || new Date(ev.datetime) < new Date(firstIn.datetime)){
+            firstIn = ev;
+          }
+        }
+        if (ev.type === "checkout"){
+          if (!lastOut || new Date(ev.datetime) > new Date(lastOut.datetime)){
+            lastOut = ev;
+          }
+        }
+      }
+
+      let hours = 0;
+      if (firstIn && lastOut){
+        const start = new Date(firstIn.datetime);
+        const end = new Date(lastOut.datetime);
+        const diffMs = end - start;
+        if (diffMs > 0){
+          hours = diffMs/1000/60/60;
+        }
+      }
+
+      let siteName = "—";
+      let statusChip = `<span class="chip info">No data</span>`;
+      let distanceMi = "";
+      let paidMiles = "";
+      let fuelCost = "";
+
+      if (firstIn){
+        const { site, recognised } = findNearestSite(firstIn.lat, firstIn.lon);
+        if (site){
+          siteName = `${site.siteName || "Site"} (${site.siteNumber || ""})`;
+        }else{
+          siteName = "Unknown";
+        }
+        if (!recognised){
+          anyUnknown = true;
+        }
+        if (recognised){
+          statusChip = `<span class="chip ok">Matched Site</span>`;
+        }else if (site){
+          statusChip = `<span class="chip warn">Nearest: ${site.siteName || "Site"}</span>`;
+        }else{
+          statusChip = `<span class="chip bad">Unknown Location</span>`;
+        }
+        matchedNearest = site;
+      }else if (eventsForDay.length){
+        statusChip = `<span class="chip warn">Partial Day</span>`;
+      }
+
+      if (anyUnknown) unknownCount++;
+
+      totalHours += hours;
+
+      const tr = document.createElement("tr");
+      tr.dataset.date = dayStr;
+
+      const inStr = firstIn ? new Date(firstIn.datetime).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}) : "—";
+      const outStr = lastOut ? new Date(lastOut.datetime).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}) : "—";
+
+      tr.innerHTML = `
+        <td>${dayStr}</td>
+        <td>${dayName(dayDate)}</td>
+        <td>${inStr}</td>
+        <td>${outStr}</td>
+        <td>${siteName}</td>
+        <td>${statusChip}</td>
+        <td><input type="number" step="0.25" min="0" value="${hours.toFixed(2)}" class="hours-input"></td>
+        <td style="text-align:center;"><input type="checkbox" class="fuel-check"></td>
+        <td><input type="number" step="0.1" min="0" class="dist-input" value=""></td>
+        <td><input type="number" step="0.1" min="0" class="paidmiles-input" value=""></td>
+        <td><input type="number" step="0.01" min="0" class="fuelcost-input" value=""></td>
+        <td><button class="btn outline btn-small">Calc</button></td>
+      `;
+
+      const calcBtn = tr.querySelector("button");
+      calcBtn.addEventListener("click", async () => {
+        const distInput = tr.querySelector(".dist-input");
+        const paidInput = tr.querySelector(".paidmiles-input");
+        const costInput = tr.querySelector(".fuelcost-input");
+        const fuelChk = tr.querySelector(".fuel-check");
+
+        if (!matchedNearest || matchedNearest.lat == null || matchedNearest.lon == null){
+          alert("No matched site with coordinates for this day.");
+          return;
+        }
+        setStatus(`Calculating mileage for ${dayStr}...`);
+        const miles = await calcMileageFromHQ(matchedNearest.lat, matchedNearest.lon);
+        if (miles == null){
+          setStatus("Mileage calculation failed.");
+          return;
+        }
+        const free = SETTINGS.freeMilesRadius || 0;
+        const payMiles = Math.max(0, miles - free);
+        const rate = SETTINGS.fuelRate || 0.25;
+        const fuel = payMiles * rate;
+
+        distInput.value = miles.toFixed(1);
+        paidInput.value = payMiles.toFixed(1);
+        costInput.value = fuel.toFixed(2);
+        fuelChk.checked = payMiles > 0;
+
+        recalcTotals();
+        setStatus("Mileage updated.");
+      });
+
+      // Update totals live on change
+      tr.querySelectorAll("input").forEach(inp=>{
+        inp.addEventListener("input", recalcTotals);
+        inp.addEventListener("change", recalcTotals);
+      });
+
+      tbody.appendChild(tr);
+    }
+
+    recalcTotals();
+  }
+
+  function recalcTotals(){
+    const rows = Array.from(document.querySelectorAll("#rows tr"));
+    let totalHours=0;
+    let totalMiles=0;
+    let totalFuel=0;
+    let unknownCount=0;
+
+    for (const tr of rows){
+      const hours = parseFloat(tr.querySelector(".hours-input").value) || 0;
+      const paid = parseFloat(tr.querySelector(".paidmiles-input").value) || 0;
+      const fuel = parseFloat(tr.querySelector(".fuelcost-input").value) || 0;
+      const statusCell = tr.children[5];
+      const isUnknown = statusCell.textContent.includes("Unknown");
+      if (isUnknown) unknownCount++;
+
+      const fuelChk = tr.querySelector(".fuel-check");
+      totalHours += hours;
+      if (fuelChk.checked){
+        totalMiles += paid;
+        totalFuel += fuel;
+      }
+    }
+
+    document.getElementById("sumHours").textContent = totalHours.toFixed(2);
+    document.getElementById("sumMiles").textContent = totalMiles.toFixed(1);
+    document.getElementById("sumFuel").textContent = "£" + totalFuel.toFixed(2);
+    document.getElementById("sumUnknown").textContent = unknownCount;
+  }
+
+  async function approveWeek(){
+    if (!CURRENT_USER || !CURRENT_WEEK_START){
+      alert("Load a user and week first.");
+      return;
+    }
+    if (!confirm("Approve this week for payment?")) return;
+
+    const monday = CURRENT_WEEK_START;
+    const weekStartStr = dateToYMD(monday);
+    const end = new Date(monday);
+    end.setDate(end.getDate()+6);
+    const weekEndStr = dateToYMD(end);
+
+    const rows = Array.from(document.querySelectorAll("#rows tr"));
+    const days = rows.map(tr=>{
+      const date = tr.dataset.date;
+      const hours = parseFloat(tr.querySelector(".hours-input").value) || 0;
+      const fuelChk = tr.querySelector(".fuel-check").checked;
+      const dist = parseFloat(tr.querySelector(".dist-input").value) || 0;
+      const paidMiles = parseFloat(tr.querySelector(".paidmiles-input").value) || 0;
+      const fuelCost = parseFloat(tr.querySelector(".fuelcost-input").value) || 0;
+      const statusText = tr.children[5].textContent.trim();
+      const siteLabel = tr.children[4].textContent.trim();
+      return {
+        date,
+        dayName: tr.children[1].textContent.trim(),
+        site: siteLabel,
+        status: statusText,
+        hours,
+        payFuel: fuelChk,
+        distanceMiles: dist,
+        paidMiles,
+        fuelCost
+      };
+    });
+
+    const totals = {
+      hours: parseFloat(document.getElementById("sumHours").textContent) || 0,
+      paidMiles: parseFloat(document.getElementById("sumMiles").textContent) || 0,
+      fuelTotal: parseFloat(
+        (document.getElementById("sumFuel").textContent || "£0")
+        .replace("£","")
+      ) || 0,
+      fuelRate: SETTINGS.fuelRate,
+      freeMilesRadius: SETTINGS.freeMilesRadius
+    };
+
+    const payload = {
+      username: CURRENT_USER,
+      weekStart: weekStartStr,
+      weekEnd: weekEndStr,
+      days,
+      totals
+    };
+
+    try{
+      setStatus("Approving week...");
+      const res = await fetch(`${TIMESHEET_WORKER}/approve-week`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("Approve failed");
+      const j = await res.json();
+      setStatus("Week approved and saved.");
+      alert("Week approved and saved for " + CURRENT_USER);
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to approve week.");
+      alert("Failed to approve week.");
+    }
+  }
+
+  function init(){
+    // Populate userSelect with at least the current user for now.
+    const sel = document.getElementById("userSelect");
+    const me = sessionStorage.getItem("mostlaneUser");
+    if (me){
+      const opt = document.createElement("option");
+      opt.value = me;
+      opt.textContent = me;
+      sel.appendChild(opt);
+      sel.value = me;
+    }
+
+    // Default week start to this Monday
+    const monday = getMonday(new Date());
+    document.getElementById("weekStartInput").value = dateToYMD(monday);
+    CURRENT_WEEK_START = monday;
+    loadSettings();
+  }
+
+  window.addEventListener("DOMContentLoaded", init);
+</script>
+
+<!-- Google Maps loader (for distance matrix) -->
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM&libraries=places">
+</script>
+
+</body>
+</html>
