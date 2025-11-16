@@ -96,6 +96,7 @@
       padding:14px 18px 18px;
     }
 
+    /* Search / Filter pills */
     .toolbar{
       display:flex;
       flex-wrap:wrap;
@@ -131,6 +132,7 @@
       color:#64748b;
     }
 
+    /* Summary cards */
     .summary-strip{
       display:flex;
       flex-wrap:wrap;
@@ -177,6 +179,7 @@
       margin-top:2px;
     }
 
+    /* Vehicle cards */
     .grid{
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
@@ -322,6 +325,7 @@
       padding-top:8px;
     }
 
+    /* Mobile tweaks */
     @media(max-width:720px){
       .header{align-items:flex-start;}
       .header-title{font-size:18px;}
@@ -332,63 +336,13 @@
       .btn-pill.sub{padding:3px 8px;font-size:11px;}
       .btn-ghost{font-size:11px;}
     }
-
-    /* Modal Styling */
-    .modal-backdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,0.55);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:50;
-    }
-    .modal{
-      background:white;
-      border-radius:12px;
-      padding:16px;
-      width:90%;
-      max-width:420px;
-      box-shadow:0 18px 40px rgba(0,0,0,0.35);
-    }
-    .modal-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:10px;
-    }
-    .modal-title{
-      font-weight:700;
-      font-size:16px;
-    }
-    .modal-body{
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-    .modal-row label{
-      font-size:13px;
-      font-weight:600;
-    }
-    .modal-row input, .modal-row select{
-      width:100%;
-      padding:7px 9px;
-      font-size:13px;
-      border:1px solid #d1d5db;
-      border-radius:8px;
-    }
-    .modal-footer{
-      display:flex;
-      justify-content:flex-end;
-      gap:8px;
-      margin-top:12px;
-    }
   </style>
 </head>
 
 <body>
 <div class="wrap">
 
+  <!-- HEADER -->
   <div class="header">
     <div>
       <div class="header-title">Vehicle Fleet</div>
@@ -400,8 +354,10 @@
     </div>
   </div>
 
+  <!-- CONTENT -->
   <div class="content">
 
+    <!-- Filters -->
     <div class="toolbar">
       <div class="pill-field">
         <span class="pill-label">Search</span>
@@ -417,6 +373,7 @@
       </div>
     </div>
 
+    <!-- Summary -->
     <div class="summary-strip">
       <div class="summary-card">
         <div class="summary-label">Total Vehicles</div>
@@ -435,6 +392,7 @@
       </div>
     </div>
 
+    <!-- Cards -->
     <div class="grid" id="fleetGrid"></div>
 
     <div class="footer-line">
@@ -442,72 +400,7 @@
       <span>Mostlane • Vehicles</span>
     </div>
   </div>
-</div>
 
-<!-- EDIT MODAL (fixed & outside script) -->
-<div class="modal-backdrop" id="editBackdrop">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="editTitle">Edit Vehicle</div>
-      <button class="btn icon-only" onclick="closeEditModal()">✕</button>
-    </div>
-
-    <div class="modal-body">
-      <div class="modal-row">
-        <label>Registration</label>
-        <input id="editReg" readonly style="background:#f1f5f9;">
-      </div>
-
-      <div class="modal-row">
-        <label>Make</label>
-        <input id="editMake">
-      </div>
-
-      <div class="modal-row">
-        <label>Model</label>
-        <input id="editModel">
-      </div>
-
-      <div class="modal-row">
-        <label>Fuel Type</label>
-        <input id="editFuel">
-      </div>
-
-      <div class="modal-row">
-        <label>Driver</label>
-        <input id="editDriver">
-      </div>
-
-      <div class="modal-row">
-        <label>Active?</label>
-        <select id="editActive">
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </select>
-      </div>
-
-      <div class="modal-row">
-        <label>Next Service Date</label>
-        <input id="editService" type="date">
-      </div>
-
-      <div class="modal-row">
-        <label>MOT Due</label>
-        <input id="editMOT" type="date">
-      </div>
-
-      <div class="modal-row">
-        <label>Notes / Issues</label>
-        <input id="editNotes">
-      </div>
-
-    </div>
-
-    <div class="modal-footer">
-      <button class="btn secondary" onclick="closeEditModal()">Cancel</button>
-      <button class="btn primary" onclick="saveVehicleEdits()">Save</button>
-    </div>
-  </div>
 </div>
 
 <script>
@@ -515,11 +408,8 @@
     window.location.href = "login.html";
   }
 
-  const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
   const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
-
   let FLEET = [];
-  let EDIT_REG = null;
 
   function goMain(){
     window.location.href = "main.html";
@@ -583,6 +473,7 @@
       const fuel = v.fuel || "";
       const issues = v.issuesCount || 0;
 
+      // MOT tag
       let motTag = `<span class="tag info"><span class="tag-dot info"></span>MOT: n/a</span>`;
       if (v.motDue){
         const status = v.motStatus === "bad" ? "bad" : "warn";
@@ -591,6 +482,7 @@
         </span>`;
       }
 
+      // Service tag
       let serviceTag = `<span class="tag info"><span class="tag-dot info"></span>Service: n/a</span>`;
       if (v.nextServiceDate){
         const status = v.serviceStatus === "ok" ? "ok" : "warn";
@@ -599,6 +491,7 @@
         </span>`;
       }
 
+      // Issues tag
       const issuesTag = issues > 0
         ? `<span class="tag bad"><span class="tag-dot bad"></span>${issues} issues</span>`
         : `<span class="tag ok"><span class="tag-dot ok"></span>No issues</span>`;
@@ -620,11 +513,6 @@
 
         <div class="card-actions">
           <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
-
-          ${CURRENT_USER === "Jamie.Line" ? `
-            <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
-          ` : ""}
-
           <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
         </div>
       `;
@@ -635,64 +523,6 @@
 
   function openVehicle(reg){
     window.location.href = `vehicle.html?reg=${encodeURIComponent(reg)}`;
-  }
-
-  function openEditModal(reg){
-    EDIT_REG = reg;
-    const v = FLEET.find(x => x.reg === reg);
-    if (!v) return;
-
-    document.getElementById("editTitle").textContent = `Edit – ${reg}`;
-    document.getElementById("editReg").value = v.reg || "";
-    document.getElementById("editMake").value = v.make || "";
-    document.getElementById("editModel").value = v.model || "";
-    document.getElementById("editFuel").value = v.fuel || "";
-    document.getElementById("editDriver").value = v.driver || "";
-    document.getElementById("editActive").value = v.active === false ? "false" : "true";
-    document.getElementById("editService").value = v.nextServiceDate || "";
-    document.getElementById("editMOT").value = v.motDue || "";
-    document.getElementById("editNotes").value = v.notes || "";
-
-    document.getElementById("editBackdrop").style.display = "flex";
-  }
-
-  function closeEditModal(){
-    document.getElementById("editBackdrop").style.display = "none";
-  }
-
-  async function saveVehicleEdits(){
-    if (!EDIT_REG) return;
-
-    const updates = {
-      make: document.getElementById("editMake").value.trim(),
-      model: document.getElementById("editModel").value.trim(),
-      fuel: document.getElementById("editFuel").value.trim(),
-      driver: document.getElementById("editDriver").value.trim(),
-      active: document.getElementById("editActive").value === "true",
-      nextServiceDate: document.getElementById("editService").value,
-      motDue: document.getElementById("editMOT").value,
-      notes: document.getElementById("editNotes").value.trim(),
-    };
-
-    try{
-      const res = await fetch(`${VEHICLE_WORKER}/update-vehicle`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ reg: EDIT_REG, updates })
-      });
-
-      if (!res.ok) throw new Error("Failed");
-
-      const updated = await res.json();
-      const idx = FLEET.findIndex(v => v.reg === EDIT_REG);
-      if (idx !== -1) FLEET[idx] = updated;
-
-      closeEditModal();
-      renderFleet();
-    }catch(e){
-      console.error(e);
-      alert("Could not save changes.");
-    }
   }
 
   window.addEventListener("DOMContentLoaded", loadFleet);
