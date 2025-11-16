@@ -373,6 +373,9 @@
       <button class="tab-pill" data-tab="history">
         <span class="dot"></span> History
       </button>
+      <button class="tab-pill" data-tab="fuel">
+        <span class="dot"></span> Fuel
+      </button>
       <button class="tab-pill" data-tab="checks">
         <span class="dot"></span> Van Checks
       </button>
@@ -534,6 +537,69 @@
               <!-- rows injected -->
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- FUEL -->
+    <div class="tab-panel" id="tab-fuel">
+      <div class="card">
+        <div class="card-title">
+          <span>Fuel & MPG</span>
+          <button class="btn subtle" onclick="openAddFuelModal()">+ Add Fuel</button>
+        </div>
+
+        <div class="field-row">
+          <span class="field-label">Average MPG (all time)</span>
+          <span class="field-value" id="fuelAvgAll">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Last fill MPG</span>
+          <span class="field-value" id="fuelLastMPG">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Last 30 days MPG</span>
+          <span class="field-value" id="fuelAvg30">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Last 90 days MPG</span>
+          <span class="field-value" id="fuelAvg90">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Total litres logged</span>
+          <span class="field-value" id="fuelTotalLitres">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Total fuel cost</span>
+          <span class="field-value" id="fuelTotalCost">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Total miles from logs</span>
+          <span class="field-value" id="fuelTotalMiles">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Period covered</span>
+          <span class="field-value" id="fuelPeriod">–</span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Litres</th>
+              <th>Cost</th>
+              <th>Odometer</th>
+              <th>MPG</th>
+              <th>Receipt</th>
+            </tr>
+          </thead>
+          <tbody id="fuelBody">
+            <!-- fuel rows -->
+          </tbody>
+        </table>
+
+        <div class="status-line">
+          <span id="fuelStatus">No fuel entries yet.</span>
         </div>
       </div>
     </div>
@@ -716,6 +782,46 @@
   </div>
 </div>
 
+<!-- Add Fuel Modal -->
+<div class="modal-backdrop" id="fuelBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="fuelModalTitle">Add Fuel</div>
+      <button class="btn secondary" style="padding:4px 8px;font-size:11px;" onclick="closeAddFuelModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-row">
+        <label>Date</label>
+        <input type="date" id="fuelDate">
+      </div>
+      <div class="modal-row">
+        <label>Litres</label>
+        <input type="number" step="0.01" min="0" id="fuelLitres" placeholder="e.g. 45.3">
+      </div>
+      <div class="modal-row">
+        <label>Cost (£)</label>
+        <input type="number" step="0.01" min="0" id="fuelCost" placeholder="Total cost">
+      </div>
+      <div class="modal-row">
+        <label>Odometer (miles)</label>
+        <input type="number" step="1" min="0" id="fuelOdo" placeholder="e.g. 45678">
+      </div>
+      <div class="modal-row">
+        <label>Notes</label>
+        <input type="text" id="fuelNotes" placeholder="Optional notes">
+      </div>
+      <div class="modal-row">
+        <label>Receipt URL (SharePoint)</label>
+        <input type="url" id="fuelReceipt" placeholder="Paste receipt SharePoint URL">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn secondary" onclick="closeAddFuelModal()">Cancel</button>
+      <button class="btn primary" onclick="saveFuel()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // Auth gate
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
@@ -723,18 +829,21 @@
   }
 
   const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
+  // NEW: separate fuel worker – update URL if you name it differently
+  const FUEL_WORKER = "https://vehicles-fuel.jamie-def.workers.dev";
+
   const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
 
   let CURRENT_REG = "";
   let VEHICLE = null;
 
   function goBack(){
-    // back to fleet
     window.location.href = "vehicles.html";
   }
 
   function setStatus(msg){
-    document.getElementById("statusLine").textContent = msg;
+    const el = document.getElementById("statusLine");
+    if (el) el.textContent = msg;
   }
 
   function getQueryReg(){
@@ -769,42 +878,6 @@
       setStatus("Loading vehicle…");
       const res = await fetch(`${VEHICLE_WORKER}/vehicle?reg=${encodeURIComponent(CURRENT_REG)}`);
       if (!res.ok) throw new Error("Failed to load vehicle");
-      // Expected JSON shape (example):
-      // {
-      //   reg, make, model, fuel, year, colour, active,
-      //   mileage, lastUpdated,
-      //   motDue, motStatus,
-      //   serviceDue, lastServiceDate, serviceStatus,
-      //   emissions: { ulez: true/false, notes },
-      //   driver: "Jamie.Line",
-      //   driverSince: "2025-01-01",
-      //   driverHistory: [
-      //     { driver:"Tony Pelin", from:"2025-01-01", to:"2025-05-08", handoverUrl:"..." },
-      //     { driver:"Jamie.Line", from:"2025-05-10", to:null, handoverUrl:"..." }
-      //   ],
-      //   works: [
-      //     { type:"Service", date:"2025-05-01", description:"Full service", cost:240, centre:"ATS", invoiceUrl:"..." },
-      //     ...
-      //   ],
-      //   checks: [
-      //     { date:"2025-11-10", mileage:12345, status:"OK", issueCount:0, reportUrl:"..." },
-      //   ],
-      //   photoSummary: {
-      //     interior:{ count:20, last:"2025-11-14" },
-      //     tyres:{ count:35, last:"2025-11-12" },
-      //     damage:{ count:2, last:"2025-11-01" }
-      //   },
-      //   finance:{
-      //     company, startDate, endDate, monthly, balloon, equityEstimate
-      //   },
-      //   financeRollup:{
-      //     totalMaintenance, totalTyres, totalService, totalOther
-      //   },
-      //   permissions:{
-      //     view:["director","admin"],
-      //     edit:["director"]
-      //   }
-      // }
       VEHICLE = await res.json();
       populateOverview();
       populateHistory();
@@ -812,6 +885,8 @@
       populatePhotos();
       populateFinance();
       populatePermissions();
+      // NEW: load fuel data
+      loadFuel();
       setStatus("Vehicle loaded.");
     }catch(e){
       console.error(e);
@@ -830,6 +905,10 @@
     const num = Number(v);
     if (isNaN(num)) return String(v);
     return "£" + num.toFixed(2);
+  }
+  function formatMPG(v){
+    if (v == null || v === "" || isNaN(Number(v))) return "–";
+    return Number(v).toFixed(1) + " mpg";
   }
 
   function populateOverview(){
@@ -1058,6 +1137,119 @@
     document.getElementById("permEditList").textContent = eArr.length ? eArr.join(", ") : "–";
   }
 
+  // -------- FUEL FUNCTIONS (NEW) --------
+  async function loadFuel(){
+    if (!CURRENT_REG){
+      CURRENT_REG = getQueryReg();
+    }
+    if (!CURRENT_REG || !FUEL_WORKER) return;
+
+    const tbody = document.getElementById("fuelBody");
+    const statusEl = document.getElementById("fuelStatus");
+
+    tbody.innerHTML =
+      `<tr><td colspan="6" style="font-size:12px;color:#64748b;">Loading fuel log…</td></tr>`;
+    statusEl.textContent = "Loading fuel data…";
+
+    try{
+      const [sumRes, logRes] = await Promise.all([
+        fetch(`${FUEL_WORKER}/fuel-summary?reg=${encodeURIComponent(CURRENT_REG)}`),
+        fetch(`${FUEL_WORKER}/fuel-log?reg=${encodeURIComponent(CURRENT_REG)}`)
+      ]);
+
+      if (!sumRes.ok && sumRes.status !== 404) throw new Error("summary");
+      if (!logRes.ok && logRes.status !== 404) throw new Error("log");
+
+      const summary = sumRes.ok ? await sumRes.json() : null;
+      const log = logRes.ok ? await logRes.json() : [];
+
+      renderFuelSummary(summary, log);
+      renderFuelTable(log);
+    }catch(e){
+      console.error(e);
+      document.getElementById("fuelAvgAll").textContent = "–";
+      document.getElementById("fuelLastMPG").textContent = "–";
+      document.getElementById("fuelAvg30").textContent = "–";
+      document.getElementById("fuelAvg90").textContent = "–";
+      document.getElementById("fuelTotalLitres").textContent = "–";
+      document.getElementById("fuelTotalCost").textContent = "–";
+      document.getElementById("fuelTotalMiles").textContent = "–";
+      document.getElementById("fuelPeriod").textContent = "–";
+      tbody.innerHTML =
+        `<tr><td colspan="6" style="font-size:12px;color:#64748b;">Fuel data unavailable.</td></tr>`;
+      statusEl.textContent = "Could not load fuel data.";
+    }
+  }
+
+  function renderFuelSummary(summary, log){
+    const statusEl = document.getElementById("fuelStatus");
+    if (!summary || !summary.entries){
+      document.getElementById("fuelAvgAll").textContent = "–";
+      document.getElementById("fuelLastMPG").textContent = "–";
+      document.getElementById("fuelAvg30").textContent = "–";
+      document.getElementById("fuelAvg90").textContent = "–";
+      document.getElementById("fuelTotalLitres").textContent = "–";
+      document.getElementById("fuelTotalCost").textContent = "–";
+      document.getElementById("fuelTotalMiles").textContent = "–";
+      document.getElementById("fuelPeriod").textContent = "–";
+      statusEl.textContent = "No fuel entries recorded yet.";
+      return;
+    }
+
+    document.getElementById("fuelAvgAll").textContent = formatMPG(summary.avgMPGAll);
+    document.getElementById("fuelLastMPG").textContent = formatMPG(summary.lastMPG);
+    document.getElementById("fuelAvg30").textContent = formatMPG(summary.avgMPG30);
+    document.getElementById("fuelAvg90").textContent = formatMPG(summary.avgMPG90);
+    document.getElementById("fuelTotalLitres").textContent =
+      summary.totalLitres != null ? summary.totalLitres.toFixed(1) + " L" : "–";
+    document.getElementById("fuelTotalCost").textContent = formatMoney(summary.totalCost);
+    document.getElementById("fuelTotalMiles").textContent =
+      summary.totalMiles != null ? summary.totalMiles.toLocaleString() + " mi" : "–";
+
+    let period = "–";
+    if (summary.firstDate && summary.lastDate){
+      period = formatDate(summary.firstDate) + " – " + formatDate(summary.lastDate);
+    }
+    document.getElementById("fuelPeriod").textContent = period;
+
+    statusEl.textContent = `Fuel entries: ${summary.entries}`;
+  }
+
+  function renderFuelTable(entries){
+    const tbody = document.getElementById("fuelBody");
+    tbody.innerHTML = "";
+
+    const list = Array.isArray(entries) ? entries.slice() : [];
+    if (!list.length){
+      tbody.innerHTML =
+        `<tr><td colspan="6" style="font-size:12px;color:#64748b;">No fuel entries yet.</td></tr>`;
+      return;
+    }
+
+    list.sort((a,b)=> new Date(b.date||0) - new Date(a.date||0)); // newest first
+
+    list.forEach(e=>{
+      const tr = document.createElement("tr");
+      const litres = e.litres != null ? Number(e.litres).toFixed(1) + " L" : "–";
+      const cost = formatMoney(e.cost);
+      const odo = e.odo != null ? Number(e.odo).toLocaleString()+" mi" : "–";
+      const mpg = formatMPG(e.mpg);
+      const receiptCell = e.receiptUrl
+        ? `<a class="inline-link" href="${e.receiptUrl}" target="_blank">View</a>`
+        : "–";
+
+      tr.innerHTML = `
+        <td>${formatDate(e.date)}</td>
+        <td>${litres}</td>
+        <td>${cost}</td>
+        <td>${odo}</td>
+        <td>${mpg}</td>
+        <td>${receiptCell}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
   // Add Work modal
   function openAddWorkModal(){
     if (!CURRENT_REG){
@@ -1112,7 +1304,7 @@
       });
       if (!res.ok) throw new Error("Failed");
       closeAddWorkModal();
-      await reloadVehicle(); // refresh data
+      await reloadVehicle(); // refresh data (includes work)
       setStatus("Work saved.");
     }catch(e){
       console.error(e);
@@ -1121,13 +1313,78 @@
     }
   }
 
+  // Add Fuel modal
+  function openAddFuelModal(){
+    if (!CURRENT_REG){
+      CURRENT_REG = getQueryReg();
+    }
+    document.getElementById("fuelModalTitle").textContent = "Add Fuel – " + (CURRENT_REG || "");
+    document.getElementById("fuelDate").value = "";
+    document.getElementById("fuelLitres").value = "";
+    document.getElementById("fuelCost").value = "";
+    document.getElementById("fuelOdo").value = "";
+    document.getElementById("fuelNotes").value = "";
+    document.getElementById("fuelReceipt").value = "";
+    document.getElementById("fuelBackdrop").style.display = "flex";
+  }
+  function closeAddFuelModal(){
+    document.getElementById("fuelBackdrop").style.display = "none";
+  }
+
+  async function saveFuel(){
+    if (!CURRENT_REG){
+      alert("No registration loaded.");
+      return;
+    }
+    const date = document.getElementById("fuelDate").value;
+    const litresVal = document.getElementById("fuelLitres").value;
+    const costVal = document.getElementById("fuelCost").value;
+    const odoVal = document.getElementById("fuelOdo").value;
+    const notes = document.getElementById("fuelNotes").value.trim();
+    const receiptUrl = document.getElementById("fuelReceipt").value.trim();
+
+    const litres = litresVal ? parseFloat(litresVal) : 0;
+    const cost = costVal ? parseFloat(costVal) : 0;
+    const odo = odoVal ? parseFloat(odoVal) : null;
+
+    if (!date || !litres){
+      alert("Please enter at least a date and litres.");
+      return;
+    }
+
+    const body = {
+      reg: CURRENT_REG,
+      date,
+      litres,
+      cost,
+      odo,
+      notes,
+      receiptUrl
+    };
+
+    try{
+      setStatus("Saving fuel entry…");
+      const res = await fetch(`${FUEL_WORKER}/add-fuel`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Failed");
+      closeAddFuelModal();
+      await loadFuel();
+      setStatus("Fuel entry saved.");
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to save fuel entry.");
+      alert("Could not save fuel entry.");
+    }
+  }
+
   function openHandoverForm(){
     if (!CURRENT_REG){
       CURRENT_REG = getQueryReg();
     }
-    // JotForm van handover (from your notes)
     const base = "https://form.jotform.com/250527511327047";
-    // We just pass reg as a query param for now so it can be mapped in JotForm
     window.open(`${base}?van_reg=${encodeURIComponent(CURRENT_REG)}`,"_blank");
   }
 
