@@ -6,64 +6,73 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
+
   <style>
     :root{
-      --ml-blue:#1e66ff;
-      --text:#1f2937;
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --text:#0f172a;
       --muted:#6b7280;
-      --ok:#10b981;
-      --warn:#f59e0b;
-      --bad:#ef4444;
-      --panel:rgba(255,255,255,0.80);
+      --ok:#16a34a;
+      --warn:#f97316;
+      --bad:#dc2626;
+      --panel:rgba(255,255,255,0.9);
     }
+
     html,body{
       height:100%;margin:0;
-      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background:#0b1930 url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text);
     }
-    body{
-      display:flex;
-      justify-content:center;
-      align-items:flex-start;
-    }
+
+    body{padding:16px;}
+
     .wrap{
       max-width:1200px;
-      width:100%;
-      margin:24px 16px;
-      padding:20px;
+      margin:0 auto;
       background:var(--panel);
-      border-radius:12px;
-      box-shadow:0 8px 24px rgba(0,0,0,0.10);
+      border-radius:16px;
+      box-shadow:0 18px 45px rgba(0,0,0,0.35);
+      overflow:hidden;
     }
-    .head{
+
+    .header{
+      background:linear-gradient(135deg,#001a3d,#003b82);
+      color:#e5ecff;
+      padding:16px 20px;
       display:flex;
       justify-content:space-between;
       align-items:center;
       gap:12px;
       flex-wrap:wrap;
-      margin-bottom:16px;
     }
-    .title{
-      font-size:22px;
+
+    .header-title{
+      font-size:20px;
       font-weight:700;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
     }
-    .subtitle{
-      font-size:13px;
-      color:var(--muted);
+
+    .header-sub{
+      font-size:12px;
+      opacity:0.8;
     }
-    .controls{
+
+    .header-actions{
       display:flex;
-      flex-wrap:wrap;
       gap:8px;
+      flex-wrap:wrap;
       align-items:center;
     }
+
     .btn{
       border:none;
       border-radius:999px;
       padding:8px 14px;
-      font-size:14px;
+      font-size:13px;
       font-weight:600;
       cursor:pointer;
       display:inline-flex;
@@ -71,586 +80,452 @@
       gap:6px;
       white-space:nowrap;
     }
-    .btn.primary{background:var(--ml-blue);color:#fff;}
-    .btn.outline{background:#fff;color:var(--ml-blue);border:1px solid var(--ml-blue);}
-    .btn.small{padding:6px 10px;font-size:12px;}
-    .btn.icon-only{padding:6px 8px;border-radius:999px;width:32px;height:32px;justify-content:center;}
 
+    .btn.primary{
+      background:#1e66ff;
+      color:#fff;
+    }
+
+    .btn.secondary{
+      background:rgba(15,23,42,0.12);
+      color:#e5ecff;
+      border:1px solid rgba(148,163,184,0.4);
+    }
+
+    .content{
+      padding:14px 18px 18px;
+    }
+
+    /* Search / Filter pills */
     .toolbar{
       display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
       flex-wrap:wrap;
-      margin-bottom:16px;
-      font-size:14px;
-    }
-    .search-box{
-      position:relative;
-      flex:1 1 220px;
-      max-width:320px;
-    }
-    .search-box input{
-      width:100%;
-      padding:8px 30px 8px 12px;
-      border-radius:999px;
-      border:1px solid #cfd6e4;
-      font-size:14px;
-      background:#fff;
-    }
-    .search-box span{
-      position:absolute;
-      right:10px;
-      top:50%;
-      transform:translateY(-50%);
-      font-size:14px;
-      color:var(--muted);
+      gap:10px;
+      align-items:center;
+      margin-bottom:10px;
     }
 
-    .fleet-grid{
-      display:grid;
-      grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-      gap:12px;
-    }
-    .vehicle-card{
-      background:#ffffff;
-      border-radius:12px;
-      box-shadow:0 2px 6px rgba(0,0,0,0.05);
-      padding:12px 14px;
+    .pill-field{
       display:flex;
-      flex-direction:column;
+      align-items:center;
+      padding:6px 10px;
+      border-radius:999px;
+      background:#f1f5f9;
+      border:1px solid #cbd5f5;
       gap:6px;
-      position:relative;
-    }
-    .vehicle-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:8px;
-    }
-    .reg{
-      font-size:18px;
-      font-weight:800;
-      letter-spacing:0.04em;
-      background:#111827;
-      color:#fbbf24;
-      padding:4px 10px;
-      border-radius:6px;
-      display:inline-block;
-    }
-    .driver{
       font-size:13px;
-      color:var(--muted);
+    }
+
+    .pill-field input,
+    .pill-field select{
+      border:none;
+      background:transparent;
+      outline:none;
+      font-size:13px;
+      min-width:120px;
+    }
+
+    .pill-label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      color:#64748b;
+    }
+
+    /* Summary cards */
+    .summary-strip{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin:4px 0 12px;
+    }
+
+    .summary-card{
+      flex:1 1 120px;
+      min-width:120px;
+      background:#0f172a;
+      color:#e5ecff;
+      border-radius:12px;
+      padding:10px 12px;
+      position:relative;
+      overflow:hidden;
+    }
+
+    .summary-card::after{
+      content:"";
+      position:absolute;
+      right:-20px;top:-20px;
+      width:60px;height:60px;
+      background:radial-gradient(circle at center,rgba(129,140,248,0.45),transparent 70%);
+      opacity:0.8;
+    }
+
+    .summary-label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      opacity:0.8;
+    }
+
+    .summary-value{
+      font-size:18px;
+      font-weight:700;
       margin-top:4px;
     }
-    .meta-row{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      flex-wrap:wrap;
-      gap:6px;
-      font-size:13px;
-    }
-    .badges{
-      display:flex;
-      flex-wrap:wrap;
-      gap:4px;
-    }
-    .badge{
+
+    .summary-note{
       font-size:11px;
-      padding:2px 8px;
-      border-radius:999px;
-      border:1px solid #e5e7eb;
-      color:var(--muted);
-      background:#f9fafb;
-    }
-    .badge.ok{border-color:#bbf7d0;color:#166534;background:#ecfdf3;}
-    .badge.warn{border-color:#fed7aa;color:#92400e;background:#fffbeb;}
-    .badge.bad{border-color:#fecaca;color:#b91c1c;background:#fef2f2;}
-
-    .line{
-      display:flex;
-      justify-content:space-between;
-      font-size:12px;
-      color:var(--muted);
-    }
-    .line strong{
-      color:var(--text);
-      font-size:13px;
+      opacity:0.7;
+      margin-top:2px;
     }
 
-    .card-footer{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-top:6px;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .status-dot{
-      width:8px;
-      height:8px;
-      border-radius:999px;
-      display:inline-block;
-      margin-right:4px;
-    }
-    .status-dot.ok{background:var(--ok);}
-    .status-dot.bad{background:var(--bad);}
-    .status-text{
-      font-size:12px;
-      color:var(--muted);
-    }
-
-    .status-bar{
-      font-size:12px;
-      margin-top:10px;
-      color:var(--muted);
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
-    /* Modal */
-    .modal-backdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,0.35);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:50;
-    }
-    .modal{
-      background:#ffffff;
-      border-radius:12px;
-      max-width:480px;
-      width:90%;
-      max-height:90vh;
-      overflow:auto;
-      box-shadow:0 10px 30px rgba(0,0,0,0.25);
-      padding:16px 18px 18px;
-    }
-    .modal-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:8px;
-    }
-    .modal-title{
-      font-size:18px;
-      font-weight:600;
-    }
-    .modal-body{
+    /* Vehicle cards */
+    .grid{
       display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px 10px;
-      font-size:13px;
+      grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+      gap:12px;
     }
-    .modal-body .full-width{
-      grid-column:1 / -1;
-    }
-    .field{
+
+    .card{
+      background:#ffffff;
+      border-radius:14px;
+      box-shadow:0 8px 18px rgba(15,23,42,0.12);
+      padding:12px 12px 10px;
       display:flex;
       flex-direction:column;
-      gap:3px;
-    }
-    .field label{
-      font-size:12px;
-      color:var(--muted);
-    }
-    .field input,
-    .field select,
-    .field textarea{
-      border-radius:8px;
-      border:1px solid #d1d5db;
-      padding:6px 8px;
-      font-size:13px;
-      font-family:inherit;
-    }
-    .field textarea{
-      min-height:60px;
-      resize:vertical;
-    }
-    .field-row{
-      display:flex;
-      align-items:center;
       gap:6px;
+      border:1px solid #e2e8f0;
+      position:relative;
     }
-    .field-row input[type="checkbox"]{
-      transform:scale(1.1);
-    }
-    .modal-footer{
+
+    .reg-row{
       display:flex;
       justify-content:space-between;
       align-items:center;
-      margin-top:10px;
-      gap:8px;
-      flex-wrap:wrap;
-      font-size:12px;
-      color:var(--muted);
+      gap:6px;
     }
 
-    @media (max-width:700px){
-      .wrap{
-        margin:12px 8px;
-        padding:14px;
-      }
-      .modal-body{
-        grid-template-columns:1fr;
-      }
-      .modal{
-        padding:14px 14px 16px;
-      }
-      .title{font-size:20px;}
-      .reg{font-size:16px;}
+    .reg{
+      font-size:16px;
+      font-weight:800;
+      letter-spacing:0.15em;
+      text-transform:uppercase;
+      color:#0f172a;
+      background:#e2e8f0;
+      padding:4px 8px;
+      border-radius:6px;
+      border:1px solid #cbd5f5;
+    }
+
+    .driver{
+      font-size:13px;
+      color:#0f172a;
+      font-weight:600;
+      text-align:right;
+    }
+
+    .driver span{
+      color:#64748b;
+      font-weight:500;
+    }
+
+    .meta{
+      font-size:12px;
+      color:#475569;
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 12px;
+    }
+
+    .meta span{display:flex;align-items:center;gap:4px;}
+    .dot{width:6px;height:6px;border-radius:999px;background:#94a3b8;}
+
+    .status-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:4px;
+      margin-top:2px;
+    }
+
+    .tag{
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+
+    .tag-dot{
+      width:6px;height:6px;border-radius:999px;
+    }
+
+    .tag.ok{background:#dcfce7;color:#166534;}
+    .tag.warn{background:#fef3c7;color:#92400e;}
+    .tag.bad{background:#fee2e2;color:#b91c1c;}
+    .tag.info{background:#e0f2fe;color:#075985;}
+
+    .tag-dot.ok{background:#16a34a;}
+    .tag-dot.warn{background:#f97316;}
+    .tag-dot.bad{background:#dc2626;}
+    .tag-dot.info{background:#0284c7;}
+
+    .card-actions{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:6px;
+      margin-top:8px;
+    }
+
+    .btn-pill{
+      border:none;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:600;
+      padding:4px 10px;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+
+    .btn-pill.main{background:#1d4ed8;color:#fff;}
+    .btn-pill.sub{
+      background:#f8fafc;color:#1e293b;
+      border:1px solid #cbd5f5;
+    }
+
+    .btn-ghost{
+      border:none;
+      background:transparent;
+      font-size:12px;
+      color:#1e40af;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:4px 6px;
+      border-radius:999px;
+      cursor:pointer;
+    }
+    .btn-ghost:hover{
+      background:#e0ecff;
+    }
+
+    .footer-line{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:12px;
+      font-size:11px;
+      color:#64748b;
+      border-top:1px dashed #e2e8f0;
+      padding-top:8px;
+    }
+
+    /* Mobile tweaks */
+    @media(max-width:720px){
+      .header{align-items:flex-start;}
+      .header-title{font-size:18px;}
+      .summary-card{padding:8px 10px;}
+      .reg{font-size:14px;}
       .driver{font-size:12px;}
+      .btn-pill.main{padding:4px 8px;font-size:11px;}
+      .btn-pill.sub{padding:3px 8px;font-size:11px;}
+      .btn-ghost{font-size:11px;}
     }
   </style>
 </head>
+
 <body>
-
 <div class="wrap">
-  <div class="head">
+
+  <!-- HEADER -->
+  <div class="header">
     <div>
-      <div class="title">Vehicles</div>
-      <div class="subtitle">Manage van details, MOT & service dates, drivers and basic flags.</div>
+      <div class="header-title">Vehicle Fleet</div>
+      <div class="header-sub">Live overview of all vans and their current drivers.</div>
     </div>
-    <div class="controls">
-      <button class="btn outline" onclick="goMain()">Main Menu</button>
-      <button class="btn outline" onclick="reloadFleet()">Reload</button>
-    </div>
-  </div>
-
-  <div class="toolbar">
-    <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Search by reg, driver or model…" oninput="renderFleet()">
-      <span>🔍</span>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);">
-      <span id="fleetCount">0 vehicles</span>
+    <div class="header-actions">
+      <button class="btn secondary" onclick="goMain()">← Main Menu</button>
+      <button class="btn primary" onclick="loadFleet()">⟳ Refresh</button>
     </div>
   </div>
 
-  <div id="fleetGrid" class="fleet-grid"></div>
+  <!-- CONTENT -->
+  <div class="content">
 
-  <div class="status-bar">
-    <span id="statusText">Loading fleet…</span>
-  </div>
-</div>
-
-<!-- Edit Vehicle Modal -->
-<div id="modalBackdrop" class="modal-backdrop">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="modalTitle">Edit Vehicle</div>
-      <button class="btn icon-only outline" onclick="closeModal()" aria-label="Close">✕</button>
-    </div>
-    <form id="editForm" onsubmit="saveVehicle(event)">
-      <input type="hidden" id="editIndex">
-      <div class="modal-body">
-        <div class="field">
-          <label for="editReg">Registration</label>
-          <input id="editReg" required>
-        </div>
-        <div class="field">
-          <label for="editDriver">Assigned Driver</label>
-          <input id="editDriver" placeholder="e.g. Jamie Line">
-        </div>
-
-        <div class="field">
-          <label for="editMake">Make</label>
-          <input id="editMake">
-        </div>
-        <div class="field">
-          <label for="editModel">Model</label>
-          <input id="editModel">
-        </div>
-
-        <div class="field">
-          <label for="editFuel">Fuel Type</label>
-          <select id="editFuel">
-            <option value="">—</option>
-            <option>Diesel</option>
-            <option>Petrol</option>
-            <option>Hybrid</option>
-            <option>Electric</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="editMileage">Mileage Snapshot</label>
-          <input id="editMileage" type="number" min="0" step="1" placeholder="e.g. 75234">
-        </div>
-
-        <div class="field">
-          <label for="editMotDue">MOT Due</label>
-          <input id="editMotDue" type="date">
-        </div>
-        <div class="field">
-          <label for="editServiceDue">Service Due</label>
-          <input id="editServiceDue" type="date">
-        </div>
-
-        <div class="field">
-          <label for="editLastService">Last Service Date</label>
-          <input id="editLastService" type="date">
-        </div>
-        <div class="field-row field">
-          <label>Flags</label>
-          <div class="field-row">
-            <input id="editActive" type="checkbox">
-            <span>Active vehicle</span>
-          </div>
-          <div class="field-row">
-            <input id="editLez" type="checkbox">
-            <span>LEZ / ULEZ compliant</span>
-          </div>
-        </div>
-
-        <div class="field full-width">
-          <label for="editNotes">Notes</label>
-          <textarea id="editNotes" placeholder="General notes, conditions etc."></textarea>
-        </div>
+    <!-- Filters -->
+    <div class="toolbar">
+      <div class="pill-field">
+        <span class="pill-label">Search</span>
+        <input id="searchInput" placeholder="Reg, driver, model..." oninput="renderFleet()">
       </div>
-      <div class="modal-footer">
-        <span id="modalStatus">Changes are not saved until you click Save.</span>
-        <div style="display:flex;gap:8px;">
-          <button type="button" class="btn outline small" onclick="closeModal()">Cancel</button>
-          <button type="submit" class="btn primary small">Save</button>
-        </div>
+      <div class="pill-field">
+        <span class="pill-label">Filter</span>
+        <select id="filterActive" onchange="renderFleet()">
+          <option value="all">All vehicles</option>
+          <option value="active">Active only</option>
+          <option value="inactive">Inactive only</option>
+        </select>
       </div>
-    </form>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-strip">
+      <div class="summary-card">
+        <div class="summary-label">Total Vehicles</div>
+        <div class="summary-value" id="sumTotal">0</div>
+        <div class="summary-note">Across whole fleet</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Active</div>
+        <div class="summary-value" id="sumActive">0</div>
+        <div class="summary-note">Currently in service</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Unassigned</div>
+        <div class="summary-value" id="sumUnassigned">0</div>
+        <div class="summary-note">No primary driver set</div>
+      </div>
+    </div>
+
+    <!-- Cards -->
+    <div class="grid" id="fleetGrid"></div>
+
+    <div class="footer-line">
+      <span id="statusLine">Loading fleet…</span>
+      <span>Mostlane • Vehicles</span>
+    </div>
   </div>
+
 </div>
 
 <script>
-  // ---- Basic auth gate ----
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
   }
 
-  // 🔧 EDIT THIS if your worker URL is different
-  const FLEET_WORKER = "https://vehicles.jamie-def.workers.dev";
-
+  const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
   let FLEET = [];
 
   function goMain(){
     window.location.href = "main.html";
   }
 
-  function setStatus(msg){
-    const el = document.getElementById("statusText");
-    if (el) el.textContent = msg;
-  }
-
   async function loadFleet(){
     try{
-      setStatus("Loading fleet…");
-      const res = await fetch(`${FLEET_WORKER}/fleet?v=` + Date.now());
-      if (!res.ok) throw new Error("Fleet not available");
+      document.getElementById("statusLine").textContent = "Loading fleet...";
+      const res = await fetch(`${VEHICLE_WORKER}/fleet`);
+      if (!res.ok) throw new Error();
       FLEET = await res.json();
-      if (!Array.isArray(FLEET)) FLEET = [];
+      updateSummary();
       renderFleet();
-      setStatus("Fleet loaded.");
+      document.getElementById("statusLine").textContent = "Fleet loaded.";
     }catch(e){
       console.error(e);
-      FLEET = [];
-      renderFleet();
-      setStatus("Failed to load fleet.");
+      document.getElementById("statusLine").textContent = "Failed to load fleet.";
     }
   }
 
-  function reloadFleet(){
-    loadFleet();
+  function updateSummary(){
+    document.getElementById("sumTotal").textContent = FLEET.length;
+    document.getElementById("sumActive").textContent = FLEET.filter(v => v.active !== false).length;
+    document.getElementById("sumUnassigned").textContent = FLEET.filter(v => !v.driver).length;
   }
 
   function renderFleet(){
     const grid = document.getElementById("fleetGrid");
-    const search = (document.getElementById("searchInput").value || "").toLowerCase().trim();
     grid.innerHTML = "";
 
-    let filtered = FLEET;
-    if (search){
-      filtered = FLEET.filter(v=>{
-        const reg = (v.reg || "").toLowerCase();
-        const drv = (v.assignedDriver || "").toLowerCase();
-        const mm = ((v.make || "") + " " + (v.model || "")).toLowerCase();
-        return reg.includes(search) || drv.includes(search) || mm.includes(search);
-      });
+    const q = (document.getElementById("searchInput").value || "").toLowerCase();
+    const filt = document.getElementById("filterActive").value;
+
+    let items = FLEET.slice();
+
+    if (q){
+      items = items.filter(v =>
+        (v.reg || "").toLowerCase().includes(q) ||
+        (v.driver || "").toLowerCase().includes(q) ||
+        (v.make || "").toLowerCase().includes(q) ||
+        (v.model || "").toLowerCase().includes(q)
+      );
     }
 
-    document.getElementById("fleetCount").textContent =
-      `${filtered.length} vehicle${filtered.length===1?"":"s"}`;
+    if (filt === "active") items = items.filter(v => v.active !== false);
+    if (filt === "inactive") items = items.filter(v => v.active === false);
 
-    if (!filtered.length){
-      const empty = document.createElement("div");
-      empty.style.padding = "10px 2px";
-      empty.style.fontSize = "13px";
-      empty.style.color = "var(--muted)";
-      empty.textContent = "No vehicles to display. Check your worker /fleet data.";
-      grid.appendChild(empty);
+    if (!items.length){
+      grid.innerHTML = `<div style="color:#64748b;font-size:13px;">No vehicles found.</div>`;
       return;
     }
 
-    filtered.forEach(v=>{
-      const idx = FLEET.indexOf(v);
-
+    for (const v of items){
       const card = document.createElement("div");
-      card.className = "vehicle-card";
+      card.className = "card";
 
-      const active = v.active !== false;
-      const motDue = v.motDue || "";
-      const serviceDue = v.serviceDue || "";
+      const reg = v.reg || "UNKNOWN";
+      const driver = (v.driver || "Unassigned").replace(/\./g," ");
+      const make = v.make || "";
+      const model = v.model || "";
+      const fuel = v.fuel || "";
+      const issues = v.issuesCount || 0;
 
-      const today = new Date();
-      const motStatus = motDue ? new Date(motDue) : null;
-      const svcStatus = serviceDue ? new Date(serviceDue) : null;
+      // MOT tag
+      let motTag = `<span class="tag info"><span class="tag-dot info"></span>MOT: n/a</span>`;
+      if (v.motDue){
+        const status = v.motStatus === "bad" ? "bad" : "warn";
+        motTag = `<span class="tag ${status}">
+          <span class="tag-dot ${status}"></span>MOT: ${v.motDue}
+        </span>`;
+      }
 
-      const motBadgeClass = motStatus && motStatus < today ? "badge bad" : "badge ok";
-      const svcBadgeClass = svcStatus && svcStatus < today ? "badge bad" : "badge ok";
+      // Service tag
+      let serviceTag = `<span class="tag info"><span class="tag-dot info"></span>Service: n/a</span>`;
+      if (v.nextServiceDate){
+        const status = v.serviceStatus === "ok" ? "ok" : "warn";
+        serviceTag = `<span class="tag ${status}">
+          <span class="tag-dot ${status}"></span>Service: ${v.nextServiceDate}
+        </span>`;
+      }
 
-      const driverDisplay = (v.assignedDriver || "Unassigned");
+      // Issues tag
+      const issuesTag = issues > 0
+        ? `<span class="tag bad"><span class="tag-dot bad"></span>${issues} issues</span>`
+        : `<span class="tag ok"><span class="tag-dot ok"></span>No issues</span>`;
 
       card.innerHTML = `
-        <div class="vehicle-header">
-          <div>
-            <div class="reg">${(v.reg || "UNKNOWN").toUpperCase()}</div>
-            <div class="driver">Driver: ${driverDisplay}</div>
-          </div>
-          <button class="btn outline small" type="button">Edit</button>
+        <div class="reg-row">
+          <div class="reg">${reg}</div>
+          <div class="driver"><span>Driver</span><br>${driver}</div>
         </div>
-        <div class="meta-row">
-          <div style="font-size:13px;">
-            ${(v.make || "")} ${(v.model || "")}
-          </div>
-          <div class="badges">
-            ${v.fuelType ? `<span class="badge">${v.fuelType}</span>` : ""}
-            ${active ? `<span class="badge ok">Active</span>` : `<span class="badge bad">Inactive</span>`}
-            ${v.lowEmissionZone ? `<span class="badge ok">ULEZ OK</span>` : ""}
-          </div>
+
+        <div class="meta">
+          <span><span class="dot"></span>${make} ${model}</span>
+          ${fuel ? `<span><span class="dot"></span>${fuel}</span>` : ""}
+          <span><span class="dot"></span>${v.active !== false ? "Active" : "Inactive"}</span>
         </div>
-        <div class="line">
-          <span>MOT due</span>
-          <strong class="${motStatus ? motBadgeClass : ""}">
-            ${motDue || "—"}
-          </strong>
-        </div>
-        <div class="line">
-          <span>Service due</span>
-          <strong class="${svcStatus ? svcBadgeClass : ""}">
-            ${serviceDue || "—"}
-          </strong>
-        </div>
-        <div class="line">
-          <span>Last service</span>
-          <strong>${v.lastServiceDate || "—"}</strong>
-        </div>
-        <div class="line">
-          <span>Mileage snapshot</span>
-          <strong>${v.mileageSnapshot != null ? v.mileageSnapshot : "—"}</strong>
-        </div>
-        <div class="card-footer">
-          <div class="status-text">
-            <span class="status-dot ${active ? "ok" : "bad"}"></span>
-            ${active ? "In use" : "Off fleet"}
-          </div>
-          <div style="font-size:11px;color:var(--muted);">
-            Click Edit to change details
-          </div>
+
+        <div class="status-row">${serviceTag} ${motTag}</div>
+        <div class="status-row">${issuesTag}</div>
+
+        <div class="card-actions">
+          <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+          <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
         </div>
       `;
 
-      const editBtn = card.querySelector("button");
-      editBtn.addEventListener("click", ()=>openModal(idx));
-
       grid.appendChild(card);
-    });
-  }
-
-  // ---- Modal helpers ----
-
-  function openModal(index){
-    const v = FLEET[index];
-    if (!v) return;
-
-    document.getElementById("editIndex").value = index;
-    document.getElementById("modalTitle").textContent = "Edit " + (v.reg || "Vehicle");
-
-    document.getElementById("editReg").value = v.reg || "";
-    document.getElementById("editDriver").value = v.assignedDriver || "";
-    document.getElementById("editMake").value = v.make || "";
-    document.getElementById("editModel").value = v.model || "";
-    document.getElementById("editFuel").value = v.fuelType || "";
-    document.getElementById("editMileage").value =
-      (v.mileageSnapshot != null ? v.mileageSnapshot : "");
-    document.getElementById("editMotDue").value = v.motDue || "";
-    document.getElementById("editServiceDue").value = v.serviceDue || "";
-    document.getElementById("editLastService").value = v.lastServiceDate || "";
-    document.getElementById("editActive").checked = v.active !== false;
-    document.getElementById("editLez").checked = !!v.lowEmissionZone;
-    document.getElementById("editNotes").value = v.notes || "";
-
-    document.getElementById("modalStatus").textContent =
-      "Changes are not saved until you click Save.";
-
-    document.getElementById("modalBackdrop").style.display = "flex";
-  }
-
-  function closeModal(){
-    document.getElementById("modalBackdrop").style.display = "none";
-  }
-
-  async function saveVehicle(evt){
-    evt.preventDefault();
-
-    const idx = parseInt(document.getElementById("editIndex").value,10);
-    if (isNaN(idx) || !FLEET[idx]) {
-      closeModal();
-      return;
-    }
-
-    const v = FLEET[idx];
-
-    v.reg = document.getElementById("editReg").value.trim();
-    v.assignedDriver = document.getElementById("editDriver").value.trim();
-    v.make = document.getElementById("editMake").value.trim();
-    v.model = document.getElementById("editModel").value.trim();
-    v.fuelType = document.getElementById("editFuel").value;
-    const mileageVal = document.getElementById("editMileage").value;
-    v.mileageSnapshot = mileageVal === "" ? null : Number(mileageVal);
-    v.motDue = document.getElementById("editMotDue").value;
-    v.serviceDue = document.getElementById("editServiceDue").value;
-    v.lastServiceDate = document.getElementById("editLastService").value;
-    v.active = document.getElementById("editActive").checked;
-    v.lowEmissionZone = document.getElementById("editLez").checked;
-    v.notes = document.getElementById("editNotes").value.trim();
-
-    document.getElementById("modalStatus").textContent = "Saving to server…";
-
-    try{
-      const res = await fetch(`${FLEET_WORKER}/fleet`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(FLEET)
-      });
-      if (!res.ok) throw new Error("Save failed");
-      document.getElementById("modalStatus").textContent = "Saved.";
-      closeModal();
-      renderFleet();
-      setStatus("Vehicle updated.");
-    }catch(e){
-      console.error(e);
-      document.getElementById("modalStatus").textContent =
-        "Error saving – check worker.";
-      alert("Could not save changes to worker.");
     }
   }
 
-  function init(){
-    loadFleet();
+  function openVehicle(reg){
+    window.location.href = `vehicle.html?reg=${encodeURIComponent(reg)}`;
   }
 
-  window.addEventListener("DOMContentLoaded", init);
+  window.addEventListener("DOMContentLoaded", loadFleet);
 </script>
 
 </body>
