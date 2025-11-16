@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mostlane • Vehicle</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --bg:#0b1930;
+      --panel:rgba(255,255,255,0.96);
+      --muted:#6b7280;
+      --danger:#b91c1c;
+      --ok:#16a34a;
+    }
+    html,body{
+      height:100%;margin:0;
+      background:#0b1930 url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:#0f172a;
+    }
+    body{padding:16px;}
+    .shell{
+      max-width:1200px;
+      margin:0 auto;
+      display:flex;
+      gap:12px;
+    }
+    .sidebar{
+      width:230px;
+      background:linear-gradient(135deg,#001a3d,#003b82);
+      color:#e5ecff;
+      border-radius:16px;
+      padding:14px 12px;
+      box-shadow:0 18px 45px rgba(0,0,0,0.4);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .reg-box{
+      background:rgba(15,23,42,0.65);
+      border-radius:12px;
+      padding:10px 10px;
+      border:1px solid rgba(148,163,184,0.5);
+    }
+    .reg-label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      opacity:0.8;
+    }
+    .reg-value{
+      margin-top:4px;
+      font-size:18px;
+      font-weight:800;
+      letter-spacing:0.16em;
+    }
+    .driver-side{
+      font-size:13px;
+      margin-top:8px;
+    }
+    .driver-side span{
+      opacity:0.8;
+    }
+    .nav{
+      margin-top:6px;
+      border-top:1px solid rgba(148,163,184,0.4);
+      padding-top:8px;
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+    }
+    .nav button{
+      border:none;
+      background:transparent;
+      color:#e5ecff;
+      font-size:13px;
+      text-align:left;
+      padding:6px 8px;
+      border-radius:8px;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .nav button.active{
+      background:rgba(15,23,42,0.85);
+      font-weight:600;
+    }
+    .nav button span.icon{
+      font-size:14px;
+    }
+    .side-footer{
+      font-size:11px;
+      opacity:0.7;
+      margin-top:auto;
+    }
+
+    .main{
+      flex:1;
+      background:var(--panel);
+      border-radius:16px;
+      box-shadow:0 18px 45px rgba(15,23,42,0.35);
+      padding:14px 14px 16px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+    .main-top{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .main-title{
+      font-size:18px;
+      font-weight:700;
+    }
+    .main-sub{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+    }
+    .badge.ok{background:#dcfce7;color:#166534;}
+    .badge.warn{background:#fef3c7;color:#92400e;}
+    .badge.danger{background:#fee2e2;color:#b91c1c;}
+    .btn-top{
+      border:none;
+      border-radius:999px;
+      padding:6px 12px;
+      font-size:12px;
+      font-weight:600;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .btn-top.primary{
+      background:#1e66ff;
+      color:#fff;
+    }
+    .btn-top.ghost{
+      background:transparent;
+      color:#1e293b;
+      border:1px solid #cbd5f5;
+    }
+
+    .section{
+      border-radius:12px;
+      border:1px solid #e2e8f0;
+      padding:10px 11px;
+      background:#f8fafc;
+      margin-top:4px;
+    }
+    .section h3{
+      margin:0 0 4px;
+      font-size:14px;
+    }
+    .section small{
+      font-size:11px;
+      color:#6b7280;
+    }
+    .grid-two{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+      gap:10px;
+      margin-top:8px;
+    }
+    .field{
+      font-size:12px;
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+    }
+    .field label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.06em;
+      color:#64748b;
+    }
+    .field span.value{
+      font-size:13px;
+      font-weight:500;
+    }
+    .field input, .field textarea{
+      font-size:13px;
+      border-radius:8px;
+      border:1px solid #d1d5db;
+      padding:6px 8px;
+      width:100%;
+      box-sizing:border-box;
+    }
+    .field textarea{
+      min-height:46px;
+      resize:vertical;
+    }
+    .pill-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-top:4px;
+    }
+    .pill{
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+      background:#e5e7eb;
+      color:#374151;
+    }
+
+    ul.timeline{
+      list-style:none;
+      padding-left:0;
+      margin:6px 0 0;
+      font-size:12px;
+    }
+    ul.timeline li{
+      padding:6px 0;
+      border-bottom:1px dashed #e5e7eb;
+    }
+    ul.timeline li:last-child{
+      border-bottom:none;
+    }
+    ul.timeline strong{
+      font-size:12px;
+    }
+    ul.timeline span.date{
+      font-size:11px;
+      color:#6b7280;
+    }
+    ul.timeline a{
+      font-size:11px;
+      color:#1d4ed8;
+      text-decoration:none;
+    }
+
+    .section-footer{
+      display:flex;
+      justify-content:flex-end;
+      margin-top:8px;
+      gap:6px;
+      font-size:12px;
+    }
+    .btn-sm{
+      border-radius:999px;
+      border:1px solid #cbd5f5;
+      padding:4px 10px;
+      font-size:12px;
+      background:#ffffff;
+      cursor:pointer;
+    }
+    .btn-sm.primary{
+      background:#1e66ff;
+      color:#fff;
+      border:none;
+    }
+
+    @media(max-width:820px){
+      .shell{
+        flex-direction:column;
+      }
+      .sidebar{
+        width:100%;
+        flex-direction:row;
+        align-items:center;
+        overflow-x:auto;
+      }
+      .reg-box{
+        flex:0 0 auto;
+        min-width:180px;
+      }
+      .nav{
+        flex-direction:row;
+        padding-top:0;
+        border-top:none;
+        margin-left:8px;
+        flex:1;
+        overflow-x:auto;
+      }
+      .nav button{
+        white-space:nowrap;
+      }
+      .side-footer{
+        display:none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="reg-box">
+      <div class="reg-label">Vehicle</div>
+      <div class="reg-value" id="sideReg">---</div>
+      <div class="driver-side">
+        <span>Driver</span><br>
+        <strong id="sideDriver">—</strong>
+      </div>
+    </div>
+    <div class="nav">
+      <button class="active" data-tab="dashboard" onclick="setTab('dashboard', this)"><span class="icon">📊</span> Dashboard</button>
+      <button data-tab="drivers" onclick="setTab('drivers', this)"><span class="icon">👤</span> Driver History</button>
+      <button data-tab="works" onclick="setTab('works', this)"><span class="icon">🛠</span> Service & Works</button>
+      <button data-tab="finance" onclick="setTab('finance', this)"><span class="icon">💷</span> Finance</button>
+      <button data-tab="checks" onclick="setTab('checks', this)"><span class="icon">📸</span> Van Checks</button>
+    </div>
+    <div class="side-footer">
+      Mostlane • Vehicles
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="main-top">
+      <div>
+        <div class="main-title" id="mainTitle">Vehicle</div>
+        <div class="main-sub" id="mainSub">Loading details…</div>
+      </div>
+      <div>
+        <button class="btn-top ghost" onclick="goBack()">← Vehicles</button>
+        <button class="btn-top primary" onclick="refreshVehicle()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- DASHBOARD TAB -->
+    <section class="section tab" id="tab-dashboard">
+      <h3>Overview</h3>
+      <small>Key details, status and quick facts.</small>
+      <div class="grid-two" style="margin-top:8px;">
+        <div class="field">
+          <label>Registration</label>
+          <span class="value" id="dashReg">—</span>
+        </div>
+        <div class="field">
+          <label>Driver</label>
+          <span class="value" id="dashDriver">—</span>
+        </div>
+        <div class="field">
+          <label>Make / Model</label>
+          <span class="value" id="dashMakeModel">—</span>
+        </div>
+        <div class="field">
+          <label>Fuel</label>
+          <span class="value" id="dashFuel">—</span>
+        </div>
+        <div class="field">
+          <label>MOT Due</label>
+          <span class="value" id="dashMot">—</span>
+        </div>
+        <div class="field">
+          <label>Next Service</label>
+          <span class="value" id="dashService">—</span>
+        </div>
+      </div>
+      <div class="pill-row" id="dashBadges" style="margin-top:10px;"></div>
+    </section>
+
+    <!-- DRIVER HISTORY -->
+    <section class="section tab" id="tab-drivers" style="display:none;">
+      <h3>Driver History</h3>
+      <small>Who has held this vehicle, and when.</small>
+      <ul class="timeline" id="driverTimeline"></ul>
+      <div class="section-footer" id="driverControls">
+        <!-- future add-driver controls can go here -->
+      </div>
+    </section>
+
+    <!-- WORKS / SERVICE -->
+    <section class="section tab" id="tab-works" style="display:none;">
+      <h3>Service & Works</h3>
+      <small>Maintenance, tyres, MOT repairs and other history.</small>
+
+      <ul class="timeline" id="worksTimeline"></ul>
+
+      <div class="section-footer" id="worksControls">
+        <!-- "Add Works" button will go here later -->
+      </div>
+    </section>
+
+    <!-- FINANCE -->
+    <section class="section tab" id="tab-finance" style="display:none;">
+      <h3>Finance</h3>
+      <small>Provider, monthly cost and residuals.</small>
+      <div class="grid-two">
+        <div class="field">
+          <label>Company</label>
+          <span class="value" id="finCompany">—</span>
+        </div>
+        <div class="field">
+          <label>Monthly Cost</label>
+          <span class="value" id="finMonthly">—</span>
+        </div>
+        <div class="field">
+          <label>Start Date</label>
+          <span class="value" id="finStart">—</span>
+        </div>
+        <div class="field">
+          <label>End Date</label>
+          <span class="value" id="finEnd">—</span>
+        </div>
+        <div class="field">
+          <label>Balloon Payment</label>
+          <span class="value" id="finBalloon">—</span>
+        </div>
+        <div class="field">
+          <label>Estimated Equity</label>
+          <span class="value" id="finEquity">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- VAN CHECKS -->
+    <section class="section tab" id="tab-checks" style="display:none;">
+      <h3>Van Checks</h3>
+      <small>Summary of latest weekly checks and photo sets.</small>
+      <ul class="timeline" id="checksTimeline"></ul>
+      <div class="section-footer" id="checksControls">
+        <!-- later: "Open photos" / filter by category -->
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+    window.location.href = "login.html";
+  }
+
+  const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev"; // same as vehicles.html
+  const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
+  const IS_ADMIN = CURRENT_USER === "Jamie.Line"; // adjust once you add roles
+
+  let CURRENT_REG = null;
+  let VEHICLE_DATA = null;
+
+  function getRegFromQuery(){
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reg");
+  }
+
+  function goBack(){
+    window.location.href = "vehicles.html";
+  }
+
+  function setTab(tab, btnEl){
+    document.querySelectorAll(".tab").forEach(el => el.style.display="none");
+    document.getElementById(`tab-${tab}`).style.display = "block";
+    document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
+    if (btnEl) btnEl.classList.add("active");
+  }
+
+  function fillDashboard(v, drivers, works, finance, checks){
+    // Sidebar
+    document.getElementById("sideReg").textContent = v.reg || "—";
+    document.getElementById("sideDriver").textContent = (v.driver || "Unassigned").replace(/\./g," ");
+
+    // Top
+    document.getElementById("mainTitle").textContent = `${v.reg || "Vehicle"}`;
+    const makeModel = [v.make, v.model].filter(Boolean).join(" ");
+    document.getElementById("mainSub").textContent =
+      `${makeModel || "No make/model set"} • ${(v.driver || "Unassigned").replace(/\./g," ")}`;
+
+    // Dashboard values
+    document.getElementById("dashReg").textContent = v.reg || "—";
+    document.getElementById("dashDriver").textContent = (v.driver || "Unassigned").replace(/\./g," ");
+    document.getElementById("dashMakeModel").textContent = makeModel || "—";
+    document.getElementById("dashFuel").textContent = v.fuel || "—";
+    document.getElementById("dashMot").textContent = v.motDue || "—";
+    document.getElementById("dashService").textContent = v.nextServiceDate || "—";
+
+    const badges = document.getElementById("dashBadges");
+    badges.innerHTML = "";
+    const active = v.active !== false;
+    const badge1 = document.createElement("span");
+    badge1.className = "badge " + (active ? "ok" : "danger");
+    badge1.textContent = active ? "Active vehicle" : "Out of service";
+    badges.appendChild(badge1);
+
+    if (Array.isArray(works) && works.length){
+      const latest = works[0];
+      const b = document.createElement("span");
+      b.className = "badge warn";
+      b.textContent = `Last work: ${latest.type || "Work"} (${latest.date || ""})`;
+      badges.appendChild(b);
+    }
+
+    if (Array.isArray(checks) && checks.length){
+      const latestCheck = checks[0];
+      const b = document.createElement("span");
+      b.className = "badge ok";
+      b.textContent = `Last van check: ${latestCheck.date || ""}`;
+      badges.appendChild(b);
+    }
+
+    // Driver timeline
+    const driverUl = document.getElementById("driverTimeline");
+    driverUl.innerHTML = "";
+    if (Array.isArray(drivers) && drivers.length){
+      drivers.forEach(d => {
+        const li = document.createElement("li");
+        li.innerHTML = `
+          <strong>${(d.name || "").replace(/\./g," ")}</strong>
+          <span class="date"> • ${d.from || "?"} → ${d.to || "Present"}</span>
+          ${d.notes ? `<div>${d.notes}</div>` : ""}
+          ${d.handoverURL ? `<div><a href="${d.handoverURL}" target="_blank">View handover form</a></div>` : ""}
+        `;
+        driverUl.appendChild(li);
+      });
+    }else{
+      driverUl.innerHTML = `<li><span class="date">No driver history logged yet.</span></li>`;
+    }
+
+    // Works timeline
+    const worksUl = document.getElementById("worksTimeline");
+    worksUl.innerHTML = "";
+    if (Array.isArray(works) && works.length){
+      works.forEach(w => {
+        const li = document.createElement("li");
+        li.innerHTML = `
+          <strong>${w.type || "Work"}</strong>
+          <span class="date"> • ${w.date || ""}</span>
+          ${w.description ? `<div>${w.description}</div>` : ""}
+          ${w.cost ? `<div>Cost: £${Number(w.cost).toFixed(2)}</div>` : ""}
+          ${w.invoiceURL ? `<div><a href="${w.invoiceURL}" target="_blank">View invoice</a></div>` : ""}
+        `;
+        worksUl.appendChild(li);
+      });
+    }else{
+      worksUl.innerHTML = `<li><span class="date">No service history recorded.</span></li>`;
+    }
+
+    // Finance
+    const fin = finance || {};
+    document.getElementById("finCompany").textContent = fin.company || "—";
+    document.getElementById("finMonthly").textContent = fin.monthly ? `£${Number(fin.monthly).toFixed(2)}` : "—";
+    document.getElementById("finStart").textContent = fin.startDate || "—";
+    document.getElementById("finEnd").textContent = fin.endDate || "—";
+    document.getElementById("finBalloon").textContent = fin.balloon ? `£${Number(fin.balloon).toFixed(2)}` : "—";
+    document.getElementById("finEquity").textContent = fin.equity ? `£${Number(fin.equity).toFixed(2)}` : "—";
+
+    // Checks
+    const checksUl = document.getElementById("checksTimeline");
+    checksUl.innerHTML = "";
+    if (Array.isArray(checks) && checks.length){
+      checks.forEach(c => {
+        const li = document.createElement("li");
+        li.innerHTML = `
+          <strong>${c.category || "Van check"}</strong>
+          <span class="date"> • ${c.date || ""}</span>
+          ${c.summary ? `<div>${c.summary}</div>` : ""}
+          ${c.url ? `<div><a href="${c.url}" target="_blank">Open images / report</a></div>` : ""}
+        `;
+        checksUl.appendChild(li);
+      });
+    }else{
+      checksUl.innerHTML = `<li><span class="date">No van checks linked yet.</span></li>`;
+    }
+  }
+
+  async function loadVehicle(){
+    CURRENT_REG = getRegFromQuery();
+    if (!CURRENT_REG){
+      alert("No vehicle reg specified.");
+      goBack();
+      return;
+    }
+    try{
+      document.getElementById("mainSub").textContent = "Loading details…";
+      const res = await fetch(`${VEHICLE_WORKER}/vehicle?reg=${encodeURIComponent(CURRENT_REG)}`);
+      if (!res.ok) throw new Error("Failed to load vehicle");
+      const data = await res.json();
+      VEHICLE_DATA = data;
+      const v = data.vehicle || {};
+      fillDashboard(v, data.drivers || [], data.works || [], data.finance || {}, data.checks || []);
+      document.getElementById("mainSub").textContent = "Details loaded.";
+    }catch(e){
+      console.error(e);
+      document.getElementById("mainSub").textContent = "Could not load vehicle.";
+    }
+  }
+
+  function refreshVehicle(){
+    loadVehicle();
+  }
+
+  window.addEventListener("DOMContentLoaded", loadVehicle);
+</script>
+
+</body>
+</html>
