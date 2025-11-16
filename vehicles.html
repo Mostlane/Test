@@ -511,10 +511,15 @@
         <div class="status-row">${serviceTag} ${motTag}</div>
         <div class="status-row">${issuesTag}</div>
 
-        <div class="card-actions">
-          <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
-          <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
-        </div>
+<div class="card-actions">
+  <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+
+  ${CURRENT_USER === "Jamie.Line" ? `
+    <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
+  ` : ""}
+
+  <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
+</div>
       `;
 
       grid.appendChild(card);
@@ -526,6 +531,132 @@
   }
 
   window.addEventListener("DOMContentLoaded", loadFleet);
+  <!-- Edit Modal -->
+<div class="modal-backdrop" id="editBackdrop" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="editTitle">Edit Vehicle</div>
+      <button class="btn icon-only" onclick="closeEditModal()">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="modal-row">
+        <label>Registration</label>
+        <input id="editReg" readonly style="background:#f1f5f9;">
+      </div>
+
+      <div class="modal-row">
+        <label>Make</label>
+        <input id="editMake">
+      </div>
+
+      <div class="modal-row">
+        <label>Model</label>
+        <input id="editModel">
+      </div>
+
+      <div class="modal-row">
+        <label>Fuel Type</label>
+        <input id="editFuel" placeholder="Diesel, Petrol, Electric">
+      </div>
+
+      <div class="modal-row">
+        <label>Driver</label>
+        <input id="editDriver" placeholder="Jamie.Line">
+      </div>
+
+      <div class="modal-row">
+        <label>Active?</label>
+        <select id="editActive" style="padding:7px 9px;border-radius:8px;border:1px solid #d1d5db;font-size:13px;">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </div>
+
+      <div class="modal-row">
+        <label>Next Service Date</label>
+        <input id="editService" type="date">
+      </div>
+
+      <div class="modal-row">
+        <label>MOT Due</label>
+        <input id="editMOT" type="date">
+      </div>
+
+      <div class="modal-row">
+        <label>Notes / Issues</label>
+        <input id="editNotes" placeholder="Optional notes">
+      </div>
+
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn secondary" onclick="closeEditModal()">Cancel</button>
+      <button class="btn primary" onclick="saveVehicleEdits()">Save</button>
+    </div>
+  </div>
+</div>
+  let EDIT_REG = null;
+
+function openEditModal(reg){
+  EDIT_REG = reg;
+  const v = FLEET.find(x => x.reg === reg);
+  if (!v) return;
+
+  document.getElementById("editTitle").textContent = `Edit – ${reg}`;
+  document.getElementById("editReg").value = v.reg || "";
+  document.getElementById("editMake").value = v.make || "";
+  document.getElementById("editModel").value = v.model || "";
+  document.getElementById("editFuel").value = v.fuel || "";
+  document.getElementById("editDriver").value = v.driver || "";
+  document.getElementById("editActive").value = v.active === false ? "false" : "true";
+  document.getElementById("editService").value = v.nextServiceDate || "";
+  document.getElementById("editMOT").value = v.motDue || "";
+  document.getElementById("editNotes").value = v.notes || "";
+
+  document.getElementById("editBackdrop").style.display = "flex";
+}
+
+function closeEditModal(){
+  document.getElementById("editBackdrop").style.display = "none";
+}
+
+async function saveVehicleEdits(){
+  if (!EDIT_REG) return;
+
+  const updates = {
+    make: document.getElementById("editMake").value.trim(),
+    model: document.getElementById("editModel").value.trim(),
+    fuel: document.getElementById("editFuel").value.trim(),
+    driver: document.getElementById("editDriver").value.trim(),
+    active: document.getElementById("editActive").value === "true",
+    nextServiceDate: document.getElementById("editService").value,
+    motDue: document.getElementById("editMOT").value,
+    notes: document.getElementById("editNotes").value.trim(),
+  };
+
+  try{
+    const res = await fetch(`${VEHICLE_WORKER}/update-vehicle`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ reg: EDIT_REG, updates })
+    });
+
+    if (!res.ok) throw new Error("Failed");
+
+    // update list locally
+    const updated = await res.json();
+    const idx = FLEET.findIndex(v => v.reg === EDIT_REG);
+    if (idx !== -1) FLEET[idx] = updated;
+
+    closeEditModal();
+    renderFleet();
+  }catch(e){
+    console.error(e);
+    alert("Could not save changes.");
+  }
+}
 </script>
 
 </body>
