@@ -2,867 +2,736 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>Mostlane • Vehicle Details</title>
+  <title>Mostlane • Vehicles</title>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
   <style>
     :root{
-      --ml-blue:#1e66ff;
-      --text:#1f2937;
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --text:#0f172a;
       --muted:#6b7280;
-      --ok:#10b981;
-      --warn:#f59e0b;
-      --bad:#ef4444;
-      --panel:rgba(255,255,255,0.80);
-      --bg:#e6e8eb;
+      --ok:#16a34a;
+      --warn:#f97316;
+      --bad:#dc2626;
+      --panel:rgba(255,255,255,0.9);
     }
     html,body{
       height:100%;margin:0;
-      background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background:#0b1930 url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text);
     }
-    body{
-      display:flex;
-      justify-content:center;
-      align-items:flex-start;
-    }
-    .shell{
-      width:100%;
-      max-width:1280px;
-      margin:20px;
-      display:flex;
-      gap:18px;
-    }
-    .sidebar{
-      width:260px;
+    body{padding:16px;}
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
       background:var(--panel);
-      border-radius:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.12);
-      padding:16px 14px;
-      box-sizing:border-box;
-      display:flex;
-      flex-direction:column;
-      gap:12px;
+      border-radius:16px;
+      box-shadow:0 18px 45px rgba(0,0,0,0.35);
+      overflow:hidden;
     }
-    .veh-header-reg{
+    .header{
+      background:linear-gradient(135deg,#001a3d,#003b82);
+      color:#e5ecff;
+      padding:16px 20px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .header-title{
       font-size:20px;
       font-weight:700;
-      letter-spacing:0.08em;
-    }
-    .veh-header-meta{
-      font-size:13px;
-      color:var(--muted);
-      margin-top:2px;
-    }
-    .veh-pill{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding:4px 10px;
-      border-radius:999px;
-      font-size:11px;
-      background:#eef2ff;
-      color:#3730a3;
-      margin-top:8px;
-    }
-    .nav-label{
-      font-size:11px;
+      letter-spacing:0.04em;
       text-transform:uppercase;
-      letter-spacing:0.08em;
-      color:var(--muted);
-      margin-top:10px;
-      margin-bottom:2px;
     }
-    .nav-list{
-      display:flex;
-      flex-direction:column;
-      gap:4px;
+    .header-sub{
+      font-size:12px;
+      opacity:0.8;
     }
-    .nav-item{
-      border-radius:8px;
-      padding:8px 10px;
-      font-size:14px;
-      cursor:pointer;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
-    .nav-item span.small{
-      font-size:11px;
-      color:var(--muted);
-    }
-    .nav-item.active{
-      background:var(--ml-blue);
-      color:#fff;
-    }
-    .nav-item:not(.active):hover{
-      background:rgba(30,102,255,0.06);
-    }
-    .nav-footer{
-      margin-top:auto;
-      font-size:11px;
-      color:var(--muted);
-    }
-    .nav-footer button{
-      margin-top:8px;
-      width:100%;
-      border:none;
-      padding:8px 10px;
-      border-radius:8px;
-      font-size:13px;
-      font-weight:600;
-      background:#fff;
-      color:var(--ml-blue);
-      cursor:pointer;
-      border:1px solid rgba(30,102,255,0.4);
-    }
-
-    .content{
-      flex:1;
-      background:var(--panel);
-      border-radius:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.12);
-      padding:18px 18px 24px;
-      box-sizing:border-box;
-      min-width:0;
-    }
-    .content-head{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-bottom:14px;
-    }
-    .content-title{
-      font-size:18px;
-      font-weight:650;
-    }
-    .content-actions{
+    .header-actions{
       display:flex;
       gap:8px;
       flex-wrap:wrap;
+      align-items:center;
     }
     .btn{
       border:none;
-      border-radius:8px;
-      padding:8px 11px;
+      border-radius:999px;
+      padding:8px 14px;
       font-size:13px;
       font-weight:600;
       cursor:pointer;
       display:inline-flex;
       align-items:center;
       gap:6px;
-      background:#fff;
-      color:var(--ml-blue);
-      border:1px solid rgba(30,102,255,0.5);
+      white-space:nowrap;
     }
     .btn.primary{
-      background:var(--ml-blue);
+      background:#1e66ff;
       color:#fff;
-      border-color:var(--ml-blue);
     }
-    .btn.ghost{
-      background:transparent;
+    .btn.secondary{
+      background:rgba(15,23,42,0.12);
+      color:#e5ecff;
+      border:1px solid rgba(148,163,184,0.4);
+    }
+    .btn.icon-only{
+      padding:6px 8px;
+      border-radius:999px;
+    }
+    .content{
+      padding:14px 18px 18px;
+    }
+    .toolbar{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .pill-field{
+      display:flex;
+      align-items:center;
+      padding:6px 10px;
+      border-radius:999px;
+      background:#f1f5f9;
+      border:1px solid #cbd5f5;
+      gap:6px;
+      font-size:13px;
+    }
+    .pill-field input{
       border:none;
-      color:var(--muted);
+      background:transparent;
+      outline:none;
+      font-size:13px;
+      min-width:120px;
     }
-
-    .section{
-      display:none;
+    .pill-label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      color:#64748b;
     }
-    .section.active{
-      display:block;
+    .summary-strip{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin:4px 0 12px;
+    }
+    .summary-card{
+      flex:1 1 120px;
+      min-width:120px;
+      background:#0f172a;
+      color:#e5ecff;
+      border-radius:12px;
+      padding:10px 12px;
+      position:relative;
+      overflow:hidden;
+    }
+    .summary-card::after{
+      content:"";
+      position:absolute;
+      right:-20px;top:-20px;
+      width:60px;height:60px;
+      background:radial-gradient(circle at center,rgba(129,140,248,0.45),transparent 70%);
+      opacity:0.8;
+    }
+    .summary-label{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:0.08em;
+      opacity:0.8;
+    }
+    .summary-value{
+      font-size:18px;
+      font-weight:700;
+      margin-top:4px;
+    }
+    .summary-note{
+      font-size:11px;
+      opacity:0.7;
+      margin-top:2px;
     }
 
     .grid{
       display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:14px;
+      grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+      gap:12px;
     }
     .card{
-      background:#fff;
-      border-radius:12px;
+      background:#ffffff;
+      border-radius:14px;
+      box-shadow:0 8px 18px rgba(15,23,42,0.12);
       padding:12px 12px 10px;
-      box-shadow:0 2px 8px rgba(0,0,0,0.08);
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      border:1px solid #e2e8f0;
+      position:relative;
     }
-    .card-head{
+    .reg-row{
       display:flex;
       justify-content:space-between;
       align-items:center;
-      margin-bottom:6px;
+      gap:6px;
     }
-    .card-title{
-      font-size:14px;
+    .reg{
+      font-size:16px;
+      font-weight:800;
+      letter-spacing:0.15em;
+      text-transform:uppercase;
+      color:#0f172a;
+      background:#e2e8f0;
+      padding:4px 8px;
+      border-radius:6px;
+      border:1px solid #cbd5f5;
+    }
+    .driver{
+      font-size:13px;
+      color:#0f172a;
       font-weight:600;
     }
-    .card-sub{
-      font-size:11px;
-      color:var(--muted);
+    .driver span{
+      color:#64748b;
+      font-weight:500;
     }
-    .badge{
-      display:inline-flex;
+    .meta{
+      font-size:12px;
+      color:#475569;
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 12px;
+    }
+    .meta span{
+      display:flex;
       align-items:center;
-      justify-content:center;
+      gap:4px;
+    }
+    .dot{
+      width:6px;height:6px;border-radius:999px;background:#94a3b8;
+    }
+    .status-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:4px;
+      margin-top:2px;
+    }
+    .tag{
       padding:2px 8px;
       border-radius:999px;
       font-size:11px;
       font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
     }
-    .badge.ok{background:#ecfdf3;color:#166534;}
-    .badge.warn{background:#fffbeb;color:#92400e;}
-    .badge.bad{background:#fef2f2;color:#b91c1c;}
-    .badge.info{background:#eef2ff;color:#3730a3;}
+    .tag.ok{background:#dcfce7;color:#166534;}
+    .tag.warn{background:#fef3c7;color:#92400e;}
+    .tag.bad{background:#fee2e2;color:#b91c1c;}
+    .tag.info{background:#e0f2fe;color:#075985;}
+    .tag-dot{
+      width:6px;height:6px;border-radius:999px;
+    }
+    .tag-dot.ok{background:#16a34a;}
+    .tag-dot.warn{background:#f97316;}
+    .tag-dot.bad{background:#dc2626;}
+    .tag-dot.info{background:#0284c7;}
 
-    .stats-row{
+    .card-actions{
       display:flex;
       justify-content:space-between;
-      font-size:13px;
-      margin:2px 0;
-    }
-    .stats-row span.label{
-      color:var(--muted);
-    }
-    .stats-row span.value{
-      font-weight:600;
-    }
-
-    table{
-      width:100%;
-      border-collapse:collapse;
-      font-size:13px;
-      margin-top:4px;
-    }
-    th,td{
-      text-align:left;
-      padding:6px 4px;
-    }
-    th{
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.06em;
-      color:var(--muted);
-      border-bottom:1px solid #e5e7eb;
-    }
-    tbody tr:nth-child(even){
-      background:#f9fafb;
-    }
-
-    .tag-row{
-      display:flex;
-      flex-wrap:wrap;
+      align-items:center;
       gap:6px;
-      margin:6px 0 4px;
-      font-size:11px;
+      margin-top:8px;
     }
-    .tag{
-      padding:3px 8px;
+    .btn-ghost{
+      border:none;
+      background:transparent;
+      font-size:12px;
+      color:#1e40af;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:4px 6px;
       border-radius:999px;
-      background:#f3f4f6;
-      color:#374151;
       cursor:pointer;
     }
-    .tag.active{
-      background:#1e40af;
+    .btn-ghost:hover{
+      background:#e0ecff;
+    }
+    .btn-pill{
+      border:none;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:600;
+      padding:4px 10px;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .btn-pill.main{
+      background:#1d4ed8;
       color:#fff;
     }
-    .gallery{
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(80px,1fr));
-      gap:6px;
-      margin-top:6px;
-    }
-    .gallery img{
-      width:100%;
-      height:70px;
-      object-fit:cover;
-      border-radius:8px;
-      border:1px solid #e5e7eb;
-      background:#e5e7eb;
+    .btn-pill.sub{
+      background:#f8fafc;
+      color:#1e293b;
+      border:1px solid #cbd5f5;
     }
 
-    .pill-list{
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      margin-top:4px;
+    .status-text{
       font-size:11px;
+      color:#64748b;
+      display:flex;
+      align-items:center;
+      gap:4px;
     }
-    .pill{
-      padding:3px 8px;
+
+    .pill-small{
+      font-size:11px;
+      padding:2px 6px;
       border-radius:999px;
-      background:#f3f4f6;
-      color:#111827;
+      background:#f1f5f9;
+      color:#475569;
     }
 
-    .muted-text{
-      font-size:12px;
-      color:var(--muted);
+    .footer-line{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:12px;
+      font-size:11px;
+      color:#64748b;
+      border-top:1px dashed #e2e8f0;
+      padding-top:8px;
     }
 
-    /* Simple modal */
+    /* Modal */
     .modal-backdrop{
       position:fixed;
       inset:0;
-      background:rgba(15,23,42,0.45);
+      background:rgba(15,23,42,0.55);
       display:none;
-      justify-content:center;
       align-items:center;
+      justify-content:center;
       z-index:50;
     }
     .modal{
       background:#ffffff;
-      border-radius:12px;
-      padding:14px 14px 12px;
+      border-radius:14px;
       max-width:420px;
-      width:100%;
-      box-shadow:0 20px 45px rgba(0,0,0,0.25);
-      box-sizing:border-box;
+      width:92%;
+      padding:14px 16px;
+      box-shadow:0 22px 50px rgba(15,23,42,0.4);
     }
-    .modal h3{
-      margin:0 0 4px;
+    .modal-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .modal-title{
       font-size:15px;
+      font-weight:700;
+      color:#0f172a;
     }
-    .modal p{
-      margin:0 0 8px;
-      font-size:12px;
-      color:var(--muted);
-    }
-    .modal form{
+    .modal-body{
+      font-size:13px;
+      color:#0f172a;
       display:flex;
       flex-direction:column;
       gap:8px;
-      margin-top:6px;
     }
-    .modal label{
+    .modal-row label{
       font-size:12px;
-      font-weight:500;
+      font-weight:600;
+      color:#4b5563;
+      display:block;
+      margin-bottom:2px;
     }
-    .modal input,.modal select,.modal textarea{
-      font-size:13px;
-      padding:7px 8px;
+    .modal-row input{
+      width:100%;
+      padding:7px 9px;
       border-radius:8px;
       border:1px solid #d1d5db;
-      width:100%;
-      box-sizing:border-box;
+      font-size:13px;
     }
-    .modal textarea{
-      min-height:70px;
-      resize:vertical;
-    }
-    .modal-actions{
+    .modal-footer{
       display:flex;
       justify-content:flex-end;
       gap:8px;
       margin-top:10px;
     }
+    .chip-role{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:11px;
+      background:#eff6ff;
+      color:#1d4ed8;
+      margin-right:4px;
+    }
+    .chip-role span{
+      font-size:14px;
+      cursor:pointer;
+    }
 
-    @media (max-width: 960px){
-      .shell{
-        flex-direction:column;
-        margin:12px;
+    @media(max-width:720px){
+      .header{
+        align-items:flex-start;
       }
-      .sidebar{
-        width:100%;
-        flex-direction:column;
+      .header-title{
+        font-size:18px;
       }
-      .sidebar-nav-row{
-        display:flex;
-        flex-wrap:wrap;
-        gap:6px;
-        margin-top:4px;
+      .summary-card{
+        padding:8px 10px;
       }
-      .nav-list{
-        flex-direction:row;
-        overflow-x:auto;
-        padding-bottom:4px;
+      .reg{
+        font-size:14px;
       }
-      .nav-item{
-        white-space:nowrap;
+      .driver{
+        font-size:12px;
       }
-      .content{
-        margin-top:8px;
+      .btn-pill.main{
+        padding:4px 8px;
+        font-size:11px;
       }
-      .grid{
-        grid-template-columns:1fr;
+      .btn-pill.sub{
+        padding:3px 8px;
+        font-size:11px;
+      }
+      .btn-ghost{
+        font-size:11px;
       }
     }
   </style>
 </head>
 <body>
 
-<div class="shell">
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
+<div class="wrap">
+  <div class="header">
     <div>
-      <div class="veh-header-reg" id="vehReg">WP64 EJD</div>
-      <div class="veh-header-meta" id="vehMeta">
-        Transit Custom • Diesel • Euro 6
-      </div>
-      <div class="veh-pill" id="vehDriver">
-        Driver: <strong>Jamie Line</strong>
-      </div>
+      <div class="header-title">Vehicle Fleet</div>
+      <div class="header-sub">Live overview of all vans and their current drivers.</div>
     </div>
-
-    <div class="nav-label">Sections</div>
-    <div class="nav-list">
-      <div class="nav-item active" data-section="overview">
-        Overview <span class="small">Summary</span>
-      </div>
-      <div class="nav-item" data-section="checks">
-        Checks &amp; Photos <span class="small">JotForm / R2</span>
-      </div>
-      <div class="nav-item" data-section="services">
-        Services &amp; Repairs <span class="small">History</span>
-      </div>
-      <div class="nav-item" data-section="fuel">
-        Fuel &amp; MPG <span class="small">Performance</span>
-      </div>
-      <div class="nav-item" data-section="finance">
-        Finance <span class="small">Lease / HP</span>
-      </div>
-      <div class="nav-item" data-section="drivers">
-        Drivers &amp; Handover <span class="small">History</span>
-      </div>
-      <div class="nav-item" data-section="docs">
-        Documents <span class="small">All files</span>
-      </div>
+    <div class="header-actions">
+      <button class="btn secondary" onclick="goMain()">← Main Menu</button>
+      <button class="btn primary" onclick="reloadFleet()">
+        ⟳ Refresh
+      </button>
     </div>
+  </div>
 
-    <div class="nav-footer">
-      <div>Vehicle config and limits will later come from your secure USER_CONFIG_KV / VEHICLE_CONFIG_KV worker.</div>
-      <button onclick="window.location.href='vehicles.html'">Back to Fleet Dashboard</button>
-    </div>
-  </aside>
-
-  <!-- MAIN CONTENT -->
-  <main class="content">
-    <div class="content-head">
-      <div class="content-title" id="sectionTitle">Overview</div>
-      <div class="content-actions">
-        <button class="btn ghost" onclick="window.location.href='main.html'">Main Menu</button>
-        <button class="btn" onclick="refreshView()">Refresh</button>
+  <div class="content">
+    <div class="toolbar">
+      <div class="pill-field">
+        <span class="pill-label">Search</span>
+        <input id="searchInput" placeholder="Reg, driver, model..." oninput="renderFleet()">
       </div>
-    </div>
-
-    <!-- OVERVIEW -->
-    <section class="section active" data-section="overview">
-      <div class="grid">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Service &amp; MOT Status</div>
-              <div class="card-sub">Automatic reminders driven by KV</div>
-            </div>
-            <span class="badge ok" id="serviceBadge">OK</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Next Service Date</span>
-            <span class="value" id="nextServiceDate">01 Feb 2025</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Next Service Mileage</span>
-            <span class="value" id="nextServiceMiles">42,000</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Next MOT Date</span>
-            <span class="value" id="nextMOTDate">12 Sep 2025</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Last Service</span>
-            <span class="value" id="lastService">10 Aug 2024 @ 36,000</span>
-          </div>
-          <p class="muted-text">Service/MOT reminders will be sent by a daily cron Worker to you and the current driver.</p>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Usage Snapshot</div>
-              <div class="card-sub">Rolling picture from van checks + fuel</div>
-            </div>
-            <span class="badge info">Last 30 days</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Total Miles</span>
-            <span class="value" id="snapMiles">1,250</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Average MPG</span>
-            <span class="value" id="snapMPG">34.8</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Fuel Spend</span>
-            <span class="value" id="snapFuelCost">£410</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Checks Completed</span>
-            <span class="value" id="snapChecks">4</span>
-          </div>
-          <p class="muted-text">These numbers will eventually be calculated from fuel-card entries and odometer photos.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- CHECKS & PHOTOS -->
-    <section class="section" data-section="checks">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Weekly Van Checks</div>
-            <div class="card-sub">Pulled from JotForm + stored in R2</div>
-          </div>
-          <button class="btn" onclick="openLatestCheck()">Open Latest Check</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Odometer</th>
-              <th>Issues</th>
-              <th>Completed By</th>
-              <th>View PDF</th>
-            </tr>
-          </thead>
-          <tbody id="checksTable">
-            <!-- rows populated by JS later -->
-          </tbody>
-        </table>
-      </div>
-
-      <div class="card" style="margin-top:10px;">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Photo Timeline</div>
-            <div class="card-sub">Grouped by zone (e.g. NSF Wheel, Interior, Damage)</div>
-          </div>
-        </div>
-        <div class="tag-row" id="photoFilters">
-          <div class="tag active" data-tag="all">All</div>
-          <div class="tag" data-tag="interior">Interior</div>
-          <div class="tag" data-tag="nsf-wheel">NSF Wheel</div>
-          <div class="tag" data-tag="osf-wheel">OSF Wheel</div>
-          <div class="tag" data-tag="damage">Damage</div>
-          <div class="tag" data-tag="tyres">Tyres</div>
-        </div>
-        <div class="gallery" id="photoGallery">
-          <!-- images populated from R2 via Worker -->
-        </div>
-        <p class="muted-text">Later, each image will be tagged by JotForm ("Interior", "NSF Wheel", etc.) and displayed here newest-first.</p>
-      </div>
-    </section>
-
-    <!-- SERVICES & REPAIRS -->
-    <section class="section" data-section="services">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Service &amp; Repair History</div>
-            <div class="card-sub">All invoices linked to SharePoint</div>
-          </div>
-          <button class="btn primary" onclick="openWorksModal()">Add Works</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Description</th>
-              <th>Cost</th>
-              <th>Centre</th>
-              <th>Invoice</th>
-            </tr>
-          </thead>
-          <tbody id="worksTable">
-            <!-- JS populated -->
-          </tbody>
-        </table>
-        <p class="muted-text">Types will be: Service, MOT, Tyres, Windscreen, Other. Each row will have a “View” button opening the stored invoice PDF.</p>
-      </div>
-    </section>
-
-    <!-- FUEL & MPG -->
-    <section class="section" data-section="fuel">
-      <div class="grid">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Fuel Performance</div>
-              <div class="card-sub">From fuel card entries and odometer</div>
-            </div>
-          </div>
-          <div class="stats-row">
-            <span class="label">Average MPG (last 90 days)</span>
-            <span class="value" id="avgMPG">35.2</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Best MPG Period</span>
-            <span class="value" id="bestMPG">40.1</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Worst MPG Period</span>
-            <span class="value" id="worstMPG">29.4</span>
-          </div>
-          <p class="muted-text">This page will later cross-reference fuel card quantity/cost with mileage from van checks.</p>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Fuel Entries</div>
-              <div class="card-sub">Manual input from invoices</div>
-            </div>
-            <button class="btn" onclick="openFuelModal()">Add Fuel Entry</button>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Litres</th>
-                <th>Cost</th>
-                <th>Odometer</th>
-                <th>Invoice</th>
-              </tr>
-            </thead>
-            <tbody id="fuelTable">
-              <!-- fuel rows here -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- FINANCE -->
-    <section class="section" data-section="finance">
-      <div class="grid">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Finance Summary</div>
-              <div class="card-sub">Lease / HP details</div>
-            </div>
-            <button class="btn" onclick="openFinanceModal()">Edit Finance</button>
-          </div>
-          <div class="stats-row">
-            <span class="label">Finance Company</span>
-            <span class="value" id="finCompany">Lex Autolease</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Monthly Payment</span>
-            <span class="value" id="finMonthly">£420</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Balloon / Final</span>
-            <span class="value" id="finBalloon">£9,500</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Start / End</span>
-            <span class="value" id="finTerm">01 Jan 2024 – 31 Dec 2027</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Estimated Equity</span>
-            <span class="value" id="finEquity">£2,800</span>
-          </div>
-          <p class="muted-text">We’ll later add a simple amortisation / equity estimator so you can quickly see which vans are cheap to keep or ripe to replace.</p>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="card-title">Running Cost Snapshot</div>
-              <div class="card-sub">Finance + fuel + maintenance</div>
-            </div>
-          </div>
-          <div class="stats-row">
-            <span class="label">Monthly Finance</span>
-            <span class="value">£420</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Avg Monthly Fuel</span>
-            <span class="value">£380</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Avg Maintenance</span>
-            <span class="value">£95</span>
-          </div>
-          <div class="stats-row">
-            <span class="label">Total Running Cost</span>
-            <span class="value">£895</span>
-          </div>
-          <p class="muted-text">These will later be driven from the works &amp; fuel tables plus the finance record.</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- DRIVERS & HANDOVER -->
-    <section class="section" data-section="drivers">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">Driver History</div>
-            <div class="card-sub">Who had this van and when</div>
-          </div>
-          <button class="btn primary" onclick="openAssignDriverModal()">Assign Driver</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Driver</th>
-              <th>From</th>
-              <th>To</th>
-              <th>Handover</th>
-            </tr>
-          </thead>
-          <tbody id="driverTable">
-            <!-- JS -->
-          </tbody>
-        </table>
-        <p class="muted-text">Each time you assign a new driver, you can optionally trigger the Van Handover JotForm. Zapier will save the signed PDF to SharePoint and we’ll show a “View” button here.</p>
-      </div>
-    </section>
-
-    <!-- DOCUMENTS -->
-    <section class="section" data-section="docs">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="card-title">All Documents</div>
-            <div class="card-sub">Central index of everything for this van</div>
-          </div>
-          <button class="btn" onclick="openUploadDocModal()">Upload Document</button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Description</th>
-              <th>Date</th>
-              <th>Source</th>
-              <th>Link</th>
-            </tr>
-          </thead>
-          <tbody id="docsTable">
-            <!-- JS -->
-          </tbody>
-        </table>
-        <p class="muted-text">This will include: van checks, handover forms, service invoices, tyre invoices, windscreen, insurance docs, etc. All via SharePoint / R2 links.</p>
-      </div>
-    </section>
-  </main>
-</div>
-
-<!-- MODALS (skeletons, to be wired later) -->
-<div class="modal-backdrop" id="worksModal">
-  <div class="modal">
-    <h3>Add Works</h3>
-    <p>Log a Service, MOT, Tyres, Windscreen or Other work item for this vehicle.</p>
-    <form>
-      <div>
-        <label>Type</label>
-        <select id="workType">
-          <option value="Service">Service</option>
-          <option value="MOT">MOT</option>
-          <option value="Tyres">Tyres</option>
-          <option value="Windscreen">Windscreen</option>
-          <option value="Other">Other</option>
+      <div class="pill-field">
+        <span class="pill-label">Filter</span>
+        <select id="filterActive" onchange="renderFleet()" style="border:none;background:transparent;font-size:13px;">
+          <option value="all">All vehicles</option>
+          <option value="active">Active only</option>
+          <option value="inactive">Inactive only</option>
         </select>
       </div>
-      <div>
-        <label>Date</label>
-        <input type="date" id="workDate">
+    </div>
+
+    <div class="summary-strip">
+      <div class="summary-card">
+        <div class="summary-label">Total Vehicles</div>
+        <div class="summary-value" id="sumTotal">0</div>
+        <div class="summary-note">Across whole fleet</div>
       </div>
-      <div>
-        <label>Cost (£)</label>
-        <input type="number" step="0.01" min="0" id="workCost">
+      <div class="summary-card">
+        <div class="summary-label">Active</div>
+        <div class="summary-value" id="sumActive">0</div>
+        <div class="summary-note">Currently in service</div>
       </div>
-      <div>
-        <label>Service Centre</label>
-        <input type="text" id="workCentre" placeholder="Kwik Fit, Main Dealer, etc.">
+      <div class="summary-card">
+        <div class="summary-label">Unassigned</div>
+        <div class="summary-value" id="sumUnassigned">0</div>
+        <div class="summary-note">No primary driver set</div>
       </div>
-      <div>
-        <label>Description</label>
-        <textarea id="workDesc" placeholder="What was done?"></textarea>
-      </div>
-      <div>
-        <label>SharePoint Invoice URL</label>
-        <input type="url" id="workInvoiceURL" placeholder="https://...">
-      </div>
-    </form>
-    <div class="modal-actions">
-      <button class="btn ghost" onclick="closeModal('worksModal')">Cancel</button>
-      <button class="btn primary" onclick="saveWorks()">Save</button>
+    </div>
+
+    <div class="grid" id="fleetGrid">
+      <!-- cards injected here -->
+    </div>
+
+    <div class="footer-line">
+      <span id="statusLine">Loading fleet…</span>
+      <span>Mostlane • Vehicles</span>
     </div>
   </div>
 </div>
 
-<!-- (Other modals for fuel, finance, assign driver, upload doc etc. can follow same pattern) -->
+<!-- Permissions Modal -->
+<div class="modal-backdrop" id="permBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="permTitle">Permissions</div>
+      <button class="btn icon-only" onclick="closePermModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:#6b7280;">
+        Viewers can see this vehicle. Editors can change details and history.
+      </div>
+      <div class="modal-row">
+        <label>View Access (comma separated)</label>
+        <input id="permViewInput" placeholder="director, admin, office, Jamie.Line">
+        <div style="margin-top:4px;">
+          <span class="chip-role" onclick="quickAddRole('director')">director <span>＋</span></span>
+          <span class="chip-role" onclick="quickAddRole('admin')">admin <span>＋</span></span>
+          <span class="chip-role" onclick="quickAddRole('office')">office <span>＋</span></span>
+        </div>
+      </div>
+      <div class="modal-row">
+        <label>Edit Access (comma separated)</label>
+        <input id="permEditInput" placeholder="director, admin">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn secondary" onclick="closePermModal()">Cancel</button>
+      <button class="btn primary" onclick="savePermissions()">Save</button>
+    </div>
+  </div>
+</div>
 
 <script>
-  // Gate
+  // BASIC AUTH GATE
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
   }
 
-  function setActiveSection(section){
-    document.querySelectorAll('.nav-item').forEach(el=>{
-      el.classList.toggle('active', el.dataset.section===section);
-    });
-    document.querySelectorAll('.section').forEach(el=>{
-      el.classList.toggle('active', el.dataset.section===section);
-    });
-    const mapTitle = {
-      overview:"Overview",
-      checks:"Checks & Photos",
-      services:"Services & Repairs",
-      fuel:"Fuel & MPG",
-      finance:"Finance",
-      drivers:"Drivers & Handover",
-      docs:"Documents"
-    };
-    document.getElementById('sectionTitle').textContent = mapTitle[section] || "Vehicle";
+  const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev"; // <- set your worker URL
+  const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
+  const IS_ADMIN = CURRENT_USER === "Jamie.Line"; // adjust when you add roles
+
+  let FLEET = [];
+  let PERM_EDIT_REG = null;
+
+  function goMain(){
+    window.location.href = "main.html";
   }
 
-  document.querySelectorAll('.nav-item').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      setActiveSection(el.dataset.section);
-    });
-  });
-
-  function refreshView(){
-    // later: re-fetch vehicle JSON and re-render
-    console.log("Refresh requested");
+  function setStatus(msg){
+    document.getElementById("statusLine").textContent = msg;
   }
 
-  function openWorksModal(){ document.getElementById('worksModal').style.display='flex'; }
-  function closeModal(id){ document.getElementById(id).style.display='none'; }
+  async function loadFleet(){
+    try{
+      setStatus("Loading fleet…");
+      const res = await fetch(`${VEHICLE_WORKER}/fleet`);
+      if (!res.ok) throw new Error("Failed to load fleet");
+      const data = await res.json();
+      FLEET = Array.isArray(data) ? data : [];
 
-  function saveWorks(){
-    // placeholder: later call Worker to save
-    alert("Works will be saved via vehicle Worker (to KV + link to SharePoint invoice).");
-    closeModal('worksModal');
+      // update summary
+      const total = FLEET.length;
+      const active = FLEET.filter(v => v.active !== false).length;
+      const unassigned = FLEET.filter(v => !v.driver || !String(v.driver).trim()).length;
+      document.getElementById("sumTotal").textContent = total;
+      document.getElementById("sumActive").textContent = active;
+      document.getElementById("sumUnassigned").textContent = unassigned;
+
+      renderFleet();
+      setStatus("Fleet loaded.");
+    }catch(e){
+      console.error(e);
+      setStatus("Could not load fleet.");
+    }
   }
 
-  function openLatestCheck(){
-    // later: open latest van check PDF or details
-    alert("This will open the most recent Weekly Van Check PDF.");
+  function renderFleet(){
+    const grid = document.getElementById("fleetGrid");
+    grid.innerHTML = "";
+    const q = (document.getElementById("searchInput").value || "").toLowerCase();
+    const filt = document.getElementById("filterActive").value;
+
+    let items = FLEET.slice();
+
+    if (q){
+      items = items.filter(v => {
+        const reg = (v.reg || "").toLowerCase();
+        const driver = (v.driver || "").toLowerCase();
+        const model = (v.model || "").toLowerCase();
+        const make = (v.make || "").toLowerCase();
+        return reg.includes(q) || driver.includes(q) || model.includes(q) || make.includes(q);
+      });
+    }
+
+    if (filt === "active"){
+      items = items.filter(v => v.active !== false);
+    }else if (filt === "inactive"){
+      items = items.filter(v => v.active === false);
+    }
+
+    if (!items.length){
+      grid.innerHTML = `<div style="font-size:13px;color:#64748b;">No vehicles match your filters.</div>`;
+      return;
+    }
+
+    for (const v of items){
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const reg = v.reg || "UNKNOWN";
+      const driverDisp = v.driver ? v.driver : "Unassigned";
+      const make = v.make || "";
+      const model = v.model || "";
+      const fuel = v.fuel || "";
+      const active = v.active !== false;
+
+      const nextService = v.nextServiceDate || "";
+      const motDue = v.motDue || "";
+      const issues = v.issuesCount || 0;
+
+      let motTag = `<span class="tag info"><span class="tag-dot info"></span>MOT: n/a</span>`;
+      if (motDue){
+        motTag = `<span class="tag ${v.motStatus === 'bad' ? 'bad':'warn'}">
+          <span class="tag-dot ${v.motStatus === 'bad' ? 'bad':'warn'}"></span>
+          MOT: ${motDue}
+        </span>`;
+      }
+
+      let servTag = `<span class="tag info"><span class="tag-dot info"></span>Service: n/a</span>`;
+      if (nextService){
+        servTag = `<span class="tag ${v.serviceStatus === 'ok' ? 'ok':'warn'}">
+          <span class="tag-dot ${v.serviceStatus === 'ok' ? 'ok':'warn'}"></span>
+          Service: ${nextService}
+        </span>`;
+      }
+
+      const issuesTag = issues > 0
+        ? `<span class="tag bad"><span class="tag-dot bad"></span>${issues} issues</span>`
+        : `<span class="tag ok"><span class="tag-dot ok"></span>No open issues</span>`;
+
+      const driverLabel = driverDisp.replace(/\./g," ");
+
+      card.innerHTML = `
+        <div class="reg-row">
+          <div class="reg">${reg}</div>
+          <div class="driver"><span>Driver</span><br>${driverLabel}</div>
+        </div>
+        <div class="meta">
+          <span><span class="dot"></span>${make} ${model}</span>
+          ${fuel ? `<span><span class="dot"></span>${fuel}</span>` : ""}
+          <span><span class="dot"></span>${active ? "Active" : "Inactive"}</span>
+        </div>
+        <div class="status-row">
+          <div>${servTag}</div>
+          <div>${motTag}</div>
+        </div>
+        <div class="status-row">
+          <div>${issuesTag}</div>
+          <div class="status-text">
+            <span class="pill-small">Last updated: ${v.lastUpdated ? new Date(v.lastUpdated).toLocaleDateString() : "—"}</span>
+          </div>
+        </div>
+        <div class="card-actions">
+          <div>
+            <button class="btn-ghost" onclick="openVehicle('${reg}')">
+              Open vehicle
+            </button>
+          </div>
+          <div>
+            ${IS_ADMIN ? `
+              <button class="btn-pill sub" onclick="openPermissions('${reg}')">
+                Permissions
+              </button>
+            ` : ""}
+            <button class="btn-pill main" onclick="openVehicle('${reg}')">
+              Details →
+            </button>
+          </div>
+        </div>
+      `;
+
+      grid.appendChild(card);
+    }
   }
 
-  function openFuelModal(){
-    alert("Fuel entry modal to be wired later.");
+  function openVehicle(reg){
+    window.location.href = `vehicle.html?reg=${encodeURIComponent(reg)}`;
   }
 
-  function openFinanceModal(){
-    alert("Finance edit modal to be wired later.");
+  // --- Permissions modal logic ---
+  function openPermissions(reg){
+    PERM_EDIT_REG = reg;
+    const vehicle = FLEET.find(v => v.reg === reg);
+    const viewArr = (vehicle && Array.isArray(vehicle.allowedViewers)) ? vehicle.allowedViewers : [];
+    const editArr = (vehicle && Array.isArray(vehicle.allowedEditors)) ? vehicle.allowedEditors : [];
+
+    document.getElementById("permTitle").textContent = `Permissions – ${reg}`;
+    document.getElementById("permViewInput").value = viewArr.join(", ");
+    document.getElementById("permEditInput").value = editArr.join(", ");
+
+    document.getElementById("permBackdrop").style.display = "flex";
   }
 
-  function openAssignDriverModal(){
-    alert("Assign driver + send handover form modal to be wired later.");
+  function closePermModal(){
+    document.getElementById("permBackdrop").style.display = "none";
+    PERM_EDIT_REG = null;
   }
 
-  function openUploadDocModal(){
-    alert("Upload document modal to be wired later (Zapier → SharePoint/R2).");
+  function quickAddRole(role){
+    const inp = document.getElementById("permViewInput");
+    const current = inp.value.split(",").map(x => x.trim()).filter(Boolean);
+    if (!current.includes(role)){
+      current.push(role);
+      inp.value = current.join(", ");
+    }
   }
+
+  async function savePermissions(){
+    if (!PERM_EDIT_REG) return;
+    const viewStr = document.getElementById("permViewInput").value || "";
+    const editStr = document.getElementById("permEditInput").value || "";
+    const allowedViewers = viewStr.split(",").map(x => x.trim()).filter(Boolean);
+    const allowedEditors = editStr.split(",").map(x => x.trim()).filter(Boolean);
+
+    try{
+      setStatus("Saving permissions…");
+      const body = { reg: PERM_EDIT_REG, allowedViewers, allowedEditors };
+      const res = await fetch(`${VEHICLE_WORKER}/update-permissions`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      const updated = await res.json();
+      // Update local FLEET entry
+      const idx = FLEET.findIndex(v => v.reg === PERM_EDIT_REG);
+      if (idx !== -1){
+        FLEET[idx].allowedViewers = allowedViewers;
+        FLEET[idx].allowedEditors = allowedEditors;
+      }
+      setStatus("Permissions saved.");
+      closePermModal();
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to save permissions.");
+      alert("Could not save permissions.");
+    }
+  }
+
+  function reloadFleet(){
+    loadFleet();
+  }
+
+  window.addEventListener("DOMContentLoaded", loadFleet);
 </script>
+
 </body>
 </html>
