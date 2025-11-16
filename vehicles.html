@@ -7,6 +7,11 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <script src="auth.js"></script>
 
+  <script>
+    /* FIX — ensure CURRENT_USER exists BEFORE rendering cards */
+    const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
+  </script>
+
   <style>
     :root{
       --ml-blue:#003b82;
@@ -81,40 +86,13 @@
       white-space:nowrap;
     }
 
-    .btn.primary{
-      background:#1e66ff;
-      color:#fff;
-    }
+    .btn.primary{ background:#1e66ff; color:#fff; }
+    .btn.secondary{ background:rgba(15,23,42,0.12); color:#e5ecff; border:1px solid rgba(148,163,184,0.4); }
 
-    .btn.secondary{
-      background:rgba(15,23,42,0.12);
-      color:#e5ecff;
-      border:1px solid rgba(148,163,184,0.4);
-    }
+    .content{ padding:14px 18px 18px; }
 
-    .content{
-      padding:14px 18px 18px;
-    }
-
-    /* Search / Filter pills */
-    .toolbar{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      align-items:center;
-      margin-bottom:10px;
-    }
-
-    .pill-field{
-      display:flex;
-      align-items:center;
-      padding:6px 10px;
-      border-radius:999px;
-      background:#f1f5f9;
-      border:1px solid #cbd5f5;
-      gap:6px;
-      font-size:13px;
-    }
+    .toolbar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+    .pill-field{ display:flex; align-items:center; padding:6px 10px; border-radius:999px; background:#f1f5f9; border:1px solid #cbd5f5; gap:6px; font-size:13px; }
 
     .pill-field input,
     .pill-field select{
@@ -125,20 +103,9 @@
       min-width:120px;
     }
 
-    .pill-label{
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.08em;
-      color:#64748b;
-    }
+    .pill-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; }
 
-    /* Summary cards */
-    .summary-strip{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin:4px 0 12px;
-    }
+    .summary-strip{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 12px; }
 
     .summary-card{
       flex:1 1 120px;
@@ -148,194 +115,82 @@
       border-radius:12px;
       padding:10px 12px;
       position:relative;
-      overflow:hidden;
     }
 
-    .summary-card::after{
-      content:"";
-      position:absolute;
-      right:-20px;top:-20px;
-      width:60px;height:60px;
-      background:radial-gradient(circle at center,rgba(129,140,248,0.45),transparent 70%);
-      opacity:0.8;
-    }
+    .summary-label{ font-size:11px; text-transform:uppercase; letter-spacing:0.08em; opacity:0.8; }
+    .summary-value{ font-size:18px; font-weight:700; margin-top:4px; }
+    .summary-note{ font-size:11px; opacity:0.7; margin-top:2px; }
 
-    .summary-label{
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:0.08em;
-      opacity:0.8;
-    }
-
-    .summary-value{
-      font-size:18px;
-      font-weight:700;
-      margin-top:4px;
-    }
-
-    .summary-note{
-      font-size:11px;
-      opacity:0.7;
-      margin-top:2px;
-    }
-
-    /* Vehicle cards */
-    .grid{
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
-      gap:12px;
-    }
+    .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
 
     .card{
       background:#ffffff;
       border-radius:14px;
       box-shadow:0 8px 18px rgba(15,23,42,0.12);
-      padding:12px 12px 10px;
+      padding:12px;
       display:flex;
       flex-direction:column;
       gap:6px;
       border:1px solid #e2e8f0;
-      position:relative;
     }
 
-    .reg-row{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:6px;
-    }
+    .reg-row{ display:flex; justify-content:space-between; align-items:center; gap:6px; }
 
     .reg{
-      font-size:16px;
-      font-weight:800;
-      letter-spacing:0.15em;
-      text-transform:uppercase;
-      color:#0f172a;
-      background:#e2e8f0;
-      padding:4px 8px;
-      border-radius:6px;
-      border:1px solid #cbd5f5;
+      font-size:16px; font-weight:800; letter-spacing:0.15em;
+      text-transform:uppercase; color:#0f172a;
+      background:#e2e8f0; padding:4px 8px;
+      border-radius:6px; border:1px solid #cbd5f5;
     }
 
-    .driver{
-      font-size:13px;
-      color:#0f172a;
-      font-weight:600;
-      text-align:right;
+    .driver{ font-size:13px; color:#0f172a; font-weight:600; text-align:right; }
+    .driver span{ color:#64748b; font-weight:500; }
+
+    .meta{ font-size:12px; color:#475569; display:flex; flex-wrap:wrap; gap:6px 12px; }
+    .dot{ width:6px; height:6px; border-radius:999px; background:#94a3b8; }
+
+    .status-row{ display:flex; justify-content:space-between; align-items:center; gap:4px; margin-top:2px; }
+
+    .tag{ padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; display:inline-flex; align-items:center; gap:4px; }
+
+    .tag.ok{ background:#dcfce7; color:#166534; }
+    .tag.warn{ background:#fef3c7; color:#92400e; }
+    .tag.bad{ background:#fee2e2; color:#b91c1c; }
+    .tag.info{ background:#e0f2fe; color:#075985; }
+
+    .card-actions{ display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:8px; }
+    .btn-pill{ border:none; border-radius:999px; font-size:12px; font-weight:600; padding:4px 10px; cursor:pointer; }
+    .btn-pill.main{ background:#1d4ed8; color:#fff; }
+    .btn-ghost{ border:none; background:transparent; font-size:12px; color:#1e40af; padding:4px 6px; cursor:pointer; }
+
+    .footer-line{ display:flex; justify-content:space-between; align-items:center; margin-top:12px; font-size:11px; color:#64748b; border-top:1px dashed #e2e8f0; padding-top:8px; }
+
+    /* Modal */
+    .modal-backdrop{
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.55);
+      display:none; align-items:center; justify-content:center;
+      z-index:2000;
     }
 
-    .driver span{
-      color:#64748b;
-      font-weight:500;
+    .modal{
+      background:#fff;
+      width:90%; max-width:420px;
+      border-radius:14px;
+      padding:20px 18px;
+      box-shadow:0 10px 35px rgba(0,0,0,0.35);
     }
 
-    .meta{
-      font-size:12px;
-      color:#475569;
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px 12px;
+    .modal-header{
+      display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;
     }
 
-    .meta span{display:flex;align-items:center;gap:4px;}
-    .dot{width:6px;height:6px;border-radius:999px;background:#94a3b8;}
-
-    .status-row{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:4px;
-      margin-top:2px;
+    .modal-row{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+    .modal-row input, .modal-row select{
+      padding:8px 10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px;
     }
 
-    .tag{
-      padding:2px 8px;
-      border-radius:999px;
-      font-size:11px;
-      font-weight:600;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-    }
-
-    .tag-dot{
-      width:6px;height:6px;border-radius:999px;
-    }
-
-    .tag.ok{background:#dcfce7;color:#166534;}
-    .tag.warn{background:#fef3c7;color:#92400e;}
-    .tag.bad{background:#fee2e2;color:#b91c1c;}
-    .tag.info{background:#e0f2fe;color:#075985;}
-
-    .tag-dot.ok{background:#16a34a;}
-    .tag-dot.warn{background:#f97316;}
-    .tag-dot.bad{background:#dc2626;}
-    .tag-dot.info{background:#0284c7;}
-
-    .card-actions{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:6px;
-      margin-top:8px;
-    }
-
-    .btn-pill{
-      border:none;
-      border-radius:999px;
-      font-size:12px;
-      font-weight:600;
-      padding:4px 10px;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-    }
-
-    .btn-pill.main{background:#1d4ed8;color:#fff;}
-    .btn-pill.sub{
-      background:#f8fafc;color:#1e293b;
-      border:1px solid #cbd5f5;
-    }
-
-    .btn-ghost{
-      border:none;
-      background:transparent;
-      font-size:12px;
-      color:#1e40af;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      padding:4px 6px;
-      border-radius:999px;
-      cursor:pointer;
-    }
-    .btn-ghost:hover{
-      background:#e0ecff;
-    }
-
-    .footer-line{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-top:12px;
-      font-size:11px;
-      color:#64748b;
-      border-top:1px dashed #e2e8f0;
-      padding-top:8px;
-    }
-
-    /* Mobile tweaks */
-    @media(max-width:720px){
-      .header{align-items:flex-start;}
-      .header-title{font-size:18px;}
-      .summary-card{padding:8px 10px;}
-      .reg{font-size:14px;}
-      .driver{font-size:12px;}
-      .btn-pill.main{padding:4px 8px;font-size:11px;}
-      .btn-pill.sub{padding:3px 8px;font-size:11px;}
-      .btn-ghost{font-size:11px;}
-    }
+    .modal-footer{ display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
   </style>
 </head>
 
@@ -363,6 +218,7 @@
         <span class="pill-label">Search</span>
         <input id="searchInput" placeholder="Reg, driver, model..." oninput="renderFleet()">
       </div>
+
       <div class="pill-field">
         <span class="pill-label">Filter</span>
         <select id="filterActive" onchange="renderFleet()">
@@ -403,6 +259,73 @@
 
 </div>
 
+<!-- EDIT MODAL -->
+<div class="modal-backdrop" id="editBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="editTitle">Edit Vehicle</div>
+      <button onclick="closeEditModal()">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <div class="modal-row">
+        <label>Registration</label>
+        <input id="editReg" readonly>
+      </div>
+
+      <div class="modal-row">
+        <label>Make</label>
+        <input id="editMake">
+      </div>
+
+      <div class="modal-row">
+        <label>Model</label>
+        <input id="editModel">
+      </div>
+
+      <div class="modal-row">
+        <label>Fuel Type</label>
+        <input id="editFuel">
+      </div>
+
+      <div class="modal-row">
+        <label>Driver</label>
+        <input id="editDriver">
+      </div>
+
+      <div class="modal-row">
+        <label>Active?</label>
+        <select id="editActive">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </div>
+
+      <div class="modal-row">
+        <label>Next Service</label>
+        <input id="editService" type="date">
+      </div>
+
+      <div class="modal-row">
+        <label>MOT Due</label>
+        <input id="editMOT" type="date">
+      </div>
+
+      <div class="modal-row">
+        <label>Notes</label>
+        <input id="editNotes">
+      </div>
+
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn secondary" onclick="closeEditModal()">Cancel</button>
+      <button class="btn primary" onclick="saveVehicleEdits()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
@@ -410,16 +333,15 @@
 
   const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
   let FLEET = [];
+  let EDIT_REG = null;
 
-  function goMain(){
-    window.location.href = "main.html";
-  }
+  function goMain(){ window.location.href="main.html"; }
 
   async function loadFleet(){
     try{
       document.getElementById("statusLine").textContent = "Loading fleet...";
       const res = await fetch(`${VEHICLE_WORKER}/fleet`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error("failed");
       FLEET = await res.json();
       updateSummary();
       renderFleet();
@@ -431,70 +353,59 @@
   }
 
   function updateSummary(){
-    document.getElementById("sumTotal").textContent = FLEET.length;
-    document.getElementById("sumActive").textContent = FLEET.filter(v => v.active !== false).length;
-    document.getElementById("sumUnassigned").textContent = FLEET.filter(v => !v.driver).length;
+    sumTotal.textContent = FLEET.length;
+    sumActive.textContent = FLEET.filter(v => v.active !== false).length;
+    sumUnassigned.textContent = FLEET.filter(v => !v.driver).length;
   }
 
   function renderFleet(){
     const grid = document.getElementById("fleetGrid");
     grid.innerHTML = "";
 
-    const q = (document.getElementById("searchInput").value || "").toLowerCase();
-    const filt = document.getElementById("filterActive").value;
+    const q = searchInput.value.toLowerCase();
+    const filt = filterActive.value;
 
-    let items = FLEET.slice();
+    let list = FLEET.slice();
 
     if (q){
-      items = items.filter(v =>
-        (v.reg || "").toLowerCase().includes(q) ||
-        (v.driver || "").toLowerCase().includes(q) ||
-        (v.make || "").toLowerCase().includes(q) ||
-        (v.model || "").toLowerCase().includes(q)
+      list = list.filter(v =>
+        (v.reg||"").toLowerCase().includes(q) ||
+        (v.driver||"").toLowerCase().includes(q) ||
+        (v.make||"").toLowerCase().includes(q) ||
+        (v.model||"").toLowerCase().includes(q)
       );
     }
 
-    if (filt === "active") items = items.filter(v => v.active !== false);
-    if (filt === "inactive") items = items.filter(v => v.active === false);
+    if (filt==="active") list = list.filter(v => v.active !== false);
+    if (filt==="inactive") list = list.filter(v => v.active === false);
 
-    if (!items.length){
+    if (!list.length){
       grid.innerHTML = `<div style="color:#64748b;font-size:13px;">No vehicles found.</div>`;
       return;
     }
 
-    for (const v of items){
+    for (const v of list){
       const card = document.createElement("div");
-      card.className = "card";
+      card.className="card";
 
       const reg = v.reg || "UNKNOWN";
-      const driver = (v.driver || "Unassigned").replace(/\./g," ");
-      const make = v.make || "";
-      const model = v.model || "";
-      const fuel = v.fuel || "";
-      const issues = v.issuesCount || 0;
+      const driver = (v.driver||"Unassigned").replace(/\./g," ");
 
-      // MOT tag
-      let motTag = `<span class="tag info"><span class="tag-dot info"></span>MOT: n/a</span>`;
+      let motTag = `<span class="tag info">MOT: n/a</span>`;
       if (v.motDue){
-        const status = v.motStatus === "bad" ? "bad" : "warn";
-        motTag = `<span class="tag ${status}">
-          <span class="tag-dot ${status}"></span>MOT: ${v.motDue}
-        </span>`;
+        const s = v.motStatus==="bad" ? "bad" : "warn";
+        motTag = `<span class="tag ${s}">MOT: ${v.motDue}</span>`;
       }
 
-      // Service tag
-      let serviceTag = `<span class="tag info"><span class="tag-dot info"></span>Service: n/a</span>`;
+      let serviceTag = `<span class="tag info">Service: n/a</span>`;
       if (v.nextServiceDate){
-        const status = v.serviceStatus === "ok" ? "ok" : "warn";
-        serviceTag = `<span class="tag ${status}">
-          <span class="tag-dot ${status}"></span>Service: ${v.nextServiceDate}
-        </span>`;
+        const s = v.serviceStatus==="ok" ? "ok" : "warn";
+        serviceTag = `<span class="tag ${s}">Service: ${v.nextServiceDate}</span>`;
       }
 
-      // Issues tag
-      const issuesTag = issues > 0
-        ? `<span class="tag bad"><span class="tag-dot bad"></span>${issues} issues</span>`
-        : `<span class="tag ok"><span class="tag-dot ok"></span>No issues</span>`;
+      const issuesTag = (v.issuesCount||0)>0
+        ? `<span class="tag bad">${v.issuesCount} issues</span>`
+        : `<span class="tag ok">No issues</span>`;
 
       card.innerHTML = `
         <div class="reg-row">
@@ -503,9 +414,9 @@
         </div>
 
         <div class="meta">
-          <span><span class="dot"></span>${make} ${model}</span>
-          ${fuel ? `<span><span class="dot"></span>${fuel}</span>` : ""}
-          <span><span class="dot"></span>${v.active !== false ? "Active" : "Inactive"}</span>
+          <span><span class="dot"></span>${v.make||""} ${v.model||""}</span>
+          ${v.fuel ? `<span><span class="dot"></span>${v.fuel}</span>` : ""}
+          <span><span class="dot"></span>${v.active!==false?"Active":"Inactive"}</span>
         </div>
 
         <div class="status-row">${serviceTag} ${motTag}</div>
@@ -513,6 +424,11 @@
 
         <div class="card-actions">
           <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+
+          ${CURRENT_USER==="Jamie.Line" ? 
+            `<button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>` 
+            : ""}
+
           <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
         </div>
       `;
@@ -522,7 +438,65 @@
   }
 
   function openVehicle(reg){
-    window.location.href = `vehicle.html?reg=${encodeURIComponent(reg)}`;
+    window.location.href=`vehicle.html?reg=${encodeURIComponent(reg)}`;
+  }
+
+  function openEditModal(reg){
+    EDIT_REG = reg;
+    const v = FLEET.find(x => x.reg===reg);
+    if (!v) return;
+
+    editReg.value = v.reg||"";
+    editMake.value = v.make||"";
+    editModel.value = v.model||"";
+    editFuel.value = v.fuel||"";
+    editDriver.value = v.driver||"";
+    editActive.value = v.active===false ? "false" : "true";
+    editService.value = v.nextServiceDate||"";
+    editMOT.value = v.motDue||"";
+    editNotes.value = v.notes||"";
+
+    document.getElementById("editBackdrop").style.display="flex";
+  }
+
+  function closeEditModal(){
+    document.getElementById("editBackdrop").style.display="none";
+  }
+
+  async function saveVehicleEdits(){
+    if (!EDIT_REG) return;
+
+    const updates = {
+      make: editMake.value.trim(),
+      model: editModel.value.trim(),
+      fuel: editFuel.value.trim(),
+      driver: editDriver.value.trim(),
+      active: editActive.value==="true",
+      nextServiceDate: editService.value,
+      motDue: editMOT.value,
+      notes: editNotes.value.trim(),
+    };
+
+    try{
+      const res = await fetch(`${VEHICLE_WORKER}/update-vehicle`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ reg: EDIT_REG, updates })
+      });
+
+      if (!res.ok) throw new Error("fail");
+
+      const newObj = await res.json();
+      const idx = FLEET.findIndex(v => v.reg===EDIT_REG);
+      if (idx!==-1) FLEET[idx] = newObj;
+
+      closeEditModal();
+      renderFleet();
+
+    }catch(err){
+      console.error(err);
+      alert("Could not save changes.");
+    }
   }
 
   window.addEventListener("DOMContentLoaded", loadFleet);
