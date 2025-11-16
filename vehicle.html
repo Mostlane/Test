@@ -10,592 +10,1133 @@
     :root{
       --ml-blue:#003b82;
       --ml-blue-light:#1e66ff;
-      --bg:#0b1930;
-      --panel:rgba(255,255,255,0.96);
+      --text:#0f172a;
       --muted:#6b7280;
-      --danger:#b91c1c;
       --ok:#16a34a;
+      --warn:#f97316;
+      --bad:#dc2626;
+      --panel:rgba(255,255,255,0.9);
     }
     html,body{
       height:100%;margin:0;
       background:#0b1930 url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-      color:#0f172a;
+      color:var(--text);
     }
     body{padding:16px;}
-    .shell{
+    .wrap{
       max-width:1200px;
       margin:0 auto;
-      display:flex;
-      gap:12px;
+      background:var(--panel);
+      border-radius:16px;
+      box-shadow:0 18px 45px rgba(0,0,0,0.35);
+      overflow:hidden;
     }
-    .sidebar{
-      width:230px;
+    .header{
       background:linear-gradient(135deg,#001a3d,#003b82);
       color:#e5ecff;
-      border-radius:16px;
-      padding:14px 12px;
-      box-shadow:0 18px 45px rgba(0,0,0,0.4);
+      padding:16px 20px;
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .header-main{
       display:flex;
       flex-direction:column;
-      gap:10px;
+      gap:4px;
     }
-    .reg-box{
-      background:rgba(15,23,42,0.65);
-      border-radius:12px;
-      padding:10px 10px;
-      border:1px solid rgba(148,163,184,0.5);
-    }
-    .reg-label{
-      font-size:11px;
-      text-transform:uppercase;
+    .header-title{
+      font-size:20px;
+      font-weight:700;
       letter-spacing:0.08em;
-      opacity:0.8;
+      text-transform:uppercase;
     }
-    .reg-value{
-      margin-top:4px;
+    .header-reg{
       font-size:18px;
       font-weight:800;
       letter-spacing:0.16em;
+      text-transform:uppercase;
+      background:#e2e8f0;
+      color:#0f172a;
+      padding:4px 10px;
+      border-radius:6px;
+      border:1px solid #cbd5f5;
+      display:inline-block;
+      margin-top:4px;
     }
-    .driver-side{
-      font-size:13px;
-      margin-top:8px;
+    .header-sub{
+      font-size:12px;
+      opacity:0.85;
     }
-    .driver-side span{
-      opacity:0.8;
+    .header-meta{
+      font-size:12px;
+      opacity:0.9;
     }
-    .nav{
-      margin-top:6px;
-      border-top:1px solid rgba(148,163,184,0.4);
-      padding-top:8px;
+    .header-actions{
       display:flex;
-      flex-direction:column;
-      gap:3px;
-    }
-    .nav button{
-      border:none;
-      background:transparent;
-      color:#e5ecff;
-      font-size:13px;
-      text-align:left;
-      padding:6px 8px;
-      border-radius:8px;
-      cursor:pointer;
-      display:flex;
-      align-items:center;
       gap:8px;
-    }
-    .nav button.active{
-      background:rgba(15,23,42,0.85);
-      font-weight:600;
-    }
-    .nav button span.icon{
-      font-size:14px;
-    }
-    .side-footer{
-      font-size:11px;
-      opacity:0.7;
-      margin-top:auto;
-    }
-
-    .main{
-      flex:1;
-      background:var(--panel);
-      border-radius:16px;
-      box-shadow:0 18px 45px rgba(15,23,42,0.35);
-      padding:14px 14px 16px;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-    .main-top{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
       flex-wrap:wrap;
-    }
-    .main-title{
-      font-size:18px;
-      font-weight:700;
-    }
-    .main-sub{
-      font-size:12px;
-      color:var(--muted);
-    }
-    .badge{
-      display:inline-flex;
       align-items:center;
-      gap:4px;
-      font-size:11px;
-      padding:2px 8px;
-      border-radius:999px;
     }
-    .badge.ok{background:#dcfce7;color:#166534;}
-    .badge.warn{background:#fef3c7;color:#92400e;}
-    .badge.danger{background:#fee2e2;color:#b91c1c;}
-    .btn-top{
+    .btn{
       border:none;
       border-radius:999px;
-      padding:6px 12px;
-      font-size:12px;
+      padding:8px 14px;
+      font-size:13px;
       font-weight:600;
       cursor:pointer;
       display:inline-flex;
       align-items:center;
       gap:6px;
+      white-space:nowrap;
     }
-    .btn-top.primary{
+    .btn.primary{
       background:#1e66ff;
       color:#fff;
     }
-    .btn-top.ghost{
-      background:transparent;
+    .btn.secondary{
+      background:rgba(15,23,42,0.12);
+      color:#e5ecff;
+      border:1px solid rgba(148,163,184,0.4);
+    }
+    .btn.subtle{
+      background:#f8fafc;
       color:#1e293b;
       border:1px solid #cbd5f5;
+      font-size:12px;
+      padding:6px 10px;
+    }
+    .content{
+      padding:14px 18px 18px;
     }
 
-    .section{
-      border-radius:12px;
-      border:1px solid #e2e8f0;
-      padding:10px 11px;
-      background:#f8fafc;
+    /* Tabs */
+    .tab-bar{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      margin-bottom:12px;
+      border-bottom:1px solid #e2e8f0;
+      padding-bottom:6px;
+    }
+    .tab-pill{
+      border:none;
+      border-radius:999px;
+      padding:6px 10px;
+      font-size:12px;
+      font-weight:600;
+      cursor:pointer;
+      background:#f1f5f9;
+      color:#475569;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .tab-pill.active{
+      background:#1e40af;
+      color:#e5ecff;
+      box-shadow:0 4px 10px rgba(30,64,175,0.4);
+    }
+    .tab-pill span.dot{
+      width:6px;height:6px;border-radius:999px;background:#94a3b8;
+    }
+    .tab-pill.active span.dot{
+      background:#bfdbfe;
+    }
+    .tab-panel{
+      display:none;
       margin-top:4px;
     }
-    .section h3{
-      margin:0 0 4px;
-      font-size:14px;
+    .tab-panel.active{
+      display:block;
     }
-    .section small{
-      font-size:11px;
-      color:#6b7280;
+
+    /* Cards / layout */
+    .grid-2{
+      display:grid;
+      grid-template-columns:2fr 1.4fr;
+      gap:12px;
     }
-    .grid-two{
+    .grid-3{
       display:grid;
       grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
       gap:10px;
-      margin-top:8px;
     }
-    .field{
-      font-size:12px;
+    .card{
+      background:#ffffff;
+      border-radius:14px;
+      box-shadow:0 8px 18px rgba(15,23,42,0.08);
+      padding:10px 12px 10px;
+      border:1px solid #e2e8f0;
+      position:relative;
+    }
+    .card-title{
+      font-size:13px;
+      font-weight:700;
+      color:#0f172a;
       display:flex;
-      flex-direction:column;
-      gap:3px;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:6px;
     }
-    .field label{
+    .card-title span.sub{
+      font-size:11px;
+      font-weight:500;
+      color:#64748b;
+    }
+    .field-row{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      font-size:12px;
+      margin:2px 0;
+      color:#0f172a;
+    }
+    .field-label{
+      color:#64748b;
+    }
+    .field-value{
+      font-weight:600;
+      text-align:right;
+    }
+    .tag{
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+    .tag-dot{
+      width:6px;height:6px;border-radius:999px;
+    }
+    .tag.ok{background:#dcfce7;color:#166534;}
+    .tag.ok .tag-dot{background:#16a34a;}
+    .tag.warn{background:#fef3c7;color:#92400e;}
+    .tag.warn .tag-dot{background:#f97316;}
+    .tag.bad{background:#fee2e2;color:#b91c1c;}
+    .tag.bad .tag-dot{background:#dc2626;}
+    .tag.info{background:#e0f2fe;color:#075985;}
+    .tag.info .tag-dot{background:#0284c7;}
+
+    .pill-small{
+      font-size:11px;
+      padding:2px 6px;
+      border-radius:999px;
+      background:#f1f5f9;
+      color:#475569;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      margin-top:4px;
+    }
+    thead th{
+      text-align:left;
+      padding:4px 4px;
+      color:#64748b;
       font-size:11px;
       text-transform:uppercase;
       letter-spacing:0.06em;
-      color:#64748b;
+      border-bottom:1px solid #e2e8f0;
     }
-    .field span.value{
-      font-size:13px;
-      font-weight:500;
+    tbody td{
+      padding:4px 4px;
+      border-bottom:1px solid #f1f5f9;
+      vertical-align:middle;
     }
-    .field input, .field textarea{
-      font-size:13px;
-      border-radius:8px;
-      border:1px solid #d1d5db;
-      padding:6px 8px;
-      width:100%;
-      box-sizing:border-box;
-    }
-    .field textarea{
-      min-height:46px;
-      resize:vertical;
-    }
-    .pill-row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      margin-top:4px;
-    }
-    .pill{
-      font-size:11px;
-      padding:2px 8px;
-      border-radius:999px;
-      background:#e5e7eb;
-      color:#374151;
-    }
-
-    ul.timeline{
-      list-style:none;
-      padding-left:0;
-      margin:6px 0 0;
-      font-size:12px;
-    }
-    ul.timeline li{
-      padding:6px 0;
-      border-bottom:1px dashed #e5e7eb;
-    }
-    ul.timeline li:last-child{
+    tbody tr:last-child td{
       border-bottom:none;
     }
-    ul.timeline strong{
-      font-size:12px;
-    }
-    ul.timeline span.date{
-      font-size:11px;
-      color:#6b7280;
-    }
-    ul.timeline a{
-      font-size:11px;
+    a.inline-link{
       color:#1d4ed8;
       text-decoration:none;
+      font-weight:500;
+    }
+    a.inline-link:hover{
+      text-decoration:underline;
     }
 
-    .section-footer{
+    .status-line{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top:10px;
+      font-size:11px;
+      color:#64748b;
+      border-top:1px dashed #e2e8f0;
+      padding-top:6px;
+    }
+
+    /* Modal */
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,0.55);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:50;
+    }
+    .modal{
+      background:#ffffff;
+      border-radius:14px;
+      max-width:420px;
+      width:92%;
+      padding:14px 16px;
+      box-shadow:0 22px 50px rgba(15,23,42,0.4);
+    }
+    .modal-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .modal-title{
+      font-size:15px;
+      font-weight:700;
+      color:#0f172a;
+    }
+    .modal-body{
+      font-size:13px;
+      color:#0f172a;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .modal-row label{
+      font-size:12px;
+      font-weight:600;
+      color:#4b5563;
+      display:block;
+      margin-bottom:2px;
+    }
+    .modal-row input,
+    .modal-row select{
+      width:100%;
+      padding:7px 9px;
+      border-radius:8px;
+      border:1px solid #d1d5db;
+      font-size:13px;
+    }
+    .modal-footer{
       display:flex;
       justify-content:flex-end;
-      margin-top:8px;
-      gap:6px;
-      font-size:12px;
-    }
-    .btn-sm{
-      border-radius:999px;
-      border:1px solid #cbd5f5;
-      padding:4px 10px;
-      font-size:12px;
-      background:#ffffff;
-      cursor:pointer;
-    }
-    .btn-sm.primary{
-      background:#1e66ff;
-      color:#fff;
-      border:none;
+      gap:8px;
+      margin-top:10px;
     }
 
-    @media(max-width:820px){
-      .shell{
-        flex-direction:column;
+    @media(max-width:720px){
+      .grid-2{
+        grid-template-columns:1fr;
       }
-      .sidebar{
-        width:100%;
-        flex-direction:row;
-        align-items:center;
-        overflow-x:auto;
+      .header{
+        align-items:flex-start;
       }
-      .reg-box{
-        flex:0 0 auto;
-        min-width:180px;
+      .header-title{
+        font-size:18px;
       }
-      .nav{
-        flex-direction:row;
-        padding-top:0;
-        border-top:none;
-        margin-left:8px;
-        flex:1;
-        overflow-x:auto;
-      }
-      .nav button{
-        white-space:nowrap;
-      }
-      .side-footer{
-        display:none;
+      .header-reg{
+        font-size:15px;
       }
     }
   </style>
 </head>
 <body>
 
-<div class="shell">
-  <aside class="sidebar">
-    <div class="reg-box">
-      <div class="reg-label">Vehicle</div>
-      <div class="reg-value" id="sideReg">---</div>
-      <div class="driver-side">
-        <span>Driver</span><br>
-        <strong id="sideDriver">—</strong>
+<div class="wrap">
+  <div class="header">
+    <div class="header-main">
+      <div class="header-title">Vehicle Detail</div>
+      <div id="regLabel" class="header-reg">LOADING</div>
+      <div id="headerSub" class="header-sub">Make / model loading…</div>
+      <div id="headerMeta" class="header-meta"></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn secondary" onclick="goBack()">← Fleet</button>
+      <button class="btn primary" onclick="reloadVehicle()">⟳ Refresh</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <button class="tab-pill active" data-tab="overview">
+        <span class="dot"></span> Overview
+      </button>
+      <button class="tab-pill" data-tab="history">
+        <span class="dot"></span> History
+      </button>
+      <button class="tab-pill" data-tab="checks">
+        <span class="dot"></span> Van Checks
+      </button>
+      <button class="tab-pill" data-tab="photos">
+        <span class="dot"></span> Photos
+      </button>
+      <button class="tab-pill" data-tab="finance">
+        <span class="dot"></span> Finance
+      </button>
+      <button class="tab-pill" data-tab="permissions">
+        <span class="dot"></span> Permissions
+      </button>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="grid-2">
+        <!-- Left: core details -->
+        <div class="card">
+          <div class="card-title">
+            <span>Vehicle summary</span>
+            <span id="statusTag" class="tag info">
+              <span class="tag-dot"></span> Status
+            </span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Registration</span>
+            <span class="field-value" id="ovReg">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Make</span>
+            <span class="field-value" id="ovMake">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Model</span>
+            <span class="field-value" id="ovModel">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Fuel type</span>
+            <span class="field-value" id="ovFuel">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Year</span>
+            <span class="field-value" id="ovYear">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Colour</span>
+            <span class="field-value" id="ovColour">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Odometer (approx)</span>
+            <span class="field-value" id="ovMileage">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">ULEZ / LEZ</span>
+            <span class="field-value" id="ovEmissions">–</span>
+          </div>
+          <div class="status-line">
+            <span id="statusLine">Loading vehicle…</span>
+            <span class="pill-small" id="lastUpdated">Last updated: –</span>
+          </div>
+        </div>
+
+        <!-- Right: MOT / Service / Driver -->
+        <div class="card">
+          <div class="card-title">
+            <span>Running status</span>
+            <span class="sub" id="ovSummarySub">MOT & service loading…</span>
+          </div>
+
+          <div class="field-row">
+            <span class="field-label">Current driver</span>
+            <span class="field-value" id="ovDriver">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Driver since</span>
+            <span class="field-value" id="ovDriverSince">–</span>
+          </div>
+
+          <div style="margin:6px 0;"></div>
+
+          <div class="field-row">
+            <span class="field-label">MOT due</span>
+            <span class="field-value" id="ovMOT">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Service due</span>
+            <span class="field-value" id="ovService">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Last service</span>
+            <span class="field-value" id="ovLastService">–</span>
+          </div>
+
+          <div style="margin:6px 0;"></div>
+
+          <div class="field-row">
+            <span class="field-label">Last weekly check</span>
+            <span class="field-value" id="ovLastCheck">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Last check mileage</span>
+            <span class="field-value" id="ovLastCheckMileage">–</span>
+          </div>
+
+          <div class="status-line">
+            <button class="btn subtle" onclick="openAddWorkModal()">
+              + Add Work / Service
+            </button>
+            <button class="btn subtle" onclick="openHandoverForm()">
+              New handover form
+            </button>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="nav">
-      <button class="active" data-tab="dashboard" onclick="setTab('dashboard', this)"><span class="icon">📊</span> Dashboard</button>
-      <button data-tab="drivers" onclick="setTab('drivers', this)"><span class="icon">👤</span> Driver History</button>
-      <button data-tab="works" onclick="setTab('works', this)"><span class="icon">🛠</span> Service & Works</button>
-      <button data-tab="finance" onclick="setTab('finance', this)"><span class="icon">💷</span> Finance</button>
-      <button data-tab="checks" onclick="setTab('checks', this)"><span class="icon">📸</span> Van Checks</button>
+
+    <!-- HISTORY -->
+    <div class="tab-panel" id="tab-history">
+      <div class="grid-2">
+        <!-- Driver history -->
+        <div class="card">
+          <div class="card-title">
+            <span>Driver history</span>
+            <span class="sub">Who has held this vehicle</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Handover</th>
+              </tr>
+            </thead>
+            <tbody id="driverHistoryBody">
+              <!-- rows injected -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Work history -->
+        <div class="card">
+          <div class="card-title">
+            <span>Works & maintenance</span>
+            <button class="btn subtle" onclick="openAddWorkModal()">+ Add Work</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Cost</th>
+                <th>Invoice</th>
+              </tr>
+            </thead>
+            <tbody id="workHistoryBody">
+              <!-- rows injected -->
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <div class="side-footer">
-      Mostlane • Vehicles
+
+    <!-- CHECKS -->
+    <div class="tab-panel" id="tab-checks">
+      <div class="card">
+        <div class="card-title">
+          <span>Weekly van checks</span>
+          <span class="sub" id="checksSub">Summary of received JotForm checks</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Mileage</th>
+              <th>Score / Status</th>
+              <th>Issues</th>
+              <th>View</th>
+            </tr>
+          </thead>
+          <tbody id="checksBody">
+            <!-- injected -->
+          </tbody>
+        </table>
+      </div>
     </div>
-  </aside>
 
-  <main class="main">
-    <div class="main-top">
-      <div>
-        <div class="main-title" id="mainTitle">Vehicle</div>
-        <div class="main-sub" id="mainSub">Loading details…</div>
-      </div>
-      <div>
-        <button class="btn-top ghost" onclick="goBack()">← Vehicles</button>
-        <button class="btn-top primary" onclick="refreshVehicle()">Refresh</button>
+    <!-- PHOTOS -->
+    <div class="tab-panel" id="tab-photos">
+      <div class="card">
+        <div class="card-title">
+          <span>Photo history</span>
+          <span class="sub">Grouped by category (tyres, interior, etc.)</span>
+        </div>
+        <div id="photosSummary" style="font-size:12px;color:#475569;">
+          Loading photo summary…
+        </div>
       </div>
     </div>
-
-    <!-- DASHBOARD TAB -->
-    <section class="section tab" id="tab-dashboard">
-      <h3>Overview</h3>
-      <small>Key details, status and quick facts.</small>
-      <div class="grid-two" style="margin-top:8px;">
-        <div class="field">
-          <label>Registration</label>
-          <span class="value" id="dashReg">—</span>
-        </div>
-        <div class="field">
-          <label>Driver</label>
-          <span class="value" id="dashDriver">—</span>
-        </div>
-        <div class="field">
-          <label>Make / Model</label>
-          <span class="value" id="dashMakeModel">—</span>
-        </div>
-        <div class="field">
-          <label>Fuel</label>
-          <span class="value" id="dashFuel">—</span>
-        </div>
-        <div class="field">
-          <label>MOT Due</label>
-          <span class="value" id="dashMot">—</span>
-        </div>
-        <div class="field">
-          <label>Next Service</label>
-          <span class="value" id="dashService">—</span>
-        </div>
-      </div>
-      <div class="pill-row" id="dashBadges" style="margin-top:10px;"></div>
-    </section>
-
-    <!-- DRIVER HISTORY -->
-    <section class="section tab" id="tab-drivers" style="display:none;">
-      <h3>Driver History</h3>
-      <small>Who has held this vehicle, and when.</small>
-      <ul class="timeline" id="driverTimeline"></ul>
-      <div class="section-footer" id="driverControls">
-        <!-- future add-driver controls can go here -->
-      </div>
-    </section>
-
-    <!-- WORKS / SERVICE -->
-    <section class="section tab" id="tab-works" style="display:none;">
-      <h3>Service & Works</h3>
-      <small>Maintenance, tyres, MOT repairs and other history.</small>
-
-      <ul class="timeline" id="worksTimeline"></ul>
-
-      <div class="section-footer" id="worksControls">
-        <!-- "Add Works" button will go here later -->
-      </div>
-    </section>
 
     <!-- FINANCE -->
-    <section class="section tab" id="tab-finance" style="display:none;">
-      <h3>Finance</h3>
-      <small>Provider, monthly cost and residuals.</small>
-      <div class="grid-two">
-        <div class="field">
-          <label>Company</label>
-          <span class="value" id="finCompany">—</span>
+    <div class="tab-panel" id="tab-finance">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-title">
+            <span>Finance details</span>
+            <span class="sub">If financed / leased</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Finance company</span>
+            <span class="field-value" id="finCompany">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Agreement start</span>
+            <span class="field-value" id="finStart">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Agreement end</span>
+            <span class="field-value" id="finEnd">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Monthly cost</span>
+            <span class="field-value" id="finMonthly">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Balloon / final</span>
+            <span class="field-value" id="finBalloon">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Equity estimate</span>
+            <span class="field-value" id="finEquity">–</span>
+          </div>
+          <div class="status-line">
+            <span class="pill-small" id="finStatus">Finance status: –</span>
+            <button class="btn subtle" onclick="editFinanceSoon()" disabled title="To be edited in a dedicated page later">
+              Edit finance…
+            </button>
+          </div>
         </div>
-        <div class="field">
-          <label>Monthly Cost</label>
-          <span class="value" id="finMonthly">—</span>
-        </div>
-        <div class="field">
-          <label>Start Date</label>
-          <span class="value" id="finStart">—</span>
-        </div>
-        <div class="field">
-          <label>End Date</label>
-          <span class="value" id="finEnd">—</span>
-        </div>
-        <div class="field">
-          <label>Balloon Payment</label>
-          <span class="value" id="finBalloon">—</span>
-        </div>
-        <div class="field">
-          <label>Estimated Equity</label>
-          <span class="value" id="finEquity">—</span>
-        </div>
-      </div>
-    </section>
 
-    <!-- VAN CHECKS -->
-    <section class="section tab" id="tab-checks" style="display:none;">
-      <h3>Van Checks</h3>
-      <small>Summary of latest weekly checks and photo sets.</small>
-      <ul class="timeline" id="checksTimeline"></ul>
-      <div class="section-footer" id="checksControls">
-        <!-- later: "Open photos" / filter by category -->
+        <div class="card">
+          <div class="card-title">
+            <span>Cost overview</span>
+            <span class="sub">High-level picture</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Total maintenance cost</span>
+            <span class="field-value" id="finMaintTotal">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Total tyres</span>
+            <span class="field-value" id="finTyresTotal">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Total services</span>
+            <span class="field-value" id="finServiceTotal">–</span>
+          </div>
+          <div class="field-row">
+            <span class="field-label">Other costs</span>
+            <span class="field-value" id="finOtherTotal">–</span>
+          </div>
+          <div class="status-line">
+            <span id="finNote">Costs calculated from work history.</span>
+          </div>
+        </div>
       </div>
-    </section>
-  </main>
+    </div>
+
+    <!-- PERMISSIONS -->
+    <div class="tab-panel" id="tab-permissions">
+      <div class="card">
+        <div class="card-title">
+          <span>Access & permissions</span>
+          <span class="sub">Which roles / users can see and edit this vehicle</span>
+        </div>
+        <div style="font-size:12px;color:#475569;margin-bottom:6px;">
+          This will mirror the permissions set in the main fleet page. View = can see this vehicle. Edit = can change details and history.
+        </div>
+        <div class="field-row">
+          <span class="field-label">View access</span>
+          <span class="field-value" id="permViewList">–</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Edit access</span>
+          <span class="field-value" id="permEditList">–</span>
+        </div>
+        <div class="status-line">
+          <span class="pill-small">Manage permissions from Vehicles overview</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Add Work Modal -->
+<div class="modal-backdrop" id="workBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="workModalTitle">Add Work / Service</div>
+      <button class="btn secondary" style="padding:4px 8px;font-size:11px;" onclick="closeAddWorkModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-row">
+        <label>Type</label>
+        <select id="workType">
+          <option value="Service">Service</option>
+          <option value="MOT">MOT</option>
+          <option value="Tyres">Tyres</option>
+          <option value="Windscreen">Windscreen</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="modal-row">
+        <label>Date</label>
+        <input type="date" id="workDate">
+      </div>
+      <div class="modal-row">
+        <label>Description</label>
+        <input type="text" id="workDesc" placeholder="e.g. Full service & front pads">
+      </div>
+      <div class="modal-row">
+        <label>Cost (£)</label>
+        <input type="number" step="0.01" min="0" id="workCost" placeholder="0.00">
+      </div>
+      <div class="modal-row">
+        <label>Service centre / garage</label>
+        <input type="text" id="workCentre" placeholder="e.g. ATS Fareham">
+      </div>
+      <div class="modal-row">
+        <label>SharePoint invoice link</label>
+        <input type="url" id="workInvoice" placeholder="Paste full SharePoint URL">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn secondary" onclick="closeAddWorkModal()">Cancel</button>
+      <button class="btn primary" onclick="saveWork()">Save</button>
+    </div>
+  </div>
 </div>
 
 <script>
+  // Auth gate
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
   }
 
-  const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev"; // same as vehicles.html
+  const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
   const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
-  const IS_ADMIN = CURRENT_USER === "Jamie.Line"; // adjust once you add roles
 
-  let CURRENT_REG = null;
-  let VEHICLE_DATA = null;
-
-  function getRegFromQuery(){
-    const params = new URLSearchParams(window.location.search);
-    return params.get("reg");
-  }
+  let CURRENT_REG = "";
+  let VEHICLE = null;
 
   function goBack(){
+    // back to fleet
     window.location.href = "vehicles.html";
   }
 
-  function setTab(tab, btnEl){
-    document.querySelectorAll(".tab").forEach(el => el.style.display="none");
-    document.getElementById(`tab-${tab}`).style.display = "block";
-    document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
-    if (btnEl) btnEl.classList.add("active");
+  function setStatus(msg){
+    document.getElementById("statusLine").textContent = msg;
   }
 
-  function fillDashboard(v, drivers, works, finance, checks){
-    // Sidebar
-    document.getElementById("sideReg").textContent = v.reg || "—";
-    document.getElementById("sideDriver").textContent = (v.driver || "Unassigned").replace(/\./g," ");
-
-    // Top
-    document.getElementById("mainTitle").textContent = `${v.reg || "Vehicle"}`;
-    const makeModel = [v.make, v.model].filter(Boolean).join(" ");
-    document.getElementById("mainSub").textContent =
-      `${makeModel || "No make/model set"} • ${(v.driver || "Unassigned").replace(/\./g," ")}`;
-
-    // Dashboard values
-    document.getElementById("dashReg").textContent = v.reg || "—";
-    document.getElementById("dashDriver").textContent = (v.driver || "Unassigned").replace(/\./g," ");
-    document.getElementById("dashMakeModel").textContent = makeModel || "—";
-    document.getElementById("dashFuel").textContent = v.fuel || "—";
-    document.getElementById("dashMot").textContent = v.motDue || "—";
-    document.getElementById("dashService").textContent = v.nextServiceDate || "—";
-
-    const badges = document.getElementById("dashBadges");
-    badges.innerHTML = "";
-    const active = v.active !== false;
-    const badge1 = document.createElement("span");
-    badge1.className = "badge " + (active ? "ok" : "danger");
-    badge1.textContent = active ? "Active vehicle" : "Out of service";
-    badges.appendChild(badge1);
-
-    if (Array.isArray(works) && works.length){
-      const latest = works[0];
-      const b = document.createElement("span");
-      b.className = "badge warn";
-      b.textContent = `Last work: ${latest.type || "Work"} (${latest.date || ""})`;
-      badges.appendChild(b);
-    }
-
-    if (Array.isArray(checks) && checks.length){
-      const latestCheck = checks[0];
-      const b = document.createElement("span");
-      b.className = "badge ok";
-      b.textContent = `Last van check: ${latestCheck.date || ""}`;
-      badges.appendChild(b);
-    }
-
-    // Driver timeline
-    const driverUl = document.getElementById("driverTimeline");
-    driverUl.innerHTML = "";
-    if (Array.isArray(drivers) && drivers.length){
-      drivers.forEach(d => {
-        const li = document.createElement("li");
-        li.innerHTML = `
-          <strong>${(d.name || "").replace(/\./g," ")}</strong>
-          <span class="date"> • ${d.from || "?"} → ${d.to || "Present"}</span>
-          ${d.notes ? `<div>${d.notes}</div>` : ""}
-          ${d.handoverURL ? `<div><a href="${d.handoverURL}" target="_blank">View handover form</a></div>` : ""}
-        `;
-        driverUl.appendChild(li);
-      });
-    }else{
-      driverUl.innerHTML = `<li><span class="date">No driver history logged yet.</span></li>`;
-    }
-
-    // Works timeline
-    const worksUl = document.getElementById("worksTimeline");
-    worksUl.innerHTML = "";
-    if (Array.isArray(works) && works.length){
-      works.forEach(w => {
-        const li = document.createElement("li");
-        li.innerHTML = `
-          <strong>${w.type || "Work"}</strong>
-          <span class="date"> • ${w.date || ""}</span>
-          ${w.description ? `<div>${w.description}</div>` : ""}
-          ${w.cost ? `<div>Cost: £${Number(w.cost).toFixed(2)}</div>` : ""}
-          ${w.invoiceURL ? `<div><a href="${w.invoiceURL}" target="_blank">View invoice</a></div>` : ""}
-        `;
-        worksUl.appendChild(li);
-      });
-    }else{
-      worksUl.innerHTML = `<li><span class="date">No service history recorded.</span></li>`;
-    }
-
-    // Finance
-    const fin = finance || {};
-    document.getElementById("finCompany").textContent = fin.company || "—";
-    document.getElementById("finMonthly").textContent = fin.monthly ? `£${Number(fin.monthly).toFixed(2)}` : "—";
-    document.getElementById("finStart").textContent = fin.startDate || "—";
-    document.getElementById("finEnd").textContent = fin.endDate || "—";
-    document.getElementById("finBalloon").textContent = fin.balloon ? `£${Number(fin.balloon).toFixed(2)}` : "—";
-    document.getElementById("finEquity").textContent = fin.equity ? `£${Number(fin.equity).toFixed(2)}` : "—";
-
-    // Checks
-    const checksUl = document.getElementById("checksTimeline");
-    checksUl.innerHTML = "";
-    if (Array.isArray(checks) && checks.length){
-      checks.forEach(c => {
-        const li = document.createElement("li");
-        li.innerHTML = `
-          <strong>${c.category || "Van check"}</strong>
-          <span class="date"> • ${c.date || ""}</span>
-          ${c.summary ? `<div>${c.summary}</div>` : ""}
-          ${c.url ? `<div><a href="${c.url}" target="_blank">Open images / report</a></div>` : ""}
-        `;
-        checksUl.appendChild(li);
-      });
-    }else{
-      checksUl.innerHTML = `<li><span class="date">No van checks linked yet.</span></li>`;
-    }
+  function getQueryReg(){
+    const qs = new URLSearchParams(window.location.search);
+    return (qs.get("reg") || "").toUpperCase();
   }
 
-  async function loadVehicle(){
-    CURRENT_REG = getRegFromQuery();
+  function switchTab(name){
+    document.querySelectorAll(".tab-pill").forEach(btn=>{
+      btn.classList.toggle("active", btn.dataset.tab === name);
+    });
+    document.querySelectorAll(".tab-panel").forEach(p=>{
+      p.classList.toggle("active", p.id === "tab-" + name);
+    });
+  }
+
+  document.addEventListener("click", e=>{
+    const btn = e.target.closest(".tab-pill");
+    if (btn){
+      switchTab(btn.dataset.tab);
+    }
+  });
+
+  async function reloadVehicle(){
+    CURRENT_REG = getQueryReg();
     if (!CURRENT_REG){
-      alert("No vehicle reg specified.");
-      goBack();
+      setStatus("No registration in URL.");
+      document.getElementById("regLabel").textContent = "UNKNOWN";
       return;
     }
     try{
-      document.getElementById("mainSub").textContent = "Loading details…";
+      setStatus("Loading vehicle…");
       const res = await fetch(`${VEHICLE_WORKER}/vehicle?reg=${encodeURIComponent(CURRENT_REG)}`);
       if (!res.ok) throw new Error("Failed to load vehicle");
-      const data = await res.json();
-      VEHICLE_DATA = data;
-      const v = data.vehicle || {};
-      fillDashboard(v, data.drivers || [], data.works || [], data.finance || {}, data.checks || []);
-      document.getElementById("mainSub").textContent = "Details loaded.";
+      // Expected JSON shape (example):
+      // {
+      //   reg, make, model, fuel, year, colour, active,
+      //   mileage, lastUpdated,
+      //   motDue, motStatus,
+      //   serviceDue, lastServiceDate, serviceStatus,
+      //   emissions: { ulez: true/false, notes },
+      //   driver: "Jamie.Line",
+      //   driverSince: "2025-01-01",
+      //   driverHistory: [
+      //     { driver:"Tony Pelin", from:"2025-01-01", to:"2025-05-08", handoverUrl:"..." },
+      //     { driver:"Jamie.Line", from:"2025-05-10", to:null, handoverUrl:"..." }
+      //   ],
+      //   works: [
+      //     { type:"Service", date:"2025-05-01", description:"Full service", cost:240, centre:"ATS", invoiceUrl:"..." },
+      //     ...
+      //   ],
+      //   checks: [
+      //     { date:"2025-11-10", mileage:12345, status:"OK", issueCount:0, reportUrl:"..." },
+      //   ],
+      //   photoSummary: {
+      //     interior:{ count:20, last:"2025-11-14" },
+      //     tyres:{ count:35, last:"2025-11-12" },
+      //     damage:{ count:2, last:"2025-11-01" }
+      //   },
+      //   finance:{
+      //     company, startDate, endDate, monthly, balloon, equityEstimate
+      //   },
+      //   financeRollup:{
+      //     totalMaintenance, totalTyres, totalService, totalOther
+      //   },
+      //   permissions:{
+      //     view:["director","admin"],
+      //     edit:["director"]
+      //   }
+      // }
+      VEHICLE = await res.json();
+      populateOverview();
+      populateHistory();
+      populateChecks();
+      populatePhotos();
+      populateFinance();
+      populatePermissions();
+      setStatus("Vehicle loaded.");
     }catch(e){
       console.error(e);
-      document.getElementById("mainSub").textContent = "Could not load vehicle.";
+      setStatus("Could not load vehicle.");
     }
   }
 
-  function refreshVehicle(){
-    loadVehicle();
+  function formatDate(s){
+    if (!s) return "–";
+    const d = new Date(s);
+    if (isNaN(d)) return s;
+    return d.toLocaleDateString();
+  }
+  function formatMoney(v){
+    if (v == null || v === "") return "–";
+    const num = Number(v);
+    if (isNaN(num)) return String(v);
+    return "£" + num.toFixed(2);
   }
 
-  window.addEventListener("DOMContentLoaded", loadVehicle);
+  function populateOverview(){
+    if (!VEHICLE) return;
+    const v = VEHICLE;
+    const reg = (v.reg || CURRENT_REG || "UNKNOWN").toUpperCase();
+
+    document.getElementById("regLabel").textContent = reg;
+    document.getElementById("ovReg").textContent = reg;
+
+    const make = v.make || "";
+    const model = v.model || "";
+    document.getElementById("ovMake").textContent = make || "–";
+    document.getElementById("ovModel").textContent = model || "–";
+    document.getElementById("headerSub").textContent =
+      (make || model) ? `${make} ${model}`.trim() : "Vehicle details";
+
+    document.getElementById("ovFuel").textContent = v.fuel || "–";
+    document.getElementById("ovYear").textContent = v.year || "–";
+    document.getElementById("ovColour").textContent = v.colour || "–";
+
+    const mileage = v.mileage != null ? `${v.mileage.toLocaleString()} mi` : "–";
+    document.getElementById("ovMileage").textContent = mileage;
+
+    const emissions = v.emissions || {};
+    let emStr = "–";
+    if (emissions.ulez === true) emStr = "ULEZ chargeable";
+    else if (emissions.ulez === false) emStr = "ULEZ compliant";
+    if (emissions.notes){
+      emStr += (emStr === "–" ? "" : " • ") + emissions.notes;
+    }
+    document.getElementById("ovEmissions").textContent = emStr;
+
+    // Active tag
+    const tag = document.getElementById("statusTag");
+    const active = v.active !== false;
+    tag.className = "tag " + (active ? "ok" : "warn");
+    tag.innerHTML = `<span class="tag-dot"></span>${active ? "Active" : "Inactive"}`;
+
+    const lastUpdated = v.lastUpdated ? formatDate(v.lastUpdated) : "–";
+    document.getElementById("lastUpdated").textContent = "Last updated: " + lastUpdated;
+
+    // Driver info
+    const driverRaw = v.driver || "";
+    const driverNice = driverRaw ? driverRaw.replace(/\./g," ") : "Unassigned";
+    document.getElementById("ovDriver").textContent = driverNice;
+    document.getElementById("ovDriverSince").textContent = v.driverSince ? formatDate(v.driverSince) : "–";
+
+    // MOT / Service / Checks
+    document.getElementById("ovMOT").textContent = v.motDue ? formatDate(v.motDue) : "–";
+    document.getElementById("ovService").textContent = v.serviceDue ? formatDate(v.serviceDue) : "–";
+    document.getElementById("ovLastService").textContent = v.lastServiceDate ? formatDate(v.lastServiceDate) : "–";
+
+    document.getElementById("ovLastCheck").textContent = v.lastCheckDate ? formatDate(v.lastCheckDate) : "–";
+    document.getElementById("ovLastCheckMileage").textContent =
+      v.lastCheckMileage != null ? v.lastCheckMileage.toLocaleString()+" mi" : "–";
+
+    // summary line for MOT / service
+    const motStatus = v.motStatus || "";
+    const servStatus = v.serviceStatus || "";
+    let sub = "";
+    if (motStatus === "bad") sub += "MOT overdue. ";
+    else if (motStatus === "warn") sub += "MOT due soon. ";
+
+    if (servStatus === "bad") sub += "Service overdue.";
+    else if (servStatus === "warn") sub += "Service due soon.";
+    if (!sub) sub = "MOT & service currently OK.";
+    document.getElementById("ovSummarySub").textContent = sub;
+
+    // header meta
+    let meta = [];
+    meta.push(active ? "In service" : "Out of service");
+    if (v.fuel) meta.push(v.fuel);
+    if (v.year) meta.push("Year " + v.year);
+    document.getElementById("headerMeta").textContent = meta.join(" • ");
+  }
+
+  function populateHistory(){
+    if (!VEHICLE) return;
+    const workerHistoryBody = document.getElementById("workHistoryBody");
+    const driverHistoryBody = document.getElementById("driverHistoryBody");
+    workerHistoryBody.innerHTML = "";
+    driverHistoryBody.innerHTML = "";
+
+    const drivers = Array.isArray(VEHICLE.driverHistory) ? VEHICLE.driverHistory : [];
+    if (!drivers.length){
+      driverHistoryBody.innerHTML =
+        `<tr><td colspan="4" style="font-size:12px;color:#64748b;">No driver history recorded yet.</td></tr>`;
+    }else{
+      drivers.forEach(row=>{
+        const tr = document.createElement("tr");
+        const driverNice = (row.driver || "").replace(/\./g," ");
+        const from = formatDate(row.from);
+        const to = row.to ? formatDate(row.to) : "Present";
+        let handoverCell = "–";
+        if (row.handoverUrl){
+          handoverCell = `<a class="inline-link" href="${row.handoverUrl}" target="_blank">View</a>`;
+        }
+        tr.innerHTML = `
+          <td>${driverNice || "Unknown"}</td>
+          <td>${from}</td>
+          <td>${to}</td>
+          <td>${handoverCell}</td>
+        `;
+        driverHistoryBody.appendChild(tr);
+      });
+    }
+
+    const works = Array.isArray(VEHICLE.works) ? VEHICLE.works : [];
+    if (!works.length){
+      workerHistoryBody.innerHTML =
+        `<tr><td colspan="5" style="font-size:12px;color:#64748b;">No recorded works / services yet.</td></tr>`;
+    }else{
+      works
+        .slice()
+        .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0)) // newest first
+        .forEach(w=>{
+          const tr = document.createElement("tr");
+          const invCell = w.invoiceUrl
+            ? `<a class="inline-link" href="${w.invoiceUrl}" target="_blank">View</a>`
+            : "–";
+          tr.innerHTML = `
+            <td>${w.type || "-"}</td>
+            <td>${formatDate(w.date)}</td>
+            <td>${w.description || "-"}</td>
+            <td>${formatMoney(w.cost)}</td>
+            <td>${invCell}</td>
+          `;
+          workerHistoryBody.appendChild(tr);
+        });
+    }
+  }
+
+  function populateChecks(){
+    const tbody = document.getElementById("checksBody");
+    tbody.innerHTML = "";
+    const checks = Array.isArray(VEHICLE?.checks) ? VEHICLE.checks : [];
+    if (!checks.length){
+      tbody.innerHTML =
+        `<tr><td colspan="5" style="font-size:12px;color:#64748b;">No weekly checks recorded yet.</td></tr>`;
+      document.getElementById("checksSub").textContent =
+        "No van check submissions found for this vehicle (yet).";
+      return;
+    }
+    document.getElementById("checksSub").textContent =
+      `${checks.length} checks loaded from JotForm / R2.`;
+
+    checks
+      .slice()
+      .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0))
+      .forEach(c=>{
+        const tr = document.createElement("tr");
+        const status = c.status || "OK";
+        const issues = c.issueCount != null ? c.issueCount : "-";
+        const link = c.reportUrl
+          ? `<a class="inline-link" href="${c.reportUrl}" target="_blank">View</a>`
+          : "–";
+        tr.innerHTML = `
+          <td>${formatDate(c.date)}</td>
+          <td>${c.mileage != null ? c.mileage.toLocaleString()+" mi":"–"}</td>
+          <td>${status}</td>
+          <td>${issues}</td>
+          <td>${link}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+  }
+
+  function populatePhotos(){
+    const el = document.getElementById("photosSummary");
+    const s = VEHICLE?.photoSummary || null;
+    if (!s){
+      el.textContent = "No photo metadata recorded yet.";
+      return;
+    }
+    const parts = [];
+    for (const [cat,info] of Object.entries(s)){
+      const count = info?.count ?? 0;
+      const last = info?.last ? formatDate(info.last) : "–";
+      parts.push(
+        `<div style="margin:2px 0;">
+          <span class="field-label" style="text-transform:capitalize;">${cat}</span> –
+          <span class="field-value">${count} photos</span>
+          <span class="pill-small" style="margin-left:4px;">Last: ${last}</span>
+        </div>`
+      );
+    }
+    el.innerHTML = parts.join("");
+  }
+
+  function populateFinance(){
+    const fin = VEHICLE?.finance || {};
+    const roll = VEHICLE?.financeRollup || {};
+
+    document.getElementById("finCompany").textContent = fin.company || "–";
+    document.getElementById("finStart").textContent = formatDate(fin.startDate);
+    document.getElementById("finEnd").textContent = formatDate(fin.endDate);
+    document.getElementById("finMonthly").textContent = formatMoney(fin.monthly);
+    document.getElementById("finBalloon").textContent = formatMoney(fin.balloon);
+    document.getElementById("finEquity").textContent = formatMoney(fin.equityEstimate);
+
+    document.getElementById("finMaintTotal").textContent = formatMoney(roll.totalMaintenance);
+    document.getElementById("finTyresTotal").textContent = formatMoney(roll.totalTyres);
+    document.getElementById("finServiceTotal").textContent = formatMoney(roll.totalService);
+    document.getElementById("finOtherTotal").textContent = formatMoney(roll.totalOther);
+
+    let status = "Finance status: –";
+    if (fin.endDate){
+      const end = new Date(fin.endDate);
+      const now = new Date();
+      if (end < now) status = "Finance status: Agreement ended";
+      else{
+        const diffMonths = (end.getFullYear()-now.getFullYear())*12 + (end.getMonth()-now.getMonth());
+        if (diffMonths <= 3) status = "Finance status: Ending soon";
+        else status = "Finance status: Active";
+      }
+    }
+    document.getElementById("finStatus").textContent = status;
+  }
+
+  function populatePermissions(){
+    const perms = VEHICLE?.permissions || {};
+    const vArr = Array.isArray(perms.view) ? perms.view : [];
+    const eArr = Array.isArray(perms.edit) ? perms.edit : [];
+    document.getElementById("permViewList").textContent = vArr.length ? vArr.join(", ") : "–";
+    document.getElementById("permEditList").textContent = eArr.length ? eArr.join(", ") : "–";
+  }
+
+  // Add Work modal
+  function openAddWorkModal(){
+    if (!CURRENT_REG){
+      CURRENT_REG = getQueryReg();
+    }
+    document.getElementById("workModalTitle").textContent = "Add Work – " + (CURRENT_REG || "");
+    document.getElementById("workType").value = "Service";
+    document.getElementById("workDate").value = "";
+    document.getElementById("workDesc").value = "";
+    document.getElementById("workCost").value = "";
+    document.getElementById("workCentre").value = "";
+    document.getElementById("workInvoice").value = "";
+    document.getElementById("workBackdrop").style.display = "flex";
+  }
+  function closeAddWorkModal(){
+    document.getElementById("workBackdrop").style.display = "none";
+  }
+
+  async function saveWork(){
+    if (!CURRENT_REG){
+      alert("No registration loaded.");
+      return;
+    }
+    const type = document.getElementById("workType").value || "Other";
+    const date = document.getElementById("workDate").value;
+    const desc = document.getElementById("workDesc").value.trim();
+    const cost = parseFloat(document.getElementById("workCost").value) || 0;
+    const centre = document.getElementById("workCentre").value.trim();
+    const invoiceUrl = document.getElementById("workInvoice").value.trim();
+
+    if (!date){
+      alert("Please select a date.");
+      return;
+    }
+
+    const body = {
+      reg: CURRENT_REG,
+      type,
+      date,
+      description: desc,
+      cost,
+      centre,
+      invoiceUrl
+    };
+
+    try{
+      setStatus("Saving work entry…");
+      const res = await fetch(`${VEHICLE_WORKER}/add-work`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Failed");
+      closeAddWorkModal();
+      await reloadVehicle(); // refresh data
+      setStatus("Work saved.");
+    }catch(e){
+      console.error(e);
+      setStatus("Failed to save work entry.");
+      alert("Could not save work entry.");
+    }
+  }
+
+  function openHandoverForm(){
+    if (!CURRENT_REG){
+      CURRENT_REG = getQueryReg();
+    }
+    // JotForm van handover (from your notes)
+    const base = "https://form.jotform.com/250527511327047";
+    // We just pass reg as a query param for now so it can be mapped in JotForm
+    window.open(`${base}?van_reg=${encodeURIComponent(CURRENT_REG)}`,"_blank");
+  }
+
+  function editFinanceSoon(){
+    alert("Finance editing will be handled in the dedicated user-config KV / admin-rates page.");
+  }
+
+  // Init
+  window.addEventListener("DOMContentLoaded", reloadVehicle);
 </script>
 
 </body>
