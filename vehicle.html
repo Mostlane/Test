@@ -829,9 +829,7 @@
   }
 
   const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
-  // NEW: separate fuel worker – update URL if you name it differently
   const FUEL_WORKER = "https://vehicles-fuel.jamie-def.workers.dev";
-
   const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
 
   let CURRENT_REG = "";
@@ -885,7 +883,6 @@
       populatePhotos();
       populateFinance();
       populatePermissions();
-      // NEW: load fuel data
       loadFuel();
       setStatus("Vehicle loaded.");
     }catch(e){
@@ -913,7 +910,8 @@
 
   function populateOverview(){
     if (!VEHICLE) return;
-    const v = VEHICLE;
+    // v is the actual vehicle object from the worker
+    const v = VEHICLE.vehicle || VEHICLE;
     const reg = (v.reg || CURRENT_REG || "UNKNOWN").toUpperCase();
 
     document.getElementById("regLabel").textContent = reg;
@@ -993,19 +991,25 @@
     workerHistoryBody.innerHTML = "";
     driverHistoryBody.innerHTML = "";
 
-    const drivers = Array.isArray(VEHICLE.driverHistory) ? VEHICLE.driverHistory : [];
-    if (!drivers.length){
+    // Drivers: prefer VEHICLE.drivers (from worker), fall back to VEHICLE.driverHistory
+    const driversArr = Array.isArray(VEHICLE.drivers)
+      ? VEHICLE.drivers
+      : (Array.isArray(VEHICLE.driverHistory) ? VEHICLE.driverHistory : []);
+
+    if (!driversArr.length){
       driverHistoryBody.innerHTML =
         `<tr><td colspan="4" style="font-size:12px;color:#64748b;">No driver history recorded yet.</td></tr>`;
     }else{
-      drivers.forEach(row=>{
+      driversArr.forEach(row=>{
         const tr = document.createElement("tr");
-        const driverNice = (row.driver || "").replace(/\./g," ");
+        const driverNameRaw = row.name || row.driver || "";
+        const driverNice = driverNameRaw ? driverNameRaw.replace(/\./g," ") : "";
         const from = formatDate(row.from);
         const to = row.to ? formatDate(row.to) : "Present";
+        const handoverUrl = row.handoverURL || row.handoverUrl || "";
         let handoverCell = "–";
-        if (row.handoverUrl){
-          handoverCell = `<a class="inline-link" href="${row.handoverUrl}" target="_blank">View</a>`;
+        if (handoverUrl){
+          handoverCell = `<a class="inline-link" href="${handoverUrl}" target="_blank">View</a>`;
         }
         tr.innerHTML = `
           <td>${driverNice || "Unknown"}</td>
@@ -1017,18 +1021,20 @@
       });
     }
 
-    const works = Array.isArray(VEHICLE.works) ? VEHICLE.works : [];
-    if (!works.length){
+    // Works: from VEHICLE.works (array from worker)
+    const worksArr = Array.isArray(VEHICLE.works) ? VEHICLE.works : [];
+    if (!worksArr.length){
       workerHistoryBody.innerHTML =
         `<tr><td colspan="5" style="font-size:12px;color:#64748b;">No recorded works / services yet.</td></tr>`;
     }else{
-      works
+      worksArr
         .slice()
         .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0)) // newest first
         .forEach(w=>{
           const tr = document.createElement("tr");
-          const invCell = w.invoiceUrl
-            ? `<a class="inline-link" href="${w.invoiceUrl}" target="_blank">View</a>`
+          const invUrl = w.invoiceURL || w.invoiceUrl || "";
+          const invCell = invUrl
+            ? `<a class="inline-link" href="${invUrl}" target="_blank">View</a>`
             : "–";
           tr.innerHTML = `
             <td>${w.type || "-"}</td>
@@ -1137,7 +1143,7 @@
     document.getElementById("permEditList").textContent = eArr.length ? eArr.join(", ") : "–";
   }
 
-  // -------- FUEL FUNCTIONS (NEW) --------
+  // -------- FUEL FUNCTIONS --------
   async function loadFuel(){
     if (!CURRENT_REG){
       CURRENT_REG = getQueryReg();
@@ -1304,7 +1310,7 @@
       });
       if (!res.ok) throw new Error("Failed");
       closeAddWorkModal();
-      await reloadVehicle(); // refresh data (includes work)
+      await reloadVehicle();
       setStatus("Work saved.");
     }catch(e){
       console.error(e);
