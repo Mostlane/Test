@@ -3,7 +3,6 @@
 <head>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
 
@@ -12,102 +11,70 @@
       window.location.href = "login.html";
     }
   </script>
-</head>
 
-<body class="main-body">
-
-  <!-- Status Box -->
-  <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
-  <script>
-    const currentUser = sessionStorage.getItem("mostlaneUser");
-    const status = localStorage.getItem("mostlaneStatus_" + currentUser);
-    const site = localStorage.getItem("mostlaneSite_" + currentUser);
-    const timestamp = localStorage.getItem("mostlaneTimestamp_" + currentUser);
-    let statusText = "Status unknown";
-    if (status === "checked-in") {
-      statusText = "Checked In" + (site ? ` at ${site}` : "");
-    } else if (status === "checked-out") {
-      statusText = "Last Checkout: " + (timestamp ? timestamp : "unknown time");
-      if (site) statusText += " at " + site;
-    }
-    document.getElementById("statusBox").textContent = "Current Status: " + statusText;
-  </script>
-
-  <!-- User Display -->
-  <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
-  <script>
-    const user = sessionStorage.getItem("mostlaneUser");
-    if (user) {
-      document.getElementById("user-display").textContent = "You are logged in as " + user;
-    }
-  </script>
-
-  <!-- ⭐⭐⭐ NEW STYLE BLOCK (Mockup Accurate) ⭐⭐⭐ -->
   <style>
     html, body { height: 100%; }
 
-    .main-body {
+    body.main-body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
       margin: 0;
-      padding: 20px 0;
-      min-height: 100vh;
+      padding: 30px 0;
       display: flex;
       flex-direction: column;
       align-items: center;
     }
 
-    /* --------------------------
-       GLOSSY TILE BUTTONS
-    --------------------------- */
-    .button {
+    /* GRID — EXACTLY LIKE MOCKUP */
+    .menu-grid {
+      width: 92%;
+      max-width: 750px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+      margin-top: 10px;
+    }
+    .full-width {
+      grid-column: span 2;
+    }
+
+    /* CARD STYLE — EXACT MOCKUP */
+    a.button {
       display: flex !important;
       align-items: center;
       justify-content: flex-start;
       gap: 12px;
 
-      background: linear-gradient(180deg, #2d71ff 0%, #0049c0 100%);
-      color: white;
-      font-weight: 600;
-
-      padding: 14px 18px;
-      border-radius: 16px;
-      width: 92%;
-      max-width: 340px;
-
-      font-size: 17px;
-      text-decoration: none;
-      margin: 12px 0;
+      padding: 18px 22px;
+      background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+      border-radius: 14px;
 
       box-shadow:
-        0 3px 6px rgba(0,0,0,0.25),
-        inset 0 2px 3px rgba(255,255,255,0.20);
+        0 4px 10px rgba(0,0,0,0.25),
+        inset 0 1px 2px rgba(255,255,255,0.15);
 
-      transition: 0.2s ease;
+      text-decoration: none;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 17px;
     }
 
-    .button:hover {
+    a.button:hover {
       transform: translateY(-2px);
       box-shadow:
-        0 6px 12px rgba(0,0,0,0.28),
-        inset 0 2px 4px rgba(255,255,255,0.25);
+        0 7px 14px rgba(0,0,0,0.30),
+        inset 0 1px 2px rgba(255,255,255,0.20);
     }
 
-    .button:active {
-      transform: translateY(1px);
-    }
-
-    /* Emoji Settings */
-    .button .emoji {
-      font-size: 1.55rem;
-      width: 32px;
-      text-align: center;
+    .emoji {
+      font-size: 2.0rem;       /* match mockup */
+      margin-right: 6px;
       flex-shrink: 0;
     }
 
     .hidden-btn {
-      opacity: 0.3 !important;
+      opacity: 0.25 !important;
     }
 
     .admin-toggle {
@@ -118,134 +85,123 @@
       cursor: pointer;
     }
 
-    #toggleView { display: none !important; }
     #statusBox { display: none !important; }
+    #toggleView { display: none !important; }
   </style>
 
-  <!-- ⭐⭐⭐ BUTTON LIST WITH EMOJIS ⭐⭐⭐ -->
+</head>
 
-  <a class="button" href="index.html" id="checkinBtn">
-    <span class="emoji">🕒</span> Check In / Out
-  </a>
+<body class="main-body">
 
-  <a class="button" href="vehicles.html" id="vehiclesBtn">
-    <span class="emoji">🚐</span> Vehicles
-  </a>
+  <div id="user-display" style="margin-bottom: 15px; font-size: 18px; font-weight: bold; color: #003366;">
+    You are logged in as <span id="userName"></span>
+  </div>
 
-  <a class="button" href="holiday.html" id="holidayBtn">
-    <span class="emoji">📅</span> Holiday Requests
-  </a>
+  <script>
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (user) document.getElementById("userName").textContent = user;
+  </script>
 
-  <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">
-    <span class="emoji">🛠️</span> Engineers Hours Menu
-  </a>
+  <!-- ⭐ GRID STARTS HERE -->
+  <div class="menu-grid">
 
-  <a class="button" href="purchase.html" id="purchaseBtn">
-    <span class="emoji">🧾</span> Generate Purchase Order Reference
-  </a>
+    <a class="button" href="index.html" id="checkinBtn">
+      <span class="emoji">🕒</span> Check In / Out
+    </a>
 
-  <a class="button" href="sites.html" id="sitesBtn">
-    <span class="emoji">📍</span> Manage Sites
-  </a>
+    <a class="button" href="vehicles.html" id="vehiclesBtn">
+      <span class="emoji">🚐</span> Vehicles
+    </a>
 
-  <a class="button" href="asset-menu.html">
-    <span class="emoji">⚙️</span> Plant & Equipment
-  </a>
+    <a class="button" href="holiday.html" id="holidayBtn">
+      <span class="emoji">📅</span> Holiday Requests
+    </a>
 
-  <a class="button" href="#" id="my-documents-btn">
-    <span class="emoji">📄</span> My Documents
-  </a>
+    <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">
+      <span class="emoji">🛠️</span> Hours
+    </a>
 
-  <a class="button" href="weekly.html" id="weeklyBtn">
-    <span class="emoji">📊</span> Weekly Summary
-  </a>
+    <a class="button" href="purchase.html" id="purchaseBtn">
+      <span class="emoji">🧾</span> Purchase Orders
+    </a>
 
-  <a class="button" href="forms.html" id="formsBtn">
-    <span class="emoji">📝</span> Forms
-  </a>
+    <a class="button" href="sites.html" id="sitesBtn">
+      <span class="emoji">📍</span> Sites
+    </a>
 
-  <a class="button" href="compliance.html" id="complianceBtn">
-    <span class="emoji">✔️</span> Compliance
-  </a>
+    <a class="button" href="asset-menu.html">
+      <span class="emoji">⚙️</span> Plant & Equipment
+    </a>
 
-  <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">
-    <span class="emoji">⏳</span> Hours Dashboard
-  </a>
+    <a class="button" href="#" id="my-documents-btn">
+      <span class="emoji">📄</span> Documents
+    </a>
 
-  <a class="button" href="po-menu.html" id="poMenuBtn">
-    <span class="emoji">💷</span> Purchase Orders
-  </a>
+    <!-- FULL WIDTH TILE LIKE MOCKUP -->
+    <a class="button full-width" href="weekly.html" id="weeklyBtn">
+      <span class="emoji">📊</span> Weekly Summary
+    </a>
 
-  <a class="button" href="users-admin.html" id="usersAdminBtn">
-    <span class="emoji">👥</span> Users
-  </a>
+  </div>
 
-  <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
-    <span class="emoji">🚪</span> Logout
-  </a>
-
-  <!-- Admin Toggle -->
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- Permissions Logic -->
+  <!-- Permissions Logic (unchanged) -->
   <script>
-  document.addEventListener('DOMContentLoaded', async () => {
-    const username = sessionStorage.getItem("mostlaneUser");
-    if (!username) return;
+    document.addEventListener('DOMContentLoaded', async () => {
+      const username = sessionStorage.getItem("mostlaneUser");
+      if (!username) return;
 
-    try {
-      const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
-      const data = await res.json();
-      if (!data.found) return;
+      try {
+        const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
+        const data = await res.json();
+        if (!data.found) return;
 
-      const user = data.user;
-      const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
-      const buttons = document.querySelectorAll("a.button");
+        const user = data.user;
+        const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
+        const buttons = document.querySelectorAll("a.button");
 
-      buttons.forEach(btn => {
-        const id = btn.id || "";
-        const label = (btn.textContent || "").trim().replace(/\s+/g, '');
-        const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
-        const keys = [id, label, href];
-
-        let allowed = false;
-        keys.forEach(k => {
-          if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
-        });
-
-        if (fullAccess || allowed) {
-          btn.style.display = "flex";
-        } else {
-          btn.style.display = "none";
-        }
-
-        if (id === "my-documents-btn" && user.SharePointPath) {
-          btn.href = user.SharePointPath;
-        }
-      });
-
-      const toggle = document.getElementById("toggleView");
-      let adminMode = false;
-
-      toggle.addEventListener("click", () => {
-        adminMode = !adminMode;
         buttons.forEach(btn => {
-          if (btn.style.display === "none") {
-            if (adminMode) {
-              btn.classList.add("hidden-btn");
-            } else {
-              btn.classList.remove("hidden-btn");
-            }
+          const id = btn.id || "";
+          const label = (btn.textContent || "").trim().replace(/\s+/g, '');
+          const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
+          const keys = [id, label, href];
+
+          let allowed = false;
+          keys.forEach(k => {
+            if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
+          });
+
+          if (fullAccess || allowed) {
+            btn.style.visibility = "visible";
+          } else {
+            btn.style.display = "none";
+          }
+
+          if (id === "my-documents-btn" && user.SharePointPath) {
+            btn.href = user.SharePointPath;
           }
         });
 
-        toggle.textContent = adminMode ? "Hide Hidden Buttons" : "Show All (Admin View)";
-      });
+        const toggle = document.getElementById("toggleView");
+        let adminMode = false;
 
-    } catch (err) {
-      console.error("Failed to load permissions", err);
-    }
-  });
+        toggle.addEventListener("click", () => {
+          adminMode = !adminMode;
+          buttons.forEach(btn => {
+            if (btn.style.display === "none") {
+              if (adminMode) btn.classList.add("hidden-btn");
+              else btn.classList.remove("hidden-btn");
+            }
+          });
+
+          toggle.textContent = adminMode ? "Hide Hidden Buttons" : "Show All (Admin View)";
+        });
+
+      } catch (err) {
+        console.error("Failed to load permissions", err);
+      }
+    });
   </script>
 
 </body>
