@@ -431,14 +431,13 @@ body{ padding:16px; }
         <div class="status-row">${issuesTag}</div>
 
         <div class="card-actions">
-          <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+  <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
 
-          ${CURRENT_USER==="Jamie.Line" ? 
-            `<button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>` 
-            : ""}
+  <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
 
-          <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
-        </div>
+  <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
+</div>
+
       `;
 
       grid.appendChild(card);
