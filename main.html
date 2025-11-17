@@ -16,7 +16,7 @@
 
 <body class="main-body">
 
-  <!-- ✅ Status box -->
+  <!-- Status Box -->
   <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
   <script>
     const currentUser = sessionStorage.getItem("mostlaneUser");
@@ -33,7 +33,7 @@
     document.getElementById("statusBox").textContent = "Current Status: " + statusText;
   </script>
 
-  <!-- ✅ User display -->
+  <!-- User Display -->
   <div id="user-display" style="margin-bottom: 20px; font-size: 16px; font-weight: bold; color: #003366;"></div>
   <script>
     const user = sessionStorage.getItem("mostlaneUser");
@@ -42,93 +42,87 @@
     }
   </script>
 
-  <!-- ⭐⭐⭐ NEW STYLING BLOCK ⭐⭐⭐ -->
-html, body { height: 100%; }
+  <!-- ⭐⭐⭐ NEW STYLE BLOCK (Mockup Accurate) ⭐⭐⭐ -->
+  <style>
+    html, body { height: 100%; }
 
-.main-body {
-  font-family: "Segoe UI", sans-serif;
-  background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-  background-size: cover;
-  margin: 0;
-  padding: 20px 0;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
+    .main-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 20px 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
 
-/* --------------------------------
-   TRUE MOCKUP-STYLE TILE BUTTONS
---------------------------------- */
-.button {
-  display: flex !important;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
+    /* --------------------------
+       GLOSSY TILE BUTTONS
+    --------------------------- */
+    .button {
+      display: flex !important;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
 
-  background: #1e5fe9;
-  background: linear-gradient(180deg, #2d71ff 0%, #0049c0 100%);
+      background: linear-gradient(180deg, #2d71ff 0%, #0049c0 100%);
+      color: white;
+      font-weight: 600;
 
-  padding: 14px 18px;       /* ⬅ tighter padding */
-  border-radius: 16px;      /* ⬅ softer radius like mockup */
-  width: 92%;
-  max-width: 340px;
+      padding: 14px 18px;
+      border-radius: 16px;
+      width: 92%;
+      max-width: 340px;
 
-  color: white;
-  font-weight: 600;
-  font-size: 17px;
+      font-size: 17px;
+      text-decoration: none;
+      margin: 12px 0;
 
-  box-shadow:
-    0 3px 6px rgba(0,0,0,0.25),
-    inset 0 2px 3px rgba(255,255,255,0.2);
+      box-shadow:
+        0 3px 6px rgba(0,0,0,0.25),
+        inset 0 2px 3px rgba(255,255,255,0.20);
 
-  text-decoration: none;
+      transition: 0.2s ease;
+    }
 
-  margin: 12px 0;           /* ⬅ more space between buttons */
-  transition: 0.2s ease;
-}
+    .button:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        0 6px 12px rgba(0,0,0,0.28),
+        inset 0 2px 4px rgba(255,255,255,0.25);
+    }
 
-/* Hover lift */
-.button:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    0 6px 12px rgba(0,0,0,0.28),
-    inset 0 2px 4px rgba(255,255,255,0.25);
-}
+    .button:active {
+      transform: translateY(1px);
+    }
 
-/* Button press */
-.button:active {
-  transform: translateY(1px);
-}
+    /* Emoji Settings */
+    .button .emoji {
+      font-size: 1.55rem;
+      width: 32px;
+      text-align: center;
+      flex-shrink: 0;
+    }
 
-/* --------------------------------
-         Emoji settings
---------------------------------- */
-.button .emoji {
-  font-size: 1.55rem;       /* ⬅ smaller like mockup */
-  width: 32px;
-  text-align: center;
-  flex-shrink: 0;
-}
+    .hidden-btn {
+      opacity: 0.3 !important;
+    }
 
-/* Admin dimming */
-.hidden-btn {
-  opacity: 0.3 !important;
-}
+    .admin-toggle {
+      margin-top: 25px;
+      font-size: 14px;
+      color: #004a99;
+      text-decoration: underline;
+      cursor: pointer;
+    }
 
-/* Admin Toggle */
-.admin-toggle {
-  margin-top: 25px;
-  font-size: 14px;
-  color: #004a99;
-  text-decoration: underline;
-  cursor: pointer;
-}
+    #toggleView { display: none !important; }
+    #statusBox { display: none !important; }
+  </style>
 
-#toggleView { display: none !important; }
-#statusBox { display: none !important; }
-
-  <!-- ⭐⭐⭐ BUTTONS WITH EMOJIS ⭐⭐⭐ -->
+  <!-- ⭐⭐⭐ BUTTON LIST WITH EMOJIS ⭐⭐⭐ -->
 
   <a class="button" href="index.html" id="checkinBtn">
     <span class="emoji">🕒</span> Check In / Out
@@ -190,7 +184,7 @@ html, body { height: 100%; }
     <span class="emoji">🚪</span> Logout
   </a>
 
-  <!-- Admin toggle -->
+  <!-- Admin Toggle -->
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
   <!-- Permissions Logic -->
@@ -212,10 +206,10 @@ html, body { height: 100%; }
         const id = btn.id || "";
         const label = (btn.textContent || "").trim().replace(/\s+/g, '');
         const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
-        const keyCandidates = [id, label, href];
+        const keys = [id, label, href];
 
         let allowed = false;
-        keyCandidates.forEach(k => {
+        keys.forEach(k => {
           if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
         });
 
