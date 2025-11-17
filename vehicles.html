@@ -399,11 +399,16 @@ body{ padding:16px; }
       const reg = v.reg || "UNKNOWN";
       const driver = (v.driver||"Unassigned").replace(/\./g," ");
 
-// --- MOT TAG WITH COLOUR LOGIC + DATE FORMAT ---
+// --- MOT TAG WITH COLOUR LOGIC + DATE FORMAT + DAYS REMAINING ---
 let motTag = `<span class="tag info">MOT: n/a</span>`;
+
 if (v.motDue) {
     const motDate = new Date(v.motDue);
-    const now = new Date();
+    const today = new Date();
+
+    // strip time for correct comparison
+    motDate.setHours(0,0,0,0);
+    today.setHours(0,0,0,0);
 
     // Format DD-MM-YYYY
     const formatted =
@@ -411,16 +416,34 @@ if (v.motDue) {
         String(motDate.getMonth() + 1).padStart(2, "0") + "-" +
         motDate.getFullYear();
 
-    let diffDays = Math.ceil((motDate - now) / (1000 * 60 * 60 * 24));
+    // Days remaining
+    const diffDays = Math.ceil((motDate - today) / (1000 * 60 * 60 * 24));
 
+    // Colour logic
     let statusClass = "ok";  // green
     if (diffDays < 0) {
-        statusClass = "bad"; // red – overdue
+        statusClass = "bad";  // overdue
     } else if (diffDays <= 30) {
-        statusClass = "warn"; // amber – within 30 days
+        statusClass = "warn"; // amber
+    } else if (diffDays <= 90) {
+        statusClass = "ok";   // still green, but will show days text
     }
 
-    motTag = `<span class="tag ${statusClass}">MOT: ${formatted}</span>`;
+    // Days remaining label (< 90 days)
+    let daysText = "";
+    if (diffDays <= 90) {
+        if (diffDays < 0) {
+            daysText = `<div style="font-size:10px;color:#b91c1c;">Overdue</div>`;
+        } else {
+            daysText = `<div style="font-size:10px;opacity:0.8;">${diffDays} days</div>`;
+        }
+    }
+
+    motTag = `
+      <span class="tag ${statusClass}" style="flex-direction:column;align-items:flex-start;">
+        MOT: ${formatted}
+        ${daysText}
+      </span>`;
 }
 
       let serviceTag = `<span class="tag info">Service: n/a</span>`;
