@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-<link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+
   <script>
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
       window.location.href = "login.html";
@@ -14,6 +15,7 @@
 </head>
 
 <body class="main-body">
+
   <!-- ✅ Status box -->
   <div id="statusBox" style="margin-bottom: 20px; font-weight: bold; color: #004a99;"></div>
   <script>
@@ -40,8 +42,10 @@
     }
   </script>
 
+  <!-- ⭐⭐⭐ NEW STYLING BLOCK ⭐⭐⭐ -->
   <style>
     html, body { height: 100%; }
+
     .main-body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -53,24 +57,61 @@
       flex-direction: column;
       align-items: center;
     }
+
+    /* ---------------------------
+       GLOSSY TILE BUTTONS
+    ---------------------------- */
     .button {
-      display: block;
-      margin: 10px auto;
-      padding: 12px 20px;
-      font-size: 16px;
-      text-align: center;
-      color: #ffffff;
-      background-color: rgba(0, 74, 153, 0.6);
+      display: flex !important;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 14px;
+
+      background: linear-gradient(180deg, #1E6BFF 0%, #0050B8 100%);
+      color: white;
+      font-weight: 600;
+
+      padding: 18px 20px;
+      border-radius: 18px;
+      width: 100%;
+      max-width: 360px;
+
+      box-shadow:
+        inset 0 2px 4px rgba(255,255,255,0.25),
+        0 4px 8px rgba(0,0,0,0.25);
+
       text-decoration: none;
-      border-radius: 6px;
-      width: 90%;
-      max-width: 300px;
-      transition: opacity 0.3s;
+      font-size: 18px;
+      transition: 0.2s ease;
+      margin: 12px 0;
     }
+
+    .button:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        inset 0 2px 4px rgba(255,255,255,0.30),
+        0 6px 12px rgba(0,0,0,0.35);
+    }
+
+    .button:active {
+      transform: translateY(1px);
+    }
+
+    /* ---------------------------
+       EMOJI STYLE
+    ---------------------------- */
+    .button .emoji {
+      font-size: 1.9rem;
+      display: flex;
+      align-items: center;
+      margin-right: 6px;
+    }
+
+    /* Hidden buttons (Admin mode) */
     .hidden-btn {
-      display: block !important;
-      opacity: 0.3;
+      opacity: 0.3 !important;
     }
+
     .admin-toggle {
       margin-top: 20px;
       font-size: 14px;
@@ -78,38 +119,83 @@
       text-decoration: underline;
       cursor: pointer;
     }
-#toggleView { display: none !important; }
+
+    #toggleView { display: none !important; }
     #statusBox { display: none !important; }
   </style>
 
-  <!-- ✅ Buttons (all possible) -->
-  <a class="button" href="index.html" id="checkinBtn">Check In / Out</a>
-  <a class="button" href="vehicles.html" id="vehiclesBtn">Vehicles</a>
-  <a class="button" href="holiday.html" id="holidayBtn">Holiday Requests</a>
-  <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">Engineers Hours Menu</a>
-  <a class="button" href="purchase.html" id="purchaseBtn">Generate Purchase Order Reference</a>
-<a class="button" href="sites.html" id="sitesBtn">Manage Sites</a>
-  <a class="button" href="asset-menu.html">Plant & Equipment</a>
-  <a class="button" href="#" id="my-documents-btn">My Documents</a>
-  <a class="button" href="weekly.html" id="weeklyBtn">Weekly Summary</a>
-  <a class="button" href="forms.html" id="formsBtn">Forms</a>
-  <a class="button" href="compliance.html" id="complianceBtn">Compliance</a>
-  <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">Hours Dashboard</a>
-  <a class="button" href="po-menu.html" id="poMenuBtn">Purchase Orders</a>
-  <a class="button" href="users-admin.html" id="usersAdminBtn">Users</a>
-  <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">Logout</a>
+  <!-- ⭐⭐⭐ BUTTONS WITH EMOJIS ⭐⭐⭐ -->
 
-  <!-- ✅ Admin Toggle -->
+  <a class="button" href="index.html" id="checkinBtn">
+    <span class="emoji">🕒</span> Check In / Out
+  </a>
+
+  <a class="button" href="vehicles.html" id="vehiclesBtn">
+    <span class="emoji">🚐</span> Vehicles
+  </a>
+
+  <a class="button" href="holiday.html" id="holidayBtn">
+    <span class="emoji">📅</span> Holiday Requests
+  </a>
+
+  <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">
+    <span class="emoji">🛠️</span> Engineers Hours Menu
+  </a>
+
+  <a class="button" href="purchase.html" id="purchaseBtn">
+    <span class="emoji">🧾</span> Generate Purchase Order Reference
+  </a>
+
+  <a class="button" href="sites.html" id="sitesBtn">
+    <span class="emoji">📍</span> Manage Sites
+  </a>
+
+  <a class="button" href="asset-menu.html">
+    <span class="emoji">⚙️</span> Plant & Equipment
+  </a>
+
+  <a class="button" href="#" id="my-documents-btn">
+    <span class="emoji">📄</span> My Documents
+  </a>
+
+  <a class="button" href="weekly.html" id="weeklyBtn">
+    <span class="emoji">📊</span> Weekly Summary
+  </a>
+
+  <a class="button" href="forms.html" id="formsBtn">
+    <span class="emoji">📝</span> Forms
+  </a>
+
+  <a class="button" href="compliance.html" id="complianceBtn">
+    <span class="emoji">✔️</span> Compliance
+  </a>
+
+  <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">
+    <span class="emoji">⏳</span> Hours Dashboard
+  </a>
+
+  <a class="button" href="po-menu.html" id="poMenuBtn">
+    <span class="emoji">💷</span> Purchase Orders
+  </a>
+
+  <a class="button" href="users-admin.html" id="usersAdminBtn">
+    <span class="emoji">👥</span> Users
+  </a>
+
+  <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+    <span class="emoji">🚪</span> Logout
+  </a>
+
+  <!-- Admin toggle -->
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- ✅ Dynamic Permission Logic -->
+  <!-- Permissions Logic -->
   <script>
   document.addEventListener('DOMContentLoaded', async () => {
     const username = sessionStorage.getItem("mostlaneUser");
     if (!username) return;
 
     try {
-      // 🔹 Fetch user data from KV Worker
       const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
       const data = await res.json();
       if (!data.found) return;
@@ -122,34 +208,27 @@
         const id = btn.id || "";
         const label = (btn.textContent || "").trim().replace(/\s+/g, '');
         const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
-
-        // All possible matching keys
         const keyCandidates = [id, label, href];
 
-        // Check if any match in JSON with value "Yes"
         let allowed = false;
         keyCandidates.forEach(k => {
           if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
         });
 
-        console.log(`🔍 Button "${label}" checked keys: ${keyCandidates.join(", ")} -> Allowed: ${allowed}`);
-
-        // Handle visibility
         if (fullAccess || allowed) {
-          btn.style.display = "block";
+          btn.style.display = "flex";
         } else {
           btn.style.display = "none";
         }
 
-        // Link SharePoint folder for My Documents
         if (id === "my-documents-btn" && user.SharePointPath) {
           btn.href = user.SharePointPath;
         }
       });
 
-      // 🔧 Admin view toggle
       const toggle = document.getElementById("toggleView");
       let adminMode = false;
+
       toggle.addEventListener("click", () => {
         adminMode = !adminMode;
         buttons.forEach(btn => {
@@ -161,6 +240,7 @@
             }
           }
         });
+
         toggle.textContent = adminMode ? "Hide Hidden Buttons" : "Show All (Admin View)";
       });
 
@@ -169,5 +249,6 @@
     }
   });
   </script>
+
 </body>
 </html>
