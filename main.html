@@ -43,86 +43,90 @@
   </script>
 
   <!-- ⭐⭐⭐ NEW STYLING BLOCK ⭐⭐⭐ -->
-  <style>
-    html, body { height: 100%; }
+html, body { height: 100%; }
 
-    .main-body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      margin: 0;
-      padding: 40px 20px;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
+.main-body {
+  font-family: "Segoe UI", sans-serif;
+  background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+  background-size: cover;
+  margin: 0;
+  padding: 20px 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 
-    /* ---------------------------
-       GLOSSY TILE BUTTONS
-    ---------------------------- */
-    .button {
-      display: flex !important;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 14px;
+/* --------------------------------
+   TRUE MOCKUP-STYLE TILE BUTTONS
+--------------------------------- */
+.button {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
 
-      background: linear-gradient(180deg, #1E6BFF 0%, #0050B8 100%);
-      color: white;
-      font-weight: 600;
+  background: #1e5fe9;
+  background: linear-gradient(180deg, #2d71ff 0%, #0049c0 100%);
 
-      padding: 18px 20px;
-      border-radius: 18px;
-      width: 100%;
-      max-width: 360px;
+  padding: 14px 18px;       /* ⬅ tighter padding */
+  border-radius: 16px;      /* ⬅ softer radius like mockup */
+  width: 92%;
+  max-width: 340px;
 
-      box-shadow:
-        inset 0 2px 4px rgba(255,255,255,0.25),
-        0 4px 8px rgba(0,0,0,0.25);
+  color: white;
+  font-weight: 600;
+  font-size: 17px;
 
-      text-decoration: none;
-      font-size: 18px;
-      transition: 0.2s ease;
-      margin: 12px 0;
-    }
+  box-shadow:
+    0 3px 6px rgba(0,0,0,0.25),
+    inset 0 2px 3px rgba(255,255,255,0.2);
 
-    .button:hover {
-      transform: translateY(-2px);
-      box-shadow:
-        inset 0 2px 4px rgba(255,255,255,0.30),
-        0 6px 12px rgba(0,0,0,0.35);
-    }
+  text-decoration: none;
 
-    .button:active {
-      transform: translateY(1px);
-    }
+  margin: 12px 0;           /* ⬅ more space between buttons */
+  transition: 0.2s ease;
+}
 
-    /* ---------------------------
-       EMOJI STYLE
-    ---------------------------- */
-    .button .emoji {
-      font-size: 1.9rem;
-      display: flex;
-      align-items: center;
-      margin-right: 6px;
-    }
+/* Hover lift */
+.button:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 6px 12px rgba(0,0,0,0.28),
+    inset 0 2px 4px rgba(255,255,255,0.25);
+}
 
-    /* Hidden buttons (Admin mode) */
-    .hidden-btn {
-      opacity: 0.3 !important;
-    }
+/* Button press */
+.button:active {
+  transform: translateY(1px);
+}
 
-    .admin-toggle {
-      margin-top: 20px;
-      font-size: 14px;
-      color: #004a99;
-      text-decoration: underline;
-      cursor: pointer;
-    }
+/* --------------------------------
+         Emoji settings
+--------------------------------- */
+.button .emoji {
+  font-size: 1.55rem;       /* ⬅ smaller like mockup */
+  width: 32px;
+  text-align: center;
+  flex-shrink: 0;
+}
 
-    #toggleView { display: none !important; }
-    #statusBox { display: none !important; }
-  </style>
+/* Admin dimming */
+.hidden-btn {
+  opacity: 0.3 !important;
+}
+
+/* Admin Toggle */
+.admin-toggle {
+  margin-top: 25px;
+  font-size: 14px;
+  color: #004a99;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+#toggleView { display: none !important; }
+#statusBox { display: none !important; }
 
   <!-- ⭐⭐⭐ BUTTONS WITH EMOJIS ⭐⭐⭐ -->
 
