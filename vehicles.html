@@ -27,7 +27,6 @@ html,body{
   background:#0b1930; /* fallback */
 }
 
-/* fixed embossed background behind everything */
 .bg-fixed{
   position:fixed;
   top:0; left:0; right:0; bottom:0;
@@ -37,10 +36,8 @@ html,body{
   pointer-events:none;
 }
 
-/* Add spacing */
 body{ padding:16px; }
 
-/* MAIN WRAPPER */
 .wrap{
   max-width:1200px;
   margin:0 auto;
@@ -319,6 +316,12 @@ body{ padding:16px; }
           <input id="editMOT" type="date">
         </div>
 
+        <!-- ⭐ ADDED TAX DUE FIELD (Option A) -->
+        <div class="modal-row">
+          <label>Tax Due</label>
+          <input id="editTax" type="date">
+        </div>
+
         <div class="modal-row">
           <label>Notes</label>
           <input id="editNotes">
@@ -332,14 +335,13 @@ body{ padding:16px; }
       </div>
     </div>
   </div>
-
-<script>
+  <script>
   if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
     window.location.href = "login.html";
   }
 
   const VEHICLE_WORKER = "https://vehicles.jamie-def.workers.dev";
-  const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";  // ← ADDED
+  const CURRENT_USER = sessionStorage.getItem("mostlaneUser") || "";
   let FLEET = [];
   let EDIT_REG = null;
 
@@ -364,6 +366,49 @@ body{ padding:16px; }
     sumTotal.textContent = FLEET.length;
     sumActive.textContent = FLEET.filter(v => v.active !== false).length;
     sumUnassigned.textContent = FLEET.filter(v => !v.driver).length;
+  }
+
+  function formatDMY(dateStr){
+    if (!dateStr) return "n/a";
+    const d = new Date(dateStr);
+    if (isNaN(d)) return "n/a";
+    return String(d.getDate()).padStart(2,"0") + "-" +
+           String(d.getMonth()+1).padStart(2,"0") + "-" +
+           d.getFullYear();
+  }
+
+  function tagWithLogic(dateStr, label){
+    if (!dateStr) {
+      return `<span class="tag info">${label}: n/a</span>`;
+    }
+
+    const d = new Date(dateStr);
+    const today = new Date();
+    d.setHours(0,0,0,0);
+    today.setHours(0,0,0,0);
+
+    const diffDays = Math.ceil((d - today) / (1000*60*60*24));
+
+    let status = "ok";
+    if (diffDays < 0) status = "bad";
+    else if (diffDays <= 30) status = "warn";
+
+    const formatted = formatDMY(dateStr);
+
+    let daysText = "";
+    if (diffDays <= 90){
+      if (diffDays < 0){
+        daysText = `<div style="font-size:10px;color:#b91c1c;">Overdue</div>`;
+      } else {
+        daysText = `<div style="font-size:10px;opacity:0.8;">${diffDays} days</div>`;
+      }
+    }
+
+    return `
+      <span class="tag ${status}" style="flex-direction:column;align-items:flex-start;">
+        ${label}: ${formatted}
+        ${daysText}
+      </span>`;
   }
 
   function renderFleet(){
@@ -397,59 +442,16 @@ body{ padding:16px; }
       card.className="card";
 
       const reg = v.reg || "UNKNOWN";
-      const driver = (v.driver||"Unassigned").replace(/\./g," ");
+      const driver = (v.driver || "Unassigned").replace(/\./g," ");
 
-// --- MOT TAG WITH COLOUR LOGIC + DATE FORMAT + DAYS REMAINING ---
-let motTag = `<span class="tag info">MOT: n/a</span>`;
-
-if (v.motDue) {
-    const motDate = new Date(v.motDue);
-    const today = new Date();
-
-    // strip time for correct comparison
-    motDate.setHours(0,0,0,0);
-    today.setHours(0,0,0,0);
-
-    // Format DD-MM-YYYY
-    const formatted =
-        String(motDate.getDate()).padStart(2, "0") + "-" +
-        String(motDate.getMonth() + 1).padStart(2, "0") + "-" +
-        motDate.getFullYear();
-
-    // Days remaining
-    const diffDays = Math.ceil((motDate - today) / (1000 * 60 * 60 * 24));
-
-    // Colour logic
-    let statusClass = "ok";  // green
-    if (diffDays < 0) {
-        statusClass = "bad";  // overdue
-    } else if (diffDays <= 30) {
-        statusClass = "warn"; // amber
-    } else if (diffDays <= 90) {
-        statusClass = "ok";   // still green, but will show days text
-    }
-
-    // Days remaining label (< 90 days)
-    let daysText = "";
-    if (diffDays <= 90) {
-        if (diffDays < 0) {
-            daysText = `<div style="font-size:10px;color:#b91c1c;">Overdue</div>`;
-        } else {
-            daysText = `<div style="font-size:10px;opacity:0.8;">${diffDays} days</div>`;
-        }
-    }
-
-    motTag = `
-      <span class="tag ${statusClass}" style="flex-direction:column;align-items:flex-start;">
-        MOT: ${formatted}
-        ${daysText}
-      </span>`;
-}
+      // MOT + Tax tags
+      const motTag = tagWithLogic(v.motDue, "MOT");
+      const taxTag = tagWithLogic(v.taxDue, "Tax");
 
       let serviceTag = `<span class="tag info">Service: n/a</span>`;
       if (v.nextServiceDate){
-        const s = v.serviceStatus==="ok" ? "ok" : "warn";
-        serviceTag = `<span class="tag ${s}">Service: ${v.nextServiceDate}</span>`;
+        const status = v.serviceStatus==="ok" ? "ok" : "warn";
+        serviceTag = `<span class="tag ${status}">Service: ${v.nextServiceDate}</span>`;
       }
 
       const issuesTag = (v.issuesCount||0)>0
@@ -469,16 +471,14 @@ if (v.motDue) {
         </div>
 
         <div class="status-row">${serviceTag} ${motTag}</div>
+        <div class="status-row">${taxTag}</div>
         <div class="status-row">${issuesTag}</div>
 
         <div class="card-actions">
-  <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
-
-  <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
-
-  <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
-</div>
-
+          <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+          <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
+          <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
+        </div>
       `;
 
       grid.appendChild(card);
@@ -486,23 +486,24 @@ if (v.motDue) {
   }
 
   function openVehicle(reg){
-    window.location.href=`vehicle.html?reg=${encodeURIComponent(reg)}`;
+    window.location.href = `vehicle.html?reg=${encodeURIComponent(reg)}`;
   }
 
   function openEditModal(reg){
     EDIT_REG = reg;
-    const v = FLEET.find(x => x.reg===reg);
+    const v = FLEET.find(x => x.reg === reg);
     if (!v) return;
 
-    editReg.value = v.reg||"";
-    editMake.value = v.make||"";
-    editModel.value = v.model||"";
-    editFuel.value = v.fuel||"";
-    editDriver.value = v.driver||"";
-    editActive.value = v.active===false ? "false" : "true";
-    editService.value = v.nextServiceDate||"";
-    editMOT.value = v.motDue||"";
-    editNotes.value = v.notes||"";
+    editReg.value = v.reg || "";
+    editMake.value = v.make || "";
+    editModel.value = v.model || "";
+    editFuel.value = v.fuel || "";
+    editDriver.value = v.driver || "";
+    editActive.value = v.active === false ? "false" : "true";
+    editService.value = v.nextServiceDate || "";
+    editMOT.value = v.motDue || "";
+    editTax.value = v.taxDue || "";
+    editNotes.value = v.notes || "";
 
     document.getElementById("editBackdrop").style.display="flex";
   }
@@ -522,6 +523,7 @@ if (v.motDue) {
       active: editActive.value==="true",
       nextServiceDate: editService.value,
       motDue: editMOT.value,
+      taxDue: editTax.value,
       notes: editNotes.value.trim(),
     };
 
@@ -535,8 +537,8 @@ if (v.motDue) {
       if (!res.ok) throw new Error("fail");
 
       const newObj = await res.json();
-      const idx = FLEET.findIndex(v => v.reg===EDIT_REG);
-      if (idx!==-1) FLEET[idx] = newObj;
+      const idx = FLEET.findIndex(v => v.reg === EDIT_REG);
+      if (idx !== -1) FLEET[idx] = newObj;
 
       closeEditModal();
       renderFleet();
@@ -549,6 +551,5 @@ if (v.motDue) {
 
   window.addEventListener("DOMContentLoaded", loadFleet);
 </script>
-
 </body>
 </html>
