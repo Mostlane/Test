@@ -13,40 +13,63 @@
   </script>
 
   <style>
-    html, body { height: 100%; }
+    html, body { height: 100%; margin: 0; padding: 0; }
 
     body.main-body {
       font-family: "Segoe UI", sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: cover;
-      margin: 0;
-      padding: 30px 0;
+      padding: 25px 0;
       display: flex;
       flex-direction: column;
       align-items: center;
     }
 
-    /* GRID — EXACTLY LIKE MOCKUP */
-    .menu-grid {
-      width: 92%;
-      max-width: 750px;
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 18px;
-      margin-top: 10px;
-    }
-    .full-width {
-      grid-column: span 2;
+    /* USER DISPLAY */
+    #user-display {
+      font-size: 18px;
+      font-weight: bold;
+      color: #003366;
+      margin-bottom: 18px;
     }
 
-    /* CARD STYLE — EXACT MOCKUP */
+    /* --------------------------
+       RESPONSIVE GRID LAYOUT
+    --------------------------- */
+    .menu-grid {
+      width: 92%;
+      max-width: 850px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    /* Desktop = 3 columns */
+    @media (min-width: 800px) {
+      .menu-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    .full-width {
+      grid-column: span 2 !important;
+    }
+
+    @media (min-width: 800px) {
+      .full-width {
+        grid-column: span 3 !important;
+      }
+    }
+
+    /* --------------------------
+       TILE DESIGN (mockup-accurate)
+    --------------------------- */
     a.button {
       display: flex !important;
       align-items: center;
-      justify-content: flex-start;
       gap: 12px;
 
-      padding: 18px 22px;
+      padding: 18px 20px;
       background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
       border-radius: 14px;
 
@@ -58,6 +81,7 @@
       color: #ffffff;
       font-weight: 600;
       font-size: 17px;
+      transition: 0.2s ease;
     }
 
     a.button:hover {
@@ -68,15 +92,12 @@
     }
 
     .emoji {
-      font-size: 2.0rem;       /* match mockup */
-      margin-right: 6px;
+      font-size: 2rem;
       flex-shrink: 0;
+      margin-right: 4px;
     }
 
-    .hidden-btn {
-      opacity: 0.25 !important;
-    }
-
+    /* Admin toggle */
     .admin-toggle {
       margin-top: 25px;
       font-size: 14px;
@@ -85,26 +106,26 @@
       cursor: pointer;
     }
 
+    .hidden-btn { opacity: 0.25 !important; }
+
     #statusBox { display: none !important; }
     #toggleView { display: none !important; }
   </style>
-
 </head>
 
 <body class="main-body">
 
-  <div id="user-display" style="margin-bottom: 15px; font-size: 18px; font-weight: bold; color: #003366;">
-    You are logged in as <span id="userName"></span>
-  </div>
+  <div id="user-display">You are logged in as <span id="userName"></span></div>
 
   <script>
     const user = sessionStorage.getItem("mostlaneUser");
     if (user) document.getElementById("userName").textContent = user;
   </script>
 
-  <!-- ⭐ GRID STARTS HERE -->
-  <div class="menu-grid">
+  <!-- ⭐ GRID CONTAINER -->
+  <div class="menu-grid" id="menuGrid">
 
+    <!-- ALL BUTTONS (permissions will hide/show) -->
     <a class="button" href="index.html" id="checkinBtn">
       <span class="emoji">🕒</span> Check In / Out
     </a>
@@ -118,15 +139,15 @@
     </a>
 
     <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">
-      <span class="emoji">🛠️</span> Hours
+      <span class="emoji">🛠️</span> Engineers Hours Menu
     </a>
 
     <a class="button" href="purchase.html" id="purchaseBtn">
-      <span class="emoji">🧾</span> Purchase Orders
+      <span class="emoji">🧾</span> Generate Purchase Order Reference
     </a>
 
     <a class="button" href="sites.html" id="sitesBtn">
-      <span class="emoji">📍</span> Sites
+      <span class="emoji">📍</span> Manage Sites
     </a>
 
     <a class="button" href="asset-menu.html">
@@ -134,37 +155,65 @@
     </a>
 
     <a class="button" href="#" id="my-documents-btn">
-      <span class="emoji">📄</span> Documents
+      <span class="emoji">📄</span> My Documents
     </a>
 
-    <!-- FULL WIDTH TILE LIKE MOCKUP -->
-    <a class="button full-width" href="weekly.html" id="weeklyBtn">
+    <a class="button" href="weekly.html" id="weeklyBtn">
       <span class="emoji">📊</span> Weekly Summary
+    </a>
+
+    <a class="button" href="forms.html" id="formsBtn">
+      <span class="emoji">📝</span> Forms
+    </a>
+
+    <a class="button" href="compliance.html" id="complianceBtn">
+      <span class="emoji">✔️</span> Compliance
+    </a>
+
+    <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">
+      <span class="emoji">⏳</span> Hours Dashboard
+    </a>
+
+    <a class="button" href="po-menu.html" id="poMenuBtn">
+      <span class="emoji">💷</span> Purchase Orders
+    </a>
+
+    <a class="button" href="users-admin.html" id="usersAdminBtn">
+      <span class="emoji">👥</span> Users
+    </a>
+
+    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+      <span class="emoji">🚪</span> Logout
     </a>
 
   </div>
 
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- Permissions Logic (unchanged) -->
+  <!-- ⭐ PERMISSIONS + AUTO FULL-WIDTH LAST BUTTON ⭐ -->
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
+
       const username = sessionStorage.getItem("mostlaneUser");
       if (!username) return;
 
       try {
-        const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
+        const res = await fetch(
+          "https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username)
+        );
         const data = await res.json();
         if (!data.found) return;
 
         const user = data.user;
         const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
-        const buttons = document.querySelectorAll("a.button");
 
+        const buttons = Array.from(document.querySelectorAll("a.button"));
+
+        // Permission-based hiding
         buttons.forEach(btn => {
           const id = btn.id || "";
-          const label = (btn.textContent || "").trim().replace(/\s+/g, '');
-          const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, '');
+          const label = (btn.textContent || "").trim().replace(/\s+/g, "");
+          const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, "");
           const keys = [id, label, href];
 
           let allowed = false;
@@ -172,9 +221,7 @@
             if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
           });
 
-          if (fullAccess || allowed) {
-            btn.style.visibility = "visible";
-          } else {
+          if (!fullAccess && !allowed) {
             btn.style.display = "none";
           }
 
@@ -183,24 +230,45 @@
           }
         });
 
+        /* ---------------------------
+           AUTO FULL-WIDTH LAST TILE
+        ---------------------------- */
+        const visible = buttons.filter(b => b.style.display !== "none");
+
+        // Remove any existing full-width
+        visible.forEach(btn => btn.classList.remove("full-width"));
+
+        if (visible.length % 2 !== 0) {
+          // If odd number → last visible tile becomes full width
+          visible[visible.length - 1].classList.add("full-width");
+        }
+
+        /* ---------------------------
+           ADMIN MODE (show hidden)
+        ---------------------------- */
         const toggle = document.getElementById("toggleView");
         let adminMode = false;
 
         toggle.addEventListener("click", () => {
           adminMode = !adminMode;
+
           buttons.forEach(btn => {
             if (btn.style.display === "none") {
+              btn.style.display = "flex";   // reveal it
               if (adminMode) btn.classList.add("hidden-btn");
               else btn.classList.remove("hidden-btn");
             }
           });
 
-          toggle.textContent = adminMode ? "Hide Hidden Buttons" : "Show All (Admin View)";
+          toggle.textContent = adminMode ?
+            "Hide Hidden Buttons" :
+            "Show All (Admin View)";
         });
 
       } catch (err) {
         console.error("Failed to load permissions", err);
       }
+
     });
   </script>
 
