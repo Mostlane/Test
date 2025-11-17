@@ -399,11 +399,29 @@ body{ padding:16px; }
       const reg = v.reg || "UNKNOWN";
       const driver = (v.driver||"Unassigned").replace(/\./g," ");
 
-      let motTag = `<span class="tag info">MOT: n/a</span>`;
-      if (v.motDue){
-        const s = v.motStatus==="bad" ? "bad" : "warn";
-        motTag = `<span class="tag ${s}">MOT: ${v.motDue}</span>`;
-      }
+// --- MOT TAG WITH COLOUR LOGIC + DATE FORMAT ---
+let motTag = `<span class="tag info">MOT: n/a</span>`;
+if (v.motDue) {
+    const motDate = new Date(v.motDue);
+    const now = new Date();
+
+    // Format DD-MM-YYYY
+    const formatted =
+        String(motDate.getDate()).padStart(2, "0") + "-" +
+        String(motDate.getMonth() + 1).padStart(2, "0") + "-" +
+        motDate.getFullYear();
+
+    let diffDays = Math.ceil((motDate - now) / (1000 * 60 * 60 * 24));
+
+    let statusClass = "ok";  // green
+    if (diffDays < 0) {
+        statusClass = "bad"; // red – overdue
+    } else if (diffDays <= 30) {
+        statusClass = "warn"; // amber – within 30 days
+    }
+
+    motTag = `<span class="tag ${statusClass}">MOT: ${formatted}</span>`;
+}
 
       let serviceTag = `<span class="tag info">Service: n/a</span>`;
       if (v.nextServiceDate){
