@@ -85,6 +85,7 @@
     }
     .input{
       background:#fff; border:1px solid #d1d5db; border-radius:6px; padding:10px 12px; font-size:14px;
+      min-width:150px; /* ⭐ ADDED */
     }
     .input:focus{outline:none; border-color:var(--ml-blue)}
     .spacer{flex:1}
@@ -132,7 +133,7 @@
     input:checked + .slider{background:var(--ml-blue)}
     input:checked + .slider:before{transform:translateX(20px)}
 
-    /* Modal */
+    /* Modal, Spinner, misc unchanged below */
     .modal{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:60 }
     .modal.show{display:flex}
     .modal-card{ background:#fff; width:92%; max-width:480px; max-height:85vh; overflow:auto; border-radius:10px; padding:16px; box-shadow:0 10px 25px rgba(0,0,0,.15) }
@@ -142,7 +143,6 @@
     .field input{width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; background:#fff; box-sizing:border-box}
     .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:8px}
 
-    /* Spinner overlay */
     .mask{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:70; background:rgba(255,255,255,.55); backdrop-filter: blur(2px)}
     .mask.show{display:flex}
     .spinner{
@@ -155,6 +155,7 @@
   </style>
 </head>
 <body>
+
   <!-- Top bar -->
   <div class="topbar">
     <h1>User Administration</h1>
@@ -179,17 +180,27 @@
       then shows matching toggles per user. <b>Full Access</b> overrides everything.
       <div class="small">Mapped keys are saved BOTH as your legacy fields (so existing pages continue to work) and as the discovered id/href (future-proof for new buttons).</div>
     </div>
+
     <div class="util">
+
+      <!-- ⭐ ADDED USERNAME DROPDOWN -->
+      <select id="userFilter" class="input" style="max-width:180px;">
+        <option value="">All Users</option>
+      </select>
+      <!-- ⭐ END ADDITION -->
+
       <input id="searchBox" class="input" placeholder="Search users (name / username / number)…" />
       <div class="spacer"></div>
       <span class="mini" id="structCount">Scanning…</span>
       <a class="mini" href="main.html" target="_blank" rel="noopener">Open main.html</a>
       <a class="mini" id="debugLink" href="https://mostlane-users.jamie-def.workers.dev/debug/bindings" target="_blank" rel="noopener">Bindings</a>
     </div>
+
     <div id="list">Loading users…</div>
   </div>
 
-  <!-- Add User Modal -->
+  <!-- Add User Modal, Spinner etc. (UNCHANGED below) -->
+
   <div id="addUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Add New User</h3>
@@ -205,7 +216,6 @@
     </div>
   </div>
 
-  <!-- Spinner -->
   <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
   <script>
@@ -219,6 +229,7 @@
     const banner=document.getElementById('banner');const bannerText=document.getElementById('bannerText');
     const bannerClose=document.getElementById('bannerClose');const mask=document.getElementById('mask');
     const list=document.getElementById('list');const structCount=document.getElementById('structCount');
+
     function showMask(on=true){mask.classList.toggle('show',!!on);}
     function showBanner(msg,type='ok'){banner.classList.remove('ok','err','warn');banner.classList.add(type);
       bannerText.textContent=msg;banner.classList.add('show');setTimeout(()=>banner.classList.remove('show'),5000);}
@@ -248,9 +259,6 @@
       if(href)return href.replace(/\.html$/,'').replace(/[^\w]/g,'');return null;}
     function normalizeIdForKey(s){return(s||'').trim().toLowerCase().replace(/[^\w]+/g,'');}
 
-    // =========================
-    // Portal scan (recursive v2)
-    // =========================
     async function scanPortal(){
       const parser=new DOMParser();const visited=new Set();const struct=[];
       async function scanPage(url,depth=0){if(!url||visited.has(url))return[];visited.add(url);
@@ -264,75 +272,232 @@
 
     async function fetchAllUsers(){const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});if(!res.ok)throw new Error('Failed to fetch users');
       const data=await res.json();return data.Users||[];}
+
     async function saveUsers(users){const res=await fetch(SAVE_URL,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),body:JSON.stringify({Users:users})});
       if(!res.ok){const txt=await res.text().catch(()=> '');throw new Error('Save failed: '+txt);}}
 
     function switchControl(id,checked){const boxId=id+'__chk';return h('label',{class:'switch'},
       h('input',{type:'checkbox',id:boxId,...(checked?{checked:true}:{})}),h('span',{class:'slider'}));}
+
     function toggleRow(user,id,label,href,checked,indent=false){const pathSpan=href?h('span',{class:'path'},href):null;
       return h('div',{class:'toggle-row'+(indent?' indent':'')},h('div',{class:'lbl'},label||id||'(unnamed)',pathSpan?h('div',null,pathSpan):null),
         switchControl(`${user.Username}::${id||href||label||'unknown'}`,!!checked));}
-    function userCard(user,structure){const header=h('div',{class:'user-header'},h('div',null,
-      `${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`,' ',
-      h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)),
-      h('div',null,h('div',{class:'toggle-row'},h('span',{class:'lbl'},'Full Access'),
-      switchControl(`fa_${user.Username}`,(user.FullAccess||'').toLowerCase()==='yes'))));
+
+    function userCard(user,structure){
+      const header=h('div',{class:'user-header'},h('div',null,
+        `${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`,' ',
+        h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)),
+        h('div',null,h('div',{class:'toggle-row'},h('span',{class:'lbl'},'Full Access'),
+        switchControl(`fa_${user.Username}`,(user.FullAccess||'').toLowerCase()==='yes'))));
       const sub=h('div',{class:'user-sub'},`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`);
       const grid=h('div',{class:'grid'});
       grid.appendChild(h('div',{class:'section-title'},'Main Menu',h('span',{class:'pill'},'auto')));
-      structure.forEach(p=>{const pid=p.id||normalizeIdForKey(p.href||p.label);
-        const legacy=mapIdToLegacyKey(pid,p.label,p.href);const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
-        grid.appendChild(toggleRow(user,pid,p.label,p.href,currentOn,false));});
-      const subs=structure.flatMap(s=>s.subpages||[]);if(subs.length){grid.appendChild(h('div',{class:'section-title',style:'grid-column:1/-1'},'Sub-menus',h('span',{class:'pill'},String(subs.length))));
-        subs.forEach(sp=>{const sid=sp.id||normalizeIdForKey(sp.href||sp.label);const sleg=mapIdToLegacyKey(sid,sp.label,sp.href);
-          const on=((user[sleg]||user[sid]||'').toLowerCase()==='yes');grid.appendChild(toggleRow(user,sid,sp.label,sp.href,on,true));});}
-      return h('div',{class:'user-card'},header,sub,grid);}
-    function renderUsers(users,structure){list.innerHTML='';if(!users.length){list.textContent='No users found.';return;}
-      users.forEach(u=>list.appendChild(userCard(u,structure)));}
+      structure.forEach(p=>{
+        const pid=p.id||normalizeIdForKey(p.href||p.label);
+        const legacy=mapIdToLegacyKey(pid,p.label,p.href);
+        const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
+        grid.appendChild(toggleRow(user,pid,p.label,p.href,currentOn,false));
+      });
+      const subs=structure.flatMap(s=>s.subpages||[]);
+      if(subs.length){
+        grid.appendChild(h('div',{class:'section-title',style:'grid-column:1/-1'},'Sub-menus',h('span',{class:'pill'},String(subs.length))));
+        subs.forEach(sp=>{
+          const sid=sp.id||normalizeIdForKey(sp.href||sp.label);
+          const sleg=mapIdToLegacyKey(sid,sp.label,sp.href);
+          const on=((user[sleg]||user[sid]||'').toLowerCase()==='yes');
+          grid.appendChild(toggleRow(user,sid,sp.label,sp.href,on,true));
+        });
+      }
+      return h('div',{class:'user-card'},header,sub,grid);
+    }
+
+    function renderUsers(users,structure){
+      list.innerHTML='';
+      if(!users.length){list.textContent='No users found.';return;}
+      users.forEach(u=>list.appendChild(userCard(u,structure)));
+    }
+
     let __USERS=[],__STRUCT=[];
-    async function buildUI(){showMask(true);try{const[users,struct]=await Promise.all([fetchAllUsers(),scanPortal()]);__USERS=users;__STRUCT=struct;renderUsers(__USERS,__STRUCT);}
-      catch(err){console.error(err);list.textContent='Failed to load. Check Worker and network.';showBanner('❌ Failed to load users or scan portal','err');}
-      finally{showMask(false);}}
 
-    let saving=false;async function saveAll(){if(saving)return;if(!__USERS||!__STRUCT)return;saving=true;showMask(true);
-      try{const users=JSON.parse(JSON.stringify(__USERS));const struct=__STRUCT;
-        users.forEach(u=>{const faEl=document.getElementById(`fa_${u.Username}__chk`);u.FullAccess=(faEl&&faEl.checked)?'Yes':'No';
-          const assign=(id,label,href)=>{const pid=id||normalizeIdForKey(href||label);const legacy=mapIdToLegacyKey(pid,label,href);
-            const chk=document.getElementById(`${u.Username}::${pid}__chk`);const val=(chk&&chk.checked)?'Yes':'No';
-            if(legacy)u[legacy]=val;if(pid)u[pid]=val;};
-          struct.forEach(p=>{assign(p.id,p.label,p.href);(p.subpages||[]).forEach(sp=>assign(sp.id,sp.label,sp.href));});});
-        await saveUsers(users);__USERS=users;showBanner('✅ Changes saved successfully.','ok');}
-      catch(err){console.error(err);showBanner('❌ Save failed. '+(err?.message||''),'err');}
-      finally{showMask(false);saving=false;}}
+    async function buildUI(){
+      showMask(true);
+      try{
+        const[users,struct]=await Promise.all([fetchAllUsers(),scanPortal()]);
+        __USERS=users;
+        __STRUCT=struct;
 
-    const modal=document.getElementById('addUserModal');const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
+        /* ⭐ ADDED: populate username dropdown */
+        const filter = document.getElementById("userFilter");
+        filter.innerHTML = '<option value="">All Users</option>';
+        __USERS.forEach(u=>{
+          filter.innerHTML += `<option value="${u.Username}">${u.Username}</option>`;
+        });
+        /* ⭐ END ADDITION */
+
+        renderUsers(__USERS,__STRUCT);
+      }
+      catch(err){
+        console.error(err);
+        list.textContent='Failed to load. Check Worker and network.';
+        showBanner('❌ Failed to load users or scan portal','err');
+      }
+      finally{
+        showMask(false);
+      }
+    }
+
+    let saving=false;
+    async function saveAll(){
+      if(saving)return;
+      if(!__USERS||!__STRUCT)return;
+      saving=true;
+      showMask(true);
+      try{
+        const users=JSON.parse(JSON.stringify(__USERS));
+        const struct=__STRUCT;
+
+        users.forEach(u=>{
+          const faEl=document.getElementById(`fa_${u.Username}__chk`);
+          u.FullAccess=(faEl&&faEl.checked)?'Yes':'No';
+
+          const assign=(id,label,href)=>{
+            const pid=id||normalizeIdForKey(href||label);
+            const legacy=mapIdToLegacyKey(pid,label,href);
+            const chk=document.getElementById(`${u.Username}::${pid}__chk`);
+            const val=(chk&&chk.checked)?'Yes':'No';
+            if(legacy)u[legacy]=val;
+            if(pid)u[pid]=val;
+          };
+
+          struct.forEach(p=>{
+            assign(p.id,p.label,p.href);
+            (p.subpages||[]).forEach(sp=>assign(sp.id,sp.label,sp.href));
+          });
+        });
+
+        await saveUsers(users);
+        __USERS=users;
+        showBanner('✅ Changes saved successfully.','ok');
+      }
+      catch(err){
+        console.error(err);
+        showBanner('❌ Save failed. '+(err?.message||''),'err');
+      }
+      finally{
+        showMask(false);
+        saving=false;
+      }
+    }
+
+    const modal=document.getElementById('addUserModal');
+    const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
-    document.getElementById('addUserBtn').addEventListener('click',openAdd);document.getElementById('cancelAdd').addEventListener('click',closeAdd);
-    async function createUser(){try{showMask(true);const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});const data=await res.json();
-      const users=data.Users||[];const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
-      const nextNum=String(maxNum+1);const firstName=document.getElementById('firstName').value.trim();const lastName=document.getElementById('lastName').value.trim();
-      const email=document.getElementById('email').value.trim();const username=document.getElementById('username').value.trim();
-      const password=document.getElementById('password').value;const vehicle=document.getElementById('vehicle').value.trim();
-      const empType=document.getElementById('employmentType').value.trim();const spPath=document.getElementById('sharepoint').value.trim();
-      if(!firstName||!lastName||!username||!password){showBanner('❌ Please complete First, Last, Username and Password.','err');return;}
-      const hashedPassword=await sha256Hex(password);
-      const newUser={EngineerNumber:nextNum,FirstName:firstName,LastName:lastName,Username:username,Email:email,HashedPassword:hashedPassword,
-        VehicleAssigned:vehicle,EmploymentType:empType||'Employed',Status:'Active',FullAccess:'No',SharePointPath:spPath};
-      users.push(newUser);await saveUsers(users);closeAdd();showBanner('✅ User added.','ok');buildUI();}
-      catch(err){console.error(err);showBanner('❌ Could not add user. '+(err?.message||''),'err');}
-      finally{showMask(false);}}
+
+    document.getElementById('addUserBtn').addEventListener('click',openAdd);
+    document.getElementById('cancelAdd').addEventListener('click',closeAdd);
+
+    async function createUser(){
+      try{
+        showMask(true);
+        const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});const data=await res.json();
+        const users=data.Users||[];
+        const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
+        const nextNum=String(maxNum+1);
+        const firstName=document.getElementById('firstName').value.trim();
+        const lastName=document.getElementById('lastName').value.trim();
+        const email=document.getElementById('email').value.trim();
+        const username=document.getElementById('username').value.trim();
+        const password=document.getElementById('password').value;
+        const vehicle=document.getElementById('vehicle').value.trim();
+        const empType=document.getElementById('employmentType').value.trim();
+        const spPath=document.getElementById('sharepoint').value.trim();
+
+        if(!firstName||!lastName||!username||!password){
+          showBanner('❌ Please complete First, Last, Username and Password.','err');
+          return;
+        }
+
+        const hashedPassword=await sha256Hex(password);
+
+        const newUser={
+          EngineerNumber:nextNum,
+          FirstName:firstName,
+          LastName:lastName,
+          Username:username,
+          Email:email,
+          HashedPassword:hashedPassword,
+          VehicleAssigned:vehicle,
+          EmploymentType:empType||'Employed',
+          Status:'Active',
+          FullAccess:'No',
+          SharePointPath:spPath
+        };
+
+        users.push(newUser);
+        await saveUsers(users);
+        closeAdd();
+        showBanner('✅ User added.','ok');
+        buildUI();
+      }
+      catch(err){
+        console.error(err);
+        showBanner('❌ Could not add user. '+(err?.message||''),'err');
+      }
+      finally{
+        showMask(false);
+      }
+    }
 
     document.getElementById('createUserBtn').addEventListener('click',createUser);
+
+    /* ⭐ REPLACED SEARCH LOGIC WITH COMBINED FILTER */
+    function applyFilters() {
+      const q = (searchBox.value || '').trim().toLowerCase();
+      const selected = document.getElementById('userFilter').value;
+
+      let filtered = __USERS;
+
+      if (selected) {
+        filtered = filtered.filter(u => u.Username === selected);
+      }
+
+      if (q) {
+        filtered = filtered.filter(u =>
+          (u.FirstName || '').toLowerCase().includes(q) ||
+          (u.LastName || '').toLowerCase().includes(q) ||
+          (u.Username || '').toLowerCase().includes(q) ||
+          String(u.EngineerNumber || '').includes(q)
+        );
+      }
+
+      renderUsers(filtered, __STRUCT);
+    }
+
     const searchBox=document.getElementById('searchBox');
-    searchBox.addEventListener('input',debounce(()=>{const q=(searchBox.value||'').trim().toLowerCase();
-      const filtered=!q?__USERS:__USERS.filter(u=>(u.FirstName||'').toLowerCase().includes(q)||(u.LastName||'').toLowerCase().includes(q)
-      ||(u.Username||'').toLowerCase().includes(q)||String(u.EngineerNumber||'').includes(q));renderUsers(filtered,__STRUCT);},150));
+    searchBox.addEventListener('input', debounce(applyFilters, 150));
+    document.getElementById('userFilter').addEventListener('change', applyFilters);
+    /* ⭐ END ADDITION */
+
     document.getElementById('saveBtn').addEventListener('click',saveAll);
     document.getElementById('reloadBtn').addEventListener('click',buildUI);
-    document.getElementById('rescanBtn').addEventListener('click',async()=>{showMask(true);
-      try{__STRUCT=await scanPortal();renderUsers(__USERS,__STRUCT);showBanner('🔄 Scan complete. Buttons refreshed.','ok');}
-      catch(e){console.error(e);showBanner('❌ Scan failed','err');}finally{showMask(false);}});
+    document.getElementById('rescanBtn').addEventListener('click',async()=>{
+      showMask(true);
+      try{
+        __STRUCT=await scanPortal();
+        renderUsers(__USERS,__STRUCT);
+        showBanner('🔄 Scan complete. Buttons refreshed.','ok');
+      }
+      catch(e){
+        console.error(e);
+        showBanner('❌ Scan failed','err');
+      }
+      finally{
+        showMask(false);
+      }
+    });
+
     (async()=>{await buildUI();})();
   </script>
+
 </body>
 </html>
