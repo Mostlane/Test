@@ -190,7 +190,7 @@
 
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- ⭐ PERMISSIONS + AUTO FULL-WIDTH LAST BUTTON ⭐ -->
+  <!-- ⭐ PERMISSIONS (NO MORE FULL-WIDTH LOGIC) ⭐ -->
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
 
@@ -209,6 +209,9 @@
 
         const buttons = Array.from(document.querySelectorAll("a.button"));
 
+        // Ensure no stray full-width classes
+        buttons.forEach(btn => btn.classList.remove("full-width"));
+
         // Permission-based hiding
         buttons.forEach(btn => {
           const id = btn.id || "";
@@ -221,7 +224,9 @@
             if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
           });
 
-          if (!fullAccess && !allowed) {
+          if (fullAccess || allowed) {
+            btn.style.display = "flex";
+          } else {
             btn.style.display = "none";
           }
 
@@ -230,31 +235,15 @@
           }
         });
 
-        /* ---------------------------
-           AUTO FULL-WIDTH LAST TILE
-        ---------------------------- */
-        const visible = buttons.filter(b => b.style.display !== "none");
-
-        // Remove any existing full-width
-        visible.forEach(btn => btn.classList.remove("full-width"));
-
-        if (visible.length % 2 !== 0) {
-          // If odd number → last visible tile becomes full width
-          visible[visible.length - 1].classList.add("full-width");
-        }
-
-        /* ---------------------------
-           ADMIN MODE (show hidden)
-        ---------------------------- */
+        /* Admin view toggle (unchanged) */
         const toggle = document.getElementById("toggleView");
         let adminMode = false;
 
         toggle.addEventListener("click", () => {
           adminMode = !adminMode;
-
           buttons.forEach(btn => {
             if (btn.style.display === "none") {
-              btn.style.display = "flex";   // reveal it
+              btn.style.display = "flex";
               if (adminMode) btn.classList.add("hidden-btn");
               else btn.classList.remove("hidden-btn");
             }
