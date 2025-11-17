@@ -97,7 +97,6 @@
       margin-right: 4px;
     }
 
-    /* Admin toggle */
     .admin-toggle {
       margin-top: 25px;
       font-size: 14px;
@@ -126,71 +125,41 @@
   <div class="menu-grid" id="menuGrid">
 
     <!-- ALL BUTTONS (permissions will hide/show) -->
-    <a class="button" href="index.html" id="checkinBtn">
-      <span class="emoji">🕒</span> Check In / Out
-    </a>
+    <a class="button" href="index.html" id="checkinBtn"><span class="emoji">🕒</span> Check In / Out</a>
 
-    <a class="button" href="vehicles.html" id="vehiclesBtn">
-      <span class="emoji">🚐</span> Vehicles
-    </a>
+    <a class="button" href="vehicles.html" id="vehiclesBtn"><span class="emoji">🚐</span> Vehicles</a>
 
-    <a class="button" href="holiday.html" id="holidayBtn">
-      <span class="emoji">📅</span> Holiday Requests
-    </a>
+    <a class="button" href="holiday.html" id="holidayBtn"><span class="emoji">📅</span> Holiday Requests</a>
 
-    <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn">
-      <span class="emoji">🛠️</span> Engineers Hours Menu
-    </a>
+    <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
 
-    <a class="button" href="purchase.html" id="purchaseBtn">
-      <span class="emoji">🧾</span> Generate Purchase Order Reference
-    </a>
+    <a class="button" href="purchase.html" id="purchaseBtn"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
 
-    <a class="button" href="sites.html" id="sitesBtn">
-      <span class="emoji">📍</span> Manage Sites
-    </a>
+    <a class="button" href="sites.html" id="sitesBtn"><span class="emoji">📍</span> Manage Sites</a>
 
-    <a class="button" href="asset-menu.html">
-      <span class="emoji">⚙️</span> Plant & Equipment
-    </a>
+    <a class="button" href="asset-menu.html"><span class="emoji">⚙️</span> Plant & Equipment</a>
 
-    <a class="button" href="#" id="my-documents-btn">
-      <span class="emoji">📄</span> My Documents
-    </a>
+    <a class="button" href="#" id="my-documents-btn"><span class="emoji">📄</span> My Documents</a>
 
-    <a class="button" href="weekly.html" id="weeklyBtn">
-      <span class="emoji">📊</span> Weekly Summary
-    </a>
+    <a class="button" href="weekly.html" id="weeklyBtn"><span class="emoji">📊</span> Weekly Summary</a>
 
-    <a class="button" href="forms.html" id="formsBtn">
-      <span class="emoji">📝</span> Forms
-    </a>
+    <a class="button" href="forms.html" id="formsBtn"><span class="emoji">📝</span> Forms</a>
 
-    <a class="button" href="compliance.html" id="complianceBtn">
-      <span class="emoji">✔️</span> Compliance
-    </a>
+    <a class="button" href="compliance.html" id="complianceBtn"><span class="emoji">✔️</span> Compliance</a>
 
-    <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn">
-      <span class="emoji">⏳</span> Hours Dashboard
-    </a>
+    <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn"><span class="emoji">⏳</span> Hours Dashboard</a>
 
-    <a class="button" href="po-menu.html" id="poMenuBtn">
-      <span class="emoji">💷</span> Purchase Orders
-    </a>
+    <a class="button" href="po-menu.html" id="poMenuBtn"><span class="emoji">💷</span> Purchase Orders</a>
 
-    <a class="button" href="users-admin.html" id="usersAdminBtn">
-      <span class="emoji">👥</span> Users
-    </a>
+    <a class="button" href="users-admin.html" id="usersAdminBtn"><span class="emoji">👥</span> Users</a>
 
-    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
-      <span class="emoji">🚪</span> Logout
-    </a>
+    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';"><span class="emoji">🚪</span> Logout</a>
 
   </div>
 
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- ⭐ PERMISSIONS (NO MORE FULL-WIDTH LOGIC) ⭐ -->
+  <!-- ⭐ PERMISSIONS + FULL-WIDTH LAST TILE FIX ⭐ -->
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
 
@@ -209,10 +178,7 @@
 
         const buttons = Array.from(document.querySelectorAll("a.button"));
 
-        // Ensure no stray full-width classes
-        buttons.forEach(btn => btn.classList.remove("full-width"));
-
-        // Permission-based hiding
+        // Permission-based visibility
         buttons.forEach(btn => {
           const id = btn.id || "";
           const label = (btn.textContent || "").trim().replace(/\s+/g, "");
@@ -235,7 +201,23 @@
           }
         });
 
-        /* Admin view toggle (unchanged) */
+        // ----------------------------------
+        // ⭐ AUTO FULL-WIDTH LAST VISIBLE TILE
+        // ----------------------------------
+        setTimeout(() => {
+          buttons.forEach(b => b.classList.remove("full-width"));
+
+          const visible = buttons.filter(btn =>
+            btn.style.display !== "none"
+          );
+
+          if (visible.length % 2 === 1) {
+            const last = visible[visible.length - 1];
+            last.classList.add("full-width");
+          }
+        }, 50);
+
+        // Admin view toggle
         const toggle = document.getElementById("toggleView");
         let adminMode = false;
 
