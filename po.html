@@ -456,6 +456,79 @@
 
   document.addEventListener('DOMContentLoaded',init);
 </script>
+<!-- ==========================
+     OFFLINE WARNING MODAL
+     ========================== -->
+<div id="offlineModal" style="
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  font-family: Segoe UI, sans-serif;
+">
+  <div style="
+    background: #fff;
+    padding: 24px;
+    border-radius: 12px;
+    width: calc(100% - 60px);
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  ">
+    <h2 style="color:#003366; margin-top:0;">⚠️ Offline Mode</h2>
+    <p style="font-size: 16px; color:#333;">
+      You are currently offline and cannot raise a Purchase Order.
+    </p>
+    <p style="font-size: 16px; margin-top:10px;">
+      Please contact the office to obtain a PO number:
+    </p>
+
+    <p style="font-size: 20px; font-weight: bold; margin: 12px 0;">
+      📞 <a href="tel:02380262000" style="color:#003b82;">
+        02380 262000
+      </a>
+    </p>
+
+    <p style="font-size: 14px; color:#666; margin-top:12px;">
+      This message will disappear when your connection returns.
+    </p>
+  </div>
+</div>
+
+<script>
+function showOfflineModal() {
+  document.getElementById("offlineModal").style.display = "flex";
+}
+
+function hideOfflineModal() {
+  document.getElementById("offlineModal").style.display = "none";
+}
+
+// --- Detect offline on page load ---
+if (!navigator.onLine) {
+  showOfflineModal();
+}
+
+// --- Live connection monitoring ---
+window.addEventListener("offline", showOfflineModal);
+window.addEventListener("online", hideOfflineModal);
+
+// --- Block form submission if offline ---
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("poForm");
+  if (!form) return;
+
+  form.addEventListener("submit", e => {
+    if (!navigator.onLine) {
+      e.preventDefault();
+      showOfflineModal();
+    }
+  });
+});
+</script>
 
 </body>
 </html>
