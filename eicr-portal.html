@@ -373,7 +373,7 @@ async function fetchOneSource(s) {
 
   return arr
     .map(r => normaliseRecord(r, s.label))
-    .filter(r => r.storeCode && r.siteName);
+   .filter(r => r.storeCode && (r.storeName ?? r.siteName ?? "").trim() !== "");
 }
 async function fetchAllProgressive(){
   allData = [];
