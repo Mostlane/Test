@@ -173,17 +173,17 @@
 <script>
   const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
   const USERS_URL = RAW + 'users.json';
-  const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/get-suppliers";
+const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/get-suppliers";
   const VEHICLES_URL = RAW + 'vehicles.json';
 
   // Updated endpoints for new PO worker
   const SITE_ENDPOINTS = {
-    retail: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=retail',
-    els: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els',
-    els_private: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els_private',
-    cobra: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=cobra',
-    wenzels: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=wenzels',
-    projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
+   retail: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=retail',
+els: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els',
+els_private: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els_private',
+cobra: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=cobra',
+wenzels: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=wenzels',
+projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
   };
 
   const CLOUDFLARE_ENDPOINT = 'https://mostlane-po.jamie-def.workers.dev/add-po';
