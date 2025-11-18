@@ -99,6 +99,41 @@
       button, select { width: 100%; }
       .week-header { font-size: 14px; text-align: center; }
     }
+
+    /* Offline modal */
+    #offlineModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      font-family: Segoe UI, sans-serif;
+    }
+    #offlineModal .content {
+      background: #fff;
+      padding: 24px;
+      border-radius: 12px;
+      width: calc(100% - 60px);
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+    #offlineModal h2 {
+      color:#003366;
+      margin-top:0;
+    }
+    #offlineModal p {
+      font-size: 16px;
+      color:#333;
+      margin: 6px 0;
+    }
+    #offlineModal a {
+      color:#003b82;
+      text-decoration:none;
+      font-weight:bold;
+    }
   </style>
 </head>
 <body>
@@ -131,29 +166,58 @@
     <div id="poContainer">Loading...</div>
   </div>
 
+  <!-- OFFLINE WARNING MODAL -->
+  <div id="offlineModal">
+    <div class="content">
+      <h2>⚠️ Offline Mode</h2>
+      <p>You are currently offline and may not be able to view or refresh your Purchase Orders.</p>
+      <p>If you urgently need a PO number while offline, please contact the office:</p>
+      <p style="font-size: 20px; font-weight: bold; margin: 12px 0;">
+        📞 <a href="tel:02380262000">02380 262000</a>
+      </p>
+      <p style="font-size: 14px; color:#666; margin-top:12px;">
+        This message will disappear when your connection returns.
+      </p>
+    </div>
+  </div>
+
   <script>
-  const CLOUDFLARE_ENDPOINT = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
+  // === ENDPOINTS ===
+  const CLOUDFLARE_ENDPOINT = 'https://mostlane-po.jamie-def.workers.dev/get-po'; // list POs
+  const USERS_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/users.json';
+
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
 
   // 🗓 Parse UK date (DD/MM/YYYY)
   function parseUKDate(dateStr) {
     if (!dateStr) return null;
-    const [d, m, y] = dateStr.split('/');
-    if (!d || !m || !y) return null;
-    return new Date(`${y}-${m}-${d}T00:00:00`);
+    if (dateStr.includes('/')) {
+      // DD/MM/YYYY
+      const [d, m, y] = dateStr.split('/');
+      if (!d || !m || !y) return null;
+      return new Date(`${y}-${m}-${d}T00:00:00`);
+    } else if (dateStr.includes('-')) {
+      // YYYY-MM-DD (ISO date)
+      const [y, m, d] = dateStr.split('-');
+      if (!y || !m || !d) return null;
+      return new Date(`${y}-${m}-${d}T00:00:00`);
+    }
+    return null;
   }
+
   function formatDateDisplay(dateStr) {
     const d = parseUKDate(dateStr);
     if (!d || isNaN(d)) return '';
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
+
   function getWeekStart(dateStr) {
     const d = parseUKDate(dateStr);
     if (!d || isNaN(d)) return 'Unknown';
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const day = d.getDay(); // 0 = Sun, 1 = Mon
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // back to Monday
     const monday = new Date(d.setDate(diff));
-    return monday.toISOString().split('T')[0];
+    return monday.toISOString().split('T')[0]; // YYYY-MM-DD
   }
 
   // 🔎 Date filter
@@ -168,6 +232,47 @@
     });
   }
 
+  // 🔐 Permission check: FullAccess == "Yes" OR myposhtml == "Yes"
+  async function ensurePOPermission() {
+    const container = document.getElementById('poContainer');
+    const username = sessionStorage.getItem('mostlaneUser') || '';
+
+    if (!username) {
+      container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">You are not logged in.</p>`;
+      throw new Error('No logged-in user');
+    }
+
+    try {
+      const res = await fetch(USERS_URL + '?v=' + Date.now(), { cache: 'no-store' });
+      const json = await res.json();
+      const usersArr = json.Users || json || [];
+      const rec = usersArr.find(u => u.Username === username || u.username === username);
+
+      if (!rec) {
+        container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">User record not found in permissions list.</p>`;
+        throw new Error('User not found');
+      }
+
+      const fullAccess = (rec.FullAccess || '').toString().toLowerCase() === 'yes';
+      const myPO = (rec['myposhtml'] || rec['mypos'] || '').toString().toLowerCase() === 'yes';
+
+      if (!fullAccess && !myPO) {
+        container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">
+          You do not have permission to view purchase orders.<br/>
+          Please contact the office if you believe this is incorrect.
+        </p>`;
+        throw new Error('No permission for My POs');
+      }
+    } catch (err) {
+      if (!container.innerHTML) {
+        container.innerHTML = `<p style="color:#b45309;font-weight:bold;">
+          ⚠️ Unable to verify permissions. Please try again or contact the office.
+        </p>`;
+      }
+      throw err;
+    }
+  }
+
   async function loadPOs() {
     const container = document.getElementById('poContainer');
     const supplierFilter = document.getElementById('supplierFilter');
@@ -175,22 +280,28 @@
     const username = sessionStorage.getItem('mostlaneUser') || '';
     const engineerName = dotToSpace(username);
 
+    if (!navigator.onLine) {
+      container.textContent = '⚠️ Offline – cannot load Purchase Orders.';
+      return;
+    }
+
     try {
       const res = await fetch(CLOUDFLARE_ENDPOINT, { cache: 'no-store' });
       const data = await res.json();
-      const myPOs = data.filter(po => po.engineer === engineerName);
+      const myPOs = (Array.isArray(data) ? data : data.data || []).filter(po => po.engineer === engineerName);
 
       // Populate supplier filter
       const suppliers = [...new Set(myPOs.map(p => p.supplierName))].sort();
       suppliers.forEach(name => {
         const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
+        opt.value = name;
+        opt.textContent = name;
         supplierFilter.appendChild(opt);
       });
 
       // Default filter render
-      const filtered = filterByDate(myPOs, dateRange.value);
-      renderPOs(filtered);
+      const initial = filterByDate(myPOs, dateRange.value);
+      renderPOs(initial);
 
       supplierFilter.addEventListener('change', () => {
         const supplierVal = supplierFilter.value;
@@ -229,22 +340,43 @@
       grouped[weekStart].push(p);
     });
 
-    const sortedWeeks = Object.keys(grouped).sort((a,b)=>new Date(b)-new Date(a));
+    const sortedWeeks = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
 
     sortedWeeks.forEach(weekStart => {
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-
       const header = document.createElement('div');
       header.className = 'week-header';
-      const weekText = weekStart === 'Unknown'
-        ? 'Unknown Date'
-        : `Week of ${formatDateDisplay(weekStart)} → ${formatDateDisplay(weekEnd.toISOString().split('T')[0])}`;
-      header.textContent = weekText;
+
+      if (weekStart === 'Unknown') {
+        header.textContent = 'Unknown Date';
+      } else {
+        const monday = parseUKDate(weekStart); // weekStart is YYYY-MM-DD
+        const sunday = new Date(monday);
+        sunday.setDate(sunday.getDate() + 6);
+        const weekText = `Week of ${formatDateDisplay(weekStart)} → ${formatDateDisplay(sunday.toISOString().split('T')[0])}`;
+        header.textContent = weekText;
+      }
+
       container.appendChild(header);
 
       const wrapper = document.createElement('div');
       wrapper.className = 'table-wrapper';
+
+      const rowsHtml = grouped[weekStart]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .map(po => `
+          <tr>
+            <td>${formatDateDisplay(po.date)}</td>
+            <td>${po.poNumber}</td>
+            <td>${po.supplierName}</td>
+            <td>${po.description}</td>
+            <td>${po.workType}</td>
+            <td>${
+              po.latitude && po.longitude
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${po.latitude},${po.longitude}" target="_blank">📍</a>`
+                : ''
+            }</td>
+          </tr>
+        `).join('');
 
       const table = document.createElement('table');
       table.innerHTML = `
@@ -258,30 +390,38 @@
             <th>Map</th>
           </tr>
         </thead>
-        <tbody>
-          ${grouped[weekStart]
-            .sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt))
-            .map(po => `
-              <tr>
-                <td>${formatDateDisplay(po.date)}</td>
-                <td>${po.poNumber}</td>
-                <td>${po.supplierName}</td>
-                <td>${po.description}</td>
-                <td>${po.workType}</td>
-                <td>${
-                  po.latitude && po.longitude
-                    ? `<a class="map-link" href="https://www.google.com/maps?q=${po.latitude},${po.longitude}" target="_blank">📍</a>`
-                    : ''
-                }</td>
-              </tr>
-            `).join('')}
-        </tbody>`;
+        <tbody>${rowsHtml}</tbody>
+      `;
+
       wrapper.appendChild(table);
       container.appendChild(wrapper);
     });
   }
 
-  document.addEventListener('DOMContentLoaded', loadPOs);
+  // Offline modal helpers
+  function showOfflineModal() {
+    document.getElementById('offlineModal').style.display = 'flex';
+  }
+  function hideOfflineModal() {
+    document.getElementById('offlineModal').style.display = 'none';
+  }
+
+  // Init
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Offline state at load
+    if (!navigator.onLine) showOfflineModal();
+
+    window.addEventListener('offline', showOfflineModal);
+    window.addEventListener('online', hideOfflineModal);
+
+    try {
+      await ensurePOPermission();
+      await loadPOs();
+    } catch (e) {
+      // permission or other fatal error already shown in UI
+      console.warn(e);
+    }
+  });
   </script>
 </body>
 </html>
