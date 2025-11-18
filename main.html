@@ -25,7 +25,6 @@
       align-items: center;
     }
 
-    /* USER DISPLAY */
     #user-display {
       font-size: 18px;
       font-weight: bold;
@@ -33,9 +32,6 @@
       margin-bottom: 18px;
     }
 
-    /* --------------------------
-       RESPONSIVE GRID LAYOUT
-    --------------------------- */
     .menu-grid {
       width: 92%;
       max-width: 850px;
@@ -44,7 +40,6 @@
       grid-template-columns: repeat(2, 1fr);
     }
 
-    /* Desktop = 3 columns */
     @media (min-width: 800px) {
       .menu-grid {
         grid-template-columns: repeat(3, 1fr);
@@ -54,16 +49,12 @@
     .full-width {
       grid-column: span 2 !important;
     }
-
     @media (min-width: 800px) {
       .full-width {
         grid-column: span 3 !important;
       }
     }
 
-    /* --------------------------
-       TILE DESIGN (mockup-accurate)
-    --------------------------- */
     a.button {
       display: flex !important;
       align-items: center;
@@ -97,7 +88,6 @@
       margin-right: 4px;
     }
 
-    /* ⭐ Center stretched full-width buttons */
     .button.full-width {
       justify-content: center;
       text-align: center;
@@ -127,10 +117,8 @@
     if (user) document.getElementById("userName").textContent = user;
   </script>
 
-  <!-- ⭐ GRID CONTAINER -->
   <div class="menu-grid" id="menuGrid">
 
-    <!-- ALL BUTTONS -->
     <a class="button" href="index.html" id="checkinBtn"><span class="emoji">🕒</span> Check In / Out</a>
     <a class="button" href="vehicles.html" id="vehiclesBtn"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="holiday.html" id="holidayBtn"><span class="emoji">📅</span> Holiday Requests</a>
@@ -145,13 +133,15 @@
     <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="po-menu.html" id="poMenuBtn"><span class="emoji">💷</span> Purchase Orders</a>
     <a class="button" href="users-admin.html" id="usersAdminBtn"><span class="emoji">👥</span> Users</a>
-    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';"><span class="emoji">🚪</span> Logout</a>
+    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+      <span class="emoji">🚪</span> Logout
+    </a>
 
   </div>
 
   <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
 
-  <!-- ⭐ PERMISSIONS + FULL-WIDTH LAST TILE ⭐ -->
+  <!-- ⭐ FIXED PERMISSIONS LOGIC -->
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
 
@@ -170,11 +160,17 @@
 
         const buttons = Array.from(document.querySelectorAll("a.button"));
 
-        // Hide/show based on permissions
         buttons.forEach(btn => {
+
           const id = btn.id || "";
-          const label = (btn.textContent || "").trim().replace(/\s+/g, "");
+
+          // ⭐ FIX: Clean label without emojis
+          let label = btn.innerText || "";
+          label = label.replace(/[\p{Emoji_Presentation}\p{Emoji}\uFE0F]/gu, ""); 
+          label = label.trim().replace(/\s+/g, "");
+
           const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, "");
+
           const keys = [id, label, href];
 
           let allowed = false;
@@ -189,7 +185,7 @@
           }
         });
 
-        // ⭐ AUTO FULL-WIDTH LAST VISIBLE TILE
+        // FULL WIDTH LAST TILE
         setTimeout(() => {
           buttons.forEach(b => b.classList.remove("full-width"));
 
@@ -202,7 +198,7 @@
           }
         }, 60);
 
-        // Admin mode
+        // ADMIN OVERRIDE
         const toggle = document.getElementById("toggleView");
         let adminMode = false;
 
@@ -212,7 +208,9 @@
           buttons.forEach(btn => {
             if (btn.style.display === "none") {
               btn.style.display = "flex";
-              adminMode ? btn.classList.add("hidden-btn") : btn.classList.remove("hidden-btn");
+              adminMode ?
+                btn.classList.add("hidden-btn") :
+                btn.classList.remove("hidden-btn");
             }
           });
 
