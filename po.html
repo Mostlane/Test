@@ -173,21 +173,23 @@
 <script>
   const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
   const USERS_URL = RAW + 'users.json';
-const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/get-suppliers";
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // Updated endpoints for new PO worker
+  // ---------------------------
+  // UPDATED ENDPOINTS (MATCHING YOUR WORKER)
+  // ---------------------------
+  const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/suppliers";
+
   const SITE_ENDPOINTS = {
-   retail: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=retail',
-els: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els',
-els_private: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=els_private',
-cobra: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=cobra',
-wenzels: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=wenzels',
-projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
+    retail:   "https://mostlane-po.jamie-def.workers.dev/sites/retail",
+    els:      "https://mostlane-po.jamie-def.workers.dev/sites/els",
+    els_private: "https://mostlane-po.jamie-def.workers.dev/sites/els_private",
+    cobra:    "https://mostlane-po.jamie-def.workers.dev/sites/cobra",
+    wenzels:  "https://mostlane-po.jamie-def.workers.dev/sites/wenzels",
+    projects: "https://mostlane-po.jamie-def.workers.dev/sites/projects"
   };
 
-  const CLOUDFLARE_ENDPOINT = 'https://mostlane-po.jamie-def.workers.dev/add-po';
-  const API_KEY = '';
+  const CLOUDFLARE_ENDPOINT = "https://mostlane-po.jamie-def.workers.dev/po/create";
 
   const byId = id => document.getElementById(id);
   const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
@@ -197,74 +199,68 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
 
   let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
 
-  async function fetchSitesForKey(key) {
-    const url = SITE_ENDPOINTS[key];
-    if (!url) return [];
-    try {
-      const data = await fetchJSON(url);
-      if (!data) return [];
-
-      let list = [];
-
-      if (Array.isArray(data)) {
-        if (data.length === 1 && typeof data[0] === "object" && !Array.isArray(data[0])) {
-          const big = data[0];
-          for (const code in big) {
-            const s = big[code];
-            const storeCode = String(s.branchCode || s["Branch Code"] || code || "").padStart(4, "0");
-            const storeName = s.storeName || s["Store Name"] || s.siteName || "";
-            list.push({ code: storeCode, name: storeName });
-          }
-        } else {
-          data.forEach(s => {
-            const storeCode = String(s["Branch Code"] || s.branchCode || s.siteCode || "").padStart(4, "0");
-            const storeName = s["Store Name"] || s.storeName || s.siteName || "";
-            list.push({ code: storeCode, name: storeName });
-          });
-        }
-      } else if (typeof data === "object") {
-        for (const code in data) {
-          const s = data[code];
-          const storeCode = String(s.branchCode || s["Branch Code"] || code || "").padStart(4, "0");
-          const storeName = s.storeName || s["Store Name"] || "";
-          list.push({ code: storeCode, name: storeName });
-        }
-      }
-
-      return list.filter(x => x.code && x.name).sort((a,b)=>Number(a.code)-Number(b.code));
-    } catch (e) {
-      console.warn("Sites fetch failed for", key, e);
-      return [];
-    }
-  }
-
+  // ---------------------------
+  // SUPPLIERS
+  // ---------------------------
   async function populateSuppliers(){
     try {
-      allSuppliers = await fetchJSON(SUPPLIERS_URL);
+      const resp = await fetchJSON(SUPPLIERS_URL);
+      allSuppliers = resp.data || [];
       const sel = byId('supplier');
       sel.innerHTML = '';
+
       allSuppliers.forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.supplierNumber;
         opt.textContent = s.supplierName;
         sel.appendChild(opt);
       });
-    } catch {
+    } catch (e) {
       byId('supplier').innerHTML = '<option>(Unable to load)</option>';
     }
   }
 
+  // ---------------------------
+  // VEHICLES
+  // ---------------------------
   async function populateVehicles(){
     try {
       const vehicles = await fetchJSON(VEHICLES_URL);
       const sel=byId('vehicleReg'); sel.innerHTML='';
+
       (vehicles||[]).forEach(v=>{
         const opt=document.createElement('option');
         const reg=(v.reg||v.registration||'').toString().replace(/\s+/g,'');
-        opt.value=reg; opt.textContent=v.reg||v.registration||reg;
+        opt.value=reg;
+        opt.textContent=v.reg||v.registration||reg;
         sel.appendChild(opt);
       });
     } catch{}
+  }
+
+  // ---------------------------
+  // SITES
+  // ---------------------------
+  async function fetchSitesForKey(key){
+    const url = SITE_ENDPOINTS[key];
+    if (!url) return [];
+
+    try {
+      const resp = await fetchJSON(url);
+      const data = resp.data || [];
+
+      return data
+        .map(s => ({
+          code: s.siteNumber?.toString().padStart(4,'0') || "",
+          name: s.siteName || ""
+        }))
+        .filter(x => x.code && x.name)
+        .sort((a,b)=>Number(a.code)-Number(b.code));
+
+    } catch(e){
+      console.warn("Sites fetch failed for", key, e);
+      return [];
+    }
   }
 
   async function populateSites(){
@@ -274,37 +270,40 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     sel.innerHTML = '<option>Loading...</option>';
 
     const keyMap = {
-      'retail':'retail',
-      'els':'els',
-      'els private':'els_private',
-      'cobra':'cobra',
-      'wenzel’s':'wenzels',
-      'projects':'projects'
+      "retail":"retail",
+      "els":"els",
+      "els private":"els_private",
+      "cobra":"cobra",
+      "wenzel’s":"wenzels",
+      "projects":"projects"
     };
 
     if (!type) {
-      let combined = [];
-      for (const k of Object.values(keyMap)) {
-        const sites = await fetchSitesForKey(k);
-        combined = combined.concat(sites);
+      let combined=[];
+      for (const k of Object.values(keyMap)){
+        combined = combined.concat(await fetchSitesForKey(k));
       }
       allSites = combined.sort((a,b)=>Number(a.code)-Number(b.code));
+
     } else {
-      const key = keyMap[type] || 'retail';
+      const key = keyMap[type];
       allSites = await fetchSitesForKey(key);
     }
 
-    sel.innerHTML = '';
-    allSites.forEach(s => {
-      const opt = document.createElement('option');
+    sel.innerHTML='';
+    allSites.forEach(s=>{
+      const opt=document.createElement('option');
       opt.value = s.code;
       opt.textContent = `${s.code} ${s.name}`;
       sel.appendChild(opt);
     });
 
-    if (!allSites.length) sel.innerHTML = '<option>(No options)</option>';
+    if (!allSites.length) sel.innerHTML='<option>(No options)</option>';
   }
 
+  // ---------------------------
+  // PO Number (local sequence only)
+  // ---------------------------
   function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
     const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
     let n = parseInt(localStorage.getItem(key) || "0",10)+1;
@@ -312,9 +311,17 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
   }
 
-  function showModal(po){ byId('poCodeText').textContent=po; byId('modalBackdrop').style.display='flex'; }
-  function hideModal(){ byId('modalBackdrop').style.display='none'; }
+  function showModal(po){
+    byId('poCodeText').textContent=po;
+    byId('modalBackdrop').style.display='flex';
+  }
+  function hideModal(){
+    byId('modalBackdrop').style.display='none';
+  }
 
+  // ---------------------------
+  // INIT
+  // ---------------------------
   async function init(){
     const username=sessionStorage.getItem('mostlaneUser')||'';
     engineerName=username?dotToSpace(username):'Unknown';
@@ -328,7 +335,9 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
       const empType=(rec?.EmploymentType||rec?.employmentType||'Employed').toLowerCase();
       const prefix=empType.includes('self')?'SE':'E';
       engineerCode=prefix+String(engNum||'').trim();
-    }catch{engineerCode='E0';}
+    }catch{
+      engineerCode='E0';
+    }
 
     await populateSuppliers();
     await populateVehicles();
@@ -336,18 +345,24 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     if(navigator.geolocation){
       navigator.geolocation.getCurrentPosition(
         pos=>{
-          geo.lat=pos.coords.latitude; geo.lon=pos.coords.longitude;
+          geo.lat=pos.coords.latitude;
+          geo.lon=pos.coords.longitude;
           byId('geoStatus').textContent=`📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
         },
-        ()=>{byId('geoStatus').textContent='⚠️ Location permission denied. Allow access.';},
-        {enableHighAccuracy:true,timeout:10000}
+        ()=>{
+          byId('geoStatus').textContent='⚠️ Location permission denied. Allow access.';
+        },
+        {enableHighAccuracy:true, timeout:10000}
       );
-    } else byId('geoStatus').textContent='❌ Geolocation not supported.';
+    } else {
+      byId('geoStatus').textContent='❌ Geolocation not supported.';
+    }
 
     byId('workType').addEventListener('change', e=>{
       const val=e.target.value;
       const isReactive=val==='Reactive';
       const isVehicle=val==='Vehicle Maintenance';
+
       byId('incidentRow').style.display=isReactive?'':'none';
       byId('siteTypeRow').style.display=isVehicle?'none':'';
       byId('siteRow').style.display=isVehicle?'none':'';
@@ -357,7 +372,7 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     byId('siteType').addEventListener('change', populateSites);
     byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
     byId('closeBtn').onclick=hideModal;
-    byId('newBtn').onclick=()=>{hideModal();byId('poForm').reset();byId('engineer').value=engineerName;byId('date').value=formatDateUK();};
+    byId('newBtn').onclick=()=>{ hideModal(); byId('poForm').reset(); byId('engineer').value=engineerName; byId('date').value=formatDateUK(); };
 
     byId('personalBtn').onclick=()=>{
       const eng=encodeURIComponent(byId('engineer').value||'');
@@ -368,9 +383,14 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     byId('poForm').addEventListener('submit',onSubmit);
   }
 
+  // ---------------------------
+  // SUBMIT
+  // ---------------------------
   async function onSubmit(e){
     e.preventDefault();
-    const submitBtn=byId('submitBtn'); submitBtn.disabled=true;
+    const submitBtn=byId('submitBtn');
+    submitBtn.disabled=true;
+
     const workType=byId('workType').value;
     const isVehicle=workType==='Vehicle Maintenance';
     const engineerVal=byId('engineer').value.trim();
@@ -384,16 +404,19 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
 
     if(!engineerVal||!dateVal||!descVal||!supplierNumber){
       alert('All required fields must be completed.');
-      submitBtn.disabled=false; return;
+      submitBtn.disabled=false;
+      return;
     }
     if(geo.lat===null||geo.lon===null){
       alert('Location required. Enable location.');
-      submitBtn.disabled=false; return;
+      submitBtn.disabled=false;
+      return;
     }
 
     const typeLetter=workType==='Reactive'?'R':workType==='Planned'?'P':'V';
-    const siteSegment=isVehicle?(vehicleReg||'').replace(/\s+/g,''):siteNumber;
+    const siteSegment=isVehicle ? (vehicleReg||'').replace(/\s+/g,'') : siteNumber;
     const poCode=nextPO(engineerCode,supplierNumber,siteSegment,typeLetter);
+
     showModal(poCode);
 
     const data = {
@@ -415,20 +438,19 @@ projects: 'https://mostlane-po.jamie-def.workers.dev/get-sites?type=projects'
     try {
       const res = await fetch(CLOUDFLARE_ENDPOINT, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(API_KEY ? { 'x-api-key': API_KEY } : {})
-        },
+        headers: {'Content-Type':'application/json'},
         body: JSON.stringify(data),
         cache: 'no-store'
       });
+
       const result = await res.json();
       if(res.ok) alert(`✅ Purchase Order ${poCode} submitted successfully.`);
       else alert(`⚠️ Failed: ${result?.error || 'Unknown error'}`);
+
     } catch (err) {
       alert('⚠️ Failed to reach server: ' + err.message);
     } finally {
-      submitBtn.disabled = false;
+      submitBtn.disabled=false;
     }
   }
 
