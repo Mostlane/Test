@@ -153,15 +153,33 @@
   let currentEditId=null;
   let portalUsers=[];
 
+  /* ------------
+     LOAD USERS
+  ------------ */
   async function loadPortalUsers(){
-    const res=await fetch("https://mostlane-users.jamie-def.workers.dev/users");
-    const data=await res.json();
+    const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
+    const raw = await res.text();
 
-    portalUsers = data.Users.filter(u =>
-      u.Username && u.Username.trim() !== ""
-    );
+    let data;
+    try { data = JSON.parse(raw); }
+    catch { data = { Users: [] }; }
+
+    portalUsers = (data.Users || [])
+      .filter(u =>
+        u.Username &&
+        u.Username.trim() !== "" &&
+        u.FirstName &&
+        u.LastName &&
+        u.Status !== "Not Active"
+      )
+      .sort((a,b)=>
+        (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
+      );
   }
 
+  /* ------------------------
+     POPULATE SELECT DROPDOWN
+  --------------------------*/
   function populateUserDropdown(selected=""){
     const sel=document.getElementById("assignedField");
     sel.innerHTML = `<option value="">-- Select User --</option>`;
@@ -174,7 +192,6 @@
       sel.appendChild(opt);
     });
 
-    // Add "Shared"
     const sharedOpt=document.createElement("option");
     sharedOpt.value="Shared";
     sharedOpt.textContent="Shared";
@@ -193,6 +210,9 @@
     }
   }
 
+  /* ------------
+     ADD MODAL
+  ------------ */
   function openAddModal(){
     currentEditId=null;
     document.getElementById("modalTitle").textContent="Add Asset";
@@ -210,6 +230,9 @@
     document.getElementById("assetModal").style.display="flex";
   }
 
+  /* ------------
+     EDIT MODAL
+  ------------ */
   function openEditModal(asset){
     currentEditId=asset.id;
     document.getElementById("modalTitle").textContent="Edit Asset";
@@ -236,6 +259,9 @@
     document.getElementById("assetModal").style.display="none";
   }
 
+  /* ------------
+     LOAD ASSETS
+  ------------ */
   async function loadAssets(){
     await loadPortalUsers();
 
@@ -263,14 +289,17 @@
     });
   }
 
+  /* ------------
+     SAVE
+  ------------ */
   async function saveAsset(){
     const assigned=document.getElementById("assignedField").value;
     if(assigned===""){
-      alert("Please select a user before saving.");
-      return;
+      alert("Please select a user before saving.");return;
     }
 
     const id=document.getElementById("idField").value.trim();
+
     const body={
       id,
       name:document.getElementById("nameField").value.trim(),
@@ -296,6 +325,9 @@
     closeModal();loadAssets();
   }
 
+  /* ------------
+     DELETE
+  ------------ */
   async function deleteAsset(id){
     if(!confirm(`Delete asset ${id}?`))return;
 
