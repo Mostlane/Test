@@ -140,6 +140,26 @@
       cursor:pointer;
       font-weight:bold;
     }
+
+    /* 🔹 Nav buttons in fullscreen viewer (Option A: white semi-transparent) */
+    .img-nav-btn{
+      position:absolute;
+      top:50%;
+      transform:translateY(-50%);
+      background:rgba(255,255,255,0.75);
+      border:none;
+      border-radius:999px;
+      width:40px;
+      height:40px;
+      font-size:20px;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      outline:none;
+    }
+    #imgPrev{ left:20px; }
+    #imgNext{ right:20px; }
   </style>
 
   <script>
@@ -221,7 +241,9 @@
   <!-- Image Viewer -->
   <div id="imageViewer" class="image-viewer-overlay">
     <span class="image-viewer-close" onclick="closeImageViewer()">×</span>
+    <button id="imgPrev" class="img-nav-btn" onclick="prevImage()">&#8592;</button>
     <img id="imageViewerImg" src="" alt="Asset image">
+    <button id="imgNext" class="img-nav-btn" onclick="nextImage()">&#8594;</button>
   </div>
 
 <script>
@@ -230,6 +252,7 @@
   let currentAsset=null;
   let portalUsers=[];
   let currentImageList=[];
+  let currentImageIndex=0; // 🔹 track which image is open
 
   async function loadPortalUsers(){
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
@@ -367,6 +390,11 @@
   function openImageViewer(url){
     const modal=document.getElementById("imageViewer");
     const img=document.getElementById("imageViewerImg");
+
+    // 🔹 set index based on clicked image
+    const idx = currentImageList.indexOf(url);
+    currentImageIndex = idx >= 0 ? idx : 0;
+
     img.src=url;
     modal.style.display="flex";
   }
@@ -375,6 +403,49 @@
     const modal=document.getElementById("imageViewer");
     modal.style.display="none";
     document.getElementById("imageViewerImg").src="";
+  }
+
+  // 🔹 Next / previous image helpers
+  function showImageAt(index){
+    if(!currentImageList || !currentImageList.length) return;
+    const total = currentImageList.length;
+    currentImageIndex = (index + total) % total; // wrap around
+    const url = currentImageList[currentImageIndex];
+    const img=document.getElementById("imageViewerImg");
+    img.src = url;
+  }
+
+  function nextImage(){
+    showImageAt(currentImageIndex + 1);
+  }
+
+  function prevImage(){
+    showImageAt(currentImageIndex - 1);
+  }
+
+  // 🔹 Swipe support on fullscreen viewer
+  const viewerEl = document.getElementById("imageViewer");
+  let touchStartX = null;
+
+  if(viewerEl){
+    viewerEl.addEventListener("touchstart", e=>{
+      if(e.changedTouches && e.changedTouches.length){
+        touchStartX = e.changedTouches[0].clientX;
+      }
+    }, { passive:true });
+
+    viewerEl.addEventListener("touchend", e=>{
+      if(touchStartX === null) return;
+      if(!e.changedTouches || !e.changedTouches.length) return;
+      const endX = e.changedTouches[0].clientX;
+      const dx = endX - touchStartX;
+      const threshold = 40; // px
+      if(Math.abs(dx) > threshold){
+        if(dx < 0) nextImage();   // swipe left → next
+        else       prevImage();   // swipe right → previous
+      }
+      touchStartX = null;
+    }, { passive:true });
   }
 
   /* FIXED DELETE IMAGE */
@@ -386,7 +457,6 @@
     );
     if(!confirmDelete) return;
 
-    // ✅ Extract R2 key from URL
     const key = url.split("key=")[1];
 
     if(!key){
