@@ -44,7 +44,7 @@
       margin-right:5px;padding:4px 8px;font-size:12px;
     }
 
-    /* Modal styling */
+    /* Modal */
     .modal{
       display:none;position:fixed;z-index:999;
       left:0;top:0;width:100%;height:100%;
@@ -55,19 +55,28 @@
       background:white;padding:20px;border-radius:8px;
       width:90%;max-width:500px;position:relative;
     }
-    .modal-content input, .modal-content select{
+    .modal-content input,
+    .modal-content select{
       width:100%;margin:6px 0;padding:8px;
       border:1px solid #ccc;border-radius:4px;
+    }
+    .modal-content label{
+      font-size:13px;
+      font-weight:bold;
+      margin-top:8px;
+      display:block;
     }
     .close-btn{
       position:absolute;top:10px;right:12px;
       font-size:20px;font-weight:bold;
       cursor:pointer;color:#333;
     }
+    .disabled{
+      opacity:0.4;pointer-events:none;
+    }
   </style>
 
   <script>
-    // Restrict to Office role only
     async function checkAccess(){
       const user=sessionStorage.getItem("mostlaneUser");
       const res=await fetch("role-type.txt");
@@ -81,11 +90,13 @@
     checkAccess();
   </script>
 </head>
+
 <body>
   <div class="content">
     <a class="button" href="main.html">Main Menu</a>
     <button class="button" onclick="openAddModal()">Add Asset</button>
     <h1>Asset Administration</h1>
+
     <table id="assetTable">
       <thead>
         <tr>
@@ -97,151 +108,209 @@
     </table>
   </div>
 
-  <!-- Add/Edit Modal -->
+  <!-- MODAL -->
   <div id="assetModal" class="modal">
     <div class="modal-content">
       <span class="close-btn" onclick="closeModal()">×</span>
+
       <h3 id="modalTitle">Add/Edit Asset</h3>
 
-      <input id="idField" placeholder="Asset ID (e.g., A1050)">
+      <label>Asset ID</label>
+      <input id="idField" placeholder="Asset ID">
+
+      <label>Name</label>
       <input id="nameField" placeholder="Name">
+
+      <label>Category</label>
       <input id="categoryField" placeholder="Category">
+
+      <label>Serial</label>
       <input id="serialField" placeholder="Serial">
+
+      <label>Value (£)</label>
       <input id="valueField" placeholder="Value (£)">
 
       <label>Assigned To</label>
-      <select id="assignedField"></select>
+      <select id="assignedField">
+        <option value="">-- Select User --</option>
+      </select>
 
-      <input id="sharedField" placeholder="Shared (yes/no)">
+      <label>Shared (yes/no)</label>
+      <input id="sharedField" placeholder="yes/no">
 
-      <label>Calibration Date (auto-filled)</label>
+      <label>Calibration Date</label>
       <input id="calibrationField" readonly>
 
       <div style="text-align:right;margin-top:10px;">
-        <button class="button" onclick="saveAsset()">Save</button>
+        <button id="saveBtn" class="button" onclick="saveAsset()">Save</button>
         <button class="button" onclick="closeModal()">Cancel</button>
       </div>
     </div>
   </div>
 
-  <script>
-    const apiBase="https://mostlane-assets.jamie-def.workers.dev";
-    let currentEditId=null;
-    let portalUsers=[];
+<script>
+  const apiBase="https://mostlane-assets.jamie-def.workers.dev";
+  let currentEditId=null;
+  let portalUsers=[];
 
-    async function loadPortalUsers(){
-      const res=await fetch("Portal Users.txt");
-      const text=await res.text();
-      portalUsers = text.split("\n").map(u=>u.trim()).filter(u=>u.length>0);
+  async function loadPortalUsers(){
+    const res=await fetch("https://mostlane-users.jamie-def.workers.dev/users");
+    const data=await res.json();
+
+    portalUsers = data.Users.filter(u =>
+      u.Username && u.Username.trim() !== ""
+    );
+  }
+
+  function populateUserDropdown(selected=""){
+    const sel=document.getElementById("assignedField");
+    sel.innerHTML = `<option value="">-- Select User --</option>`;
+
+    portalUsers.forEach(u=>{
+      const opt=document.createElement("option");
+      opt.value=u.Username;
+      opt.textContent = u.FirstName + " " + u.LastName;
+      if(u.Username === selected) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    // Add "Shared"
+    const sharedOpt=document.createElement("option");
+    sharedOpt.value="Shared";
+    sharedOpt.textContent="Shared";
+    if(selected==="Shared") sharedOpt.selected=true;
+    sel.appendChild(sharedOpt);
+  }
+
+  function validateSaveButton(){
+    const saveBtn=document.getElementById("saveBtn");
+    const assigned=document.getElementById("assignedField").value;
+
+    if(assigned === ""){
+      saveBtn.classList.add("disabled");
+    } else {
+      saveBtn.classList.remove("disabled");
     }
-    loadPortalUsers();
+  }
 
-    function populateUserDropdown(selected=""){
-      const sel=document.getElementById("assignedField");
-      sel.innerHTML="";
-      portalUsers.forEach(u=>{
-        const opt=document.createElement("option");
-        opt.value=u;
-        opt.textContent=u.replace(".", " ");
-        if(u===selected) opt.selected=true;
-        sel.appendChild(opt);
-      });
-      // Add "Shared"
-      const sharedOpt=document.createElement("option");
-      sharedOpt.value="Shared";
-      sharedOpt.textContent="Shared";
-      if(selected==="Shared") sharedOpt.selected=true;
-      sel.appendChild(sharedOpt);
+  function openAddModal(){
+    currentEditId=null;
+    document.getElementById("modalTitle").textContent="Add Asset";
+
+    document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+
+    populateUserDropdown("");
+    validateSaveButton();
+
+    document.getElementById("calibrationField").value =
+      new Date().toISOString().slice(0,10);
+
+    document.getElementById("assignedField").onchange = validateSaveButton;
+
+    document.getElementById("assetModal").style.display="flex";
+  }
+
+  function openEditModal(asset){
+    currentEditId=asset.id;
+    document.getElementById("modalTitle").textContent="Edit Asset";
+
+    document.getElementById("idField").value=asset.id;
+    document.getElementById("nameField").value=asset.name;
+    document.getElementById("categoryField").value=asset.category;
+    document.getElementById("serialField").value=asset.serial;
+    document.getElementById("valueField").value=asset.value;
+
+    populateUserDropdown(asset.assignedTo);
+    validateSaveButton();
+
+    document.getElementById("assignedField").onchange = validateSaveButton;
+
+    document.getElementById("sharedField").value=asset.shared;
+    document.getElementById("calibrationField").value =
+      new Date().toISOString().slice(0,10);
+
+    document.getElementById("assetModal").style.display="flex";
+  }
+
+  function closeModal(){
+    document.getElementById("assetModal").style.display="none";
+  }
+
+  async function loadAssets(){
+    await loadPortalUsers();
+
+    const res=await fetch(`${apiBase}/assets`);
+    const data=await res.json();
+
+    const tbody=document.querySelector("#assetTable tbody");
+    tbody.innerHTML="";
+
+    data.assets.forEach(a=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`
+        <td>${a.id}</td>
+        <td>${a.name}</td>
+        <td>${a.category}</td>
+        <td>${a.serial}</td>
+        <td>${a.value}</td>
+        <td>${a.assignedTo}</td>
+        <td>${a.shared}</td>
+        <td class="actions">
+          <button onclick='openEditModal(${JSON.stringify(a)})'>Edit</button>
+          <button onclick='deleteAsset("${a.id}")'>Delete</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function saveAsset(){
+    const assigned=document.getElementById("assignedField").value;
+    if(assigned===""){
+      alert("Please select a user before saving.");
+      return;
     }
 
-    function openAddModal(){
-      currentEditId=null;
-      document.getElementById("modalTitle").textContent="Add Asset";
-      document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+    const id=document.getElementById("idField").value.trim();
+    const body={
+      id,
+      name:document.getElementById("nameField").value.trim(),
+      category:document.getElementById("categoryField").value.trim(),
+      serial:document.getElementById("serialField").value.trim(),
+      value:document.getElementById("valueField").value.trim(),
+      assignedTo:assigned,
+      shared:document.getElementById("sharedField").value.trim(),
+      calibrationDate:document.getElementById("calibrationField").value.trim()
+    };
 
-      populateUserDropdown("");
+    const route=currentEditId?"/asset/update":"/asset/add";
 
-      document.getElementById("calibrationField").value = new Date().toISOString().slice(0,10);
-      document.getElementById("assetModal").style.display="flex";
-    }
+    const res=await fetch(`${apiBase}${route}`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)
+    });
 
-    function openEditModal(asset){
-      currentEditId=asset.id;
-      document.getElementById("modalTitle").textContent="Edit Asset";
+    const r=await res.json();
+    alert(r.message||r.error);
 
-      document.getElementById("idField").value=asset.id;
-      document.getElementById("nameField").value=asset.name;
-      document.getElementById("categoryField").value=asset.category;
-      document.getElementById("serialField").value=asset.serial;
-      document.getElementById("valueField").value=asset.value;
+    closeModal();loadAssets();
+  }
 
-      populateUserDropdown(asset.assignedTo);
+  async function deleteAsset(id){
+    if(!confirm(`Delete asset ${id}?`))return;
 
-      document.getElementById("sharedField").value=asset.shared;
-      document.getElementById("calibrationField").value = new Date().toISOString().slice(0,10);
+    const res=await fetch(`${apiBase}/asset/delete?id=${id}`,{
+      method:"DELETE"
+    });
 
-      document.getElementById("assetModal").style.display="flex";
-    }
-
-    function closeModal(){
-      document.getElementById("assetModal").style.display="none";
-    }
-
-    async function loadAssets(){
-      const res=await fetch(`${apiBase}/assets`);
-      const data=await res.json();
-      const tbody=document.querySelector("#assetTable tbody");
-      tbody.innerHTML="";
-      data.assets.forEach(a=>{
-        const tr=document.createElement("tr");
-        tr.innerHTML=`
-          <td>${a.id}</td>
-          <td>${a.name}</td>
-          <td>${a.category}</td>
-          <td>${a.serial}</td>
-          <td>${a.value}</td>
-          <td>${a.assignedTo}</td>
-          <td>${a.shared}</td>
-          <td class="actions">
-            <button onclick='openEditModal(${JSON.stringify(a)})'>Edit</button>
-            <button onclick='deleteAsset("${a.id}")'>Delete</button>
-          </td>`;
-        tbody.appendChild(tr);
-      });
-    }
-
-    async function saveAsset(){
-      const id=document.getElementById("idField").value.trim();
-      const body={
-        id,
-        name:document.getElementById("nameField").value.trim(),
-        category:document.getElementById("categoryField").value.trim(),
-        serial:document.getElementById("serialField").value.trim(),
-        value:document.getElementById("valueField").value.trim(),
-        assignedTo:document.getElementById("assignedField").value.trim(),
-        shared:document.getElementById("sharedField").value.trim(),
-        calibrationDate:document.getElementById("calibrationField").value.trim()
-      };
-      const route=currentEditId?"/asset/update":"/asset/add";
-      const res=await fetch(`${apiBase}${route}`,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(body)
-      });
-      const r=await res.json();
-      alert(r.message||r.error);
-      closeModal();loadAssets();
-    }
-
-    async function deleteAsset(id){
-      if(!confirm(`Delete asset ${id}?`))return;
-      const res=await fetch(`${apiBase}/asset/delete?id=${id}`,{method:"DELETE"});
-      const r=await res.json();
-      alert(r.message||r.error);
-      loadAssets();
-    }
+    const r=await res.json();
+    alert(r.message||r.error);
 
     loadAssets();
-  </script>
+  }
+
+  loadAssets();
+</script>
+
 </body>
 </html>
