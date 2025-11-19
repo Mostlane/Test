@@ -164,7 +164,6 @@
     const username = sessionStorage.getItem("mostlaneUser");
     document.getElementById("user-display").textContent = username;
 
-    /* FIXED: USE asset.images (correct field) */
     fetch("https://mostlane-assets.jamie-def.workers.dev/assets?user=" + username)
       .then(r => r.json())
       .then(data => {
@@ -182,7 +181,11 @@
             : "Unknown";
 
           const pdfURL = asset.pdfURL || null;
-          const images = asset.images || [];   /* FIXED */
+
+          // 🔥 FIXED: use correct images array from KV
+          const images = asset.images || [];
+
+          const thumb = images.length ? images[0] : null;
 
           const formUrl = new URL("https://www.jotform.com/form/251441412477049");
           formUrl.searchParams.append("assetID", asset.id);
@@ -192,8 +195,8 @@
 
           const card = document.createElement("div");
           card.className = "card";
-
           card.innerHTML = `
+            ${thumb ? `<img src="${thumb}" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;margin-bottom:10px;">` : ""}
             <h3>${asset.name}</h3>
             <p><strong>Category:</strong> ${asset.category}</p>
             <p><strong>Serial:</strong> ${asset.serial}</p>
@@ -205,7 +208,6 @@
               ${images.length ? `<a href="#" onclick='showImagePopup(${JSON.stringify(images)})'>View Images</a>` : ""}
             </div>
           `;
-
           container.appendChild(card);
         });
       })
@@ -214,34 +216,28 @@
         document.getElementById("assetGrid").innerHTML = "<p>Error loading assets.</p>";
       });
 
-    /* ---------------- IMAGE VIEWER ---------------- */
+    /* --- Modal viewer logic --- */
+    let currentImages = [], currentIndex = 0;
 
-    let currentImages = [];
-    let currentIndex = 0;
-
-    function showImagePopup(imgArray, startIndex = 0) {
-      currentImages = imgArray;
-      currentIndex = startIndex;
+    function showImagePopup(urls, start = 0) {
+      currentImages = urls;
+      currentIndex = start;
       updateModalImage();
       document.getElementById("imageModal").style.display = "flex";
     }
-
     function closeImagePopup() {
       document.getElementById("imageModal").style.display = "none";
     }
-
     function nextImage() {
       if (!currentImages.length) return;
       currentIndex = (currentIndex + 1) % currentImages.length;
       updateModalImage();
     }
-
     function prevImage() {
       if (!currentImages.length) return;
       currentIndex = (currentIndex - 1 + currentImages.length) % currentImages.length;
       updateModalImage();
     }
-
     function updateModalImage() {
       document.getElementById("modalImage").src = currentImages[currentIndex];
     }
