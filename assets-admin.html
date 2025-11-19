@@ -53,11 +53,16 @@
     }
     .modal-content{
       background:white;padding:20px;border-radius:8px;
-      width:90%;max-width:500px;
+      width:90%;max-width:500px;position:relative;
     }
-    .modal-content input{
+    .modal-content input, .modal-content select{
       width:100%;margin:6px 0;padding:8px;
       border:1px solid #ccc;border-radius:4px;
+    }
+    .close-btn{
+      position:absolute;top:10px;right:12px;
+      font-size:20px;font-weight:bold;
+      cursor:pointer;color:#333;
     }
   </style>
 
@@ -95,15 +100,23 @@
   <!-- Add/Edit Modal -->
   <div id="assetModal" class="modal">
     <div class="modal-content">
+      <span class="close-btn" onclick="closeModal()">×</span>
       <h3 id="modalTitle">Add/Edit Asset</h3>
+
       <input id="idField" placeholder="Asset ID (e.g., A1050)">
       <input id="nameField" placeholder="Name">
       <input id="categoryField" placeholder="Category">
       <input id="serialField" placeholder="Serial">
       <input id="valueField" placeholder="Value (£)">
-      <input id="assignedField" placeholder="Assigned To (e.g., Jamie.Line or Shared)">
+
+      <label>Assigned To</label>
+      <select id="assignedField"></select>
+
       <input id="sharedField" placeholder="Shared (yes/no)">
-      <input id="calibrationField" placeholder="Calibration Date (YYYY-MM-DD)">
+
+      <label>Calibration Date (auto-filled)</label>
+      <input id="calibrationField" readonly>
+
       <div style="text-align:right;margin-top:10px;">
         <button class="button" onclick="saveAsset()">Save</button>
         <button class="button" onclick="closeModal()">Cancel</button>
@@ -114,26 +127,62 @@
   <script>
     const apiBase="https://mostlane-assets.jamie-def.workers.dev";
     let currentEditId=null;
+    let portalUsers=[];
+
+    async function loadPortalUsers(){
+      const res=await fetch("Portal Users.txt");
+      const text=await res.text();
+      portalUsers = text.split("\n").map(u=>u.trim()).filter(u=>u.length>0);
+    }
+    loadPortalUsers();
+
+    function populateUserDropdown(selected=""){
+      const sel=document.getElementById("assignedField");
+      sel.innerHTML="";
+      portalUsers.forEach(u=>{
+        const opt=document.createElement("option");
+        opt.value=u;
+        opt.textContent=u.replace(".", " ");
+        if(u===selected) opt.selected=true;
+        sel.appendChild(opt);
+      });
+      // Add "Shared"
+      const sharedOpt=document.createElement("option");
+      sharedOpt.value="Shared";
+      sharedOpt.textContent="Shared";
+      if(selected==="Shared") sharedOpt.selected=true;
+      sel.appendChild(sharedOpt);
+    }
 
     function openAddModal(){
       currentEditId=null;
       document.getElementById("modalTitle").textContent="Add Asset";
       document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+
+      populateUserDropdown("");
+
+      document.getElementById("calibrationField").value = new Date().toISOString().slice(0,10);
       document.getElementById("assetModal").style.display="flex";
     }
+
     function openEditModal(asset){
       currentEditId=asset.id;
       document.getElementById("modalTitle").textContent="Edit Asset";
+
       document.getElementById("idField").value=asset.id;
       document.getElementById("nameField").value=asset.name;
       document.getElementById("categoryField").value=asset.category;
       document.getElementById("serialField").value=asset.serial;
       document.getElementById("valueField").value=asset.value;
-      document.getElementById("assignedField").value=asset.assignedTo;
+
+      populateUserDropdown(asset.assignedTo);
+
       document.getElementById("sharedField").value=asset.shared;
-      document.getElementById("calibrationField").value=asset.calibrationDate||"";
+      document.getElementById("calibrationField").value = new Date().toISOString().slice(0,10);
+
       document.getElementById("assetModal").style.display="flex";
     }
+
     function closeModal(){
       document.getElementById("assetModal").style.display="none";
     }
@@ -191,10 +240,6 @@
       alert(r.message||r.error);
       loadAssets();
     }
-
-    window.onclick=e=>{
-      if(e.target.id==="assetModal")closeModal();
-    };
 
     loadAssets();
   </script>
