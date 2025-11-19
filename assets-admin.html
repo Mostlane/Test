@@ -46,7 +46,6 @@
       margin-right:5px;padding:4px 8px;font-size:12px;
     }
 
-    /* thumbnail in table */
     .thumb-img{
       height:40px;
       width:40px;
@@ -54,7 +53,6 @@
       border-radius:4px;
     }
 
-    /* Modal */
     .modal{
       display:none;position:fixed;z-index:999;
       left:0;top:0;width:100%;height:100%;
@@ -85,14 +83,12 @@
       opacity:0.4;pointer-events:none;
     }
 
-    /* Image Gallery */
     .gallery-container {
       margin:10px 0;
       overflow-x:auto;
       white-space:nowrap;
     }
 
-    /* each image wrapper */
     .gallery-item{
       position:relative;
       display:inline-block;
@@ -121,7 +117,6 @@
       cursor:pointer;
     }
 
-    /* fullscreen image viewer */
     .image-viewer-overlay{
       display:none;
       position:fixed;
@@ -212,7 +207,6 @@
       <label>Transfer Date</label>
       <input id="calibrationField" readonly>
 
-      <!-- IMAGE UPLOAD + GALLERY (NEW) -->
       <h4 style="margin-top:15px;">Images</h4>
       <div id="imageGallery" class="gallery-container"></div>
       <button class="button" onclick="uploadImage()">Upload Image</button>
@@ -224,7 +218,7 @@
     </div>
   </div>
 
-  <!-- fullscreen image viewer -->
+  <!-- Image Viewer -->
   <div id="imageViewer" class="image-viewer-overlay">
     <span class="image-viewer-close" onclick="closeImageViewer()">×</span>
     <img id="imageViewerImg" src="" alt="Asset image">
@@ -237,11 +231,9 @@
   let portalUsers=[];
   let currentImageList=[];
 
-  /* LOAD USERS */
   async function loadPortalUsers(){
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
     const raw = await res.text();
-
     let data;
     try { data = JSON.parse(raw); }
     catch { data = { Users: [] }; }
@@ -281,7 +273,6 @@
   function validateSaveButton(){
     const saveBtn=document.getElementById("saveBtn");
     const assigned=document.getElementById("assignedField").value;
-
     if(assigned === ""){
       saveBtn.classList.add("disabled");
     } else {
@@ -373,7 +364,6 @@
     });
   }
 
-  /* IMAGE VIEWER */
   function openImageViewer(url){
     const modal=document.getElementById("imageViewer");
     const img=document.getElementById("imageViewerImg");
@@ -387,7 +377,7 @@
     document.getElementById("imageViewerImg").src="";
   }
 
-  /* DELETE IMAGE */
+  /* FIXED DELETE IMAGE */
   async function deleteImage(url){
     if(!currentAsset) return;
 
@@ -396,24 +386,33 @@
     );
     if(!confirmDelete) return;
 
+    // ✅ Extract R2 key from URL
+    const key = url.split("key=")[1];
+
+    if(!key){
+      alert("Image key missing — cannot delete.");
+      return;
+    }
+
     try{
       const res = await fetch(`${apiBase}/delete-asset-image`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           assetId: currentAsset.id,
-          imageUrl: url
+          key: key
         })
       });
+
       const data = await res.json();
       if(!data.ok){
         alert(data.error || "Failed to delete image");
         return;
       }
 
-      // remove from local asset and refresh gallery
       currentAsset.images = (currentAsset.images || []).filter(u=>u!==url);
       loadImageGallery(currentAsset);
+
     }catch(err){
       alert("Failed to delete image");
     }
@@ -451,7 +450,6 @@
       currentAsset.images=currentAsset.images||[];
       currentAsset.images.push(data.url);
 
-      // Save updated asset
       await fetch(`${apiBase}/asset/update`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -532,7 +530,7 @@
     closeModal();loadAssets();
   }
 
-  /* DELETE */
+  /* DELETE ASSET */
   async function deleteAsset(id){
     if(!confirm(`Delete asset ${id}?`))return;
 
