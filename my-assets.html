@@ -87,6 +87,13 @@
       border-radius: 4px;
       text-decoration: none;
     }
+    .thumb-img {
+      width: 100%;
+      max-height: 160px;
+      object-fit: cover;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
 
     /* --- Modal gallery --- */
     .modal {
@@ -176,16 +183,17 @@
         }
 
         assets.forEach(asset => {
-          const assignedDate = asset.lastTransfer
-            ? new Date(asset.lastTransfer).toLocaleDateString()
-            : "Unknown";
+          /* FIXED — correct “Since” date */
+          let since = "Unknown";
+
+          if (asset.calibrationDate) {
+            since = asset.calibrationDate;
+          } else if (asset.lastTransfer) {
+            since = new Date(asset.lastTransfer).toLocaleDateString();
+          }
 
           const pdfURL = asset.pdfURL || null;
-
-          // 🔥 FIXED: use correct images array from KV
-          const images = asset.images || [];
-
-          const thumb = images.length ? images[0] : null;
+          const images = asset.imageURLs || [];
 
           const formUrl = new URL("https://www.jotform.com/form/251441412477049");
           formUrl.searchParams.append("assetID", asset.id);
@@ -195,13 +203,18 @@
 
           const card = document.createElement("div");
           card.className = "card";
+
+          const thumb = images.length
+              ? `<img class="thumb-img" src="${images[0]}" onclick='showImagePopup(${JSON.stringify(images)}, 0)'>`
+              : "";
+
           card.innerHTML = `
-            ${thumb ? `<img src="${thumb}" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;margin-bottom:10px;">` : ""}
+            ${thumb}
             <h3>${asset.name}</h3>
             <p><strong>Category:</strong> ${asset.category}</p>
             <p><strong>Serial:</strong> ${asset.serial}</p>
             <p><strong>Value:</strong> ${asset.value}</p>
-            <p><strong>Since:</strong> ${assignedDate}</p>
+            <p><strong>Since:</strong> ${since}</p>
             <div class="buttons">
               <a href="${formUrl}" target="_blank">Transfer</a>
               ${pdfURL ? `<a href="${pdfURL}" target="_blank">Agreement</a>` : ""}
@@ -210,15 +223,10 @@
           `;
           container.appendChild(card);
         });
-      })
-      .catch(err => {
-        console.error("Error loading asset data:", err);
-        document.getElementById("assetGrid").innerHTML = "<p>Error loading assets.</p>";
       });
 
-    /* --- Modal viewer logic --- */
+    /* Modal logic unchanged */
     let currentImages = [], currentIndex = 0;
-
     function showImagePopup(urls, start = 0) {
       currentImages = urls;
       currentIndex = start;
@@ -241,12 +249,6 @@
     function updateModalImage() {
       document.getElementById("modalImage").src = currentImages[currentIndex];
     }
-
-    window.addEventListener("keydown", e => {
-      if (e.key === "Escape") closeImagePopup();
-      if (e.key === "ArrowRight") nextImage();
-      if (e.key === "ArrowLeft") prevImage();
-    });
   </script>
 </body>
 </html>
