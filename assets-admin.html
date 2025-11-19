@@ -46,6 +46,14 @@
       margin-right:5px;padding:4px 8px;font-size:12px;
     }
 
+    /* thumbnail in table */
+    .thumb-img{
+      height:40px;
+      width:40px;
+      object-fit:cover;
+      border-radius:4px;
+    }
+
     /* Modal */
     .modal{
       display:none;position:fixed;z-index:999;
@@ -83,12 +91,59 @@
       overflow-x:auto;
       white-space:nowrap;
     }
-    .gallery-container img {
+
+    /* each image wrapper */
+    .gallery-item{
+      position:relative;
+      display:inline-block;
+      margin-right:8px;
+    }
+    .gallery-item img {
       height:70px;
       width:auto;
-      margin-right:8px;
       border-radius:6px;
       object-fit:cover;
+      cursor:pointer;
+    }
+    .gallery-delete{
+      position:absolute;
+      top:-6px;
+      right:-6px;
+      background:#dc2626;
+      color:#fff;
+      border:none;
+      border-radius:999px;
+      width:20px;
+      height:20px;
+      font-size:12px;
+      line-height:20px;
+      text-align:center;
+      cursor:pointer;
+    }
+
+    /* fullscreen image viewer */
+    .image-viewer-overlay{
+      display:none;
+      position:fixed;
+      z-index:1000;
+      inset:0;
+      background:rgba(0,0,0,0.9);
+      justify-content:center;
+      align-items:center;
+    }
+    .image-viewer-overlay img{
+      max-width:90%;
+      max-height:90%;
+      border-radius:8px;
+    }
+    .image-viewer-close{
+      position:absolute;
+      top:12px;
+      right:16px;
+      font-size:28px;
+      color:#fff;
+      cursor:pointer;
+      font-weight:bold;
     }
   </style>
 
@@ -116,7 +171,7 @@
     <table id="assetTable">
       <thead>
         <tr>
-          <th>ID</th><th>Name</th><th>Category</th><th>Serial</th>
+          <th>ID</th><th>Name</th><th>Image</th><th>Category</th><th>Serial</th>
           <th>Value</th><th>Assigned To</th><th>Shared</th><th>Actions</th>
         </tr>
       </thead>
@@ -169,11 +224,18 @@
     </div>
   </div>
 
+  <!-- fullscreen image viewer -->
+  <div id="imageViewer" class="image-viewer-overlay">
+    <span class="image-viewer-close" onclick="closeImageViewer()">×</span>
+    <img id="imageViewerImg" src="" alt="Asset image">
+  </div>
+
 <script>
   const apiBase="https://mostlane-assets.jamie-def.workers.dev";
   let currentEditId=null;
   let currentAsset=null;
   let portalUsers=[];
+  let currentImageList=[];
 
   /* LOAD USERS */
   async function loadPortalUsers(){
@@ -237,6 +299,7 @@
     document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
 
     document.getElementById("imageGallery").innerHTML="";
+    currentImageList = [];
 
     populateUserDropdown("");
     validateSaveButton();
@@ -276,15 +339,84 @@
     document.getElementById("assetModal").style.display="flex";
   }
 
+  function closeModal(){
+    document.getElementById("assetModal").style.display="none";
+  }
+
   function loadImageGallery(asset){
     const gallery=document.getElementById("imageGallery");
     gallery.innerHTML="";
 
-    (asset.images || []).forEach(url=>{
+    currentImageList = asset.images || [];
+    currentAsset.images = currentImageList;
+
+    currentImageList.forEach(url=>{
+      const wrapper=document.createElement("div");
+      wrapper.className="gallery-item";
+
       const img=document.createElement("img");
       img.src=url;
-      gallery.appendChild(img);
+      img.onclick=()=>openImageViewer(url);
+
+      const del=document.createElement("button");
+      del.className="gallery-delete";
+      del.type="button";
+      del.textContent="×";
+      del.onclick=(e)=>{
+        e.stopPropagation();
+        deleteImage(url);
+      };
+
+      wrapper.appendChild(img);
+      wrapper.appendChild(del);
+      gallery.appendChild(wrapper);
     });
+  }
+
+  /* IMAGE VIEWER */
+  function openImageViewer(url){
+    const modal=document.getElementById("imageViewer");
+    const img=document.getElementById("imageViewerImg");
+    img.src=url;
+    modal.style.display="flex";
+  }
+
+  function closeImageViewer(){
+    const modal=document.getElementById("imageViewer");
+    modal.style.display="none";
+    document.getElementById("imageViewerImg").src="";
+  }
+
+  /* DELETE IMAGE */
+  async function deleteImage(url){
+    if(!currentAsset) return;
+
+    const confirmDelete = confirm(
+      "Are you sure you want to delete this image? This image will be permanently deleted and cannot be recovered."
+    );
+    if(!confirmDelete) return;
+
+    try{
+      const res = await fetch(`${apiBase}/delete-asset-image`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          assetId: currentAsset.id,
+          imageUrl: url
+        })
+      });
+      const data = await res.json();
+      if(!data.ok){
+        alert(data.error || "Failed to delete image");
+        return;
+      }
+
+      // remove from local asset and refresh gallery
+      currentAsset.images = (currentAsset.images || []).filter(u=>u!==url);
+      loadImageGallery(currentAsset);
+    }catch(err){
+      alert("Failed to delete image");
+    }
   }
 
   /* IMAGE UPLOAD */
@@ -343,10 +475,15 @@
     tbody.innerHTML="";
 
     data.assets.forEach(a=>{
+      const thumb = (a.images && a.images.length)
+        ? `<img src="${a.images[0]}" class="thumb-img">`
+        : "—";
+
       const tr=document.createElement("tr");
       tr.innerHTML=`
         <td>${a.id}</td>
         <td>${a.name}</td>
+        <td>${thumb}</td>
         <td>${a.category}</td>
         <td>${a.serial}</td>
         <td>${a.value}</td>
