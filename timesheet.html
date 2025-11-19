@@ -243,8 +243,7 @@ function render(){
 
   const byDate = collectWeekEntries(weekMonISO, currentEngineer);
 
-// Always show Monday → Sunday (7 days)
-const days = [0,1,2,3,4,5,6].map(i => addDays(currentWeekMon, i));
+const days = [0,1,2,3,4].map(i => addDays(currentWeekMon, i));
 
   let tbody = $("tbody");
   tbody.innerHTML = "";
