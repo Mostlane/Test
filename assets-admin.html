@@ -31,20 +31,20 @@
       margin:5px 5px 15px 0;cursor:pointer;
       border:none;
     }
- table{
-  width:100%;border-collapse:collapse;
-  background:white;font-size:14px;
-}
-th, td {
-  border:1px solid #ccc;
-  padding:8px;
-  text-align:center; 
-  vertical-align:middle;
-}
-th{background:#f3f4f6;}
-.actions button{
-  margin-right:5px;padding:4px 8px;font-size:12px;
-}
+    table{
+      width:100%;border-collapse:collapse;
+      background:white;font-size:14px;
+    }
+    th, td {
+      border:1px solid #ccc;
+      padding:8px;
+      text-align:center; 
+      vertical-align:middle;
+    }
+    th{background:#f3f4f6;}
+    .actions button{
+      margin-right:5px;padding:4px 8px;font-size:12px;
+    }
 
     /* Modal */
     .modal{
@@ -75,6 +75,20 @@ th{background:#f3f4f6;}
     }
     .disabled{
       opacity:0.4;pointer-events:none;
+    }
+
+    /* Image Gallery */
+    .gallery-container {
+      margin:10px 0;
+      overflow-x:auto;
+      white-space:nowrap;
+    }
+    .gallery-container img {
+      height:70px;
+      width:auto;
+      margin-right:8px;
+      border-radius:6px;
+      object-fit:cover;
     }
   </style>
 
@@ -141,7 +155,12 @@ th{background:#f3f4f6;}
       <input id="sharedField" placeholder="yes/no">
 
       <label>Transfer Date</label>
-<input id="calibrationField" readonly>
+      <input id="calibrationField" readonly>
+
+      <!-- IMAGE UPLOAD + GALLERY (NEW) -->
+      <h4 style="margin-top:15px;">Images</h4>
+      <div id="imageGallery" class="gallery-container"></div>
+      <button class="button" onclick="uploadImage()">Upload Image</button>
 
       <div style="text-align:right;margin-top:10px;">
         <button id="saveBtn" class="button" onclick="saveAsset()">Save</button>
@@ -153,11 +172,10 @@ th{background:#f3f4f6;}
 <script>
   const apiBase="https://mostlane-assets.jamie-def.workers.dev";
   let currentEditId=null;
+  let currentAsset=null;
   let portalUsers=[];
 
-  /* ------------
-     LOAD USERS
-  ------------ */
+  /* LOAD USERS */
   async function loadPortalUsers(){
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
     const raw = await res.text();
@@ -179,9 +197,6 @@ th{background:#f3f4f6;}
       );
   }
 
-  /* ------------------------
-     POPULATE SELECT DROPDOWN
-  --------------------------*/
   function populateUserDropdown(selected=""){
     const sel=document.getElementById("assignedField");
     sel.innerHTML = `<option value="">-- Select User --</option>`;
@@ -212,14 +227,16 @@ th{background:#f3f4f6;}
     }
   }
 
-  /* ------------
-     ADD MODAL
-  ------------ */
+  /* ADD MODAL */
   function openAddModal(){
     currentEditId=null;
+    currentAsset=null;
+
     document.getElementById("modalTitle").textContent="Add Asset";
 
     document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+
+    document.getElementById("imageGallery").innerHTML="";
 
     populateUserDropdown("");
     validateSaveButton();
@@ -232,11 +249,11 @@ th{background:#f3f4f6;}
     document.getElementById("assetModal").style.display="flex";
   }
 
-  /* ------------
-     EDIT MODAL
-  ------------ */
+  /* EDIT MODAL */
   function openEditModal(asset){
     currentEditId=asset.id;
+    currentAsset=asset;
+
     document.getElementById("modalTitle").textContent="Edit Asset";
 
     document.getElementById("idField").value=asset.id;
@@ -254,16 +271,68 @@ th{background:#f3f4f6;}
     document.getElementById("calibrationField").value =
       new Date().toISOString().slice(0,10);
 
+    loadImageGallery(asset);
+
     document.getElementById("assetModal").style.display="flex";
   }
 
-  function closeModal(){
-    document.getElementById("assetModal").style.display="none";
+  function loadImageGallery(asset){
+    const gallery=document.getElementById("imageGallery");
+    gallery.innerHTML="";
+
+    (asset.images || []).forEach(url=>{
+      const img=document.createElement("img");
+      img.src=url;
+      gallery.appendChild(img);
+    });
   }
 
-  /* ------------
-     LOAD ASSETS
-  ------------ */
+  /* IMAGE UPLOAD */
+  async function uploadImage(){
+    if(!currentAsset){
+      alert("Please save the asset before uploading images.");
+      return;
+    }
+
+    const input=document.createElement("input");
+    input.type="file";
+    input.accept="image/*";
+
+    input.onchange=async()=>{
+      const file=input.files[0];
+      if(!file) return;
+
+      const form=new FormData();
+      form.append("file", file);
+      form.append("assetId", currentAsset.id);
+
+      const res=await fetch(`${apiBase}/upload-asset-image`,{
+        method:"POST",
+        body:form
+      });
+
+      const data=await res.json();
+      if(!data.ok){
+        alert("Upload failed");return;
+      }
+
+      currentAsset.images=currentAsset.images||[];
+      currentAsset.images.push(data.url);
+
+      // Save updated asset
+      await fetch(`${apiBase}/asset/update`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(currentAsset)
+      });
+
+      loadImageGallery(currentAsset);
+    };
+
+    input.click();
+  }
+
+  /* LOAD ASSETS */
   async function loadAssets(){
     await loadPortalUsers();
 
@@ -291,9 +360,7 @@ th{background:#f3f4f6;}
     });
   }
 
-  /* ------------
-     SAVE
-  ------------ */
+  /* SAVE */
   async function saveAsset(){
     const assigned=document.getElementById("assignedField").value;
     if(assigned===""){
@@ -310,7 +377,8 @@ th{background:#f3f4f6;}
       value:document.getElementById("valueField").value.trim(),
       assignedTo:assigned,
       shared:document.getElementById("sharedField").value.trim(),
-      calibrationDate:document.getElementById("calibrationField").value.trim()
+      calibrationDate:document.getElementById("calibrationField").value.trim(),
+      images: currentAsset?.images || []
     };
 
     const route=currentEditId?"/asset/update":"/asset/add";
@@ -327,9 +395,7 @@ th{background:#f3f4f6;}
     closeModal();loadAssets();
   }
 
-  /* ------------
-     DELETE
-  ------------ */
+  /* DELETE */
   async function deleteAsset(id){
     if(!confirm(`Delete asset ${id}?`))return;
 
