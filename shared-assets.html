@@ -177,7 +177,6 @@
       }
 
       sharedAssets.forEach(asset => {
-        // ⭐ Correct “Since” logic (same as my-assets.html)
         let sinceText = "Unknown";
 
         if (asset.calibrationDate) {
@@ -210,23 +209,43 @@
       document.getElementById("sharedGrid").innerHTML = "<p>Error loading shared assets.</p>";
     });
 
-  /* --- Transfer History Viewer --- */
+  /* --- Transfer History Viewer (FIXED) --- */
   function showHistory(assetID) {
     fetch("https://mostlane-assets.jamie-def.workers.dev/transfer-log?assetID=" + assetID)
       .then(res => res.json())
       .then(logs => {
-        const history = logs.filter(entry => entry.assetID === assetID);
         const content = document.getElementById('historyContent');
+
+        if (!Array.isArray(logs) || !logs.length) {
+          content.innerHTML = "<p>No transfer history available.</p>";
+          document.getElementById('historyModal').style.display = 'block';
+          return;
+        }
+
+        const history = logs.filter(entry => entry.assetID === assetID);
 
         if (!history.length) {
           content.innerHTML = "<p>No transfer history available.</p>";
-        } else {
-          const sorted = history.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          content.innerHTML = sorted.map(entry => {
-            const date = new Date(entry.timestamp).toLocaleString();
-            return `<p><strong>${entry.from}</strong> → <strong>${entry.to}</strong><br><em>${date}</em></p>`;
-          }).join('');
+          document.getElementById('historyModal').style.display = 'block';
+          return;
         }
+
+        const sorted = history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        const latest = sorted.slice(0, 4);
+
+        content.innerHTML = latest.map(entry => {
+          const date = new Date(entry.timestamp).toLocaleString();
+          return `
+            <p>
+              <strong>${entry.from.replace(".", " ")}</strong>
+              →
+              <strong>${entry.to.replace(".", " ")}</strong><br>
+              <em>${date}</em>
+            </p>
+          `;
+        }).join('');
+
         document.getElementById('historyModal').style.display = 'block';
       })
       .catch(() => {
