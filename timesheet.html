@@ -76,9 +76,7 @@
               <th style="width:130px">Notes</th>
             </tr>
           </thead>
-          <tbody id="tbody">
-            <!-- rows injected -->
-          </tbody>
+          <tbody id="tbody"></tbody>
           <tfoot>
             <tr>
               <td colspan="4">Weekly Totals</td>
@@ -100,7 +98,7 @@
 
       <div class="note">
         Start = <b>leaveHome</b> · Finish = <b>arriveHome</b>.  
-        Overtime day = any day with OT &gt; 0 (ignores excluded entries).
+        Overtime day = any day with OT > 0 (ignores excluded entries).
       </div>
 
       <div id="status" class="muted" style="margin-top:10px;"></div>
@@ -109,14 +107,13 @@
 
 <script>
 const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
-
 const $ = (id)=>document.getElementById(id);
 
 // --- Date helpers ---
 function startOfWeekMonday(date){
   const d = new Date(date);
-  const day = d.getDay(); // 0=Sun .. 6=Sat
-  const diff = (day === 0 ? -6 : 1 - day); // shift to Monday
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1 - day);
   d.setDate(d.getDate() + diff);
   d.setHours(12,0,0,0);
   return d;
@@ -128,55 +125,54 @@ function fmtNice(d){
 function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 
 // --- State ---
-let RAW = {};                 // GET result from Worker (object keyed by date → arrays)
-let ENGINEERS = [];           // all names discovered
-let currentWeekMon = null;    // Date (Monday)
-let currentEngineer = null;   // string
+let RAW = {};
+let ENGINEERS = [];
+let currentWeekMon = null;
+let currentEngineer = null;
+
+// --- NEW: Load only the week’s data ---
+async function loadWeekData(weekMonISO) {
+  RAW = {}; 
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(new Date(weekMonISO + "T00:00:00"), i);
+    const iso = fmtISODate(d);
+
+    try {
+      const url = `${HOURS_URL}?date=${iso}&t=${Date.now()}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) continue;
+
+      let j = await res.json();
+
+      if (Array.isArray(j)) {
+        RAW[iso] = j;
+      } else if (j.ok && Array.isArray(j.data)) {
+        RAW[iso] = j.data;
+      }
+    } catch {}
+  }
+}
 
 // Load + init
 window.addEventListener("DOMContentLoaded", async () => {
   $("status").textContent = "Loading…";
-  try{
-const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
-let j = await res.text();
 
-try {
-  j = JSON.parse(j);
-} catch (e) {
-  console.warn("Non-JSON response from worker:", j);
-  j = {};
-}
+  currentWeekMon = startOfWeekMonday(new Date());
+  await loadWeekData(fmtISODate(currentWeekMon));
 
-if (j.ok && j.data) RAW = j.data;
-else if (j.Hours) RAW = j.Hours;
-else if (typeof j === "object") RAW = j;
-else {
-  console.error("Unexpected data format", j);
-  RAW = {};
-}
-
-console.log("✅ RAW loaded:", RAW);
-  }catch(e){
-    $("status").textContent = "Could not load data.";
-    RAW = {};
-  }
-
-  // Build engineer list from all entries
+  // Build engineer list
   const names = new Set();
   Object.values(RAW).forEach(arr=>{
     if(Array.isArray(arr)){
       arr.forEach(e=>{
         if(e && typeof e === "object" && e.engineer){
           names.add(String(e.engineer).trim());
-        } else if (typeof e === "string"){
-          names.add(e.trim());
         }
       });
     }
   });
   ENGINEERS = Array.from(names).sort((a,b)=>a.localeCompare(b));
 
-  // Fill dropdown
   const sel = $("engineerSel");
   sel.innerHTML = "";
   ENGINEERS.forEach(n=>{
@@ -184,18 +180,25 @@ console.log("✅ RAW loaded:", RAW);
     opt.value = n; opt.textContent = n;
     sel.appendChild(opt);
   });
-  currentEngineer = ENGINEERS[0] || null;
 
-  // Default week = this week's Monday
-  currentWeekMon = startOfWeekMonday(new Date());
+  currentEngineer = ENGINEERS[0] || null;
+  $("status").textContent = "";
   render();
 
-  $("prevWeek").onclick = ()=>{ currentWeekMon = addDays(currentWeekMon,-7); render(); };
-  $("nextWeek").onclick = ()=>{ currentWeekMon = addDays(currentWeekMon, 7); render(); };
+  $("prevWeek").onclick = async ()=>{
+    currentWeekMon = addDays(currentWeekMon,-7);
+    await loadWeekData(fmtISODate(currentWeekMon));
+    render();
+  };
+  $("nextWeek").onclick = async ()=>{
+    currentWeekMon = addDays(currentWeekMon, 7);
+    await loadWeekData(fmtISODate(currentWeekMon));
+    render();
+  };
   sel.onchange = ()=>{ currentEngineer = sel.value; render(); };
 });
 
-// Pull all entries that match weekKey & engineer
+// Pull all entries that match week & engineer
 function collectWeekEntries(weekMonISO, engineer){
   const out = [];
   const weekMon = new Date(weekMonISO + "T00:00:00");
@@ -207,26 +210,19 @@ function collectWeekEntries(weekMonISO, engineer){
     if(!Array.isArray(arr)) continue;
     arr.forEach(e=>{
       if(!e || typeof e !== "object") return;
-
-      // Match engineer (case-insensitive)
       if(String(e.engineer||"").trim().toLowerCase() !== engineer.trim().toLowerCase()) return;
 
-      // Normalize weekKey (some are Sunday, some Monday)
       const wk = String(e.weekKey || "").trim();
 
-      // ✅ Include if this record belongs to this week (Mon–Sun)
       if (wk === weekMonISO || wk === sundayKey) {
         out.push(e);
-      }
-      // Also include if date itself falls within the Mon–Fri window
-      else {
+      } else {
         const d = new Date(e.date + "T00:00:00");
         if (d >= weekMon && d < addDays(weekMon,7)) out.push(e);
       }
     });
   }
 
-  // Group by date
   const byDate = {};
   out.forEach(e=>{
     const k = String(e.date);
@@ -235,7 +231,7 @@ function collectWeekEntries(weekMonISO, engineer){
   });
   return byDate;
 }
-  
+
 function render(){
   if(!currentEngineer || !currentWeekMon){
     $("status").textContent = "Select an engineer.";
@@ -245,12 +241,11 @@ function render(){
   const weekMonISO = fmtISODate(currentWeekMon);
   $("weekLabel").textContent = fmtNice(currentWeekMon);
 
-  // Get entries for this engineer + week
   const byDate = collectWeekEntries(weekMonISO, currentEngineer);
 
-  // Build 5 working days Mon..Fri
   const days = [0,1,2,3,4].map(i => addDays(currentWeekMon, i));
-  const tbody = $("tbody");
+
+  let tbody = $("tbody");
   tbody.innerHTML = "";
 
   let totTotal = 0, totStd = 0, totOT = 0, otDays = 0;
@@ -261,58 +256,51 @@ function render(){
     const dayName = d.toLocaleDateString("en-GB",{weekday:"short"});
     const pretty = d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
 
-    // choose first non-excluded entry for the day (if multiple, take the one with biggest totalHours)
     const entries = byDate[iso] || [];
     let entry = entries
-      .filter(e => !e.excludeFromPay) // ignore excluded lines in viewer totals
-.sort((a,b)=> new Date(b.submittedAt) - new Date(a.submittedAt))[0];
+      .filter(e => !e.excludeFromPay)
+      .sort((a,b)=> new Date(b.submittedAt) - new Date(a.submittedAt))[0];
 
-    // Capture Monday van check banner from the actual Monday record if present
-if (idx === 0) { // Monday summary
-  const weekMonISO = fmtISODate(currentWeekMon);
-  const sundayBefore = fmtISODate(addDays(currentWeekMon, -1));
+    if (idx === 0) {
+      const sundayBefore = fmtISODate(addDays(currentWeekMon, -1));
+      const monRecord = Object.values(RAW)
+        .flat()
+        .find(e =>
+          e &&
+          typeof e === "object" &&
+          String(e.engineer || "").trim().toLowerCase() === currentEngineer.trim().toLowerCase() &&
+          (
+            String(e.weekKey).trim() === weekMonISO ||
+            String(e.weekKey).trim() === sundayBefore
+          ) &&
+          (e.vanCheck || e.vanCheckWeekStatus)
+        );
 
-  // Find any record for this engineer whose weekKey matches Monday or the Sunday-before
-  const monRecord = Object.values(RAW)
-    .flat()
-    .find(e =>
-      e &&
-      typeof e === "object" &&
-      String(e.engineer || "").trim().toLowerCase() === currentEngineer.trim().toLowerCase() &&
-      (
-        String(e.weekKey).trim() === weekMonISO ||
-        String(e.weekKey).trim() === sundayBefore
-      ) &&
-      (e.vanCheck || e.vanCheckWeekStatus)
-    );
+      if (monRecord) {
+        const rawVal = monRecord.vanCheck || monRecord.vanCheckWeekStatus || "";
+        const checkVal = String(rawVal).trim().toLowerCase();
 
-  if (monRecord) {
-    const rawVal = monRecord.vanCheck || monRecord.vanCheckWeekStatus || "";
-    const checkVal = String(rawVal).trim().toLowerCase();
-    mondayVanCheckText = `Monday Van Check: ${rawVal}`;
+        mondayVanCheckText = `Monday Van Check: ${rawVal}`;
 
-if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
-  mondayVanCheckText +=
-    ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
-} else if (checkVal === "no" || checkVal === "failed") {
-  mondayVanCheckText +=
-    ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
-} else if (checkVal === "n/a" || checkVal === "na") {
-  mondayVanCheckText +=
-    ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
-} else {
-  mondayVanCheckText = `
-    Monday Van Check: ⚠️ 
-    <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
-  `;
-}
-  } else {
-    mondayVanCheckText = `
-      Monday Van Check: ⚠️ 
-      <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
-    `;
-  }
-}
+        if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
+          mondayVanCheckText +=
+            ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
+        } else if (checkVal === "no" || checkVal === "failed") {
+          mondayVanCheckText +=
+            ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
+        } else if (checkVal === "n/a" || checkVal === "na") {
+          mondayVanCheckText +=
+            ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
+        } else {
+          mondayVanCheckText =
+            `Monday Van Check: ⚠️ <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>`;
+        }
+      } else {
+        mondayVanCheckText =
+          `Monday Van Check: ⚠️ <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>`;
+      }
+    }
+
     const start = entry?.leaveHome || "";
     const finish = entry?.arriveHome || "";
     const total = parseFloat(entry?.totalHours || 0) || 0;
@@ -340,13 +328,10 @@ if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
     tbody.appendChild(tr);
   });
 
-  // Totals row
   $("totTotal").textContent = totTotal.toFixed(2);
   $("totStd").textContent   = totStd.toFixed(2);
   $("totOT").textContent    = totOT.toFixed(2);
-  $("totDays").textContent  = "—";
 
-  // Summary chips
   $("sumTotal").textContent  = totTotal.toFixed(2);
   $("sumStd").textContent    = totStd.toFixed(2);
   $("sumOT").textContent     = totOT.toFixed(2);
@@ -354,30 +339,24 @@ if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
 
   $("vanCheckBanner").innerHTML = mondayVanCheckText;
 
-  // Status line
   const foundAny = Object.keys(byDate).length > 0;
   $("status").textContent = foundAny ? "" : "No entries found for this week for the selected engineer.";
 }
 </script>
 
-<!-- html2canvas + jsPDF libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <script>
 document.getElementById("exportBtn").addEventListener("click", async () => {
-  const engineer = document.getElementById("engineerSel").value.replace(/\s+/g, '');
-  const weekComm = document.getElementById("weekLabel").textContent.split(',')[0].replace(/\s+/g,'');
-  // Clean name format: Bradley Graham - WC 17-10-2025.pdf
-const engineerName = document.getElementById("engineerSel").value.trim();
-const monday = new Date(currentWeekMon);
-const dd = String(monday.getDate()).padStart(2, '0');
-const mm = String(monday.getMonth() + 1).padStart(2, '0');
-const yyyy = monday.getFullYear();
-const weekLabelFormatted = `${dd}-${mm}-${yyyy}`;
-const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
+  const engineerName = document.getElementById("engineerSel").value.trim();
+  const monday = new Date(currentWeekMon);
+  const dd = String(monday.getDate()).padStart(2, '0');
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const yyyy = monday.getFullYear();
+  const weekLabelFormatted = `${dd}-${mm}-${yyyy}`;
+  const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
 
-  // hide buttons & dropdown temporarily for clean export
   const controls = document.querySelector('.controls');
   controls.style.display = 'none';
   const exportBtn = document.getElementById('exportBtn');
@@ -393,7 +372,6 @@ const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
   pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
   pdf.save(filename);
 
-  // restore controls
   controls.style.display = '';
   exportBtn.style.display = '';
 });
