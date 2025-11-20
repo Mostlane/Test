@@ -419,8 +419,8 @@
   async function loadAssets(){
     await loadPortalUsers();
 
-    const res=await.fetch(`${apiBase}/assets`);
-    const data=await.res.json();
+    const res = await fetch(`${apiBase}/assets`);
+const data = await res.json();
 
     currentAssets=data.assets || [];
     renderValueSummary(currentAssets);
