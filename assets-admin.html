@@ -160,6 +160,61 @@
     }
     #imgPrev{ left:20px; }
     #imgNext{ right:20px; }
+
+    /* 🔹 Summary / bar chart styles */
+    .summary-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:4px 0;
+      border-bottom:1px solid #eee;
+      font-size:13px;
+    }
+    .summary-row.highlight{
+      background:rgba(16,185,129,0.08);
+    }
+    .summary-name{
+      flex:0 0 35%;
+      text-align:left;
+      font-weight:bold;
+    }
+    .summary-value{
+      flex:0 0 18%;
+      text-align:right;
+      white-space:nowrap;
+    }
+    .summary-count{
+      flex:0 0 12%;
+      text-align:right;
+      font-size:12px;
+      color:#555;
+    }
+    .summary-bar-outer{
+      flex:1;
+      height:8px;
+      background:#e5e7eb;
+      border-radius:999px;
+      overflow:hidden;
+    }
+    .summary-bar-inner{
+      height:100%;
+      border-radius:999px;
+      background:linear-gradient(90deg,rgba(0,74,153,0.8),rgba(0,148,255,0.9));
+    }
+    .summary-controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+      margin:10px 0 20px 0;
+    }
+    .summary-legend{
+      font-size:11px;
+      color:#444;
+      margin-top:6px;
+      font-style:italic;
+    }
   </style>
 
   <script>
@@ -182,6 +237,17 @@
     <a class="button" href="main.html">Main Menu</a>
     <button class="button" onclick="openAddModal()">Add Asset</button>
     <h1>Asset Administration</h1>
+
+    <!-- 🔹 Asset value summary + controls -->
+    <div id="valueSummary" style="margin:15px 0;padding:15px;background:white;border-radius:8px;border:1px solid #ccc;font-size:15px;">
+      <strong>Loading asset summary…</strong>
+    </div>
+    <div class="summary-controls">
+      <button class="button" type="button" onclick="setSummarySort('value')">Sort by Value (High → Low)</button>
+      <button class="button" type="button" onclick="setSummarySort('name')">Sort by Name (A → Z)</button>
+      <button class="button" type="button" onclick="downloadSummaryCSV()">Export Summary CSV</button>
+      <span class="summary-legend">Bar length shows relative value held. Rows highlighted green are holding more than £5,000 of assets.</span>
+    </div>
 
     <table id="assetTable">
       <thead>
@@ -253,6 +319,12 @@
   let portalUsers=[];
   let currentImageList=[];
   let currentImageIndex=0; // 🔹 track which image is open
+
+  // 🔹 For summary / chart / CSV
+  let currentAssets = [];
+  let lastSummarySort = "value"; // "value" or "name"
+  let lastSummaryData = [];
+  const HIGH_VALUE_THRESHOLD = 5000; // £5k highlight
 
   async function loadPortalUsers(){
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
@@ -532,12 +604,134 @@
     input.click();
   }
 
+  // 🔹 Build summary / bar chart / CSV for current assets
+  function renderValueSummary(assets){
+    const summaryEl = document.getElementById("valueSummary");
+    if(!summaryEl) return;
+
+    let totalValue = 0;
+    const totalCount = assets.length;
+    const perUser = {};
+
+    assets.forEach(a=>{
+      const val = parseFloat(a.value) || 0;
+      totalValue += val;
+
+      if(a.assignedTo && a.assignedTo !== "Shared"){
+        if(!perUser[a.assignedTo]){
+          perUser[a.assignedTo] = { total:0, count:0 };
+        }
+        perUser[a.assignedTo].total += val;
+        perUser[a.assignedTo].count += 1;
+      }
+    });
+
+    let data = Object.entries(perUser).map(([username,info])=>{
+      const displayName = username.replace(/\./g," ");
+      return {
+        username,
+        displayName,
+        totalValue: info.total,
+        count: info.count
+      };
+    });
+
+    // sort
+    if(lastSummarySort === "name"){
+      data.sort((a,b)=>a.displayName.localeCompare(b.displayName));
+    } else {
+      data.sort((a,b)=>b.totalValue - a.totalValue);
+    }
+
+    lastSummaryData = data;
+
+    const maxVal = data.length ? Math.max(...data.map(d=>d.totalValue)) : 0;
+
+    let rowsHtml = "";
+    data.forEach(d=>{
+      const pct = maxVal > 0 ? (d.totalValue / maxVal) * 100 : 0;
+      const highlightClass = d.totalValue >= HIGH_VALUE_THRESHOLD ? " highlight" : "";
+      rowsHtml += `
+        <div class="summary-row${highlightClass}">
+          <div class="summary-name">${d.displayName}</div>
+          <div class="summary-value">£${d.totalValue.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
+          <div class="summary-count">${d.count}</div>
+          <div class="summary-bar-outer">
+            <div class="summary-bar-inner" style="width:${pct}%;"></div>
+          </div>
+        </div>
+      `;
+    });
+
+    const html = `
+      <div style="margin-bottom:10px;">
+        <strong>Total Assets:</strong> ${totalCount}<br>
+        <strong>Total Asset Value:</strong> £${totalValue.toLocaleString()}
+      </div>
+      <hr style="margin:10px 0;">
+      <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">
+        Value per Engineer
+        <span style="font-weight:normal;font-size:11px;color:#555;">(bars show relative value, count = number of assets)</span>
+      </div>
+      <div class="summary-row" style="font-weight:bold;border-bottom:2px solid #ddd;">
+        <div class="summary-name">Engineer</div>
+        <div class="summary-value">Total £</div>
+        <div class="summary-count">Count</div>
+        <div class="summary-bar-outer" style="background:transparent;height:auto;">
+          <span style="font-size:11px;color:#555;">Relative Value</span>
+        </div>
+      </div>
+      ${rowsHtml || `<div style="font-size:13px;color:#555;margin-top:4px;">No assets currently assigned to engineers.</div>`}
+    `;
+
+    summaryEl.innerHTML = html;
+  }
+
+  function setSummarySort(mode){
+    if(mode !== "value" && mode !== "name") return;
+    lastSummarySort = mode;
+    if(currentAssets && currentAssets.length){
+      renderValueSummary(currentAssets);
+    }
+  }
+
+  function downloadSummaryCSV(){
+    if(!lastSummaryData || !lastSummaryData.length){
+      alert("No summary data available to export.");
+      return;
+    }
+
+    let csv = "Engineer,Username,Total Value (£),Asset Count\n";
+    lastSummaryData.forEach(d=>{
+      const line = [
+        `"${d.displayName.replace(/"/g,'""')}"`,
+        `"${d.username.replace(/"/g,'""')}"`,
+        d.totalValue.toFixed(2),
+        d.count
+      ].join(",");
+      csv += line + "\n";
+    });
+
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "asset-value-summary.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   /* LOAD ASSETS */
   async function loadAssets(){
     await loadPortalUsers();
 
     const res=await fetch(`${apiBase}/assets`);
     const data=await res.json();
+
+    currentAssets = data.assets || [];
+    renderValueSummary(currentAssets);
 
     const tbody=document.querySelector("#assetTable tbody");
     tbody.innerHTML="";
