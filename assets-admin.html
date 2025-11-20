@@ -141,6 +141,7 @@
       font-weight:bold;
     }
 
+    /* Nav buttons in fullscreen viewer */
     .img-nav-btn{
       position:absolute;
       top:50%;
@@ -160,6 +161,7 @@
     #imgPrev{ left:20px; }
     #imgNext{ right:20px; }
 
+    /* Summary / bar chart styles */
     .summary-row{
       display:flex;
       align-items:center;
@@ -236,6 +238,7 @@
     <button class="button" onclick="openAddModal()">Add Asset</button>
     <h1>Asset Administration</h1>
 
+    <!-- New summary panel -->
     <div id="valueSummary" style="margin:15px 0;padding:15px;background:white;border-radius:8px;border:1px solid #ccc;font-size:15px;">
       <strong>Loading asset summary…</strong>
     </div>
@@ -257,212 +260,564 @@
     </table>
   </div>
 
-<!-- MODALS + IMAGE VIEWER OMITTED HERE FOR LENGTH BUT INCLUDED IN REAL OUTPUT -->
+  <!-- MODAL -->
+  <div id="assetModal" class="modal">
+    <div class="modal-content">
+      <span class="close-btn" onclick="closeModal()">×</span>
 
-<script>
-  const apiBase="https://mostlane-assets.jamie-def.workers.dev";
-  let currentEditId=null;
-  let currentAsset=null;
-  let portalUsers=[];
-  let currentImageList=[];
-  let currentImageIndex=0;
+      <h3 id="modalTitle">Add/Edit Asset</h3>
 
-  let currentAssets=[];
-  let lastSummarySort="value";
-  let lastSummaryData=[];
-  const HIGH_VALUE_THRESHOLD=5000;
+      <label>Asset ID</label>
+      <input id="idField" placeholder="Asset ID">
 
-  /* USERS */
-  async function loadPortalUsers(){
-    const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
-    const raw = await res.text();
-    let data;
-    try { data = JSON.parse(raw); }
-    catch { data = { Users: [] }; }
+      <label>Name</label>
+      <input id="nameField" placeholder="Name">
 
-    portalUsers = (data.Users || [])
-      .filter(u =>
-        u.Username &&
-        u.Username.trim() !== "" &&
-        u.FirstName &&
-        u.LastName &&
-        u.Status !== "Not Active"
-      )
-      .sort((a,b)=>
-        (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
-      );
-  }
+      <label>Category</label>
+      <input id="categoryField" placeholder="Category">
 
-  /* SUMMARY VALUE FIX */
-  function renderValueSummary(assets){
-    const summaryEl=document.getElementById("valueSummary");
-    if(!summaryEl) return;
+      <label>Serial</label>
+      <input id="serialField" placeholder="Serial">
 
-    let totalValue=0;
-    const totalCount=assets.length;
-    const perUser={};
+      <label>Value (£)</label>
+      <input id="valueField" placeholder="Value (£)">
 
-    assets.forEach(a=>{
-      // FIXED VALUE PARSING
-      let val = 0;
-      if (a.value !== undefined && a.value !== null) {
-        val = parseFloat(
-          String(a.value)
-            .replace(/£/g, "")
-            .replace(/,/g, "")
-            .trim()
+      <label>Assigned To</label>
+      <select id="assignedField">
+        <option value="">-- Select User --</option>
+      </select>
+
+      <label>Shared (yes/no)</label>
+      <input id="sharedField" placeholder="yes/no">
+
+      <label>Transfer Date</label>
+      <input id="calibrationField" readonly>
+
+      <h4 style="margin-top:15px;">Images</h4>
+      <div id="imageGallery" class="gallery-container"></div>
+      <button class="button" onclick="uploadImage()">Upload Image</button>
+
+      <div style="text-align:right;margin-top:10px;">
+        <button id="saveBtn" class="button" onclick="saveAsset()">Save</button>
+        <button class="button" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Viewer -->
+  <div id="imageViewer" class="image-viewer-overlay">
+    <span class="image-viewer-close" onclick="closeImageViewer()">×</span>
+    <button id="imgPrev" class="img-nav-btn" onclick="prevImage()">&#8592;</button>
+    <img id="imageViewerImg" src="" alt="Asset image">
+    <button id="imgNext" class="img-nav-btn" onclick="nextImage()">&#8594;</button>
+  </div>
+
+  <script>
+    const apiBase="https://mostlane-assets.jamie-def.workers.dev";
+    let currentEditId=null;
+    let currentAsset=null;
+    let portalUsers=[];
+    let currentImageList=[];
+    let currentImageIndex=0; // track which image is open
+
+    // summary state
+    let currentAssets = [];
+    let lastSummarySort = "value"; // "value" or "name"
+    let lastSummaryData = [];
+    const HIGH_VALUE_THRESHOLD = 5000; // £5k
+
+    async function loadPortalUsers(){
+      const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
+      const raw = await res.text();
+      let data;
+      try { data = JSON.parse(raw); }
+      catch { data = { Users: [] }; }
+
+      portalUsers = (data.Users || [])
+        .filter(u =>
+          u.Username &&
+          u.Username.trim() !== "" &&
+          u.FirstName &&
+          u.LastName &&
+          u.Status !== "Not Active"
+        )
+        .sort((a,b)=>
+          (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
         );
-        if (isNaN(val)) val = 0;
-      }
-
-      totalValue += val;
-
-      if(a.assignedTo && a.assignedTo !== "Shared"){
-        if(!perUser[a.assignedTo]){
-          perUser[a.assignedTo]={ total:0, count:0 };
-        }
-        perUser[a.assignedTo].total += val;
-        perUser[a.assignedTo].count += 1;
-      }
-    });
-
-    let data=Object.entries(perUser).map(([username,info])=>{
-      return {
-        username,
-        displayName: username.replace(/\./g," "),
-        totalValue: info.total,
-        count: info.count
-      };
-    });
-
-    if(lastSummarySort === "name"){
-      data.sort((a,b)=>a.displayName.localeCompare(b.displayName));
-    } else {
-      data.sort((a,b)=>b.totalValue - a.totalValue);
     }
 
-    lastSummaryData=data;
+    function populateUserDropdown(selected=""){
+      const sel=document.getElementById("assignedField");
+      sel.innerHTML = `<option value="">-- Select User --</option>`;
 
-    const maxVal=data.length ? Math.max(...data.map(d=>d.totalValue)) : 0;
+      portalUsers.forEach(u=>{
+        const opt=document.createElement("option");
+        opt.value=u.Username;
+        opt.textContent = u.FirstName + " " + u.LastName;
+        if(u.Username === selected) opt.selected = true;
+        sel.appendChild(opt);
+      });
 
-    let rowsHtml="";
-    data.forEach(d=>{
-      const pct = maxVal>0 ? (d.totalValue/maxVal)*100 : 0;
-      const highlight = d.totalValue>=HIGH_VALUE_THRESHOLD ? " highlight" : "";
-      rowsHtml += `
-        <div class="summary-row${highlight}">
-          <div class="summary-name">${d.displayName}</div>
-          <div class="summary-value">£${d.totalValue.toLocaleString()}</div>
-          <div class="summary-count">${d.count}</div>
-          <div class="summary-bar-outer">
-            <div class="summary-bar-inner" style="width:${pct}%;"></div>
+      const sharedOpt=document.createElement("option");
+      sharedOpt.value="Shared";
+      sharedOpt.textContent="Shared";
+      if(selected==="Shared") sharedOpt.selected=true;
+      sel.appendChild(sharedOpt);
+    }
+
+    function validateSaveButton(){
+      const saveBtn=document.getElementById("saveBtn");
+      const assigned=document.getElementById("assignedField").value;
+      if(assigned === ""){
+        saveBtn.classList.add("disabled");
+      } else {
+        saveBtn.classList.remove("disabled");
+      }
+    }
+
+    /* ADD MODAL */
+    function openAddModal(){
+      currentEditId=null;
+      currentAsset=null;
+
+      document.getElementById("modalTitle").textContent="Add Asset";
+
+      document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+
+      document.getElementById("imageGallery").innerHTML="";
+      currentImageList = [];
+
+      populateUserDropdown("");
+      validateSaveButton();
+
+      document.getElementById("calibrationField").value =
+        new Date().toISOString().slice(0,10);
+
+      document.getElementById("assignedField").onchange = validateSaveButton;
+
+      document.getElementById("assetModal").style.display="flex";
+    }
+
+    /* EDIT MODAL */
+    function openEditModal(asset){
+      currentEditId=asset.id;
+      currentAsset=asset;
+
+      document.getElementById("modalTitle").textContent="Edit Asset";
+
+      document.getElementById("idField").value=asset.id;
+      document.getElementById("nameField").value=asset.name;
+      document.getElementById("categoryField").value=asset.category;
+      document.getElementById("serialField").value=asset.serial;
+      document.getElementById("valueField").value=asset.value;
+
+      populateUserDropdown(asset.assignedTo);
+      validateSaveButton();
+
+      document.getElementById("assignedField").onchange = validateSaveButton;
+
+      document.getElementById("sharedField").value=asset.shared;
+      document.getElementById("calibrationField").value =
+        new Date().toISOString().slice(0,10);
+
+      loadImageGallery(asset);
+
+      document.getElementById("assetModal").style.display="flex";
+    }
+
+    function closeModal(){
+      document.getElementById("assetModal").style.display="none";
+    }
+
+    function loadImageGallery(asset){
+      const gallery=document.getElementById("imageGallery");
+      gallery.innerHTML="";
+
+      currentImageList = asset.images || [];
+      currentAsset.images = currentImageList;
+
+      currentImageList.forEach(url=>{
+        const wrapper=document.createElement("div");
+        wrapper.className="gallery-item";
+
+        const img=document.createElement("img");
+        img.src=url;
+        img.onclick=()=>openImageViewer(url);
+
+        const del=document.createElement("button");
+        del.className="gallery-delete";
+        del.type="button";
+        del.textContent="×";
+        del.onclick=(e)=>{
+          e.stopPropagation();
+          deleteImage(url);
+        };
+
+        wrapper.appendChild(img);
+        wrapper.appendChild(del);
+        gallery.appendChild(wrapper);
+      });
+    }
+
+    function openImageViewer(url){
+      const modal=document.getElementById("imageViewer");
+      const img=document.getElementById("imageViewerImg");
+
+      const idx = currentImageList.indexOf(url);
+      currentImageIndex = idx >= 0 ? idx : 0;
+
+      img.src=url;
+      modal.style.display="flex";
+    }
+
+    function closeImageViewer(){
+      const modal=document.getElementById("imageViewer");
+      modal.style.display="none";
+      document.getElementById("imageViewerImg").src="";
+    }
+
+    function showImageAt(index){
+      if(!currentImageList || !currentImageList.length) return;
+      const total = currentImageList.length;
+      currentImageIndex = (index + total) % total;
+      const url = currentImageList[currentImageIndex];
+      const img=document.getElementById("imageViewerImg");
+      img.src = url;
+    }
+
+    function nextImage(){
+      showImageAt(currentImageIndex + 1);
+    }
+
+    function prevImage(){
+      showImageAt(currentImageIndex - 1);
+    }
+
+    // Swipe support
+    const viewerEl = document.getElementById("imageViewer");
+    let touchStartX = null;
+
+    if(viewerEl){
+      viewerEl.addEventListener("touchstart", e=>{
+        if(e.changedTouches && e.changedTouches.length){
+          touchStartX = e.changedTouches[0].clientX;
+        }
+      }, { passive:true });
+
+      viewerEl.addEventListener("touchend", e=>{
+        if(touchStartX === null) return;
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        const endX = e.changedTouches[0].clientX;
+        const dx = endX - touchStartX;
+        const threshold = 40;
+        if(Math.abs(dx) > threshold){
+          if(dx < 0) nextImage();
+          else       prevImage();
+        }
+        touchStartX = null;
+      }, { passive:true });
+    }
+
+    /* DELETE IMAGE */
+    async function deleteImage(url){
+      if(!currentAsset) return;
+
+      const confirmDelete = confirm(
+        "Are you sure you want to delete this image? This image will be permanently deleted and cannot be recovered."
+      );
+      if(!confirmDelete) return;
+
+      const key = url.split("key=")[1];
+
+      if(!key){
+        alert("Image key missing — cannot delete.");
+        return;
+      }
+
+      try{
+        const res = await fetch(`${apiBase}/delete-asset-image`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            assetId: currentAsset.id,
+            key: key
+          })
+        });
+
+        const data = await res.json();
+        if(!data.ok){
+          alert(data.error || "Failed to delete image");
+          return;
+        }
+
+        currentAsset.images = (currentAsset.images || []).filter(u=>u!==url);
+        loadImageGallery(currentAsset);
+
+      }catch(err){
+        alert("Failed to delete image");
+      }
+    }
+
+    /* IMAGE UPLOAD */
+    async function uploadImage(){
+      if(!currentAsset){
+        alert("Please save the asset before uploading images.");
+        return;
+      }
+
+      const input=document.createElement("input");
+      input.type="file";
+      input.accept="image/*";
+
+      input.onchange=async()=>{
+        const file=input.files[0];
+        if(!file) return;
+
+        const form=new FormData();
+        form.append("file", file);
+        form.append("assetId", currentAsset.id);
+
+        const res=await fetch(`${apiBase}/upload-asset-image`,{
+          method:"POST",
+          body:form
+        });
+
+        const data=await res.json();
+        if(!data.ok){
+          alert("Upload failed");return;
+        }
+
+        currentAsset.images=currentAsset.images||[];
+        currentAsset.images.push(data.url);
+
+        await fetch(`${apiBase}/asset/update`,{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(currentAsset)
+        });
+
+        loadImageGallery(currentAsset);
+      };
+
+      input.click();
+    }
+
+    /* SUMMARY + VALUE PROCESSING */
+    function renderValueSummary(assets){
+      const summaryEl=document.getElementById("valueSummary");
+      if(!summaryEl) return;
+
+      let totalValue=0;
+      const totalCount=assets.length;
+      const perUser={};
+
+      assets.forEach(a=>{
+        let val = 0;
+        if (a.value !== undefined && a.value !== null) {
+          val = parseFloat(
+            String(a.value)
+              .replace(/£/g, "")
+              .replace(/,/g, "")
+              .trim()
+          );
+          if (isNaN(val)) val = 0;
+        }
+
+        totalValue += val;
+
+        if(a.assignedTo && a.assignedTo !== "Shared"){
+          if(!perUser[a.assignedTo]){
+            perUser[a.assignedTo]={ total:0, count:0 };
+          }
+          perUser[a.assignedTo].total += val;
+          perUser[a.assignedTo].count += 1;
+        }
+      });
+
+      let data=Object.entries(perUser).map(([username,info])=>{
+        return {
+          username,
+          displayName: username.replace(/\./g," "),
+          totalValue: info.total,
+          count: info.count
+        };
+      });
+
+      if(lastSummarySort === "name"){
+        data.sort((a,b)=>a.displayName.localeCompare(b.displayName));
+      } else {
+        data.sort((a,b)=>b.totalValue - a.totalValue);
+      }
+
+      lastSummaryData=data;
+
+      const maxVal=data.length ? Math.max(...data.map(d=>d.totalValue)) : 0;
+
+      let rowsHtml="";
+      data.forEach(d=>{
+        const pct = maxVal>0 ? (d.totalValue/maxVal)*100 : 0;
+        const highlight = d.totalValue>=HIGH_VALUE_THRESHOLD ? " highlight" : "";
+        rowsHtml += `
+          <div class="summary-row${highlight}">
+            <div class="summary-name">${d.displayName}</div>
+            <div class="summary-value">£${d.totalValue.toLocaleString()}</div>
+            <div class="summary-count">${d.count}</div>
+            <div class="summary-bar-outer">
+              <div class="summary-bar-inner" style="width:${pct}%;"></div>
+            </div>
+          </div>
+        `;
+      });
+
+      summaryEl.innerHTML = `
+        <div style="margin-bottom:10px;">
+          <strong>Total Assets:</strong> ${totalCount}<br>
+          <strong>Total Asset Value:</strong> £${totalValue.toLocaleString()}
+        </div>
+        <hr style="margin:10px 0;">
+        <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">
+          Value per Engineer
+        </div>
+        <div class="summary-row" style="font-weight:bold;border-bottom:2px solid #ddd;">
+          <div class="summary-name">Engineer</div>
+          <div class="summary-value">Total £</div>
+          <div class="summary-count">Count</div>
+          <div class="summary-bar-outer" style="background:transparent;height:auto;">
+            <span style="font-size:11px;color:#555;">Relative Value</span>
           </div>
         </div>
+        ${rowsHtml || `<div style="font-size:13px;color:#555;margin-top:4px;">No assets currently assigned to engineers.</div>`}
       `;
-    });
+    }
 
-    summaryEl.innerHTML = `
-      <div style="margin-bottom:10px;">
-        <strong>Total Assets:</strong> ${totalCount}<br>
-        <strong>Total Asset Value:</strong> £${totalValue.toLocaleString()}
-      </div>
-      <hr style="margin:10px 0;">
-      <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">
-        Value per Engineer
-      </div>
-      <div class="summary-row" style="font-weight:bold;border-bottom:2px solid #ddd;">
-        <div class="summary-name">Engineer</div>
-        <div class="summary-value">Total £</div>
-        <div class="summary-count">Count</div>
-        <div class="summary-bar-outer" style="background:transparent;height:auto;">
-          <span style="font-size:11px;color:#555;">Relative Value</span>
-        </div>
-      </div>
-      ${rowsHtml}
-    `;
-  }
+    function setSummarySort(mode){
+      if(mode !== "value" && mode !== "name") return;
+      lastSummarySort = mode;
+      if(currentAssets && currentAssets.length){
+        renderValueSummary(currentAssets);
+      }
+    }
 
-  function setSummarySort(mode){
-    lastSummarySort = mode;
-    if(currentAssets.length){
+    function downloadSummaryCSV(){
+      if(!lastSummaryData || !lastSummaryData.length){
+        alert("No summary data available to export.");
+        return;
+      }
+
+      let csv="Engineer,Username,Total Value (£),Asset Count\n";
+      lastSummaryData.forEach(d=>{
+        csv += `"${d.displayName.replace(/"/g,'""')}",` +
+               `"${d.username.replace(/"/g,'""')}",` +
+               `${d.totalValue.toFixed(2)},` +
+               `${d.count}\n`;
+      });
+
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;
+      a.download="asset-value-summary.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    /* LOAD ASSETS (with safe Edit handler) */
+    async function loadAssets(){
+      await loadPortalUsers();
+
+      const res=await fetch(`${apiBase}/assets`);
+      const data=await res.json();
+
+      currentAssets = data.assets || [];
       renderValueSummary(currentAssets);
+
+      const tbody=document.querySelector("#assetTable tbody");
+      tbody.innerHTML="";
+
+      currentAssets.forEach(a=>{
+        const thumb = (a.images && a.images.length)
+          ? `<img src="${a.images[0]}" class="thumb-img">`
+          : "—";
+
+        const tr=document.createElement("tr");
+        tr.innerHTML=`
+          <td>${a.id}</td>
+          <td>${a.name}</td>
+          <td>${thumb}</td>
+          <td>${a.category}</td>
+          <td>${a.serial}</td>
+          <td>${a.value}</td>
+          <td>${a.assignedTo}</td>
+          <td>${a.shared}</td>
+          <td class="actions">
+            <button class="editBtn">Edit</button>
+            <button onclick='deleteAsset("${a.id}")'>Delete</button>
+          </td>
+        `;
+
+        const editBtn = tr.querySelector(".editBtn");
+        if(editBtn){
+          editBtn.onclick = () => openEditModal(a);
+        }
+
+        tbody.appendChild(tr);
+      });
     }
-  }
 
-  function downloadSummaryCSV(){
-    if(!lastSummaryData.length){
-      alert("No data to export");
-      return;
+    /* SAVE */
+    async function saveAsset(){
+      const assigned=document.getElementById("assignedField").value;
+      if(assigned===""){
+        alert("Please select a user before saving.");return;
+      }
+
+      const id=document.getElementById("idField").value.trim();
+
+      const body={
+        id,
+        name:document.getElementById("nameField").value.trim(),
+        category:document.getElementById("categoryField").value.trim(),
+        serial:document.getElementById("serialField").value.trim(),
+        value:document.getElementById("valueField").value.trim(),
+        assignedTo:assigned,
+        shared:document.getElementById("sharedField").value.trim(),
+        calibrationDate:document.getElementById("calibrationField").value.trim(),
+        images: currentAsset?.images || []
+      };
+
+      const route=currentEditId?"/asset/update":"/asset/add";
+
+      const res=await fetch(`${apiBase}${route}`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+
+      const r=await res.json();
+      alert(r.message||r.error);
+
+      closeModal();
+      loadAssets();
     }
 
-    let csv="Engineer,Username,Total Value (£),Asset Count\n";
-    lastSummaryData.forEach(d=>{
-      csv += `"${d.displayName}",` +
-             `"${d.username}",` +
-             `${d.totalValue},` +
-             `${d.count}\n`;
-    });
+    /* DELETE ASSET */
+    async function deleteAsset(id){
+      if(!confirm(`Delete asset ${id}?`))return;
 
-    const blob=new Blob([csv],{type:"text/csv"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url;
-    a.download="asset-summary.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+      const res=await fetch(`${apiBase}/asset/delete?id=${id}`,{
+        method:"DELETE"
+      });
 
-  /* ----------------------- */
-  /*    LOAD ASSETS (FIX)    */
-  /* ----------------------- */
+      const r=await res.json();
+      alert(r.message||r.error);
 
-  async function loadAssets(){
-    await loadPortalUsers();
+      loadAssets();
+    }
 
-    const res = await fetch(`${apiBase}/assets`);
-const data = await res.json();
-
-    currentAssets=data.assets || [];
-    renderValueSummary(currentAssets);
-
-    const tbody=document.querySelector("#assetTable tbody");
-    tbody.innerHTML="";
-
-    currentAssets.forEach(a=>{
-      const thumb=(a.images&&a.images.length)
-        ? `<img src="${a.images[0]}" class="thumb-img">`
-        : "—";
-
-      // BUILD ROW
-      const tr=document.createElement("tr");
-      tr.innerHTML=`
-        <td>${a.id}</td>
-        <td>${a.name}</td>
-        <td>${thumb}</td>
-        <td>${a.category}</td>
-        <td>${a.serial}</td>
-        <td>${a.value}</td>
-        <td>${a.assignedTo}</td>
-        <td>${a.shared}</td>
-
-        <!-- EDIT BUTTON FIX -->
-        <td class="actions">
-          <button class="editBtn">Edit</button>
-          <button onclick='deleteAsset("${a.id}")'>Delete</button>
-        </td>
-      `;
-
-      // EDIT BUTTON FIX — attach JS handler instead of injecting JSON
-      tr.querySelector(".editBtn").onclick = () => openEditModal(a);
-
-      tbody.appendChild(tr);
-    });
-  }
-
-  /* SAVE + DELETE remain unchanged */
-
-  loadAssets();
-</script>
+    loadAssets();
+  </script>
 
 </body>
 </html>
