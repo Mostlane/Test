@@ -449,6 +449,36 @@
       "notes": "HN69 SYP",
       "noteVisible": false,
       "submittedAt": "2025-11-21T09:20:40.430Z"
+    },
+    {
+      "id": "1763717011422-evcpcf",
+      "receivedAt": "2025-11-21T09:23:31.426Z",
+      "date": "2025-11-10",
+      "day": "Monday",
+      "engineer": "Bradley Graham",
+      "vehicle": "WP64 EJD",
+      "leaveHome": "07:00",
+      "arriveFirstSite": "08:00",
+      "leaveLastSite": "16:00",
+      "arriveHome": "17:00",
+      "deductLunch": true,
+      "totalHours": 9.5,
+      "standardHours": 9.5,
+      "overtimeHours": null,
+      "travelToHours": 1,
+      "travelFromHours": 1,
+      "totalTravelHours": 2,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "Yes",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-11-21T09:23:31.427Z"
     }
   ]
 }
