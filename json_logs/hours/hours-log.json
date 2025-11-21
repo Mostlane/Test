@@ -269,6 +269,36 @@
       "notes": "Van Check No & Lunch Deducted = Yes",
       "noteVisible": false,
       "submittedAt": "2025-10-16T08:24:55.667Z"
+    },
+    {
+      "id": "1763716209567-qppqrt",
+      "receivedAt": "2025-11-21T09:10:09.567Z",
+      "date": "2025-11-17",
+      "day": "Monday",
+      "engineer": "Chris Cooke",
+      "vehicle": "LA70 FPJ",
+      "leaveHome": "07:00",
+      "arriveFirstSite": "08:00",
+      "leaveLastSite": "16:00",
+      "arriveHome": "17:00",
+      "deductLunch": true,
+      "totalHours": 9.5,
+      "standardHours": 9.5,
+      "overtimeHours": null,
+      "travelToHours": 1,
+      "travelFromHours": 1,
+      "totalTravelHours": 2,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "Yes",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-11-21T09:10:09.567Z"
     }
   ]
 }
