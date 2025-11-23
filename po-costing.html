@@ -127,8 +127,8 @@
 
   <script>
   // ----- Config -----
-  const GET_URL = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
-  const UPDATE_URL = 'https://mostlane-pos.jamie-def.workers.dev/update-po';
+  const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
+  const UPDATE_URL = 'https://mostlane-po.jamie-def.workers.dev/po/update';
 
   // ----- Utils -----
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
@@ -149,12 +149,10 @@
   }
   function byId(id){ return document.getElementById(id); }
 
-  // ----- State -----
   let allPOs = [];
-  let currentTab = 'toCost'; // 'toCost' | 'costed'
+  let currentTab = 'toCost';
   let engineerName = '';
 
-  // ----- Filters -----
   function filterByDate(pos, range) {
     if (range === 'all') return pos;
     const days = parseInt(range);
@@ -181,7 +179,6 @@
     return out;
   }
 
-  // ----- Renderers -----
   function render() {
     const content = byId('tabContent');
     content.innerHTML = '';
@@ -189,9 +186,9 @@
     const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
     const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
 
-    // Populate supplier filter from *all* POs
+    // Supplier filter populate
     const supSel = byId('supplierFilter');
-    const currentSupplier = supSel.value;
+    const keep = supSel.value;
     supSel.innerHTML = '<option value="">All Suppliers</option>';
     [...new Set(allPOs.map(p => p.supplierName).filter(Boolean))].sort()
       .forEach(name => {
@@ -199,10 +196,8 @@
         opt.value = name; opt.textContent = name;
         supSel.appendChild(opt);
       });
-    // restore selection
-    supSel.value = currentSupplier;
+    supSel.value = keep;
 
-    // Apply filters
     const list = currentTab === 'toCost' ? applyAllFilters(uncosted) : applyAllFilters(costed);
 
     byId('statusText').textContent = `${list.length} item(s)`;
@@ -313,7 +308,7 @@
     content.appendChild(wrap);
   }
 
-  // ----- VAT auto-calc handlers (per row) -----
+  // VAT handlers
   function readInputs(id) {
     const netEl = byId(`net-${id}`);
     const grossEl = byId(`gross-${id}`);
@@ -343,7 +338,7 @@
     }
   }
 
-  // ----- Save to Cloudflare -----
+  // SAVE UPDATE
   async function saveCost(poNumber, id) {
     const row = document.querySelector(`tr[data-po="${poNumber}"]`);
     const saveBtn = row?.querySelector('.save-btn');
@@ -359,10 +354,12 @@
 
       const payload = {
         poNumber,
-        costNet: Number(netVal.toFixed(2)),
-        costGross: Number(grossVal.toFixed(2)),
-        vatRate,
-        costedBy: engineerName || 'Office',
+        fields: {
+          costNet: Number(netVal.toFixed(2)),
+          costGross: Number(grossVal.toFixed(2)),
+          vatRate,
+          costedBy: engineerName || 'Office'
+        }
       };
 
       const res = await fetch(UPDATE_URL, {
@@ -375,15 +372,16 @@
       const result = await res.json();
       if (!res.ok) throw new Error(result?.error || 'Update failed');
 
-      // Merge back into local state for instant UI update
+      // update local cache
       const idx = allPOs.findIndex(p => p.poNumber === poNumber);
       if (idx >= 0) {
-        allPOs[idx].costNet = payload.costNet;
-        allPOs[idx].costGross = payload.costGross;
-        allPOs[idx].vatRate = payload.vatRate;
-        allPOs[idx].costedBy = payload.costedBy;
+        allPOs[idx].costNet = payload.fields.costNet;
+        allPOs[idx].costGross = payload.fields.costGross;
+        allPOs[idx].vatRate = payload.fields.vatRate;
+        allPOs[idx].costedBy = payload.fields.costedBy;
         allPOs[idx].costedAt = new Date().toISOString();
       }
+
       render();
     } catch (e) {
       alert('⚠️ Save failed: ' + e.message);
@@ -392,7 +390,6 @@
     }
   }
 
-  // ----- Load + events -----
   async function init() {
     const username = sessionStorage.getItem('mostlaneUser') || '';
     engineerName = dotToSpace(username) || 'Office';
@@ -417,7 +414,8 @@
 
     try {
       const res = await fetch(GET_URL, { cache: 'no-store' });
-      allPOs = await res.json();
+      const data = await res.json();
+      allPOs = data.data || data || [];
       render();
     } catch (err) {
       byId('tabContent').innerHTML = '⚠️ Failed to load POs: ' + err.message;
