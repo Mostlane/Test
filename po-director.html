@@ -153,6 +153,18 @@
       </div>
     </div>
 
+    <!-- NEW: Work Type filter row (Option A: separate line) -->
+    <div class="filters" style="margin-top:-4px;">
+      <div>
+        <label for="workTypeFilter">Work Type</label>
+        <select id="workTypeFilter">
+          <option value="">All Types</option>
+          <option value="planned">Planned</option>
+          <option value="reactive">Reactive</option>
+        </select>
+      </div>
+    </div>
+
     <div class="kpis">
       <div class="kpi"><div class="label">Total POs</div><div class="value" id="k_totalPOs">-</div></div>
       <div class="kpi"><div class="label">Unique Engineers</div><div class="value" id="k_uniqueEng">-</div></div>
@@ -280,6 +292,45 @@ function dateInRange(d, days) {
   return d >= cutoff;
 }
 
+// --- Work type + job helpers ---
+
+// Normalise workType into 'planned', 'reactive', or 'other'
+function classifyWorkType(p) {
+  const wt = (p.workType || '').toLowerCase();
+  if (wt.includes('react')) return 'reactive';
+  if (wt.includes('plan')) return 'planned';
+
+  // fallback from PO number last segment: ...-P1 / ...-R1
+  const parts = String(p.poNumber || '').split('-');
+  const last = (parts[parts.length - 1] || '').toUpperCase();
+  if (/^P\d*/.test(last)) return 'planned';
+  if (/^R\d*/.test(last)) return 'reactive';
+
+  return 'other';
+}
+
+// Heuristic for ELS / ELS Private
+function isElsSite(p) {
+  const client = (p.client || p.siteClient || '').toLowerCase();
+  if (client.includes('els')) return true;
+  const siteStr = (p.siteSegment || p.site || '').toLowerCase();
+  return siteStr.includes('els');
+}
+
+// Job label logic:
+// - Reactive + ELS/ELS Private => "ELS Reactive"
+// - Reactive (other) => "Reactive"
+// - Otherwise => site name/segment or "Unspecified"
+function getJobLabel(p) {
+  const wtClass = classifyWorkType(p);
+  if (wtClass === 'reactive') {
+    return isElsSite(p) ? 'ELS Reactive' : 'Reactive';
+  }
+  const siteStr = (p.siteSegment || p.site || '').trim();
+  if (siteStr) return siteStr;
+  return 'Unspecified';
+}
+
 // Build dropdowns from visible dataset
 function populateFilters(list) {
   const engSel = document.getElementById('engineerFilter');
@@ -298,8 +349,8 @@ function populateFilters(list) {
   [...new Set(list.map(p => p.supplierName).filter(Boolean))].sort()
     .forEach(v => { const o=document.createElement('option');o.value=v;o.textContent=v;supSel.appendChild(o); });
 
-  // siteSegment from your PO generator (vehicle uses reg; site uses job number)
-  [...new Set(list.map(p => (p.siteSegment || p.site || '')).filter(Boolean))].sort()
+  // Jobs via job label (Reactive, ELS Reactive, or site name)
+  [...new Set(list.map(p => getJobLabel(p)).filter(Boolean))].sort()
     .forEach(v => { const o=document.createElement('option');o.value=v;o.textContent=v;jobSel.appendChild(o); });
 
   engSel.value = engKeep; supSel.value = supKeep; jobSel.value = jobKeep;
@@ -310,6 +361,7 @@ function applyFilters() {
   const sup = document.getElementById('supplierFilter').value;
   const job = document.getElementById('jobFilter').value;
   const days = document.getElementById('dateRange').value;
+  const workType = document.getElementById('workTypeFilter').value;
   const search = (document.getElementById('searchBox').value || '').toLowerCase().trim();
 
   FILTERED = ALL.filter(p => {
@@ -318,9 +370,15 @@ function applyFilters() {
     if (!dateInRange(d, days)) return false;
     if (eng && p.engineer !== eng) return false;
     if (sup && p.supplierName !== sup) return false;
-    if (job && (p.siteSegment || p.site || '') !== job) return false;
+
+    const jobLabel = getJobLabel(p);
+    if (job && jobLabel !== job) return false;
+
+    const wtClass = classifyWorkType(p);
+    if (workType && wtClass !== workType) return false;
+
     if (search) {
-      const hay = [p.poNumber, p.description, p.engineer, p.supplierName, (p.siteSegment||p.site||'')].join(' ').toLowerCase();
+      const hay = [p.poNumber, p.description, p.engineer, p.supplierName, jobLabel].join(' ').toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
@@ -337,7 +395,7 @@ function updateKpis(list) {
   const totalPOs = list.length;
   const uniqEng = new Set(list.map(p=>p.engineer).filter(Boolean)).size;
   const uniqSup = new Set(list.map(p=>p.supplierName).filter(Boolean)).size;
-  const uniqJobs = new Set(list.map(p=> (p.siteSegment||p.site||'') ).filter(Boolean)).size;
+  const uniqJobs = new Set(list.map(p=> getJobLabel(p)).filter(Boolean)).size;
 
   // Only costed totals
   let net=0, gross=0;
@@ -383,7 +441,7 @@ function renderTables(list) {
   // Jobs
   const jobsBody = document.querySelector('#tblJobs tbody');
   jobsBody.innerHTML = '';
-  const gJobs = groupBy(list, p => (p.siteSegment || p.site || 'Unspecified'));
+  const gJobs = groupBy(list, p => getJobLabel(p) || 'Unspecified');
   [...gJobs.entries()]
     .sort((a,b)=>{
       const A = totalsFor(a[1]).gross, B = totalsFor(b[1]).gross;
@@ -595,7 +653,7 @@ async function init() {
   }
 
   // Filters wire-up
-  ['engineerFilter','supplierFilter','jobFilter','dateRange','searchBox'].forEach(id=>{
+  ['engineerFilter','supplierFilter','jobFilter','dateRange','searchBox','workTypeFilter'].forEach(id=>{
     document.getElementById(id).addEventListener('input', applyFilters);
     document.getElementById(id).addEventListener('change', applyFilters);
   });
