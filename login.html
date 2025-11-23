@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mostlane Portal Login</title>
+
   <style>
     body {
       font-family: "Segoe UI", sans-serif;
@@ -48,20 +49,23 @@
     .login-box p#error { color: red; font-size: 14px; margin-top: 10px; }
   </style>
 </head>
+
 <body>
+
   <div class="login-box">
     <img src="mostlane-logo.jpg" alt="Mostlane Logo" />
+
     <form id="loginForm">
       <input type="text" id="username" placeholder="Username" required />
       <input type="password" id="password" placeholder="Password" required />
       <button type="submit">Sign in</button>
       <p id="error"></p>
     </form>
+
     <a href="onboard.html">Sign up</a>
   </div>
 
   <script>
-    // ✅ Updated to your Cloudflare Worker URL
     const usersJsonURL = "https://mostlane-users.jamie-def.workers.dev/users";
 
     async function hashPassword(password) {
@@ -81,60 +85,63 @@
       errorBox.textContent = "";
 
       try {
-        // ✅ Fetch live JSON from Cloudflare KV
         const res = await fetch(usersJsonURL + '?v=' + Date.now());
         if (!res.ok) throw new Error('Network error');
+
         const data = await res.json();
         const users = data.Users || [];
 
-        // Find user (case-insensitive)
         const user = users.find(u => u.Username.toLowerCase() === usernameInput.toLowerCase());
         if (!user) {
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // Check account status
         if ((user.Status || '').toLowerCase() !== 'active') {
           errorBox.textContent = "Account is not active.";
           return;
         }
 
-        // Compare SHA-256 hash
         const hashedInput = await hashPassword(passwordInput);
         if (hashedInput !== (user.HashedPassword || '').toLowerCase()) {
-          console.log('Expected:', user.HashedPassword);
-          console.log('Entered :', hashedInput);
           errorBox.textContent = "Invalid login credentials.";
           return;
         }
 
-        // ✅ Success — store session info
+        // ⭐ REQUIRED: Save ALL session keys
         sessionStorage.setItem('mostlaneLoggedIn', 'true');
         sessionStorage.setItem('mostlaneUser', user.Username);
+        sessionStorage.setItem('mostlaneUsername', user.Username);       // ⭐ FIXED (CRITICAL)
         sessionStorage.setItem('mostlaneFolder', user.SharePointPath || '');
-        sessionStorage.setItem('mostlaneEmployment', user.EmploymentType || '');
         sessionStorage.setItem('mostlaneVehicle', user.VehicleAssigned || '');
+        sessionStorage.setItem('mostlaneEmployment', user.EmploymentType || '');
+
+        // ⭐ Full permission set for future use
         sessionStorage.setItem('mostlanePermissions', JSON.stringify({
-          PurchaseOrders: user.PurchaseOrders,
           CheckInOut: user.CheckInOut,
+          Vehicles: user.Vehicles,
           Holiday: user.Holiday,
-          Forms: user.Forms,
+          EngineersHoursMenu: user.EngineersHoursMenu,
+          HoursDashboard: user.HoursDashboard,
+          PurchaseOrders: user.PurchaseOrders,
+          Sites: user.Sites,
           Assets: user.Assets,
-          AddSite: user.AddSite
+          MyDocuments: user.MyDocuments,
+          Weekly: user.Weekly,
+          Forms: user.Forms,
+          Compliance: user.Compliance,
+          Users: user.Users
         }));
 
-        localStorage.setItem('mostlaneLoggedIn', 'true');
-        localStorage.setItem('mostlaneUser', user.Username);
-        localStorage.setItem('mostlaneFolder', user.SharePointPath || '');
-        localStorage.setItem('mostlaneExpiry', Date.now() + (12 * 60 * 60 * 1000));
-
         window.location.href = 'main.html';
-      } catch (err) {
+      }
+
+      catch (err) {
         console.error(err);
-        errorBox.textContent = 'Could not load user list.';
+        errorBox.textContent = 'Could not load user data.';
       }
     });
   </script>
+
 </body>
 </html>
