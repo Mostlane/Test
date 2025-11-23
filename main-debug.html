@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Main Menu – DEBUG MODE</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body{
+      font-family:Arial;
+      background:#f0f0f0;
+      padding:20px;
+    }
+    #debug{
+      background:#fff3cd;
+      padding:15px;
+      border:1px solid #ffeeba;
+      border-radius:8px;
+      margin-bottom:20px;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+    a.button{
+      display:block;
+      margin:8px 0;
+      padding:12px;
+      background:#003b82;
+      color:white;
+      border-radius:6px;
+      text-decoration:none;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="debug">Loading debug info…</div>
+
+<div id="menu">
+  <a class="button" id="checkinBtn">🕒 Check In / Out</a>
+  <a class="button" id="vehiclesBtn">🚐 Vehicles</a>
+  <a class="button" id="holidayBtn">📅 Holiday Requests</a>
+  <a class="button" id="engineersHoursMenuBtn">🛠 Engineers Hours Menu</a>
+  <a class="button" id="purchaseBtn">🧾 Generate Purchase Order Reference</a>
+  <a class="button" id="sitesBtn">📍 Manage Sites</a>
+  <a class="button" id="assetsBtn">⚙ Plant & Equipment</a>
+  <a class="button" id="my-documents-btn">📄 My Documents</a>
+  <a class="button" id="weeklyBtn">📊 Weekly Summary</a>
+  <a class="button" id="formsBtn">📝 Forms</a>
+  <a class="button" id="complianceBtn">✔ Compliance</a>
+  <a class="button" id="hours-dashboard-btn">⏳ Hours Dashboard</a>
+  <a class="button" id="poMenuBtn">💷 Purchase Orders</a>
+  <a class="button" id="usersAdminBtn">👥 Users</a>
+  <a class="button">🚪 Logout</a>
+</div>
+
+<script>
+async function runDebug() {
+
+  const debug = document.getElementById("debug");
+
+  const u1 = sessionStorage.getItem("mostlaneUsername");
+  const u2 = sessionStorage.getItem("mostlaneUser");
+  const u3 = sessionStorage.getItem("mostlaneLoggedIn");
+
+  debug.textContent =
+    "SESSION VALUES:\n" +
+    "mostlaneUsername = " + u1 + "\n" +
+    "mostlaneUser = " + u2 + "\n" +
+    "mostlaneLoggedIn = " + u3 + "\n\n" +
+    "Fetching user from KV…";
+
+  const username = u1 || u2;
+
+  if (!username) {
+    debug.textContent += "\n❌ No username found in sessionStorage!";
+    return;
+  }
+
+  const url = "https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username);
+  const res = await fetch(url);
+  const data = await res.json();
+
+  debug.textContent += "\n\nKV RESPONSE:\n" + JSON.stringify(data, null, 2);
+
+}
+runDebug();
+</script>
+
+</body>
+</html>
