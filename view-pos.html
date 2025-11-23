@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Purchase Orders</title>
+  <title>View Purchase Orders</title>
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -15,26 +15,29 @@
       color: #333;
     }
     .container {
-      max-width: 950px;
+      max-width: 1100px;
       margin: auto;
       background: rgba(255,255,255,0.9);
-      padding: 25px;
+      padding: 24px;
       border-radius: 12px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     h1 {
       text-align: center;
       color: #003366;
-      margin-top: 0;
-      margin-bottom: 25px;
+      margin: 0 0 16px 0;
     }
-    .top-bar {
+    .top-bar,
+    .filters {
       display: flex;
       flex-wrap: wrap;
-      justify-content: space-between;
       align-items: center;
+      justify-content: space-between;
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 14px;
+    }
+    .filters > * {
+      margin-right: 8px;
     }
     button {
       background-color: rgba(0,74,153,0.9);
@@ -46,7 +49,8 @@
       font-size: 15px;
       white-space: nowrap;
     }
-    select {
+    select,
+    input[type="search"] {
       background: #fff;
       color: #003366;
       border: 1px solid #ccc;
@@ -54,29 +58,40 @@
       padding: 8px 10px;
       font-size: 15px;
     }
-    .week-header {
+    .inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .muted {
+      color: #666;
+      font-size: 13px;
+    }
+    .section-title {
       background: #003366;
       color: #fff;
       padding: 8px 12px;
       border-radius: 6px;
-      margin-top: 25px;
       font-weight: bold;
+      margin-top: 16px;
     }
     .table-wrapper {
       overflow-x: auto;
-      margin-top: 8px;
       border-radius: 8px;
+      margin-top: 8px;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 600px;
+      min-width: 860px;
     }
-    th, td {
+    th,
+    td {
       text-align: left;
       padding: 10px 8px;
       border-bottom: 1px solid #ddd;
       font-size: 15px;
+      vertical-align: middle;
     }
     th {
       background-color: #f0f3f8;
@@ -85,68 +100,70 @@
     tr:hover {
       background-color: #f9f9f9;
     }
+    .right {
+      text-align: right;
+    }
+    .nowrap {
+      white-space: nowrap;
+    }
     .map-link {
       color: #003366;
       text-decoration: none;
       font-size: 18px;
     }
-    @media (max-width: 700px) {
-      body { padding: 10px; }
-      .container { padding: 15px; border-radius: 10px; }
-      h1 { font-size: 20px; }
-      th, td { font-size: 13px; padding: 8px 6px; }
-      .top-bar { flex-direction: column; align-items: stretch; gap: 12px; }
-      button, select { width: 100%; }
-      .week-header { font-size: 14px; text-align: center; }
-    }
-
-    /* Offline modal */
-    #offlineModal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.55);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 99999;
-      font-family: Segoe UI, sans-serif;
-    }
-    #offlineModal .content {
-      background: #fff;
-      padding: 24px;
-      border-radius: 12px;
-      width: calc(100% - 60px);
-      max-width: 420px;
-      text-align: center;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    }
-    #offlineModal h2 {
-      color:#003366;
-      margin-top:0;
-    }
-    #offlineModal p {
-      font-size: 16px;
-      color:#333;
-      margin: 6px 0;
-    }
-    #offlineModal a {
-      color:#003b82;
-      text-decoration:none;
-      font-weight:bold;
+    @media (max-width: 750px) {
+      body {
+        padding: 10px;
+      }
+      .container {
+        padding: 15px;
+      }
+      th,
+      td {
+        font-size: 13px;
+        padding: 8px 6px;
+      }
+      button,
+      select,
+      input {
+        width: 100%;
+      }
+      .top-bar,
+      .filters {
+        flex-direction: column;
+        align-items: stretch;
+      }
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>My Purchase Orders</h1>
+    <h1>View Purchase Orders</h1>
 
     <div class="top-bar">
       <button onclick="window.location.href='main.html'">Main Menu</button>
+      <div class="muted" id="statusText">Loading…</div>
+    </div>
+
+    <div class="filters">
+      <div>
+        <label for="engineerFilter"><strong>Engineer:</strong></label>
+        <select id="engineerFilter">
+          <option value="">All Engineers</option>
+        </select>
+      </div>
 
       <div>
-        <label for="supplierFilter"><strong>Filter by Supplier:</strong></label>
+        <label for="supplierFilter"><strong>Supplier:</strong></label>
         <select id="supplierFilter">
           <option value="">All Suppliers</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="jobFilter"><strong>Job / Site Key:</strong></label>
+        <select id="jobFilter">
+          <option value="">All Jobs</option>
         </select>
       </div>
 
@@ -161,267 +178,311 @@
           <option value="all">All</option>
         </select>
       </div>
+
+      <div class="inline">
+        <label for="searchBox"><strong>Search:</strong></label>
+        <input id="searchBox" type="search" placeholder="PO number, description, incident…" />
+      </div>
     </div>
 
-    <div id="poContainer">Loading...</div>
-  </div>
-
-  <!-- OFFLINE WARNING MODAL -->
-  <div id="offlineModal">
-    <div class="content">
-      <h2>⚠️ Offline Mode</h2>
-      <p>You are currently offline and may not be able to view or refresh your Purchase Orders.</p>
-      <p>If you urgently need a PO number while offline, please contact the office:</p>
-      <p style="font-size: 20px; font-weight: bold; margin: 12px 0;">
-        📞 <a href="tel:02380262000">02380 262000</a>
-      </p>
-      <p style="font-size: 14px; color:#666; margin-top:12px;">
-        This message will disappear when your connection returns.
-      </p>
-    </div>
-  </div>
-
-  <script>
-  // === ENDPOINTS ===
-  const CLOUDFLARE_ENDPOINT = 'https://mostlane-po.jamie-def.workers.dev/get-po'; // list POs
-  const USERS_URL = 'https://raw.githubusercontent.com/Mostlane/Test/main/users.json';
-
-  const dotToSpace = s => (s || '').replace(/\./g, ' ');
-
-  // 🗓 Parse UK date (DD/MM/YYYY)
-  function parseUKDate(dateStr) {
-    if (!dateStr) return null;
-    if (dateStr.includes('/')) {
-      // DD/MM/YYYY
-      const [d, m, y] = dateStr.split('/');
-      if (!d || !m || !y) return null;
-      return new Date(`${y}-${m}-${d}T00:00:00`);
-    } else if (dateStr.includes('-')) {
-      // YYYY-MM-DD (ISO date)
-      const [y, m, d] = dateStr.split('-');
-      if (!y || !m || !d) return null;
-      return new Date(`${y}-${m}-${d}T00:00:00`);
-    }
-    return null;
-  }
-
-  function formatDateDisplay(dateStr) {
-    const d = parseUKDate(dateStr);
-    if (!d || isNaN(d)) return '';
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
-
-  function getWeekStart(dateStr) {
-    const d = parseUKDate(dateStr);
-    if (!d || isNaN(d)) return 'Unknown';
-    const day = d.getDay(); // 0 = Sun, 1 = Mon
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // back to Monday
-    const monday = new Date(d.setDate(diff));
-    return monday.toISOString().split('T')[0]; // YYYY-MM-DD
-  }
-
-  // 🔎 Date filter
-  function filterByDate(pos, range) {
-    if (range === 'all') return pos;
-    const days = parseInt(range);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    return pos.filter(p => {
-      const d = parseUKDate(p.date);
-      return d && d >= cutoff;
-    });
-  }
-
-  // 🔐 Permission check: FullAccess == "Yes" OR myposhtml == "Yes"
-  async function ensurePOPermission() {
-    const container = document.getElementById('poContainer');
-    const username = sessionStorage.getItem('mostlaneUser') || '';
-
-    if (!username) {
-      container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">You are not logged in.</p>`;
-      throw new Error('No logged-in user');
-    }
-
-    try {
-      const res = await fetch(USERS_URL + '?v=' + Date.now(), { cache: 'no-store' });
-      const json = await res.json();
-      const usersArr = json.Users || json || [];
-      const rec = usersArr.find(u => u.Username === username || u.username === username);
-
-      if (!rec) {
-        container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">User record not found in permissions list.</p>`;
-        throw new Error('User not found');
-      }
-
-      const fullAccess = (rec.FullAccess || '').toString().toLowerCase() === 'yes';
-      const myPO = (rec['myposhtml'] || rec['mypos'] || '').toString().toLowerCase() === 'yes';
-
-      if (!fullAccess && !myPO) {
-        container.innerHTML = `<p style="color:#b91c1c;font-weight:bold;">
-          You do not have permission to view purchase orders.<br/>
-          Please contact the office if you believe this is incorrect.
-        </p>`;
-        throw new Error('No permission for My POs');
-      }
-    } catch (err) {
-      if (!container.innerHTML) {
-        container.innerHTML = `<p style="color:#b45309;font-weight:bold;">
-          ⚠️ Unable to verify permissions. Please try again or contact the office.
-        </p>`;
-      }
-      throw err;
-    }
-  }
-
-  async function loadPOs() {
-    const container = document.getElementById('poContainer');
-    const supplierFilter = document.getElementById('supplierFilter');
-    const dateRange = document.getElementById('dateRange');
-    const username = sessionStorage.getItem('mostlaneUser') || '';
-    const engineerName = dotToSpace(username);
-
-    if (!navigator.onLine) {
-      container.textContent = '⚠️ Offline – cannot load Purchase Orders.';
-      return;
-    }
-
-    try {
-      const res = await fetch(CLOUDFLARE_ENDPOINT, { cache: 'no-store' });
-      const data = await res.json();
-      const myPOs = (Array.isArray(data) ? data : data.data || []).filter(po => po.engineer === engineerName);
-
-      // Populate supplier filter
-      const suppliers = [...new Set(myPOs.map(p => p.supplierName))].sort();
-      suppliers.forEach(name => {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        supplierFilter.appendChild(opt);
-      });
-
-      // Default filter render
-      const initial = filterByDate(myPOs, dateRange.value);
-      renderPOs(initial);
-
-      supplierFilter.addEventListener('change', () => {
-        const supplierVal = supplierFilter.value;
-        const dateVal = dateRange.value;
-        let filtered = filterByDate(myPOs, dateVal);
-        if (supplierVal) filtered = filtered.filter(p => p.supplierName === supplierVal);
-        renderPOs(filtered);
-      });
-
-      dateRange.addEventListener('change', () => {
-        const supplierVal = supplierFilter.value;
-        const dateVal = dateRange.value;
-        let filtered = filterByDate(myPOs, dateVal);
-        if (supplierVal) filtered = filtered.filter(p => p.supplierName === supplierVal);
-        renderPOs(filtered);
-      });
-
-    } catch (err) {
-      container.textContent = '⚠️ Failed to load POs: ' + err.message;
-    }
-  }
-
-  function renderPOs(pos) {
-    const container = document.getElementById('poContainer');
-    container.innerHTML = '';
-
-    if (!pos.length) {
-      container.textContent = 'No Purchase Orders found.';
-      return;
-    }
-
-    const grouped = {};
-    pos.forEach(p => {
-      const weekStart = getWeekStart(p.date);
-      if (!grouped[weekStart]) grouped[weekStart] = [];
-      grouped[weekStart].push(p);
-    });
-
-    const sortedWeeks = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
-
-    sortedWeeks.forEach(weekStart => {
-      const header = document.createElement('div');
-      header.className = 'week-header';
-
-      if (weekStart === 'Unknown') {
-        header.textContent = 'Unknown Date';
-      } else {
-        const monday = parseUKDate(weekStart); // weekStart is YYYY-MM-DD
-        const sunday = new Date(monday);
-        sunday.setDate(sunday.getDate() + 6);
-        const weekText = `Week of ${formatDateDisplay(weekStart)} → ${formatDateDisplay(sunday.toISOString().split('T')[0])}`;
-        header.textContent = weekText;
-      }
-
-      container.appendChild(header);
-
-      const wrapper = document.createElement('div');
-      wrapper.className = 'table-wrapper';
-
-      const rowsHtml = grouped[weekStart]
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .map(po => `
-          <tr>
-            <td>${formatDateDisplay(po.date)}</td>
-            <td>${po.poNumber}</td>
-            <td>${po.supplierName}</td>
-            <td>${po.description}</td>
-            <td>${po.workType}</td>
-            <td>${
-              po.latitude && po.longitude
-                ? `<a class="map-link" href="https://www.google.com/maps?q=${po.latitude},${po.longitude}" target="_blank">📍</a>`
-                : ''
-            }</td>
-          </tr>
-        `).join('');
-
-      const table = document.createElement('table');
-      table.innerHTML = `
+    <div class="section-title">All Purchase Orders</div>
+    <div class="table-wrapper">
+      <table id="poTable">
         <thead>
           <tr>
             <th>Date</th>
             <th>PO Number</th>
+            <th>Engineer</th>
             <th>Supplier</th>
+            <th>Job / Site Key</th>
+            <th>Work Type</th>
             <th>Description</th>
-            <th>Type</th>
+            <th>Incident</th>
             <th>Map</th>
           </tr>
         </thead>
-        <tbody>${rowsHtml}</tbody>
-      `;
+        <tbody>
+          <!-- filled by JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
 
-      wrapper.appendChild(table);
-      container.appendChild(wrapper);
-    });
-  }
+  <script>
+    // ======== CONFIG ========
+    const GET_URL = "https://mostlane-po.jamie-def.workers.dev/po/list";
 
-  // Offline modal helpers
-  function showOfflineModal() {
-    document.getElementById('offlineModal').style.display = 'flex';
-  }
-  function hideOfflineModal() {
-    document.getElementById('offlineModal').style.display = 'none';
-  }
+    // ======== UTILS ========
+    const dotToSpace = (s) => (s || "").replace(/\./g, " ");
 
-  // Init
-  document.addEventListener('DOMContentLoaded', async () => {
-    // Offline state at load
-    if (!navigator.onLine) showOfflineModal();
-
-    window.addEventListener('offline', showOfflineModal);
-    window.addEventListener('online', hideOfflineModal);
-
-    try {
-      await ensurePOPermission();
-      await loadPOs();
-    } catch (e) {
-      // permission or other fatal error already shown in UI
-      console.warn(e);
+    // Parse UK date (DD/MM/YYYY) to Date
+    function parseUKDate(dateStr) {
+      if (!dateStr) return null;
+      const parts = dateStr.split("/");
+      if (parts.length !== 3) return null;
+      const [d, m, y] = parts;
+      if (!d || !m || !y) return null;
+      return new Date(`${y}-${m}-${d}T00:00:00`);
     }
-  });
+
+    function formatDateDisplay(dateStr) {
+      const d = parseUKDate(dateStr);
+      if (!d || isNaN(d)) return "";
+      return d.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    }
+
+    // Job / Site key = 3rd segment of PO number (e.g. E01-1234-S0001-R1 -> S0001)
+    function getJobKey(poNumber) {
+      const num = String(poNumber || "");
+      const parts = num.split("-");
+      if (parts.length >= 3) return parts[2];
+      return "";
+    }
+
+    function byId(id) {
+      return document.getElementById(id);
+    }
+
+    // Date range filter
+    function filterByDate(list, range) {
+      if (range === "all") return list;
+      const days = parseInt(range, 10);
+      if (isNaN(days)) return list;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      return list.filter((p) => {
+        const d = parseUKDate(p.date);
+        return d && d >= cutoff;
+      });
+    }
+
+    // ======== STATE ========
+    let ALL_POS = [];
+    let FILTERED_POS = [];
+
+    // ======== FILTER + RENDER ========
+    function applyFilters() {
+      const engineerVal = byId("engineerFilter").value;
+      const supplierVal = byId("supplierFilter").value;
+      const jobVal = byId("jobFilter").value;
+      const dateVal = byId("dateRange").value;
+      const searchVal = (byId("searchBox").value || "").toLowerCase().trim();
+
+      let list = filterByDate(ALL_POS, dateVal);
+
+      if (engineerVal) {
+        list = list.filter((p) => (p.engineer || "") === engineerVal);
+      }
+      if (supplierVal) {
+        list = list.filter((p) => (p.supplierName || "") === supplierVal);
+      }
+      if (jobVal) {
+        list = list.filter((p) => p.jobKey === jobVal);
+      }
+      if (searchVal) {
+        list = list.filter((p) => {
+          const hay = [
+            p.poNumber,
+            p.description,
+            p.incidentNumber,
+            p.workType,
+            p.engineer,
+            p.supplierName,
+            p.jobKey,
+          ]
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(searchVal);
+        });
+      }
+
+      FILTERED_POS = list;
+      renderTable();
+      updateStatus();
+      populateDropdownsFromFiltered(); // keep options in sync with visible set
+    }
+
+    function updateStatus() {
+      const status = byId("statusText");
+      const uniqueJobs = new Set(FILTERED_POS.map((p) => p.jobKey || "").filter(Boolean)).size;
+      status.textContent = `${FILTERED_POS.length} PO(s) | ${uniqueJobs} job(s)`;
+    }
+
+    function renderTable() {
+      const tbody = document.querySelector("#poTable tbody");
+      tbody.innerHTML = "";
+
+      const rows = [...FILTERED_POS].sort((a, b) => {
+        const da = parseUKDate(a.date);
+        const db = parseUKDate(b.date);
+        return (db || 0) - (da || 0);
+      });
+
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 9;
+        td.textContent = "No Purchase Orders match your filters.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      rows.forEach((p) => {
+        const tr = document.createElement("tr");
+
+        const mapCell =
+          p.latitude != null && p.longitude != null
+            ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+            : "";
+
+        tr.innerHTML = `
+          <td class="nowrap">${formatDateDisplay(p.date)}</td>
+          <td class="nowrap">${p.poNumber || ""}</td>
+          <td>${p.engineer || ""}</td>
+          <td>${p.supplierName || ""}</td>
+          <td class="nowrap">${p.jobKey || ""}</td>
+          <td>${p.workType || ""}</td>
+          <td>${p.description || ""}</td>
+          <td>${p.incidentNumber || ""}</td>
+          <td class="nowrap">${mapCell}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Populate dropdowns from ALL_POS initially, and keep their values when filters change
+    function populateDropdownsInitial() {
+      const engSel = byId("engineerFilter");
+      const supSel = byId("supplierFilter");
+      const jobSel = byId("jobFilter");
+
+      const engineers = [...new Set(ALL_POS.map((p) => p.engineer).filter(Boolean))].sort();
+      const suppliers = [...new Set(ALL_POS.map((p) => p.supplierName).filter(Boolean))].sort();
+      const jobs = [...new Set(ALL_POS.map((p) => p.jobKey).filter(Boolean))].sort();
+
+      engSel.innerHTML = '<option value="">All Engineers</option>';
+      engineers.forEach((e) => {
+        const opt = document.createElement("option");
+        opt.value = e;
+        opt.textContent = e;
+        engSel.appendChild(opt);
+      });
+
+      supSel.innerHTML = '<option value="">All Suppliers</option>';
+      suppliers.forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s;
+        opt.textContent = s;
+        supSel.appendChild(opt);
+      });
+
+      jobSel.innerHTML = '<option value="">All Jobs</option>';
+      jobs.forEach((j) => {
+        const opt = document.createElement("option");
+        opt.value = j;
+        opt.textContent = j;
+        jobSel.appendChild(opt);
+      });
+    }
+
+    // After filtering, we keep dropdowns limited to what's in FILTERED_POS
+    function populateDropdownsFromFiltered() {
+      const engSel = byId("engineerFilter");
+      const supSel = byId("supplierFilter");
+      const jobSel = byId("jobFilter");
+
+      const keepEng = engSel.value;
+      const keepSup = supSel.value;
+      const keepJob = jobSel.value;
+
+      const engineers = [...new Set(FILTERED_POS.map((p) => p.engineer).filter(Boolean))].sort();
+      const suppliers = [...new Set(FILTERED_POS.map((p) => p.supplierName).filter(Boolean))].sort();
+      const jobs = [...new Set(FILTERED_POS.map((p) => p.jobKey).filter(Boolean))].sort();
+
+      engSel.innerHTML = '<option value="">All Engineers</option>';
+      engineers.forEach((e) => {
+        const opt = document.createElement("option");
+        opt.value = e;
+        opt.textContent = e;
+        engSel.appendChild(opt);
+      });
+
+      supSel.innerHTML = '<option value="">All Suppliers</option>';
+      suppliers.forEach((s) => {
+        const opt = document.createElement("option");
+        opt.value = s;
+        opt.textContent = s;
+        supSel.appendChild(opt);
+      });
+
+      jobSel.innerHTML = '<option value="">All Jobs</option>';
+      jobs.forEach((j) => {
+        const opt = document.createElement("option");
+        opt.value = j;
+        opt.textContent = j;
+        jobSel.appendChild(opt);
+      });
+
+      // restore previous selections if still valid
+      if ([...engSel.options].some((o) => o.value === keepEng)) engSel.value = keepEng;
+      if ([...supSel.options].some((o) => o.value === keepSup)) supSel.value = keepSup;
+      if ([...jobSel.options].some((o) => o.value === keepJob)) jobSel.value = keepJob;
+    }
+
+    // ======== INIT ========
+    async function init() {
+      const status = byId("statusText");
+      status.textContent = "Loading…";
+
+      try {
+        const res = await fetch(GET_URL, { cache: "no-store" });
+        const json = await res.json();
+
+        // Worker returns { ok, count, data } – but also tolerate raw array
+        let list = json.data || json || [];
+        if (!Array.isArray(list)) list = [];
+
+        ALL_POS = list.map((p) => {
+          const jobKey = getJobKey(p.poNumber);
+          return {
+            ...p,
+            engineer: p.engineer || "",
+            supplierName: p.supplierName || "",
+            workType: p.workType || "",
+            description: p.description || "",
+            incidentNumber: p.incidentNumber || "",
+            date: p.date || (p.createdAt ? new Date(p.createdAt).toLocaleDateString("en-GB") : ""),
+            jobKey,
+          };
+        });
+
+        populateDropdownsInitial();
+
+        // Wire up filters
+        ["engineerFilter", "supplierFilter", "jobFilter", "dateRange", "searchBox"].forEach(
+          (id) => {
+            const el = byId(id);
+            el.addEventListener("change", applyFilters);
+            el.addEventListener("input", applyFilters);
+          }
+        );
+
+        FILTERED_POS = ALL_POS.slice();
+        renderTable();
+        updateStatus();
+      } catch (err) {
+        status.textContent = "⚠️ Failed to load POs: " + err.message;
+        console.error(err);
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", init);
   </script>
 </body>
 </html>
