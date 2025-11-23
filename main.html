@@ -1,14 +1,16 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8"/>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
 
-  <script src="auth.js"></script>
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
+      window.location.href = "login.html";
+    }
+  </script>
 
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
@@ -26,122 +28,276 @@
     #user-display {
       font-size: 18px;
       font-weight: bold;
-      margin-bottom: 20px;
-      color: #003b82;
+      color: #003366;
+      margin-bottom: 18px;
     }
 
-    .menu-container {
-      width: 90%;
-      max-width: 600px;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 25px;
-      border-radius: 12px;
-      box-shadow: 0px 4px 8px rgba(0,0,0,0.2);
+    .menu-grid {
+      width: 92%;
+      max-width: 850px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(2, 1fr);
     }
 
-    .menu-btn {
-      width: 100%;
-      padding: 18px;
-      margin: 10px 0;
-      font-size: 18px;
-      font-weight: bold;
-      border-radius: 10px;
-      background: #003b82;
-      color: white;
-      border: none;
+    @media (min-width: 800px) {
+      .menu-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    .full-width {
+      grid-column: span 2 !important;
+    }
+    @media (min-width: 800px) {
+      .full-width {
+        grid-column: span 3 !important;
+      }
+    }
+
+    a.button {
+      display: flex !important;
+      align-items: center;
+      gap: 12px;
+
+      padding: 18px 20px;
+      background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
+      border-radius: 14px;
+
+      box-shadow:
+        0 4px 10px rgba(0,0,0,0.25),
+        inset 0 1px 2px rgba(255,255,255,0.15);
+
+      text-decoration: none;
+      color: #ffffff;
+      font-weight: 600;
+      font-size: 17px;
+      transition: 0.2s ease;
+    }
+
+    a.button:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        0 7px 14px rgba(0,0,0,0.30),
+        inset 0 1px 2px rgba(255,255,255,0.20);
+    }
+
+    .emoji {
+      font-size: 2rem;
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
+
+    .button.full-width {
+      justify-content: center;
+      text-align: center;
+    }
+
+    .admin-toggle {
+      margin-top: 25px;
+      font-size: 14px;
+      color: #004a99;
+      text-decoration: underline;
       cursor: pointer;
-      transition: 0.2s;
     }
 
-    .menu-btn:hover {
-      background: #0059c9;
-    }
+    .hidden-btn { opacity: 0.25 !important; }
 
-    .hidden { display: none !important; }
+    #statusBox { display: none !important; }
+    #toggleView { display: none !important; }
   </style>
 </head>
 
 <body class="main-body">
-  <div id="user-display">Loading...</div>
 
-  <div class="menu-container">
-
-    <button id="checkin" class="menu-btn hidden" onclick="location.href='checkin.html'">🕒 Check In / Out</button>
-    <button id="holiday" class="menu-btn hidden" onclick="location.href='holiday.html'">📅 Holiday Requests</button>
-    <button id="purchaseorders" class="menu-btn hidden" onclick="location.href='purchase.html'">🧾 Generate PO Reference</button>
-    <button id="assets" class="menu-btn hidden" onclick="location.href='asset-menu.html'">⚙ Plant & Equipment</button>
-    <button id="forms" class="menu-btn hidden" onclick="location.href='forms.html'">📝 Forms</button>
-    <button id="users" class="menu-btn hidden" onclick="location.href='user-admin.html'">👥 Users</button>
-    <button id="compliance" class="menu-btn hidden" onclick="location.href='compliance-menu.html'">✔ Compliance</button>
-    <button id="hoursdashboard" class="menu-btn hidden" onclick="location.href='weekly.html'">📊 Hours Dashboard</button>
-    <button id="weekly" class="menu-btn hidden" onclick="location.href='weekly.html'">📊 Weekly Summary</button>
-    <button id="sites" class="menu-btn hidden" onclick="location.href='add-site.html'">📍 Manage Sites</button>
-    <button id="vehicles" class="menu-btn hidden" onclick="location.href='vehicles.html'">🚐 Vehicles</button>
-    <button id="mydocuments" class="menu-btn hidden" onclick="location.href='documents.html'">📄 My Documents</button>
-
-    <button class="menu-btn" onclick="logout()">🚪 Logout</button>
-  </div>
+  <div id="user-display">You are logged in as <span id="userName"></span></div>
 
   <script>
-    // AUTHORISATION BLOCK
-    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-      window.location.href = "login.html";
-    }
+    const userName = sessionStorage.getItem("mostlaneUser");
+    if (userName) document.getElementById("userName").textContent = userName;
+  </script>
 
-    const loggedInUser = sessionStorage.getItem("mostlaneUsername");
+  <div class="menu-grid" id="menuGrid">
 
-    document.getElementById("user-display").textContent = loggedInUser
-      ? "Logged in as: " + loggedInUser.replace(".", " ")
-      : "Logged in";
+    <a class="button" href="index.html" id="checkinBtn"><span class="emoji">🕒</span> Check In / Out</a>
+    <a class="button" href="vehicles.html" id="vehiclesBtn"><span class="emoji">🚐</span> Vehicles</a>
+    <a class="button" href="holiday.html" id="holidayBtn"><span class="emoji">📅</span> Holiday Requests</a>
+    <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
+    <a class="button" href="purchase.html" id="purchaseBtn"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
+    <a class="button" href="sites.html" id="sitesBtn"><span class="emoji">📍</span> Manage Sites</a>
+    <a class="button" href="asset-menu.html"><span class="emoji">⚙️</span> Plant & Equipment</a>
+    <a class="button" href="#" id="my-documents-btn"><span class="emoji">📄</span> My Documents</a>
+    <a class="button" href="weekly.html" id="weeklyBtn"><span class="emoji">📊</span> Weekly Summary</a>
+    <a class="button" href="forms.html" id="formsBtn"><span class="emoji">📝</span> Forms</a>
+    <a class="button" href="compliance.html" id="complianceBtn"><span class="emoji">✔️</span> Compliance</a>
+    <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn"><span class="emoji">⏳</span> Hours Dashboard</a>
+    <a class="button" href="po-menu.html" id="poMenuBtn"><span class="emoji">💷</span> Purchase Orders</a>
+    <a class="button" href="users-admin.html" id="usersAdminBtn"><span class="emoji">👥</span> Users</a>
+    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+      <span class="emoji">🚪</span> Logout
+    </a>
 
-    // STABLE PERMISSION KEYS ONLY (option A)
-    const permissionMap = {
-      "CheckInOut": "checkin",
-      "Holiday": "holiday",
-      "PurchaseOrders": "purchaseorders",
-      "Assets": "assets",
-      "Forms": "forms",
-      "Users": "users",
-      "Compliance": "compliance",
-      "HoursDashboard": "hoursdashboard",
-      "Weekly": "weekly",
-      "Sites": "sites",
-      "Vehicles": "vehicles",
-      "MyDocuments": "mydocuments"
-    };
+  </div>
 
-    async function loadPermissions() {
+  <div class="admin-toggle" id="toggleView">Show All (Admin View)</div>
+
+  <!-- ✅ FIXED PERMISSIONS LOGIC -->
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+
+      const username = sessionStorage.getItem("mostlaneUser");
+      if (!username) return;
+
+      // --- helper: normalize id/href etc ---
+      function normalize(str) {
+        return (str || '')
+          .toLowerCase()
+          .trim()
+          .replace(/[^\w]+/g, '');
+      }
+
+      // strict stable keys ONLY
+      const stableMap = {
+        // main known ids → stable keys
+        checkinbtn:        'CheckInOut',
+        holidaybtn:        'Holiday',
+        purchasebtn:       'PurchaseOrders',
+        pomenubtn:         'PurchaseOrders',
+        assetsbtn:         'Assets',
+        formsbtn:          'Forms',
+        'my-documents-btn':'MyDocuments',
+        compliancebtn:     'Compliance',
+        'hours-dashboard-btn':'HoursDashboard',
+        weeklybtn:         'Weekly',
+        usersadminbtn:     'Users',
+        vehiclesbtn:       'Vehicles',
+        sitesbtn:          'Sites'
+      };
+
+      function stableKeyForButton(btn) {
+        const idNorm = normalize(btn.id);
+        if (stableMap[idNorm]) return stableMap[idNorm];
+
+        const href = btn.getAttribute('href') || '';
+        const hrefNorm = normalize(href);
+
+        // Fallbacks based on href patterns
+        if (hrefNorm.includes('index') || hrefNorm.includes('checkin'))       return 'CheckInOut';
+        if (hrefNorm.includes('holiday'))                                     return 'Holiday';
+        if (hrefNorm.includes('purchase') && !hrefNorm.includes('po-menu'))   return 'PurchaseOrders';
+        if (hrefNorm.includes('asset'))                                       return 'Assets';
+        if (hrefNorm.includes('forms'))                                       return 'Forms';
+        if (hrefNorm.includes('compliance'))                                  return 'Compliance';
+        if (hrefNorm.includes('hoursdashboard') || hrefNorm.includes('hours-dashboard')) return 'HoursDashboard';
+        if (hrefNorm.includes('weekly'))                                      return 'Weekly';
+        if (hrefNorm.includes('users-admin'))                                 return 'Users';
+        if (hrefNorm.includes('vehicles'))                                    return 'Vehicles';
+        if (hrefNorm.includes('sites'))                                       return 'Sites';
+        if (hrefNorm.includes('document'))                                    return 'MyDocuments';
+
+        // no recognized mapping → deny by default
+        return null;
+      }
+
       try {
-        const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
+        const res = await fetch(
+          "https://mostlane-users.jamie-def.workers.dev/user?u=" +
+          encodeURIComponent(username)
+        );
         const data = await res.json();
-        const user = data.Users.find(u => u.Username === loggedInUser);
+        if (!data.found) return;
 
-        if (!user) return;
+        const user = data.user || {};
+        const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
-        // Loop through ONLY the stable keys above
-        Object.entries(permissionMap).forEach(([jsonKey, btnId]) => {
-          const btn = document.getElementById(btnId);
+        const buttons = Array.from(document.querySelectorAll("a.button"));
 
-          if (!btn) return;
+        buttons.forEach(btn => {
+          // don’t hide Logout
+          const isLogout = btn.textContent.includes('Logout');
+          if (isLogout) {
+            btn.style.display = 'flex';
+            return;
+          }
 
-          if (user[jsonKey] && user[jsonKey].toString().toLowerCase() === "yes") {
-            btn.classList.remove("hidden");
+          let allowed = false;
+
+          if (fullAccess) {
+            allowed = true;
           } else {
-            btn.classList.add("hidden");
+            const key = stableKeyForButton(btn);
+
+            if (key && user.hasOwnProperty(key)) {
+              allowed = String(user[key]).toLowerCase() === 'yes';
+            } else {
+              // strict mode: no stable key = denied
+              allowed = false;
+            }
+          }
+
+          btn.style.display = allowed ? 'flex' : 'none';
+
+          // dynamic My Documents link
+          if (btn.id === "my-documents-btn" && user.SharePointPath) {
+            btn.href = user.SharePointPath;
+            btn.target = "_blank";
+            btn.rel = "noopener";
           }
         });
-      }
-      catch (err) {
-        console.error("Permission load error:", err);
-      }
-    }
 
-    loadPermissions();
+        // tidy layout: last visible full-width if odd count
+        setTimeout(() => {
+          const btns = Array.from(document.querySelectorAll("a.button"));
+          btns.forEach(b => b.classList.remove("full-width"));
 
-    function logout() {
-      sessionStorage.clear();
-      window.location.href = "login.html";
-    }
+          const visible = btns.filter(b => b.style.display !== "none");
+          if (visible.length % 2 === 1) {
+            visible[visible.length - 1].classList.add("full-width");
+          }
+        }, 60);
+
+        // ADMIN OVERRIDE (only shows hidden as faded, toggle itself is CSS-hidden for now)
+        const toggle = document.getElementById("toggleView");
+        let adminMode = false;
+
+        toggle.addEventListener("click", () => {
+          adminMode = !adminMode;
+
+          const btns = Array.from(document.querySelectorAll("a.button"));
+          btns.forEach(btn => {
+            const isLogout = btn.textContent.includes('Logout');
+            if (isLogout) return;
+
+            const originallyHidden = btn.style.display === "none";
+
+            if (adminMode && originallyHidden) {
+              btn.style.display = "flex";
+              btn.classList.add("hidden-btn");
+            } else if (!adminMode) {
+              // re-run permission check for this button
+              const key = stableKeyForButton(btn);
+              let allowed = false;
+              if (fullAccess) {
+                allowed = true;
+              } else if (key && user.hasOwnProperty(key)) {
+                allowed = String(user[key]).toLowerCase() === 'yes';
+              }
+              btn.style.display = allowed ? "flex" : "none";
+              btn.classList.remove("hidden-btn");
+            }
+          });
+
+          toggle.textContent = adminMode
+            ? "Hide Hidden Buttons"
+            : "Show All (Admin View)";
+        });
+
+      } catch (err) {
+        console.error("Failed to load permissions", err);
+      }
+
+    });
   </script>
+
 </body>
 </html>
