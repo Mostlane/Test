@@ -46,17 +46,8 @@
       }
     }
 
-    .full-width {
-      grid-column: span 2 !important;
-    }
-    @media (min-width: 800px) {
-      .full-width {
-        grid-column: span 3 !important;
-      }
-    }
-
     a.button {
-      display: none; /* IMPORTANT: hide by default for fast-loading */
+      display: none;
       align-items: center;
       gap: 12px;
       padding: 18px 20px;
@@ -96,7 +87,7 @@
   <div id="user-display">You are logged in as <span id="userName"></span></div>
 
   <script>
-    const user = sessionStorage.getItem("mostlaneUsername");
+    const user = sessionStorage.getItem("mostlaneUser"); /* FIXED */
     if (user) document.getElementById("userName").textContent = user;
   </script>
 
@@ -126,7 +117,7 @@
   <script>
     document.addEventListener("DOMContentLoaded", async () => {
 
-      const username = sessionStorage.getItem("mostlaneUsername");
+      const username = sessionStorage.getItem("mostlaneUser"); /* FIXED */
       if (!username) return;
 
       const res = await fetch(
