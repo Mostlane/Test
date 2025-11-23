@@ -5,7 +5,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PO Costing</title>
-
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -44,12 +43,15 @@
       cursor: pointer; font-size: 15px; white-space: nowrap;
     }
     .tab-btn.inactive { background: #7a8aa6; }
-    select, input[type="search"], input[type="number"] {
+    .btn-danger {
+      background: #b91c1c;
+    }
+    select, input[type="search"], input[type="number"], input[type="text"] {
       background: #fff; color: #003366;
       border: 1px solid #ccc; border-radius: 8px;
-      padding: 8px 10px; font-size: 15px;
+      padding: 6px 8px; font-size: 14px;
     }
-    .tabs { display: flex; gap: 8px; margin: 10px 0 16px; }
+    .tabs { display: flex; gap: 8px; margin: 10px 0 16px; flex-wrap: wrap; }
     .section-title {
       background: #003366; color: #fff;
       padding: 8px 12px; border-radius: 6px; font-weight: bold;
@@ -76,6 +78,12 @@
       display: inline-flex; align-items: center; gap: 8px;
     }
     .vat-label { font-size: 13px; color: #003366; }
+    .refund-select {
+      max-width: 120px;
+    }
+    .refund-notes {
+      width: 140px;
+    }
     @media (max-width: 750px) {
       body { padding: 10px; }
       .container { padding: 15px; }
@@ -86,7 +94,6 @@
     }
   </style>
 </head>
-
 <body>
   <div class="container">
     <h1>PO Costing</h1>
@@ -96,6 +103,7 @@
       <div class="tabs">
         <button id="toCostBtn" class="tab-btn">To Cost</button>
         <button id="costedBtn" class="tab-btn inactive">Costed Entries</button>
+        <button id="refundsBtn" class="tab-btn inactive">Refunds</button>
       </div>
     </div>
 
@@ -106,7 +114,6 @@
           <option value="">All Suppliers</option>
         </select>
       </div>
-
       <div>
         <label for="dateRange"><strong>Show:</strong></label>
         <select id="dateRange">
@@ -118,338 +125,541 @@
           <option value="all">All</option>
         </select>
       </div>
-
       <div class="inline">
         <label for="searchBox"><strong>Search:</strong></label>
-        <input id="searchBox" type="search" placeholder="PO number or description…"/>
+        <input id="searchBox" type="search" placeholder="PO number or description…" />
       </div>
-
       <div class="muted" id="statusText"></div>
     </div>
 
     <div id="tabContent"></div>
   </div>
 
-<script>
-// ----- Config -----
-const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
-const UPDATE_URL = 'https://mostlane-po.jamie-def.workers.dev/po/update';
+  <script>
+  // ----- Config -----
+  const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
+  const UPDATE_URL = 'https://mostlane-po.jamie-def.workers.dev/po/update';
 
-// ----- Utils -----
-const dotToSpace = s => (s || '').replace(/\./g, ' ');
+  // ----- Utils -----
+  const dotToSpace = s => (s || '').replace(/\./g, ' ');
+  function parseUKDate(dateStr) {
+    if (!dateStr) return null;
+    const [d, m, y] = dateStr.split('/');
+    if (!d || !m || !y) return null;
+    return new Date(`${y}-${m}-${d}T00:00:00`);
+  }
+  function formatDateDisplay(dateStr) {
+    const d = parseUKDate(dateStr);
+    if (!d || isNaN(d)) return '';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+  function formatDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  function formatGBP(n) {
+    if (n === null || n === undefined || isNaN(n)) return '';
+    return '£' + Number(n).toFixed(2);
+  }
+  function byId(id){ return document.getElementById(id); }
 
-function parseUKDate(dateStr) {
-  if (!dateStr) return null;
-  const [d, m, y] = dateStr.split('/');
-  if (!d || !m || !y) return null;
-  return new Date(`${y}-${m}-${d}T00:00:00`);
-}
+  let allPOs = [];
+  let currentTab = 'toCost';
+  let engineerName = '';
 
-function formatDateDisplay(dateStr) {
-  const d = parseUKDate(dateStr);
-  if (!d || isNaN(d)) return '';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function formatGBP(n) {
-  if (n === null || n === undefined || isNaN(n)) return '';
-  return '£' + Number(n).toFixed(2);
-}
-
-function byId(id) { return document.getElementById(id); }
-
-let allPOs = [];
-let currentTab = 'toCost';
-let engineerName = '';
-
-// -------------------------
-// Filters
-// -------------------------
-function filterByDate(pos, range) {
-  if (range === 'all') return pos;
-  const days = parseInt(range);
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  return pos.filter(p => {
-    const d = parseUKDate(p.date);
-    return d && d >= cutoff;
-  });
-}
-
-function applyAllFilters(base) {
-  const supplierVal = byId('supplierFilter').value;
-  const dateVal = byId('dateRange').value;
-  const searchVal = (byId('searchBox').value || '').toLowerCase().trim();
-
-  let out = filterByDate(base, dateVal);
-  if (supplierVal) out = out.filter(p => (p.supplierName || '') === supplierVal);
-  if (searchVal) {
-    out = out.filter(p => {
-      const hay = [p.poNumber, p.description, p.supplierName].join(' ').toLowerCase();
-      return hay.includes(searchVal);
+  function filterByDate(pos, range) {
+    if (range === 'all') return pos;
+    const days = parseInt(range);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return pos.filter(p => {
+      const d = parseUKDate(p.date);
+      return d && d >= cutoff;
     });
   }
-  return out;
-}
+  function applyAllFilters(base) {
+    const supplierVal = byId('supplierFilter').value;
+    const dateVal = byId('dateRange').value;
+    const searchVal = (byId('searchBox').value || '').toLowerCase().trim();
 
-// -------------------------
-// Render
-// -------------------------
-function render() {
-  const content = byId('tabContent');
-  content.innerHTML = '';
-
-  const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
-  const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
-
-  const supSel = byId('supplierFilter');
-  const keep = supSel.value;
-  supSel.innerHTML = '<option value="">All Suppliers</option>';
-  [...new Set(allPOs.map(p => p.supplierName).filter(Boolean))].sort()
-    .forEach(name => {
-      const opt = document.createElement('option');
-      opt.value = name; opt.textContent = name;
-      supSel.appendChild(opt);
-    });
-  supSel.value = keep;
-
-  const list = currentTab === 'toCost' ? applyAllFilters(uncosted) : applyAllFilters(costed);
-
-  byId('statusText').textContent = `${list.length} item(s)`;
-
-  const title = document.createElement('div');
-  title.className = 'section-title';
-  title.textContent = currentTab === 'toCost' ? 'To Cost' : 'Costed Entries';
-  content.appendChild(title);
-
-  const wrap = document.createElement('div');
-  wrap.className = 'table-wrapper';
-  const table = document.createElement('table');
-
-  if (currentTab === 'toCost') {
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>PO Number</th>
-          <th>Supplier</th>
-          <th>Description</th>
-          <th class="right">Net</th>
-          <th class="right">Gross</th>
-          <th>VAT @20%</th>
-          <th>Map</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${list
-          .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))
-          .map(p => {
-            const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
-            const mapCell = (p.latitude && p.longitude)
-              ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
-              : '';
-            return `
-            <tr data-po="${p.poNumber}">
-              <td class="nowrap">${formatDateDisplay(p.date)}</td>
-              <td class="nowrap">${p.poNumber}</td>
-              <td>${p.supplierName || ''}</td>
-              <td>${p.description || ''}</td>
-              <td class="right">
-                <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
-                  oninput="onNetChanged('${id}')" />
-              </td>
-              <td class="right">
-                <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
-                  oninput="onGrossChanged('${id}')" />
-              </td>
-              <td class="nowrap">
-                <label class="vat-label">
-                  <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
-                  20%
-                </label>
-              </td>
-              <td class="nowrap">${mapCell}</td>
-              <td class="nowrap">
-                <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
-              </td>
-            </tr>`;
-          }).join('')}
-      </tbody>`;
-  } else {
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>Date Costed</th>
-          <th>PO Number</th>
-          <th>Supplier</th>
-          <th>Description</th>
-          <th class="right">Net</th>
-          <th class="right">VAT</th>
-          <th class="right">Gross</th>
-          <th>Map</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${list
-          .sort((a,b)=> new Date(b.costedAt || b.createdAt) - new Date(a.costedAt || a.createdAt))
-          .map(p => {
-            const vatRate = (p.vatRate ?? 0.2);
-            const net = Number(p.costNet || 0);
-            const gross = Number(p.costGross || 0);
-            const vat = gross && net ? (gross - net) : Number((net * vatRate).toFixed(2));
-            const mapCell = (p.latitude && p.longitude)
-              ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
-              : '';
-            const costedAtTxt = p.costedAt
-              ? new Date(p.costedAt).toLocaleString('en-GB', { hour12:false })
-              : '';
-            return `
-            <tr>
-              <td class="nowrap">${costedAtTxt}</td>
-              <td class="nowrap">${p.poNumber}</td>
-              <td>${p.supplierName || ''}</td>
-              <td>${p.description || ''}</td>
-              <td class="right">${formatGBP(net)}</td>
-              <td class="right">${formatGBP(vat)}</td>
-              <td class="right">${formatGBP(gross || (net*(1+vatRate)))}</td>
-              <td class="nowrap">${mapCell}</td>
-            </tr>`;
-          }).join('')}
-      </tbody>`;
+    let out = filterByDate(base, dateVal);
+    if (supplierVal) out = out.filter(p => (p.supplierName || '') === supplierVal);
+    if (searchVal) {
+      out = out.filter(p => {
+        const hay = [p.poNumber, p.description, p.supplierName].join(' ').toLowerCase();
+        return hay.includes(searchVal);
+      });
+    }
+    return out;
   }
 
-  wrap.appendChild(table);
-  content.appendChild(wrap);
-}
-
-// -------------------------
-// VAT Handlers
-// -------------------------
-function readInputs(id) {
-  const netEl = byId(`net-${id}`);
-  const grossEl = byId(`gross-${id}`);
-  const vatEl = byId(`vat-${id}`);
-  const net = parseFloat(netEl.value);
-  const gross = parseFloat(grossEl.value);
-  const vatOn = !!vatEl?.checked;
-  const vatRate = vatOn ? 0.2 : 0.0;
-  return { netEl, grossEl, vatEl, net, gross, vatRate };
-}
-
-function onNetChanged(id) {
-  const { net, grossEl, vatRate } = readInputs(id);
-  if (!isNaN(net)) grossEl.value = (net * (1 + vatRate)).toFixed(2);
-}
-
-function onGrossChanged(id) {
-  const { gross, netEl, vatRate } = readInputs(id);
-  if (!isNaN(gross)) netEl.value = (gross / (1 + vatRate)).toFixed(2);
-}
-
-function onVATToggle(id) {
-  const { netEl, grossEl, vatRate } = readInputs(id);
-  const net = parseFloat(netEl.value);
-  const gross = parseFloat(grossEl.value);
-  if (!isNaN(net) && (isNaN(gross) || document.activeElement === netEl)) {
-    grossEl.value = (net * (1 + vatRate)).toFixed(2);
-  } else if (!isNaN(gross)) {
-    netEl.value = (gross / (1 + vatRate)).toFixed(2);
+  function buildMetaTooltip(p) {
+    const parts = [];
+    if (p.costedBy || p.costedAt) {
+      parts.push(`Costed by ${p.costedBy || 'Unknown'}${p.costedAt ? ' on ' + formatDateTime(p.costedAt) : ''}`);
+    }
+    if (p.editedBy || p.editedAt) {
+      parts.push(`Last edited by ${p.editedBy || 'Unknown'}${p.editedAt ? ' on ' + formatDateTime(p.editedAt) : ''}`);
+    }
+    if (p.deletedBy || p.deletedAt) {
+      parts.push(`Deleted by ${p.deletedBy || 'Unknown'}${p.deletedAt ? ' on ' + formatDateTime(p.deletedAt) : ''}`);
+    }
+    if (p.refundFlag) {
+      const label = p.refundFlag === 'refund_due'
+        ? 'Refund due'
+        : p.refundFlag === 'partial_refund'
+        ? 'Partial refund'
+        : 'Refunded';
+      parts.push(`Refund status: ${label}${p.refundNotes ? ' – ' + p.refundNotes : ''}`);
+    }
+    return parts.join('\n');
   }
-}
 
-// -------------------------
-// SAVE UPDATE  (UPDATED)
-// -------------------------
-async function saveCost(poNumber, id) {
-  const row = document.querySelector(`tr[data-po="${poNumber}"]`);
-  const saveBtn = row?.querySelector('.save-btn');
-  const { net, gross, vatRate } = readInputs(id);
+  function render() {
+    const content = byId('tabContent');
+    content.innerHTML = '';
 
-  if (isNaN(net) && isNaN(gross)) { alert('Enter Net or Gross.'); return; }
+    const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
+    const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
+    const refunds  = allPOs.filter(p => !!p.refundFlag);
 
-  const netVal = isNaN(net) ? (gross / (1 + vatRate)) : net;
-  const grossVal = isNaN(gross) ? (net * (1 + vatRate)) : gross;
+    // Supplier filter populate
+    const supSel = byId('supplierFilter');
+    const keep = supSel.value;
+    supSel.innerHTML = '<option value="">All Suppliers</option>';
+    [...new Set(allPOs.map(p => p.supplierName).filter(Boolean))].sort()
+      .forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        supSel.appendChild(opt);
+      });
+    supSel.value = keep;
 
-  try {
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    let base;
+    if (currentTab === 'toCost') base = uncosted;
+    else if (currentTab === 'costed') base = costed;
+    else base = refunds;
 
+    const list = applyAllFilters(base);
+    byId('statusText').textContent = `${list.length} item(s)`;
+
+    const title = document.createElement('div');
+    title.className = 'section-title';
+    title.textContent =
+      currentTab === 'toCost' ? 'To Cost' :
+      currentTab === 'costed' ? 'Costed Entries' :
+      'Refunds';
+    content.appendChild(title);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrapper';
+    const table = document.createElement('table');
+
+    if (currentTab === 'toCost') {
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>PO Number</th>
+            <th>Supplier</th>
+            <th>Description</th>
+            <th class="right">Net</th>
+            <th class="right">Gross</th>
+            <th>VAT @20%</th>
+            <th>Refund</th>
+            <th>Map</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list
+            .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))
+            .map(p => {
+              const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
+              const mapCell = (p.latitude && p.longitude)
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+                : '';
+              return `
+              <tr data-po="${p.poNumber}">
+                <td class="nowrap">${formatDateDisplay(p.date)}</td>
+                <td class="nowrap">${p.poNumber}</td>
+                <td>${p.supplierName || ''}</td>
+                <td>${p.description || ''}</td>
+                <td class="right">
+                  <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
+                    oninput="onNetChanged('${id}')" />
+                </td>
+                <td class="right">
+                  <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
+                    oninput="onGrossChanged('${id}')" />
+                </td>
+                <td class="nowrap">
+                  <label class="vat-label">
+                    <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
+                    20%
+                  </label>
+                </td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                  </select>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
+                <td class="nowrap">${mapCell}</td>
+                <td class="nowrap">
+                  <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
+                  <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>`;
+    } else if (currentTab === 'costed') {
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Date Costed</th>
+            <th>Date</th>
+            <th>PO Number</th>
+            <th>Supplier</th>
+            <th>Description</th>
+            <th>Refund</th>
+            <th class="right">Net</th>
+            <th class="right">VAT</th>
+            <th class="right">Gross</th>
+            <th>Map</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list
+            .sort((a,b)=> new Date(b.costedAt || b.createdAt) - new Date(a.costedAt || a.createdAt))
+            .map(p => {
+              const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
+              const vatRate = (p.vatRate ?? 0.2);
+              const net = Number(p.costNet || 0);
+              const gross = Number(p.costGross || 0);
+              const vat = gross && net ? (gross - net) : Number((net * vatRate).toFixed(2));
+              const mapCell = (p.latitude && p.longitude)
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+                : '';
+              const costedAtTxt = p.costedAt
+                ? formatDateTime(p.costedAt)
+                : '';
+              const tooltip = buildMetaTooltip(p).replace(/"/g, '&quot;');
+              const refundLabel = p.refundFlag === 'refund_due'
+                ? 'Refund due'
+                : p.refundFlag === 'partial_refund'
+                ? 'Partial refund'
+                : p.refundFlag === 'refunded'
+                ? 'Refunded'
+                : 'None';
+              return `
+              <tr title="${tooltip}">
+                <td class="nowrap">${costedAtTxt}</td>
+                <td class="nowrap">${formatDateDisplay(p.date)}</td>
+                <td class="nowrap">${p.poNumber}</td>
+                <td>${p.supplierName || ''}</td>
+                <td>${p.description || ''}</td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                  </select>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
+                <td class="right">${formatGBP(net)}</td>
+                <td class="right">${formatGBP(vat)}</td>
+                <td class="right">${formatGBP(gross || (net*(1+vatRate)))}</td>
+                <td class="nowrap">${mapCell}</td>
+                <td class="nowrap">
+                  <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>`;
+    } else {
+      // Refunds tab
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Date Costed</th>
+            <th>Date</th>
+            <th>PO Number</th>
+            <th>Supplier</th>
+            <th>Description</th>
+            <th>Refund Status</th>
+            <th>Notes</th>
+            <th class="right">Net</th>
+            <th class="right">Gross</th>
+            <th>Map</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list
+            .sort((a,b)=> new Date(b.costedAt || b.createdAt) - new Date(a.costedAt || a.createdAt))
+            .map(p => {
+              const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
+              const net = Number(p.costNet || 0);
+              const gross = Number(p.costGross || 0);
+              const mapCell = (p.latitude && p.longitude)
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+                : '';
+              const costedAtTxt = p.costedAt
+                ? formatDateTime(p.costedAt)
+                : '';
+              const tooltip = buildMetaTooltip(p).replace(/"/g, '&quot;');
+              return `
+              <tr title="${tooltip}">
+                <td class="nowrap">${costedAtTxt}</td>
+                <td class="nowrap">${formatDateDisplay(p.date)}</td>
+                <td class="nowrap">${p.poNumber}</td>
+                <td>${p.supplierName || ''}</td>
+                <td>${p.description || ''}</td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                  </select>
+                </td>
+                <td>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
+                <td class="right">${formatGBP(net)}</td>
+                <td class="right">${formatGBP(gross)}</td>
+                <td class="nowrap">${mapCell}</td>
+                <td class="nowrap">
+                  <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>`;
+    }
+
+    wrap.appendChild(table);
+    content.appendChild(wrap);
+  }
+
+  // VAT handlers
+  function readInputs(id) {
+    const netEl = byId(`net-${id}`);
+    const grossEl = byId(`gross-${id}`);
+    const vatEl = byId(`vat-${id}`);
+    const net = netEl ? parseFloat(netEl.value) : NaN;
+    const gross = grossEl ? parseFloat(grossEl.value) : NaN;
+    const vatOn = !!vatEl?.checked;
+    const vatRate = vatOn ? 0.2 : 0.0;
+    return { netEl, grossEl, vatEl, net, gross, vatRate };
+  }
+  function onNetChanged(id) {
+    const { net, grossEl, vatRate } = readInputs(id);
+    if (!isNaN(net) && grossEl) grossEl.value = (net * (1 + vatRate)).toFixed(2);
+  }
+  function onGrossChanged(id) {
+    const { gross, netEl, vatRate } = readInputs(id);
+    if (!isNaN(gross) && netEl) netEl.value = (gross / (1 + vatRate)).toFixed(2);
+  }
+  function onVATToggle(id) {
+    const { netEl, grossEl, vatRate } = readInputs(id);
+    const net = netEl ? parseFloat(netEl.value) : NaN;
+    const gross = grossEl ? parseFloat(grossEl.value) : NaN;
+    if (!isNaN(net) && (isNaN(gross) || document.activeElement === netEl)) {
+      if (grossEl) grossEl.value = (net * (1 + vatRate)).toFixed(2);
+    } else if (!isNaN(gross)) {
+      if (netEl) netEl.value = (gross / (1 + vatRate)).toFixed(2);
+    }
+  }
+
+  // SAVE COST UPDATE
+  async function saveCost(poNumber, id) {
+    const row = document.querySelector(`tr[data-po="${poNumber}"]`);
+    const saveBtn = row?.querySelector('.save-btn');
+    const { net, gross, vatRate } = readInputs(id);
+
+    if (isNaN(net) && isNaN(gross)) { alert('Enter Net or Gross.'); return; }
+
+    const netVal = isNaN(net) ? (gross / (1 + vatRate)) : net;
+    const grossVal = isNaN(gross) ? (net * (1 + vatRate)) : gross;
+
+    try {
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+      const nowIso = new Date().toISOString();
+
+      const payload = {
+        poNumber,
+        editedBy: engineerName || 'Office',
+        fields: {
+          costNet: Number(netVal.toFixed(2)),
+          costGross: Number(grossVal.toFixed(2)),
+          vatRate,
+          costedBy: engineerName || 'Office',
+          costedAt: nowIso,
+          editedBy: engineerName || 'Office'
+        }
+      };
+
+      const res = await fetch(UPDATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store'
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Update failed');
+
+      // update local cache
+      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+      if (idx >= 0) {
+        allPOs[idx].costNet = payload.fields.costNet;
+        allPOs[idx].costGross = payload.fields.costGross;
+        allPOs[idx].vatRate = payload.fields.vatRate;
+        allPOs[idx].costedBy = payload.fields.costedBy;
+        allPOs[idx].costedAt = payload.fields.costedAt;
+        allPOs[idx].editedBy = payload.fields.editedBy;
+        allPOs[idx].editedAt = payload.fields.costedAt;
+      }
+
+      render();
+    } catch (e) {
+      alert('⚠️ Save failed: ' + e.message);
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
+    }
+  }
+
+  // REFUND FLAG UPDATE
+  async function onRefundChange(poNumber, id, fromBlur) {
+    const flagSel = byId(`refundFlag-${id}`);
+    const notesEl = byId(`refundNotes-${id}`);
+    if (!flagSel && !notesEl) return;
+
+    const refundFlag = flagSel ? flagSel.value : (allPOs.find(p => p.poNumber === poNumber)?.refundFlag || '');
+    const refundNotes = notesEl ? notesEl.value : (allPOs.find(p => p.poNumber === poNumber)?.refundNotes || '');
+
+    // If it's only a blur event but no changes, we still push notes, that's fine.
     const payload = {
       poNumber,
+      editedBy: engineerName || 'Office',
       fields: {
-        costNet: Number(netVal.toFixed(2)),
-        costGross: Number(grossVal.toFixed(2)),
-        vatRate,
-        costedBy: engineerName || 'Office',
-        costedAt: new Date().toISOString()     // <-- REQUIRED FIX
+        refundFlag: refundFlag || "",
+        refundNotes: refundNotes || "",
+        editedBy: engineerName || 'Office'
       }
     };
 
-    const res = await fetch(UPDATE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      cache: 'no-store'
+    try {
+      const res = await fetch(UPDATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store'
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Update failed');
+
+      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+      if (idx >= 0) {
+        allPOs[idx].refundFlag = payload.fields.refundFlag;
+        allPOs[idx].refundNotes = payload.fields.refundNotes;
+        allPOs[idx].editedBy = payload.fields.editedBy;
+        allPOs[idx].editedAt = new Date().toISOString();
+      }
+      render();
+    } catch (e) {
+      console.error('Refund update failed', e);
+      if (!fromBlur) alert('⚠️ Refund update failed: ' + e.message);
+    }
+  }
+
+  // DELETE (SOFT) PO
+  async function deletePO(poNumber) {
+    if (!confirm(`Are you sure you want to delete PO ${poNumber}?`)) return;
+
+    try {
+      const payload = {
+        poNumber,
+        delete: true,
+        deletedBy: engineerName || 'Office'
+      };
+      const res = await fetch(UPDATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store'
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Delete failed');
+
+      // Remove from local list
+      allPOs = allPOs.filter(p => p.poNumber !== poNumber);
+      render();
+    } catch (e) {
+      alert('⚠️ Delete failed: ' + e.message);
+    }
+  }
+
+  async function init() {
+    const username = sessionStorage.getItem('mostlaneUser') || '';
+    engineerName = dotToSpace(username) || 'Office';
+
+    byId('toCostBtn').addEventListener('click', () => {
+      currentTab = 'toCost';
+      byId('toCostBtn').classList.remove('inactive');
+      byId('costedBtn').classList.add('inactive');
+      byId('refundsBtn').classList.add('inactive');
+      render();
+    });
+    byId('costedBtn').addEventListener('click', () => {
+      currentTab = 'costed';
+      byId('costedBtn').classList.remove('inactive');
+      byId('toCostBtn').classList.add('inactive');
+      byId('refundsBtn').classList.add('inactive');
+      render();
+    });
+    byId('refundsBtn').addEventListener('click', () => {
+      currentTab = 'refunds';
+      byId('refundsBtn').classList.remove('inactive');
+      byId('toCostBtn').classList.add('inactive');
+      byId('costedBtn').classList.add('inactive');
+      render();
     });
 
-    const result = await res.json();
-    if (!res.ok) throw new Error(result?.error || 'Update failed');
+    ['supplierFilter','dateRange','searchBox'].forEach(id => {
+      byId(id).addEventListener('input', render);
+      byId(id).addEventListener('change', render);
+    });
 
-    const idx = allPOs.findIndex(p => p.poNumber === poNumber);
-    if (idx >= 0) {
-      allPOs[idx].costNet = payload.fields.costNet;
-      allPOs[idx].costGross = payload.fields.costGross;
-      allPOs[idx].vatRate = payload.fields.vatRate;
-      allPOs[idx].costedBy = payload.fields.costedBy;
-      allPOs[idx].costedAt = payload.fields.costedAt;
+    try {
+      const res = await fetch(GET_URL, { cache: 'no-store' });
+      const data = await res.json();
+      allPOs = data.data || data || [];
+      render();
+    } catch (err) {
+      byId('tabContent').innerHTML = '⚠️ Failed to load POs: ' + err.message;
     }
-
-    render();
-  } catch (e) {
-    alert('⚠️ Save failed: ' + e.message);
-  } finally {
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
   }
-}
 
-// -------------------------
-// INIT
-// -------------------------
-async function init() {
-  const username = sessionStorage.getItem('mostlaneUser') || '';
-  engineerName = dotToSpace(username) || 'Office';
-
-  byId('toCostBtn').addEventListener('click', () => {
-    currentTab = 'toCost';
-    byId('toCostBtn').classList.remove('inactive');
-    byId('costedBtn').classList.add('inactive');
-    render();
-  });
-
-  byId('costedBtn').addEventListener('click', () => {
-    currentTab = 'costed';
-    byId('costedBtn').classList.remove('inactive');
-    byId('toCostBtn').classList.add('inactive');
-    render();
-  });
-
-  ['supplierFilter','dateRange','searchBox'].forEach(id => {
-    byId(id).addEventListener('input', render);
-    byId(id).addEventListener('change', render);
-  });
-
-  try {
-    const res = await fetch(GET_URL, { cache: 'no-store' });
-    const data = await res.json();
-    allPOs = data.data || data || [];
-    render();
-  } catch (err) {
-    byId('tabContent').innerHTML = '⚠️ Failed to load POs: ' + err.message;
-  }
-}
-
-document.addEventListener('DOMContentLoaded', init);
-</script>
-
+  document.addEventListener('DOMContentLoaded', init);
+  </script>
 </body>
 </html>
