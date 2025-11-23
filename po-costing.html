@@ -43,6 +43,10 @@
       cursor: pointer; font-size: 15px; white-space: nowrap;
     }
     .tab-btn.inactive { background: #7a8aa6; }
+    .tab-btn.small-tab {
+      font-size: 13px;
+      padding: 6px 10px;
+    }
     .btn-danger {
       background: #b91c1c;
     }
@@ -104,6 +108,7 @@
         <button id="toCostBtn" class="tab-btn">To Cost</button>
         <button id="costedBtn" class="tab-btn inactive">Costed Entries</button>
         <button id="refundsBtn" class="tab-btn inactive">Credits</button>
+        <button id="deletedBtn" class="tab-btn small-tab inactive">Deleted</button>
       </div>
     </div>
 
@@ -221,9 +226,10 @@
     const content = byId('tabContent');
     content.innerHTML = '';
 
-    const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
-    const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
-    const refunds  = allPOs.filter(p => !!p.refundFlag);
+    const uncosted = allPOs.filter(p => !p.deleted && !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
+    const costed   = allPOs.filter(p => !p.deleted &&  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
+    const refunds  = allPOs.filter(p => !p.deleted && !!p.refundFlag);
+    const deleted  = allPOs.filter(p => p.deleted);
 
     // Supplier filter populate
     const supSel = byId('supplierFilter');
@@ -240,7 +246,8 @@
     let base;
     if (currentTab === 'toCost') base = uncosted;
     else if (currentTab === 'costed') base = costed;
-    else base = refunds;
+    else if (currentTab === 'refunds') base = refunds;
+    else base = deleted;
 
     const list = applyAllFilters(base);
     byId('statusText').textContent = `${list.length} item(s)`;
@@ -250,7 +257,8 @@
     title.textContent =
       currentTab === 'toCost' ? 'To Cost' :
       currentTab === 'costed' ? 'Costed Entries' :
-      'Credits';
+      currentTab === 'refunds' ? 'Credits' :
+      'Deleted PO’s';
     content.appendChild(title);
 
     const wrap = document.createElement('div');
@@ -354,13 +362,6 @@
                 ? formatDateTime(p.costedAt)
                 : '';
               const tooltip = buildMetaTooltip(p).replace(/"/g, '&quot;');
-              const refundLabel = p.refundFlag === 'refund_due'
-                ? 'Credit due'
-                : p.refundFlag === 'partial_refund'
-                ? 'Partial credit'
-                : p.refundFlag === 'refunded'
-                ? 'Credited'
-                : 'None';
               return `
               <tr title="${tooltip}">
                 <td class="nowrap">${costedAtTxt}</td>
@@ -390,7 +391,7 @@
               </tr>`;
             }).join('')}
         </tbody>`;
-    } else {
+    } else if (currentTab === 'refunds') {
       // Credits tab
       table.innerHTML = `
         <thead>
@@ -448,6 +449,47 @@
                 <td class="nowrap">${mapCell}</td>
                 <td class="nowrap">
                   <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>`;
+    } else {
+      // Deleted tab
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Date Deleted</th>
+            <th>Date</th>
+            <th>PO Number</th>
+            <th>Supplier</th>
+            <th>Description</th>
+            <th>Deleted By</th>
+            <th>Deleted At</th>
+            <th>Map</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list
+            .sort((a,b)=> new Date(b.deletedAt || b.updatedAt || b.createdAt) - new Date(a.deletedAt || a.updatedAt || a.createdAt))
+            .map(p => {
+              const mapCell = (p.latitude && p.longitude)
+                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+                : '';
+              const deletedAtTxt = p.deletedAt ? formatDateTime(p.deletedAt) : '';
+              const tooltip = buildMetaTooltip(p).replace(/"/g, '&quot;');
+              return `
+              <tr title="${tooltip}">
+                <td class="nowrap">${deletedAtTxt}</td>
+                <td class="nowrap">${formatDateDisplay(p.date)}</td>
+                <td class="nowrap">${p.poNumber}</td>
+                <td>${p.supplierName || ''}</td>
+                <td>${p.description || ''}</td>
+                <td class="nowrap">${p.deletedBy || ''}</td>
+                <td class="nowrap">${deletedAtTxt}</td>
+                <td class="nowrap">${mapCell}</td>
+                <td class="nowrap">
+                  <button class="save-btn" onclick="restorePO('${p.poNumber}')">↩ Restore</button>
                 </td>
               </tr>`;
             }).join('')}
@@ -590,7 +632,7 @@
     }
   }
 
-  // DELETE (SOFT) PO
+  // DELETE (SOFT) PO  -> mark as deleted, keep in list
   async function deletePO(poNumber) {
     if (!confirm(`Are you sure you want to delete PO ${poNumber}?`)) return;
 
@@ -609,11 +651,55 @@
       const result = await res.json();
       if (!res.ok) throw new Error(result?.error || 'Delete failed');
 
-      // Remove from local list
-      allPOs = allPOs.filter(p => p.poNumber !== poNumber);
+      // Mark as deleted locally (do NOT remove)
+      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+      if (idx >= 0) {
+        allPOs[idx].deleted = true;
+        allPOs[idx].deletedBy = engineerName || 'Office';
+        allPOs[idx].deletedAt = new Date().toISOString();
+      }
       render();
     } catch (e) {
       alert('⚠️ Delete failed: ' + e.message);
+    }
+  }
+
+  // RESTORE PO (Option A: clear deleted fields)
+  async function restorePO(poNumber) {
+    if (!confirm(`Restore PO ${poNumber}?`)) return;
+
+    try {
+      const payload = {
+        poNumber,
+        editedBy: engineerName || 'Office',
+        fields: {
+          deleted: false,
+          deletedBy: "",
+          deletedAt: "",
+          editedBy: engineerName || 'Office'
+        }
+      };
+
+      const res = await fetch(UPDATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store'
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Restore failed');
+
+      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+      if (idx >= 0) {
+        allPOs[idx].deleted = false;
+        allPOs[idx].deletedBy = "";
+        allPOs[idx].deletedAt = "";
+        allPOs[idx].editedBy = engineerName || 'Office';
+        allPOs[idx].editedAt = new Date().toISOString();
+      }
+      render();
+    } catch (e) {
+      alert('⚠️ Restore failed: ' + e.message);
     }
   }
 
@@ -626,6 +712,7 @@
       byId('toCostBtn').classList.remove('inactive');
       byId('costedBtn').classList.add('inactive');
       byId('refundsBtn').classList.add('inactive');
+      byId('deletedBtn').classList.add('inactive');
       render();
     });
     byId('costedBtn').addEventListener('click', () => {
@@ -633,6 +720,7 @@
       byId('costedBtn').classList.remove('inactive');
       byId('toCostBtn').classList.add('inactive');
       byId('refundsBtn').classList.add('inactive');
+      byId('deletedBtn').classList.add('inactive');
       render();
     });
     byId('refundsBtn').addEventListener('click', () => {
@@ -640,6 +728,15 @@
       byId('refundsBtn').classList.remove('inactive');
       byId('toCostBtn').classList.add('inactive');
       byId('costedBtn').classList.add('inactive');
+      byId('deletedBtn').classList.add('inactive');
+      render();
+    });
+    byId('deletedBtn').addEventListener('click', () => {
+      currentTab = 'deleted';
+      byId('deletedBtn').classList.remove('inactive');
+      byId('toCostBtn').classList.add('inactive');
+      byId('costedBtn').classList.add('inactive');
+      byId('refundsBtn').classList.add('inactive');
       render();
     });
 
