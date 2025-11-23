@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Previous POs</title>
   <style>
-    
     body {
       font-family: 'Segoe UI', sans-serif;
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -34,16 +33,104 @@
       text-align: center;
       text-decoration: none;
     }
-
-    .po-item {background:#fff; margin-bottom:10px; border-radius:6px; padding:12px;}
+    .po-item {
+      background:#fff;
+      margin-bottom:10px;
+      border-radius:6px;
+      padding:12px;
+      font-size:15px;
+      line-height:1.4;
+    }
+    .map-link {
+      font-size: 18px;
+      text-decoration: none;
+      margin-left: 4px;
+    }
   </style>
 </head>
 <body>
   <div class="main-body">
     <h1>Previous Generated POs</h1>
-    <div class="po-item">Example PO #1 – Engineer A – Site 1</div>
-    <div class="po-item">Example PO #2 – Engineer B – Site 2</div>
+    <div id="poList">Loading…</div>
     <a href="po-menu.html" class="button">Back</a>
   </div>
+
+  <script>
+    const GET_URL = "https://mostlane-po.jamie-def.workers.dev/po/list";
+
+    const dotToSpace = s => (s || "").replace(/\./g, " ");
+
+    function formatDate(dateStr) {
+      if (!dateStr) return "";
+      const parts = dateStr.split("/");
+      if (parts.length !== 3) return dateStr;
+      const d = new Date(parts[2] + "-" + parts[1] + "-" + parts[0] + "T00:00:00");
+      return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
+    }
+
+    function getJobKey(poNumber) {
+      const parts = String(poNumber || "").split("-");
+      return parts.length >= 3 ? parts[2] : "";
+    }
+
+    async function loadPOs() {
+      const usernameRaw = sessionStorage.getItem("mostlaneUser") || "";
+      const engineerName = dotToSpace(usernameRaw);
+
+      const container = document.getElementById("poList");
+
+      try {
+        const res = await fetch(GET_URL, { cache:"no-store" });
+        const json = await res.json();
+
+        let list = json.data || json || [];
+        if (!Array.isArray(list)) list = [];
+
+        // Filter to this engineer only
+        const myPOs = list.filter(p => 
+          (p.engineer || "").toLowerCase() === engineerName.toLowerCase()
+        );
+
+        if (!myPOs.length) {
+          container.innerHTML = "No POs found.";
+          return;
+        }
+
+        // Sort newest first
+        myPOs.sort((a,b)=>{
+          const da = a.createdAt ? new Date(a.createdAt) : 0;
+          const db = b.createdAt ? new Date(b.createdAt) : 0;
+          return db - da;
+        });
+
+        container.innerHTML = "";
+
+        myPOs.forEach(p => {
+          const jobKey = getJobKey(p.poNumber);
+          const date = formatDate(p.date);
+          const mapLink = (p.latitude != null && p.longitude != null)
+            ? `<a class="map-link" target="_blank" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}">📍</a>`
+            : "";
+
+          const div = document.createElement("div");
+          div.className = "po-item";
+          div.innerHTML = `
+            <strong>${p.poNumber}</strong><br>
+            <strong>Supplier:</strong> ${p.supplierName || "Unknown"}<br>
+            <strong>Job:</strong> ${jobKey || "N/A"}<br>
+            <strong>Date:</strong> ${date}<br>
+            <strong>Description:</strong> ${p.description || ""}<br>
+            ${mapLink}
+          `;
+          container.appendChild(div);
+        });
+
+      } catch (err) {
+        container.innerHTML = "⚠️ Failed to load POs: " + err.message;
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", loadPOs);
+  </script>
 </body>
 </html>
