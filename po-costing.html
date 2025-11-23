@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PO Costing</title>
+
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -85,6 +86,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="container">
     <h1>PO Costing</h1>
@@ -104,6 +106,7 @@
           <option value="">All Suppliers</option>
         </select>
       </div>
+
       <div>
         <label for="dateRange"><strong>Show:</strong></label>
         <select id="dateRange">
@@ -115,314 +118,338 @@
           <option value="all">All</option>
         </select>
       </div>
+
       <div class="inline">
         <label for="searchBox"><strong>Search:</strong></label>
-        <input id="searchBox" type="search" placeholder="PO number or description…" />
+        <input id="searchBox" type="search" placeholder="PO number or description…"/>
       </div>
+
       <div class="muted" id="statusText"></div>
     </div>
 
     <div id="tabContent"></div>
   </div>
 
-  <script>
-  // ----- Config -----
-  const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
-  const UPDATE_URL = 'https://mostlane-po.jamie-def.workers.dev/po/update';
+<script>
+// ----- Config -----
+const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
+const UPDATE_URL = 'https://mostlane-po.jamie-def.workers.dev/po/update';
 
-  // ----- Utils -----
-  const dotToSpace = s => (s || '').replace(/\./g, ' ');
-  function parseUKDate(dateStr) {
-    if (!dateStr) return null;
-    const [d, m, y] = dateStr.split('/');
-    if (!d || !m || !y) return null;
-    return new Date(`${y}-${m}-${d}T00:00:00`);
-  }
-  function formatDateDisplay(dateStr) {
-    const d = parseUKDate(dateStr);
-    if (!d || isNaN(d)) return '';
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
-  function formatGBP(n) {
-    if (n === null || n === undefined || isNaN(n)) return '';
-    return '£' + Number(n).toFixed(2);
-  }
-  function byId(id){ return document.getElementById(id); }
+// ----- Utils -----
+const dotToSpace = s => (s || '').replace(/\./g, ' ');
 
-  let allPOs = [];
-  let currentTab = 'toCost';
-  let engineerName = '';
+function parseUKDate(dateStr) {
+  if (!dateStr) return null;
+  const [d, m, y] = dateStr.split('/');
+  if (!d || !m || !y) return null;
+  return new Date(`${y}-${m}-${d}T00:00:00`);
+}
 
-  function filterByDate(pos, range) {
-    if (range === 'all') return pos;
-    const days = parseInt(range);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    return pos.filter(p => {
-      const d = parseUKDate(p.date);
-      return d && d >= cutoff;
+function formatDateDisplay(dateStr) {
+  const d = parseUKDate(dateStr);
+  if (!d || isNaN(d)) return '';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatGBP(n) {
+  if (n === null || n === undefined || isNaN(n)) return '';
+  return '£' + Number(n).toFixed(2);
+}
+
+function byId(id) { return document.getElementById(id); }
+
+let allPOs = [];
+let currentTab = 'toCost';
+let engineerName = '';
+
+// -------------------------
+// Filters
+// -------------------------
+function filterByDate(pos, range) {
+  if (range === 'all') return pos;
+  const days = parseInt(range);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  return pos.filter(p => {
+    const d = parseUKDate(p.date);
+    return d && d >= cutoff;
+  });
+}
+
+function applyAllFilters(base) {
+  const supplierVal = byId('supplierFilter').value;
+  const dateVal = byId('dateRange').value;
+  const searchVal = (byId('searchBox').value || '').toLowerCase().trim();
+
+  let out = filterByDate(base, dateVal);
+  if (supplierVal) out = out.filter(p => (p.supplierName || '') === supplierVal);
+  if (searchVal) {
+    out = out.filter(p => {
+      const hay = [p.poNumber, p.description, p.supplierName].join(' ').toLowerCase();
+      return hay.includes(searchVal);
     });
   }
-  function applyAllFilters(base) {
-    const supplierVal = byId('supplierFilter').value;
-    const dateVal = byId('dateRange').value;
-    const searchVal = (byId('searchBox').value || '').toLowerCase().trim();
+  return out;
+}
 
-    let out = filterByDate(base, dateVal);
-    if (supplierVal) out = out.filter(p => (p.supplierName || '') === supplierVal);
-    if (searchVal) {
-      out = out.filter(p => {
-        const hay = [p.poNumber, p.description, p.supplierName].join(' ').toLowerCase();
-        return hay.includes(searchVal);
-      });
-    }
-    return out;
+// -------------------------
+// Render
+// -------------------------
+function render() {
+  const content = byId('tabContent');
+  content.innerHTML = '';
+
+  const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
+  const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
+
+  const supSel = byId('supplierFilter');
+  const keep = supSel.value;
+  supSel.innerHTML = '<option value="">All Suppliers</option>';
+  [...new Set(allPOs.map(p => p.supplierName).filter(Boolean))].sort()
+    .forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      supSel.appendChild(opt);
+    });
+  supSel.value = keep;
+
+  const list = currentTab === 'toCost' ? applyAllFilters(uncosted) : applyAllFilters(costed);
+
+  byId('statusText').textContent = `${list.length} item(s)`;
+
+  const title = document.createElement('div');
+  title.className = 'section-title';
+  title.textContent = currentTab === 'toCost' ? 'To Cost' : 'Costed Entries';
+  content.appendChild(title);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'table-wrapper';
+  const table = document.createElement('table');
+
+  if (currentTab === 'toCost') {
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>PO Number</th>
+          <th>Supplier</th>
+          <th>Description</th>
+          <th class="right">Net</th>
+          <th class="right">Gross</th>
+          <th>VAT @20%</th>
+          <th>Map</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list
+          .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))
+          .map(p => {
+            const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
+            const mapCell = (p.latitude && p.longitude)
+              ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+              : '';
+            return `
+            <tr data-po="${p.poNumber}">
+              <td class="nowrap">${formatDateDisplay(p.date)}</td>
+              <td class="nowrap">${p.poNumber}</td>
+              <td>${p.supplierName || ''}</td>
+              <td>${p.description || ''}</td>
+              <td class="right">
+                <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
+                  oninput="onNetChanged('${id}')" />
+              </td>
+              <td class="right">
+                <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
+                  oninput="onGrossChanged('${id}')" />
+              </td>
+              <td class="nowrap">
+                <label class="vat-label">
+                  <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
+                  20%
+                </label>
+              </td>
+              <td class="nowrap">${mapCell}</td>
+              <td class="nowrap">
+                <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
+              </td>
+            </tr>`;
+          }).join('')}
+      </tbody>`;
+  } else {
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>Date Costed</th>
+          <th>PO Number</th>
+          <th>Supplier</th>
+          <th>Description</th>
+          <th class="right">Net</th>
+          <th class="right">VAT</th>
+          <th class="right">Gross</th>
+          <th>Map</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${list
+          .sort((a,b)=> new Date(b.costedAt || b.createdAt) - new Date(a.costedAt || a.createdAt))
+          .map(p => {
+            const vatRate = (p.vatRate ?? 0.2);
+            const net = Number(p.costNet || 0);
+            const gross = Number(p.costGross || 0);
+            const vat = gross && net ? (gross - net) : Number((net * vatRate).toFixed(2));
+            const mapCell = (p.latitude && p.longitude)
+              ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
+              : '';
+            const costedAtTxt = p.costedAt
+              ? new Date(p.costedAt).toLocaleString('en-GB', { hour12:false })
+              : '';
+            return `
+            <tr>
+              <td class="nowrap">${costedAtTxt}</td>
+              <td class="nowrap">${p.poNumber}</td>
+              <td>${p.supplierName || ''}</td>
+              <td>${p.description || ''}</td>
+              <td class="right">${formatGBP(net)}</td>
+              <td class="right">${formatGBP(vat)}</td>
+              <td class="right">${formatGBP(gross || (net*(1+vatRate)))}</td>
+              <td class="nowrap">${mapCell}</td>
+            </tr>`;
+          }).join('')}
+      </tbody>`;
   }
 
-  function render() {
-    const content = byId('tabContent');
-    content.innerHTML = '';
+  wrap.appendChild(table);
+  content.appendChild(wrap);
+}
 
-    const uncosted = allPOs.filter(p => !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
-    const costed   = allPOs.filter(p =>  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
+// -------------------------
+// VAT Handlers
+// -------------------------
+function readInputs(id) {
+  const netEl = byId(`net-${id}`);
+  const grossEl = byId(`gross-${id}`);
+  const vatEl = byId(`vat-${id}`);
+  const net = parseFloat(netEl.value);
+  const gross = parseFloat(grossEl.value);
+  const vatOn = !!vatEl?.checked;
+  const vatRate = vatOn ? 0.2 : 0.0;
+  return { netEl, grossEl, vatEl, net, gross, vatRate };
+}
 
-    // Supplier filter populate
-    const supSel = byId('supplierFilter');
-    const keep = supSel.value;
-    supSel.innerHTML = '<option value="">All Suppliers</option>';
-    [...new Set(allPOs.map(p => p.supplierName).filter(Boolean))].sort()
-      .forEach(name => {
-        const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
-        supSel.appendChild(opt);
-      });
-    supSel.value = keep;
+function onNetChanged(id) {
+  const { net, grossEl, vatRate } = readInputs(id);
+  if (!isNaN(net)) grossEl.value = (net * (1 + vatRate)).toFixed(2);
+}
 
-    const list = currentTab === 'toCost' ? applyAllFilters(uncosted) : applyAllFilters(costed);
+function onGrossChanged(id) {
+  const { gross, netEl, vatRate } = readInputs(id);
+  if (!isNaN(gross)) netEl.value = (gross / (1 + vatRate)).toFixed(2);
+}
 
-    byId('statusText').textContent = `${list.length} item(s)`;
-
-    const title = document.createElement('div');
-    title.className = 'section-title';
-    title.textContent = currentTab === 'toCost' ? 'To Cost' : 'Costed Entries';
-    content.appendChild(title);
-
-    const wrap = document.createElement('div');
-    wrap.className = 'table-wrapper';
-    const table = document.createElement('table');
-
-    if (currentTab === 'toCost') {
-      table.innerHTML = `
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>PO Number</th>
-            <th>Supplier</th>
-            <th>Description</th>
-            <th class="right">Net</th>
-            <th class="right">Gross</th>
-            <th>VAT @20%</th>
-            <th>Map</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${list
-            .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))
-            .map(p => {
-              const id = p.poNumber.replace(/[^A-Za-z0-9]/g,'_');
-              const mapCell = (p.latitude && p.longitude)
-                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
-                : '';
-              return `
-              <tr data-po="${p.poNumber}">
-                <td class="nowrap">${formatDateDisplay(p.date)}</td>
-                <td class="nowrap">${p.poNumber}</td>
-                <td>${p.supplierName || ''}</td>
-                <td>${p.description || ''}</td>
-                <td class="right">
-                  <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
-                    oninput="onNetChanged('${id}')" />
-                </td>
-                <td class="right">
-                  <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
-                    oninput="onGrossChanged('${id}')" />
-                </td>
-                <td class="nowrap">
-                  <label class="vat-label">
-                    <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
-                    20%
-                  </label>
-                </td>
-                <td class="nowrap">${mapCell}</td>
-                <td class="nowrap">
-                  <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
-                </td>
-              </tr>`;
-            }).join('')}
-        </tbody>`;
-    } else {
-      table.innerHTML = `
-        <thead>
-          <tr>
-            <th>Date Costed</th>
-            <th>PO Number</th>
-            <th>Supplier</th>
-            <th>Description</th>
-            <th class="right">Net</th>
-            <th class="right">VAT</th>
-            <th class="right">Gross</th>
-            <th>Map</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${list
-            .sort((a,b)=> new Date(b.costedAt || b.createdAt) - new Date(a.costedAt || a.createdAt))
-            .map(p => {
-              const vatRate = (p.vatRate ?? 0.2);
-              const net = Number(p.costNet || 0);
-              const gross = Number(p.costGross || 0);
-              const vat = gross && net ? (gross - net) : Number((net * vatRate).toFixed(2));
-              const mapCell = (p.latitude && p.longitude)
-                ? `<a class="map-link" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}" target="_blank">📍</a>`
-                : '';
-              const costedAtTxt = p.costedAt
-                ? new Date(p.costedAt).toLocaleString('en-GB', { hour12:false })
-                : '';
-              return `
-              <tr>
-                <td class="nowrap">${costedAtTxt}</td>
-                <td class="nowrap">${p.poNumber}</td>
-                <td>${p.supplierName || ''}</td>
-                <td>${p.description || ''}</td>
-                <td class="right">${formatGBP(net)}</td>
-                <td class="right">${formatGBP(vat)}</td>
-                <td class="right">${formatGBP(gross || (net*(1+vatRate)))}</td>
-                <td class="nowrap">${mapCell}</td>
-              </tr>`;
-            }).join('')}
-        </tbody>`;
-    }
-
-    wrap.appendChild(table);
-    content.appendChild(wrap);
+function onVATToggle(id) {
+  const { netEl, grossEl, vatRate } = readInputs(id);
+  const net = parseFloat(netEl.value);
+  const gross = parseFloat(grossEl.value);
+  if (!isNaN(net) && (isNaN(gross) || document.activeElement === netEl)) {
+    grossEl.value = (net * (1 + vatRate)).toFixed(2);
+  } else if (!isNaN(gross)) {
+    netEl.value = (gross / (1 + vatRate)).toFixed(2);
   }
+}
 
-  // VAT handlers
-  function readInputs(id) {
-    const netEl = byId(`net-${id}`);
-    const grossEl = byId(`gross-${id}`);
-    const vatEl = byId(`vat-${id}`);
-    const net = parseFloat(netEl.value);
-    const gross = parseFloat(grossEl.value);
-    const vatOn = !!vatEl?.checked;
-    const vatRate = vatOn ? 0.2 : 0.0;
-    return { netEl, grossEl, vatEl, net, gross, vatRate };
-  }
-  function onNetChanged(id) {
-    const { net, grossEl, vatRate } = readInputs(id);
-    if (!isNaN(net)) grossEl.value = (net * (1 + vatRate)).toFixed(2);
-  }
-  function onGrossChanged(id) {
-    const { gross, netEl, vatRate } = readInputs(id);
-    if (!isNaN(gross)) netEl.value = (gross / (1 + vatRate)).toFixed(2);
-  }
-  function onVATToggle(id) {
-    const { netEl, grossEl, vatRate } = readInputs(id);
-    const net = parseFloat(netEl.value);
-    const gross = parseFloat(grossEl.value);
-    if (!isNaN(net) && (isNaN(gross) || document.activeElement === netEl)) {
-      grossEl.value = (net * (1 + vatRate)).toFixed(2);
-    } else if (!isNaN(gross)) {
-      netEl.value = (gross / (1 + vatRate)).toFixed(2);
-    }
-  }
+// -------------------------
+// SAVE UPDATE  (UPDATED)
+// -------------------------
+async function saveCost(poNumber, id) {
+  const row = document.querySelector(`tr[data-po="${poNumber}"]`);
+  const saveBtn = row?.querySelector('.save-btn');
+  const { net, gross, vatRate } = readInputs(id);
 
-  // SAVE UPDATE
-  async function saveCost(poNumber, id) {
-    const row = document.querySelector(`tr[data-po="${poNumber}"]`);
-    const saveBtn = row?.querySelector('.save-btn');
-    const { net, gross, vatRate } = readInputs(id);
+  if (isNaN(net) && isNaN(gross)) { alert('Enter Net or Gross.'); return; }
 
-    if (isNaN(net) && isNaN(gross)) { alert('Enter Net or Gross.'); return; }
+  const netVal = isNaN(net) ? (gross / (1 + vatRate)) : net;
+  const grossVal = isNaN(gross) ? (net * (1 + vatRate)) : gross;
 
-    const netVal = isNaN(net) ? (gross / (1 + vatRate)) : net;
-    const grossVal = isNaN(gross) ? (net * (1 + vatRate)) : gross;
+  try {
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
 
-    try {
-      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
-
-      const payload = {
-        poNumber,
-        fields: {
-          costNet: Number(netVal.toFixed(2)),
-          costGross: Number(grossVal.toFixed(2)),
-          vatRate,
-          costedBy: engineerName || 'Office'
-        }
-      };
-
-      const res = await fetch(UPDATE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        cache: 'no-store'
-      });
-
-      const result = await res.json();
-      if (!res.ok) throw new Error(result?.error || 'Update failed');
-
-      // update local cache
-      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
-      if (idx >= 0) {
-        allPOs[idx].costNet = payload.fields.costNet;
-        allPOs[idx].costGross = payload.fields.costGross;
-        allPOs[idx].vatRate = payload.fields.vatRate;
-        allPOs[idx].costedBy = payload.fields.costedBy;
-        allPOs[idx].costedAt = new Date().toISOString();
+    const payload = {
+      poNumber,
+      fields: {
+        costNet: Number(netVal.toFixed(2)),
+        costGross: Number(grossVal.toFixed(2)),
+        vatRate,
+        costedBy: engineerName || 'Office',
+        costedAt: new Date().toISOString()     // <-- REQUIRED FIX
       }
+    };
 
-      render();
-    } catch (e) {
-      alert('⚠️ Save failed: ' + e.message);
-    } finally {
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
+    const res = await fetch(UPDATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store'
+    });
+
+    const result = await res.json();
+    if (!res.ok) throw new Error(result?.error || 'Update failed');
+
+    const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+    if (idx >= 0) {
+      allPOs[idx].costNet = payload.fields.costNet;
+      allPOs[idx].costGross = payload.fields.costGross;
+      allPOs[idx].vatRate = payload.fields.vatRate;
+      allPOs[idx].costedBy = payload.fields.costedBy;
+      allPOs[idx].costedAt = payload.fields.costedAt;
     }
+
+    render();
+  } catch (e) {
+    alert('⚠️ Save failed: ' + e.message);
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
   }
+}
 
-  async function init() {
-    const username = sessionStorage.getItem('mostlaneUser') || '';
-    engineerName = dotToSpace(username) || 'Office';
+// -------------------------
+// INIT
+// -------------------------
+async function init() {
+  const username = sessionStorage.getItem('mostlaneUser') || '';
+  engineerName = dotToSpace(username) || 'Office';
 
-    byId('toCostBtn').addEventListener('click', () => {
-      currentTab = 'toCost';
-      byId('toCostBtn').classList.remove('inactive');
-      byId('costedBtn').classList.add('inactive');
-      render();
-    });
-    byId('costedBtn').addEventListener('click', () => {
-      currentTab = 'costed';
-      byId('costedBtn').classList.remove('inactive');
-      byId('toCostBtn').classList.add('inactive');
-      render();
-    });
+  byId('toCostBtn').addEventListener('click', () => {
+    currentTab = 'toCost';
+    byId('toCostBtn').classList.remove('inactive');
+    byId('costedBtn').classList.add('inactive');
+    render();
+  });
 
-    ['supplierFilter','dateRange','searchBox'].forEach(id => {
-      byId(id).addEventListener('input', render);
-      byId(id).addEventListener('change', render);
-    });
+  byId('costedBtn').addEventListener('click', () => {
+    currentTab = 'costed';
+    byId('costedBtn').classList.remove('inactive');
+    byId('toCostBtn').classList.add('inactive');
+    render();
+  });
 
-    try {
-      const res = await fetch(GET_URL, { cache: 'no-store' });
-      const data = await res.json();
-      allPOs = data.data || data || [];
-      render();
-    } catch (err) {
-      byId('tabContent').innerHTML = '⚠️ Failed to load POs: ' + err.message;
-    }
+  ['supplierFilter','dateRange','searchBox'].forEach(id => {
+    byId(id).addEventListener('input', render);
+    byId(id).addEventListener('change', render);
+  });
+
+  try {
+    const res = await fetch(GET_URL, { cache: 'no-store' });
+    const data = await res.json();
+    allPOs = data.data || data || [];
+    render();
+  } catch (err) {
+    byId('tabContent').innerHTML = '⚠️ Failed to load POs: ' + err.message;
   }
+}
 
-  document.addEventListener('DOMContentLoaded', init);
-  </script>
+document.addEventListener('DOMContentLoaded', init);
+</script>
+
 </body>
 </html>
