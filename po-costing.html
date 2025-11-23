@@ -103,7 +103,7 @@
       <div class="tabs">
         <button id="toCostBtn" class="tab-btn">To Cost</button>
         <button id="costedBtn" class="tab-btn inactive">Costed Entries</button>
-        <button id="refundsBtn" class="tab-btn inactive">Refunds</button>
+        <button id="refundsBtn" class="tab-btn inactive">Credits</button>
       </div>
     </div>
 
@@ -208,11 +208,11 @@
     }
     if (p.refundFlag) {
       const label = p.refundFlag === 'refund_due'
-        ? 'Refund due'
+        ? 'Credit due'
         : p.refundFlag === 'partial_refund'
-        ? 'Partial refund'
-        : 'Refunded';
-      parts.push(`Refund status: ${label}${p.refundNotes ? ' – ' + p.refundNotes : ''}`);
+        ? 'Partial credit'
+        : 'Credited';
+      parts.push(`Credit status: ${label}${p.refundNotes ? ' – ' + p.refundNotes : ''}`);
     }
     return parts.join('\n');
   }
@@ -250,7 +250,7 @@
     title.textContent =
       currentTab === 'toCost' ? 'To Cost' :
       currentTab === 'costed' ? 'Costed Entries' :
-      'Refunds';
+      'Credits';
     content.appendChild(title);
 
     const wrap = document.createElement('div');
@@ -268,7 +268,7 @@
             <th class="right">Net</th>
             <th class="right">Gross</th>
             <th>VAT @20%</th>
-            <th>Refund</th>
+            <th>Credit</th>
             <th>Map</th>
             <th>Actions</th>
           </tr>
@@ -305,9 +305,9 @@
                   <select id="refundFlag-${id}" class="refund-select"
                     onchange="onRefundChange('${p.poNumber}','${id}')">
                     <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
-                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
-                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
-                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
                   </select>
                   <input type="text" id="refundNotes-${id}" class="refund-notes"
                     placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
@@ -330,7 +330,7 @@
             <th>PO Number</th>
             <th>Supplier</th>
             <th>Description</th>
-            <th>Refund</th>
+            <th>Credit</th>
             <th class="right">Net</th>
             <th class="right">VAT</th>
             <th class="right">Gross</th>
@@ -355,11 +355,11 @@
                 : '';
               const tooltip = buildMetaTooltip(p).replace(/"/g, '&quot;');
               const refundLabel = p.refundFlag === 'refund_due'
-                ? 'Refund due'
+                ? 'Credit due'
                 : p.refundFlag === 'partial_refund'
-                ? 'Partial refund'
+                ? 'Partial credit'
                 : p.refundFlag === 'refunded'
-                ? 'Refunded'
+                ? 'Credited'
                 : 'None';
               return `
               <tr title="${tooltip}">
@@ -372,9 +372,9 @@
                   <select id="refundFlag-${id}" class="refund-select"
                     onchange="onRefundChange('${p.poNumber}','${id}')">
                     <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
-                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
-                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
-                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
                   </select>
                   <input type="text" id="refundNotes-${id}" class="refund-notes"
                     placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
@@ -391,7 +391,7 @@
             }).join('')}
         </tbody>`;
     } else {
-      // Refunds tab
+      // Credits tab
       table.innerHTML = `
         <thead>
           <tr>
@@ -400,7 +400,7 @@
             <th>PO Number</th>
             <th>Supplier</th>
             <th>Description</th>
-            <th>Refund Status</th>
+            <th>Credit Status</th>
             <th>Notes</th>
             <th class="right">Net</th>
             <th class="right">Gross</th>
@@ -433,9 +433,9 @@
                   <select id="refundFlag-${id}" class="refund-select"
                     onchange="onRefundChange('${p.poNumber}','${id}')">
                     <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
-                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Refund due</option>
-                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial refund</option>
-                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Refunded</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
                   </select>
                 </td>
                 <td>
@@ -547,7 +547,7 @@
     }
   }
 
-  // REFUND FLAG UPDATE
+  // CREDIT FLAG UPDATE (backend still uses refundFlag/refundNotes)
   async function onRefundChange(poNumber, id, fromBlur) {
     const flagSel = byId(`refundFlag-${id}`);
     const notesEl = byId(`refundNotes-${id}`);
@@ -556,7 +556,6 @@
     const refundFlag = flagSel ? flagSel.value : (allPOs.find(p => p.poNumber === poNumber)?.refundFlag || '');
     const refundNotes = notesEl ? notesEl.value : (allPOs.find(p => p.poNumber === poNumber)?.refundNotes || '');
 
-    // If it's only a blur event but no changes, we still push notes, that's fine.
     const payload = {
       poNumber,
       editedBy: engineerName || 'Office',
@@ -586,8 +585,8 @@
       }
       render();
     } catch (e) {
-      console.error('Refund update failed', e);
-      if (!fromBlur) alert('⚠️ Refund update failed: ' + e.message);
+      console.error('Credit update failed', e);
+      if (!fromBlur) alert('⚠️ Credit update failed: ' + e.message);
     }
   }
 
