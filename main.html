@@ -117,6 +117,7 @@
     if (user) document.getElementById("userName").textContent = user;
   </script>
 
+  <!-- ⭐ MENU GRID -->
   <div class="menu-grid" id="menuGrid">
 
     <a class="button" href="index.html" id="checkinBtn"><span class="emoji">🕒</span> Check In / Out</a>
@@ -125,7 +126,7 @@
     <a class="button" href="engineers-hours-menu.html" id="engineersHoursMenuBtn"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
     <a class="button" href="purchase.html" id="purchaseBtn"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
     <a class="button" href="sites.html" id="sitesBtn"><span class="emoji">📍</span> Manage Sites</a>
-    <a class="button" href="asset-menu.html"><span class="emoji">⚙️</span> Plant & Equipment</a>
+    <a class="button" href="asset-menu.html" id="assetsBtn"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <a class="button" href="#" id="my-documents-btn"><span class="emoji">📄</span> My Documents</a>
     <a class="button" href="weekly.html" id="weeklyBtn"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="formsBtn"><span class="emoji">📝</span> Forms</a>
@@ -133,6 +134,7 @@
     <a class="button" href="hours-dashboard-simple-v2.html" id="hours-dashboard-btn"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="po-menu.html" id="poMenuBtn"><span class="emoji">💷</span> Purchase Orders</a>
     <a class="button" href="users-admin.html" id="usersAdminBtn"><span class="emoji">👥</span> Users</a>
+
     <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
@@ -148,9 +150,55 @@
       const username = sessionStorage.getItem("mostlaneUser");
       if (!username) return;
 
+      // === NORMALISATION FUNCTIONS (same as user-admin.html) ===
+      function normalizeKey(s){
+        return (s || "").trim().toLowerCase().replace(/[^\w]+/g,"");
+      }
+
+      function mapToPermKey(id,label,href){
+        const EXACT = {
+          checkinbtn: "CheckInOut",
+          holidaybtn: "Holiday",
+          purchasebtn: "PurchaseOrders",
+          pomenubtn: "PurchaseOrders",
+          assetsbtn: "Assets",
+          formsbtn: "Forms",
+          "my-documents-btn": "MyDocuments",
+          compliancebtn: "Compliance",
+          "hours-dashboard-btn": "HoursDashboard",
+          weeklybtn: "Weekly",
+          usersadminbtn: "Users",
+          vehiclesbtn: "Vehicles"
+        };
+
+        const cid = normalizeKey(id);
+        if (EXACT[cid]) return EXACT[cid];
+
+        const clabel = normalizeKey(label);
+        if (EXACT[clabel]) return EXACT[clabel];
+
+        const chref = normalizeKey(href);
+        if (EXACT[chref]) return EXACT[chref];
+
+        // Derive fallback category
+        if (chref.includes("checkin") || chref.includes("index")) return "CheckInOut";
+        if (chref.includes("holiday")) return "Holiday";
+        if (chref.includes("weekly")) return "Weekly";
+        if (chref.includes("purchase") || chref.includes("po")) return "PurchaseOrders";
+        if (chref.includes("asset")) return "Assets";
+        if (chref.includes("form")) return "Forms";
+        if (chref.includes("compliance")) return "Compliance";
+        if (chref.includes("vehicles")) return "Vehicles";
+        if (chref.includes("hours")) return "HoursDashboard";
+        if (chref.includes("users")) return "Users";
+
+        return chref || clabel || cid;
+      }
+
       try {
         const res = await fetch(
-          "https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username)
+          "https://mostlane-users.jamie-def.workers.dev/user?u=" + 
+          encodeURIComponent(username)
         );
         const data = await res.json();
         if (!data.found) return;
@@ -164,39 +212,32 @@
 
           const id = btn.id || "";
 
-          // ⭐ FIX: Clean label without emojis
           let label = btn.innerText || "";
-          label = label.replace(/[\p{Emoji_Presentation}\p{Emoji}\uFE0F]/gu, ""); 
-          label = label.trim().replace(/\s+/g, "");
+          label = label.replace(/[\p{Emoji_Presentation}\p{Emoji}\uFE0F]/gu,"").trim();
 
-          const href = (btn.getAttribute("href") || "").replace(/[^\w]/g, "");
+          const href = btn.getAttribute("href") || "";
+          const permKey = mapToPermKey(id,label,href);
 
-          const keys = [id, label, href];
+          const allowed =
+            fullAccess ||
+            ((user[permKey] || "").toLowerCase() === "yes");
 
-          let allowed = false;
-          keys.forEach(k => {
-            if (user[k] && user[k].toLowerCase() === "yes") allowed = true;
-          });
+          btn.style.display = allowed ? "flex" : "none";
 
-          btn.style.display = (fullAccess || allowed) ? "flex" : "none";
-
+          // Documents redirect
           if (id === "my-documents-btn" && user.SharePointPath) {
             btn.href = user.SharePointPath;
           }
         });
 
-        // FULL WIDTH LAST TILE
+        // FIX FULL WIDTH TILE
         setTimeout(() => {
-          buttons.forEach(b => b.classList.remove("full-width"));
-
-          const visible = buttons.filter(btn =>
-            btn.style.display !== "none"
-          );
-
+          const visible = buttons.filter(btn => btn.style.display !== "none");
+          visible.forEach(b => b.classList.remove("full-width"));
           if (visible.length % 2 === 1) {
             visible[visible.length - 1].classList.add("full-width");
           }
-        }, 60);
+        }, 50);
 
         // ADMIN OVERRIDE
         const toggle = document.getElementById("toggleView");
@@ -214,13 +255,13 @@
             }
           });
 
-          toggle.textContent = adminMode ?
-            "Hide Hidden Buttons" :
-            "Show All (Admin View)";
+          toggle.textContent = adminMode
+            ? "Hide Hidden Buttons"
+            : "Show All (Admin View)";
         });
 
       } catch (err) {
-        console.error("Failed to load permissions", err);
+        console.error("Permissions load failed", err);
       }
 
     });
