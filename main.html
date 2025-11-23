@@ -41,27 +41,39 @@
     }
 
     @media (min-width: 800px) {
-      .menu-grid { grid-template-columns: repeat(3, 1fr); }
+      .menu-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    .full-width {
+      grid-column: span 2 !important;
+    }
+    @media (min-width: 800px) {
+      .full-width {
+        grid-column: span 3 !important;
+      }
     }
 
     a.button {
-      display: flex !important;
+      display: none; /* IMPORTANT: hide by default for fast-loading */
       align-items: center;
       gap: 12px;
-
       padding: 18px 20px;
       background: linear-gradient(180deg, #1A4F8F 0%, #003468 100%);
       border-radius: 14px;
-
       box-shadow:
         0 4px 10px rgba(0,0,0,0.25),
         inset 0 1px 2px rgba(255,255,255,0.15);
-
       text-decoration: none;
       color: #ffffff;
       font-weight: 600;
       font-size: 17px;
       transition: 0.2s ease;
+    }
+
+    a.button.visible {
+      display: flex !important;
     }
 
     a.button:hover {
@@ -71,9 +83,11 @@
         inset 0 1px 2px rgba(255,255,255,0.20);
     }
 
-    .emoji { font-size: 2rem; }
-
-    .hidden { display: none !important; }
+    .emoji {
+      font-size: 2rem;
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
   </style>
 </head>
 
@@ -82,92 +96,90 @@
   <div id="user-display">You are logged in as <span id="userName"></span></div>
 
   <script>
-    const userDisplay = sessionStorage.getItem("mostlaneUsername");
-    if (userDisplay) document.getElementById("userName").textContent = userDisplay;
+    const user = sessionStorage.getItem("mostlaneUsername");
+    if (user) document.getElementById("userName").textContent = user;
   </script>
 
   <div class="menu-grid" id="menuGrid">
 
-    <!-- EXACT ORIGINAL ORDER -->
-    <a class="button hidden" id="CheckInOut" href="index.html"><span class="emoji">🕒</span> Check In / Out</a>
-    <a class="button hidden" id="Vehicles" href="vehicles.html"><span class="emoji">🚐</span> Vehicles</a>
-    <a class="button hidden" id="Holiday" href="holiday.html"><span class="emoji">📅</span> Holiday Requests</a>
-    <a class="button hidden" id="EngineersHoursMenu" href="engineers-hours-menu.html"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
-    <a class="button hidden" id="PurchaseOrders" href="purchase.html"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
-    <a class="button hidden" id="Sites" href="sites.html"><span class="emoji">📍</span> Manage Sites</a>
-    <a class="button hidden" id="Assets" href="asset-menu.html"><span class="emoji">⚙️</span> Plant & Equipment</a>
-    <a class="button hidden" id="MyDocuments" href="#"><span class="emoji">📄</span> My Documents</a>
-    <a class="button hidden" id="Weekly" href="weekly.html"><span class="emoji">📊</span> Weekly Summary</a>
-    <a class="button hidden" id="Forms" href="forms.html"><span class="emoji">📝</span> Forms</a>
-    <a class="button hidden" id="Compliance" href="compliance.html"><span class="emoji">✔️</span> Compliance</a>
-    <a class="button hidden" id="HoursDashboard" href="hours-dashboard-simple-v2.html"><span class="emoji">⏳</span> Hours Dashboard</a>
-    <a class="button hidden" id="PurchaseOrders2" href="po-menu.html"><span class="emoji">💷</span> Purchase Orders</a>
-    <a class="button hidden" id="Users" href="users-admin.html"><span class="emoji">👥</span> Users</a>
+    <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
+    <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
+    <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
+    <a class="button" href="engineers-hours-menu.html" id="EngineersHoursMenu"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
+    <a class="button" href="purchase.html" id="PurchaseOrders"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
+    <a class="button" href="sites.html" id="Sites"><span class="emoji">📍</span> Manage Sites</a>
+    <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
+    <a class="button" href="#" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
+    <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
+    <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
+    <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
+    <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
+    <a class="button" href="po-menu.html" id="PurchaseOrders2"><span class="emoji">💷</span> Purchase Orders</a>
+    <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
 
-    <a class="button" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+    <a class="button visible" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
 
   </div>
 
-  <!-- STRICT PERMISSIONS LOGIC -->
   <script>
     document.addEventListener("DOMContentLoaded", async () => {
 
-      const username = sessionStorage.getItem("mostlaneUsername"); // FIXED
+      const username = sessionStorage.getItem("mostlaneUsername");
       if (!username) return;
 
-      try {
-        const res = await fetch(
-          "https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username)
-        );
-        const data = await res.json();
-        if (!data.found) return;
+      const res = await fetch(
+        "https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username)
+      );
+      const data = await res.json();
+      if (!data.found) return;
 
-        const user = data.user;
+      const user = data.user;
+      const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
-        // STRICT, STABLE PERMISSION KEYS
-        const stableKeys = [
-          "CheckInOut",
-          "Vehicles",
-          "Holiday",
-          "EngineersHoursMenu",
-          "PurchaseOrders",
-          "Sites",
-          "Assets",
-          "MyDocuments",
-          "Weekly",
-          "Forms",
-          "Compliance",
-          "HoursDashboard",
-          "Users"
-        ];
+      const PERMISSIONS = {
+        CheckInOut: "CheckInOut",
+        Vehicles: "Vehicles",
+        Holiday: "Holiday",
+        EngineersHoursMenu: "EngineersHoursMenu",
+        HoursDashboard: "HoursDashboard",
+        PurchaseOrders: "PurchaseOrders",
+        Sites: "Sites",
+        Assets: "Assets",
+        MyDocuments: "MyDocuments",
+        Weekly: "Weekly",
+        Forms: "Forms",
+        Compliance: "Compliance",
+        Users: "Users"
+      };
 
-        // Hide all by default
-        stableKeys.forEach(key => {
-          const btn = document.getElementById(key);
-          if (btn) btn.classList.add("hidden");
-        });
+      Object.entries(PERMISSIONS).forEach(([key, id]) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
 
-        // Show only allowed
-        stableKeys.forEach(key => {
-          const btn = document.getElementById(key);
-          if (!btn) return;
+        const allowed = fullAccess || ((user[key] || "").toLowerCase() === "yes");
 
-          if (user[key] && user[key].toString().toLowerCase() === "yes") {
-            btn.classList.remove("hidden");
+        if (allowed) {
+          btn.classList.add("visible");
+
+          if (id === "MyDocuments" && user.SharePointPath) {
+            btn.href = user.SharePointPath;
           }
-        });
 
-        // Special case: My Documents
-        const docsBtn = document.getElementById("MyDocuments");
-        if (docsBtn && user.MyDocuments === "Yes" && user.SharePointPath) {
-          docsBtn.href = user.SharePointPath;
+        } else {
+          btn.remove();
         }
+      });
 
-      } catch (err) {
-        console.error("Permissions failed:", err);
-      }
+      setTimeout(() => {
+        const buttons = [...document.querySelectorAll('.menu-grid a.button.visible')];
+        buttons.forEach(b => b.classList.remove("full-width"));
+
+        if (buttons.length % 2 === 1) {
+          buttons[buttons.length - 1].classList.add("full-width");
+        }
+      }, 10);
 
     });
   </script>
