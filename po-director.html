@@ -258,7 +258,7 @@
   </div>
 
 <script>
-const GET_URL = 'https://mostlane-pos.jamie-def.workers.dev/get-po';
+const GET_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
 
 let ALL = [];
 let FILTERED = [];
@@ -577,7 +577,8 @@ document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
 async function init() {
   try {
     const res = await fetch(GET_URL, { cache: 'no-store' });
-    ALL = await res.json();
+    let raw = await res.json();
+    ALL = Array.isArray(raw) ? raw : (raw.data || []);
     // Ensure arrays and defaults exist
     ALL = (ALL || []).map(p => ({
       ...p,
