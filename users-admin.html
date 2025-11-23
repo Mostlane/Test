@@ -281,6 +281,23 @@
     // 🔑 Map DOM id/label/href → stable permission key
     function mapToPermKey(id,label,href){
       const mapByExact = {
+        // === NEW MAIN.HTML IDS → PERMISSION KEYS ===
+        "CheckInOut": "CheckInOut",
+        "Vehicles": "Vehicles",
+        "Holiday": "Holiday",
+        "EngineersHoursMenu": "EngineersHoursMenu",
+        "PurchaseOrders": "PurchaseOrders",
+        "PurchaseOrders2": "PurchaseOrders",   // share same permission
+        "Sites": "Sites",
+        "Assets": "Assets",
+        "MyDocuments": "MyDocuments",
+        "Weekly": "Weekly",
+        "Forms": "Forms",
+        "Compliance": "Compliance",
+        "HoursDashboard": "HoursDashboard",
+        "Users": "Users",
+
+        // Legacy / other button ids
         checkinBtn: "CheckInOut",
         holidayBtn: "Holiday",
         purchaseBtn: "PurchaseOrders",
@@ -295,6 +312,7 @@
         poDirectorBtn: "PODirector",
         poCostingBtn: "POCosting",
 
+        // Labels (emoji-less)
         "Check In / Out": "CheckInOut",
         "Holiday Requests": "Holiday",
         "Generate Purchase Order Reference": "PurchaseOrders",
