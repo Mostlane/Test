@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script src="auth.js"></script>
+  <script src="auth.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Previous POs</title>
@@ -20,6 +20,11 @@
       padding: 30px;
       border-radius: 8px;
     }
+    h1 {
+      margin-top: 0;
+      color: #003366;
+      text-align: center;
+    }
     .button {
       display: block;
       margin: 20px 0;
@@ -33,104 +38,331 @@
       text-align: center;
       text-decoration: none;
     }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 16px;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 14px;
+    }
+    .filters label {
+      font-weight: 600;
+      color: #003366;
+      margin-right: 4px;
+    }
+    .filters select,
+    .filters input[type="search"] {
+      flex: 1;
+      min-width: 120px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    .filters-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+    }
+    .filters-row > div {
+      flex: 1 1 48%;
+      min-width: 0;
+    }
+    .status-text {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 8px;
+    }
+    .group-header {
+      margin: 18px 0 8px;
+      font-weight: 700;
+      color: #003366;
+      border-bottom: 1px solid rgba(0,0,0,0.1);
+      padding-bottom: 4px;
+    }
     .po-item {
       background:#fff;
       margin-bottom:10px;
       border-radius:6px;
-      padding:12px;
-      font-size:15px;
-      line-height:1.4;
+      padding:10px 12px;
+      font-size: 14px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    }
+    .po-line-main {
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+    .po-line-sub {
+      color: #374151;
+      margin-bottom: 4px;
+    }
+    .po-meta {
+      font-size: 12px;
+      color:#6b7280;
+      display:flex;
+      justify-content: space-between;
+      align-items:center;
+      gap:8px;
+    }
+    .po-meta span {
+      white-space: nowrap;
     }
     .map-link {
-      font-size: 18px;
-      text-decoration: none;
-      margin-left: 4px;
+      text-decoration:none;
+      font-size:16px;
+    }
+    @media (max-width: 640px) {
+      .main-body {
+        margin: 40px 10px;
+      }
+      .filters-row > div {
+        flex-basis: 100%;
+      }
+      .po-meta {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
 <body>
   <div class="main-body">
     <h1>Previous Generated POs</h1>
-    <div id="poList">Loading…</div>
+
+    <!-- Filters -->
+    <div class="filters">
+      <div class="filters-row">
+        <div>
+          <label for="supplierFilter">Supplier</label><br/>
+          <select id="supplierFilter">
+            <option value="">All Suppliers</option>
+          </select>
+        </div>
+        <div>
+          <label for="searchBox">Search</label><br/>
+          <input id="searchBox" type="search" placeholder="PO, description, job…" />
+        </div>
+      </div>
+    </div>
+
+    <div class="status-text" id="statusText">Loading…</div>
+
+    <!-- PO list -->
+    <div id="poList"></div>
+
     <a href="po-menu.html" class="button">Back</a>
   </div>
 
   <script>
-    const GET_URL = "https://mostlane-po.jamie-def.workers.dev/po/list";
+    const API_URL = 'https://mostlane-po.jamie-def.workers.dev/po/list';
+    const dotToSpace = s => (s || '').replace(/\./g, ' ');
 
-    const dotToSpace = s => (s || "").replace(/\./g, " ");
-
-    function formatDate(dateStr) {
-      if (!dateStr) return "";
-      const parts = dateStr.split("/");
-      if (parts.length !== 3) return dateStr;
-      const d = new Date(parts[2] + "-" + parts[1] + "-" + parts[0] + "T00:00:00");
-      return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
+    function parseUKDate(dateStr) {
+      if (!dateStr) return null;
+      if (dateStr.includes('/')) {
+        const [d, m, y] = dateStr.split('/');
+        if (!d || !m || !y) return null;
+        return new Date(`${y}-${m}-${d}T00:00:00`);
+      }
+      if (dateStr.includes('-')) {
+        const [y, m, d] = dateStr.split('-');
+        if (!y || !m || !d) return null;
+        return new Date(`${y}-${m}-${d}T00:00:00`);
+      }
+      return null;
     }
 
-    function getJobKey(poNumber) {
-      const parts = String(poNumber || "").split("-");
-      return parts.length >= 3 ? parts[2] : "";
+    function formatDateDisplay(dateStr) {
+      const d = parseUKDate(dateStr);
+      if (!d || isNaN(d)) return '';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     }
 
-    async function loadPOs() {
-      const usernameRaw = sessionStorage.getItem("mostlaneUser") || "";
-      const engineerName = dotToSpace(usernameRaw);
+    function diffInDays(from, to) {
+      const ms = from.getTime() - to.getTime();
+      return ms / (1000 * 60 * 60 * 24);
+    }
 
-      const container = document.getElementById("poList");
+    const supplierFilter = document.getElementById('supplierFilter');
+    const searchBox = document.getElementById('searchBox');
+    const poList = document.getElementById('poList');
+    const statusText = document.getElementById('statusText');
+
+    let ALL = [];
+    let engineerName = '';
+
+    function applyFilters() {
+      const supplierVal = supplierFilter.value;
+      const searchVal = (searchBox.value || '').toLowerCase().trim();
+      const now = new Date();
+
+      let filtered = ALL.slice();
+
+      if (supplierVal) {
+        filtered = filtered.filter(p => (p.supplierName || '') === supplierVal);
+      }
+
+      if (searchVal) {
+        filtered = filtered.filter(p => {
+          const hay = [
+            p.poNumber,
+            p.description,
+            p.supplierName,
+            p.incidentNumber,
+            p.workType
+          ].join(' ').toLowerCase();
+          return hay.includes(searchVal);
+        });
+      }
+
+      // Group into: Last 7 days / Last 30 days / Older
+      const groups = {
+        'Last 7 Days': [],
+        'Last 30 Days': [],
+        'Older': []
+      };
+
+      filtered.forEach(p => {
+        const d = parseUKDate(p.date);
+        if (!d || isNaN(d)) return;
+        const days = diffInDays(now, d); // now - date
+        if (days <= 7) {
+          groups['Last 7 Days'].push(p);
+        } else if (days <= 30) {
+          groups['Last 30 Days'].push(p);
+        } else {
+          groups['Older'].push(p);
+        }
+      });
+
+      // Sort each group by newest first (createdAt or date)
+      const sortFn = (a, b) => {
+        const da = a.createdAt ? new Date(a.createdAt) : parseUKDate(a.date) || 0;
+        const db = b.createdAt ? new Date(b.createdAt) : parseUKDate(b.date) || 0;
+        return db - da;
+      };
+      Object.keys(groups).forEach(k => groups[k].sort(sortFn));
+
+      renderGroups(groups);
+    }
+
+    function renderGroups(groups) {
+      poList.innerHTML = '';
+
+      const totalCount =
+        groups['Last 7 Days'].length +
+        groups['Last 30 Days'].length +
+        groups['Older'].length;
+
+      statusText.textContent = totalCount
+        ? `${totalCount} PO(s) found`
+        : 'No POs found for this engineer.';
+
+      ['Last 7 Days', 'Last 30 Days', 'Older'].forEach(label => {
+        const arr = groups[label];
+        if (!arr || !arr.length) return;
+
+        const header = document.createElement('div');
+        header.className = 'group-header';
+        header.textContent = label;
+        poList.appendChild(header);
+
+        arr.forEach(p => {
+          const item = document.createElement('div');
+          item.className = 'po-item';
+
+          const dateText = formatDateDisplay(p.date || '');
+          const mainLine = document.createElement('div');
+          mainLine.className = 'po-line-main';
+          mainLine.textContent = `${dateText || 'Unknown date'} – ${p.poNumber || ''}`;
+
+          const subLine = document.createElement('div');
+          subLine.className = 'po-line-sub';
+          subLine.textContent = `${p.supplierName || ''} – ${p.description || ''}`;
+
+          const meta = document.createElement('div');
+          meta.className = 'po-meta';
+
+          const leftMeta = document.createElement('span');
+          leftMeta.textContent = p.workType ? `Type: ${p.workType}` : '';
+
+          const rightMeta = document.createElement('span');
+          if (p.latitude && p.longitude) {
+            const a = document.createElement('a');
+            a.href = `https://www.google.com/maps?q=${p.latitude},${p.longitude}`;
+            a.target = '_blank';
+            a.className = 'map-link';
+            a.textContent = '📍';
+            rightMeta.appendChild(a);
+          }
+
+          meta.appendChild(leftMeta);
+          meta.appendChild(rightMeta);
+
+          item.appendChild(mainLine);
+          item.appendChild(subLine);
+          item.appendChild(meta);
+          poList.appendChild(item);
+        });
+      });
+    }
+
+    async function init() {
+      const username = sessionStorage.getItem('mostlaneUser') || '';
+      engineerName = dotToSpace(username);
+
+      if (!username) {
+        statusText.textContent = 'No logged-in user found.';
+        return;
+      }
 
       try {
-        const res = await fetch(GET_URL, { cache:"no-store" });
-        const json = await res.json();
+        const res = await fetch(API_URL, { cache: 'no-store' });
+        const data = await res.json();
+        const all = data.data || data || [];
 
-        let list = json.data || json || [];
-        if (!Array.isArray(list)) list = [];
+        // Only POs for this engineer
+        ALL = all
+          .filter(p => (p.engineer || '') === engineerName)
+          .map(p => ({
+            ...p,
+            date: p.date || '',
+            supplierName: p.supplierName || '',
+            description: p.description || '',
+            workType: p.workType || '',
+            incidentNumber: p.incidentNumber || ''
+          }));
 
-        // Filter to this engineer only
-        const myPOs = list.filter(p => 
-          (p.engineer || "").toLowerCase() === engineerName.toLowerCase()
-        );
+        // Populate supplier filter
+        const suppliers = [...new Set(ALL.map(p => p.supplierName).filter(Boolean))].sort();
+        suppliers.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name;
+          supplierFilter.appendChild(opt);
+        });
 
-        if (!myPOs.length) {
-          container.innerHTML = "No POs found.";
+        if (!ALL.length) {
+          statusText.textContent = 'No POs found for this engineer yet.';
+          poList.innerHTML = '';
           return;
         }
 
-        // Sort newest first
-        myPOs.sort((a,b)=>{
-          const da = a.createdAt ? new Date(a.createdAt) : 0;
-          const db = b.createdAt ? new Date(b.createdAt) : 0;
-          return db - da;
-        });
-
-        container.innerHTML = "";
-
-        myPOs.forEach(p => {
-          const jobKey = getJobKey(p.poNumber);
-          const date = formatDate(p.date);
-          const mapLink = (p.latitude != null && p.longitude != null)
-            ? `<a class="map-link" target="_blank" href="https://www.google.com/maps?q=${p.latitude},${p.longitude}">📍</a>`
-            : "";
-
-          const div = document.createElement("div");
-          div.className = "po-item";
-          div.innerHTML = `
-            <strong>${p.poNumber}</strong><br>
-            <strong>Supplier:</strong> ${p.supplierName || "Unknown"}<br>
-            <strong>Job:</strong> ${jobKey || "N/A"}<br>
-            <strong>Date:</strong> ${date}<br>
-            <strong>Description:</strong> ${p.description || ""}<br>
-            ${mapLink}
-          `;
-          container.appendChild(div);
-        });
-
+        applyFilters();
       } catch (err) {
-        container.innerHTML = "⚠️ Failed to load POs: " + err.message;
+        statusText.textContent = '⚠️ Failed to load POs: ' + err.message;
       }
+
+      supplierFilter.addEventListener('change', applyFilters);
+      searchBox.addEventListener('input', applyFilters);
     }
 
-    document.addEventListener("DOMContentLoaded", loadPOs);
+    document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
 </html>
