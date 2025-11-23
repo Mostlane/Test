@@ -85,7 +85,7 @@
     }
     .input{
       background:#fff; border:1px solid #d1d5db; border-radius:6px; padding:10px 12px; font-size:14px;
-      min-width:150px; /* ⭐ ADDED */
+      min-width:150px;
     }
     .input:focus{outline:none; border-color:var(--ml-blue)}
     .spacer{flex:1}
@@ -101,7 +101,7 @@
     }
     .user-sub{font-size:13px; color:var(--muted); margin-bottom:6px}
     .grid{
-      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px;
     }
     @media (max-width: 700px){ .grid{grid-template-columns:1fr} }
 
@@ -133,7 +133,7 @@
     input:checked + .slider{background:var(--ml-blue)}
     input:checked + .slider:before{transform:translateX(20px)}
 
-    /* Modal, Spinner, misc unchanged below */
+    /* Modal, Spinner, misc */
     .modal{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:60 }
     .modal.show{display:flex}
     .modal-card{ background:#fff; width:92%; max-width:480px; max-height:85vh; overflow:auto; border-radius:10px; padding:16px; box-shadow:0 10px 25px rgba(0,0,0,.15) }
@@ -152,6 +152,9 @@
 
     .small{font-size:12px; color:#6b7280}
     .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:4px; padding:1px 4px}
+
+    /* Submenu visibility (we toggle display via JS) */
+    .submenu-row{ display:flex; }
   </style>
 </head>
 <body>
@@ -178,16 +181,17 @@
     <div class="subnote">
       This page auto-discovers buttons from <b>main.html</b> (and linked sub-menus),
       then shows matching toggles per user. <b>Full Access</b> overrides everything.
-      <div class="small">Mapped keys are saved BOTH as your legacy fields (so existing pages continue to work) and as the discovered id/href (future-proof for new buttons).</div>
+      <div class="small">
+        Permissions are stored under stable keys per section, so settings will not reset even if you rename buttons or add emojis.
+      </div>
     </div>
 
     <div class="util">
 
-      <!-- ⭐ ADDED USERNAME DROPDOWN -->
+      <!-- Username dropdown -->
       <select id="userFilter" class="input" style="max-width:180px;">
         <option value="">All Users</option>
       </select>
-      <!-- ⭐ END ADDITION -->
 
       <input id="searchBox" class="input" placeholder="Search users (name / username / number)…" />
       <div class="spacer"></div>
@@ -199,7 +203,7 @@
     <div id="list">Loading users…</div>
   </div>
 
-  <!-- Add User Modal, Spinner etc. (UNCHANGED below) -->
+  <!-- Add User Modal -->
 
   <div id="addUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
@@ -226,113 +230,335 @@
     const CURRENT   = sessionStorage.getItem("mostlaneUser");
     if (!CURRENT) { window.location.href = "login.html"; }
 
-    const banner=document.getElementById('banner');const bannerText=document.getElementById('bannerText');
-    const bannerClose=document.getElementById('bannerClose');const mask=document.getElementById('mask');
-    const list=document.getElementById('list');const structCount=document.getElementById('structCount');
+    const banner = document.getElementById('banner');
+    const bannerText = document.getElementById('bannerText');
+    const bannerClose = document.getElementById('bannerClose');
+    const mask = document.getElementById('mask');
+    const list = document.getElementById('list');
+    const structCount = document.getElementById('structCount');
+    const userFilter = document.getElementById('userFilter');
+    const searchBox = document.getElementById('searchBox');
 
     function showMask(on=true){mask.classList.toggle('show',!!on);}
-    function showBanner(msg,type='ok'){banner.classList.remove('ok','err','warn');banner.classList.add(type);
-      bannerText.textContent=msg;banner.classList.add('show');setTimeout(()=>banner.classList.remove('show'),5000);}
+    function showBanner(msg,type='ok'){
+      banner.classList.remove('ok','err','warn');
+      banner.classList.add(type);
+      bannerText.textContent=msg;
+      banner.classList.add('show');
+      setTimeout(()=>banner.classList.remove('show'),5000);
+    }
     bannerClose.addEventListener('click',()=>banner.classList.remove('show'));
 
-    function h(tag,attrs={},...children){const el=document.createElement(tag);
-      for(const[k,v]of Object.entries(attrs||{})){if(k==='class')el.className=v;
-      else if(k.startsWith('on')&&typeof v==='function')el.addEventListener(k.slice(2),v);
-      else el.setAttribute(k,v);}for(const c of children){if(c==null)continue;
-      if(typeof c==='string')el.appendChild(document.createTextNode(c));else el.appendChild(c);}return el;}
+    function h(tag,attrs={},...children){
+      const el=document.createElement(tag);
+      for(const[k,v]of Object.entries(attrs||{})){
+        if(k==='class') el.className=v;
+        else if(k.startsWith('on')&&typeof v==='function') el.addEventListener(k.slice(2),v);
+        else el.setAttribute(k,v);
+      }
+      for(const c of children){
+        if(c==null) continue;
+        if(typeof c==='string') el.appendChild(document.createTextNode(c));
+        else el.appendChild(c);
+      }
+      return el;
+    }
 
-    function debounce(fn,ms=250){let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};}
-    async function sha256Hex(s){const enc=new TextEncoder();const buf=await crypto.subtle.digest('SHA-256',enc.encode((s||'').trim()));
-      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+    function debounce(fn,ms=250){
+      let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};
+    }
 
-    function mapIdToLegacyKey(id,label,href){const map={checkinBtn:"CheckInOut",holidayBtn:"Holiday",purchaseBtn:"PurchaseOrders",
-      poMenuBtn:"PurchaseOrders",assetsBtn:"Assets",formsBtn:"Forms","my-documents-btn":"MyDocuments",complianceBtn:"Compliance",
-      "hours-dashboard-btn":"HoursDashboard",weeklyBtn:"Weekly",usersAdminBtn:"Users",poDirectorBtn:"PODirector",poCostingBtn:"POCosting",
-      "Check In / Out":"CheckInOut","Holiday Requests":"Holiday","Generate Purchase Order Reference":"PurchaseOrders",
-      "Plant & Equipment":"Assets","Weekly Summary":"Weekly","Purchase Orders":"PurchaseOrders","Users":"Users","My Documents":"MyDocuments",
-      "Compliance":"Compliance","Hours Dashboard":"HoursDashboard"};if(id&&map[id])return map[id];if(label&&map[label])return map[label];
-      if(href){const clean=href.toLowerCase();if(clean.includes('podirector'))return'PODirector';if(clean.includes('pocosting'))return'POCosting';
-      if(clean.includes('po-menu'))return'PurchaseOrders';if(clean.includes('weekly'))return'Weekly';if(clean.includes('compliance'))return'Compliance';
-      if(clean.includes('forms'))return'Forms';if(clean.includes('assets'))return'Assets';if(clean.includes('purchase'))return'PurchaseOrders';
-      if(clean.includes('holiday'))return'Holiday';if(clean.includes('hours-dashboard'))return'HoursDashboard';
-      if(clean.includes('users-admin'))return'Users';}if(id)return id.replace(/Btn$/,'');if(label)return label.replace(/\s+/g,'');
-      if(href)return href.replace(/\.html$/,'').replace(/[^\w]/g,'');return null;}
-    function normalizeIdForKey(s){return(s||'').trim().toLowerCase().replace(/[^\w]+/g,'');}
+    async function sha256Hex(s){
+      const enc=new TextEncoder();
+      const buf=await crypto.subtle.digest('SHA-256',enc.encode((s||'').trim()));
+      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
 
+    function normalizeIdForKey(s){
+      return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
+    }
+
+    // 🔑 Map DOM id/label/href → stable permission key
+    function mapToPermKey(id,label,href){
+      const mapByExact = {
+        checkinBtn: "CheckInOut",
+        holidayBtn: "Holiday",
+        purchaseBtn: "PurchaseOrders",
+        poMenuBtn: "PurchaseOrders",
+        assetsBtn: "Assets",
+        formsBtn: "Forms",
+        "my-documents-btn": "MyDocuments",
+        complianceBtn: "Compliance",
+        "hours-dashboard-btn": "HoursDashboard",
+        weeklyBtn: "Weekly",
+        usersAdminBtn: "Users",
+        poDirectorBtn: "PODirector",
+        poCostingBtn: "POCosting",
+
+        "Check In / Out": "CheckInOut",
+        "Holiday Requests": "Holiday",
+        "Generate Purchase Order Reference": "PurchaseOrders",
+        "Plant & Equipment": "Assets",
+        "Weekly Summary": "Weekly",
+        "Purchase Orders": "PurchaseOrders",
+        "Users": "Users",
+        "My Documents": "MyDocuments",
+        "Compliance": "Compliance",
+        "Hours Dashboard": "HoursDashboard"
+      };
+
+      if (id && mapByExact[id]) return mapByExact[id];
+      if (label && mapByExact[label]) return mapByExact[label];
+
+      if (href){
+        const clean = href.toLowerCase();
+        if (clean.includes('podirector'))   return 'PODirector';
+        if (clean.includes('pocosting'))    return 'POCosting';
+        if (clean.includes('po-menu'))      return 'PurchaseOrders';
+        if (clean.includes('purchase'))     return 'PurchaseOrders';
+        if (clean.includes('checkin') || clean.includes('checkout')) return 'CheckInOut';
+        if (clean.includes('weekly'))       return 'Weekly';
+        if (clean.includes('compliance'))   return 'Compliance';
+        if (clean.includes('forms'))        return 'Forms';
+        if (clean.includes('assets'))       return 'Assets';
+        if (clean.includes('holiday'))      return 'Holiday';
+        if (clean.includes('hours-dashboard')) return 'HoursDashboard';
+        if (clean.includes('users-admin'))  return 'Users';
+        if (clean.includes('vehicles'))     return 'Vehicles';
+      }
+
+      // Fallback: stable-ish key from href, id, or label
+      if (href) return normalizeIdForKey(href.replace(/\.html$/,''));
+      if (id)   return normalizeIdForKey(id);
+      if (label)return normalizeIdForKey(label);
+      return null;
+    }
+
+    // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
-      const parser=new DOMParser();const visited=new Set();const struct=[];
-      async function scanPage(url,depth=0){if(!url||visited.has(url))return[];visited.add(url);
-        try{const res=await fetch(url+(url.includes('?')?'&':'?')+'v='+Date.now(),{cache:'no-store'});
-          const html=await res.text();const doc=parser.parseFromString(html,'text/html');
-          const buttons=[...doc.querySelectorAll('a.button')].map(b=>({id:b.id||'',label:(b.textContent||'').trim(),href:b.getAttribute('href')||''}));
-          if(depth<2){for(const btn of buttons){if(btn.href&&/\.html$/i.test(btn.href)&&!/login\.html/i.test(btn.href)){
-              btn.subpages=await scanPage(btn.href,depth+1);}}}
-          return buttons;}catch(e){console.warn('Scan failed for',url,e);return[];}}
-      struct.push(...await scanPage('main.html'));structCount.textContent=`Discovered ${struct.length} main buttons (deep scan)`;return struct;}
+      const parser=new DOMParser();
+      const visited=new Set();
+      const struct=[];
 
-    async function fetchAllUsers(){const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});if(!res.ok)throw new Error('Failed to fetch users');
-      const data=await res.json();return data.Users||[];}
+      async function scanPage(url,depth=0){
+        if(!url || visited.has(url)) return [];
+        visited.add(url);
+        try{
+          const fullUrl = url + (url.includes('?')?'&':'?') + 'v=' + Date.now();
+          const res=await fetch(fullUrl,{cache:'no-store'});
+          const html=await res.text();
+          const doc=parser.parseFromString(html,'text/html');
 
-    async function saveUsers(users){const res=await fetch(SAVE_URL,{method:'POST',headers:Object.assign({'Content-Type':'application/json'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),body:JSON.stringify({Users:users})});
-      if(!res.ok){const txt=await res.text().catch(()=> '');throw new Error('Save failed: '+txt);}}
+          // Support emoji buttons as long as they have these classes
+          const rawButtons = [
+            ...doc.querySelectorAll('a.button,button.button,a.menu-btn,button.menu-btn')
+          ];
 
-    function switchControl(id,checked){const boxId=id+'__chk';return h('label',{class:'switch'},
-      h('input',{type:'checkbox',id:boxId,...(checked?{checked:true}:{})}),h('span',{class:'slider'}));}
+          const buttons = rawButtons.map(b=>{
+            const id = b.id || '';
+            const label = (b.textContent || '').trim();
+            const hrefAttr = b.getAttribute('href') || '';
+            const href = hrefAttr;
+            const key = mapToPermKey(id,label,href);
+            return { id, label, href, key, subpages: [] };
+          }).filter(b => !!b.key); // only keep ones with a key
 
-    function toggleRow(user,id,label,href,checked,indent=false){const pathSpan=href?h('span',{class:'path'},href):null;
-      return h('div',{class:'toggle-row'+(indent?' indent':'')},h('div',{class:'lbl'},label||id||'(unnamed)',pathSpan?h('div',null,pathSpan):null),
-        switchControl(`${user.Username}::${id||href||label||'unknown'}`,!!checked));}
+          if (depth < 2){
+            for (const btn of buttons){
+              if (btn.href && /\.html$/i.test(btn.href) && !/login\.html/i.test(btn.href)){
+                const nextUrl = new URL(btn.href, url).toString();
+                const subs = await scanPage(nextUrl, depth+1);
+                btn.subpages = subs;
+              }
+            }
+          }
+
+          return buttons;
+        }catch(e){
+          console.warn('Scan failed for',url,e);
+          return [];
+        }
+      }
+
+      const rootUrl = new URL('main.html', window.location.href).toString();
+      struct.push(...await scanPage(rootUrl));
+      structCount.textContent = `Discovered ${struct.length} main buttons (deep scan)`;
+      return struct;
+    }
+
+    async function fetchAllUsers(){
+      const res=await fetch(USERS_URL+'?v='+Date.now(),{
+        headers: TOKEN ? {'Authorization':'Bearer '+TOKEN} : {}
+      });
+      if(!res.ok) throw new Error('Failed to fetch users');
+      const data=await res.json();
+      return data.Users || [];
+    }
+
+    async function saveUsers(users){
+      const res=await fetch(SAVE_URL,{
+        method:'POST',
+        headers:Object.assign({'Content-Type':'application/json'},TOKEN?{'Authorization':'Bearer '+TOKEN}:{}),
+        body:JSON.stringify({Users:users})
+      });
+      if(!res.ok){
+        const txt=await res.text().catch(()=> '');
+        throw new Error('Save failed: '+txt);
+      }
+    }
+
+    function switchControl(domId,checked,permKey,role){
+      const inputAttrs = {
+        type:'checkbox',
+        id:domId,
+        'data-key':permKey,
+        'data-role':role || 'main'
+      };
+      if (checked) inputAttrs.checked = true;
+      return h('label',{class:'switch'},
+        h('input',inputAttrs),
+        h('span',{class:'slider'})
+      );
+    }
+
+    function toggleRow(user,permKey,label,href,checked,indent=false,role='main',parentKey=null){
+      const pathSpan = href ? h('span',{class:'path'},href) : null;
+      const rowClasses = ['toggle-row'];
+      if (indent) rowClasses.push('indent');
+      if (role === 'sub') rowClasses.push('submenu-row');
+
+      const attrs = {class:rowClasses.join(' ')};
+      if (role === 'sub' && parentKey) {
+        attrs['data-parent'] = parentKey;
+      }
+
+      const domId = `${user.Username}::${permKey}__chk`;
+
+      return h('div',attrs,
+        h('div',{class:'lbl'},
+          label || permKey || '(unnamed)',
+          pathSpan ? h('div',null,pathSpan) : null
+        ),
+        switchControl(domId,!!checked,permKey,role)
+      );
+    }
 
     function userCard(user,structure){
-      const header=h('div',{class:'user-header'},h('div',null,
-        `${user.EngineerNumber?('#'+user.EngineerNumber+' – '):''}${user.FirstName||''} ${user.LastName||''}`,' ',
-        h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)),
-        h('div',null,h('div',{class:'toggle-row'},h('span',{class:'lbl'},'Full Access'),
-        switchControl(`fa_${user.Username}`,(user.FullAccess||'').toLowerCase()==='yes'))));
-      const sub=h('div',{class:'user-sub'},`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`);
-      const grid=h('div',{class:'grid'});
-      grid.appendChild(h('div',{class:'section-title'},'Main Menu',h('span',{class:'pill'},'auto')));
+      const header = h('div',{class:'user-header'},
+        h('div',null,
+          `${user.EngineerNumber ? ('#'+user.EngineerNumber+' – ') : ''}${user.FirstName||''} ${user.LastName||''} `,
+          h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)
+        ),
+        h('div',null,
+          h('div',{class:'toggle-row'},
+            h('span',{class:'lbl'},'Full Access'),
+            switchControl(`fa_${user.Username}__chk`,(user.FullAccess||'').toLowerCase()==='yes','FullAccess','fa')
+          )
+        )
+      );
+
+      const sub = h('div',{class:'user-sub'},
+        `${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`
+      );
+
+      const grid = h('div',{class:'grid'});
+      grid.appendChild(
+        h('div',{class:'section-title'},
+          'Main Menu',
+          h('span',{class:'pill'},'auto')
+        )
+      );
+
+      // Main buttons
       structure.forEach(p=>{
-        const pid=p.id||normalizeIdForKey(p.href||p.label);
-        const legacy=mapIdToLegacyKey(pid,p.label,p.href);
-        const currentOn=((user[legacy]||user[pid]||'').toLowerCase()==='yes');
-        grid.appendChild(toggleRow(user,pid,p.label,p.href,currentOn,false));
+        const permKey = p.key || mapToPermKey(p.id,p.label,p.href);
+        if (!permKey) return;
+        const currentOn = ((user[permKey] || '').toLowerCase() === 'yes');
+        grid.appendChild(
+          toggleRow(user,permKey,p.label,p.href,currentOn,false,'main',null)
+        );
       });
-      const subs=structure.flatMap(s=>s.subpages||[]);
-      if(subs.length){
-        grid.appendChild(h('div',{class:'section-title',style:'grid-column:1/-1'},'Sub-menus',h('span',{class:'pill'},String(subs.length))));
-        subs.forEach(sp=>{
-          const sid=sp.id||normalizeIdForKey(sp.href||sp.label);
-          const sleg=mapIdToLegacyKey(sid,sp.label,sp.href);
-          const on=((user[sleg]||user[sid]||'').toLowerCase()==='yes');
-          grid.appendChild(toggleRow(user,sid,sp.label,sp.href,on,true));
+
+      // Sub menus
+      const subs = structure.flatMap(s=>s.subpages || []);
+      if (subs.length){
+        grid.appendChild(
+          h('div',{
+            class:'section-title',
+            style:'grid-column:1/-1'
+          },
+          'Sub-menus',
+          h('span',{class:'pill'},String(subs.length)))
+        );
+
+        structure.forEach(p=>{
+          const parentKey = p.key || mapToPermKey(p.id,p.label,p.href);
+          if (!parentKey) return;
+          (p.subpages || []).forEach(sp=>{
+            const sid = sp.key || mapToPermKey(sp.id,sp.label,sp.href);
+            if (!sid) return;
+            const on = ((user[sid] || '').toLowerCase() === 'yes');
+            grid.appendChild(
+              toggleRow(user,sid,sp.label,sp.href,on,true,'sub',parentKey)
+            );
+          });
         });
       }
+
       return h('div',{class:'user-card'},header,sub,grid);
+    }
+
+    function initSubmenuVisibility(){
+      // For each user card, tie submenus to their main switches
+      document.querySelectorAll('.user-card').forEach(card=>{
+        const mains = card.querySelectorAll('input[type="checkbox"][data-role="main"]');
+        mains.forEach(main=>{
+          const key = main.getAttribute('data-key');
+          if (!key) return;
+          const rows = card.querySelectorAll(`.submenu-row[data-parent="${key}"]`);
+          const sync = ()=>{
+            const show = main.checked;
+            rows.forEach(r=>{
+              r.style.display = show ? 'flex' : 'none';
+            });
+          };
+          main.addEventListener('change', sync);
+          // initial state
+          sync();
+        });
+      });
     }
 
     function renderUsers(users,structure){
       list.innerHTML='';
-      if(!users.length){list.textContent='No users found.';return;}
+      if(!users.length){
+        list.textContent='No users found.';
+        return;
+      }
       users.forEach(u=>list.appendChild(userCard(u,structure)));
+      initSubmenuVisibility();
     }
 
-    let __USERS=[],__STRUCT=[];
+    let __USERS = [];
+    let __STRUCT = [];
 
     async function buildUI(){
       showMask(true);
       try{
-        const[users,struct]=await Promise.all([fetchAllUsers(),scanPortal()]);
-        __USERS=users;
-        __STRUCT=struct;
+        const [users,struct] = await Promise.all([fetchAllUsers(),scanPortal()]);
+        __USERS = users;
+        __STRUCT = struct;
 
-        /* ⭐ ADDED: populate username dropdown */
-        const filter = document.getElementById("userFilter");
-        filter.innerHTML = '<option value="">All Users</option>';
+        // Populate username dropdown
+        userFilter.innerHTML = '<option value="">All Users</option>';
         __USERS.forEach(u=>{
-          filter.innerHTML += `<option value="${u.Username}">${u.Username}</option>`;
+          const uname = u.Username || '';
+          if (!uname) return;
+          const opt = document.createElement('option');
+          opt.value = uname;
+          opt.textContent = uname;
+          userFilter.appendChild(opt);
         });
-        /* ⭐ END ADDITION */
 
         renderUsers(__USERS,__STRUCT);
       }
@@ -348,35 +574,37 @@
 
     let saving=false;
     async function saveAll(){
-      if(saving)return;
-      if(!__USERS||!__STRUCT)return;
-      saving=true;
+      if(saving) return;
+      if(!__USERS || !__STRUCT) return;
+      saving = true;
       showMask(true);
       try{
-        const users=JSON.parse(JSON.stringify(__USERS));
-        const struct=__STRUCT;
+        const users = JSON.parse(JSON.stringify(__USERS));
 
         users.forEach(u=>{
-          const faEl=document.getElementById(`fa_${u.Username}__chk`);
-          u.FullAccess=(faEl&&faEl.checked)?'Yes':'No';
+          // Full Access
+          const faEl = document.getElementById(`fa_${u.Username}__chk`);
+          u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
 
-          const assign=(id,label,href)=>{
-            const pid=id||normalizeIdForKey(href||label);
-            const legacy=mapIdToLegacyKey(pid,label,href);
-            const chk=document.getElementById(`${u.Username}::${pid}__chk`);
-            const val=(chk&&chk.checked)?'Yes':'No';
-            if(legacy)u[legacy]=val;
-            if(pid)u[pid]=val;
+          const assign = (permKey)=>{
+            if (!permKey) return;
+            const chk = document.getElementById(`${u.Username}::${permKey}__chk`);
+            const val = (chk && chk.checked) ? 'Yes' : 'No';
+            u[permKey] = val;
           };
 
-          struct.forEach(p=>{
-            assign(p.id,p.label,p.href);
-            (p.subpages||[]).forEach(sp=>assign(sp.id,sp.label,sp.href));
+          __STRUCT.forEach(p=>{
+            const parentKey = p.key || mapToPermKey(p.id,p.label,p.href);
+            assign(parentKey);
+            (p.subpages || []).forEach(sp=>{
+              const sid = sp.key || mapToPermKey(sp.id,sp.label,sp.href);
+              assign(sid);
+            });
           });
         });
 
         await saveUsers(users);
-        __USERS=users;
+        __USERS = users;
         showBanner('✅ Changes saved successfully.','ok');
       }
       catch(err){
@@ -389,6 +617,7 @@
       }
     }
 
+    // Modal logic
     const modal=document.getElementById('addUserModal');
     const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
@@ -399,10 +628,17 @@
     async function createUser(){
       try{
         showMask(true);
-        const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});const data=await res.json();
+        const res=await fetch(USERS_URL+'?v='+Date.now(),{
+          headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}
+        });
+        const data=await res.json();
         const users=data.Users||[];
-        const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
+        const maxNum=users.reduce((m,u)=>{
+          const n=parseInt(u.EngineerNumber,10);
+          return isNaN(n)?m:Math.max(m,n);
+        },0);
         const nextNum=String(maxNum+1);
+
         const firstName=document.getElementById('firstName').value.trim();
         const lastName=document.getElementById('lastName').value.trim();
         const email=document.getElementById('email').value.trim();
@@ -450,15 +686,15 @@
 
     document.getElementById('createUserBtn').addEventListener('click',createUser);
 
-    /* ⭐ REPLACED SEARCH LOGIC WITH COMBINED FILTER */
+    // Combined search + filter
     function applyFilters() {
       const q = (searchBox.value || '').trim().toLowerCase();
-      const selected = document.getElementById('userFilter').value;
+      const selected = userFilter.value;
 
-      let filtered = __USERS;
+      let filtered = __USERS || [];
 
       if (selected) {
-        filtered = filtered.filter(u => u.Username === selected);
+        filtered = filtered.filter(u => (u.Username || '') === selected);
       }
 
       if (q) {
@@ -473,17 +709,15 @@
       renderUsers(filtered, __STRUCT);
     }
 
-    const searchBox=document.getElementById('searchBox');
     searchBox.addEventListener('input', debounce(applyFilters, 150));
-    document.getElementById('userFilter').addEventListener('change', applyFilters);
-    /* ⭐ END ADDITION */
+    userFilter.addEventListener('change', applyFilters);
 
     document.getElementById('saveBtn').addEventListener('click',saveAll);
     document.getElementById('reloadBtn').addEventListener('click',buildUI);
     document.getElementById('rescanBtn').addEventListener('click',async()=>{
       showMask(true);
       try{
-        __STRUCT=await scanPortal();
+        __STRUCT = await scanPortal();
         renderUsers(__USERS,__STRUCT);
         showBanner('🔄 Scan complete. Buttons refreshed.','ok');
       }
