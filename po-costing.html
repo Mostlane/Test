@@ -88,74 +88,6 @@
     .refund-notes {
       width: 140px;
     }
-
-    /* Multi-flag dropdown */
-    .flag-cell {
-      position: relative;
-      display: inline-block;
-      max-width: 260px;
-    }
-    .flag-toggle {
-      background-color: #f0f3f8;
-      color: #003366;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      padding: 4px 8px;
-      font-size: 13px;
-      cursor: pointer;
-      max-width: 100%;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-    .flag-menu {
-      position: absolute;
-      top: 110%;
-      left: 0;
-      z-index: 20;
-      background: #fff;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      padding: 8px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-      min-width: 220px;
-      max-width: 280px;
-      display: none;
-    }
-    .flag-cell.open .flag-menu {
-      display: block;
-    }
-    .flag-options {
-      max-height: 180px;
-      overflow-y: auto;
-      margin-bottom: 6px;
-    }
-    .flag-option {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      margin-bottom: 2px;
-      white-space: normal;
-    }
-    .flag-notes-block {
-      margin-top: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      font-size: 12px;
-    }
-    .flag-notes-input {
-      padding: 4px 6px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      font-size: 13px;
-    }
-    .flag-actions {
-      margin-top: 6px;
-      text-align: right;
-    }
-
     @media (max-width: 750px) {
       body { padding: 10px; }
       .container { padding: 15px; }
@@ -279,13 +211,13 @@
     if (p.deletedBy || p.deletedAt) {
       parts.push(`Deleted by ${p.deletedBy || 'Unknown'}${p.deletedAt ? ' on ' + formatDateTime(p.deletedAt) : ''}`);
     }
-    if (Array.isArray(p.flags) && p.flags.length) {
-      parts.push('Flags: ' + p.flags.join(', '));
-    } else if (p.refundFlag) {
-      parts.push('Legacy refund flag: ' + p.refundFlag);
-    }
-    if (p.flagNotes || p.refundNotes) {
-      parts.push('Notes: ' + (p.flagNotes || p.refundNotes));
+    if (p.refundFlag) {
+      const label = p.refundFlag === 'refund_due'
+        ? 'Credit due'
+        : p.refundFlag === 'partial_refund'
+        ? 'Partial credit'
+        : 'Credited';
+      parts.push(`Credit status: ${label}${p.refundNotes ? ' – ' + p.refundNotes : ''}`);
     }
     return parts.join('\n');
   }
@@ -296,7 +228,7 @@
 
     const uncosted = allPOs.filter(p => !p.deleted && !(Number(p.costGross) > 0 || Number(p.costNet) > 0));
     const costed   = allPOs.filter(p => !p.deleted &&  (Number(p.costGross) > 0 || Number(p.costNet) > 0));
-    const refunds  = allPOs.filter(p => !p.deleted && (Array.isArray(p.flags) ? p.flags.length : !!p.refundFlag));
+    const refunds  = allPOs.filter(p => !p.deleted && !!p.refundFlag);
     const deleted  = allPOs.filter(p => p.deleted);
 
     // Supplier filter populate
@@ -344,7 +276,7 @@
             <th class="right">Net</th>
             <th class="right">Gross</th>
             <th>VAT @20%</th>
-            <th>Flags / Notes</th>
+            <th>Credit</th>
             <th>Map</th>
             <th>Actions</th>
           </tr>
@@ -377,7 +309,18 @@
                     20%
                   </label>
                 </td>
-                <td class="nowrap">${renderFlagsCell(p)}</td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
+                  </select>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
                 <td class="nowrap">${mapCell}</td>
                 <td class="nowrap">
                   <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
@@ -395,7 +338,7 @@
             <th>PO Number</th>
             <th>Supplier</th>
             <th>Description</th>
-            <th>Flags / Notes</th>
+            <th>Credit</th>
             <th class="right">Net</th>
             <th class="right">VAT</th>
             <th class="right">Gross</th>
@@ -426,7 +369,18 @@
                 <td class="nowrap">${p.poNumber}</td>
                 <td>${p.supplierName || ''}</td>
                 <td>${p.description || ''}</td>
-                <td class="nowrap">${renderFlagsCell(p)}</td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
+                  </select>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
                 <td class="right">${formatGBP(net)}</td>
                 <td class="right">${formatGBP(vat)}</td>
                 <td class="right">${formatGBP(gross || (net*(1+vatRate)))}</td>
@@ -447,7 +401,8 @@
             <th>PO Number</th>
             <th>Supplier</th>
             <th>Description</th>
-            <th>Flags / Notes</th>
+            <th>Credit Status</th>
+            <th>Notes</th>
             <th class="right">Net</th>
             <th class="right">Gross</th>
             <th>Map</th>
@@ -475,7 +430,20 @@
                 <td class="nowrap">${p.poNumber}</td>
                 <td>${p.supplierName || ''}</td>
                 <td>${p.description || ''}</td>
-                <td class="nowrap">${renderFlagsCell(p)}</td>
+                <td class="nowrap">
+                  <select id="refundFlag-${id}" class="refund-select"
+                    onchange="onRefundChange('${p.poNumber}','${id}')">
+                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
+                  </select>
+                </td>
+                <td>
+                  <input type="text" id="refundNotes-${id}" class="refund-notes"
+                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+                </td>
                 <td class="right">${formatGBP(net)}</td>
                 <td class="right">${formatGBP(gross)}</td>
                 <td class="nowrap">${mapCell}</td>
@@ -562,115 +530,80 @@
     }
   }
 
-  // --------- FLAG DROPDOWN (MULTI-SELECT) ----------
-  const FLAG_DEFS = [
-    { value: 'credit_due',        label: 'Credit due' },
-    { value: 'partial_credit',    label: 'Partial credit' },
-    { value: 'credit_received',   label: 'Credit received' },
-    { value: 'damaged_goods',     label: 'Damaged / faulty' },
-    { value: 'wrong_item',        label: 'Wrong item supplied' },
-    { value: 'overcharged',       label: 'Overcharged' },
-    { value: 'price_dispute',     label: 'Price dispute' },
-    { value: 'not_required',      label: 'Not required / over-ordered' },
-    { value: 'personal_purchase', label: 'Personal purchase' },
-    { value: 'controlled_goods',  label: 'Controlled goods' }
-  ];
+  // SAVE COST UPDATE
+  async function saveCost(poNumber, id) {
+    const row = document.querySelector(`tr[data-po="${poNumber}"]`);
+    const saveBtn = row?.querySelector('.save-btn');
+    const { net, gross, vatRate } = readInputs(id);
 
-  function escapeHtml(str) {
-    if (!str) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
+    if (isNaN(net) && isNaN(gross)) { alert('Enter Net or Gross.'); return; }
 
-  // Map legacy single refundFlag into new flags[] for display only
-  function normaliseFlags(po) {
-    if (Array.isArray(po.flags)) return po.flags.slice();
-    const out = [];
-    if (po.refundFlag) {
-      if (po.refundFlag === 'refund_due') out.push('credit_due');
-      else if (po.refundFlag === 'partial_refund') out.push('partial_credit');
-      else if (po.refundFlag === 'refunded') out.push('credit_received');
+    const netVal = isNaN(net) ? (gross / (1 + vatRate)) : net;
+    const grossVal = isNaN(gross) ? (net * (1 + vatRate)) : gross;
+
+    try {
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+      const nowIso = new Date().toISOString();
+
+      const payload = {
+        poNumber,
+        editedBy: engineerName || 'Office',
+        fields: {
+          costNet: Number(netVal.toFixed(2)),
+          costGross: Number(grossVal.toFixed(2)),
+          vatRate,
+          costedBy: engineerName || 'Office',
+          costedAt: nowIso,
+          editedBy: engineerName || 'Office'
+        }
+      };
+
+      const res = await fetch(UPDATE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        cache: 'no-store'
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result?.error || 'Update failed');
+
+      // update local cache
+      const idx = allPOs.findIndex(p => p.poNumber === poNumber);
+      if (idx >= 0) {
+        allPOs[idx].costNet = payload.fields.costNet;
+        allPOs[idx].costGross = payload.fields.costGross;
+        allPOs[idx].vatRate = payload.fields.vatRate;
+        allPOs[idx].costedBy = payload.fields.costedBy;
+        allPOs[idx].costedAt = payload.fields.costedAt;
+        allPOs[idx].editedBy = payload.fields.editedBy;
+        allPOs[idx].editedAt = payload.fields.costedAt;
+      }
+
+      render();
+    } catch (e) {
+      alert('⚠️ Save failed: ' + e.message);
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save'; }
     }
-    return out;
   }
 
-  function renderFlagSummary(flags) {
-    if (!flags || !flags.length) return 'None';
-    const labels = flags.map(v => {
-      const def = FLAG_DEFS.find(d => d.value === v);
-      return def ? def.label : v;
-    });
-    return labels.join(', ');
-  }
+  // CREDIT FLAG UPDATE (backend still uses refundFlag/refundNotes)
+  async function onRefundChange(poNumber, id, fromBlur) {
+    const flagSel = byId(`refundFlag-${id}`);
+    const notesEl = byId(`refundNotes-${id}`);
+    if (!flagSel && !notesEl) return;
 
-  // Build the dropdown HTML for a given PO
-  function renderFlagsCell(po) {
-    const id = po.poNumber.replace(/[^A-Za-z0-9]/g, '_');
-    const flags = normaliseFlags(po);
-    const notes = po.flagNotes || po.refundNotes || '';
-    const summary = renderFlagSummary(flags);
-
-    const checkboxesHtml = FLAG_DEFS.map(def => {
-      const checked = flags.includes(def.value) ? 'checked' : '';
-      return `
-        <label class="flag-option">
-          <input type="checkbox"
-                 class="flag-checkbox"
-                 data-value="${def.value}"
-                 id="flag-${def.value}-${id}"
-                 ${checked}>
-          ${def.label}
-        </label>`;
-    }).join('');
-
-    return `
-      <div class="flag-cell" data-po="${po.poNumber}" data-id="${id}">
-        <button type="button" class="flag-toggle">
-          ${escapeHtml(summary)} ▾
-        </button>
-        <div class="flag-menu">
-          <div class="flag-options">
-            ${checkboxesHtml}
-          </div>
-          <div class="flag-notes-block">
-            <label>Notes:</label>
-            <input type="text"
-                   id="flagNotes-${id}"
-                   class="flag-notes-input"
-                   value="${escapeHtml(notes)}"
-                   placeholder="Notes…">
-          </div>
-          <div class="flag-actions">
-            <button type="button" class="save-btn" onclick="saveFlags('${po.poNumber}','${id}')">Save</button>
-          </div>
-        </div>
-      </div>`;
-  }
-
-  // Save flags + notes for a PO
-  async function saveFlags(poNumber, id) {
-    const cell = document.querySelector('.flag-cell[data-po="' + poNumber + '"][data-id="' + id + '"]');
-    if (!cell) return;
-
-    const checkboxes = cell.querySelectorAll('.flag-checkbox');
-    const flags = [];
-    checkboxes.forEach(cb => {
-      if (cb.checked) flags.push(cb.getAttribute('data-value'));
-    });
-
-    const notesEl = byId('flagNotes-' + id);
-    const flagNotes = notesEl ? notesEl.value : '';
+    const refundFlag = flagSel ? flagSel.value : (allPOs.find(p => p.poNumber === poNumber)?.refundFlag || '');
+    const refundNotes = notesEl ? notesEl.value : (allPOs.find(p => p.poNumber === poNumber)?.refundNotes || '');
 
     const payload = {
       poNumber,
       editedBy: engineerName || 'Office',
       fields: {
-        flags,
-        flagNotes,
+        refundFlag: refundFlag || "",
+        refundNotes: refundNotes || "",
         editedBy: engineerName || 'Office'
       }
     };
@@ -687,33 +620,17 @@
 
       const idx = allPOs.findIndex(p => p.poNumber === poNumber);
       if (idx >= 0) {
-        allPOs[idx].flags = flags;
-        allPOs[idx].flagNotes = flagNotes;
+        allPOs[idx].refundFlag = payload.fields.refundFlag;
+        allPOs[idx].refundNotes = payload.fields.refundNotes;
         allPOs[idx].editedBy = payload.fields.editedBy;
         allPOs[idx].editedAt = new Date().toISOString();
       }
-
-      document.querySelectorAll('.flag-cell.open').forEach(el => el.classList.remove('open'));
       render();
     } catch (e) {
-      alert('⚠️ Flag update failed: ' + e.message);
+      console.error('Credit update failed', e);
+      if (!fromBlur) alert('⚠️ Credit update failed: ' + e.message);
     }
   }
-
-  // Global click handler to open/close dropdowns
-  document.addEventListener('click', (e) => {
-    const toggle = e.target.closest('.flag-toggle');
-    if (toggle) {
-      const cell = toggle.closest('.flag-cell');
-      const isOpen = cell.classList.contains('open');
-      document.querySelectorAll('.flag-cell.open').forEach(el => el.classList.remove('open'));
-      if (!isOpen) cell.classList.add('open');
-      return;
-    }
-    if (!e.target.closest('.flag-cell')) {
-      document.querySelectorAll('.flag-cell.open').forEach(el => el.classList.remove('open'));
-    }
-  });
 
   // DELETE (SOFT) PO  -> mark as deleted, keep in list
   async function deletePO(poNumber) {
@@ -734,6 +651,7 @@
       const result = await res.json();
       if (!res.ok) throw new Error(result?.error || 'Delete failed');
 
+      // Mark as deleted locally (do NOT remove)
       const idx = allPOs.findIndex(p => p.poNumber === poNumber);
       if (idx >= 0) {
         allPOs[idx].deleted = true;
@@ -746,7 +664,7 @@
     }
   }
 
-  // RESTORE PO
+  // RESTORE PO (Option A: clear deleted fields)
   async function restorePO(poNumber) {
     if (!confirm(`Restore PO ${poNumber}?`)) return;
 
