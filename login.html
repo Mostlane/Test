@@ -108,15 +108,15 @@
           return;
         }
 
-        // ⭐ REQUIRED: Save ALL session keys
+        // NEW + OLD SESSION KEYS
         sessionStorage.setItem('mostlaneLoggedIn', 'true');
         sessionStorage.setItem('mostlaneUser', user.Username);
-        sessionStorage.setItem('mostlaneUsername', user.Username);       // ⭐ FIXED (CRITICAL)
+        sessionStorage.setItem('mostlaneUsername', user.Username);
         sessionStorage.setItem('mostlaneFolder', user.SharePointPath || '');
         sessionStorage.setItem('mostlaneVehicle', user.VehicleAssigned || '');
         sessionStorage.setItem('mostlaneEmployment', user.EmploymentType || '');
 
-        // ⭐ Full permission set for future use
+        // ⭐ NEW permissions object
         sessionStorage.setItem('mostlanePermissions', JSON.stringify({
           CheckInOut: user.CheckInOut,
           Vehicles: user.Vehicles,
@@ -132,6 +132,20 @@
           Compliance: user.Compliance,
           Users: user.Users
         }));
+
+        // ⭐ OLD legacy keys for backward compatibility
+        sessionStorage.setItem('username', user.Username);
+        sessionStorage.setItem('user', user.Username);
+        sessionStorage.setItem('firstName', user.FirstName || '');
+        sessionStorage.setItem('lastName', user.LastName || '');
+        sessionStorage.setItem('role', user.EmploymentType || '');
+        sessionStorage.setItem('roleType', user.EmploymentType || '');
+        sessionStorage.setItem('assignedUser', user.Username);
+
+        // Device ID fallback
+        if (!sessionStorage.getItem('deviceID')) {
+          sessionStorage.setItem('deviceID', 'temp-' + Math.random().toString(36).slice(2));
+        }
 
         window.location.href = 'main.html';
       }
