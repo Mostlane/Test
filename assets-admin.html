@@ -499,7 +499,8 @@ table {
       currentImageIndex = idx >= 0 ? idx : 0;
 
       img.src=url;
-      modal.style.display="flex";
+    modal.style.display="flex";
+updateImageNavVisibility();
     }
 
     function closeImageViewer(){
@@ -850,7 +851,7 @@ const thumb = (a.images && a.images.length)
     }
 
     loadAssets();
-    function openImageViewerFromTable(images){
+function openImageViewerFromTable(images){
   if(!images || !images.length) return;
   currentImageList = images;
   currentImageIndex = 0;
@@ -858,6 +859,7 @@ const thumb = (a.images && a.images.length)
   const img = document.getElementById("imageViewerImg");
   img.src = images[0];
   modal.style.display = "flex";
+  updateImageNavVisibility();
 }
   </script>
 
