@@ -770,9 +770,9 @@ currentAsset.images.push(data.url);
       tbody.innerHTML="";
 
       currentAssets.forEach(a=>{
-        const thumb = (a.images && a.images.length)
-          ? `<img src="${a.images[0]}" class="thumb-img">`
-          : "—";
+const thumb = (a.images && a.images.length)
+  ? `<img src="${a.images[0]}" class="thumb-img" onclick='openImageViewerFromTable(${JSON.stringify(a.images)})'>`
+  : "—";
 
         const tr=document.createElement("tr");
         tr.innerHTML=`
@@ -850,6 +850,15 @@ currentAsset.images.push(data.url);
     }
 
     loadAssets();
+    function openImageViewerFromTable(images){
+  if(!images || !images.length) return;
+  currentImageList = images;
+  currentImageIndex = 0;
+  const modal = document.getElementById("imageViewer");
+  const img = document.getElementById("imageViewerImg");
+  img.src = images[0];
+  modal.style.display = "flex";
+}
   </script>
 
 </body>
