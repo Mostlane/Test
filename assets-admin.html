@@ -63,10 +63,19 @@
       background:rgba(0,0,0,0.7);
       justify-content:center;align-items:center;
     }
-    .modal-content{
-      background:white;padding:20px;border-radius:8px;
-      width:90%;max-width:500px;position:relative;
-    }
+.modal-content{
+      background:white;
+      padding:20px;
+      border-radius:8px;
+      width:90%;
+      max-width:500px;
+      position:relative;
+
+      /* ⭐ MAKE EDIT MODAL SCROLLABLE ON MOBILE */
+      max-height: 85vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+}
     .modal-content input,
     .modal-content select{
       width:100%;margin:6px 0;padding:8px;
