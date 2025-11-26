@@ -377,7 +377,18 @@ table {
           (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
         );
     }
+function updateImageNavVisibility() {
+  const prevBtn = document.getElementById("imgPrev");
+  const nextBtn = document.getElementById("imgNext");
 
+  if (!currentImageList || currentImageList.length <= 1) {
+    prevBtn.style.display = "none";
+    nextBtn.style.display = "none";
+  } else {
+    prevBtn.style.display = "flex";
+    nextBtn.style.display = "flex";
+  }
+}
     function populateUserDropdown(selected=""){
       const sel=document.getElementById("assignedField");
       sel.innerHTML = `<option value="">-- Select User --</option>`;
