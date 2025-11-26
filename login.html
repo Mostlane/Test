@@ -108,16 +108,26 @@
           return;
         }
 
-        // NEW + OLD SESSION KEYS
-        sessionStorage.setItem('mostlaneLoggedIn', 'true');
-        sessionStorage.setItem('mostlaneUser', user.Username);
-        sessionStorage.setItem('mostlaneUsername', user.Username);
-        sessionStorage.setItem('mostlaneFolder', user.SharePointPath || '');
-        sessionStorage.setItem('mostlaneVehicle', user.VehicleAssigned || '');
-        sessionStorage.setItem('mostlaneEmployment', user.EmploymentType || '');
+        // -----------------------------------------
+        // ⭐ SESSION + PERSISTENT LOGIN (FIX)
+        // -----------------------------------------
+        const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
 
-        // ⭐ NEW permissions object
-        sessionStorage.setItem('mostlanePermissions', JSON.stringify({
+        function set(key, value) {
+          sessionStorage.setItem(key, value);
+          localStorage.setItem(key, value);
+        }
+
+        set('mostlaneLoggedIn', 'true');
+        set('mostlaneUser', user.Username);
+        set('mostlaneUsername', user.Username);
+        set('mostlaneFolder', user.SharePointPath || '');
+        set('mostlaneVehicle', user.VehicleAssigned || '');
+        set('mostlaneEmployment', user.EmploymentType || '');
+        localStorage.setItem('mostlaneExpiry', EXPIRY);
+
+        // Permissions (session + persistent)
+        const perms = {
           CheckInOut: user.CheckInOut,
           Vehicles: user.Vehicles,
           Holiday: user.Holiday,
@@ -131,20 +141,24 @@
           Forms: user.Forms,
           Compliance: user.Compliance,
           Users: user.Users
-        }));
+        };
+        sessionStorage.setItem('mostlanePermissions', JSON.stringify(perms));
+        localStorage.setItem('mostlanePermissions', JSON.stringify(perms));
 
-        // ⭐ OLD legacy keys for backward compatibility
-        sessionStorage.setItem('username', user.Username);
-        sessionStorage.setItem('user', user.Username);
-        sessionStorage.setItem('firstName', user.FirstName || '');
-        sessionStorage.setItem('lastName', user.LastName || '');
-        sessionStorage.setItem('role', user.EmploymentType || '');
-        sessionStorage.setItem('roleType', user.EmploymentType || '');
-        sessionStorage.setItem('assignedUser', user.Username);
+        // Legacy compatibility keys
+        set('username', user.Username);
+        set('user', user.Username);
+        set('firstName', user.FirstName || '');
+        set('lastName', user.LastName || '');
+        set('role', user.EmploymentType || '');
+        set('roleType', user.EmploymentType || '');
+        set('assignedUser', user.Username);
 
-        // Device ID fallback
+        // Device ID
         if (!sessionStorage.getItem('deviceID')) {
-          sessionStorage.setItem('deviceID', 'temp-' + Math.random().toString(36).slice(2));
+          const dev = 'dev-' + Math.random().toString(36).slice(2);
+          sessionStorage.setItem('deviceID', dev);
+          localStorage.setItem('deviceID', dev);
         }
 
         window.location.href = 'main.html';
