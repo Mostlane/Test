@@ -109,7 +109,10 @@
     <a class="button" href="purchase.html" id="PurchaseOrders"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
     <a class="button" href="sites.html" id="Sites"><span class="emoji">📍</span> Manage Sites</a>
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
-    <a class="button" href="#" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
+
+    <!-- FIXED HERE -->
+    <a class="button" href="javascript:void(0)" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
+
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
@@ -117,7 +120,8 @@
     <a class="button" href="po-menu.html" id="PurchaseOrders2"><span class="emoji">💷</span> Purchase Orders</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
 
-    <a class="button visible" href="#" onclick="sessionStorage.clear(); window.location.href='login.html';">
+    <!-- FIXED HERE -->
+    <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
 
@@ -148,7 +152,6 @@
         Assets: ["Assets", "Plant&Equipment", "assetsBtn", "assetmenuhtml", "myassetshtml", "assetsadminhtml"],
         MyDocuments: ["MyDocuments", "my-documents-btn"],
         
-        // ✅ Weekly now only visible when Weekly = Yes or FullAccess = Yes
         Weekly: ["Weekly"],
 
         Forms: ["Forms", "formsBtn"],
