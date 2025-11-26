@@ -610,8 +610,9 @@ table {
           alert("Upload failed");return;
         }
 
-        currentAsset.images=currentAsset.images||[];
-        currentAsset.images.push(data.url);
+if (!currentAsset) currentAsset = {};
+if (!Array.isArray(currentAsset.images)) currentAsset.images = [];
+currentAsset.images.push(data.url);
 
         await fetch(`${apiBase}/asset/update`,{
           method:"POST",
