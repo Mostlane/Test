@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mostlane • SLA Job View</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --text:#0f172a;
+      --muted:#6b7280;
+      --ok:#16a34a;
+      --warn:#f97316;
+      --bad:#dc2626;
+      --panel:rgba(255,255,255,0.9);
+    }
+    html,body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:var(--text);
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:cover;
+    }
+    .shell{
+      max-width:900px;
+      margin:32px auto;
+      padding:0 16px;
+    }
+    .card{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      overflow:hidden;
+    }
+    header{
+      padding:16px 20px;
+      border-bottom:1px solid #d1d5db;
+      background:linear-gradient(90deg,#fff,#f7f9fc);
+      display:flex;flex-wrap:wrap;gap:8px;
+      justify-content:space-between;align-items:center;
+    }
+    h1{margin:0;font-size:20px;color:var(--ml-blue);}
+    .muted{color:var(--muted);font-size:13px;}
+    .content{padding:18px 20px;}
+    .btn{
+      border-radius:999px;
+      border:1px solid #cbd5e1;
+      padding:8px 14px;
+      font-size:14px;
+      font-weight:600;
+      cursor:pointer;
+      background:#fff;
+      color:var(--text);
+    }
+    .btn.primary{background:var(--ml-blue-light);color:#fff;border-color:var(--ml-blue-light);}
+    .btn.small{padding:6px 10px;font-size:13px;}
+    .pill{
+      display:inline-flex;align-items:center;
+      padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;
+    }
+    .priority-p1{background:#fef2f2;color:#b91c1c;}
+    .priority-p2{background:#fffbeb;color:#92400e;}
+    .priority-p3{background:#ecfeff;color:#0f766e;}
+    .priority-p4{background:#eff6ff;color:#1d4ed8;}
+    .priority-p5{background:#eff6ff;color:#1d4ed8;}
+    .status-open{background:#eff6ff;color:#1d4ed8;}
+    .status-with-eng{background:#ecfdf3;color:#166534;}
+    .status-completed{background:#f3f4f6;color:#4b5563;}
+    .sla-badge{
+      display:inline-flex;align-items:center;
+      padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;
+    }
+    .sla-ok{background:#ecfdf3;color:#166534;}
+    .sla-warn{background:#fffbeb;color:#92400e;}
+    .sla-bad{background:#fef2f2;color:#b91c1c;}
+    .sla-done{background:#e5e7eb;color:#4b5563;}
+
+    .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;}
+    @media(max-width:800px){.grid{grid-template-columns:1fr;}}
+
+    /* Timeline (style D) */
+    .timeline{
+      position:relative;
+      margin:10px 0 0 0;
+      padding-left:24px;
+    }
+    .timeline::before{
+      content:"";
+      position:absolute;
+      top:4px;
+      bottom:0;
+      left:10px;
+      width:2px;
+      background:#e5e7eb;
+    }
+    .event{
+      position:relative;
+      margin-bottom:14px;
+      padding-left:8px;
+    }
+    .event:last-child{margin-bottom:0;}
+    .event-dot{
+      position:absolute;
+      left:-2px;
+      top:4px;
+      width:10px;height:10px;
+      border-radius:50%;
+      background:#fff;
+      border:2px solid #60a5fa;
+    }
+    .event-header{
+      font-size:13px;
+      font-weight:600;
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+    }
+    .event-body{
+      font-size:13px;
+      color:var(--muted);
+      margin-top:2px;
+    }
+    .event-action{color:#111827;}
+    .field-group{
+      margin-bottom:12px;
+    }
+    label{display:block;font-size:13px;font-weight:600;margin-bottom:4px;}
+    select,textarea,input{
+      width:100%;
+      border-radius:8px;
+      border:1px solid #cbd5e1;
+      padding:8px 10px;
+      font-size:14px;
+    }
+    textarea{min-height:80px;resize:vertical;}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <div>
+        <h1 id="jobTitle">Job – …</h1>
+        <div class="muted" id="jobMeta">Loading…</div>
+      </div>
+      <div>
+        <button class="btn small" onclick="window.location='sla-main.html'">Back to SLA</button>
+      </div>
+    </header>
+    <div class="content">
+      <div class="grid">
+        <!-- Left: details + editor -->
+        <div>
+          <div style="margin-bottom:10px;">
+            <div>
+              <span id="priorityBadge" class="pill"></span>
+              <span id="statusBadge" class="pill" style="margin-left:6px;"></span>
+              <span id="slaBadge" class="sla-badge" style="margin-left:6px;"></span>
+            </div>
+            <div class="muted" style="margin-top:4px;">
+              Raised: <span id="raisedAt"></span> · SLA Target: <span id="targetAt"></span>
+            </div>
+          </div>
+          <p id="description" style="white-space:pre-wrap;font-size:14px;"></p>
+          <div class="muted" id="addressLine"></div>
+
+          <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb;"/>
+
+          <h3 style="margin:0 0 8px 0;font-size:15px;">Update Job</h3>
+          <div class="field-group">
+            <label for="prioritySelect">Priority</label>
+            <select id="prioritySelect">
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
+              <option value="P3">P3</option>
+              <option value="P4">P4</option>
+              <option value="P5">P5</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="statusSelect">Status</label>
+            <select id="statusSelect">
+              <option value="Open">Open</option>
+              <option value="With Engineer">With Engineer</option>
+              <option value="Completed">Completed</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="noteInput">Add Note / Reason</label>
+            <textarea id="noteInput" placeholder="Reason for change, update, etc."></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn primary" id="saveChangesBtn">Save Changes</button>
+            <button class="btn" id="addNoteBtn">Add Note Only</button>
+            <span id="statusMsg" class="muted"></span>
+          </div>
+        </div>
+
+        <!-- Right: timeline -->
+        <div>
+          <h3 style="margin:0 0 8px 0;font-size:15px;">Event History</h3>
+          <div class="timeline" id="timeline"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = "https://YOUR_SLA_WORKER_DOMAIN";
+
+const params = new URLSearchParams(location.search);
+const jobId = params.get("id");
+
+let JOB = null;
+let currentUser = "Portal User"; // you can replace with logged-in user from auth.js if exposed
+
+function fmtDT(iso){
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (isNaN(d)) return "–";
+  return d.toLocaleString("en-GB", {
+    day:"2-digit", month:"short", year:"numeric",
+    hour:"2-digit", minute:"2-digit"
+  });
+}
+function fmtRemaining(targetIso, status){
+  if (!targetIso) return {text:"–",cls:"sla-done"};
+  if (status === "Completed") return {text:"Completed",cls:"sla-done"};
+  const now = new Date();
+  const t = new Date(targetIso);
+  if (isNaN(t)) return {text:"–",cls:"sla-done"};
+  const diffMs = t - now;
+  const diffMin = Math.round(diffMs/60000);
+  if (diffMin <= 0){
+    const late = Math.abs(diffMin);
+    const h = Math.floor(late/60);
+    const m = late%60;
+    const txt = h?`Overdue ${h}h ${m}m`:`Overdue ${m}m`;
+    return {text:txt,cls:"sla-bad"};
+  }
+  const h = Math.floor(diffMin/60);
+  const m = diffMin%60;
+  let txt = "";
+  if (h) txt += `${h}h `;
+  txt += `${m}m`;
+  let cls = "sla-ok";
+  if (diffMin <= 4*60) cls = "sla-warn";
+  return {text:txt,cls};
+}
+function priorityCls(p){
+  p = String(p||"").toUpperCase();
+  if (p === "P1") return "priority-p1";
+  if (p === "P2") return "priority-p2";
+  if (p === "P3") return "priority-p3";
+  if (p === "P4") return "priority-p4";
+  if (p === "P5") return "priority-p5";
+  return "priority-p4";
+}
+function statusCls(s){
+  if (s === "Open") return "status-open";
+  if (s === "With Engineer") return "status-with-eng";
+  if (s === "Completed") return "status-completed";
+  return "status-open";
+}
+
+async function loadJob(){
+  const statusEl = document.getElementById("statusMsg");
+  statusEl.textContent = "Loading…";
+  try{
+    const res = await fetch(API_BASE + "/sla/job?id=" + encodeURIComponent(jobId));
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || "Error");
+    JOB = j.job;
+    renderJob();
+    statusEl.textContent = "";
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = "❌ Could not load job.";
+  }
+}
+
+function renderJob(){
+  if (!JOB) return;
+  document.getElementById("jobTitle").textContent = `Job ${JOB.id} – ${JOB.siteName || "Unknown site"}`;
+  document.getElementById("jobMeta").textContent =
+    `${JOB.siteCode || ""} · ${JOB.originator || ""} · Urgency: ${JOB.urgency || "–"}`;
+
+  const priSpan = document.getElementById("priorityBadge");
+  priSpan.textContent = JOB.priority || "P4";
+  priSpan.className = "pill " + priorityCls(JOB.priority);
+
+  const statSpan = document.getElementById("statusBadge");
+  statSpan.textContent = JOB.status || "Open";
+  statSpan.className = "pill " + statusCls(JOB.status);
+
+  const slaSpan = document.getElementById("slaBadge");
+  const rem = fmtRemaining(JOB.targetDueAt, JOB.status);
+  slaSpan.textContent = rem.text;
+  slaSpan.className = "sla-badge " + rem.cls;
+  slaSpan.dataset.target = JOB.targetDueAt;
+  slaSpan.dataset.status = JOB.status;
+
+  document.getElementById("raisedAt").textContent = fmtDT(JOB.raisedAt);
+  document.getElementById("targetAt").textContent = fmtDT(JOB.targetDueAt);
+  document.getElementById("description").textContent = JOB.description || "";
+  document.getElementById("addressLine").textContent =
+    `${JOB.address || ""} · Tel: ${JOB.contactTel || ""}`;
+
+  document.getElementById("prioritySelect").value = JOB.priority || "P4";
+  document.getElementById("statusSelect").value = JOB.status || "Open";
+
+  renderTimeline(JOB.events || []);
+}
+
+// Vertical timeline builder
+function renderTimeline(events){
+  const container = document.getElementById("timeline");
+  container.innerHTML = "";
+  const sorted = [...events].sort((a,b)=>{
+    const tA = Date.parse(a.timestamp || 0);
+    const tB = Date.parse(b.timestamp || 0);
+    return tA - tB;
+  });
+
+  sorted.forEach(ev=>{
+    const div = document.createElement("div");
+    div.className = "event";
+    const ts = fmtDT(ev.timestamp);
+    const user = ev.user || "Unknown";
+    const action = ev.action || "Update";
+    const d = ev.details || {};
+
+    let bodyText = "";
+    if (action === "Priority changed"){
+      bodyText = `Priority changed from ${d.from || "?"} to ${d.to || "?"}`;
+      if (d.comment) bodyText += ` · "${d.comment}"`;
+    } else if (action === "Status changed"){
+      bodyText = `Status changed from ${d.from || "?"} to ${d.to || "?"}`;
+      if (d.comment) bodyText += ` · "${d.comment}"`;
+    } else if (action === "Note added"){
+      bodyText = d.note || "";
+    } else if (action === "Job created"){
+      bodyText = `Job created (priority ${d.priority || "?"}, status ${d.status || "Open"})`;
+    } else if (action === "Engineer assigned"){
+      bodyText = `Engineer set to ${d.to || ""}`;
+      if (d.comment) bodyText += ` · "${d.comment}"`;
+    } else if (action === "Job completed"){
+      bodyText = `Completed (from status ${d.from || ""})`;
+      if (d.comment) bodyText += ` · "${d.comment}"`;
+    } else {
+      bodyText = JSON.stringify(d);
+    }
+
+    div.innerHTML = `
+      <div class="event-dot"></div>
+      <div class="event-header">
+        <span><span class="event-action">${action}</span> · ${user}</span>
+        <span class="muted">${ts}</span>
+      </div>
+      <div class="event-body">${bodyText || ""}</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+// Live SLA badge tick
+function tick(){
+  const slaSpan = document.getElementById("slaBadge");
+  if (!slaSpan || !JOB) return;
+  const res = fmtRemaining(slaSpan.dataset.target, slaSpan.dataset.status);
+  slaSpan.textContent = res.text;
+  slaSpan.className = "sla-badge " + res.cls;
+}
+
+// Save priority/status together
+async function saveChanges(){
+  const statusEl = document.getElementById("statusMsg");
+  const newP = document.getElementById("prioritySelect").value;
+  const newS = document.getElementById("statusSelect").value;
+  const comment = document.getElementById("noteInput").value.trim();
+
+  statusEl.textContent = "Saving…";
+
+  try{
+    // Priority change if changed
+    if (newP !== JOB.priority){
+      await postEvent("priorityChange", { newPriority:newP, comment });
+    }
+    // Status change if changed
+    if (newS !== JOB.status){
+      await postEvent("statusChange", { newStatus:newS, comment });
+    }
+    // If note but no changes, treat as note only
+    if (comment && newP === JOB.priority && newS === JOB.status){
+      await postEvent("note", { note:comment });
+    }
+    document.getElementById("noteInput").value = "";
+    await loadJob();
+    statusEl.textContent = "✅ Updated.";
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = "❌ Update failed.";
+  }
+}
+
+async function addNoteOnly(){
+  const statusEl = document.getElementById("statusMsg");
+  const note = document.getElementById("noteInput").value.trim();
+  if (!note){
+    statusEl.textContent = "Add a note first.";
+    return;
+  }
+  statusEl.textContent = "Saving note…";
+  try{
+    await postEvent("note", { note });
+    document.getElementById("noteInput").value = "";
+    await loadJob();
+    statusEl.textContent = "✅ Note added.";
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = "❌ Failed to add note.";
+  }
+}
+
+async function postEvent(type, payload){
+  const res = await fetch(API_BASE + "/sla/job/event", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({
+      id: jobId,
+      user: currentUser,
+      type,
+      payload
+    })
+  });
+  const j = await res.json();
+  if (!res.ok || !j.ok) throw new Error(j.error || "Error");
+  JOB = j.job;
+}
+
+document.getElementById("saveChangesBtn").addEventListener("click", saveChanges);
+document.getElementById("addNoteBtn").addEventListener("click", addNoteOnly);
+
+loadJob();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
