@@ -1439,6 +1439,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-11-27T10:20:41.705Z"
+    },
+    {
+      "id": "1764238923241-5qnrjd",
+      "receivedAt": "2025-11-27T10:22:03.241Z",
+      "date": "2025-11-17",
+      "day": "Monday",
+      "engineer": "James Baczynski",
+      "vehicle": "HY25 UTR",
+      "leaveHome": "07:39",
+      "arriveFirstSite": "08:01",
+      "leaveLastSite": "15:30",
+      "arriveHome": "15:47",
+      "deductLunch": true,
+      "totalHours": 7.63,
+      "standardHours": 7.63,
+      "overtimeHours": null,
+      "travelToHours": 0.37,
+      "travelFromHours": 0.28,
+      "totalTravelHours": 0.65,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "Yes",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-11-27T10:22:03.241Z"
     }
   ]
 }
