@@ -40,7 +40,6 @@
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
   #errorMsg{text-align:center;color:var(--bad);font-weight:600;margin-top:20px}
   .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .spacer{flex:1}
   @media(min-width:1000px){
     .charts{grid-template-columns:2fr 1fr}
   }
@@ -161,40 +160,43 @@ function dedupeEntries(entries){
 async function fetchData(){
   const res = await fetch(HOURS_API+"?v="+Date.now(),{cache:"no-store"});
   if(!res.ok) throw new Error(res.status+" "+res.statusText);
-  return res.json();
+
+  let j = await res.json();
+
+  // 🔥 REQUIRED FIX — same parsing logic as timesheet.html
+  if (j.ok && j.data) return j.data;
+  if (j.Hours) return j.Hours;
+  if (typeof j === "object") return j;
+
+  return {};
 }
 
-// ✅ FIXED – robust week matching for your live JSON
+// Correct weekKey matching
 function getEntriesForWeek(data, anchorDate){
   const currentKey = getWeekKeyForDate(anchorDate);
-  const prevWeek = new Date(currentKey);
-  prevWeek.setUTCDate(prevWeek.getUTCDate() - 7);
-  const prevKey = prevWeek.toISOString().slice(0,10);
+  const prevKeyDate = new Date(currentKey);
+  prevKeyDate.setUTCDate(prevKeyDate.getUTCDate() - 7);
+  const prevKey = prevKeyDate.toISOString().slice(0,10);
 
   const all = [];
   for(const list of Object.values(data)){
     if(Array.isArray(list)) all.push(...list);
   }
 
-  // try exact match
   let filtered = all.filter(e => e.weekKey === currentKey);
-
-  // if nothing, try weekKey - 1
   if(!filtered.length){
     filtered = all.filter(e => e.weekKey === prevKey);
   }
 
   if(filtered.length) return dedupeEntries(filtered);
 
-  // fallback – date range (Mon–Sun)
   const mon = startOfWeekMonday(anchorDate);
   const sun = endOfWeekSunday(anchorDate);
-  const fallback = all.filter(e=>{
-    if(!e.date) return false;
+  const rangeFiltered = all.filter(e=>{
     const d = new Date(e.date+"T00:00:00Z");
     return d>=mon && d<=sun;
   });
-  return dedupeEntries(fallback);
+  return dedupeEntries(rangeFiltered);
 }
 
 function isCurrentWeek(anchor){
