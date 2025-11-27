@@ -691,23 +691,23 @@
       "submittedAt": "2025-11-27T09:47:48.012Z"
     },
     {
-      "id": "1764236910630-x5ob9v",
-      "receivedAt": "2025-11-27T09:48:30.630Z",
+      "id": "1764236935107-tlllvp",
+      "receivedAt": "2025-11-27T09:48:55.107Z",
       "date": "2025-11-20",
       "day": "Thursday",
       "engineer": "Chris Cooke",
       "vehicle": "LA70 FPJ",
-      "leaveHome": "06:45",
-      "arriveFirstSite": "08:19",
-      "leaveLastSite": "11:43",
-      "arriveHome": "12:20",
+      "leaveHome": "07:02",
+      "arriveFirstSite": "08:02",
+      "leaveLastSite": "15:10",
+      "arriveHome": "15:45",
       "deductLunch": true,
-      "totalHours": 5.08,
-      "standardHours": 5.08,
+      "totalHours": 8.22,
+      "standardHours": 8.22,
       "overtimeHours": null,
-      "travelToHours": 1.57,
-      "travelFromHours": 0.62,
-      "totalTravelHours": 2.19,
+      "travelToHours": 1,
+      "travelFromHours": 0.58,
+      "totalTravelHours": 1.58,
       "enhancedOvertimePreview": "Yes",
       "excludeFromPay": false,
       "forceEnhanced": false,
@@ -718,7 +718,7 @@
       "personalMileage": null,
       "notes": "",
       "noteVisible": false,
-      "submittedAt": "2025-11-27T09:48:30.630Z"
+      "submittedAt": "2025-11-27T09:48:55.107Z"
     }
   ]
 }
