@@ -1679,6 +1679,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-11-27T10:28:36.264Z"
+    },
+    {
+      "id": "1764239341214-p990xu",
+      "receivedAt": "2025-11-27T10:29:01.214Z",
+      "date": "2025-11-22",
+      "day": "Saturday",
+      "engineer": "John Thorn",
+      "vehicle": "LB21 VZU",
+      "leaveHome": "06:30",
+      "arriveFirstSite": "06:59",
+      "leaveLastSite": "11:06",
+      "arriveHome": "11:33",
+      "deductLunch": true,
+      "totalHours": 4.55,
+      "standardHours": 4.55,
+      "overtimeHours": null,
+      "travelToHours": 0.48,
+      "travelFromHours": 0.45,
+      "totalTravelHours": 0.93,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-11-27T10:29:01.214Z"
     }
   ]
 }
