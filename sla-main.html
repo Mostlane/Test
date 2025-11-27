@@ -79,12 +79,10 @@
       border-color:var(--ml-blue);
     }
     .btn.icon-only{
-      padding:8px;
-      border-radius:10px;
-    }
-    .btn:disabled{
-      opacity:.5;
-      cursor:not-allowed;
+      padding:6px 8px;
+      border-radius:8px;
+      min-width:0;
+      justify-content:center;
     }
 
     .tabs{
@@ -140,11 +138,8 @@
       border-color:var(--ml-blue);
       font-weight:600;
     }
-    .filters .spacer{
-      flex:1;
-    }
-    .filters input[type="text"],
-    .filters select{
+    .filters select,
+    .filters input[type="text"]{
       border-radius:999px;
       border:1px solid #d1d5db;
       padding:6px 10px;
@@ -152,15 +147,19 @@
       background:#fff;
       min-width:160px;
     }
+    .filters .spacer{
+      flex:1;
+    }
 
-    /* TABLE + SCROLL WRAPPER */
-    .table-wrap{
+    .table-wrapper{
       width:100%;
       overflow-x:auto;
       -webkit-overflow-scrolling:touch;
     }
+
     table{
       width:100%;
+      min-width:900px;
       border-collapse:separate;
       border-spacing:0;
       font-size:13px;
@@ -168,7 +167,6 @@
       border-radius:10px;
       overflow:hidden;
       border:1px solid #e5e7eb;
-      min-width:800px; /* keeps columns readable, scrolls on small screens */
     }
     thead th{
       text-align:left;
@@ -187,10 +185,6 @@
     tbody tr:nth-child(even){
       background:#fafbff;
     }
-
-    .muted{color:var(--muted);}
-    .small{font-size:11px;}
-    .nowrap{white-space:nowrap;}
 
     .ref{
       font-family:monospace;
@@ -229,7 +223,6 @@
     .sla-red{background:#fef2f2;color:#b91c1c;}
     .sla-none{background:#e5e7eb;color:#4b5563;}
 
-    /* Status pills (used by statusClass) */
     .status-pill{
       border-radius:999px;
       padding:3px 8px;
@@ -244,13 +237,17 @@
     .status-overdue{background:#fee2e2;color:#b91c1c;}
     .status-complete{background:#e5e7eb;color:#374151;}
 
+    .small{font-size:11px;}
+    .muted{color:var(--muted);}
+    .nowrap{white-space:nowrap;}
+
     #statusBar{
       margin-top:8px;
       font-size:12px;
       color:var(--muted);
     }
 
-    /* MODAL */
+    /* ---------- MODALS ---------- */
     .modal-backdrop{
       position:fixed;
       inset:0;
@@ -270,6 +267,9 @@
       width:100%;
       box-shadow:0 20px 40px rgba(0,0,0,0.25);
       padding:18px 18px 16px;
+      max-height:90vh;
+      display:flex;
+      flex-direction:column;
     }
     .modal header{
       display:flex;
@@ -290,6 +290,11 @@
       line-height:1;
       padding:4px;
     }
+    .modal-body{
+      flex:1;
+      overflow-y:auto;
+      padding-right:4px;
+    }
     .modal .field{
       margin-bottom:10px;
     }
@@ -300,7 +305,9 @@
       margin-bottom:3px;
     }
     .modal select,
-    .modal textarea{
+    .modal textarea,
+    .modal input[type="date"],
+    .modal input[type="time"]{
       width:100%;
       border-radius:8px;
       border:1px solid #d1d5db;
@@ -316,7 +323,7 @@
       display:flex;
       justify-content:flex-end;
       gap:8px;
-      margin-top:8px;
+      margin-top:10px;
     }
 
     @media(max-width:768px){
@@ -332,6 +339,9 @@
       .filters{
         flex-direction:column;
         align-items:flex-start;
+      }
+      table{
+        font-size:12px;
       }
     }
   </style>
@@ -388,8 +398,7 @@
         </div>
       </div>
 
-      <!-- SCROLL WRAPPER -->
-      <div class="table-wrap">
+      <div class="table-wrapper">
         <table>
           <thead>
             <tr>
@@ -400,7 +409,7 @@
               <th style="width:130px;">SLA Target</th>
               <th style="width:130px;">Time Left</th>
               <th style="width:120px;">Status</th>
-              <th style="width:90px;">Actions</th>
+              <th style="width:120px;">Actions</th>
             </tr>
           </thead>
           <tbody id="jobsTbody"></tbody>
@@ -412,58 +421,107 @@
   </div>
 </div>
 
-<!-- Update Job Modal -->
-<div class="modal-backdrop" id="modalBackdrop">
+<!-- UPDATE JOB MODAL -->
+<div class="modal-backdrop" id="updateModalBackdrop">
   <div class="modal">
     <header>
-      <h2 id="modalTitle">Update Job</h2>
-      <button type="button" id="modalCloseBtn">&times;</button>
+      <h2 id="updateModalTitle">Update Job</h2>
+      <button type="button" id="updateModalCloseBtn">&times;</button>
     </header>
-    <div class="field">
-      <label>Reference</label>
-      <div class="ref" id="modalRef">—</div>
-    </div>
-    <div class="field">
-      <label for="modalPriority">Priority</label>
-      <select id="modalPriority">
-        <option value="P1">P1 – Emergency</option>
-        <option value="P2">P2 – Urgent</option>
-        <option value="P3">P3 – Routine</option>
-        <option value="P4">P4 – Low</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="modalStatus">Status</label>
-      <select id="modalStatus">
-        <option value="With Contractor - R">With Contractor</option>
-        <option value="In Progress">In Progress</option>
-        <option value="On Hold">On Hold</option>
-        <option value="Completed">Completed</option>
-        <option value="Closed">Closed</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="modalNote">Event / Notes (will be logged in history)</label>
-      <textarea id="modalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
+    <div class="modal-body">
+      <div class="field">
+        <label>Reference</label>
+        <div class="ref" id="updateModalRef">—</div>
+      </div>
+      <div class="field">
+        <label for="updateModalPriority">Priority</label>
+        <select id="updateModalPriority">
+          <option value="P1">P1 – Emergency</option>
+          <option value="P2">P2 – Urgent</option>
+          <option value="P3">P3 – Routine</option>
+          <option value="P4">P4 – Low</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateModalStatus">Status</label>
+        <select id="updateModalStatus">
+          <option value="With Contractor - R">With Contractor</option>
+          <option value="In Progress">In Progress</option>
+          <option value="On Hold">On Hold</option>
+          <option value="Completed">Completed</option>
+          <option value="Closed">Closed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateModalNote">Event / Notes (history log)</label>
+        <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
+      </div>
     </div>
     <div class="actions">
-      <button type="button" class="btn" id="modalCancelBtn">Cancel</button>
-      <button type="button" class="btn primary" id="modalSaveBtn">Save</button>
+      <button type="button" class="btn" id="updateModalCancelBtn">Cancel</button>
+      <button type="button" class="btn primary" id="updateModalSaveBtn">Save</button>
     </div>
-    <div id="modalStatusText" class="small muted" style="margin-top:4px;"></div>
+    <div id="updateModalStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
+<!-- ASSIGN JOB MODAL -->
+<div class="modal-backdrop" id="assignModalBackdrop">
+  <div class="modal">
+    <header>
+      <h2 id="assignModalTitle">Assign Job</h2>
+      <button type="button" id="assignModalCloseBtn">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="field">
+        <label>Reference</label>
+        <div class="ref" id="assignModalRef">—</div>
+      </div>
+      <div class="field">
+        <label for="assignEngineerSelect">Engineer</label>
+        <select id="assignEngineerSelect">
+          <option value="">Loading engineers…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="assignDate">Scheduled Date</label>
+        <input type="date" id="assignDate">
+      </div>
+      <div class="field">
+        <label for="assignTime">Scheduled Time</label>
+        <input type="time" id="assignTime">
+      </div>
+      <div class="field">
+        <label for="assignNote">Note (optional)</label>
+        <textarea id="assignNote" placeholder="e.g. Booked for Connor on early shift."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="assignModalCancelBtn">Cancel</button>
+      <button type="button" class="btn primary" id="assignModalSaveBtn">Assign</button>
+    </div>
+    <div id="assignModalStatusText" class="small muted" style="margin-top:4px;"></div>
   </div>
 </div>
 
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
+
 let allJobs = [];
 let showingCompleted = false;
 let activePriority = "all";
 let countdownTimerId = null;
-let currentModalJobId = null;
+
+let currentUpdateJobId = null;
+let currentAssignJobId = null;
+let cachedUsers = [];
 
 const $ = id => document.getElementById(id);
 
+/* =========================
+   DATE HELPERS
+   ========================= */
 function parseDate(v){
   if(!v) return null;
   const d = new Date(v);
@@ -478,7 +536,19 @@ function fmtDateTimeShort(d){
   });
 }
 
-/* ========= NORMALISE JOB (includes targetAt→slaTarget) ========= */
+/* =========================
+   USER HELPER
+   ========================= */
+function getCurrentUser(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "Portal User";
+}
+
+/* =========================
+   NORMALISE JOB
+   ========================= */
 function normaliseJob(raw){
   const j = raw || {};
 
@@ -506,7 +576,7 @@ function normaliseJob(raw){
   const raisedAt =
     j.raisedAt || j.raised_on || j.createdAt || j.dateRaised;
 
-  // Worker stores SLA target as targetAt
+  // SLA target from Worker (targetAt)
   const slaTarget =
     j.slaTarget || j.targetAt || j.target || j.slaDue;
 
@@ -515,6 +585,9 @@ function normaliseJob(raw){
 
   const engineer =
     j.engineer || j.assignedEngineer || j.assignedTo || "";
+
+  // keep scheduledAt from Worker
+  const scheduledAt = j.scheduledAt || null;
 
   return {
     id,
@@ -526,11 +599,14 @@ function normaliseJob(raw){
     slaTarget,
     status,
     engineer,
+    scheduledAt,
     raw
   };
 }
 
-/* ================= SLA COUNTDOWN ================= */
+/* =========================
+   SLA COUNTDOWN
+   ========================= */
 function computeSlaCountdown(targetISO){
   if(!targetISO){
     return {text:"—", cls:"sla-badge sla-none", status:"none"};
@@ -580,7 +656,9 @@ function computeSlaCountdown(targetISO){
   };
 }
 
-/* ================= STATUS PILL ================= */
+/* =========================
+   STATUS PILL
+   ========================= */
 function statusClass(status, slaStatus){
   const s = (status || "").toLowerCase();
   if(s.includes("complete") || s.includes("closed")){
@@ -598,9 +676,14 @@ function isCompleted(job){
   return false;
 }
 
-/* ================= RENDER TABLE ================= */
+/* =========================
+   RENDER TABLE
+   ========================= */
 function render(){
   const tbody = $("jobsTbody");
+  const wrapper = document.querySelector(".table-wrapper");
+  const prevScrollLeft = wrapper ? wrapper.scrollLeft : 0;
+
   tbody.innerHTML = "";
 
   const openJobs = allJobs.filter(j => !isCompleted(j));
@@ -655,7 +738,10 @@ function render(){
     tr.dataset.jobId = job.id || "";
 
     tr.innerHTML = `
-      <td><div class="ref">${job.reference}</div></td>
+      <td>
+        <div class="ref">${job.reference}</div>
+        ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
+      </td>
       <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
       <td>
         <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
@@ -664,28 +750,34 @@ function render(){
       <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
       <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
       <td class="small nowrap">
-        ${
-          showingCompleted
-            ? `<span class="sla-badge sla-none">Completed</span>`
-            : `<span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-                 ${slaInfo.text}
-               </span>`
-        }
+        <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
+          ${slaInfo.text}
+        </span>
       </td>
       <td class="small">
         <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
       </td>
       <td>
-        <button class="btn icon-only" data-action="update">✏️</button>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+          <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+        </div>
       </td>
     `;
     tbody.appendChild(tr);
   }
 
+  // restore horizontal scroll position to stop snapback on mobile
+  if(wrapper){
+    wrapper.scrollLeft = prevScrollLeft;
+  }
+
   startCountdownLoop();
 }
 
-/* ================= COUNTDOWN LOOP ================= */
+/* =========================
+   COUNTDOWN LOOP
+   ========================= */
 function startCountdownLoop(){
   if(countdownTimerId) clearInterval(countdownTimerId);
   if(showingCompleted) return;
@@ -704,7 +796,9 @@ function startCountdownLoop(){
   countdownTimerId = setInterval(tick, 1000);
 }
 
-/* ================= LOAD JOBS ================= */
+/* =========================
+   LOAD JOBS
+   ========================= */
 async function loadJobs(){
   $("statusBar").textContent = "Loading jobs…";
   try{
@@ -724,74 +818,63 @@ async function loadJobs(){
   }
 }
 
-/* ================= MODAL UPDATE LOGIC ================= */
-function getUser(){
-  return sessionStorage.getItem("mostlaneUser") ||
-         sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") ||
-         "Portal User";
-}
-
-function openModalForJob(jobId){
+/* =========================
+   UPDATE MODAL
+   ========================= */
+function openUpdateModal(jobId){
   const job = allJobs.find(j => j.id === jobId);
   if(!job) return;
 
-  currentModalJobId = jobId;
+  currentUpdateJobId = jobId;
+  $("updateModalTitle").textContent = `Update Job – ${job.reference}`;
+  $("updateModalRef").textContent = job.reference;
+  $("updateModalPriority").value = job.priority || "P4";
 
-  $("modalTitle").textContent = `Update Job – ${job.reference}`;
-  $("modalRef").textContent = job.reference;
-
-  // Priority select
-  $("modalPriority").value = job.priority || "P4";
-
-  // Status select – best effort match
-  const statusSelect = $("modalStatus");
-  const currentStatus = job.status || "With Contractor - R";
+  const statusSelect = $("updateModalStatus");
   let matched = false;
   Array.from(statusSelect.options).forEach(opt => {
-    if(opt.value.toLowerCase() === currentStatus.toLowerCase()){
-      statusSelect.value = opt.value;
+    if(opt.value.toLowerCase() === (job.status || "").toLowerCase()){
       matched = true;
+      statusSelect.value = opt.value;
     }
   });
   if(!matched){
     statusSelect.value = "In Progress";
-    $("modalNote").value = `Status changed from “${currentStatus}” to “In Progress”.`;
-  } else {
-    $("modalNote").value = "";
   }
 
-  $("modalStatusText").textContent = "";
-  $("modalBackdrop").classList.add("show");
+  $("updateModalNote").value = "";
+  $("updateModalStatusText").textContent = "";
+
+  $("updateModalBackdrop").classList.add("show");
 }
 
-function closeModal(){
-  $("modalBackdrop").classList.remove("show");
-  currentModalJobId = null;
-  $("modalNote").value = "";
-  $("modalStatusText").textContent = "";
+function closeUpdateModal(){
+  $("updateModalBackdrop").classList.remove("show");
+  currentUpdateJobId = null;
+  $("updateModalNote").value = "";
+  $("updateModalStatusText").textContent = "";
 }
 
-async function saveModal(){
-  if(!currentModalJobId) return;
+async function saveUpdateModal(){
+  if(!currentUpdateJobId) return;
 
-  const newPriority = $("modalPriority").value;
-  const newStatus = $("modalStatus").value;
-  const note = $("modalNote").value.trim();
-  const user = getUser();
+  const priority = $("updateModalPriority").value;
+  const status = $("updateModalStatus").value;
+  const note = $("updateModalNote").value.trim();
+  const user = getCurrentUser();
 
-  $("modalStatusText").textContent = "Saving…";
+  $("updateModalStatusText").textContent = "Saving…";
 
   try{
     const payload = {
-      priority: newPriority,
-      status: newStatus,
+      priority,
+      status,
       note,
-      changedBy: user   // Worker uses changedBy for events
+      changedBy: user
     };
 
     const res = await fetch(
-      SLA_API + "/jobs/" + encodeURIComponent(currentModalJobId),
+      SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
       {
         method:"PATCH",
         headers:{ "Content-Type":"application/json" },
@@ -803,16 +886,191 @@ async function saveModal(){
       throw new Error(res.status + " " + res.statusText);
     }
 
-    $("modalStatusText").textContent = "✅ Saved – refreshing list…";
+    $("updateModalStatusText").textContent = "✅ Saved – refreshing list…";
     await loadJobs();
-    setTimeout(closeModal, 600);
+    setTimeout(closeUpdateModal, 600);
   }catch(err){
-    console.error("Modal save error:", err);
-    $("modalStatusText").textContent = "❌ Error saving changes.";
+    console.error("Update modal error:", err);
+    $("updateModalStatusText").textContent = "❌ Error saving changes.";
   }
 }
 
-/* ================= EVENTS + INIT ================= */
+/* =========================
+   LOAD ENGINEERS LIST
+   ========================= */
+async function ensureUsersLoaded(){
+  if(cachedUsers.length) return;
+  try{
+    const res = await fetch(USERS_API + "?t=" + Date.now());
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const data = await res.json();
+
+    // Support either array of strings or array of objects
+    if(Array.isArray(data)){
+      cachedUsers = data.map(item => {
+        if(typeof item === "string"){
+          return { username:item, displayName:item.replace(".", " ") };
+        }
+        return {
+          username: item.username || item.user || "",
+          displayName: item.displayName || item.name || (item.username || "").replace(".", " ")
+        };
+      }).filter(u => u.username);
+    } else if(Array.isArray(data.users)){
+      cachedUsers = data.users.map(item => ({
+        username: item.username || item.user || "",
+        displayName: item.displayName || item.name || (item.username || "").replace(".", " ")
+      })).filter(u => u.username);
+    }
+  }catch(err){
+    console.error("User load error:", err);
+    cachedUsers = [];
+  }
+}
+
+function populateEngineerSelect(){
+  const sel = $("assignEngineerSelect");
+  sel.innerHTML = "";
+
+  if(!cachedUsers.length){
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No users found";
+    sel.appendChild(opt);
+    return;
+  }
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select engineer…";
+  sel.appendChild(placeholder);
+
+  cachedUsers.forEach(u => {
+    const opt = document.createElement("option");
+    opt.value = u.username;
+    opt.textContent = u.displayName;
+    sel.appendChild(opt);
+  });
+
+  // If current logged-in user is in list, we could auto-select them if you ever want that
+}
+
+/* =========================
+   ASSIGN MODAL
+   ========================= */
+function defaultDateAndTime(){
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth()+1).padStart(2,"0");
+  const dd = String(now.getDate()).padStart(2,"0");
+  const dateStr = `${yyyy}-${mm}-${dd}`;
+
+  const hh = String(now.getHours()).padStart(2,"0");
+  const min = now.getMinutes();
+  const roundedMin = Math.round(min/15)*15;
+  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0"); // keep simple
+  const timeStr = `${hh}:${mmStr}`;
+
+  return {dateStr, timeStr};
+}
+
+async function openAssignModal(jobId){
+  const job = allJobs.find(j => j.id === jobId);
+  if(!job) return;
+
+  currentAssignJobId = jobId;
+  $("assignModalTitle").textContent = `Assign Job – ${job.reference}`;
+  $("assignModalRef").textContent = job.reference;
+  $("assignModalStatusText").textContent = "";
+
+  await ensureUsersLoaded();
+  populateEngineerSelect();
+
+  // Pre-select existing assignedTo if present
+  const sel = $("assignEngineerSelect");
+  if(job.engineer){
+    Array.from(sel.options).forEach(opt => {
+      if(opt.value === job.engineer){
+        sel.value = opt.value;
+      }
+    });
+  } else {
+    sel.value = "";
+  }
+
+  // Default date/time
+  const {dateStr, timeStr} = defaultDateAndTime();
+  $("assignDate").value = dateStr;
+  $("assignTime").value = timeStr;
+
+  $("assignNote").value = "";
+
+  $("assignModalBackdrop").classList.add("show");
+}
+
+function closeAssignModal(){
+  $("assignModalBackdrop").classList.remove("show");
+  currentAssignJobId = null;
+  $("assignNote").value = "";
+  $("assignModalStatusText").textContent = "";
+}
+
+async function saveAssignModal(){
+  if(!currentAssignJobId) return;
+
+  const engineer = $("assignEngineerSelect").value;
+  const date = $("assignDate").value;
+  const time = $("assignTime").value;
+  const note = $("assignNote").value.trim();
+  const user = getCurrentUser();
+
+  if(!engineer){
+    $("assignModalStatusText").textContent = "Please select an engineer.";
+    return;
+  }
+  if(!date || !time){
+    $("assignModalStatusText").textContent = "Please choose date and time.";
+    return;
+  }
+
+  // scheduledAt stored as ISO
+  const scheduledAt = new Date(date + "T" + time + ":00").toISOString();
+
+  $("assignModalStatusText").textContent = "Assigning…";
+
+  try{
+    const payload = {
+      assignedTo: engineer,
+      scheduledAt,
+      note,
+      changedBy: user
+    };
+
+    const res = await fetch(
+      SLA_API + "/jobs/" + encodeURIComponent(currentAssignJobId),
+      {
+        method:"PATCH",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify(payload)
+      }
+    );
+
+    if(!res.ok){
+      throw new Error(res.status + " " + res.statusText);
+    }
+
+    $("assignModalStatusText").textContent = "✅ Assigned – refreshing list…";
+    await loadJobs();
+    setTimeout(closeAssignModal, 600);
+  }catch(err){
+    console.error("Assign modal error:", err);
+    $("assignModalStatusText").textContent = "❌ Error assigning job.";
+  }
+}
+
+/* =========================
+   EVENTS + INIT
+   ========================= */
 function initEvents(){
   $("tabOpen").addEventListener("click", () => {
     showingCompleted = false;
@@ -843,24 +1101,40 @@ function initEvents(){
   $("jobsTbody").addEventListener("click", e => {
     const btn = e.target.closest("button[data-action]");
     if(!btn) return;
+    const action = btn.dataset.action;
     const tr = e.target.closest("tr");
-    if(!tr) return;
-    const id = tr.dataset.jobId;
+    const id = tr && tr.dataset.jobId;
     if(!id) return;
-    openModalForJob(id);
-  });
 
-  // Modal controls
-  $("modalCloseBtn").addEventListener("click", closeModal);
-  $("modalCancelBtn").addEventListener("click", closeModal);
-  $("modalBackdrop").addEventListener("click", e => {
-    if(e.target === $("modalBackdrop")){
-      closeModal();
+    if(action === "update"){
+      openUpdateModal(id);
+    } else if(action === "assign"){
+      openAssignModal(id);
     }
   });
+
+  // Update modal buttons
+  $("updateModalCloseBtn").addEventListener("click", closeUpdateModal);
+  $("updateModalCancelBtn").addEventListener("click", closeUpdateModal);
+  $("updateModalSaveBtn").addEventListener("click", saveUpdateModal);
+
+  // Assign modal buttons
+  $("assignModalCloseBtn").addEventListener("click", closeAssignModal);
+  $("assignModalCancelBtn").addEventListener("click", closeAssignModal);
+  $("assignModalSaveBtn").addEventListener("click", saveAssignModal);
+
+  // Backdrop click to close
+  $("updateModalBackdrop").addEventListener("click", e => {
+    if(e.target === $("updateModalBackdrop")) closeUpdateModal();
+  });
+  $("assignModalBackdrop").addEventListener("click", e => {
+    if(e.target === $("assignModalBackdrop")) closeAssignModal();
+  });
+
   document.addEventListener("keydown", e => {
     if(e.key === "Escape"){
-      closeModal();
+      if(currentAssignJobId) closeAssignModal();
+      else if(currentUpdateJobId) closeUpdateModal();
     }
   });
 }
