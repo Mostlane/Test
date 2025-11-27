@@ -571,23 +571,23 @@
       "submittedAt": "2025-11-27T09:35:46.750Z"
     },
     {
-      "id": "1764236412876-w465fs",
-      "receivedAt": "2025-11-27T09:40:12.876Z",
+      "id": "1764236464017-nv385e",
+      "receivedAt": "2025-11-27T09:41:04.027Z",
       "date": "2025-11-20",
       "day": "Thursday",
       "engineer": "Bradley Graham",
       "vehicle": "WP64 EJD",
-      "leaveHome": "07:27",
-      "arriveFirstSite": "08:16",
-      "leaveLastSite": "15:44",
-      "arriveHome": "16:32",
+      "leaveHome": "06:39",
+      "arriveFirstSite": "07:10",
+      "leaveLastSite": "16:40",
+      "arriveHome": "17:42",
       "deductLunch": true,
-      "totalHours": 8.58,
-      "standardHours": 8.58,
-      "overtimeHours": null,
-      "travelToHours": 0.82,
-      "travelFromHours": 0.8,
-      "totalTravelHours": 1.62,
+      "totalHours": 10.55,
+      "standardHours": 10,
+      "overtimeHours": 0.55,
+      "travelToHours": 0.52,
+      "travelFromHours": 1.03,
+      "totalTravelHours": 1.55,
       "enhancedOvertimePreview": "Yes",
       "excludeFromPay": false,
       "forceEnhanced": false,
@@ -598,7 +598,7 @@
       "personalMileage": null,
       "notes": "HX69 KHZ",
       "noteVisible": false,
-      "submittedAt": "2025-11-27T09:40:12.876Z"
+      "submittedAt": "2025-11-27T09:41:04.027Z"
     }
   ]
 }
