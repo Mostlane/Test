@@ -569,6 +569,36 @@
       "notes": "HX69 KHZ",
       "noteVisible": false,
       "submittedAt": "2025-11-27T09:35:46.750Z"
+    },
+    {
+      "id": "1764236412876-w465fs",
+      "receivedAt": "2025-11-27T09:40:12.876Z",
+      "date": "2025-11-20",
+      "day": "Thursday",
+      "engineer": "Bradley Graham",
+      "vehicle": "WP64 EJD",
+      "leaveHome": "07:27",
+      "arriveFirstSite": "08:16",
+      "leaveLastSite": "15:44",
+      "arriveHome": "16:32",
+      "deductLunch": true,
+      "totalHours": 8.58,
+      "standardHours": 8.58,
+      "overtimeHours": null,
+      "travelToHours": 0.82,
+      "travelFromHours": 0.8,
+      "totalTravelHours": 1.62,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "HX69 KHZ",
+      "noteVisible": false,
+      "submittedAt": "2025-11-27T09:40:12.876Z"
     }
   ]
 }
