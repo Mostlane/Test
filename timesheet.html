@@ -137,25 +137,25 @@ let currentEngineer = null;   // string
 window.addEventListener("DOMContentLoaded", async () => {
   $("status").textContent = "Loading…";
   try{
-const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
-let j = await res.text();
+    const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
+    let j = await res.text();
 
-try {
-  j = JSON.parse(j);
-} catch (e) {
-  console.warn("Non-JSON response from worker:", j);
-  j = {};
-}
+    try {
+      j = JSON.parse(j);
+    } catch (e) {
+      console.warn("Non-JSON response from worker:", j);
+      j = {};
+    }
 
-if (j.ok && j.data) RAW = j.data;
-else if (j.Hours) RAW = j.Hours;
-else if (typeof j === "object") RAW = j;
-else {
-  console.error("Unexpected data format", j);
-  RAW = {};
-}
+    if (j.ok && j.data) RAW = j.data;
+    else if (j.Hours) RAW = j.Hours;
+    else if (typeof j === "object") RAW = j;
+    else {
+      console.error("Unexpected data format", j);
+      RAW = {};
+    }
 
-console.log("✅ RAW loaded:", RAW);
+    console.log("✅ RAW loaded:", RAW);
   }catch(e){
     $("status").textContent = "Could not load data.";
     RAW = {};
@@ -203,7 +203,7 @@ function collectWeekEntries(weekMonISO, engineer){
   sundayBefore.setDate(sundayBefore.getDate() - 1);
   const sundayKey = sundayBefore.toISOString().split("T")[0];
 
-  for(const [dateKey, arr] of Object.entries(RAW)){
+  for(const [, arr] of Object.entries(RAW)){
     if(!Array.isArray(arr)) continue;
     arr.forEach(e=>{
       if(!e || typeof e !== "object") return;
@@ -219,7 +219,7 @@ function collectWeekEntries(weekMonISO, engineer){
         out.push(e);
       }
       // Also include if date itself falls within the Mon–Fri window
-      else {
+      else if (e.date) {
         const d = new Date(e.date + "T00:00:00");
         if (d >= weekMon && d < addDays(weekMon,7)) out.push(e);
       }
@@ -261,58 +261,62 @@ function render(){
     const dayName = d.toLocaleDateString("en-GB",{weekday:"short"});
     const pretty = d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"});
 
-    // choose first non-excluded entry for the day (if multiple, take the one with biggest totalHours)
+    // choose first non-excluded entry for the day (if multiple, take the latest submitted)
     const entries = byDate[iso] || [];
     let entry = entries
       .filter(e => !e.excludeFromPay) // ignore excluded lines in viewer totals
-.sort((a,b)=> new Date(b.submittedAt) - new Date(a.submittedAt))[0];
+      .sort((a,b)=> new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))[0];
 
     // Capture Monday van check banner from the actual Monday record if present
-if (idx === 0) { // Monday summary
-  const weekMonISO = fmtISODate(currentWeekMon);
-  const sundayBefore = fmtISODate(addDays(currentWeekMon, -1));
+    if (idx === 0) { // Monday summary
+      const weekMonISO = fmtISODate(currentWeekMon);
+      const sundayBefore = fmtISODate(addDays(currentWeekMon, -1));
 
-  // Find any record for this engineer whose weekKey matches Monday or the Sunday-before
-  const monRecord = Object.values(RAW)
-    .flat()
-    .find(e =>
-      e &&
-      typeof e === "object" &&
-      String(e.engineer || "").trim().toLowerCase() === currentEngineer.trim().toLowerCase() &&
-      (
-        String(e.weekKey).trim() === weekMonISO ||
-        String(e.weekKey).trim() === sundayBefore
-      ) &&
-      (e.vanCheck || e.vanCheckWeekStatus)
-    );
+      // Safely flatten RAW to an array of records
+      const allRecords = [];
+      Object.values(RAW).forEach(v => {
+        if (Array.isArray(v)) allRecords.push(...v);
+      });
 
-  if (monRecord) {
-    const rawVal = monRecord.vanCheck || monRecord.vanCheckWeekStatus || "";
-    const checkVal = String(rawVal).trim().toLowerCase();
-    mondayVanCheckText = `Monday Van Check: ${rawVal}`;
+      const monRecord = allRecords.find(e =>
+        e &&
+        typeof e === "object" &&
+        String(e.engineer || "").trim().toLowerCase() === currentEngineer.trim().toLowerCase() &&
+        (
+          String(e.weekKey || "").trim() === weekMonISO ||
+          String(e.weekKey || "").trim() === sundayBefore
+        ) &&
+        (e.vanCheck || e.vanCheckWeekStatus)
+      );
 
-if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
-  mondayVanCheckText +=
-    ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
-} else if (checkVal === "no" || checkVal === "failed") {
-  mondayVanCheckText +=
-    ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
-} else if (checkVal === "n/a" || checkVal === "na") {
-  mondayVanCheckText +=
-    ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
-} else {
-  mondayVanCheckText = `
+      if (monRecord) {
+        const rawVal = monRecord.vanCheck || monRecord.vanCheckWeekStatus || "";
+        const checkVal = String(rawVal).trim().toLowerCase();
+        mondayVanCheckText = `Monday Van Check: ${rawVal}`;
+
+        if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
+          mondayVanCheckText +=
+            ` <span style="color:#0c7d27;font-weight:600;">✅ Overtime Policy Applied to Week</span>`;
+        } else if (checkVal === "no" || checkVal === "failed") {
+          mondayVanCheckText +=
+            ` <span style="color:#b36b00;font-weight:600;">⚠️ Did not qualify for Overtime Policy this week</span>`;
+        } else if (checkVal === "n/a" || checkVal === "na") {
+          mondayVanCheckText +=
+            ` <span style="color:#64748b;font-weight:600;">ℹ️ Not applicable this week</span>`;
+        } else {
+          mondayVanCheckText = `
     Monday Van Check: ⚠️ 
     <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
   `;
-}
-  } else {
-    mondayVanCheckText = `
+        }
+      } else {
+        mondayVanCheckText = `
       Monday Van Check: ⚠️ 
       <span style="color:#b36b00;font-weight:600;">No Van Check Recorded for This Week</span>
     `;
-  }
-}
+      }
+    }
+
     const start = entry?.leaveHome || "";
     const finish = entry?.arriveHome || "";
     const total = parseFloat(entry?.totalHours || 0) || 0;
@@ -366,21 +370,18 @@ if (checkVal === "yes" || checkVal === "passed" || checkVal === "done") {
 
 <script>
 document.getElementById("exportBtn").addEventListener("click", async () => {
-  const engineer = document.getElementById("engineerSel").value.replace(/\s+/g, '');
-  const weekComm = document.getElementById("weekLabel").textContent.split(',')[0].replace(/\s+/g,'');
-  // Clean name format: Bradley Graham - WC 17-10-2025.pdf
-const engineerName = document.getElementById("engineerSel").value.trim();
-const monday = new Date(currentWeekMon);
-const dd = String(monday.getDate()).padStart(2, '0');
-const mm = String(monday.getMonth() + 1).padStart(2, '0');
-const yyyy = monday.getFullYear();
-const weekLabelFormatted = `${dd}-${mm}-${yyyy}`;
-const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
+  const engineerName = document.getElementById("engineerSel").value.trim();
+  const monday = new Date(currentWeekMon);
+  const dd = String(monday.getDate()).padStart(2, '0');
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const yyyy = monday.getFullYear();
+  const weekLabelFormatted = `${dd}-${mm}-${yyyy}`;
+  const filename = `${engineerName} - WC ${weekLabelFormatted}.pdf`;
 
-  // hide buttons & dropdown temporarily for clean export
+  // hide controls temporarily for clean export
   const controls = document.querySelector('.controls');
-  controls.style.display = 'none';
   const exportBtn = document.getElementById('exportBtn');
+  controls.style.display = 'none';
   exportBtn.style.display = 'none';
 
   const shell = document.querySelector('.shell');
