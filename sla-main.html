@@ -897,29 +897,35 @@ async function saveUpdateModal(){
 
 /* =========================
    LOAD ENGINEERS LIST
-   ========================= */
-async function ensureUsersLoaded(){
+   ========================= */async function ensureUsersLoaded(){
   if(cachedUsers.length) return;
   try{
     const res = await fetch(USERS_API + "?t=" + Date.now());
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
     const data = await res.json();
 
-    // Support either array of strings or array of objects
-    if(Array.isArray(data)){
-      cachedUsers = data.map(item => {
-        if(typeof item === "string"){
-          return { username:item, displayName:item.replace(".", " ") };
-        }
-        return {
-          username: item.username || item.user || "",
-          displayName: item.displayName || item.name || (item.username || "").replace(".", " ")
-        };
-      }).filter(u => u.username);
-    } else if(Array.isArray(data.users)){
-      cachedUsers = data.users.map(item => ({
-        username: item.username || item.user || "",
-        displayName: item.displayName || item.name || (item.username || "").replace(".", " ")
+    /* FIX — Your API returns `Users` with a capital U */
+    if (Array.isArray(data.Users)) {
+      cachedUsers = data.Users.map(u => ({
+        username: u.Username,
+        displayName: `${u.FirstName} ${u.LastName}`.trim()
+      })).filter(u => u.username);
+    }
+    /* fallback handling */
+    else if (Array.isArray(data.users)) {
+      cachedUsers = data.users.map(u => ({
+        username: u.username || u.user || "",
+        displayName: u.displayName || u.name || (u.username || "").replace(".", " ")
+      })).filter(u => u.username);
+    }
+    else if (Array.isArray(data)) {
+      cachedUsers = data.map(u => ({
+        username: u.username || u.user || u.Username || "",
+        displayName:
+          u.displayName ||
+          u.name ||
+          `${u.FirstName || ""} ${u.LastName || ""}`.trim() ||
+          (u.username || u.Username || "").replace(".", " ")
       })).filter(u => u.username);
     }
   }catch(err){
