@@ -1861,23 +1861,23 @@
       "submittedAt": "2025-11-27T10:34:55.922Z"
     },
     {
-      "id": "1764239739585-kre0xm",
-      "receivedAt": "2025-11-27T10:35:39.585Z",
+      "id": "1764239760755-frago2",
+      "receivedAt": "2025-11-27T10:36:00.755Z",
       "date": "2025-11-21",
       "day": "Friday",
       "engineer": "Ryan Diggens",
       "vehicle": "HN73 KFO",
-      "leaveHome": "06:30",
-      "arriveFirstSite": "07:15",
-      "leaveLastSite": "23:00",
-      "arriveHome": "23:45",
+      "leaveHome": "07:15",
+      "arriveFirstSite": "07:45",
+      "leaveLastSite": "17:00",
+      "arriveHome": "17:30",
       "deductLunch": true,
-      "totalHours": 16.75,
-      "standardHours": 10,
-      "overtimeHours": 6.75,
-      "travelToHours": 0.75,
-      "travelFromHours": 0.75,
-      "totalTravelHours": 1.5,
+      "totalHours": 9.75,
+      "standardHours": 9.75,
+      "overtimeHours": null,
+      "travelToHours": 0.5,
+      "travelFromHours": 0.5,
+      "totalTravelHours": 1,
       "enhancedOvertimePreview": "Yes",
       "excludeFromPay": false,
       "forceEnhanced": false,
@@ -1888,7 +1888,7 @@
       "personalMileage": null,
       "notes": "",
       "noteVisible": false,
-      "submittedAt": "2025-11-27T10:35:39.585Z"
+      "submittedAt": "2025-11-27T10:36:00.755Z"
     }
   ]
 }
