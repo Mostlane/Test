@@ -1381,23 +1381,23 @@
       "submittedAt": "2025-11-27T10:19:17.779Z"
     },
     {
-      "id": "1764238617499-mixt4q",
-      "receivedAt": "2025-11-27T10:16:57.499Z",
+      "id": "1764238790579-x39pjb",
+      "receivedAt": "2025-11-27T10:19:50.579Z",
       "date": "2025-11-22",
       "day": "Saturday",
       "engineer": "David Molloy",
       "vehicle": "LE73 UHV",
-      "leaveHome": "07:23",
-      "arriveFirstSite": "09:02",
-      "leaveLastSite": "18:46",
-      "arriveHome": "19:08",
+      "leaveHome": "06:56",
+      "arriveFirstSite": "07:56",
+      "leaveLastSite": "16:53",
+      "arriveHome": "17:21",
       "deductLunch": true,
-      "totalHours": 11.25,
-      "standardHours": 10,
-      "overtimeHours": 1.25,
-      "travelToHours": 1.65,
-      "travelFromHours": 0.37,
-      "totalTravelHours": 2.02,
+      "totalHours": 9.92,
+      "standardHours": 9.92,
+      "overtimeHours": null,
+      "travelToHours": 1,
+      "travelFromHours": 0.47,
+      "totalTravelHours": 1.47,
       "enhancedOvertimePreview": "Yes",
       "excludeFromPay": false,
       "forceEnhanced": false,
@@ -1408,7 +1408,7 @@
       "personalMileage": null,
       "notes": "",
       "noteVisible": false,
-      "submittedAt": "2025-11-27T10:16:57.499Z"
+      "submittedAt": "2025-11-27T10:19:50.579Z"
     }
   ]
 }
