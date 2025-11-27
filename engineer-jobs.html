@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane • My Jobs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --ml-bg:#e6e8eb;
+      --panel:rgba(255,255,255,0.9);
+      --text:#0f172a;
+      --muted:#6b7280;
+      --border:#d1d5db;
+      --ok:#16a34a;
+      --warn:#f97316;
+      --bad:#dc2626;
+    }
+    *{box-sizing:border-box;}
+    html,body{
+      margin:0;padding:0;
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      color:var(--text);
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+    }
+    .shell{
+      max-width:1100px;
+      margin:24px auto;
+      padding:0 16px;
+    }
+    .card{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      border:1px solid rgba(15,23,42,0.05);
+      overflow:hidden;
+    }
+    header.main-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:16px 20px;
+      background:linear-gradient(90deg,#ffffff,#f3f4f6);
+      border-bottom:1px solid #e5e7eb;
+    }
+    header h1{
+      margin:0;
+      font-size:20px;
+      color:var(--ml-blue);
+    }
+    header .sub{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .btn{
+      border-radius:999px;
+      padding:8px 14px;
+      font-size:13px;
+      border:1px solid #d1d5db;
+      background:#f9fafb;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      text-decoration:none;
+      color:var(--text);
+      font-weight:500;
+      white-space:nowrap;
+    }
+    .btn.primary{
+      background:var(--ml-blue);
+      color:#fff;
+      border-color:var(--ml-blue);
+    }
+    .content{
+      padding:14px 18px 16px;
+    }
+    .filters-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .filters-row label{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .filters-row input[type="date"]{
+      border-radius:999px;
+      border:1px solid #d1d5db;
+      padding:6px 10px;
+      font-size:13px;
+      background:#fff;
+    }
+    .table-wrap{
+      width:100%;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size:13px;
+      background:#fff;
+      border-radius:10px;
+      overflow:hidden;
+      border:1px solid #e5e7eb;
+      min-width:700px;
+    }
+    thead th{
+      text-align:left;
+      padding:8px 10px;
+      background:#f3f4f6;
+      color:#111827;
+      border-bottom:1px solid #e5e7eb;
+      font-weight:600;
+      white-space:nowrap;
+    }
+    tbody td{
+      padding:8px 10px;
+      border-bottom:1px solid #f1f5f9;
+      vertical-align:top;
+    }
+    tbody tr:nth-child(even){
+      background:#fafbff;
+    }
+    .ref{
+      font-family:monospace;
+      font-size:12px;
+      background:#f9fafb;
+      padding:2px 6px;
+      border-radius:999px;
+      display:inline-block;
+    }
+    .priority-badge{
+      border-radius:999px;
+      padding:2px 7px;
+      font-size:11px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+    .p1{background:#fef2f2;color:#b91c1c;}
+    .p2{background:#fffbeb;color:#92400e;}
+    .p3{background:#ecfdf5;color:#166534;}
+    .p4{background:#eff6ff;color:#1d4ed8;}
+    .sla-badge{
+      border-radius:999px;
+      padding:3px 8px;
+      font-size:11px;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      font-variant-numeric:tabular-nums;
+      white-space:nowrap;
+    }
+    .sla-green{background:#ecfdf5;color:#166534;}
+    .sla-amber{background:#fffbeb;color:#92400e;}
+    .sla-red{background:#fef2f2;color:#b91c1c;}
+    .sla-none{background:#e5e7eb;color:#4b5563;}
+    .status-pill{
+      border-radius:999px;
+      padding:3px 8px;
+      font-size:11px;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      background:#e5e7eb;
+      color:#111827;
+    }
+    .status-open{background:#dcfce7;color:#166534;}
+    .status-overdue{background:#fee2e2;color:#b91c1c;}
+    .status-complete{background:#e5e7eb;color:#374151;}
+    .small{font-size:11px;}
+    .muted{color:var(--muted);}
+    .nowrap{white-space:nowrap;}
+    #statusBar{
+      margin-top:8px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    @media(max-width:768px){
+      header.main-header{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:4px;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header class="main-header">
+      <div>
+        <h1>My Jobs</h1>
+        <div class="sub" id="userLabel">Engineer</div>
+      </div>
+      <a href="sla-main.html" class="btn">← Back to SLA Board</a>
+    </header>
+
+    <div class="content">
+      <div class="filters-row">
+        <label for="datePicker">Day:</label>
+        <input type="date" id="datePicker">
+        <button class="btn primary" id="reloadBtn">Refresh</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ref</th>
+              <th>Priority</th>
+              <th>Description / Site</th>
+              <th>Raised</th>
+              <th>SLA</th>
+              <th>Status</th>
+              <th>Open</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTbody"></tbody>
+        </table>
+      </div>
+
+      <div id="statusBar">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+let countdownTimerId = null;
+let jobs = [];
+
+const $ = id => document.getElementById(id);
+
+function getEngineer(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "";
+}
+
+function parseDate(v){
+  if(!v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+}
+
+function fmtDateTimeShort(d){
+  if(!(d instanceof Date) || isNaN(d)) return "—";
+  return d.toLocaleString("en-GB", {
+    day:"2-digit", month:"short",
+    hour:"2-digit", minute:"2-digit"
+  });
+}
+
+function computeSlaCountdown(targetISO){
+  if(!targetISO){
+    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+  }
+  const now = new Date();
+  const target = parseDate(targetISO);
+  if(!target){
+    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+  }
+  let diff = target - now;
+  const overdue = diff < 0;
+  if(overdue) diff = -diff;
+
+  const secs = Math.floor(diff/1000);
+  const days = Math.floor(secs/86400);
+  const hours = Math.floor((secs%86400)/3600);
+  const mins = Math.floor((secs%3600)/60);
+
+  let label = overdue ? "+" : "";
+  if(days>0){
+    label += `${days}d ${String(hours).padStart(2,"0")}h`;
+  } else {
+    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
+  }
+
+  const hoursLeft = (target - now) / 3600000;
+  let cls = "sla-badge sla-green";
+  let status = "ok";
+
+  if(overdue || hoursLeft <= 0){
+    cls = "sla-badge sla-red";
+    status = "overdue";
+  } else if(hoursLeft <= 1){
+    cls = "sla-badge sla-red";
+    status = "overdueSoon";
+  } else if(hoursLeft <= 4){
+    cls = "sla-badge sla-amber";
+    status = "warn";
+  }
+
+  return {
+    text: (overdue ? "Overdue " : "Due in ") + label,
+    cls,
+    status
+  };
+}
+
+function statusClass(status, slaStatus){
+  const s = (status || "").toLowerCase();
+  if(s.includes("complete") || s.includes("closed")){
+    return "status-pill status-complete";
+  }
+  if(slaStatus === "overdue" || slaStatus === "overdueSoon"){
+    return "status-pill status-overdue";
+  }
+  return "status-pill status-open";
+}
+
+function render(){
+  const tbody = $("jobsTbody");
+  tbody.innerHTML = "";
+
+  if(!jobs.length){
+    $("statusBar").textContent = "No jobs assigned for this day.";
+    return;
+  }
+
+  $("statusBar").textContent = `${jobs.length} job(s) assigned`;
+
+  for(const job of jobs){
+    const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
+    const target = job.targetAt || job.sla?.targetAt;
+    const slaInfo = computeSlaCountdown(target);
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="ref">${job.helpdeskRef || job.id}</span></td>
+      <td><span class="priority-badge ${job.priority?.toLowerCase() || "p4"}">${job.priority || "P4"}</span></td>
+      <td>
+        <div style="font-size:13px;font-weight:500;">${job.description || job.rawPayload?.description || ""}</div>
+        <div class="small muted">${job.siteName || job.siteCode || job.address || ""}</div>
+      </td>
+      <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
+      <td class="small nowrap">
+        <span class="${slaInfo.cls}" data-sla-target="${target || ""}" data-job-id="${job.id}">
+          ${slaInfo.text}
+        </span>
+      </td>
+      <td class="small">
+        <span class="${statusClass(job.status, slaInfo.status)}">${job.status || "With Contractor - R"}</span>
+      </td>
+      <td class="small nowrap">
+        <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  startCountdownLoop();
+}
+
+function startCountdownLoop(){
+  if(countdownTimerId) clearInterval(countdownTimerId);
+
+  const tick = () => {
+    document.querySelectorAll(".sla-badge[data-sla-target]").forEach(el => {
+      const iso = el.getAttribute("data-sla-target");
+      const info = computeSlaCountdown(iso);
+      el.textContent = info.text;
+      el.className = info.cls;
+    });
+  };
+  tick();
+  countdownTimerId = setInterval(tick, 1000);
+}
+
+async function loadJobs(){
+  const engineer = getEngineer();
+  if(!engineer){
+    $("statusBar").textContent = "No logged-in engineer found.";
+    return;
+  }
+
+  const date = $("datePicker").value;
+  const params = new URLSearchParams({ engineer });
+  if(date) params.set("date", date);
+
+  $("statusBar").textContent = "Loading jobs…";
+
+  try{
+    const res = await fetch(`${SLA_API}/jobs/for-engineer?${params.toString()}`, { cache:"no-store" });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const list = await res.json();
+    jobs = Array.isArray(list) ? list : [];
+    render();
+  }catch(err){
+    console.error("load error", err);
+    $("statusBar").textContent = "❌ Error loading jobs.";
+    jobs = [];
+  }
+}
+
+function init(){
+  const engineer = getEngineer();
+  $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
+
+  const today = new Date();
+  $("datePicker").value = today.toISOString().slice(0,10);
+
+  $("reloadBtn").addEventListener("click", loadJobs);
+  $("datePicker").addEventListener("change", loadJobs);
+
+  loadJobs();
+}
+
+window.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
