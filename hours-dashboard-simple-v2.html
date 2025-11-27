@@ -33,13 +33,15 @@
   .weeklabel{font-size:14px;color:var(--muted)}
   .panel{background:var(--panel);backdrop-filter: blur(2px);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.06);}
   .kpis{display:grid;gap:12px;grid-template-columns:repeat(6,1fr);margin-bottom:12px}
-  .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:24px;font-weight:700}
+  .kpi .label{font-size:12px;color:var(--muted)}
+  .kpi .value{font-size:24px;font-weight:700}
   .grid{display:grid;gap:12px;grid-template-columns:1fr}
   .charts{display:grid;gap:12px;grid-template-columns:1fr}
   .legend{font-size:12px;color:var(--muted);display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:-1px}
   #errorMsg{text-align:center;color:var(--bad);font-weight:600;margin-top:20px}
   .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
   @media(min-width:1000px){
     .charts{grid-template-columns:2fr 1fr}
   }
@@ -124,10 +126,6 @@ function endOfWeekSunday(d){
   sun.setUTCHours(23,59,59,999);
   return sun;
 }
-function getWeekKeyForDate(d){
-  const sun = endOfWeekSunday(d);
-  return sun.toISOString().slice(0,10);
-}
 function fmtUK(d){
   const opts = { year:'numeric', month:'short', day:'numeric', timeZone:'UTC' };
   return d.toLocaleDateString('en-GB', opts);
@@ -161,42 +159,48 @@ async function fetchData(){
   const res = await fetch(HOURS_API+"?v="+Date.now(),{cache:"no-store"});
   if(!res.ok) throw new Error(res.status+" "+res.statusText);
 
-  let j = await res.json();
+  let txt = await res.text();
+  let j;
+  try {
+    j = JSON.parse(txt);
+  } catch (e) {
+    console.warn("Non-JSON response from Hours worker:", txt);
+    return {};
+  }
 
-  // 🔥 REQUIRED FIX — same parsing logic as timesheet.html
-  if (j.ok && j.data) return j.data;
-  if (j.Hours) return j.Hours;
+  // Normalise to match timesheet.html behaviour
+  if (j && j.ok && j.data) return j.data;
+  if (j && j.Hours) return j.Hours;
   if (typeof j === "object") return j;
-
   return {};
 }
 
-// Correct weekKey matching
+/**
+ * ✅ NEW IMPLEMENTATION:
+ * Ignore weekKey completely and just use date range Mon–Sun.
+ * This matches *all* entries where e.date is between Monday and Sunday
+ * for the selected anchor week.
+ */
 function getEntriesForWeek(data, anchorDate){
-  const currentKey = getWeekKeyForDate(anchorDate);
-  const prevKeyDate = new Date(currentKey);
-  prevKeyDate.setUTCDate(prevKeyDate.getUTCDate() - 7);
-  const prevKey = prevKeyDate.toISOString().slice(0,10);
-
-  const all = [];
-  for(const list of Object.values(data)){
-    if(Array.isArray(list)) all.push(...list);
-  }
-
-  let filtered = all.filter(e => e.weekKey === currentKey);
-  if(!filtered.length){
-    filtered = all.filter(e => e.weekKey === prevKey);
-  }
-
-  if(filtered.length) return dedupeEntries(filtered);
+  if (!data || typeof data !== "object") return [];
 
   const mon = startOfWeekMonday(anchorDate);
   const sun = endOfWeekSunday(anchorDate);
-  const rangeFiltered = all.filter(e=>{
-    const d = new Date(e.date+"T00:00:00Z");
-    return d>=mon && d<=sun;
+
+  const all = [];
+  for (const list of Object.values(data)) {
+    if (Array.isArray(list)) {
+      all.push(...list);
+    }
+  }
+
+  const filtered = all.filter(e => {
+    if (!e || !e.date) return false;
+    const d = new Date(e.date + "T00:00:00Z");
+    return d >= mon && d <= sun;
   });
-  return dedupeEntries(rangeFiltered);
+
+  return dedupeEntries(filtered);
 }
 
 function isCurrentWeek(anchor){
