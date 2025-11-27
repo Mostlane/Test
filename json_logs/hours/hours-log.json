@@ -1289,6 +1289,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-11-27T10:14:01.447Z"
+    },
+    {
+      "id": "1764238469927-zznggd",
+      "receivedAt": "2025-11-27T10:14:29.927Z",
+      "date": "2025-11-19",
+      "day": "Wednesday",
+      "engineer": "David Molloy",
+      "vehicle": "LE73 UHV",
+      "leaveHome": "06:36",
+      "arriveFirstSite": "07:14",
+      "leaveLastSite": "17:05",
+      "arriveHome": "17:52",
+      "deductLunch": true,
+      "totalHours": 10.77,
+      "standardHours": 10,
+      "overtimeHours": 0.77,
+      "travelToHours": 0.63,
+      "travelFromHours": 0.78,
+      "totalTravelHours": 1.41,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-11-27T10:14:29.927Z"
     }
   ]
 }
