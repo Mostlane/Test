@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Job View – Mostlane SLA</title>
+
+<style>
+  :root {
+    --ml-blue:#003b82;
+    --ml-blue-light:#1e66ff;
+    --text:#0f172a;
+    --muted:#6b7280;
+    --ok:#16a34a;
+    --bad:#dc2626;
+    --warn:#f97316;
+    --panel:rgba(255,255,255,0.9);
+  }
+
+  body {
+    margin:0;
+    font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size:180%;
+    padding:20px;
+    color:var(--text);
+  }
+
+  .container {
+    max-width:900px;
+    margin:auto;
+    background:var(--panel);
+    padding:20px;
+    border-radius:14px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.15);
+  }
+
+  h1 {
+    margin-top:0;
+    color:var(--ml-blue);
+  }
+
+  .section {
+    background:white;
+    border-radius:8px;
+    padding:16px;
+    margin-bottom:18px;
+    border:1px solid #d2d6db;
+  }
+
+  .label {
+    font-weight:600;
+    margin-right:8px;
+  }
+
+  .row {
+    margin-bottom:8px;
+  }
+
+  .badge {
+    display:inline-block;
+    padding:4px 10px;
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+    color:white;
+  }
+  .p1 { background:#dc2626; }
+  .p2 { background:#f97316; }
+  .p3 { background:#eab308; color:#000; }
+  .p4 { background:#16a34a; }
+  .p5 { background:#2563eb; }
+
+  .countdown {
+    font-size:18px;
+    font-weight:700;
+    margin-top:6px;
+  }
+
+  .button {
+    display:inline-block;
+    background:var(--ml-blue);
+    color:white;
+    padding:10px 14px;
+    border-radius:8px;
+    cursor:pointer;
+    border:none;
+    margin-right:8px;
+    margin-bottom:10px;
+    font-size:14px;
+  }
+
+  .event {
+    border-left:3px solid var(--ml-blue);
+    padding-left:12px;
+    margin-bottom:14px;
+  }
+  .event-time {
+    font-size:12px;
+    color:var(--muted);
+  }
+  .event-type {
+    font-weight:600;
+  }
+  .event-note {
+    margin-top:4px;
+  }
+
+  /* MODAL */
+  .modal {
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.6);
+    display:none;
+    justify-content:center;
+    align-items:center;
+    z-index:999;
+  }
+  .modal-content {
+    background:white;
+    padding:20px;
+    border-radius:10px;
+    width:90%;
+    max-width:380px;
+  }
+  input, select, textarea {
+    width:100%;
+    padding:8px;
+    margin-top:6px;
+    margin-bottom:12px;
+    border:1px solid #ccc;
+    border-radius:6px;
+    font-size:14px;
+  }
+</style>
+
+</head>
+<body>
+
+<div class="container">
+  <h1 id="jobRef">Job</h1>
+
+  <div class="section">
+    <div class="row"><span class="label">Priority:</span> <span id="priorityBadge"></span></div>
+    <div class="row"><span class="label">Status:</span> <span id="status"></span></div>
+    <div class="row"><span class="label">SLA Target:</span> <span id="slaTarget"></span></div>
+    <div class="countdown" id="countdown">Loading timer…</div>
+  </div>
+
+  <div class="section">
+    <h3>Details</h3>
+    <div class="row"><span class="label">Site:</span> <span id="site"></span></div>
+    <div class="row"><span class="label">Address:</span> <span id="address"></span></div>
+    <div class="row"><span class="label">Description:</span> <span id="description"></span></div>
+    <div class="row"><span class="label">Raised:</span> <span id="raised"></span></div>
+  </div>
+
+  <div class="section">
+    <h3>Actions</h3>
+    <button class="button" onclick="openPriorityModal()">Change Priority</button>
+    <button class="button" onclick="openStatusModal()">Change Status</button>
+    <button class="button" onclick="openNoteModal()">Add Note</button>
+  </div>
+
+  <div class="section">
+    <h3>Event History</h3>
+    <div id="events"></div>
+  </div>
+</div>
+
+<!-- PRIORITY MODAL -->
+<div class="modal" id="priorityModal">
+  <div class="modal-content">
+    <h3>Change Priority</h3>
+    <select id="newPriority">
+      <option value="P1">P1</option>
+      <option value="P2">P2</option>
+      <option value="P3">P3</option>
+      <option value="P4">P4</option>
+      <option value="P5">P5</option>
+    </select>
+    <textarea id="priorityNote" placeholder="Optional note"></textarea>
+    <button class="button" onclick="submitPriority()">Save</button>
+    <button class="button" style="background:#999" onclick="closeModals()">Cancel</button>
+  </div>
+</div>
+
+<!-- STATUS MODAL -->
+<div class="modal" id="statusModal">
+  <div class="modal-content">
+    <h3>Change Status</h3>
+    <select id="newStatus">
+      <option>With Contractor - R</option>
+      <option>In Progress</option>
+      <option>Awaiting Parts</option>
+      <option>Completed</option>
+      <option>Closed</option>
+    </select>
+    <textarea id="statusNote" placeholder="Optional note"></textarea>
+    <button class="button" onclick="submitStatus()">Save</button>
+    <button class="button" style="background:#999" onclick="closeModals()">Cancel</button>
+  </div>
+</div>
+
+<!-- NOTE MODAL -->
+<div class="modal" id="noteModal">
+  <div class="modal-content">
+    <h3>Add Note</h3>
+    <textarea id="noteText" placeholder="Write note here…"></textarea>
+    <button class="button" onclick="submitNote()">Add Note</button>
+    <button class="button" style="background:#999" onclick="closeModals()">Cancel</button>
+  </div>
+</div>
+
+<script>
+const API = "https://mostlane-sla.jamie-def.workers.dev";
+let jobId = null;
+let jobData = null;
+
+/* ---------------------------
+   LOAD PAGE
+---------------------------- */
+window.onload = async () => {
+  const url = new URL(window.location.href);
+  jobId = url.searchParams.get("id");
+
+  if(!jobId){
+    alert("Missing job ID");
+    return;
+  }
+
+  await loadJob();
+  startCountdown();
+};
+
+async function loadJob(){
+  const res = await fetch(`${API}/job?id=${jobId}`);
+  jobData = await res.json();
+
+  document.getElementById("jobRef").textContent = "Job " + jobData.reference;
+  document.getElementById("priorityBadge").innerHTML =
+    `<span class="badge ${jobData.priority.toLowerCase()}">${jobData.priority}</span>`;
+
+  document.getElementById("status").textContent = jobData.status;
+  document.getElementById("slaTarget").textContent = formatDate(jobData.slaTarget);
+  document.getElementById("site").textContent = jobData.site;
+  document.getElementById("address").textContent = jobData.address;
+  document.getElementById("description").textContent = jobData.description;
+  document.getElementById("raised").textContent = formatDate(jobData.raisedAt);
+
+  renderEvents(jobData.events || []);
+}
+
+/* ---------------------------
+   COUNTDOWN CLOCK
+---------------------------- */
+function startCountdown(){
+  function tick(){
+    const target = new Date(jobData.slaTarget).getTime();
+    const now = Date.now();
+    const diff = target - now;
+
+    if(diff <= 0){
+      document.getElementById("countdown").innerHTML = `<span style="color:var(--bad)">⚠ SLA EXPIRED</span>`;
+      return;
+    }
+    const hrs = Math.floor(diff / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    document.getElementById("countdown").textContent = `${hrs}h ${mins}m remaining`;
+  }
+  tick();
+  setInterval(tick, 60000);
+}
+
+/* ---------------------------
+   EVENTS RENDER
+---------------------------- */
+function renderEvents(events){
+  const box = document.getElementById("events");
+  box.innerHTML = "";
+
+  events
+    .sort((a,b)=> new Date(b.timestamp) - new Date(a.timestamp))
+    .forEach(ev=>{
+      const div = document.createElement("div");
+      div.className = "event";
+      div.innerHTML = `
+        <div class="event-time">${formatDate(ev.timestamp)}</div>
+        <div class="event-type">${ev.type.replace(/_/g," ")}</div>
+        ${ev.note ? `<div class="event-note">${ev.note}</div>` : ""}
+      `;
+      box.appendChild(div);
+    });
+}
+
+/* ---------------------------
+   MODALS
+---------------------------- */
+function closeModals(){
+  document.querySelectorAll(".modal").forEach(m => m.style.display="none");
+}
+function openPriorityModal(){ closeModals(); document.getElementById("priorityModal").style.display="flex"; }
+function openStatusModal(){ closeModals(); document.getElementById("statusModal").style.display="flex"; }
+function openNoteModal(){ closeModals(); document.getElementById("noteModal").style.display="flex"; }
+
+/* ---------------------------
+   ACTIONS → WORKER
+---------------------------- */
+async function submitPriority(){
+  const pr = document.getElementById("newPriority").value;
+  const note = document.getElementById("priorityNote").value;
+
+  await updateJob({
+    type:"priority_changed",
+    newPriority:pr,
+    note
+  });
+}
+
+async function submitStatus(){
+  const st = document.getElementById("newStatus").value;
+  const note = document.getElementById("statusNote").value;
+
+  await updateJob({
+    type:"status_changed",
+    newStatus:st,
+    note
+  });
+}
+
+async function submitNote(){
+  const text = document.getElementById("noteText").value;
+  if(!text.trim()) return;
+
+  await updateJob({
+    type:"note_added",
+    note:text
+  });
+}
+
+async function updateJob(payload){
+  const res = await fetch(`${API}/job/update`, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({
+      id:jobId,
+      updatedBy: sessionStorage.getItem("mostlaneUser") || "Unknown",
+      ...payload
+    })
+  });
+
+  const result = await res.json();
+  closeModals();
+  await loadJob();
+}
+
+/* ---------------------------
+   HELPERS
+---------------------------- */
+function formatDate(ts){
+  return new Date(ts).toLocaleString("en-GB", { 
+    day:"2-digit", month:"short", year:"numeric", 
+    hour:"2-digit", minute:"2-digit" 
+  });
+}
+</script>
+
+</body>
+</html>
