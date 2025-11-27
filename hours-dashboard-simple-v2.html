@@ -164,35 +164,37 @@ async function fetchData(){
   return res.json();
 }
 
-// ✅ FIXED FUNCTION — now correctly matches your JSON weekKey structure
+// ✅ FIXED – robust week matching for your live JSON
 function getEntriesForWeek(data, anchorDate){
-  const currentKey = getWeekKeyForDate(anchorDate); // Sunday key
-  const prevKeyDate = new Date(currentKey);
-  prevKeyDate.setUTCDate(prevKeyDate.getUTCDate() - 7);
-  const prevKey = prevKeyDate.toISOString().slice(0,10);
+  const currentKey = getWeekKeyForDate(anchorDate);
+  const prevWeek = new Date(currentKey);
+  prevWeek.setUTCDate(prevWeek.getUTCDate() - 7);
+  const prevKey = prevWeek.toISOString().slice(0,10);
 
   const all = [];
   for(const list of Object.values(data)){
     if(Array.isArray(list)) all.push(...list);
   }
 
-  // try direct match first
+  // try exact match
   let filtered = all.filter(e => e.weekKey === currentKey);
+
+  // if nothing, try weekKey - 1
   if(!filtered.length){
-    // try the offset weekKey if JSON weekKey is one week behind
     filtered = all.filter(e => e.weekKey === prevKey);
   }
 
   if(filtered.length) return dedupeEntries(filtered);
 
-  // fallback: date-range filter
+  // fallback – date range (Mon–Sun)
   const mon = startOfWeekMonday(anchorDate);
   const sun = endOfWeekSunday(anchorDate);
-  const rangeFiltered = all.filter(e=>{
+  const fallback = all.filter(e=>{
+    if(!e.date) return false;
     const d = new Date(e.date+"T00:00:00Z");
     return d>=mon && d<=sun;
   });
-  return dedupeEntries(rangeFiltered);
+  return dedupeEntries(fallback);
 }
 
 function isCurrentWeek(anchor){
