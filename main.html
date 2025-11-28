@@ -110,7 +110,7 @@
     <a class="button" href="sites.html" id="Sites"><span class="emoji">📍</span> Manage Sites</a>
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
 
-    <!-- FIXED HERE -->
+    <!-- FIXED -->
     <a class="button" href="javascript:void(0)" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
 
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
@@ -120,7 +120,10 @@
     <a class="button" href="po-menu.html" id="PurchaseOrders2"><span class="emoji">💷</span> Purchase Orders</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
 
-    <!-- FIXED HERE -->
+    <!-- ⭐ NEW SLA BUTTON ⭐ -->
+    <a class="button" href="sla-menu.html" id="SLA"><span class="emoji">🚨</span> SLA</a>
+
+    <!-- FIXED -->
     <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
@@ -153,10 +156,12 @@
         MyDocuments: ["MyDocuments", "my-documents-btn"],
         
         Weekly: ["Weekly"],
-
         Forms: ["Forms", "formsBtn"],
         Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
         Users: ["Users", "usersAdmin", "usersAdminBtn"],
+
+        /* ⭐ NEW SLA PERMISSION ⭐ */
+        SLA: ["SLA", "slaMenu", "slaAccess"]
       };
 
       Object.entries(MAP).forEach(([buttonID, keyList]) => {
@@ -185,7 +190,6 @@
         }
       });
 
-      // Fix last-row layout
       setTimeout(() => {
         const buttons = [...document.querySelectorAll(".button.visible")];
         buttons.forEach(b => b.classList.remove("full-width"));
