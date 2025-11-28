@@ -206,7 +206,6 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn">← My Jobs</a>
-        <!-- PO: open existing po.html prefilled with this jobId -->
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
       </div>
     </div>
@@ -280,23 +279,28 @@
     <div id="statusBar">Ready.</div>
   </div>
 
-  <!-- PHOTOS / SIGNATURE (placeholders wired for later R2 worker) -->
+  <!-- PHOTOS -->
   <div class="card">
     <h2 class="section-title">Photos</h2>
-    <p class="section-sub">Upload site / before / after photos for this job (will be saved against this job ID).</p>
+    <p class="section-sub">Upload site / before / after photos for this job.</p>
+
     <input type="file" id="photoInput" accept="image/*" multiple>
-    <div class="panel-light">
-      Photo upload endpoint will be wired to your R2 bucket: <code>jobs/{jobId}/photos/...</code>.  
-      For now this is a placeholder; once the new Worker route for file upload is in place,
-      this input will POST to <code>/jobs/:id/files</code>.
+
+    <button class="btn primary" id="uploadPhotosBtn" style="margin-top:10px;">
+      Upload Selected Photos
+    </button>
+
+    <div id="photoStatus" class="panel-light">
+      Select photos to upload.
     </div>
   </div>
 
+  <!-- SIGNATURE -->
   <div class="card">
     <h2 class="section-title">Customer Signature</h2>
-    <p class="section-sub">Later we can add a canvas or JotForm iframe here to capture a sign-off signature and store it per job.</p>
+    <p class="section-sub">Signature capture will be stored in R2.</p>
     <div class="panel-light">
-      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code> and linked in the job history.
+      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code>.
     </div>
   </div>
 </div>
@@ -428,10 +432,8 @@ function renderJob(){
   pill.textContent = st;
   pill.className = statusClass(st, slaInfo.status);
 
-  // assigned engineer
   $("jobAssigned").textContent = job.assignedTo || "Unassigned";
 
-  // select current status in dropdown if possible
   const statusSelect = $("statusSelect");
   let matched = false;
   Array.from(statusSelect.options).forEach(opt => {
@@ -447,7 +449,6 @@ function renderJob(){
     $("noteInput").value = "";
   }
 
-  // PO button pre-fills jobId in your existing po.html
   const poUrl = `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
   $("poBtn").href = poUrl;
 
@@ -527,8 +528,46 @@ async function saveUpdate(){
   }
 }
 
+/* ============================================
+   PHOTO UPLOAD (NEW)
+============================================ */
+async function uploadPhotos(){
+  const files = $("photoInput").files;
+  if(!files.length){
+    $("photoStatus").textContent = "No files selected.";
+    return;
+  }
+
+  const jobId = job.id;
+  const user = getUser();
+
+  $("photoStatus").textContent = "Uploading…";
+
+  for(const file of files){
+    const form = new FormData();
+    form.append("file", file);
+    form.append("uploadedBy", user);
+
+    try{
+      const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}/files`, {
+        method: "POST",
+        body: form
+      });
+      if(!res.ok) throw new Error("Upload failed");
+
+      const out = await res.json();
+      $("photoStatus").textContent = "✅ Uploaded: " + file.name;
+
+    } catch(err){
+      console.error(err);
+      $("photoStatus").textContent = "❌ Failed uploading " + file.name;
+    }
+  }
+}
+
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
+  $("uploadPhotosBtn").addEventListener("click", uploadPhotos);
   loadJob();
 }
 
