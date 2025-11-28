@@ -278,17 +278,20 @@
     <div id="statusBar">Ready.</div>
   </div>
 
-  <!-- PHOTOS -->
+    <!-- PHOTOS -->
   <div class="card">
     <h2 class="section-title">Photos</h2>
     <p class="section-sub">Upload site / before / after photos for this job (will be saved against this job ID).</p>
 
-    <!-- ✅ FIX APPLIED HERE -->
     <input type="file" id="photoInput" accept="image/*" multiple>
 
-    <div class="panel-light">
-      Photo upload endpoint is wired to your R2 bucket under:<br>
-      <code>jobs/{jobId}/photos/{filename}</code>.
+    <button class="btn primary" id="uploadBtn">Upload Photos</button>
+
+    <!-- Debug panel -->
+    <div id="uploadDebug"
+      style="background:#fff;border:1px solid #ccc;margin-top:12px;
+             padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap;">
+      <b>Debug Log:</b>\n
     </div>
   </div>
 
@@ -529,47 +532,67 @@ function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
 
   // ------------------------
-  // PHOTO UPLOAD HANDLER
+  // PHOTO UPLOAD DEBUG HANDLER
   // ------------------------
-  $("photoInput").addEventListener("change", async evt => {
-    const files = evt.target.files;
+  function logDebug(msg){
+    const box = document.getElementById("uploadDebug");
+    box.textContent += `\n${msg}`;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  document.getElementById("uploadBtn").addEventListener("click", async () => {
+    const files = $("photoInput").files;
+
+    logDebug("\n=== UPLOAD START ===");
+
     if(!files || !files.length){
-      $("statusBar").textContent = "No photos selected.";
+      logDebug("❌ No files selected.");
       return;
     }
 
     const jobId = job?.id;
     if(!jobId){
-      $("statusBar").textContent = "❌ Cannot upload: job not loaded.";
+      logDebug("❌ No jobId loaded.");
       return;
     }
 
-    $("statusBar").textContent = "Uploading photos…";
-
-    let anyFail = false;
-
     for(const file of files){
-      try{
-        const formData = new FormData();
-        formData.append("file", file, file.name);
+      logDebug(`Uploading: ${file.name} (${file.size} bytes, ${file.type})`);
 
-        const res = await fetch(
-          `${SLA_API}/jobs/${encodeURIComponent(jobId)}/files?filename=${encodeURIComponent(file.name)}`,
-          { method:"POST", body: formData }
-        );
+      const form = new FormData();
+      form.append("file", file, file.name);
+
+      const url = `${SLA_API}/jobs/${encodeURIComponent(jobId)}/files?filename=${encodeURIComponent(file.name)}`;
+      logDebug("POST → " + url);
+
+      try{
+        const res = await fetch(url, { method:"POST", body:form });
+
+        logDebug("Status: " + res.status);
+
+        let text;
+        try{
+          text = await res.text();
+        }catch(err){
+          text = "(could not read response text)";
+        }
+
+        logDebug("Response:\n" + text);
 
         if(!res.ok){
-          anyFail = true;
-          continue;
+          logDebug("❌ Upload failed.");
+        }else{
+          logDebug("✅ Upload complete.");
         }
+
       }catch(err){
-        console.error("upload error", err);
-        anyFail = true;
+        logDebug("❌ JS ERROR: " + err.message);
       }
+
+      logDebug("----");
     }
 
-    $("statusBar").textContent =
-      anyFail ? "❌ One or more uploads failed." : "✅ Photos uploaded.";
+    logDebug("=== UPLOAD END ===\n");
   });
 
   loadJob();
