@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane • SLA Menu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --text:#0f172a;
+      --muted:#6b7280;
+      --panel:rgba(255,255,255,0.9);
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+    }
+
+    .shell {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.12);
+      border: 1px solid rgba(15,23,42,0.05);
+    }
+
+    header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:18px;
+    }
+
+    header h1 {
+      margin:0;
+      font-size:22px;
+      color:var(--ml-blue);
+    }
+
+    .sub {
+      font-size:12px;
+      color:var(--muted);
+      margin-top:4px;
+    }
+
+    .buttons {
+      display:grid;
+      gap:20px;
+      margin-top:10px;
+    }
+
+    /* Reuse Main Menu button style */
+    a.button {
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:18px 20px;
+      background:linear-gradient(180deg,#1A4F8F 0%,#003468 100%);
+      border-radius:14px;
+      box-shadow:
+        0 4px 10px rgba(0,0,0,0.25),
+        inset 0 1px 2px rgba(255,255,255,0.15);
+      text-decoration:none;
+      color:#ffffff;
+      font-weight:600;
+      font-size:17px;
+      transition:0.2s ease;
+    }
+    a.button:hover {
+      transform:translateY(-2px);
+      box-shadow:
+        0 7px 14px rgba(0,0,0,0.30),
+        inset 0 1px 2px rgba(255,255,255,0.20);
+    }
+
+    .emoji {
+      font-size:2rem;
+      flex-shrink:0;
+      margin-right:4px;
+    }
+
+    #forbidden {
+      display:none;
+      margin-top:30px;
+      padding:20px;
+      background:#fff;
+      border-radius:12px;
+      text-align:center;
+      font-size:16px;
+      color:#b91c1c;
+      border:1px solid #fca5a5;
+      box-shadow:0 4px 10px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="card">
+    <header>
+      <div>
+        <h1>SLA Menu</h1>
+        <div class="sub" id="userLabel"></div>
+      </div>
+      <a href="main.html" class="button" style="font-size:14px;padding:10px 14px;">
+        ← Back
+      </a>
+    </header>
+
+    <div id="forbidden">🚫 You do not have permission to access SLA tools.</div>
+
+    <div class="buttons" id="buttonsArea" style="display:none">
+      <a href="sla-main.html" class="button" id="SLA_Dashboard">
+        <span class="emoji">📊</span> Dashboard
+      </a>
+
+      <a href="sla-job-view.html" class="button" id="SLA_Jobs">
+        <span class="emoji">📝</span> Jobs
+      </a>
+
+      <a href="sla-settings.html" class="button" id="SLA_Settings">
+        <span class="emoji">⚙️</span> Settings
+      </a>
+
+      <a class="button" onclick="sessionStorage.clear(); window.location.href='login.html';">
+        <span class="emoji">🚪</span> Logout
+      </a>
+    </div>
+  </div>
+</div>
+
+<script>
+  async function init() {
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (!user) {
+      window.location.href = "login.html";
+      return;
+    }
+
+    document.getElementById("userLabel").textContent = "Logged in as " + user;
+
+    // Fetch permissions
+    const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(user));
+    const data = await res.json();
+    if (!data.found) return;
+
+    const u = data.user;
+    const fullAccess = (u.FullAccess || "").toLowerCase() === "yes";
+    const slaAllowed = (u.SLA || "").toLowerCase() === "yes";
+
+    if (fullAccess || slaAllowed) {
+      document.getElementById("buttonsArea").style.display = "grid";
+    } else {
+      document.getElementById("forbidden").style.display = "block";
+    }
+  }
+
+  init();
+</script>
+
+</body>
+</html>
