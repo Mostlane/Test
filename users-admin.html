@@ -296,6 +296,7 @@
         "Compliance": "Compliance",
         "HoursDashboard": "HoursDashboard",
         "Users": "Users",
+        "SLA": "SLA",   // <-- SLA main button
 
         // Legacy / other button ids
         checkinBtn: "CheckInOut",
@@ -322,7 +323,9 @@
         "Users": "Users",
         "My Documents": "MyDocuments",
         "Compliance": "Compliance",
-        "Hours Dashboard": "HoursDashboard"
+        "Hours Dashboard": "HoursDashboard",
+        "SLA": "SLA",          // label-based match
+        "SLA Menu": "SLA"      // label-based match
       };
 
       if (id && mapByExact[id]) return mapByExact[id];
@@ -343,6 +346,7 @@
         if (clean.includes('hours-dashboard')) return 'HoursDashboard';
         if (clean.includes('users-admin'))  return 'Users';
         if (clean.includes('vehicles'))     return 'Vehicles';
+        if (clean.includes('sla-menu'))     return 'SLA';   // sla-menu.html → SLA perm
       }
 
       // Fallback: stable-ish key from href, id, or label
