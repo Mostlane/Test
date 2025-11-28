@@ -206,6 +206,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn">← My Jobs</a>
+        <!-- PO: open existing po.html prefilled with this jobId -->
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
       </div>
     </div>
@@ -282,25 +283,18 @@
   <!-- PHOTOS -->
   <div class="card">
     <h2 class="section-title">Photos</h2>
-    <p class="section-sub">Upload site / before / after photos for this job.</p>
-
+    <p class="section-sub">Upload site / before / after photos for this job (will be saved against this job ID).</p>
     <input type="file" id="photoInput" accept="image/*" multiple>
-
-    <button class="btn primary" id="uploadPhotosBtn" style="margin-top:10px;">
-      Upload Selected Photos
-    </button>
-
-    <div id="photoStatus" class="panel-light">
-      Select photos to upload.
-    </div>
+    <div id="photoStatus" class="section-sub" style="margin-top:6px;">No photos uploaded yet.</div>
+    <div id="photoList" class="panel-light" style="display:none;"></div>
   </div>
 
-  <!-- SIGNATURE -->
+  <!-- SIGNATURE PLACEHOLDER -->
   <div class="card">
     <h2 class="section-title">Customer Signature</h2>
-    <p class="section-sub">Signature capture will be stored in R2.</p>
+    <p class="section-sub">Later we can add a canvas or JotForm iframe here to capture a sign-off signature and store it per job.</p>
     <div class="panel-light">
-      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code>.
+      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code> and linked in the job history.
     </div>
   </div>
 </div>
@@ -432,8 +426,10 @@ function renderJob(){
   pill.textContent = st;
   pill.className = statusClass(st, slaInfo.status);
 
+  // assigned engineer
   $("jobAssigned").textContent = job.assignedTo || "Unassigned";
 
+  // select current status in dropdown if possible
   const statusSelect = $("statusSelect");
   let matched = false;
   Array.from(statusSelect.options).forEach(opt => {
@@ -449,6 +445,7 @@ function renderJob(){
     $("noteInput").value = "";
   }
 
+  // PO button pre-fills jobId in your existing po.html
   const poUrl = `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
   $("poBtn").href = poUrl;
 
@@ -528,46 +525,60 @@ async function saveUpdate(){
   }
 }
 
-/* ============================================
-   PHOTO UPLOAD (NEW)
-============================================ */
-async function uploadPhotos(){
-  const files = $("photoInput").files;
-  if(!files.length){
-    $("photoStatus").textContent = "No files selected.";
+async function uploadPhotos(evt){
+  if(!job){
+    $("statusBar").textContent = "No job loaded.";
     return;
   }
+  const files = Array.from(evt.target.files || []);
+  if(!files.length) return;
 
-  const jobId = job.id;
-  const user = getUser();
+  const statusEl = $("photoStatus");
+  const listEl = $("photoList");
 
-  $("photoStatus").textContent = "Uploading…";
+  statusEl.textContent = `Uploading ${files.length} photo(s)…`;
 
+  const uploaded = [];
   for(const file of files){
-    const form = new FormData();
-    form.append("file", file);
-    form.append("uploadedBy", user);
-
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("uploadedBy", getUser());
     try{
-      const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}/files`, {
-        method: "POST",
-        body: form
-      });
-      if(!res.ok) throw new Error("Upload failed");
-
-      const out = await res.json();
-      $("photoStatus").textContent = "✅ Uploaded: " + file.name;
-
-    } catch(err){
-      console.error(err);
-      $("photoStatus").textContent = "❌ Failed uploading " + file.name;
+      const res = await fetch(
+        `${SLA_API}/jobs/${encodeURIComponent(job.id)}/files`,
+        { method:"POST", body: fd }
+      );
+      if(!res.ok){
+        const txt = await res.text().catch(()=> "");
+        throw new Error(txt || (res.status + " " + res.statusText));
+      }
+      const data = await res.json();
+      uploaded.push(data);
+    }catch(err){
+      console.error("upload error", err);
+      statusEl.textContent = "❌ One or more uploads failed.";
     }
   }
+
+  if(uploaded.length){
+    statusEl.textContent = `✅ Uploaded ${uploaded.length} photo(s).`;
+    listEl.style.display = "block";
+    listEl.innerHTML = uploaded.map(u=>{
+      const url = u.url || u.publicUrl || "";
+      if(!url) return "";
+      return `<div style="margin-bottom:6px;">
+        <a href="${url}" target="_blank" rel="noopener">${url}</a>
+      </div>`;
+    }).join("");
+  }
+
+  // reset file input so same file can be reselected if needed
+  evt.target.value = "";
 }
 
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
-  $("uploadPhotosBtn").addEventListener("click", uploadPhotos);
+  $("photoInput").addEventListener("change", uploadPhotos);
   loadJob();
 }
 
