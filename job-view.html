@@ -5,6 +5,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+
   <style>
     :root{
       --ml-blue:#003b82;
@@ -18,7 +19,9 @@
       --warn:#f97316;
       --bad:#dc2626;
     }
+
     *{box-sizing:border-box;}
+
     html,body{
       margin:0;padding:0;
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
@@ -26,11 +29,9 @@
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
     }
-    .shell{
-      max-width:1100px;
-      margin:24px auto;
-      padding:0 16px;
-    }
+
+    .shell{max-width:1100px;margin:24px auto;padding:0 16px;}
+
     .card{
       background:var(--panel);
       border-radius:14px;
@@ -39,299 +40,185 @@
       padding:16px 18px 18px;
       margin-bottom:14px;
     }
+
     .header-row{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:12px;
-      margin-bottom:10px;
+      display:flex;justify-content:space-between;align-items:flex-start;
+      gap:12px;margin-bottom:10px;
     }
-    h1{
-      margin:0;
-      font-size:20px;
-      color:var(--ml-blue);
-    }
-    .sub{
-      font-size:12px;
-      color:var(--muted);
-    }
+
+    h1{margin:0;font-size:20px;color:var(--ml-blue);}
+    .sub{font-size:12px;color:var(--muted);}
+
     .btn{
-      border-radius:999px;
-      padding:8px 14px;
-      font-size:13px;
-      border:1px solid #d1d5db;
-      background:#f9fafb;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      text-decoration:none;
-      color:var(--text);
-      font-weight:500;
-      white-space:nowrap;
+      border-radius:999px;padding:8px 14px;font-size:13px;
+      border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;
+      display:inline-flex;align-items:center;gap:6px;text-decoration:none;
+      color:var(--text);font-weight:500;white-space:nowrap;
     }
-    .btn.primary{
-      background:var(--ml-blue);
-      color:#fff;
-      border-color:var(--ml-blue);
-    }
-    .ref-badge{
-      font-family:monospace;
-      font-size:13px;
-      background:#f9fafb;
-      padding:3px 7px;
-      border-radius:999px;
-      display:inline-block;
-    }
-    .row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:14px;
-    }
-    .col{
-      flex:1 1 260px;
-      min-width:0;
-    }
+    .btn.primary{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue);}
+
+    .ref-badge{font-family:monospace;font-size:13px;background:#f9fafb;padding:3px 7px;border-radius:999px;display:inline-block;}
+
+    .row{display:flex;flex-wrap:wrap;gap:14px;}
+    .col{flex:1 1 260px;min-width:0;}
+
     .field-label{
-      font-size:11px;
-      text-transform:uppercase;
-      color:var(--muted);
-      margin-bottom:2px;
+      font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:2px;
     }
-    .field-value{
-      font-size:13px;
-    }
+    .field-value{font-size:13px;}
+
     .priority-badge{
-      border-radius:999px;
-      padding:2px 7px;
-      font-size:11px;
-      font-weight:600;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
+      border-radius:999px;padding:2px 7px;font-size:11px;font-weight:600;
+      display:inline-flex;align-items:center;gap:4px;
     }
     .p1{background:#fef2f2;color:#b91c1c;}
     .p2{background:#fffbeb;color:#92400e;}
     .p3{background:#ecfdf5;color:#166534;}
     .p4{background:#eff6ff;color:#1d4ed8;}
+
     .sla-badge{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      font-variant-numeric:tabular-nums;
-      white-space:nowrap;
+      border-radius:999px;padding:3px 8px;font-size:11px;
+      display:inline-flex;align-items:center;gap:4px;
+      font-variant-numeric:tabular-nums;white-space:nowrap;
     }
     .sla-green{background:#ecfdf5;color:#166534;}
     .sla-amber{background:#fffbeb;color:#92400e;}
     .sla-red{background:#fef2f2;color:#b91c1c;}
     .sla-none{background:#e5e7eb;color:#4b5563;}
+
     .status-pill{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      background:#e5e7eb;
-      color:#111827;
+      border-radius:999px;padding:3px 8px;font-size:11px;display:inline-flex;
+      align-items:center;gap:4px;background:#e5e7eb;color:#111827;
     }
     .status-open{background:#dcfce7;color:#166534;}
     .status-overdue{background:#fee2e2;color:#b91c1c;}
     .status-complete{background:#e5e7eb;color:#374151;}
-    .section-title{
-      font-size:14px;
-      font-weight:600;
-      margin:0 0 6px;
-      color:#111827;
-    }
-    .section-sub{
-      font-size:11px;
-      color:var(--muted);
-      margin-bottom:8px;
-    }
-    select, textarea, input[type="file"]{
-      width:100%;
-      border-radius:8px;
-      border:1px solid #d1d5db;
-      padding:7px 9px;
-      font-size:13px;
-      font-family:inherit;
-      background:#fff;
-    }
-    textarea{
-      min-height:70px;
-      resize:vertical;
-    }
-    #statusBar{
-      font-size:12px;
-      color:var(--muted);
-      margin-top:6px;
-    }
-    .pill-row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      align-items:center;
-      margin-top:4px;
-    }
-    .panel-light{
-      background:#f9fafb;
-      border-radius:10px;
-      padding:10px 12px;
-      border:1px solid #e5e7eb;
-      margin-top:6px;
-      font-size:12px;
-      color:var(--muted);
+
+    .section-title{font-size:14px;font-weight:600;margin:0 0 6px;color:#111827;}
+    .section-sub{font-size:11px;color:var(--muted);margin-bottom:8px;}
+
+    select, textarea{
+      width:100%;border-radius:8px;border:1px solid #d1d5db;
+      padding:7px 9px;font-size:13px;font-family:inherit;background:#fff;
     }
 
-    /* --- Photos layout --- */
-    .photo-upload-row{
+    textarea{min-height:70px;resize:vertical;}
+
+    #statusBar{font-size:12px;color:var(--muted);margin-top:6px;}
+
+    .panel-light{
+      background:#f9fafb;border-radius:10px;padding:10px 12px;
+      border:1px solid #e5e7eb;margin-top:6px;font-size:12px;color:var(--muted);
+    }
+
+    /* ------------------------------
+       BIG UPLOAD TILE
+    ------------------------------ */
+    #uploadTile{
+      width:100%;
+      height:160px;
+      border:2px dashed var(--border);
+      border-radius:14px;
+      background:#f9fafb;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
+      cursor:pointer;
+      margin-top:10px;
+    }
+    #uploadTile:hover{
+      background:#f3f4f6;
+    }
+    #uploadTile .plus{
+      font-size:48px;
+      color:#9ca3af;
+      line-height:1;
+    }
+    #uploadTile .txt{
+      margin-top:6px;
+      font-size:14px;
+      color:#6b7280;
+    }
+
+    /* Bigger Job Description text */
+    #jobDesc{
+      font-size:16px;
+      line-height:1.45;
+      padding-top:4px;
+    }
+
+    /* Hide native input */
+    #photoInput{ display:none; }
+
+    /* ------------------------------
+       ADDED: GALLERY STYLES
+    ------------------------------ */
+    #photoGallery{
+      margin-top:14px;
       display:flex;
       flex-wrap:wrap;
       gap:10px;
-      align-items:center;
-      margin-bottom:10px;
-    }
-    .photo-upload-row input[type="file"]{
-      flex:1 1 220px;
-    }
-    .photo-upload-row .btn{
-      flex:0 0 auto;
-    }
-    #photoUploadStatus{
-      font-size:12px;
-      color:var(--muted);
-      margin-top:4px;
-    }
-    .photo-grid{
-      margin-top:10px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-    }
-    .photo-thumb{
-      width:90px;
-      height:90px;
-      border-radius:8px;
-      overflow:hidden;
-      border:1px solid #d1d5db;
-      background:#f3f4f6;
-      cursor:pointer;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-    }
-    .photo-thumb img{
-      width:100%;
-      height:100%;
-      object-fit:cover;
-      display:block;
-    }
-    .photo-thumb-empty{
-      font-size:11px;
-      color:#9ca3af;
-      text-align:center;
-      padding:20px 0;
     }
 
-    /* --- Modal viewer --- */
-    .photo-modal{
-      position:fixed;
-      inset:0;
-      background:rgba(15,23,42,0.75);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      z-index:9999;
-    }
-    .photo-modal.hidden{
-      display:none;
-    }
-    .photo-modal-inner{
-      position:relative;
-      max-width:90vw;
-      max-height:90vh;
-      background:#000;
-      border-radius:12px;
-      overflow:hidden;
-      box-shadow:0 20px 45px rgba(0,0,0,0.5);
-    }
-    .photo-modal img{
-      display:block;
-      max-width:90vw;
-      max-height:90vh;
-      object-fit:contain;
-    }
-    .photo-modal-close{
-      position:absolute;
-      top:8px;
-      right:8px;
-      border:none;
-      border-radius:999px;
-      padding:4px 10px;
-      font-size:13px;
+    .thumb{
+      width:90px;
+      height:90px;
+      border-radius:10px;
+      object-fit:cover;
       cursor:pointer;
-      background:rgba(17,24,39,0.8);
-      color:#e5e7eb;
+      border:1px solid #d1d5db;
     }
-    .photo-modal-nav{
+
+    /* Modal */
+    #photoModal{
+      position:fixed;
+      z-index:9999;
+      top:0;left:0;right:0;bottom:0;
+      background:rgba(0,0,0,0.85);
+      display:none;
+      justify-content:center;
+      align-items:center;
+      flex-direction:column;
+      padding:20px;
+    }
+
+    #modalImg{
+      max-width:90%;
+      max-height:80%;
+      border-radius:12px;
+    }
+
+    #modalClose{
+      color:white;
+      font-size:30px;
+      margin-top:15px;
+      cursor:pointer;
+    }
+
+    #modalPrev, #modalNext{
       position:absolute;
       top:50%;
       transform:translateY(-50%);
-      border:none;
-      border-radius:999px;
-      padding:6px 10px;
-      font-size:16px;
+      font-size:40px;
+      color:white;
       cursor:pointer;
-      background:rgba(17,24,39,0.75);
-      color:#e5e7eb;
-    }
-    .photo-modal-nav.left{
-      left:8px;
-    }
-    .photo-modal-nav.right{
-      right:8px;
-    }
-    .photo-modal-nav.hidden{
-      display:none;
-    }
-    .photo-modal-counter{
-      position:absolute;
-      bottom:8px;
-      right:12px;
-      font-size:12px;
-      color:#e5e7eb;
-      background:rgba(17,24,39,0.7);
-      padding:3px 8px;
-      border-radius:999px;
+      padding:8px 14px;
     }
 
+    #modalPrev{ left:10px; }
+    #modalNext{ right:10px; }
+
     @media(max-width:768px){
-      .header-row{
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      .photo-upload-row{
-        flex-direction:column;
-        align-items:stretch;
-      }
-      .photo-upload-row .btn{
-        width:100%;
-        justify-content:center;
-      }
-      .photo-thumb{
-        width:80px;
-        height:80px;
-      }
+      .header-row{flex-direction:column;align-items:flex-start;}
     }
   </style>
 </head>
+
 <body>
 <div class="shell">
-  <!-- HEADER / SUMMARY -->
+
+  <!-- HEADER -->
   <div class="card">
     <div class="header-row">
       <div>
@@ -349,12 +236,12 @@
         <div class="field-label">Reference</div>
         <div class="field-value"><span class="ref-badge" id="jobRef">—</span></div>
       </div>
+
       <div class="col">
         <div class="field-label">Priority</div>
-        <div class="field-value">
-          <span class="priority-badge p4" id="jobPriority">P4</span>
-        </div>
+        <div class="field-value"><span class="priority-badge p4" id="jobPriority">P4</span></div>
       </div>
+
       <div class="col">
         <div class="field-label">Site</div>
         <div class="field-value" id="jobSite">—</div>
@@ -366,6 +253,7 @@
         <div class="field-label">Raised</div>
         <div class="field-value" id="jobRaised">—</div>
       </div>
+
       <div class="col">
         <div class="field-label">SLA Target / Countdown</div>
         <div class="pill-row">
@@ -373,24 +261,25 @@
           <span class="status-pill" id="jobStatusPill">Status</span>
         </div>
       </div>
+
       <div class="col">
         <div class="field-label">Assigned To</div>
         <div class="field-value" id="jobAssigned">—</div>
       </div>
     </div>
 
-    <div style="margin-top:10px;">
-      <div class="field-label">Description</div>
+    <!-- DESC -->
+    <div style="margin-top:12px;">
+      <div class="field-label">Job Description</div>
       <div class="field-value" id="jobDesc">—</div>
     </div>
   </div>
 
-  <!-- STATUS / NOTES -->
+  <!-- STATUS + NOTES -->
   <div class="card">
     <h2 class="section-title">Update Status</h2>
-    <p class="section-sub">
-      Any change you make here is logged in the job event history with your name and a timestamp.
-    </p>
+    <p class="section-sub">Any change you make here is logged in the job event history.</p>
+
     <div class="row">
       <div class="col">
         <div class="field-label">Status</div>
@@ -402,71 +291,68 @@
           <option value="Closed">Closed</option>
         </select>
       </div>
+
       <div class="col">
         <div class="field-label">Note / Update</div>
-        <textarea id="noteInput" placeholder="e.g. Arrived on site, waiting on materials…"></textarea>
+        <textarea id="noteInput" placeholder="e.g. Arrived on site…"></textarea>
       </div>
     </div>
-    <div style="margin-top:10px;display:flex;gap:8px;">
+
+    <div style="margin-top:10px;">
       <button class="btn primary" id="saveBtn">Save Update</button>
     </div>
+
     <div id="statusBar">Ready.</div>
   </div>
 
   <!-- PHOTOS -->
   <div class="card">
     <h2 class="section-title">Photos</h2>
-    <p class="section-sub">
-      Upload site / before / after photos for this job. Files are stored against this job ID in R2.
-    </p>
+    <p class="section-sub">Upload site photos for this job.</p>
 
-    <div class="photo-upload-row">
-      <input type="file" id="photoInput" accept="image/*" multiple>
-      <button class="btn primary" id="uploadBtn">Upload Photos</button>
+    <!-- BIG TILE -->
+    <div id="uploadTile">
+      <div class="plus">+</div>
+      <div class="txt">Upload Photo</div>
     </div>
-    <div id="photoUploadStatus">No photos uploaded in this session yet.</div>
 
-    <div id="photoGrid" class="photo-grid">
-      <div class="photo-thumb photo-thumb-empty">Photos you upload will appear here.</div>
-    </div>
-  </div>
+    <input type="file" id="photoInput" accept="image/*" multiple>
 
-  <!-- PHOTO MODAL -->
-  <div id="photoModal" class="photo-modal hidden">
-    <div class="photo-modal-inner">
-      <button type="button" class="photo-modal-close" id="photoModalClose">Close ✕</button>
-      <button type="button" class="photo-modal-nav left" id="photoPrevBtn">‹</button>
-      <button type="button" class="photo-modal-nav right" id="photoNextBtn">›</button>
-      <img id="photoModalImg" src="" alt="Job photo">
-      <div class="photo-modal-counter" id="photoModalCounter"></div>
-    </div>
+    <!-- ADDED: GALLERY -->
+    <div id="photoGallery"></div>
+
+    <div id="uploadDebug" style="display:none;"></div>
   </div>
 
   <div class="card">
     <h2 class="section-title">Customer Signature</h2>
-    <p class="section-sub">Later we can add a canvas or JotForm iframe here to capture a sign-off signature and store it per job.</p>
-    <div class="panel-light">
-      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code>.
-    </div>
+    <div class="panel-light">Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code></div>
   </div>
+</div>
+
+<!-- ADDED: FULLSCREEN PHOTO MODAL -->
+<div id="photoModal">
+  <div id="modalPrev">&#10094;</div>
+  <img id="modalImg">
+  <div id="modalNext">&#10095;</div>
+  <div id="modalClose">✕</div>
 </div>
 
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 let job = null;
-let countdownTimerId = null;
 
-// photo gallery state (this session)
-let photoGallery = [];
+/* ADDED: photo gallery state */
+let photoList = [];
 let currentPhotoIndex = 0;
 
+/* Utility */
 const $ = id => document.getElementById(id);
 
 function getUser(){
   return sessionStorage.getItem("mostlaneUser") ||
          sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") ||
-         "Portal User";
+         sessionStorage.getItem("username") || "Portal User";
 }
 
 function getJobIdFromQuery(){
@@ -481,23 +367,20 @@ function parseDate(v){
 }
 
 function fmtDateTimeLong(d){
-  if(!(d instanceof Date) || isNaN(d)) return "—";
+  if(!d) return "—";
   return d.toLocaleString("en-GB", {
-    weekday:"short",
-    day:"2-digit", month:"short", year:"numeric",
+    weekday:"short", day:"2-digit", month:"short", year:"numeric",
     hour:"2-digit", minute:"2-digit"
   });
 }
 
+/* SLA countdown */
 function computeSlaCountdown(targetISO){
-  if(!targetISO){
-    return {text:"—", cls:"sla-badge sla-none", status:"none"};
-  }
+  if(!targetISO) return {text:"—",cls:"sla-badge sla-none",status:"none"};
   const now = new Date();
   const target = parseDate(targetISO);
-  if(!target){
-    return {text:"—", cls:"sla-badge sla-none", status:"none"};
-  }
+  if(!target) return {text:"—",cls:"sla-badge sla-none",status:"none"};
+
   let diff = target - now;
   const overdue = diff < 0;
   if(overdue) diff = -diff;
@@ -508,358 +391,183 @@ function computeSlaCountdown(targetISO){
   const mins = Math.floor((secs%3600)/60);
 
   let label = overdue ? "+" : "";
-  if(days>0){
-    label += `${days}d ${String(hours).padStart(2,"0")}h`;
-  } else {
-    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
-  }
+  if(days>0) label += `${days}d ${String(hours).padStart(2,"0")}h`;
+  else label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
 
   const hoursLeft = (target - now) / 3600000;
-  let cls = "sla-badge sla-green";
-  let status = "ok";
+  let cls="sla-badge sla-green", status="ok";
 
-  if(overdue || hoursLeft <= 0){
-    cls = "sla-badge sla-red";
-    status = "overdue";
-  } else if(hoursLeft <= 1){
-    cls = "sla-badge sla-red";
-    status = "overdueSoon";
-  } else if(hoursLeft <= 4){
-    cls = "sla-badge sla-amber";
-    status = "warn";
-  }
+  if(overdue || hoursLeft<=0){cls="sla-badge sla-red";status="overdue";}
+  else if(hoursLeft<=1){cls="sla-badge sla-red";status="soon";}
+  else if(hoursLeft<=4){cls="sla-badge sla-amber";status="warn";}
 
-  return {
-    text: (overdue ? "Overdue " : "Due in ") + label,
-    cls,
-    status
-  };
+  return {text:(overdue?"Overdue ":"Due in ")+label,cls,status};
 }
 
-function statusClass(status, slaStatus){
-  const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")){
-    return "status-pill status-complete";
-  }
-  if(slaStatus === "overdue" || slaStatus === "overdueSoon"){
-    return "status-pill status-overdue";
-  }
+function statusClass(s,sla){
+  s = (s||"").toLowerCase();
+  if(s.includes("complete")||s.includes("closed")) return "status-pill status-complete";
+  if(sla==="overdue"||sla==="soon") return "status-pill status-overdue";
   return "status-pill status-open";
 }
 
-function renderJob(){
-  if(!job){
-    $("jobTitle").textContent = "Job not found";
-    $("jobSub").textContent = " ";
-    return;
+/* ---------------------------
+   ADDED: LOAD PHOTO LIST
+---------------------------- */
+async function loadPhotos(){
+  const gallery = $("photoGallery");
+  gallery.innerHTML = "";
+
+  const base = `https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/jobs/${job.id}/photos/`;
+
+  try {
+    const res = await fetch(base);
+    const text = await res.text();
+
+    const matches = [...text.matchAll(/href="([^"]+)"/g)];
+    photoList = matches
+      .map(m => m[1])
+      .filter(url => url.match(/\.(jpg|jpeg|png|heic|gif)$/i));
+
+  } catch(e){
+    console.warn("No photo index present in R2 (first upload will create folder)");
+    photoList = [];
   }
-  const ref = job.helpdeskRef || job.reference || job.id;
+
+  photoList.forEach((url, idx)=>{
+    const img = document.createElement("img");
+    img.src = url;
+    img.className = "thumb";
+    img.onclick = ()=> openModal(idx);
+    gallery.appendChild(img);
+  });
+}
+
+/* ---------------------------
+   ADDED: MODAL VIEWER
+---------------------------- */
+function openModal(idx){
+  currentPhotoIndex = idx;
+  $("modalImg").src = photoList[idx];
+  $("photoModal").style.display = "flex";
+
+  $("modalPrev").style.display = photoList.length > 1 ? "block" : "none";
+  $("modalNext").style.display = photoList.length > 1 ? "block" : "none";
+}
+
+function closeModal(){
+  $("photoModal").style.display = "none";
+}
+
+function nextPhoto(){
+  currentPhotoIndex = (currentPhotoIndex + 1) % photoList.length;
+  $("modalImg").src = photoList[currentPhotoIndex];
+}
+
+function prevPhoto(){
+  currentPhotoIndex = (currentPhotoIndex - 1 + photoList.length) % photoList.length;
+}
+
+/* Render job */
+function renderJob(){
+  if(!job) return;
+
+  const ref = job.helpdeskRef || job.id;
   $("jobTitle").textContent = `Job ${ref}`;
   $("jobRef").textContent = ref;
 
-  const site = job.siteName || job.siteCode || job.address || job.location || "—";
-  $("jobSite").textContent = site;
+  $("jobSite").textContent = job.siteName || job.siteCode || "—";
+  $("jobDesc").textContent = job.description || "—";
 
-  const desc = job.description || job.rawPayload?.description || "—";
-  $("jobDesc").textContent = desc;
+  $("jobRaised").textContent = fmtDateTimeLong(parseDate(job.raisedAt));
 
-  const priorityRaw = (job.priority || "P4").toString().toUpperCase();
-  $("jobPriority").textContent = priorityRaw;
-  $("jobPriority").className = "priority-badge " + priorityRaw.toLowerCase();
+  const sla = computeSlaCountdown(job.targetAt);
+  $("jobSlaBadge").textContent = sla.text;
+  $("jobSlaBadge").className = sla.cls;
+  $("jobSlaBadge").dataset.slaTarget = job.targetAt || "";
 
-  const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
-  $("jobRaised").textContent = fmtDateTimeLong(raised);
-
-  const target = job.targetAt || job.sla?.targetAt;
-  const slaInfo = computeSlaCountdown(target);
-  const slaEl = $("jobSlaBadge");
-  slaEl.textContent = slaInfo.text;
-  slaEl.className = slaInfo.cls;
-  slaEl.dataset.slaTarget = target || "";
-
-  const st = job.status || "With Contractor - R";
-  const pill = $("jobStatusPill");
-  pill.textContent = st;
-  pill.className = statusClass(st, slaInfo.status);
+  $("jobStatusPill").textContent = job.status || "With Contractor - R";
+  $("jobStatusPill").className = statusClass(job.status,sla.status);
 
   $("jobAssigned").textContent = job.assignedTo || "Unassigned";
 
-  const statusSelect = $("statusSelect");
-  let matched = false;
-  Array.from(statusSelect.options).forEach(opt => {
-    if(opt.value.toLowerCase() === st.toLowerCase()){
-      statusSelect.value = opt.value;
-      matched = true;
-    }
+  const st = job.status || "In Progress";
+  const sel = $("statusSelect");
+  Array.from(sel.options).forEach(o=>{
+    if(o.value.toLowerCase()===st.toLowerCase()) sel.value=o.value;
   });
-  if(!matched){
-    statusSelect.value = "In Progress";
-    $("noteInput").value = `Status changed from “${st}” to “In Progress”.`;
-  } else {
-    $("noteInput").value = "";
-  }
 
-  const poUrl =
-    `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
-  $("poBtn").href = poUrl;
+  $("poBtn").href =
+    `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(job.siteName||"")}`;
 
-  startCountdownLoop();
+  /* ADDED: load gallery now */
+  loadPhotos();
 }
 
-function startCountdownLoop(){
-  if(countdownTimerId) clearInterval(countdownTimerId);
-  const tick = () => {
-    const el = $("jobSlaBadge");
-    const iso = el.dataset.slaTarget;
-    const info = computeSlaCountdown(iso);
-    el.textContent = info.text;
-    el.className = info.cls;
-    if(job){
-      const pill = $("jobStatusPill");
-      pill.className = statusClass(job.status || "With Contractor - R", info.status);
-    }
-  };
-  tick();
-  countdownTimerId = setInterval(tick, 1000);
-}
-
+/* Load job data */
 async function loadJob(){
-  const jobId = getJobIdFromQuery();
-  if(!jobId){
-    $("statusBar").textContent = "Missing jobId in URL.";
-    return;
-  }
-  $("statusBar").textContent = "Loading job…";
-  try{
-    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}?t=${Date.now()}`, { cache:"no-store" });
-    if(!res.ok) throw new Error(res.status + " " + res.statusText);
-    job = await res.json();
-    $("jobSub").textContent = `From SLA worker • ID: ${job.id}`;
-    $("statusBar").textContent = "Loaded.";
-    renderJob();
-  }catch(err){
-    console.error("load error", err);
-    $("statusBar").textContent = "❌ Error loading job.";
-  }
+  const id = getJobIdFromQuery();
+  const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(id)}?t=${Date.now()}`);
+  job = await res.json();
+  $("jobSub").textContent = `ID: ${job.id}`;
+  renderJob();
 }
 
+/* Save update */
 async function saveUpdate(){
-  if(!job){
-    $("statusBar").textContent = "No job loaded.";
-    return;
-  }
-  const status = $("statusSelect").value;
-  const note = $("noteInput").value.trim();
-  const user = getUser();
-
-  $("statusBar").textContent = "Saving update…";
-
-  try{
-    const payload = {
-      status,
-      note,
-      changedBy: user
-    };
-    const res = await fetch(
-      `${SLA_API}/jobs/${encodeURIComponent(job.id)}`,
-      {
-        method:"PATCH",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
-    if(!res.ok) throw new Error(res.status + " " + res.statusText);
-    job = await res.json();
-    $("statusBar").textContent = "✅ Update saved.";
-    renderJob();
-    $("noteInput").value = "";
-  }catch(err){
-    console.error("save error", err);
-    $("statusBar").textContent = "❌ Error saving update.";
-  }
-}
-
-/* ---------------------------
-   PHOTO GALLERY RENDERING
----------------------------- */
-function renderPhotoGrid(){
-  const grid = $("photoGrid");
-  grid.innerHTML = "";
-
-  if(!photoGallery.length){
-    const empty = document.createElement("div");
-    empty.className = "photo-thumb photo-thumb-empty";
-    empty.textContent = "Photos you upload will appear here.";
-    grid.appendChild(empty);
-    $("photoUploadStatus").textContent = "No photos uploaded in this session yet.";
-    return;
-  }
-
-  photoGallery.forEach((ph, index) => {
-    const wrap = document.createElement("div");
-    wrap.className = "photo-thumb";
-    wrap.dataset.index = index;
-    const img = document.createElement("img");
-    img.src = ph.url;
-    img.alt = ph.name || "Job photo";
-    wrap.appendChild(img);
-    wrap.addEventListener("click", () => openPhotoModal(index));
-    grid.appendChild(wrap);
+  const payload = {
+    status: $("statusSelect").value,
+    note: $("noteInput").value.trim(),
+    changedBy: getUser()
+  };
+  const res = await fetch(`${SLA_API}/jobs/${job.id}`,{
+    method:"PATCH",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload)
   });
-
-  $("photoUploadStatus").textContent =
-    photoGallery.length === 1
-      ? "1 photo uploaded in this session."
-      : `${photoGallery.length} photos uploaded in this session.`;
+  job = await res.json();
+  $("statusBar").textContent = "Saved.";
+  renderJob();
 }
 
-/* ---------------------------
-   PHOTO MODAL
----------------------------- */
-function openPhotoModal(index){
-  if(!photoGallery.length) return;
-  currentPhotoIndex = index;
-  const modal = $("photoModal");
-  const img   = $("photoModalImg");
-  const counter = $("photoModalCounter");
-  const prevBtn = $("photoPrevBtn");
-  const nextBtn = $("photoNextBtn");
+/* Upload photo */
+async function handlePhotoUpload(){
+  const files = $("photoInput").files;
+  if(!files.length) return;
 
-  const item = photoGallery[currentPhotoIndex];
-  img.src = item.url;
-  img.alt = item.name || "Job photo";
-  counter.textContent = `${currentPhotoIndex + 1} / ${photoGallery.length}`;
+  for(const file of files){
+    const form = new FormData();
+    form.append("file", file, file.name);
 
-  // show/hide nav
-  if(photoGallery.length > 1){
-    prevBtn.classList.remove("hidden");
-    nextBtn.classList.remove("hidden");
-  }else{
-    prevBtn.classList.add("hidden");
-    nextBtn.classList.add("hidden");
+    await fetch(`${SLA_API}/jobs/${job.id}/files?filename=${encodeURIComponent(file.name)}`,{
+      method:"POST",
+      body:form
+    });
   }
 
-  modal.classList.remove("hidden");
+  /* ADDED: refresh gallery */
+  setTimeout(loadPhotos, 800);
 }
 
-function closePhotoModal(){
-  $("photoModal").classList.add("hidden");
-}
-
-function showNextPhoto(){
-  if(photoGallery.length <= 1) return;
-  currentPhotoIndex = (currentPhotoIndex + 1) % photoGallery.length;
-  openPhotoModal(currentPhotoIndex);
-}
-
-function showPrevPhoto(){
-  if(photoGallery.length <= 1) return;
-  currentPhotoIndex = (currentPhotoIndex - 1 + photoGallery.length) % photoGallery.length;
-  openPhotoModal(currentPhotoIndex);
-}
-
-/* ---------------------------
-   INIT
----------------------------- */
+/* Init */
 function init(){
-  $("saveBtn").addEventListener("click", saveUpdate);
+  $("saveBtn").onclick = saveUpdate;
 
-  // Photo upload
-  $("uploadBtn").addEventListener("click", async () => {
-    const files = $("photoInput").files;
-    if(!files || !files.length){
-      $("photoUploadStatus").textContent = "❌ Please select at least one photo.";
-      return;
-    }
+  // Click tile -> trigger input
+  $("uploadTile").onclick = ()=> $("photoInput").click();
 
-    const jobId = job?.id;
-    if(!jobId){
-      $("photoUploadStatus").textContent = "❌ No job loaded yet.";
-      return;
-    }
+  $("photoInput").onchange = handlePhotoUpload;
 
-    $("uploadBtn").disabled = true;
-    $("uploadBtn").textContent = "Uploading…";
-    $("photoUploadStatus").textContent = "Uploading photos…";
+  /* Modal events */
+  $("modalClose").onclick = closeModal;
+  $("modalNext").onclick = nextPhoto;
+  $("modalPrev").onclick = prevPhoto;
 
-    let successCount = 0;
-    let failCount = 0;
-
-    for(const file of files){
-      try{
-        const form = new FormData();
-        form.append("file", file, file.name);
-
-        const url = `${SLA_API}/jobs/${encodeURIComponent(jobId)}/files?filename=${encodeURIComponent(file.name)}`;
-        const res = await fetch(url, { method:"POST", body:form });
-        if(!res.ok){
-          failCount++;
-          continue;
-        }
-        const data = await res.json();
-        if(data && data.ok && data.publicURL){
-          photoGallery.push({
-            url: data.publicURL,
-            name: file.name
-          });
-          successCount++;
-        }else{
-          failCount++;
-        }
-      }catch(err){
-        console.error("Photo upload error", err);
-        failCount++;
-      }
-    }
-
-    renderPhotoGrid();
-
-    if(successCount && !failCount){
-      $("photoUploadStatus").textContent = `✅ ${successCount} photo(s) uploaded.`;
-    }else if(successCount && failCount){
-      $("photoUploadStatus").textContent = `⚠️ ${successCount} uploaded, ${failCount} failed.`;
-    }else{
-      $("photoUploadStatus").textContent = "❌ Upload failed.";
-    }
-
-    $("uploadBtn").disabled = false;
-    $("uploadBtn").textContent = "Upload Photos";
-    $("photoInput").value = "";
-  });
-
-  // Photo modal events
-  $("photoModalClose").addEventListener("click", closePhotoModal);
-  $("photoPrevBtn").addEventListener("click", showPrevPhoto);
-  $("photoNextBtn").addEventListener("click", showNextPhoto);
-
-  // Close modal when clicking backdrop (outside inner box)
-  $("photoModal").addEventListener("click", (e) => {
-    if(e.target === $("photoModal")){
-      closePhotoModal();
-    }
-  });
-
-  // ESC key closes modal
-  window.addEventListener("keydown", (e) => {
-    if(e.key === "Escape"){
-      closePhotoModal();
-    }
-    if(e.key === "ArrowRight"){
-      showNextPhoto();
-    }
-    if(e.key === "ArrowLeft"){
-      showPrevPhoto();
-    }
-  });
-
-  // Initial gallery (empty this session)
-  renderPhotoGrid();
-
-  // Load job details
   loadJob();
 }
 
-window.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", init);
 </script>
+
 </body>
 </html>
