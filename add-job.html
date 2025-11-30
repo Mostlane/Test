@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Mostlane • Add Job</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --text:#0f172a;
+      --muted:#6b7280;
+      --panel:rgba(255,255,255,0.9);
+      --border:#d1d5db;
+      --ok:#16a34a;
+      --bad:#dc2626;
+    }
+    *{box-sizing:border-box;}
+    html,body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:var(--text);
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+    }
+    .shell{
+      max-width:900px;
+      margin:24px auto 40px;
+      padding:0 16px;
+    }
+    .card{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      padding:20px 22px 22px;
+      border:1px solid rgba(15,23,42,0.05);
+    }
+    h1{
+      margin:0 0 4px;
+      color:var(--ml-blue);
+      font-size:22px;
+    }
+    .sub{
+      margin:0 0 14px;
+      font-size:13px;
+      color:var(--muted);
+    }
+    label{
+      display:block;
+      font-size:13px;
+      font-weight:600;
+      margin-bottom:4px;
+    }
+    .hint{
+      font-size:11px;
+      color:var(--muted);
+    }
+    input,select,textarea{
+      width:100%;
+      font-family:inherit;
+      font-size:14px;
+      border-radius:9px;
+      border:1px solid var(--border);
+      padding:8px 10px;
+      background:#fff;
+    }
+    textarea{
+      min-height:80px;
+      resize:vertical;
+    }
+    .row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:14px;
+    }
+    .col{
+      flex:1 1 250px;
+      min-width:0;
+    }
+    .col-full{
+      flex:1 1 100%;
+    }
+    .field-group{
+      margin-bottom:12px;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:3px 7px;
+      border-radius:999px;
+      background:#e5e7eb;
+      font-size:11px;
+      color:#374151;
+      margin-left:6px;
+    }
+    .actions{
+      margin-top:16px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+    }
+    .btn{
+      border-radius:999px;
+      padding:9px 16px;
+      border:1px solid #cbd5e1;
+      cursor:pointer;
+      font-weight:600;
+      font-size:14px;
+      background:#fff;
+      color:var(--text);
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      text-decoration:none;
+    }
+    .btn.primary{
+      background:var(--ml-blue);
+      border-color:var(--ml-blue);
+      color:#fff;
+    }
+    .status-text{
+      font-size:13px;
+      color:var(--muted);
+    }
+    .status-text.ok{ color:var(--ok); }
+    .status-text.err{ color:var(--bad); }
+
+    .success-panel{
+      margin-top:16px;
+      padding:10px 12px;
+      border-radius:10px;
+      background:#ecfdf5;
+      border:1px solid #bbf7d0;
+      font-size:13px;
+      color:#166534;
+      display:none;
+      align-items:center;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      gap:10px;
+    }
+    .success-panel .left{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .tick-circle{
+      width:22px;height:22px;
+      border-radius:999px;
+      background:#22c55e;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+      font-size:14px;
+      font-weight:700;
+    }
+    .success-link{
+      font-weight:600;
+      text-decoration:none;
+      color:#166534;
+      border-bottom:1px solid rgba(22,101,52,0.4);
+    }
+
+    @media(max-width:768px){
+      .shell{margin-top:18px;}
+      .card{padding:16px 14px 18px;}
+      h1{font-size:20px;}
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <h1>Add Job</h1>
+    <p class="sub">
+      Create a new SLA-tracked job. Priorities use the target hours you set in <b>SLA Settings</b>.
+    </p>
+
+    <!-- FORM -->
+    <form id="jobForm" novalidate>
+      <!-- Site info -->
+      <div class="row">
+        <div class="col field-group">
+          <label for="siteCode">Site Code</label>
+          <input id="siteCode" name="siteCode" autocomplete="off" placeholder="e.g. SR01234">
+        </div>
+        <div class="col field-group">
+          <label for="siteName">Site Name</label>
+          <input id="siteName" name="siteName" autocomplete="off" placeholder="e.g. Co-op Portsmouth Elm Grove" required>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="address">Address</label>
+        <textarea id="address" name="address" placeholder="Street, town, postcode"></textarea>
+      </div>
+
+      <div class="row">
+        <div class="col field-group">
+          <label for="telephone">Telephone</label>
+          <input id="telephone" name="telephone" autocomplete="off" placeholder="Site contact number">
+        </div>
+        <div class="col field-group">
+          <label for="priority">
+            Priority
+            <span class="badge" id="priorityBadge">P4 – Low</span>
+          </label>
+          <select id="priority" name="priority" required>
+            <option value="Priority 1">P1 – Critical</option>
+            <option value="Priority 2">P2 – High</option>
+            <option value="Priority 3">P3 – Medium</option>
+            <option value="Priority 4" selected>P4 – Low</option>
+            <option value="Priority 5">P5 – Very Low</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Job description -->
+      <div class="field-group">
+        <label for="description">Job Description</label>
+        <textarea id="description" name="description" required
+          placeholder="Clear description for the engineer – what’s wrong, what’s expected, any special access notes etc."></textarea>
+        <div class="hint">This is the main text engineers will see on <b>Job Detail</b>.</div>
+      </div>
+
+      <!-- Assignment / timing -->
+      <div class="row">
+        <div class="col field-group">
+          <label for="assignedTo">Assigned To (engineer)</label>
+          <input id="assignedTo" name="assignedTo" autocomplete="off" placeholder="e.g. Jamie.Line">
+          <div class="hint">Use the same username format as the portal (e.g. Jamie.Line).</div>
+        </div>
+
+        <div class="col field-group">
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            <option value="With Contractor - R" selected>With Contractor</option>
+            <option value="In Progress">In Progress</option>
+            <option value="On Hold">On Hold</option>
+            <option value="Completed">Completed</option>
+            <option value="Closed">Closed</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col field-group">
+          <label for="raisedAt">Raised At</label>
+          <input type="datetime-local" id="raisedAt" name="raisedAt">
+          <div class="hint">Defaults to now if left blank.</div>
+        </div>
+        <div class="col field-group">
+          <label for="scheduledAt">Scheduled At</label>
+          <input type="datetime-local" id="scheduledAt" name="scheduledAt">
+          <div class="hint">Optional scheduled date/time for engineer.</div>
+        </div>
+      </div>
+
+      <!-- Originator -->
+      <div class="row">
+        <div class="col field-group">
+          <label for="originator">Raised By</label>
+          <input id="originator" name="originator" autocomplete="off" placeholder="Your name">
+        </div>
+        <div class="col field-group">
+          <label for="originatorEmail">Raised By Email</label>
+          <input id="originatorEmail" name="originatorEmail" autocomplete="off" placeholder="you@mostlane.com">
+        </div>
+      </div>
+
+      <!-- ACTIONS -->
+      <div class="actions">
+        <button type="button" class="btn" onclick="window.location='sla-main.html'">Back</button>
+        <button type="submit" class="btn primary" id="createBtn">Create Job</button>
+        <span id="statusText" class="status-text"></span>
+      </div>
+
+      <!-- SUCCESS PANEL (stays on page) -->
+      <div id="successPanel" class="success-panel">
+        <div class="left">
+          <div class="tick-circle">✓</div>
+          <div id="successMsg">Job created.</div>
+        </div>
+        <a id="viewJobLink" class="success-link" href="#">Open Job Detail</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
+
+function $(id){ return document.getElementById(id); }
+
+function getLoggedInUser(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "";
+}
+
+// local datetime for <input type="datetime-local">
+function nowLocalValue(){
+  const d = new Date();
+  const tz = d.getTimezoneOffset()*60000;
+  return new Date(d.getTime() - tz).toISOString().slice(0,16);
+}
+
+function toIsoOrNull(value){
+  if(!value) return null;
+  const d = new Date(value);
+  if(isNaN(d)) return null;
+  return d.toISOString();
+}
+
+// update badge text when priority changes
+function updatePriorityBadge(){
+  const v = $("priority").value;
+  let label = "P4 – Low";
+  if(v === "Priority 1") label = "P1 – Critical";
+  else if(v === "Priority 2") label = "P2 – High";
+  else if(v === "Priority 3") label = "P3 – Medium";
+  else if(v === "Priority 4") label = "P4 – Low";
+  else if(v === "Priority 5") label = "P5 – Very Low";
+  $("priorityBadge").textContent = label;
+}
+
+/* Submit handler */
+async function handleSubmit(evt){
+  evt.preventDefault();
+  const statusEl = $("statusText");
+  const successPanel = $("successPanel");
+  statusEl.textContent = "";
+  statusEl.className = "status-text";
+  successPanel.style.display = "none";
+
+  const description = $("description").value.trim();
+  const siteName = $("siteName").value.trim();
+  if(!description || !siteName){
+    statusEl.textContent = "Please enter at least Site Name and Job Description.";
+    statusEl.classList.add("err");
+    return;
+  }
+
+  const payload = {
+    siteCode: $("siteCode").value.trim() || undefined,
+    siteName,
+    address: $("address").value.trim() || undefined,
+    telephone: $("telephone").value.trim() || undefined,
+    priority: $("priority").value,
+    description,
+    assignedTo: $("assignedTo").value.trim() || undefined,
+    status: $("status").value,
+    raisedAt: toIsoOrNull($("raisedAt").value),
+    scheduledAt: toIsoOrNull($("scheduledAt").value),
+    originator: $("originator").value.trim() || getLoggedInUser() || undefined,
+    originatorEmail: $("originatorEmail").value.trim() || undefined
+  };
+
+  statusEl.textContent = "Creating job…";
+
+  try{
+    const res = await fetch(API_BASE + "/jobs",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if(!res.ok){
+      throw new Error(data.error || ("HTTP " + res.status));
+    }
+
+    // Success – show green tick panel, stay on page
+    const ref = data.helpdeskRef || data.id;
+    statusEl.textContent = "";
+    successPanel.style.display = "flex";
+    $("successMsg").textContent = `Job created: ${ref}`;
+    $("viewJobLink").href = `job-view.html?jobId=${encodeURIComponent(data.id)}`;
+
+  }catch(err){
+    console.error("Create job error:", err);
+    statusEl.textContent = "❌ Could not create job.";
+    statusEl.classList.add("err");
+  }
+}
+
+/* Init */
+function init(){
+  // prefill originator from login and raisedAt with now
+  const user = getLoggedInUser();
+  if(user) $("originator").value = user;
+  $("raisedAt").value = nowLocalValue();
+
+  $("priority").addEventListener("change", updatePriorityBadge);
+  updatePriorityBadge();
+
+  $("jobForm").addEventListener("submit", handleSubmit);
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
