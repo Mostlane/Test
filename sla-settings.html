@@ -13,6 +13,7 @@
       --muted:#6b7280;
       --panel:rgba(255,255,255,0.9);
     }
+
     html,body{
       margin:0;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
@@ -20,174 +21,213 @@
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:cover;
     }
+
     .shell{
       max-width:700px;
       margin:20px auto;
       padding:0 16px;
     }
+
     .card{
       background:var(--panel);
       border-radius:14px;
       box-shadow:0 12px 28px rgba(0,0,0,0.12);
       padding:20px 22px;
     }
+
     h1{
       margin-top:0;
       color:var(--ml-blue);
       font-size:22px;
     }
-    label{
-      display:block;
-      margin:12px 0 4px;
-      font-weight:600;
-      font-size:14px;
+
+    .setting-row{
+      padding:14px 0;
+      border-bottom:1px solid #e5e7eb;
     }
+
+    .setting-label{
+      font-weight:600;
+      font-size:16px;
+    }
+
+    .setting-value{
+      margin-top:3px;
+      font-size:14px;
+      color:var(--muted);
+    }
+
     input{
       width:100%;
       padding:10px 12px;
       border-radius:8px;
       border:1px solid #cbd5e1;
       font-size:15px;
-    }
-    .row{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:12px;
-    }
-    @media(max-width:600px){
-      .row{
-        grid-template-columns:1fr;
-      }
+      margin-top:6px;
     }
 
-    .muted{color:var(--muted);font-size:13px;margin-top:6px;}
-    .actions{margin-top:18px;display:flex;gap:10px;align-items:center;}
+    .actions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+
     .btn{
       border-radius:10px;
-      padding:12px 18px;
+      padding:10px 16px;
       border:1px solid #cbd5e1;
       cursor:pointer;
       font-weight:600;
-      font-size:15px;
+      font-size:14px;
     }
+
     .btn.primary{
       background:var(--ml-blue);
       color:#fff;
       border-color:var(--ml-blue);
     }
-    .btn.secondary{background:#fff;}
-    
+
+    .btn.secondary{ background:#fff; }
+
     #status{
       font-size:14px;
       margin-left:8px;
+      color:var(--muted);
     }
+
   </style>
 </head>
 
 <body>
 <div class="shell">
   <div class="card">
+
     <h1>SLA Settings</h1>
     <p class="muted">
-      Set SLA target times in <b>calendar hours</b>.
+      These times define when an SLA becomes breached.
+      Values shown below are the current settings from your live Worker.
     </p>
 
-    <div class="row">
-      <div>
-        <label>P1 – Critical (hours)</label>
-        <input type="number" id="p1" min="1">
-      </div>
-      <div>
-        <label>P2 – High (hours)</label>
-        <input type="number" id="p2" min="1">
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label>P3 – Medium (hours)</label>
-        <input type="number" id="p3" min="1">
-      </div>
-      <div>
-        <label>P4 – Low (hours)</label>
-        <input type="number" id="p4" min="1">
-      </div>
-    </div>
-
-    <div style="margin-top:12px;">
-      <label>P5 – Very Low (hours)</label>
-      <input type="number" id="p5" min="1">
-    </div>
+    <div id="settingsContainer"></div>
 
     <div class="actions">
       <button class="btn secondary" onclick="window.location='sla-main.html'">Back</button>
-      <button class="btn primary" id="saveBtn">Save Settings</button>
-      <span id="status" class="muted"></span>
+      <button class="btn primary" id="editBtn">Edit</button>
+      <span id="status"></span>
     </div>
+
+    <div class="actions" id="editActions" style="display:none;">
+      <button class="btn secondary" id="cancelEditBtn">Cancel</button>
+      <button class="btn primary" id="saveBtn">Save</button>
+    </div>
+
   </div>
 </div>
 
 <script>
 const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
+let currentConfig = null;
+let editMode = false;
+
+function hoursToDays(hours){
+  const days = hours / 24;
+  if(days < 1) return `(${days.toFixed(2)} days)`;
+  if(Number.isInteger(days)) return `(${days} days)`;
+  return `(${days.toFixed(1)} days)`;
+}
+
+function renderReadOnly(){
+  const box = document.getElementById("settingsContainer");
+  editMode = false;
+  document.getElementById("editBtn").style.display="inline-block";
+  document.getElementById("editActions").style.display="none";
+
+  box.innerHTML = "";
+
+  const priorities = currentConfig.priorities;
+
+  for(const key of Object.keys(priorities)){
+    const hours = priorities[key].hours;
+    const days = hoursToDays(hours);
+
+    box.innerHTML += `
+      <div class="setting-row">
+        <div class="setting-label">${key.replace("Priority","P")}</div>
+        <div class="setting-value">${hours} hours ${days}</div>
+      </div>
+    `;
+  }
+}
+
+function renderEditMode(){
+  const box = document.getElementById("settingsContainer");
+  editMode = true;
+  document.getElementById("editBtn").style.display="none";
+  document.getElementById("editActions").style.display="flex";
+
+  box.innerHTML = "";
+
+  const priorities = currentConfig.priorities;
+
+  for(const key of Object.keys(priorities)){
+    const hours = priorities[key].hours;
+
+    box.innerHTML += `
+      <div class="setting-row">
+        <div class="setting-label">${key.replace("Priority","P")}</div>
+        <input type="number" min="1" step="1" id="${key}" value="${hours}">
+      </div>
+    `;
+  }
+}
+
 async function loadConfig(){
-  status.textContent = "Loading…";
+  document.getElementById("status").textContent = "Loading…";
+
   try{
     const res = await fetch(API_BASE + "/config");
-    if(!res.ok) throw new Error("Failed");
+    currentConfig = await res.json();
 
-    const cfg = await res.json();
-
-    // Worker format → form fields
-    p1.value = cfg.priorities["Priority 1"]?.hours ?? 4;
-    p2.value = cfg.priorities["Priority 2"]?.hours ?? 24;
-    p3.value = cfg.priorities["Priority 3"]?.hours ?? 72;
-    p4.value = cfg.priorities["Priority 4"]?.hours ?? 168;
-    p5.value = cfg.priorities["Priority 5"]?.hours ?? 336;
-
-    status.textContent = "";
-  }catch(e){
-    console.error(e);
-    status.textContent = "❌ Could not load config.";
+    renderReadOnly();
+    document.getElementById("status").textContent = "";
+  }catch(err){
+    console.error(err);
+    document.getElementById("status").textContent = "❌ Could not load settings.";
   }
 }
 
 async function saveConfig(){
-  status.textContent = "Saving…";
+  document.getElementById("status").textContent = "Saving…";
 
-  const payload = {
-    priorities:{
-      "Priority 1": { hours:Number(p1.value) },
-      "Priority 2": { hours:Number(p2.value) },
-      "Priority 3": { hours:Number(p3.value) },
-      "Priority 4": { hours:Number(p4.value) },
-      "Priority 5": { hours:Number(p5.value) }
-    }
-  };
+  const priorities = currentConfig.priorities;
+
+  for(const key of Object.keys(priorities)){
+    const input = document.getElementById(key);
+    priorities[key].hours = Number(input.value);
+  }
 
   try{
-    const res = await fetch(API_BASE + "/config",{
+    await fetch(API_BASE + "/config",{
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify(payload)
+      body:JSON.stringify(currentConfig)
     });
-    if(!res.ok) throw new Error("fail");
 
-    status.textContent = "✅ Saved.";
-  }catch(e){
-    console.error(e);
-    status.textContent = "❌ Save failed.";
+    document.getElementById("status").textContent = "Saved.";
+
+    renderReadOnly();
+
+  }catch(err){
+    console.error(err);
+    document.getElementById("status").textContent = "❌ Save failed.";
   }
 }
 
-const p1=document.getElementById("p1");
-const p2=document.getElementById("p2");
-const p3=document.getElementById("p3");
-const p4=document.getElementById("p4");
-const p5=document.getElementById("p5");
-
-const status=document.getElementById("status");
-
+// Button handlers
+document.getElementById("editBtn").onclick = renderEditMode;
+document.getElementById("cancelEditBtn").onclick = renderReadOnly;
 document.getElementById("saveBtn").onclick = saveConfig;
 
 loadConfig();
