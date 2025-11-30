@@ -206,28 +206,27 @@
           <div class="hint">Shown: Site Number + Name + Postcode.</div>
         </div>
       </div>
-
-      <!-- Site info -->
+            <!-- Site info -->
       <div class="row">
         <div class="col field-group">
           <label for="siteCode">Site Code</label>
-          <input id="siteCode" name="siteCode">
+          <input id="siteCode" name="siteCode" autocomplete="off" placeholder="e.g. SR01234">
         </div>
         <div class="col field-group">
           <label for="siteName">Site Name</label>
-          <input id="siteName" name="siteName" required>
+          <input id="siteName" name="siteName" autocomplete="off" placeholder="e.g. Co-op Portsmouth Elm Grove" required>
         </div>
       </div>
 
       <div class="field-group">
         <label for="address">Address</label>
-        <textarea id="address" name="address"></textarea>
+        <textarea id="address" name="address" placeholder="Street, town, postcode"></textarea>
       </div>
 
       <div class="row">
         <div class="col field-group">
           <label for="telephone">Telephone</label>
-          <input id="telephone" name="telephone">
+          <input id="telephone" name="telephone" autocomplete="off" placeholder="Site contact number">
         </div>
         <div class="col field-group">
           <label for="priority">
@@ -247,7 +246,8 @@
       <!-- Job description -->
       <div class="field-group">
         <label for="description">Job Description</label>
-        <textarea id="description" name="description" required></textarea>
+        <textarea id="description" name="description" required
+          placeholder="Clear description for the engineer – what’s wrong, what’s expected, any special access notes etc."></textarea>
         <div class="hint">This is the main text engineers will see on <b>Job Detail</b>.</div>
       </div>
 
@@ -258,7 +258,7 @@
           <select id="assignedTo" name="assignedTo">
             <option value="">Select engineer…</option>
           </select>
-          <div class="hint">Portal usernames auto-loaded.</div>
+          <div class="hint">All portal users (sorted alphabetically).</div>
         </div>
 
         <div class="col field-group">
@@ -277,10 +277,12 @@
         <div class="col field-group">
           <label for="raisedAt">Raised At</label>
           <input type="datetime-local" id="raisedAt" name="raisedAt">
+          <div class="hint">Defaults to now if left blank.</div>
         </div>
         <div class="col field-group">
           <label for="scheduledAt">Scheduled At</label>
           <input type="datetime-local" id="scheduledAt" name="scheduledAt">
+          <div class="hint">Optional scheduled date/time for engineer.</div>
         </div>
       </div>
 
@@ -288,15 +290,15 @@
       <div class="row">
         <div class="col field-group">
           <label for="originator">Raised By</label>
-          <input id="originator" name="originator">
+          <input id="originator" name="originator" autocomplete="off" placeholder="Your name">
         </div>
         <div class="col field-group">
           <label for="originatorEmail">Raised By Email</label>
-          <input id="originatorEmail" name="originatorEmail">
+          <input id="originatorEmail" name="originatorEmail" autocomplete="off" placeholder="you@mostlane.com">
         </div>
       </div>
 
-      <!-- HIDDEN FIELDS -->
+      <!-- HIDDEN FIELDS FOR SITE METADATA -->
       <input type="hidden" id="lat" name="lat">
       <input type="hidden" id="lon" name="lon">
       <input type="hidden" id="postcode" name="postcode">
@@ -325,9 +327,85 @@
 
 <script>
 const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
-const USERS_URL = "https://raw.githubusercontent.com/Mostlane/Test/main/users.json";
 
-/* SITE ENDPOINTS SAME AS BEFORE */
+/* USERS ENDPOINT */
+const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
+
+/* Helper */
+function $(id){ return document.getElementById(id); }
+
+function fetchJSON(url){
+  return fetch(url + (url.includes("?") ? "&" : "?") + "v=" + Date.now())
+    .then(r => r.json());
+}
+
+function getLoggedInUser(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "";
+}
+
+function nowLocalValue(){
+  const d = new Date();
+  const tz = d.getTimezoneOffset()*60000;
+  return new Date(d.getTime() - tz).toISOString().slice(0,16);
+}
+
+function toIsoOrNull(value){
+  if(!value) return null;
+  const d = new Date(value);
+  if(isNaN(d)) return null;
+  return d.toISOString();
+}
+
+function updatePriorityBadge(){
+  const v = $("priority").value;
+  let label = "P4 – Low";
+  if(v === "Priority 1") label = "P1 – Critical";
+  else if(v === "Priority 2") label = "P2 – High";
+  else if(v === "Priority 3") label = "P3 – Medium";
+  else if(v === "Priority 4") label = "P4 – Low";
+  else if(v === "Priority 5") label = "P5 – Very Low";
+  $("priorityBadge").textContent = label;
+}
+
+/* ------------------------
+   FETCH PORTAL USERS
+------------------------ */
+async function populateUsersDropdown() {
+  const sel = $("assignedTo");
+  sel.innerHTML = `<option value="">Loading users…</option>`;
+
+  try {
+    const res = await fetchJSON(USERS_API);
+    const users = res.Users || [];
+
+    const sorted = users.sort((a,b) =>
+      (a.FirstName + a.LastName).localeCompare(b.FirstName + b.LastName)
+    );
+
+    sel.innerHTML = `<option value="">Select engineer…</option>`;
+
+    sorted.forEach(u => {
+      const uname = u.Username || "";
+      const full = `${u.FirstName} ${u.LastName}`.trim();
+
+      const opt = document.createElement("option");
+      opt.value = uname;
+      opt.textContent = full;
+      sel.appendChild(opt);
+    });
+
+  } catch (err) {
+    console.error("User list failed:", err);
+    sel.innerHTML = `<option value="">(Could not load users)</option>`;
+  }
+}
+  /* -------------------------------------------
+   SITES – same categories as po.html
+------------------------------------------- */
+
 const SITE_ENDPOINTS = {
   retail:   "https://mostlane-po.jamie-def.workers.dev/sites/retail",
   els:      "https://mostlane-po.jamie-def.workers.dev/sites/els",
@@ -337,100 +415,57 @@ const SITE_ENDPOINTS = {
   projects: "https://mostlane-po.jamie-def.workers.dev/sites/projects"
 };
 
-function $(id){ return document.getElementById(id); }
-function fetchJSON(url){ return fetch(url+"?v="+Date.now()).then(r=>r.json()); }
-function getLoggedInUser(){
-  return sessionStorage.getItem("mostlaneUser") ||
-         sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") || "";
-}
-function nowLocalValue(){
-  const d=new Date(); const tz=d.getTimezoneOffset()*60000;
-  return new Date(d.getTime()-tz).toISOString().slice(0,16);
-}
-function toIsoOrNull(v){
-  if(!v) return null;
-  const d=new Date(v); return isNaN(d)?null:d.toISOString();
-}
-
-/* PRIORITY BADGE */
-function updatePriorityBadge(){
-  const v=$("priority").value;
-  let label="P4 – Low";
-  if(v==="Priority 1") label="P1 – Critical";
-  else if(v==="Priority 2") label="P2 – High";
-  else if(v==="Priority 3") label="P3 – Medium";
-  else if(v==="Priority 4") label="P4 – Low";
-  else if(v==="Priority 5") label="P5 – Very Low";
-  $("priorityBadge").textContent=label;
-}
-
-/* ---------------- USERS DROPDOWN ---------------- */
-async function populateUsers(){
-  try{
-    const data = await fetchJSON(USERS_URL);
-    const sel = $("assignedTo");
-    sel.innerHTML = "<option value=''>Select engineer…</option>";
-
-    (data || []).forEach(u=>{
-      const username = u.Username || u.username || "";
-      if(!username) return;
-
-      const opt=document.createElement("option");
-      opt.value = username;
-      opt.textContent = username.replace(/\./g," ");
-      sel.appendChild(opt);
-    });
-  }catch(err){
-    console.error("User load failed",err);
-  }
-}
-
-/* ---------------- SITES (unchanged) ---------------- */
-let allSites=[];
+let allSites = [];
 
 async function fetchSitesForKey(key){
   const url = SITE_ENDPOINTS[key];
-  if(!url) return [];
+  if (!url) return [];
   try{
-    const resp=await fetchJSON(url);
-    const data=resp.data||[];
-    return data.map(s=>{
-      const raw=s.raw||{};
-      const siteNumber=s.siteNumber||raw.siteNumber||"";
-      const code=siteNumber.toString().padStart(4,"0");
-      const name=s.siteName||raw.siteName||"";
-      const postcode=s.postcode||raw.postcode||"";
-      const telephone=raw.telephone||"";
-      const addressParts=[
-        raw.address1||raw.street||"",
-        raw.town||"",
-        raw.county||"",
+    const resp = await fetchJSON(url);
+    const data = resp.data || [];
+
+    return data.map(s => {
+      const raw = s.raw || {};
+      const siteNumber = s.siteNumber || raw.siteNumber || "";
+      const code = siteNumber.toString().padStart(4,"0");
+      const name = s.siteName || raw.siteName || "";
+      const postcode = s.postcode || raw.postcode || "";
+      const telephone = raw.telephone || "";
+      const addressParts = [
+        raw.address1 || raw.street || "",
+        raw.town || "",
+        raw.county || "",
         postcode
       ].filter(Boolean);
-      const address=addressParts.join(", ");
+      const address = addressParts.join(", ");
 
-      return{
-        code,name,postcode,telephone,address,
-        lat:raw.lat??null,
-        lon:raw.lon??null,
-        mileageFromHQ:raw.mileageFromHQ??null,
-        storeType:raw.storeType||s.client||"",
-        sharepointURL:s.sharepointURL||raw.sharepointURL||""
+      return {
+        code,
+        name,
+        postcode,
+        telephone,
+        address,
+        lat: raw.lat ?? null,
+        lon: raw.lon ?? null,
+        mileageFromHQ: raw.mileageFromHQ ?? null,
+        storeType: raw.storeType || s.client || "",
+        sharepointURL: s.sharepointURL || raw.sharepointURL || ""
       };
-    }).filter(x=>x.code&&x.name);
-  }catch(err){
-    console.error("Sites fetch failed",err);
-    return[];
+    })
+    .filter(x => x.code && x.name);
+
+  } catch(err){
+    console.error("Sites fetch failed for", key, err);
+    return [];
   }
 }
 
 async function populateSites(){
-  const type=$("siteType").value.trim().toLowerCase();
-  const sel=$("siteSelect");
-  sel.innerHTML="<option value=''>Loading…</option>";
+  const siteTypeVal = $("siteType").value.trim().toLowerCase();
+  const sel = $("siteSelect");
+  sel.innerHTML = "<option value=''>Loading…</option>";
 
-  const keyMap={
+  const keyMap = {
     "retail":"retail",
     "els":"els",
     "els private":"els_private",
@@ -440,30 +475,49 @@ async function populateSites(){
     "projects":"projects"
   };
 
-  let sites=[];
-  if(!type){
-    let combined=[];
-    for(const k of new Set(Object.values(keyMap))){
-      combined=combined.concat(await fetchSitesForKey(k));
+  let sites = [];
+
+  if (!siteTypeVal) {
+    const keys = [...new Set(Object.values(keyMap))];
+    let combined = [];
+    for (const k of keys){
+      const part = await fetchSitesForKey(k);
+      combined = combined.concat(part);
     }
-    sites=combined;
-  }else{
-    sites=await fetchSitesForKey(keyMap[type]||"retail");
+    sites = combined;
+  } else {
+    const key = keyMap[siteTypeVal] || "retail";
+    sites = await fetchSitesForKey(key);
   }
 
-  allSites=sites.sort((a,b)=>Number(a.code)-Number(b.code));
-  sel.innerHTML="<option value=''>Select site…</option>";
-  allSites.forEach(s=>{
-    const opt=document.createElement("option");
-    opt.value=s.code;
-    opt.textContent=`${s.code} ${s.name}${s.postcode?" ("+s.postcode+")":""}`;
+  allSites = sites.sort((a,b) => Number(a.code) - Number(b.code));
+
+  sel.innerHTML = "";
+  if (!allSites.length){
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(No sites found)";
+    sel.appendChild(opt);
+    return;
+  }
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select site…";
+  sel.appendChild(placeholder);
+
+  allSites.forEach(s => {
+    const opt = document.createElement("option");
+    opt.value = s.code;
+    opt.textContent = `${s.code} ${s.name}${s.postcode ? " (" + s.postcode + ")" : ""}`;
     sel.appendChild(opt);
   });
 }
 
 function handleSiteChange(){
-  const site = allSites.find(s=>s.code===$("siteSelect").value);
-  if(!site) return;
+  const code = $("siteSelect").value;
+  const site = allSites.find(s => s.code === code);
+  if (!site) return;
 
   $("siteCode").value = site.code;
   $("siteName").value = site.name;
@@ -478,89 +532,102 @@ function handleSiteChange(){
   $("sharepointURL").value = site.sharepointURL || "";
 }
 
-/* ---------------- SUBMIT ---------------- */
+/* -----------------------------
+   FORM SUBMIT
+------------------------------ */
+
 async function handleSubmit(evt){
   evt.preventDefault();
-  const statusEl=$("statusText");
-  const successPanel=$("successPanel");
-  statusEl.textContent="";
-  statusEl.className="status-text";
-  successPanel.style.display="none";
+  const statusEl = $("statusText");
+  const successPanel = $("successPanel");
+  statusEl.textContent = "";
+  statusEl.className = "status-text";
+  successPanel.style.display = "none";
 
-  const description=$("description").value.trim();
-  const siteName=$("siteName").value.trim();
-  if(!description||!siteName){
-    statusEl.textContent="Please enter at least Site Name and Job Description.";
+  const description = $("description").value.trim();
+  const siteName = $("siteName").value.trim();
+  if(!description || !siteName){
+    statusEl.textContent = "Please enter at least Site Name and Job Description.";
     statusEl.classList.add("err");
     return;
   }
 
-  const payload={
-    siteCode:$("siteCode").value.trim()||undefined,
+  const payload = {
+    siteCode: $("siteCode").value.trim() || undefined,
     siteName,
-    address:$("address").value.trim()||undefined,
-    telephone:$("telephone").value.trim()||undefined,
+    address: $("address").value.trim() || undefined,
+    telephone: $("telephone").value.trim() || undefined,
 
-    lat:$("lat").value?Number($("lat").value):undefined,
-    lon:$("lon").value?Number($("lon").value):undefined,
-    postcode:$("postcode").value.trim()||undefined,
-    storeType:$("storeType").value.trim()||undefined,
-    mileageFromHQ:$("mileageFromHQ").value?Number($("mileageFromHQ").value):undefined,
-    sharepointURL:$("sharepointURL").value.trim()||undefined,
+    lat: $("lat").value ? Number($("lat").value) : undefined,
+    lon: $("lon").value ? Number($("lon").value) : undefined,
+    postcode: $("postcode").value.trim() || undefined,
+    storeType: $("storeType").value.trim() || undefined,
+    mileageFromHQ: $("mileageFromHQ").value ? Number($("mileageFromHQ").value) : undefined,
+    sharepointURL: $("sharepointURL").value.trim() || undefined,
 
-    priority:$("priority").value,
+    priority: $("priority").value,
     description,
-    assignedTo:$("assignedTo").value||undefined,
-    status:$("status").value,
-    raisedAt:toIsoOrNull($("raisedAt").value),
-    scheduledAt:toIsoOrNull($("scheduledAt").value),
-    originator:$("originator").value.trim()||getLoggedInUser()||undefined,
-    originatorEmail:$("originatorEmail").value.trim()||undefined
+    assignedTo: $("assignedTo").value.trim() || undefined,
+    status: $("status").value,
+    raisedAt: toIsoOrNull($("raisedAt").value),
+    scheduledAt: toIsoOrNull($("scheduledAt").value),
+    originator: $("originator").value.trim() || getLoggedInUser() || undefined,
+    originatorEmail: $("originatorEmail").value.trim() || undefined
   };
 
-  statusEl.textContent="Creating job…";
+  statusEl.textContent = "Creating job…";
 
   try{
-    const res=await fetch(API_BASE+"/jobs",{
+    const res = await fetch(API_BASE + "/jobs",{
       method:"POST",
-      headers:{"Content-Type":"application/json"},
+      headers:{ "Content-Type":"application/json" },
       body:JSON.stringify(payload)
     });
-    const data=await res.json();
-    if(!res.ok) throw new Error(data.error||("HTTP "+res.status));
 
-    const ref=data.helpdeskRef||data.id;
-    statusEl.textContent="";
-    successPanel.style.display="flex";
-    $("successMsg").textContent=`Job created: ${ref}`;
-    $("viewJobLink").href=`job-view.html?jobId=${encodeURIComponent(data.id)}`;
+    const data = await res.json();
+
+    if(!res.ok){
+      throw new Error(data.error || ("HTTP " + res.status));
+    }
+
+    const ref = data.helpdeskRef || data.id;
+    statusEl.textContent = "";
+    successPanel.style.display = "flex";
+    $("successMsg").textContent = `Job created: ${ref}`;
+    $("viewJobLink").href = `job-view.html?jobId=${encodeURIComponent(data.id)}`;
 
   }catch(err){
-    console.error("Create job error:",err);
-    statusEl.textContent="❌ Could not create job.";
+    console.error("Create job error:", err);
+    statusEl.textContent = "❌ Could not create job.";
     statusEl.classList.add("err");
   }
 }
 
-/* ---------------- INIT ---------------- */
-async function init(){
-  const user=getLoggedInUser();
-  if(user) $("originator").value=user;
-  $("raisedAt").value=nowLocalValue();
+/* ---------------------------
+   INIT PAGE
+--------------------------- */
 
-  $("priority").addEventListener("change",updatePriorityBadge);
+async function init(){
+  const user = getLoggedInUser();
+  if(user) $("originator").value = user;
+
+  $("raisedAt").value = nowLocalValue();
+
+  $("priority").addEventListener("change", updatePriorityBadge);
   updatePriorityBadge();
 
-  $("jobForm").addEventListener("submit",handleSubmit);
+  $("jobForm").addEventListener("submit", handleSubmit);
+  $("siteType").addEventListener("change", populateSites);
+  $("siteSelect").addEventListener("change", handleSiteChange);
 
-  $("siteType").addEventListener("change",populateSites);
-  $("siteSelect").addEventListener("change",handleSiteChange);
-
-  await populateUsers();
+  // Load sites
   populateSites();
+
+  // Load portal users into AssignedTo dropdown
+  populateUsersDropdown();
 }
 
-document.addEventListener("DOMContentLoaded",init);
+document.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
 </html>
