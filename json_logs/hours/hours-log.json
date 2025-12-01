@@ -2671,23 +2671,23 @@
       "submittedAt": "2025-12-01T15:24:49.735Z"
     },
     {
-      "id": "1764602715514-f6jtkm",
-      "receivedAt": "2025-12-01T15:25:15.532Z",
+      "id": "1764602735922-f9nw4x",
+      "receivedAt": "2025-12-01T15:25:35.924Z",
       "date": "2025-11-27",
       "day": "Thursday",
       "engineer": "Colby Lunsford",
       "vehicle": "KL07 YJK",
-      "leaveHome": "07:06",
-      "arriveFirstSite": "07:44",
-      "leaveLastSite": "13:54",
-      "arriveHome": "15:08",
+      "leaveHome": "06:31",
+      "arriveFirstSite": "07:02",
+      "leaveLastSite": "14:06",
+      "arriveHome": "14:48",
       "deductLunch": true,
-      "totalHours": 7.53,
-      "standardHours": 7.53,
+      "totalHours": 7.78,
+      "standardHours": 7.78,
       "overtimeHours": null,
-      "travelToHours": 0.63,
-      "travelFromHours": 1.23,
-      "totalTravelHours": 1.86,
+      "travelToHours": 0.52,
+      "travelFromHours": 0.7,
+      "totalTravelHours": 1.22,
       "enhancedOvertimePreview": "Yes",
       "excludeFromPay": false,
       "forceEnhanced": false,
@@ -2698,7 +2698,7 @@
       "personalMileage": null,
       "notes": "",
       "noteVisible": false,
-      "submittedAt": "2025-12-01T15:25:15.532Z"
+      "submittedAt": "2025-12-01T15:25:35.924Z"
     }
   ]
 }
