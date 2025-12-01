@@ -2609,6 +2609,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-12-01T15:22:55.639Z"
+    },
+    {
+      "id": "1764602645973-yteqc6",
+      "receivedAt": "2025-12-01T15:24:05.991Z",
+      "date": "2025-11-25",
+      "day": "Tuesday",
+      "engineer": "Colby Lunsford",
+      "vehicle": "KL07 YJK",
+      "leaveHome": "06:38",
+      "arriveFirstSite": "07:20",
+      "leaveLastSite": "16:33",
+      "arriveHome": "17:30",
+      "deductLunch": true,
+      "totalHours": 10.37,
+      "standardHours": 10,
+      "overtimeHours": 0.37,
+      "travelToHours": 0.7,
+      "travelFromHours": 0.95,
+      "totalTravelHours": 1.65,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-12-01T15:24:05.991Z"
     }
   ]
 }
