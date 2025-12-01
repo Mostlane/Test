@@ -361,7 +361,7 @@
         <a href="financials.html" class="btn">£ Financials</a>
         <a href="sla-performance.html" class="btn">📊 SLA Performance</a>
         <a href="settings.html" class="btn">⚙️ Settings</a>
-<a href="add-job.html" class="btn primary">＋ Create Job</a>
+        <a href="add-job.html" class="btn primary">＋ Create Job</a>
       </div>
     </header>
 
@@ -452,6 +452,22 @@
           <option value="Closed">Closed</option>
         </select>
       </div>
+      <!-- NEW: Engineer + scheduled date/time inside UPDATE modal -->
+      <div class="field">
+        <label for="updateModalEngineer">Engineer Assigned</label>
+        <select id="updateModalEngineer">
+          <option value="">Unassigned</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateModalDate">Scheduled Date</label>
+        <input type="date" id="updateModalDate">
+      </div>
+      <div class="field">
+        <label for="updateModalTime">Scheduled Time</label>
+        <input type="time" id="updateModalTime">
+      </div>
+      <!-- /NEW -->
       <div class="field">
         <label for="updateModalNote">Event / Notes (history log)</label>
         <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
@@ -534,6 +550,19 @@ function fmtDateTimeShort(d){
     day:"2-digit", month:"short",
     hour:"2-digit", minute:"2-digit"
   });
+}
+
+// NEW: split ISO → {date, time} for inputs
+function isoToDateAndTime(iso){
+  if(!iso) return {date:"", time:""};
+  const d = new Date(iso);
+  if(isNaN(d)) return {date:"", time:""};
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  const hh = String(d.getHours()).padStart(2,"0");
+  const min = String(d.getMinutes()).padStart(2,"0");
+  return {date:`${yyyy}-${mm}-${dd}`, time:`${hh}:${min}`};
 }
 
 /* =========================
@@ -842,6 +871,16 @@ function openUpdateModal(jobId){
     statusSelect.value = "In Progress";
   }
 
+  // NEW: populate engineer + scheduled date/time
+  ensureUsersLoaded().then(() => {
+    populateUpdateEngineerSelect(job.engineer || "");
+  });
+
+  const dt = isoToDateAndTime(job.scheduledAt);
+  $("updateModalDate").value = dt.date;
+  $("updateModalTime").value = dt.time;
+  // /NEW
+
   $("updateModalNote").value = "";
   $("updateModalStatusText").textContent = "";
 
@@ -853,6 +892,9 @@ function closeUpdateModal(){
   currentUpdateJobId = null;
   $("updateModalNote").value = "";
   $("updateModalStatusText").textContent = "";
+  $("updateModalEngineer").value = "";
+  $("updateModalDate").value = "";
+  $("updateModalTime").value = "";
 }
 
 async function saveUpdateModal(){
@@ -861,7 +903,15 @@ async function saveUpdateModal(){
   const priority = $("updateModalPriority").value;
   const status = $("updateModalStatus").value;
   const note = $("updateModalNote").value.trim();
+  const engineer = $("updateModalEngineer").value;
+  const date = $("updateModalDate").value;
+  const time = $("updateModalTime").value;
   const user = getCurrentUser();
+
+  let scheduledAt = null;
+  if(date && time){
+    scheduledAt = new Date(date + "T" + time + ":00").toISOString();
+  }
 
   $("updateModalStatusText").textContent = "Saving…";
 
@@ -872,6 +922,19 @@ async function saveUpdateModal(){
       note,
       changedBy: user
     };
+
+    // NEW: include engineer & scheduledAt in PATCH
+    if(engineer){
+      payload.assignedTo = engineer;
+    } else {
+      payload.assignedTo = "";
+    }
+    if(scheduledAt){
+      payload.scheduledAt = scheduledAt;
+    } else {
+      payload.scheduledAt = null;
+    }
+    // /NEW
 
     const res = await fetch(
       SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
@@ -897,7 +960,8 @@ async function saveUpdateModal(){
 
 /* =========================
    LOAD ENGINEERS LIST
-   ========================= */async function ensureUsersLoaded(){
+   ========================= */
+async function ensureUsersLoaded(){
   if(cachedUsers.length) return;
   try{
     const res = await fetch(USERS_API + "?t=" + Date.now());
@@ -961,6 +1025,30 @@ function populateEngineerSelect(){
   // If current logged-in user is in list, we could auto-select them if you ever want that
 }
 
+// NEW: populate engineer dropdown in UPDATE modal
+function populateUpdateEngineerSelect(selected){
+  const sel = $("updateModalEngineer");
+  if(!sel) return;
+  sel.innerHTML = "";
+
+  const optNone = document.createElement("option");
+  optNone.value = "";
+  optNone.textContent = "Unassigned";
+  sel.appendChild(optNone);
+
+  if(cachedUsers.length){
+    cachedUsers.forEach(u => {
+      const opt = document.createElement("option");
+      opt.value = u.username;
+      opt.textContent = u.displayName;
+      sel.appendChild(opt);
+    });
+  }
+
+  if(selected){
+    sel.value = selected;
+  }
+}
 /* =========================
    ASSIGN MODAL
    ========================= */
