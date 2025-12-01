@@ -3389,6 +3389,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-12-01T15:47:40.424Z"
+    },
+    {
+      "id": "1764604098564-yc835l",
+      "receivedAt": "2025-12-01T15:48:18.570Z",
+      "date": "2025-11-26",
+      "day": "Wednesday",
+      "engineer": "Tony Pelin",
+      "vehicle": "LG23 AWK",
+      "leaveHome": "07:01",
+      "arriveFirstSite": "07:59",
+      "leaveLastSite": "18:22",
+      "arriveHome": "18:46",
+      "deductLunch": true,
+      "totalHours": 11.25,
+      "standardHours": 10,
+      "overtimeHours": 1.25,
+      "travelToHours": 0.97,
+      "travelFromHours": 0.4,
+      "totalTravelHours": 1.37,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-12-01T15:48:18.570Z"
     }
   ]
 }
