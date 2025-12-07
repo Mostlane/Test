@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mostlane Device Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+    body {
+        background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+        background-size: 180%;
+        font-family: "Segoe UI", sans-serif;
+        padding: 20px;
+    }
+
+    .panel {
+        background: rgba(255,255,255,0.7);
+        padding: 20px;
+        border-radius: 10px;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    h1 { text-align: center; color: #003b82; }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+        background: white;
+    }
+
+    th, td {
+        padding: 10px;
+        border-bottom: 1px solid #ccc;
+        font-size: 14px;
+    }
+
+    th {
+        background: #003b82;
+        color: white;
+    }
+
+    button {
+        background: #c62828;
+        color: white;
+        border: none;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+    }
+
+    button:hover {
+        opacity: 0.85;
+    }
+
+    .back-btn {
+        display: inline-block;
+        background: #0066cc;
+        color: white;
+        padding: 10px 15px;
+        border-radius: 6px;
+        text-decoration: none;
+        margin-bottom: 20px;
+    }
+</style>
+
+<!-- Load device auth enforcement -->
+<script src="device-auth.js"></script>
+
+<script>
+// Enforce device check (only admins can view)
+document.addEventListener("DOMContentLoaded", () => {
+    DeviceAuth.enforceOnPage();
+
+    const perms = JSON.parse(localStorage.getItem("mostlanePermissions") || "{}");
+    if (!perms.Users) {
+        alert("You do not have permission to view this page.");
+        window.location.href = "main.html";
+    }
+});
+</script>
+
+</head>
+<body>
+
+<div class="panel">
+
+    <a class="back-btn" href="main.html">← Back to Menu</a>
+    <h1>Device Management</h1>
+    <p>View, verify and reset registered devices for each user.</p>
+
+    <table id="deviceTable">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Devices</th>
+                <th>Last Seen</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+</div>
+
+<script>
+// Cloudflare Worker endpoint
+const WORKER_BASE = "https://userdevicekv.jamie-def.workers.dev";
+
+// Fetch list of all device records
+async function loadDevices() {
+    try {
+        const res = await fetch(WORKER_BASE + "/list", { method: "GET" });
+        const data = await res.json();
+
+        populateTable(data.records || []);
+
+    } catch (err) {
+        console.error(err);
+        alert("Unable to load device records.");
+    }
+}
+
+// Add rows to table
+function populateTable(records) {
+    const tbody = document.querySelector("#deviceTable tbody");
+    tbody.innerHTML = "";
+
+    if (records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4">No device records found</td></tr>`;
+        return;
+    }
+
+    records.forEach(rec => {
+        const deviceList = rec.deviceIds.map((id, i) =>
+            `<strong>${rec.labels[i] || "Unnamed"}</strong><br>
+             ID: ${id}<br>
+             FP: ${rec.fingerprints[i].slice(0,12)}...<br><br>`
+        ).join("");
+
+        const row = `
+        <tr>
+            <td>${rec.username}</td>
+            <td>${deviceList}</td>
+            <td>${rec.lastSeen || "Never"}</td>
+            <td>
+                <button onclick="resetDevice('${rec.username}')">Reset</button>
+            </td>
+        </tr>
+        `;
+
+        tbody.innerHTML += row;
+    });
+}
+
+// Reset (delete) user's device entry in KV
+async function resetDevice(username) {
+    if (!confirm(`Reset device for ${username}?`)) return;
+
+    try {
+        const res = await fetch(WORKER_BASE + "/reset?username=" + encodeURIComponent(username), {
+            method: "POST"
+        });
+
+        const data = await res.json();
+
+        alert(data.message || "Device reset");
+        loadDevices();
+
+    } catch (err) {
+        console.error(err);
+        alert("Error resetting device.");
+    }
+}
+
+loadDevices();
+</script>
+
+</body>
+</html>
