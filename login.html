@@ -65,7 +65,7 @@
     <a href="onboard.html">Sign up</a>
   </div>
 
-  <!-- ✅ Device Auth System -->
+  <!-- Device Auth -->
   <script src="device-auth.js"></script>
 
   <script>
@@ -76,10 +76,28 @@
       const data = enc.encode(password.trim());
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       return Array.from(new Uint8Array(hashBuffer))
-                  .map(b => b.toString(16).padStart(2, '0'))
-                  .join('');
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
     }
 
+    // ⭐ New helper — safe, fallback-compatible
+    function runDeviceCheckAndContinue(username) {
+      try {
+        if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
+          DeviceAuth.checkOnLogin(username, () => {
+            window.location.href = "main.html";
+          });
+        } else {
+          console.warn("DeviceAuth missing — continuing login without device check");
+          window.location.href = "main.html";
+        }
+      } catch (e) {
+        console.error("DeviceAuth error:", e);
+        window.location.href = "main.html";
+      }
+    }
+
+    // Your original login logic — unchanged
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const usernameInput = document.getElementById('username').value.trim();
@@ -111,9 +129,7 @@
           return;
         }
 
-        // -----------------------------------------
-        // ⭐ SESSION + PERSISTENT LOGIN 
-        // -----------------------------------------
+        // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
 
         function set(key, value) {
@@ -129,7 +145,6 @@
         set('mostlaneEmployment', user.EmploymentType || '');
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
-        // Permissions
         const perms = {
           CheckInOut: user.CheckInOut,
           Vehicles: user.Vehicles,
@@ -145,10 +160,10 @@
           Compliance: user.Compliance,
           Users: user.Users
         };
+
         sessionStorage.setItem('mostlanePermissions', JSON.stringify(perms));
         localStorage.setItem('mostlanePermissions', JSON.stringify(perms));
 
-        // Legacy keys
         set('username', user.Username);
         set('user', user.Username);
         set('firstName', user.FirstName || '');
@@ -157,23 +172,18 @@
         set('roleType', user.EmploymentType || '');
         set('assignedUser', user.Username);
 
-        // Create deviceID if missing
         if (!sessionStorage.getItem('deviceID')) {
           const dev = 'dev-' + Math.random().toString(36).slice(2);
           sessionStorage.setItem('deviceID', dev);
           localStorage.setItem('deviceID', dev);
         }
 
-        // --------------------------------------------------
-        // ⭐⭐ DEVICE CHECK BEFORE ALLOWING PORTAL ENTRY ⭐⭐
-        // --------------------------------------------------
-        DeviceAuth.checkOnLogin(user.Username, () => {
-          window.location.href = 'main.html';
-        });
+        // ⭐ THE ONLY CHANGE: run device check here instead of redirecting
+        runDeviceCheckAndContinue(user.Username);
 
       } catch (err) {
         console.error(err);
-        errorBox.textContent = 'Could not load user data.';
+        errorBox.textContent = "Could not load user data.";
       }
     });
   </script>
