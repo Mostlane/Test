@@ -65,6 +65,9 @@
     <a href="onboard.html">Sign up</a>
   </div>
 
+  <!-- ✅ Device Auth System -->
+  <script src="device-auth.js"></script>
+
   <script>
     const usersJsonURL = "https://mostlane-users.jamie-def.workers.dev/users";
 
@@ -109,7 +112,7 @@
         }
 
         // -----------------------------------------
-        // ⭐ SESSION + PERSISTENT LOGIN (FIX)
+        // ⭐ SESSION + PERSISTENT LOGIN 
         // -----------------------------------------
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
 
@@ -126,7 +129,7 @@
         set('mostlaneEmployment', user.EmploymentType || '');
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
-        // Permissions (session + persistent)
+        // Permissions
         const perms = {
           CheckInOut: user.CheckInOut,
           Vehicles: user.Vehicles,
@@ -145,7 +148,7 @@
         sessionStorage.setItem('mostlanePermissions', JSON.stringify(perms));
         localStorage.setItem('mostlanePermissions', JSON.stringify(perms));
 
-        // Legacy compatibility keys
+        // Legacy keys
         set('username', user.Username);
         set('user', user.Username);
         set('firstName', user.FirstName || '');
@@ -154,17 +157,21 @@
         set('roleType', user.EmploymentType || '');
         set('assignedUser', user.Username);
 
-        // Device ID
+        // Create deviceID if missing
         if (!sessionStorage.getItem('deviceID')) {
           const dev = 'dev-' + Math.random().toString(36).slice(2);
           sessionStorage.setItem('deviceID', dev);
           localStorage.setItem('deviceID', dev);
         }
 
-        window.location.href = 'main.html';
-      }
+        // --------------------------------------------------
+        // ⭐⭐ DEVICE CHECK BEFORE ALLOWING PORTAL ENTRY ⭐⭐
+        // --------------------------------------------------
+        DeviceAuth.checkOnLogin(user.Username, () => {
+          window.location.href = 'main.html';
+        });
 
-      catch (err) {
+      } catch (err) {
         console.error(err);
         errorBox.textContent = 'Could not load user data.';
       }
