@@ -63,7 +63,6 @@
       margin-top:10px;
     }
 
-    /* Reuse Main Menu button style */
     a.button {
       display:flex;
       align-items:center;
@@ -128,6 +127,10 @@
         <span class="emoji">📊</span> Dashboard
       </a>
 
+      <a href="sla-scheduler.html" class="button" id="SLA_Scheduler">
+        <span class="emoji">🗓️</span> Scheduler
+      </a>
+
       <a href="engineer-jobs.html" class="button" id="SLA_Jobs">
         <span class="emoji">📝</span> Jobs
       </a>
@@ -153,7 +156,6 @@
 
     document.getElementById("userLabel").textContent = "Logged in as " + user;
 
-    // Fetch permissions
     const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(user));
     const data = await res.json();
     if (!data.found) return;
