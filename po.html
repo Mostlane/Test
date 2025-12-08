@@ -5,7 +5,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Generate Purchase Order Reference</title>
-
   <style>
     body {
       font-family: 'Segoe UI', sans-serif;
@@ -19,7 +18,7 @@
       max-width: 520px;
       margin: auto;
       background: rgba(255,255,255,0.9);
-      padding: 24px;
+      padding: 24px 24px 30px;
       border-radius: 12px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
@@ -34,72 +33,74 @@
       font-weight: bold;
       color: #003366;
     }
-    input, select, textarea, button {
+    input, select, button, textarea {
       width: 100%;
       padding: 10px;
-      margin-top: 6px;
       font-size: 16px;
+      margin-top: 6px;
       border-radius: 6px;
       border: 1px solid #ccc;
       box-sizing: border-box;
     }
     textarea { min-height: 80px; resize: vertical; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
     .button {
       margin-top: 22px;
-      background-color: rgba(0,74,153,0.9);
-      color: #fff;
-      border: none;
       padding: 12px;
-      border-radius: 8px;
+      width: 100%;
+      background-color: rgba(0, 74, 153, 0.9);
+      color: white;
       font-size: 18px;
+      border: none;
+      border-radius: 8px;
       cursor: pointer;
     }
-    .button[disabled] { opacity: .6; cursor: not-allowed; }
+    .button[disabled] { opacity: 0.6; cursor: not-allowed; }
+    .subtle { margin-top: 8px; font-size: 13px; color: #666; }
+    .hidden { display: none; }
 
     .readonly-field {
-      background: #f3f4f6 !important;
+      background: #f3f4f6;
       cursor: default;
     }
 
     .modal-backdrop {
       position: fixed; inset: 0;
-      display: none;
       background: rgba(0,0,0,0.45);
+      display: none;
       align-items: center; justify-content: center;
       z-index: 9999;
     }
     .modal {
       background: #fff;
-      padding: 20px;
       border-radius: 12px;
+      padding: 20px;
       max-width: 420px;
       width: calc(100% - 40px);
-      text-align: center;
       box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      text-align: center;
     }
-    .modal .po-code {
-      font-size: 20px;
-      font-weight: bold;
-      color: #003366;
-      word-break: break-all;
-      margin: 12px 0 20px;
-    }
+    .modal h2 { color: #003366; margin: 0 0 8px 0; }
+    .modal .po-code { font-weight: 700; font-size: 20px; color: #003366; margin: 8px 0 16px; word-break: break-all; }
     .modal .actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
     }
+    .modal button, .modal a {
+      padding: 10px; border-radius: 8px; border: none;
+      background: rgba(0,74,153,0.9); color: #fff; text-decoration: none; font-size: 16px;
+    }
+    .modal .close-btn { background: #888; }
   </style>
 </head>
-
 <body>
   <div class="main-body">
     <h1>Generate Purchase Order Reference</h1>
 
     <form id="poForm">
-
       <label for="engineer">Engineer</label>
       <input type="text" id="engineer" readonly />
 
@@ -110,7 +111,7 @@
         </div>
         <div>
           <label for="workType">Work Type</label>
-          <select id="workType">
+          <select id="workType" required>
             <option value="Reactive">Reactive</option>
             <option value="Planned">Planned</option>
             <option value="Vehicle Maintenance">Vehicle Maintenance</option>
@@ -120,7 +121,7 @@
 
       <div id="incidentRow">
         <label for="incident">Incident Number</label>
-        <input id="incident" type="text" placeholder="Enter incident number">
+        <input type="text" id="incident" placeholder="Enter incident number">
       </div>
 
       <div id="siteTypeRow">
@@ -134,15 +135,16 @@
           <option value="Wenzel’s">Wenzel’s</option>
           <option value="Projects">Projects</option>
         </select>
-
-        <input id="siteTypeReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
+        <!-- Read-only field shown only when linked from a job -->
+        <input type="text" id="siteTypeReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
       </div>
 
       <div id="siteRow">
         <label for="site">Site</label>
         <select id="site"></select>
-
-        <input id="siteReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
+        <!-- Read-only field shown only when linked from a job -->
+        <input type="text" id="siteReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
+        <div class="subtle">(Shown: Site Name — uses Site Number internally)</div>
       </div>
 
       <div id="vehicleRow" class="hidden">
@@ -151,403 +153,613 @@
       </div>
 
       <label for="supplier">Supplier</label>
-      <select id="supplier"></select>
+      <select id="supplier" required></select>
+      <div class="subtle">(Shown: Supplier Name — uses Supplier Number internally)</div>
 
       <label for="desc">Short Description</label>
-      <textarea id="desc" required></textarea>
+      <textarea id="desc" placeholder="What is this PO for?" required></textarea>
 
-      <button id="submitBtn" class="button" type="submit">Create PO</button>
-      <button id="personalBtn" class="button" type="button" style="margin-top:10px;background:#005bb5;">Personal Purchase</button>
+      <button type="submit" class="button" id="submitBtn">Create PO</button>
+      <button type="button" id="personalBtn" class="button" style="background-color:#005bb5;margin-top:10px;">Personal Purchase (Tools etc.)</button>
 
-      <div id="geoStatus" style="margin-top:10px;font-size:13px;color:#666;">Attempting to get your location…</div>
-
+      <div class="subtle" id="geoStatus">Attempting to get your location…</div>
     </form>
   </div>
 
-  <!-- MODAL -->
-  <div id="modalBackdrop" class="modal-backdrop">
+  <div class="modal-backdrop" id="modalBackdrop">
     <div class="modal">
-      <h2>Purchase Order Created</h2>
-      <div id="poCodeText" class="po-code"></div>
+      <h2>✅ Purchase Order Created</h2>
+      <div class="po-code" id="poCodeText"></div>
       <div class="actions">
-        <button id="copyBtn">Copy</button>
-        <a id="viewAllBtn" href="view-pos.html">View All</a>
-        <button id="closeBtn">Close</button>
-        <button id="newBtn">New</button>
+        <button id="copyBtn" type="button">Copy</button>
+        <a id="viewAllBtn" href="view-pos.html">View All POs</a>
+        <button id="closeBtn" class="close-btn" type="button">Close</button>
+        <button id="newBtn" type="button">New PO</button>
       </div>
     </div>
   </div>
 
 <script>
+  const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
+  const USERS_URL = RAW + 'users.json';
+  const VEHICLES_URL = RAW + 'vehicles.json';
 
-/* ===========================
-    CONSTANTS
-=========================== */
+  const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/suppliers";
 
-const RAW = 'https://raw.githubusercontent.com/Mostlane/Test/main/';
-const USERS_URL = RAW + 'users.json';
-const VEHICLES_URL = RAW + 'vehicles.json';
+  const SITE_ENDPOINTS = {
+    retail:   "https://mostlane-po.jamie-def.workers.dev/sites/retail",
+    els:      "https://mostlane-po.jamie-def.workers.dev/sites/els",
+    els_private: "https://mostlane-po.jamie-def.workers.dev/sites/els_private",
+    cobra:    "https://mostlane-po.jamie-def.workers.dev/sites/cobra",
+    wenzels:  "https://mostlane-po.jamie-def.workers.dev/sites/wenzels",
+    projects: "https://mostlane-po.jamie-def.workers.dev/sites/projects"
+  };
 
-const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/suppliers";
+  const CLOUDFLARE_ENDPOINT = "https://mostlane-po.jamie-def.workers.dev/po/create";
 
-const ALL_SITES_URL = "https://mostlane-sites.jamie-def.workers.dev";
+  // All sites in one worker:
+  const ALL_SITES_URL = "https://mostlane-sites.jamie-def.workers.dev";
 
-const CLOUDFLARE_ENDPOINT = "https://mostlane-po.jamie-def.workers.dev/po/create";
+  const byId = id => document.getElementById(id);
+  const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
+  const dotToSpace = s => (s || '').replace(/\./g, ' ');
+  const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  const norm = v => (v||'').toString().toLowerCase().trim();
 
-const byId = id => document.getElementById(id);
-const fetchJSON = url => fetch(url + (url.includes('?')?'&':'?') + 'v=' + Date.now()).then(r => r.json());
-const norm = s => (s||'').toString().toLowerCase().trim();
-const dotToSpace = s => (s||'').replace(/\./g,' ');
+  let engineerCode = '',
+      engineerName = '',
+      geo = { lat:null, lon:null },
+      allSites = [],
+      allSuppliers = [],
+      jobLinked = {
+        active: false,
+        jobId: null,
+        incident: null,
+        siteParam: null,
+        siteNumber: null,
+        siteName: null,
+        siteType: null
+      };
 
-let engineerCode = '';
-let engineerName = '';
-let geo = {lat:null, lon:null};
-let allSuppliers = [];
-let jobLinked = {
-  active:false, jobId:null, incident:null,
-  siteParam:null, siteNumber:null, siteName:null, siteType:null
-};
-
-/* ===========================
-   SITE MATCHING
-=========================== */
-function normaliseText(s){
-  return (s||'').toString().toLowerCase().replace(/\s+/g,' ').trim();
-}
-
-function findBestMatchingSite(param, sites){
-  if(!param) return null;
-  const raw = param.toString();
-  const n = normaliseText(raw);
-
-  // detect 4-digit store number
-  const m = raw.match(/\b(\d{4})\b/);
-  if(m){
-    const num = m[1];
-    const exact = sites.find(s => (s.siteNumber||'').toString() === num);
-    if(exact) return exact;
+  // ---------------------------
+  // TEXT NORMALISATION
+  // ---------------------------
+  function normaliseText(s){
+    return (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
-  // exact name
-  let match = sites.find(s => normaliseText(s.siteName) === n);
-  if(match) return match;
+  function findBestMatchingSite(siteParam, sites){
+    if(!siteParam || !Array.isArray(sites)) return null;
 
-  // contains
-  match = sites.find(s => n.includes(normaliseText(s.siteName)));
-  if(match) return match;
+    const raw = siteParam.toString();
+    const normParam = normaliseText(raw);
 
-  // reverse contains
-  match = sites.find(s => normaliseText(s.siteName).includes(n));
-  if(match) return match;
-
-  return null;
-}
-
-/* ===========================
-   SUPPLIERS
-=========================== */
-async function populateSuppliers(){
-  try {
-    const resp = await fetchJSON(SUPPLIERS_URL);
-    allSuppliers = resp.data || [];
-    const sel = byId('supplier');
-    sel.innerHTML = "";
-
-    allSuppliers.forEach(s=>{
-      const o = document.createElement('option');
-      o.value = s.supplierNumber;
-      o.textContent = s.supplierName;
-      sel.appendChild(o);
-    });
-
-  } catch(err){
-    byId('supplier').innerHTML = "<option>Unable to load</option>";
-  }
-}
-
-/* ===========================
-   VEHICLES
-=========================== */
-async function populateVehicles(){
-  try {
-    const data = await fetchJSON(VEHICLES_URL);
-    const sel = byId('vehicleReg');
-    sel.innerHTML = "";
-
-    (data||[]).forEach(v=>{
-      const o = document.createElement('option');
-      const reg = (v.reg || v.registration || '').replace(/\s+/g,'');
-      o.value = reg;
-      o.textContent = reg;
-      sel.appendChild(o);
-    });
-
-  } catch {}
-}
-
-/* ===========================
-   JOB-LINKED SITE HYDRATION
-=========================== */
-
-async function hydrateJobLinkedSite(){
-  if(!jobLinked.active || !jobLinked.siteParam) return;
-
-  const siteTypeSelect = byId('siteType');
-  const siteTypeReadonly = byId('siteTypeReadonly');
-  const siteSelect = byId('site');
-  const siteReadonly = byId('siteReadonly');
-
-  // hide selects, show readonly
-  siteTypeSelect.style.display = "none";
-  siteTypeReadonly.style.display = "block";
-
-  siteSelect.style.display = "none";
-  siteReadonly.style.display = "block";
-
-  siteTypeReadonly.value = "Loading…";
-  siteReadonly.value = "Matching site…";
-
-  try {
-    const sites = await fetchJSON(ALL_SITES_URL);
-    if(!Array.isArray(sites)) throw new Error("Worker did not return array");
-
-    const match = findBestMatchingSite(jobLinked.siteParam, sites);
-    if(!match){
-      siteTypeReadonly.value = "Unknown";
-      siteReadonly.value = jobLinked.siteParam + " (No match)";
-      return;
+    // Try to detect a 4-digit store number in the param
+    const digitsMatch = raw.match(/\b(\d{4})\b/);
+    if(digitsMatch){
+      const num = digitsMatch[1];
+      const byNumber = sites.find(s => (s.siteNumber || '').toString() === num);
+      if(byNumber) return byNumber;
     }
 
-    jobLinked.siteNumber = match.siteNumber || "";
-    jobLinked.siteName = match.siteName || jobLinked.siteParam;
+    // Exact name match
+    let byName = sites.find(s => normaliseText(s.siteName) === normParam);
+    if(byName) return byName;
 
-    // FIXED TYPE MAPPING
-    const rawType = (match.storeType || match.client || "").toLowerCase();
-    let mapped = "Unknown";
-    if(rawType.includes("retail")) mapped = "Retail";
-    else if(rawType.includes("els") && rawType.includes("private")) mapped = "ELS Private";
-    else if(rawType.includes("els")) mapped = "ELS";
-    else if(rawType.includes("cobra")) mapped = "Cobra";
-    else if(rawType.includes("wenzel")) mapped = "Wenzel’s";
-    else if(rawType.includes("project")) mapped = "Projects";
+    // Param contains siteName
+    byName = sites.find(s => normParam.includes(normaliseText(s.siteName)));
+    if(byName) return byName;
 
-    jobLinked.siteType = mapped;
-    siteTypeReadonly.value = mapped;
+    // siteName contains param
+    byName = sites.find(s => normaliseText(s.siteName).includes(normParam));
+    if(byName) return byName;
 
-    const sn = jobLinked.siteNumber.toString().padStart(4,'0');
-    siteReadonly.value = sn + " " + jobLinked.siteName;
-
-    // ensure hidden real selects stay valid for submission
-    siteSelect.innerHTML = "";
-    const opt = document.createElement('option');
-    opt.value = sn;
-    opt.textContent = siteReadonly.value;
-    siteSelect.appendChild(opt);
-
-    siteTypeSelect.value = mapped;
-
-  } catch(err){
-    console.error("Hydration error:", err);
-    siteTypeReadonly.value = "Unknown";
-    siteReadonly.value = jobLinked.siteParam;
-  }
-}
-
-/* ===========================
-   LOCAL PO NUMBER GENERATOR
-=========================== */
-function nextPO(engineerCode, supplierNo, siteSeg, typeLetter){
-  const key = `poSeq:${engineerCode}|${supplierNo}|${siteSeg}|${typeLetter}`;
-  let n = parseInt(localStorage.getItem(key)||"0",10) + 1;
-  localStorage.setItem(key, n);
-  return `${engineerCode}-${supplierNo}-${siteSeg}-${typeLetter}${n}`;
-}
-
-/* ===========================
-   INIT
-=========================== */
-async function init(){
-  const username = sessionStorage.getItem("mostlaneUser") || "";
-  engineerName = username ? dotToSpace(username) : "Unknown";
-  byId("engineer").value = engineerName;
-
-  // Date
-  const d = new Date();
-  byId('date').value = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-
-  // Query params
-  const params = new URLSearchParams(window.location.search);
-  const jobId = params.get("jobId");
-  const ref = params.get("ref");
-  const siteParam = params.get("site");
-
-  if(jobId){
-    jobLinked.active = true;
-    jobLinked.jobId = jobId;
-    jobLinked.incident = ref || jobId;
-    jobLinked.siteParam = siteParam || "";
+    return null;
   }
 
-  // Load engineer code
-  try {
-    const users = await fetchJSON(USERS_URL);
-    const rec = (users||[]).find(u => u.Username===username || u.username===username);
-    const num = rec?.EngineerNumber || rec?.engineerNumber || '';
-    const empType = (rec?.EmploymentType || rec?.employmentType || 'Employed').toLowerCase();
-    const prefix = empType.includes("self") ? "SE" : "E";
-    engineerCode = prefix + String(num).trim();
-  } catch(err){
-    engineerCode = "E0";
+  // ---------------------------
+  // SUPPLIERS
+  // ---------------------------
+  async function populateSuppliers(){
+    try {
+      const resp = await fetchJSON(SUPPLIERS_URL);
+      allSuppliers = resp.data || [];
+      const sel = byId('supplier');
+      sel.innerHTML = '';
+
+      allSuppliers.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.supplierNumber;
+        opt.textContent = s.supplierName;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      byId('supplier').innerHTML = '<option>(Unable to load)</option>';
+    }
   }
 
-  await populateSuppliers();
-  await populateVehicles();
+  // ---------------------------
+  // VEHICLES
+  // ---------------------------
+  async function populateVehicles(){
+    try {
+      const vehicles = await fetchJSON(VEHICLES_URL);
+      const sel = byId('vehicleReg');
+      sel.innerHTML = '';
 
-  // GEOLOCATION
-  if(navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(
-      pos=>{
-        geo.lat = pos.coords.latitude;
-        geo.lon = pos.coords.longitude;
-        byId('geoStatus').textContent = `Location captured`;
-      },
-      ()=>{
-        byId('geoStatus').textContent = "Location denied";
-      },
-      {enableHighAccuracy:true, timeout:10000}
-    );
+      (vehicles || []).forEach(v => {
+        const opt = document.createElement('option');
+        const reg = (v.reg || v.registration || '').toString().replace(/\s+/g,'');
+        opt.value = reg;
+        opt.textContent = v.reg || v.registration || reg;
+        sel.appendChild(opt);
+      });
+    } catch {}
   }
 
-  // Work type behaviour
-  byId("workType").addEventListener("change", e=>{
-    if(jobLinked.active){
-      e.target.value = "Reactive";
-      return;
+  // ---------------------------
+  // SITES (normal mode)
+  // ---------------------------
+  async function fetchSitesForKey(key){
+    const url = SITE_ENDPOINTS[key];
+    if (!url) return [];
+
+    try {
+      const resp = await fetchJSON(url);
+      const data = resp.data || [];
+
+      return data
+        .map(s => ({
+          code: s.siteNumber?.toString().padStart(4,'0') || "",
+          name: s.siteName || ""
+        }))
+        .filter(x => x.code && x.name)
+        .sort((a,b)=>Number(a.code)-Number(b.code));
+
+    } catch(e){
+      console.warn("Sites fetch failed for", key, e);
+      return [];
+    }
+  }
+
+  async function populateSites(){
+    // If we are in job-linked mode, we don't want to repopulate the dropdown.
+    if(jobLinked.active) return;
+
+    allSites = [];
+    const type = norm(byId('siteType').value);
+    const sel = byId('site');
+    sel.innerHTML = '<option>Loading...</option>';
+
+    const keyMap = {
+      "retail":"retail",
+      "els":"els",
+      "els private":"els_private",
+      "cobra":"cobra",
+      "wenzel’s":"wenzels",
+      "projects":"projects"
+    };
+
+    if (!type) {
+      let combined=[];
+      for (const k of Object.values(keyMap)){
+        combined = combined.concat(await fetchSitesForKey(k));
+      }
+      allSites = combined.sort((a,b)=>Number(a.code)-Number(b.code));
+
+    } else {
+      const key = keyMap[type];
+      allSites = await fetchSitesForKey(key);
     }
 
-    const v = e.target.value;
-    const isV = v === "Vehicle Maintenance";
+    sel.innerHTML='';
+    allSites.forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value = s.code;
+      opt.textContent = `${s.code} ${s.name}`;
+      sel.appendChild(opt);
+    });
 
-    byId("siteTypeRow").style.display = isV ? "none" : "";
-    byId("siteRow").style.display = isV ? "none" : "";
-    byId("vehicleRow").classList.toggle("hidden", !isV);
-  });
+    if (!allSites.length) sel.innerHTML='<option>(No options)</option>';
+  }
 
-  if(jobLinked.active){
-    // lock mode
-    byId("workType").value = "Reactive";
-    byId("workType").disabled = true;
+  // ---------------------------
+  // PO Number (local sequence only)
+  // ---------------------------
+  function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
+    const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
+    let n = parseInt(localStorage.getItem(key) || "0",10)+1;
+    localStorage.setItem(key,n);
+    return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
+  }
 
-    const inc = byId("incident");
-    inc.value = jobLinked.incident;
-    inc.readOnly = true;
-    inc.classList.add("readonly-field");
+  function showModal(po){
+    byId('poCodeText').textContent=po;
+    byId('modalBackdrop').style.display='flex';
+  }
+  function hideModal(){
+    byId('modalBackdrop').style.display='none';
+  }
 
+  // ---------------------------
+  // JOB-LINKED MODE: hydrate site fields
+  // ---------------------------
+  async function hydrateJobLinkedSite(){
+    if(!jobLinked.active || !jobLinked.siteParam) return;
+
+    const siteTypeSelect = byId('siteType');
+    const siteSelect = byId('site');
+    const siteTypeReadonly = byId('siteTypeReadonly');
+    const siteReadonly = byId('siteReadonly');
+
+    // Hide dropdowns, show read-only inputs
+    if(siteTypeSelect && siteTypeReadonly){
+      siteTypeSelect.style.display = 'none';
+      siteTypeReadonly.style.display = 'block';
+      siteTypeReadonly.value = 'Loading site type…';
+    }
+    if(siteSelect && siteReadonly){
+      siteSelect.style.display = 'none';
+      siteReadonly.style.display = 'block';
+      siteReadonly.value = 'Matching site…';
+    }
+
+    try {
+      const sites = await fetchJSON(ALL_SITES_URL);
+      if(!Array.isArray(sites)) throw new Error("Sites worker did not return an array");
+
+      const match = findBestMatchingSite(jobLinked.siteParam, sites);
+      if(!match){
+        if(siteTypeReadonly) siteTypeReadonly.value = 'Unknown';
+        if(siteReadonly) siteReadonly.value = jobLinked.siteParam + ' (not found)';
+        return;
+      }
+
+      jobLinked.siteNumber = match.siteNumber || '';
+      jobLinked.siteName = match.siteName || jobLinked.siteParam;
+      jobLinked.siteType = match.storeType || match.client || '';
+
+      // Presentable site type
+      let niceType = jobLinked.siteType || '';
+      if(niceType){
+        niceType = niceType.charAt(0).toUpperCase() + niceType.slice(1);
+      }
+
+      if(siteTypeReadonly){
+        siteTypeReadonly.value = niceType || 'Unknown';
+      }
+      if(siteReadonly){
+        const sn = jobLinked.siteNumber ? jobLinked.siteNumber.toString().padStart(4,'0') : '';
+        siteReadonly.value = sn ? `${sn} ${jobLinked.siteName}` : jobLinked.siteName;
+      }
+
+      // Also keep hidden select in sync (for compatibility)
+      if(siteSelect){
+        siteSelect.innerHTML = '';
+        const opt = document.createElement('option');
+        const sn = jobLinked.siteNumber ? jobLinked.siteNumber.toString().padStart(4,'0') : '';
+        opt.value = sn || '';
+        opt.textContent = sn ? `${sn} ${jobLinked.siteName}` : jobLinked.siteName;
+        siteSelect.appendChild(opt);
+        siteSelect.value = sn;
+      }
+
+      // Align hidden siteType select value if possible
+      if(siteTypeSelect && jobLinked.siteType){
+        const normType = jobLinked.siteType.toLowerCase();
+        let selectVal = '';
+        if(normType.includes('retail')) selectVal = 'Retail';
+        else if(normType.includes('els') && normType.includes('private')) selectVal = 'ELS Private';
+        else if(normType.includes('els')) selectVal = 'ELS';
+        else if(normType.includes('cobra')) selectVal = 'Cobra';
+        else if(normType.includes('wenzel')) selectVal = "Wenzel’s";
+        else if(normType.includes('project')) selectVal = 'Projects';
+        if(selectVal) siteTypeSelect.value = selectVal;
+      }
+
+    } catch (err){
+      console.error("Failed to hydrate job-linked site", err);
+      if(siteTypeReadonly) siteTypeReadonly.value = 'Unknown';
+      if(siteReadonly) siteReadonly.value = jobLinked.siteParam || '';
+    }
+  }
+
+  // ---------------------------
+  // INIT
+  // ---------------------------
+  async function init(){
+    const username = sessionStorage.getItem('mostlaneUser') || '';
+    engineerName = username ? dotToSpace(username) : 'Unknown';
+    byId('engineer').value = engineerName;
+    byId('date').value = formatDateUK();
+
+    // Read any job-linking query params
+    const params = new URLSearchParams(window.location.search);
+    const jobIdParam = params.get('jobId');
+    const refParam = params.get('ref');
+    const siteParam = params.get('site');
+
+    if(jobIdParam){
+      jobLinked.active = true;
+      jobLinked.jobId = jobIdParam;
+      jobLinked.incident = refParam || jobIdParam;
+      jobLinked.siteParam = siteParam || '';
+    }
+
+    try{
+      const users = await fetchJSON(USERS_URL);
+      const rec = (users||[]).find(u => u.Username===username || u.username===username);
+      const engNum = rec?.EngineerNumber || rec?.engineerNumber || '';
+      const empType = (rec?.EmploymentType || rec?.employmentType || 'Employed').toLowerCase();
+      const prefix = empType.includes('self') ? 'SE' : 'E';
+      engineerCode = prefix + String(engNum || '').trim();
+    }catch{
+      engineerCode = 'E0';
+    }
+
+    await populateSuppliers();
+    await populateVehicles();
+
+    // Geolocation
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        pos=>{
+          geo.lat = pos.coords.latitude;
+          geo.lon = pos.coords.longitude;
+          byId('geoStatus').textContent = `📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
+        },
+        ()=>{
+          byId('geoStatus').textContent = '⚠️ Location permission denied. Allow access.';
+        },
+        {enableHighAccuracy:true, timeout:10000}
+      );
+    } else {
+      byId('geoStatus').textContent = '❌ Geolocation not supported.';
+    }
+
+    byId('workType').addEventListener('change', e=>{
+      // In job-linked mode, force Reactive and ignore changes
+      if(jobLinked.active){
+        e.target.value = 'Reactive';
+        return;
+      }
+
+      const val = e.target.value;
+      const isReactive = val === 'Reactive';
+      const isVehicle = val === 'Vehicle Maintenance';
+
+      byId('incidentRow').style.display = isReactive ? '' : 'none';
+      byId('siteTypeRow').style.display = isVehicle ? 'none' : '';
+      byId('siteRow').style.display = isVehicle ? 'none' : '';
+      byId('vehicleRow').classList.toggle('hidden', !isVehicle);
+    });
+
+    byId('siteType').addEventListener('change', populateSites);
+    byId('copyBtn').onclick = () => navigator.clipboard.writeText(byId('poCodeText').textContent);
+    byId('closeBtn').onclick = hideModal;
+    byId('newBtn').onclick = () => {
+      hideModal();
+      byId('poForm').reset();
+      byId('engineer').value = engineerName;
+      byId('date').value = formatDateUK();
+      // In job-linked mode, re-apply locking
+      if(jobLinked.active){
+        activateJobLinkedMode();
+      }
+    };
+
+    byId('personalBtn').onclick = () => {
+      const eng = encodeURIComponent(byId('engineer').value || '');
+      const date = encodeURIComponent(byId('date').value || '');
+      window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`, '_blank');
+    };
+
+    byId('poForm').addEventListener('submit', onSubmit);
+
+    // If not job-linked, show normal behaviour (incident visible only for Reactive etc.)
+    if(!jobLinked.active){
+      // Default: Reactive → incident + site fields visible, vehicle hidden
+      byId('incidentRow').style.display = '';
+      byId('siteTypeRow').style.display = '';
+      byId('siteRow').style.display = '';
+      byId('vehicleRow').classList.add('hidden');
+    } else {
+      // Job-linked behaviour: lock work type, incident, and hydrate site
+      activateJobLinkedMode();
+    }
+  }
+
+  function activateJobLinkedMode(){
+    const workType = byId('workType');
+    if(workType){
+      workType.value = 'Reactive';
+      workType.disabled = true;
+    }
+
+    const incidentInput = byId('incident');
+    if(incidentInput){
+      incidentInput.value = jobLinked.incident || '';
+      incidentInput.readOnly = true;
+      incidentInput.classList.add('readonly-field');
+    }
+
+    // Ensure incident row and site rows visible
+    byId('incidentRow').style.display = '';
+    byId('siteTypeRow').style.display = '';
+    byId('siteRow').style.display = '';
+    byId('vehicleRow').classList.add('hidden');
+
+    // Hydrate site/type from sites worker
     hydrateJobLinkedSite();
   }
-}
 
-/* ===========================
-   SUBMIT
-=========================== */
-async function onSubmit(e){
-  e.preventDefault();
-  const submitBtn = byId("submitBtn");
-  submitBtn.disabled = true;
+  // ---------------------------
+  // SUBMIT
+  // ---------------------------
+  async function onSubmit(e){
+    e.preventDefault();
+    const submitBtn = byId('submitBtn');
+    submitBtn.disabled = true;
 
-  const engineerVal = byId("engineer").value;
-  const dateVal = byId("date").value;
-  const workType = byId("workType").value;
-  const supplierNumber = byId("supplier").value;
-  const supplierName = byId("supplier").selectedOptions[0]?.textContent || '';
-  const desc = byId("desc").value.trim();
-  const incidentVal = byId("incident").value.trim();
+    const workType = byId('workType').value;
+    const isVehicle = workType === 'Vehicle Maintenance';
+    const engineerVal = byId('engineer').value.trim();
+    const dateVal = byId('date').value.trim();
+    const supplierNumber = byId('supplier').value;
+    const supplierName = byId('supplier').selectedOptions[0]?.textContent || '';
+    const descVal = byId('desc').value.trim();
+    const incidentVal = byId('incident').value.trim();
 
-  if(!desc){
-    alert("Description required");
-    submitBtn.disabled = false;
-    return;
-  }
+    let siteNumber = byId('site').value;
+    const vehicleReg = byId('vehicleReg').value;
 
-  if(geo.lat === null){
-    alert("Location required");
-    submitBtn.disabled = false;
-    return;
-  }
-
-  let siteNumber = byId("site").value;
-  if(jobLinked.active && jobLinked.siteNumber){
-    siteNumber = jobLinked.siteNumber.toString().padStart(4,'0');
-  }
-
-  const typeLetter = workType === "Reactive" ? "R" : workType === "Planned" ? "P" : "V";
-
-  const siteSeg = workType === "Vehicle Maintenance"
-      ? (byId("vehicleReg").value || "").replace(/\s+/g,'')
-      : (siteNumber || "NONE");
-
-  const poCode = nextPO(engineerCode, supplierNumber, siteSeg, typeLetter);
-
-  byId('poCodeText').textContent = poCode;
-  byId('modalBackdrop').style.display = "flex";
-
-  const payload = {
-    poNumber: poCode,
-    engineer: engineerVal,
-    engineerCode,
-    date: dateVal,
-    workType,
-    supplierName,
-    supplierNumber,
-    description: desc,
-    incidentNumber: incidentVal,
-    latitude: geo.lat,
-    longitude: geo.lon,
-    createdAt: new Date().toISOString()
-  };
-
-  if(jobLinked.active){
-    payload.jobLinked = true;
-    payload.jobId = jobLinked.jobId;
-    payload.siteNumber = jobLinked.siteNumber;
-    payload.siteName = jobLinked.siteName;
-    payload.siteType = jobLinked.siteType;
-  } else {
-    payload.siteNumber = siteNumber;
-  }
-
-  try {
-    const res = await fetch(CLOUDFLARE_ENDPOINT, {
-      method:"POST",
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const result = await res.json();
-    if(!res.ok){
-      alert("Server error: " + (result.error||"Unknown"));
+    if(jobLinked.active && jobLinked.siteNumber){
+      siteNumber = jobLinked.siteNumber.toString().padStart(4,'0');
     }
-  } catch(err){
-    alert("Failed to submit: " + err.message);
+
+    if(!engineerVal || !dateVal || !descVal || !supplierNumber){
+      alert('All required fields must be completed.');
+      submitBtn.disabled = false;
+      return;
+    }
+    if(geo.lat === null || geo.lon === null){
+      alert('Location required. Enable location.');
+      submitBtn.disabled = false;
+      return;
+    }
+
+    const typeLetter = workType === 'Reactive' ? 'R' : workType === 'Planned' ? 'P' : 'V';
+    const siteSegment = isVehicle
+      ? (vehicleReg || '').replace(/\s+/g,'')
+      : (siteNumber || 'NO_SITE');
+
+    const poCode = nextPO(engineerCode, supplierNumber, siteSegment, typeLetter);
+
+    showModal(poCode);
+
+    const data = {
+      poNumber: poCode,
+      engineer: engineerVal,
+      engineerCode,
+      date: dateVal,
+      workType,
+      supplierName,
+      supplierNumber,
+      description: descVal,
+      latitude: geo.lat,
+      longitude: geo.lon,
+      incidentNumber: incidentVal,
+      notes: descVal,
+      createdAt: new Date().toISOString()
+    };
+
+    // Add job-link metadata when relevant
+    if(jobLinked.active){
+      data.jobLinked = true;
+      data.jobId = jobLinked.jobId;
+      if(jobLinked.siteNumber) data.siteNumber = jobLinked.siteNumber;
+      if(jobLinked.siteName) data.siteName = jobLinked.siteName;
+      if(jobLinked.siteType) data.siteType = jobLinked.siteType;
+    } else {
+      // In non job-linked mode, include site number from dropdown if present
+      if(siteNumber) data.siteNumber = siteNumber;
+    }
+
+    try {
+      const res = await fetch(CLOUDFLARE_ENDPOINT, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(data),
+        cache: 'no-store'
+      });
+
+      const result = await res.json();
+      if(res.ok) alert(`✅ Purchase Order ${poCode} submitted successfully.`);
+      else alert(`⚠️ Failed: ${result?.error || 'Unknown error'}`);
+
+    } catch (err) {
+      alert('⚠️ Failed to reach server: ' + err.message);
+    } finally {
+      submitBtn.disabled = false;
+    }
   }
 
-  submitBtn.disabled = false;
+  document.addEventListener('DOMContentLoaded', init);
+</script>
+
+<!-- ==========================
+     OFFLINE WARNING MODAL
+     ========================== -->
+<div id="offlineModal" style="
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  font-family: Segoe UI, sans-serif;
+">
+  <div style="
+    background: #fff;
+    padding: 24px;
+    border-radius: 12px;
+    width: calc(100% - 60px);
+    max-width: 420px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  ">
+    <h2 style="color:#003366; margin-top:0;">⚠️ Offline Mode</h2>
+    <p style="font-size: 16px; color:#333;">
+      You are currently offline and cannot raise a Purchase Order.
+    </p>
+    <p style="font-size: 16px; margin-top:10px;">
+      Please contact the office to obtain a PO number:
+    </p>
+
+    <p style="font-size: 20px; font-weight: bold; margin: 12px 0;">
+      📞 <a href="tel:02380262000" style="color:#003b82;">
+        02380 262000
+      </a>
+    </p>
+
+    <p style="font-size: 14px; color:#666; margin-top:12px;">
+      This message will disappear when your connection returns.
+    </p>
+  </div>
+</div>
+
+<script>
+function showOfflineModal() {
+  document.getElementById("offlineModal").style.display = "flex";
 }
 
-/* ===========================
-   MODAL BUTTONS
-=========================== */
-document.addEventListener("DOMContentLoaded", ()=>{
-  init();
+function hideOfflineModal() {
+  document.getElementById("offlineModal").style.display = "none";
+}
 
-  byId('poForm').addEventListener('submit', onSubmit);
-  byId('copyBtn').onclick = ()=> navigator.clipboard.writeText(byId('poCodeText').textContent);
-  byId('closeBtn').onclick = ()=> byId('modalBackdrop').style.display="none";
-  byId('newBtn').onclick = ()=>{
-    byId('modalBackdrop').style.display="none";
-    window.location.reload();
-  };
+// --- Detect offline on page load ---
+if (!navigator.onLine) {
+  showOfflineModal();
+}
+
+// --- Live connection monitoring ---
+window.addEventListener("offline", showOfflineModal);
+window.addEventListener("online", hideOfflineModal);
+
+// --- Block form submission if offline ---
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("poForm");
+  if (!form) return;
+
+  form.addEventListener("submit", e => {
+    if (!navigator.onLine) {
+      e.preventDefault();
+      showOfflineModal();
+    }
+  });
 });
-
 </script>
+
 </body>
 </html>
