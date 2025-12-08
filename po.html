@@ -63,6 +63,11 @@
     .subtle { margin-top: 8px; font-size: 13px; color: #666; }
     .hidden { display: none; }
 
+    .readonly-field {
+      background: #f3f4f6;
+      cursor: default;
+    }
+
     .modal-backdrop {
       position: fixed; inset: 0;
       background: rgba(0,0,0,0.45);
@@ -130,11 +135,15 @@
           <option value="Wenzel’s">Wenzel’s</option>
           <option value="Projects">Projects</option>
         </select>
+        <!-- Read-only field shown only when linked from a job -->
+        <input type="text" id="siteTypeReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
       </div>
 
       <div id="siteRow">
         <label for="site">Site</label>
         <select id="site"></select>
+        <!-- Read-only field shown only when linked from a job -->
+        <input type="text" id="siteReadonly" class="readonly-field" readonly style="display:none;margin-top:6px;">
         <div class="subtle">(Shown: Site Name — uses Site Number internally)</div>
       </div>
 
@@ -175,9 +184,6 @@
   const USERS_URL = RAW + 'users.json';
   const VEHICLES_URL = RAW + 'vehicles.json';
 
-  // ---------------------------
-  // UPDATED ENDPOINTS (MATCHING YOUR WORKER)
-  // ---------------------------
   const SUPPLIERS_URL = "https://mostlane-po.jamie-def.workers.dev/suppliers";
 
   const SITE_ENDPOINTS = {
@@ -191,13 +197,65 @@
 
   const CLOUDFLARE_ENDPOINT = "https://mostlane-po.jamie-def.workers.dev/po/create";
 
+  // All sites in one worker:
+  const ALL_SITES_URL = "https://mostlane-sites.jamie-def.workers.dev";
+
   const byId = id => document.getElementById(id);
   const fetchJSON = url => fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now()).then(r => r.json());
   const dotToSpace = s => (s || '').replace(/\./g, ' ');
   const formatDateUK = (d = new Date()) => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
   const norm = v => (v||'').toString().toLowerCase().trim();
 
-  let engineerCode='', engineerName='', geo={lat:null,lon:null}, allSites=[], allSuppliers=[];
+  let engineerCode = '',
+      engineerName = '',
+      geo = { lat:null, lon:null },
+      allSites = [],
+      allSuppliers = [],
+      jobLinked = {
+        active: false,
+        jobId: null,
+        incident: null,
+        siteParam: null,
+        siteNumber: null,
+        siteName: null,
+        siteType: null
+      };
+
+  // ---------------------------
+  // TEXT NORMALISATION
+  // ---------------------------
+  function normaliseText(s){
+    return (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  function findBestMatchingSite(siteParam, sites){
+    if(!siteParam || !Array.isArray(sites)) return null;
+
+    const raw = siteParam.toString();
+    const normParam = normaliseText(raw);
+
+    // Try to detect a 4-digit store number in the param
+    const digitsMatch = raw.match(/\b(\d{4})\b/);
+    if(digitsMatch){
+      const num = digitsMatch[1];
+      const byNumber = sites.find(s => (s.siteNumber || '').toString() === num);
+      if(byNumber) return byNumber;
+    }
+
+    // Exact name match
+    let byName = sites.find(s => normaliseText(s.siteName) === normParam);
+    if(byName) return byName;
+
+    // Param contains siteName
+    byName = sites.find(s => normParam.includes(normaliseText(s.siteName)));
+    if(byName) return byName;
+
+    // siteName contains param
+    byName = sites.find(s => normaliseText(s.siteName).includes(normParam));
+    if(byName) return byName;
+
+    return null;
+  }
 
   // ---------------------------
   // SUPPLIERS
@@ -226,20 +284,21 @@
   async function populateVehicles(){
     try {
       const vehicles = await fetchJSON(VEHICLES_URL);
-      const sel=byId('vehicleReg'); sel.innerHTML='';
+      const sel = byId('vehicleReg');
+      sel.innerHTML = '';
 
-      (vehicles||[]).forEach(v=>{
-        const opt=document.createElement('option');
-        const reg=(v.reg||v.registration||'').toString().replace(/\s+/g,'');
-        opt.value=reg;
-        opt.textContent=v.reg||v.registration||reg;
+      (vehicles || []).forEach(v => {
+        const opt = document.createElement('option');
+        const reg = (v.reg || v.registration || '').toString().replace(/\s+/g,'');
+        opt.value = reg;
+        opt.textContent = v.reg || v.registration || reg;
         sel.appendChild(opt);
       });
-    } catch{}
+    } catch {}
   }
 
   // ---------------------------
-  // SITES
+  // SITES (normal mode)
   // ---------------------------
   async function fetchSitesForKey(key){
     const url = SITE_ENDPOINTS[key];
@@ -264,6 +323,9 @@
   }
 
   async function populateSites(){
+    // If we are in job-linked mode, we don't want to repopulate the dropdown.
+    if(jobLinked.active) return;
+
     allSites = [];
     const type = norm(byId('siteType').value);
     const sel = byId('site');
@@ -320,67 +382,215 @@
   }
 
   // ---------------------------
+  // JOB-LINKED MODE: hydrate site fields
+  // ---------------------------
+  async function hydrateJobLinkedSite(){
+    if(!jobLinked.active || !jobLinked.siteParam) return;
+
+    const siteTypeSelect = byId('siteType');
+    const siteSelect = byId('site');
+    const siteTypeReadonly = byId('siteTypeReadonly');
+    const siteReadonly = byId('siteReadonly');
+
+    // Hide dropdowns, show read-only inputs
+    if(siteTypeSelect && siteTypeReadonly){
+      siteTypeSelect.style.display = 'none';
+      siteTypeReadonly.style.display = 'block';
+      siteTypeReadonly.value = 'Loading site type…';
+    }
+    if(siteSelect && siteReadonly){
+      siteSelect.style.display = 'none';
+      siteReadonly.style.display = 'block';
+      siteReadonly.value = 'Matching site…';
+    }
+
+    try {
+      const sites = await fetchJSON(ALL_SITES_URL);
+      if(!Array.isArray(sites)) throw new Error("Sites worker did not return an array");
+
+      const match = findBestMatchingSite(jobLinked.siteParam, sites);
+      if(!match){
+        if(siteTypeReadonly) siteTypeReadonly.value = 'Unknown';
+        if(siteReadonly) siteReadonly.value = jobLinked.siteParam + ' (not found)';
+        return;
+      }
+
+      jobLinked.siteNumber = match.siteNumber || '';
+      jobLinked.siteName = match.siteName || jobLinked.siteParam;
+      jobLinked.siteType = match.storeType || match.client || '';
+
+      // Presentable site type
+      let niceType = jobLinked.siteType || '';
+      if(niceType){
+        niceType = niceType.charAt(0).toUpperCase() + niceType.slice(1);
+      }
+
+      if(siteTypeReadonly){
+        siteTypeReadonly.value = niceType || 'Unknown';
+      }
+      if(siteReadonly){
+        const sn = jobLinked.siteNumber ? jobLinked.siteNumber.toString().padStart(4,'0') : '';
+        siteReadonly.value = sn ? `${sn} ${jobLinked.siteName}` : jobLinked.siteName;
+      }
+
+      // Also keep hidden select in sync (for compatibility)
+      if(siteSelect){
+        siteSelect.innerHTML = '';
+        const opt = document.createElement('option');
+        const sn = jobLinked.siteNumber ? jobLinked.siteNumber.toString().padStart(4,'0') : '';
+        opt.value = sn || '';
+        opt.textContent = sn ? `${sn} ${jobLinked.siteName}` : jobLinked.siteName;
+        siteSelect.appendChild(opt);
+        siteSelect.value = sn;
+      }
+
+      // Align hidden siteType select value if possible
+      if(siteTypeSelect && jobLinked.siteType){
+        const normType = jobLinked.siteType.toLowerCase();
+        let selectVal = '';
+        if(normType.includes('retail')) selectVal = 'Retail';
+        else if(normType.includes('els') && normType.includes('private')) selectVal = 'ELS Private';
+        else if(normType.includes('els')) selectVal = 'ELS';
+        else if(normType.includes('cobra')) selectVal = 'Cobra';
+        else if(normType.includes('wenzel')) selectVal = "Wenzel’s";
+        else if(normType.includes('project')) selectVal = 'Projects';
+        if(selectVal) siteTypeSelect.value = selectVal;
+      }
+
+    } catch (err){
+      console.error("Failed to hydrate job-linked site", err);
+      if(siteTypeReadonly) siteTypeReadonly.value = 'Unknown';
+      if(siteReadonly) siteReadonly.value = jobLinked.siteParam || '';
+    }
+  }
+
+  // ---------------------------
   // INIT
   // ---------------------------
   async function init(){
-    const username=sessionStorage.getItem('mostlaneUser')||'';
-    engineerName=username?dotToSpace(username):'Unknown';
-    byId('engineer').value=engineerName;
-    byId('date').value=formatDateUK();
+    const username = sessionStorage.getItem('mostlaneUser') || '';
+    engineerName = username ? dotToSpace(username) : 'Unknown';
+    byId('engineer').value = engineerName;
+    byId('date').value = formatDateUK();
+
+    // Read any job-linking query params
+    const params = new URLSearchParams(window.location.search);
+    const jobIdParam = params.get('jobId');
+    const refParam = params.get('ref');
+    const siteParam = params.get('site');
+
+    if(jobIdParam){
+      jobLinked.active = true;
+      jobLinked.jobId = jobIdParam;
+      jobLinked.incident = refParam || jobIdParam;
+      jobLinked.siteParam = siteParam || '';
+    }
 
     try{
-      const users=await fetchJSON(USERS_URL);
-      const rec=(users||[]).find(u=>u.Username===username||u.username===username);
-      const engNum=rec?.EngineerNumber||rec?.engineerNumber||'';
-      const empType=(rec?.EmploymentType||rec?.employmentType||'Employed').toLowerCase();
-      const prefix=empType.includes('self')?'SE':'E';
-      engineerCode=prefix+String(engNum||'').trim();
+      const users = await fetchJSON(USERS_URL);
+      const rec = (users||[]).find(u => u.Username===username || u.username===username);
+      const engNum = rec?.EngineerNumber || rec?.engineerNumber || '';
+      const empType = (rec?.EmploymentType || rec?.employmentType || 'Employed').toLowerCase();
+      const prefix = empType.includes('self') ? 'SE' : 'E';
+      engineerCode = prefix + String(engNum || '').trim();
     }catch{
-      engineerCode='E0';
+      engineerCode = 'E0';
     }
 
     await populateSuppliers();
     await populateVehicles();
 
+    // Geolocation
     if(navigator.geolocation){
       navigator.geolocation.getCurrentPosition(
         pos=>{
-          geo.lat=pos.coords.latitude;
-          geo.lon=pos.coords.longitude;
-          byId('geoStatus').textContent=`📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
+          geo.lat = pos.coords.latitude;
+          geo.lon = pos.coords.longitude;
+          byId('geoStatus').textContent = `📍 Location captured: ${geo.lat.toFixed(5)}, ${geo.lon.toFixed(5)}`;
         },
         ()=>{
-          byId('geoStatus').textContent='⚠️ Location permission denied. Allow access.';
+          byId('geoStatus').textContent = '⚠️ Location permission denied. Allow access.';
         },
         {enableHighAccuracy:true, timeout:10000}
       );
     } else {
-      byId('geoStatus').textContent='❌ Geolocation not supported.';
+      byId('geoStatus').textContent = '❌ Geolocation not supported.';
     }
 
     byId('workType').addEventListener('change', e=>{
-      const val=e.target.value;
-      const isReactive=val==='Reactive';
-      const isVehicle=val==='Vehicle Maintenance';
+      // In job-linked mode, force Reactive and ignore changes
+      if(jobLinked.active){
+        e.target.value = 'Reactive';
+        return;
+      }
 
-      byId('incidentRow').style.display=isReactive?'':'none';
-      byId('siteTypeRow').style.display=isVehicle?'none':'';
-      byId('siteRow').style.display=isVehicle?'none':'';
-      byId('vehicleRow').classList.toggle('hidden',!isVehicle);
+      const val = e.target.value;
+      const isReactive = val === 'Reactive';
+      const isVehicle = val === 'Vehicle Maintenance';
+
+      byId('incidentRow').style.display = isReactive ? '' : 'none';
+      byId('siteTypeRow').style.display = isVehicle ? 'none' : '';
+      byId('siteRow').style.display = isVehicle ? 'none' : '';
+      byId('vehicleRow').classList.toggle('hidden', !isVehicle);
     });
 
     byId('siteType').addEventListener('change', populateSites);
-    byId('copyBtn').onclick=()=>navigator.clipboard.writeText(byId('poCodeText').textContent);
-    byId('closeBtn').onclick=hideModal;
-    byId('newBtn').onclick=()=>{ hideModal(); byId('poForm').reset(); byId('engineer').value=engineerName; byId('date').value=formatDateUK(); };
-
-    byId('personalBtn').onclick=()=>{
-      const eng=encodeURIComponent(byId('engineer').value||'');
-      const date=encodeURIComponent(byId('date').value||'');
-      window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`,'_blank');
+    byId('copyBtn').onclick = () => navigator.clipboard.writeText(byId('poCodeText').textContent);
+    byId('closeBtn').onclick = hideModal;
+    byId('newBtn').onclick = () => {
+      hideModal();
+      byId('poForm').reset();
+      byId('engineer').value = engineerName;
+      byId('date').value = formatDateUK();
+      // In job-linked mode, re-apply locking
+      if(jobLinked.active){
+        activateJobLinkedMode();
+      }
     };
 
-    byId('poForm').addEventListener('submit',onSubmit);
+    byId('personalBtn').onclick = () => {
+      const eng = encodeURIComponent(byId('engineer').value || '');
+      const date = encodeURIComponent(byId('date').value || '');
+      window.open(`https://form.jotform.com/250527962516057?engineer=${eng}&date=${date}`, '_blank');
+    };
+
+    byId('poForm').addEventListener('submit', onSubmit);
+
+    // If not job-linked, show normal behaviour (incident visible only for Reactive etc.)
+    if(!jobLinked.active){
+      // Default: Reactive → incident + site fields visible, vehicle hidden
+      byId('incidentRow').style.display = '';
+      byId('siteTypeRow').style.display = '';
+      byId('siteRow').style.display = '';
+      byId('vehicleRow').classList.add('hidden');
+    } else {
+      // Job-linked behaviour: lock work type, incident, and hydrate site
+      activateJobLinkedMode();
+    }
+  }
+
+  function activateJobLinkedMode(){
+    const workType = byId('workType');
+    if(workType){
+      workType.value = 'Reactive';
+      workType.disabled = true;
+    }
+
+    const incidentInput = byId('incident');
+    if(incidentInput){
+      incidentInput.value = jobLinked.incident || '';
+      incidentInput.readOnly = true;
+      incidentInput.classList.add('readonly-field');
+    }
+
+    // Ensure incident row and site rows visible
+    byId('incidentRow').style.display = '';
+    byId('siteTypeRow').style.display = '';
+    byId('siteRow').style.display = '';
+    byId('vehicleRow').classList.add('hidden');
+
+    // Hydrate site/type from sites worker
+    hydrateJobLinkedSite();
   }
 
   // ---------------------------
@@ -388,34 +598,42 @@
   // ---------------------------
   async function onSubmit(e){
     e.preventDefault();
-    const submitBtn=byId('submitBtn');
-    submitBtn.disabled=true;
+    const submitBtn = byId('submitBtn');
+    submitBtn.disabled = true;
 
-    const workType=byId('workType').value;
-    const isVehicle=workType==='Vehicle Maintenance';
-    const engineerVal=byId('engineer').value.trim();
-    const dateVal=byId('date').value.trim();
-    const siteNumber=byId('site').value;
-    const vehicleReg=byId('vehicleReg').value;
-    const supplierNumber=byId('supplier').value;
-    const supplierName=byId('supplier').selectedOptions[0]?.textContent||'';
-    const descVal=byId('desc').value.trim();
-    const incidentVal=byId('incident').value.trim();
+    const workType = byId('workType').value;
+    const isVehicle = workType === 'Vehicle Maintenance';
+    const engineerVal = byId('engineer').value.trim();
+    const dateVal = byId('date').value.trim();
+    const supplierNumber = byId('supplier').value;
+    const supplierName = byId('supplier').selectedOptions[0]?.textContent || '';
+    const descVal = byId('desc').value.trim();
+    const incidentVal = byId('incident').value.trim();
 
-    if(!engineerVal||!dateVal||!descVal||!supplierNumber){
+    let siteNumber = byId('site').value;
+    const vehicleReg = byId('vehicleReg').value;
+
+    if(jobLinked.active && jobLinked.siteNumber){
+      siteNumber = jobLinked.siteNumber.toString().padStart(4,'0');
+    }
+
+    if(!engineerVal || !dateVal || !descVal || !supplierNumber){
       alert('All required fields must be completed.');
-      submitBtn.disabled=false;
+      submitBtn.disabled = false;
       return;
     }
-    if(geo.lat===null||geo.lon===null){
+    if(geo.lat === null || geo.lon === null){
       alert('Location required. Enable location.');
-      submitBtn.disabled=false;
+      submitBtn.disabled = false;
       return;
     }
 
-    const typeLetter=workType==='Reactive'?'R':workType==='Planned'?'P':'V';
-    const siteSegment=isVehicle ? (vehicleReg||'').replace(/\s+/g,'') : siteNumber;
-    const poCode=nextPO(engineerCode,supplierNumber,siteSegment,typeLetter);
+    const typeLetter = workType === 'Reactive' ? 'R' : workType === 'Planned' ? 'P' : 'V';
+    const siteSegment = isVehicle
+      ? (vehicleReg || '').replace(/\s+/g,'')
+      : (siteNumber || 'NO_SITE');
+
+    const poCode = nextPO(engineerCode, supplierNumber, siteSegment, typeLetter);
 
     showModal(poCode);
 
@@ -435,6 +653,18 @@
       createdAt: new Date().toISOString()
     };
 
+    // Add job-link metadata when relevant
+    if(jobLinked.active){
+      data.jobLinked = true;
+      data.jobId = jobLinked.jobId;
+      if(jobLinked.siteNumber) data.siteNumber = jobLinked.siteNumber;
+      if(jobLinked.siteName) data.siteName = jobLinked.siteName;
+      if(jobLinked.siteType) data.siteType = jobLinked.siteType;
+    } else {
+      // In non job-linked mode, include site number from dropdown if present
+      if(siteNumber) data.siteNumber = siteNumber;
+    }
+
     try {
       const res = await fetch(CLOUDFLARE_ENDPOINT, {
         method: 'POST',
@@ -450,12 +680,13 @@
     } catch (err) {
       alert('⚠️ Failed to reach server: ' + err.message);
     } finally {
-      submitBtn.disabled=false;
+      submitBtn.disabled = false;
     }
   }
 
-  document.addEventListener('DOMContentLoaded',init);
+  document.addEventListener('DOMContentLoaded', init);
 </script>
+
 <!-- ==========================
      OFFLINE WARNING MODAL
      ========================== -->
