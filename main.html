@@ -6,11 +6,11 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
 
-  <script>
-    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") {
-      window.location.href = "login.html";
-    }
-  </script>
+  <!-- ✅ Global session guard -->
+  <script src="auth.js"></script>
+
+  <!-- ✅ Device lock enforcement (talks to USER_DEVICE_KV worker) -->
+  <script src="device-auth.js"></script>
 
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
@@ -123,8 +123,8 @@
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-menu.html" id="SLA"><span class="emoji">🚨</span> SLA</a>
     <a class="button" href="device-admin.html" id="DeviceAdmin">
-    <span class="emoji">🔐</span> Device Management
-</a>
+      <span class="emoji">🔐</span> Device Management
+    </a>
 
     <!-- FIXED -->
     <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
@@ -135,6 +135,15 @@
 
   <script>
     document.addEventListener("DOMContentLoaded", async () => {
+
+      // 🔐 Extra safety: enforce device lock on main menu as well
+      if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
+        try {
+          await DeviceAuth.enforceOnPage();
+        } catch (e) {
+          console.error("Device enforcement failed:", e);
+        }
+      }
 
       const username = sessionStorage.getItem("mostlaneUser");
       if (!username) return;
