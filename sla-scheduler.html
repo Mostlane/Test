@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SLA Scheduler</title>
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 20px;
+      color: #333;
+    }
+
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: rgba(255,255,255,0.9);
+      border-radius: 12px;
+      padding: 16px 20px 22px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    h1 {
+      margin: 0 0 12px 0;
+      color: #003366;
+      text-align: center;
+      font-size: 22px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .toolbar > * {
+      font-size: 14px;
+    }
+
+    .toolbar label {
+      font-weight: 600;
+      color: #003366;
+      margin-right: 4px;
+    }
+
+    .toolbar select,
+    .toolbar input[type="date"] {
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+
+    .toolbar .btn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: none;
+      background: rgba(0,74,153,0.9);
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .toolbar .btn.secondary {
+      background: #777;
+    }
+
+    .view-toggle {
+      display: flex;
+      gap: 4px;
+    }
+
+    .view-toggle button {
+      padding: 4px 10px;
+      border-radius: 14px;
+      border: 1px solid #ccc;
+      background: #f3f4f6;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .view-toggle button.active {
+      background: rgba(0,74,153,0.9);
+      color: #fff;
+      border-color: rgba(0,74,153,0.9);
+    }
+
+    .scheduler-wrapper {
+      margin-top: 10px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #ddd;
+      background: #fff;
+    }
+
+    .scheduler-header {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      border-bottom: 1px solid #ddd;
+      background: #f3f4f6;
+      font-size: 12px;
+      font-weight: 600;
+      color: #003366;
+    }
+
+    .scheduler-header-left {
+      padding: 6px 10px;
+      border-right: 1px solid #ddd;
+    }
+
+    .scheduler-header-right {
+      position: relative;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    .time-scale {
+      position: relative;
+      height: 32px;
+      white-space: nowrap;
+    }
+
+    .time-cell {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 80px; /* slot width */
+      border-left: 1px solid #e0e0e0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .time-cell:nth-child(odd) {
+      background: #f8fafc;
+    }
+
+    .scheduler-body {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      max-height: 540px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+
+    .engineer-column {
+      border-right: 1px solid #ddd;
+      background: #fafafa;
+    }
+
+    .engineer-row-label {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      font-weight: 600;
+      color: #003366;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .engineer-row-label span.small {
+      font-size: 11px;
+      color: #777;
+      font-weight: 400;
+    }
+
+    .timeline-column {
+      position: relative;
+      overflow-x: auto;
+    }
+
+    .engineer-timeline-row {
+      position: relative;
+      height: 52px;
+      border-bottom: 1px solid #eee;
+      background-image: linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px);
+      background-size: 80px 100%;
+    }
+
+    /* Job blocks */
+    .job-block {
+      position: absolute;
+      top: 6px;
+      height: 40px;
+      border-radius: 6px;
+      padding: 4px 6px;
+      box-sizing: border-box;
+      background: rgba(0,74,153,0.85);
+      color: #fff;
+      font-size: 11px;
+      cursor: grab;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      overflow: hidden;
+    }
+
+    .job-block.dragging {
+      opacity: 0.75;
+      cursor: grabbing;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+      z-index: 10;
+    }
+
+    .job-title {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .job-meta {
+      font-size: 10px;
+      opacity: 0.9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .job-sla-warning {
+      background: #b91c1c;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      max-width: 460px;
+      width: calc(100% - 40px);
+      padding: 18px 20px 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    }
+
+    .modal h2 {
+      margin: 0 0 12px 0;
+      color: #003366;
+      font-size: 18px;
+    }
+
+    .modal-row {
+      margin-top: 10px;
+    }
+    .modal-row label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #003366;
+      margin-bottom: 4px;
+    }
+
+    .modal-row input,
+    .modal-row textarea {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+
+    .modal-row textarea {
+      min-height: 60px;
+      resize: vertical;
+    }
+
+    .engineer-checkboxes {
+      max-height: 120px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #f9fafb;
+    }
+
+    .engineer-checkboxes label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 400;
+      margin-bottom: 2px;
+    }
+
+    .modal-footer {
+      margin-top: 14px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .modal-footer button {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .modal-footer .primary {
+      background: rgba(0,74,153,0.9);
+      color: #fff;
+    }
+    .modal-footer .secondary {
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    @media (max-width: 768px) {
+      .scheduler-header {
+        grid-template-columns: 120px 1fr;
+      }
+      .scheduler-body {
+        grid-template-columns: 120px 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>SLA – Job Scheduler</h1>
+
+    <div class="toolbar">
+      <div class="view-toggle">
+        <button type="button" id="viewDayBtn" class="active">Day</button>
+        <button type="button" id="viewWeekBtn">Week</button>
+      </div>
+
+      <div>
+        <label for="datePicker">Date:</label>
+        <input type="date" id="datePicker">
+      </div>
+
+      <div>
+        <label for="engineerFilter">Engineer:</label>
+        <select id="engineerFilter">
+          <option value="all">All engineers</option>
+        </select>
+      </div>
+
+      <button type="button" class="btn secondary" id="todayBtn">Today</button>
+    </div>
+
+    <div class="scheduler-wrapper">
+      <div class="scheduler-header">
+        <div class="scheduler-header-left">
+          Engineer
+        </div>
+        <div class="scheduler-header-right">
+          <div id="timeScale" class="time-scale"></div>
+        </div>
+      </div>
+
+      <div class="scheduler-body">
+        <div id="engineerColumn" class="engineer-column"></div>
+        <div id="timelineColumn" class="timeline-column"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div id="jobModalBackdrop" class="modal-backdrop">
+    <div class="modal">
+      <h2>Edit Job</h2>
+      <div class="modal-row">
+        <label for="modalTitle">Title</label>
+        <input id="modalTitle" type="text">
+      </div>
+      <div class="modal-row">
+        <label for="modalStart">Start (local)</label>
+        <input id="modalStart" type="datetime-local">
+      </div>
+      <div class="modal-row">
+        <label for="modalEnd">End (local)</label>
+        <input id="modalEnd" type="datetime-local">
+      </div>
+      <div class="modal-row">
+        <label>Assigned Engineers</label>
+        <div id="modalEngineerCheckboxes" class="engineer-checkboxes"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="secondary" id="modalCancelBtn">Cancel</button>
+        <button type="button" class="primary" id="modalSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ==========================
+   CONFIG & MOCK DATA
+========================== */
+
+// one slot = 30 minutes, 80px wide
+const SLOT_MINUTES = 30;
+const SLOT_WIDTH = 80;
+
+let viewMode = 'day'; // 'day' | 'week'
+let currentDate = new Date(); // reference date for view
+
+// Mock engineers (replace with Worker later)
+const engineers = [
+  { id: 'Connor.Brady', name: 'Connor Brady' },
+  { id: 'Ryan.Diggens', name: 'Ryan Diggens' },
+  { id: 'Brad.Graham',  name: 'Brad Graham' },
+  { id: 'James.Baczynski', name: 'James Baczynski' },
+];
+
+// Mock jobs (replace with Worker later)
+let jobs = [
+  {
+    id: 'JOB-001',
+    title: '0307 – Leak in ceiling',
+    slaTarget: '2025-12-12T12:00:00Z',
+    start: addHours(startOfDay(new Date()), 9).toISOString(),
+    end:   addHours(startOfDay(new Date()), 11).toISOString(),
+    assignedEngineers: ['Connor.Brady']
+  },
+  {
+    id: 'JOB-002',
+    title: '0123 – EICR follow up',
+    slaTarget: '2025-12-11T15:00:00Z',
+    start: addHours(startOfDay(new Date()), 12).toISOString(),
+    end:   addHours(startOfDay(new Date()), 14).toISOString(),
+    assignedEngineers: ['Ryan.Diggens','Brad.Graham']
+  },
+  {
+    id: 'JOB-003',
+    title: '0456 – EM test failure',
+    slaTarget: '2025-12-13T09:00:00Z',
+    start: addHours(startOfDay(new Date()), 15).toISOString(),
+    end:   addHours(startOfDay(new Date()), 16).toISOString(),
+    assignedEngineers: ['James.Baczynski']
+  }
+];
+
+/* ==========================
+   UTILS
+========================== */
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  return x;
+}
+
+function startOfWeek(d) {
+  const x = startOfDay(d);
+  const day = x.getDay(); // 0 Sun, 1 Mon
+  const diff = (day === 0 ? -6 : 1) - day; // move to Monday
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+
+function addMinutes(d, m) {
+  return new Date(d.getTime() + m*60000);
+}
+function addHours(d, h) {
+  return addMinutes(d, h*60);
+}
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate()+n);
+  return x;
+}
+
+function formatDateInput(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInputValue(val) {
+  if(!val) return new Date();
+  const [year,month,day] = val.split('-').map(Number);
+  return new Date(year,month-1,day);
+}
+
+function toLocalInputValue(iso) {
+  if(!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2,'0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth()+1);
+  const day = pad(d.getDate());
+  const hrs = pad(d.getHours());
+  const mins = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hrs}:${mins}`;
+}
+function fromLocalInputValue(val) {
+  if(!val) return null;
+  // treat as local and convert to ISO
+  const d = new Date(val);
+  return d.toISOString();
+}
+
+/* ==========================
+   TIME SCALE
+========================== */
+
+function getViewStartEnd() {
+  if(viewMode === 'day') {
+    const start = startOfDay(currentDate);
+    const end = addDays(start, 1);
+    return {start,end};
+  } else {
+    const start = startOfWeek(currentDate);
+    const end = addDays(start, 7);
+    return {start,end};
+  }
+}
+
+function buildTimeScale() {
+  const {start,end} = getViewStartEnd();
+  const scaleEl = document.getElementById('timeScale');
+  scaleEl.innerHTML = '';
+
+  const totalMinutes = (end - start)/60000;
+  const slots = totalMinutes / SLOT_MINUTES;
+
+  scaleEl.style.width = (slots * SLOT_WIDTH) + 'px';
+
+  for(let i=0; i<slots; i++) {
+    const slotStart = addMinutes(start, i*SLOT_MINUTES);
+    const cell = document.createElement('div');
+    cell.className = 'time-cell';
+
+    const left = i * SLOT_WIDTH;
+    cell.style.left = left + 'px';
+
+    if(viewMode === 'day') {
+      const h = slotStart.getHours();
+      const m = slotStart.getMinutes();
+      if(m === 0) cell.textContent = `${String(h).padStart(2,'0')}:00`;
+    } else {
+      // week: show day+time for major hours
+      const h = slotStart.getHours();
+      const m = slotStart.getMinutes();
+      if(h === 9 && m === 0) {
+        const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        const monday = startOfWeek(currentDate);
+        const diffDays = Math.round((startOfDay(slotStart)-monday)/86400000);
+        const label = dayNames[diffDays] || '';
+        cell.textContent = label;
+      }
+    }
+
+    scaleEl.appendChild(cell);
+  }
+}
+
+/* ==========================
+   RENDER SCHEDULER
+========================== */
+
+function getFilteredEngineers() {
+  const filter = document.getElementById('engineerFilter').value;
+  if(filter === 'all') return engineers;
+  return engineers.filter(e => e.id === filter);
+}
+
+function renderEngineersColumn() {
+  const col = document.getElementById('engineerColumn');
+  col.innerHTML = '';
+  const list = getFilteredEngineers();
+
+  list.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'engineer-row-label';
+    const pretty = e.name;
+    row.innerHTML = `<span>${pretty}</span><span class="small">${e.id}</span>`;
+    col.appendChild(row);
+  });
+}
+
+function renderTimeline() {
+  const {start,end} = getViewStartEnd();
+  const totalMinutes = (end - start)/60000;
+  const slots = totalMinutes / SLOT_MINUTES;
+  const totalWidth = slots * SLOT_WIDTH;
+
+  const timelineCol = document.getElementById('timelineColumn');
+  timelineCol.innerHTML = '';
+
+  const engList = getFilteredEngineers();
+  engList.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'engineer-timeline-row';
+    row.dataset.engineerId = e.id;
+    row.style.width = totalWidth + 'px';
+    timelineCol.appendChild(row);
+  });
+
+  // Add jobs
+  jobs.forEach(job => {
+    // For each assigned engineer, draw a block
+    job.assignedEngineers.forEach(engId => {
+      const row = [...timelineCol.children].find(r => r.dataset.engineerId === engId);
+      if(!row) return;
+
+      const jobStart = new Date(job.start);
+      const jobEnd = new Date(job.end);
+      if(jobEnd <= start || jobStart >= end) {
+        // not in view range
+        return;
+      }
+
+      // clamp to view boundaries
+      const visibleStart = jobStart < start ? start : jobStart;
+      const visibleEnd = jobEnd > end ? end : jobEnd;
+
+      const minutesFromStart = (visibleStart - start)/60000;
+      const durationMinutes = (visibleEnd - visibleStart)/60000;
+
+      const left = (minutesFromStart / SLOT_MINUTES) * SLOT_WIDTH;
+      const width = Math.max(40, (durationMinutes / SLOT_MINUTES) * SLOT_WIDTH);
+
+      const block = document.createElement('div');
+      block.className = 'job-block';
+      block.style.left = left + 'px';
+      block.style.width = width + 'px';
+      block.dataset.jobId = job.id;
+      block.dataset.engineerId = engId;
+
+      // SLA warning (simple – if start > SLA target)
+      if(job.slaTarget && new Date(job.start) > new Date(job.slaTarget)) {
+        block.classList.add('job-sla-warning');
+      }
+
+      const timeLabel = jobStart.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      block.innerHTML = `
+        <div class="job-title">${job.title}</div>
+        <div class="job-meta">${timeLabel} • ${engId}</div>
+      `;
+
+      // Drag handlers
+      makeJobBlockDraggable(block, row);
+
+      // Click -> modal
+      block.addEventListener('click', (ev) => {
+        // ignore click if we were dragging
+        if(block.dataset.dragged === 'true') {
+          block.dataset.dragged = 'false';
+          return;
+        }
+        ev.stopPropagation();
+        openJobModal(job.id);
+      });
+
+      row.appendChild(block);
+    });
+  });
+}
+
+/* ==========================
+   DRAG & DROP
+========================== */
+
+function makeJobBlockDraggable(block, rowElement) {
+  let dragging = false;
+  let startX = 0;
+  let startLeft = 0;
+  let startY = 0;
+  let originalRow = rowElement;
+
+  const {start, end} = getViewStartEnd();
+  const totalMinutes = (end - start)/60000;
+  const slots = totalMinutes / SLOT_MINUTES;
+  const maxLeft = slots * SLOT_WIDTH;
+
+  function onMouseDown(e) {
+    if(e.button !== 0) return;
+    dragging = true;
+    block.classList.add('dragging');
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = parseFloat(block.style.left || '0');
+    block.dataset.dragged = 'false';
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  function onMouseMove(e) {
+    if(!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if(Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      block.dataset.dragged = 'true';
+    }
+
+    // horizontal drag -> time
+    let newLeft = startLeft + dx;
+    newLeft = Math.max(0, Math.min(newLeft, maxLeft - 20));
+    block.style.left = newLeft + 'px';
+
+    // vertical drag -> engineer row
+    const rows = [...document.querySelectorAll('.engineer-timeline-row')];
+    let closestRow = originalRow;
+    let smallestDist = Infinity;
+    const blockRect = block.getBoundingClientRect();
+    const midY = blockRect.top + blockRect.height/2;
+
+    rows.forEach(r => {
+      const rect = r.getBoundingClientRect();
+      const rowMid = rect.top + rect.height/2;
+      const dist = Math.abs(rowMid - midY);
+      if(dist < smallestDist) {
+        smallestDist = dist;
+        closestRow = r;
+      }
+    });
+
+    if(closestRow && closestRow !== block.parentElement) {
+      closestRow.appendChild(block);
+    }
+  }
+
+  function onMouseUp(e) {
+    if(!dragging) return;
+    dragging = false;
+    block.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+
+    // Snap to nearest slot
+    const left = parseFloat(block.style.left || '0');
+    const snappedSlots = Math.round(left / SLOT_WIDTH);
+    const snappedLeft = snappedSlots * SLOT_WIDTH;
+    block.style.left = snappedLeft + 'px';
+
+    const {start, end} = getViewStartEnd();
+    const newStart = addMinutes(start, snappedSlots * SLOT_MINUTES);
+
+    const jobId = block.dataset.jobId;
+    const engineerId = block.parentElement.dataset.engineerId;
+    const job = jobs.find(j => j.id === jobId);
+    if(!job) return;
+
+    // keep same duration
+    const oldStart = new Date(job.start);
+    const oldEnd = new Date(job.end);
+    const durationMinutes = (oldEnd - oldStart)/60000;
+    const newEnd = addMinutes(newStart, durationMinutes);
+
+    job.start = newStart.toISOString();
+    job.end   = newEnd.toISOString();
+
+    // update assignedEngineers to include engineerId if not already
+    if(!job.assignedEngineers.includes(engineerId)) {
+      job.assignedEngineers.push(engineerId);
+    }
+
+    // if previously multi-assigned and we wanted to move it just for one engineer
+    // we keep it simple: time change applies to all assigned engineers.
+    // (We can get fancier later if you want per-engineer timing.)
+
+    // Re-render to reflect updated meta text
+    renderScheduler();
+  }
+
+  block.addEventListener('mousedown', onMouseDown);
+}
+
+/* ==========================
+   MODAL
+========================== */
+
+let modalJobId = null;
+
+function openJobModal(jobId) {
+  const job = jobs.find(j => j.id === jobId);
+  if(!job) return;
+
+  modalJobId = jobId;
+
+  document.getElementById('modalTitle').value = job.title || '';
+  document.getElementById('modalStart').value = toLocalInputValue(job.start);
+  document.getElementById('modalEnd').value   = toLocalInputValue(job.end);
+
+  const boxContainer = document.getElementById('modalEngineerCheckboxes');
+  boxContainer.innerHTML = '';
+
+  engineers.forEach(e => {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = e.id;
+    cb.checked = (job.assignedEngineers || []).includes(e.id);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(' ' + e.name));
+    boxContainer.appendChild(label);
+  });
+
+  document.getElementById('jobModalBackdrop').style.display = 'flex';
+}
+
+function closeJobModal() {
+  modalJobId = null;
+  document.getElementById('jobModalBackdrop').style.display = 'none';
+}
+
+document.getElementById('modalCancelBtn').addEventListener('click', closeJobModal);
+document.getElementById('jobModalBackdrop').addEventListener('click', (e)=>{
+  if(e.target.id === 'jobModalBackdrop') closeJobModal();
+});
+
+document.getElementById('modalSaveBtn').addEventListener('click', ()=>{
+  if(!modalJobId) return;
+  const job = jobs.find(j => j.id === modalJobId);
+  if(!job) return;
+
+  job.title = document.getElementById('modalTitle').value.trim();
+
+  const newStartIso = fromLocalInputValue(document.getElementById('modalStart').value);
+  const newEndIso   = fromLocalInputValue(document.getElementById('modalEnd').value);
+  if(newStartIso && newEndIso) {
+    job.start = newStartIso;
+    job.end   = newEndIso;
+  }
+
+  const selected = [];
+  document.querySelectorAll('#modalEngineerCheckboxes input[type="checkbox"]').forEach(cb=>{
+    if(cb.checked) selected.push(cb.value);
+  });
+  if(selected.length > 0) {
+    job.assignedEngineers = selected;
+  }
+
+  closeJobModal();
+  renderScheduler();
+});
+
+/* ==========================
+   MAIN RENDER
+========================== */
+
+function renderScheduler() {
+  buildTimeScale();
+  renderEngineersColumn();
+  renderTimeline();
+}
+
+/* ==========================
+   INIT
+========================== */
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  // Populate engineer filter
+  const sel = document.getElementById('engineerFilter');
+  engineers.forEach(e=>{
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.name;
+    sel.appendChild(opt);
+  });
+
+  // Date picker
+  const datePicker = document.getElementById('datePicker');
+  datePicker.value = formatDateInput(currentDate);
+  datePicker.addEventListener('change', ()=>{
+    currentDate = parseDateInputValue(datePicker.value);
+    renderScheduler();
+  });
+
+  // Today button
+  document.getElementById('todayBtn').addEventListener('click', ()=>{
+    currentDate = new Date();
+    datePicker.value = formatDateInput(currentDate);
+    renderScheduler();
+  });
+
+  // View toggles
+  const dayBtn = document.getElementById('viewDayBtn');
+  const weekBtn = document.getElementById('viewWeekBtn');
+
+  dayBtn.addEventListener('click', ()=>{
+    viewMode = 'day';
+    dayBtn.classList.add('active');
+    weekBtn.classList.remove('active');
+    renderScheduler();
+  });
+  weekBtn.addEventListener('click', ()=>{
+    viewMode = 'week';
+    weekBtn.classList.add('active');
+    dayBtn.classList.remove('active');
+    renderScheduler();
+  });
+
+  // Engineer filter
+  sel.addEventListener('change', renderScheduler);
+
+  renderScheduler();
+});
+</script>
+</body>
+</html>
