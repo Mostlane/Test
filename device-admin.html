@@ -1,181 +1,674 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Mostlane Device Admin</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <title>Device Management – Mostlane Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<style>
-    body {
-        background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-        background-size: 180%;
-        font-family: "Segoe UI", sans-serif;
-        padding: 20px;
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
     }
 
-    .panel {
-        background: rgba(255,255,255,0.7);
-        padding: 20px;
-        border-radius: 10px;
-        max-width: 900px;
-        margin: 0 auto;
+    body.device-admin-body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 10px;
+      box-sizing: border-box;
     }
 
-    h1 { text-align: center; color: #003b82; }
+    .top-bar {
+      width: 100%;
+      max-width: 1100px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-    table {
+    .top-bar-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #003366;
+    }
+
+    .top-bar-user {
+      font-size: 14px;
+      color: #003366;
+      opacity: 0.8;
+    }
+
+    .main-card {
+      width: 100%;
+      max-width: 1100px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 15px;
+      box-sizing: border-box;
+      display: flex;
+      gap: 15px;
+      min-height: 60vh;
+    }
+
+    /* Left – User list */
+    .user-list-panel {
+      width: 32%;
+      border-right: 1px solid #dde2e8;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .user-search {
+      margin-bottom: 10px;
+    }
+
+    .user-search input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #ccd2da;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .user-list {
+      flex: 1;
+      overflow-y: auto;
+      border-radius: 6px;
+      border: 1px solid #e0e4ea;
+      background: #f8fafc;
+    }
+
+    .user-row {
+      padding: 8px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid #e0e4ea;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+
+    .user-row:last-child {
+      border-bottom: none;
+    }
+
+    .user-row:hover {
+      background: #e9f2ff;
+    }
+
+    .user-row.active {
+      background: #d8e7ff;
+      font-weight: 600;
+    }
+
+    .user-row-name {
+      color: #003366;
+    }
+
+    .user-row-tag {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e1f0ff;
+      color: #00509e;
+    }
+
+    /* Right – Detail panel */
+    .detail-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #dde2e8;
+      padding-bottom: 6px;
+    }
+
+    .detail-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #003366;
+    }
+
+    .detail-subtitle {
+      font-size: 12px;
+      color: #4b637d;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 6px;
+      padding: 7px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .btn-primary {
+      background: #0066cc;
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #f0f2f5;
+      color: #003366;
+    }
+
+    .btn-danger {
+      background: #c0392b;
+      color: #fff;
+    }
+
+    .section-card {
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 10px;
+      border: 1px solid #dde3ec;
+      font-size: 13px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #003366;
+      margin-bottom: 6px;
+    }
+
+    .form-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .form-row label {
+      font-size: 13px;
+      color: #2c3e50;
+    }
+
+    .form-row input[type="number"],
+    .form-row input[type="text"],
+    .form-row select {
+      padding: 5px 8px;
+      border-radius: 5px;
+      border: 1px solid #ccd2da;
+      font-size: 13px;
+    }
+
+    .toggle-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .device-table,
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .device-table th,
+    .device-table td,
+    .history-table th,
+    .history-table td {
+      border: 1px solid #dde3ec;
+      padding: 4px 6px;
+      text-align: left;
+    }
+
+    .device-table th,
+    .history-table th {
+      background: #e8eff9;
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .history-container {
+      max-height: 180px;
+      overflow-y: auto;
+      margin-top: 4px;
+    }
+
+    .muted {
+      color: #7f8c8d;
+      font-size: 12px;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: #eaf7e7;
+      color: #2e7d32;
+    }
+
+    .status-pill.warn {
+      background: #fff4e5;
+      color: #b36b00;
+    }
+
+    .status-pill.error {
+      background: #fdecea;
+      color: #c0392b;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #323232;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 16px;
+      font-size: 13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      z-index: 9999;
+    }
+
+    .toast.visible {
+      opacity: 0.95;
+    }
+
+    @media (max-width: 800px) {
+      .main-card {
+        flex-direction: column;
+      }
+      .user-list-panel {
         width: 100%;
-        border-collapse: collapse;
-        margin-top: 20px;
-        background: white;
+        border-right: none;
+        border-bottom: 1px solid #dde2e8;
+        padding-bottom: 10px;
+      }
     }
-
-    th, td {
-        padding: 10px;
-        border-bottom: 1px solid #ccc;
-        font-size: 14px;
-    }
-
-    th {
-        background: #003b82;
-        color: white;
-    }
-
-    button {
-        background: #c62828;
-        color: white;
-        border: none;
-        padding: 6px 10px;
-        border-radius: 6px;
-        cursor: pointer;
-    }
-
-    button:hover {
-        opacity: 0.85;
-    }
-
-    .back-btn {
-        display: inline-block;
-        background: #0066cc;
-        color: white;
-        padding: 10px 15px;
-        border-radius: 6px;
-        text-decoration: none;
-        margin-bottom: 20px;
-    }
-</style>
-
-<!-- Load device auth enforcement -->
-<script src="device-auth.js"></script>
-
-<script>
-// Enforce device check (only admins can view)
-document.addEventListener("DOMContentLoaded", () => {
-    DeviceAuth.enforceOnPage();
-
-    const perms = JSON.parse(localStorage.getItem("mostlanePermissions") || "{}");
-    if (!perms.Users) {
-        alert("You do not have permission to view this page.");
-        window.location.href = "main.html";
-    }
-});
-</script>
-
+  </style>
 </head>
-<body>
+<body class="device-admin-body">
 
-<div class="panel">
+  <div class="top-bar">
+    <div>
+      <div class="top-bar-title">Device Management</div>
+      <div class="top-bar-user" id="adminUserDisplay"></div>
+    </div>
+    <button class="btn btn-secondary" onclick="window.location.href='main.html'">⬅ Main Menu</button>
+  </div>
 
-    <a class="back-btn" href="main.html">← Back to Menu</a>
-    <h1>Device Management</h1>
-    <p>View, verify and reset registered devices for each user.</p>
+  <div class="main-card">
+    <!-- Left: user list -->
+    <div class="user-list-panel">
+      <div class="user-search">
+        <input type="text" id="userSearch" placeholder="Search user… (e.g. Jamie.Line)">
+      </div>
+      <div class="user-list" id="userList">
+        <!-- Filled by JS -->
+      </div>
+    </div>
 
-    <table id="deviceTable">
-        <thead>
-            <tr>
-                <th>User</th>
-                <th>Devices</th>
-                <th>Last Seen</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
+    <!-- Right: detail panel -->
+    <div class="detail-panel" id="detailPanel">
+      <div class="detail-header">
+        <div>
+          <div class="detail-title" id="detailTitle">Select a user</div>
+          <div class="detail-subtitle" id="detailSubtitle">
+            Choose a user from the left to view and edit device settings.
+          </div>
+        </div>
+      </div>
 
-</div>
+      <div id="detailContent" style="display:none;">
+        <!-- Settings -->
+        <div class="section-card">
+          <div class="section-title">Device Settings</div>
+          <div class="form-row">
+            <label for="allowedDevicesInput"><strong>Allowed Devices</strong></label>
+            <input type="number" id="allowedDevicesInput" min="1" max="5" step="1" style="width:70px;">
+            <span class="muted">Overrides default limit for this user.</span>
+          </div>
+          <div class="form-row">
+            <span class="muted">
+              Last device change: <span id="lastDeviceChangeText">–</span> &nbsp;|&nbsp;
+              Total changes: <span id="changeCountText">0</span> &nbsp;|&nbsp;
+              Rebinds: <span id="rebindCountText">0</span>
+            </span>
+          </div>
+          <div class="form-row">
+            <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+            <button class="btn btn-danger" id="forceResetBtn">Force Reset All Devices</button>
+          </div>
+        </div>
 
-<script>
-// Cloudflare Worker endpoint
-const WORKER_BASE = "https://userdevicekv.jamie-def.workers.dev";
+        <!-- Devices -->
+        <div class="section-card">
+          <div class="section-title">Registered Devices</div>
+          <div id="devicesSection"></div>
+        </div>
 
-// Fetch list of all device records
-async function loadDevices() {
-    try {
-        const res = await fetch(WORKER_BASE + "/list", { method: "GET" });
-        const data = await res.json();
+        <!-- History -->
+        <div class="section-card">
+          <div class="section-title">Device / Login History</div>
+          <div class="history-container" id="historySection"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-        populateTable(data.records || []);
+  <div class="toast" id="toast"></div>
 
-    } catch (err) {
-        console.error(err);
-        alert("Unable to load device records.");
+  <script>
+    const DEVICE_WORKER_BASE = "https://userdevicekv.jamie-def.workers.dev";
+
+    let allRecords = [];
+    let filteredRecords = [];
+    let selectedUsername = null;
+    let selectedRecord = null;
+
+    function showToast(msg, type = "info") {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.className = "toast visible";
+      if (type === "error") {
+        toast.style.background = "#c0392b";
+      } else if (type === "warn") {
+        toast.style.background = "#b36b00";
+      } else {
+        toast.style.background = "#323232";
+      }
+      setTimeout(() => {
+        toast.classList.remove("visible");
+      }, 2500);
     }
-}
 
-// Add rows to table
-function populateTable(records) {
-    const tbody = document.querySelector("#deviceTable tbody");
-    tbody.innerHTML = "";
+    function requireLoginAndPermission() {
+      const loggedIn = sessionStorage.getItem("mostlaneLoggedIn") === "true";
+      if (!loggedIn) {
+        window.location.href = "login.html";
+        return false;
+      }
 
-    if (records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4">No device records found</td></tr>`;
+      const permsRaw = localStorage.getItem("mostlanePermissions") || sessionStorage.getItem("mostlanePermissions");
+      let perms = {};
+      try { perms = JSON.parse(permsRaw || "{}"); } catch (e) {}
+
+      const isDeviceAdmin = perms.DeviceAdmin === true || String(perms.DeviceAdmin || "").toLowerCase() === "yes";
+      const isUsersAdmin = perms.Users === true || String(perms.Users || "").toLowerCase() === "yes";
+
+      if (!isDeviceAdmin && !isUsersAdmin) {
+        alert("You do not have permission to access Device Management.");
+        window.location.href = "main.html";
+        return false;
+      }
+
+      const adminUser = sessionStorage.getItem("mostlaneUser") || "";
+      const adminUserDisplay = document.getElementById("adminUserDisplay");
+      if (adminUserDisplay && adminUser) {
+        adminUserDisplay.textContent = "You are logged in as " + adminUser;
+      }
+      return true;
+    }
+
+    async function fetchAllRecords() {
+      const res = await fetch(DEVICE_WORKER_BASE + "/list", {
+        method: "GET"
+      });
+      if (!res.ok) throw new Error("Failed to load device records");
+      const data = await res.json();
+      return data.records || [];
+    }
+
+    function renderUserList() {
+      const container = document.getElementById("userList");
+      container.innerHTML = "";
+
+      if (!filteredRecords.length) {
+        container.innerHTML = '<div class="user-row"><span class="muted">No device records found.</span></div>';
         return;
-    }
+      }
 
-    records.forEach(rec => {
-        const deviceList = rec.deviceIds.map((id, i) =>
-            `<strong>${rec.labels[i] || "Unnamed"}</strong><br>
-             ID: ${id}<br>
-             FP: ${rec.fingerprints[i].slice(0,12)}...<br><br>`
-        ).join("");
+      filteredRecords.forEach(rec => {
+        const row = document.createElement("div");
+        row.className = "user-row";
+        if (rec.username === selectedUsername) {
+          row.classList.add("active");
+        }
 
-        const row = `
-        <tr>
-            <td>${rec.username}</td>
-            <td>${deviceList}</td>
-            <td>${rec.lastSeen || "Never"}</td>
-            <td>
-                <button onclick="resetDevice('${rec.username}')">Reset</button>
-            </td>
-        </tr>
-        `;
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "user-row-name";
+        nameSpan.textContent = rec.username || "(unknown)";
 
-        tbody.innerHTML += row;
-    });
-}
+        const tagSpan = document.createElement("span");
+        tagSpan.className = "user-row-tag";
+        const devCount = (rec.deviceIds || []).length;
+        tagSpan.textContent = devCount + " device" + (devCount === 1 ? "" : "s");
 
-// Reset (delete) user's device entry in KV
-async function resetDevice(username) {
-    if (!confirm(`Reset device for ${username}?`)) return;
+        row.appendChild(nameSpan);
+        row.appendChild(tagSpan);
 
-    try {
-        const res = await fetch(WORKER_BASE + "/reset?username=" + encodeURIComponent(username), {
-            method: "POST"
+        row.addEventListener("click", () => {
+          selectedUsername = rec.username;
+          selectedRecord = rec;
+          renderUserList();
+          loadDetailForSelected();
         });
 
+        container.appendChild(row);
+      });
+    }
+
+    function filterUserList() {
+      const q = (document.getElementById("userSearch").value || "").toLowerCase();
+      if (!q) {
+        filteredRecords = [...allRecords].sort((a, b) => (a.username || "").localeCompare(b.username || ""));
+      } else {
+        filteredRecords = allRecords
+          .filter(r => (r.username || "").toLowerCase().includes(q))
+          .sort((a, b) => (a.username || "").localeCompare(b.username || ""));
+      }
+      renderUserList();
+    }
+
+    function formatDate(iso) {
+      if (!iso) return "–";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleString();
+    }
+
+    function loadDetailForSelected() {
+      const titleEl = document.getElementById("detailTitle");
+      const subtitleEl = document.getElementById("detailSubtitle");
+      const detailContent = document.getElementById("detailContent");
+
+      if (!selectedRecord || !selectedUsername) {
+        titleEl.textContent = "Select a user";
+        subtitleEl.textContent = "Choose a user from the left to view and edit device settings.";
+        detailContent.style.display = "none";
+        return;
+      }
+
+      titleEl.textContent = selectedUsername;
+      subtitleEl.textContent = "Manage device limits, reset devices and view history.";
+
+      detailContent.style.display = "block";
+
+      const allowedInput = document.getElementById("allowedDevicesInput");
+      const lastDevChange = document.getElementById("lastDeviceChangeText");
+      const changeCount = document.getElementById("changeCountText");
+      const rebindCount = document.getElementById("rebindCountText");
+
+      const allowedDevices = typeof selectedRecord.allowedDevices === "number"
+        ? selectedRecord.allowedDevices
+        : 1;
+      allowedInput.value = allowedDevices;
+
+      lastDevChange.textContent = formatDate(selectedRecord.lastDeviceChange);
+      changeCount.textContent = selectedRecord.changeCount || 0;
+      rebindCount.textContent = selectedRecord.rebindCount || 0;
+
+      renderDevicesTable();
+      renderHistoryTable();
+    }
+
+    function renderDevicesTable() {
+      const container = document.getElementById("devicesSection");
+      container.innerHTML = "";
+
+      const devIds = selectedRecord.deviceIds || [];
+      const fps = selectedRecord.fingerprints || [];
+      const labels = selectedRecord.labels || [];
+
+      if (!devIds.length) {
+        container.innerHTML = '<span class="muted">No devices registered for this user.</span>';
+        return;
+      }
+
+      let html = '<table class="device-table"><thead><tr>' +
+        '<th>#</th><th>Device ID</th><th>Fingerprint</th><th>Label</th><th>Last Seen</th>' +
+        '</tr></thead><tbody>';
+
+      for (let i = 0; i < devIds.length; i++) {
+        html += `<tr>
+          <td>${i + 1}</td>
+          <td>${devIds[i]}</td>
+          <td>${fps[i] || ""}</td>
+          <td>${labels[i] || ""}</td>
+          <td>${formatDate(selectedRecord.lastSeen)}</td>
+        </tr>`;
+      }
+
+      html += "</tbody></table>";
+      container.innerHTML = html;
+    }
+
+    function renderHistoryTable() {
+      const container = document.getElementById("historySection");
+      container.innerHTML = "";
+
+      const history = selectedRecord.history || [];
+      if (!history.length) {
+        container.innerHTML = '<span class="muted">No history recorded yet.</span>';
+        return;
+      }
+
+      let html = '<table class="history-table"><thead><tr>' +
+        '<th>Time</th><th>Event</th><th>Detail</th>' +
+        '</tr></thead><tbody>';
+
+      history.slice().reverse().forEach(entry => {
+        const when = formatDate(entry.at || entry.time || "");
+        const type = entry.type || "EVENT";
+
+        let detailParts = [];
+        if (entry.deviceId) detailParts.push("Device: " + entry.deviceId);
+        if (entry.label) detailParts.push("Label: " + entry.label);
+        if (entry.reason) detailParts.push("Reason: " + entry.reason);
+        if (entry.oldDeviceId) detailParts.push("Replaced: " + entry.oldDeviceId);
+
+        html += `<tr>
+          <td>${when}</td>
+          <td>${type}</td>
+          <td>${detailParts.join(" | ") || ""}</td>
+        </tr>`;
+      });
+
+      html += "</tbody></table>";
+      container.innerHTML = html;
+    }
+
+    async function saveUserSettings() {
+      if (!selectedUsername || !selectedRecord) return;
+      const input = document.getElementById("allowedDevicesInput");
+      let val = parseInt(input.value, 10);
+      if (isNaN(val) || val < 1) val = 1;
+      if (val > 5) val = 5;
+
+      try {
+        const res = await fetch(DEVICE_WORKER_BASE + "/admin/update-allowed-devices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: selectedUsername,
+            allowedDevices: val
+          })
+        });
+        if (!res.ok) throw new Error("Failed to save settings");
         const data = await res.json();
 
-        alert(data.message || "Device reset");
-        loadDevices();
+        // Update local record
+        selectedRecord.allowedDevices = val;
+        const idx = allRecords.findIndex(r => r.username === selectedUsername);
+        if (idx >= 0) allRecords[idx].allowedDevices = val;
 
-    } catch (err) {
+        showToast("Settings saved for " + selectedUsername);
+      } catch (err) {
         console.error(err);
-        alert("Error resetting device.");
+        showToast("Error saving settings", "error");
+      }
     }
-}
 
-loadDevices();
-</script>
+    async function forceResetUserDevices() {
+      if (!selectedUsername) return;
+      if (!confirm("Force reset all devices for " + selectedUsername + "?\nThis will require re-registration on their next login.")) {
+        return;
+      }
 
+      try {
+        const res = await fetch(DEVICE_WORKER_BASE + "/reset?username=" + encodeURIComponent(selectedUsername), {
+          method: "POST"
+        });
+        if (!res.ok) throw new Error("Failed to reset devices");
+        const data = await res.json();
+        showToast("Devices reset for " + selectedUsername, "warn");
+
+        const idx = allRecords.findIndex(r => r.username === selectedUsername);
+        if (idx >= 0) {
+          allRecords.splice(idx, 1);
+        }
+        selectedUsername = null;
+        selectedRecord = null;
+        filterUserList();
+        loadDetailForSelected();
+      } catch (err) {
+        console.error(err);
+        showToast("Error resetting devices", "error");
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      if (!requireLoginAndPermission()) return;
+
+      const searchInput = document.getElementById("userSearch");
+      searchInput.addEventListener("input", filterUserList);
+
+      document.getElementById("saveSettingsBtn").addEventListener("click", saveUserSettings);
+      document.getElementById("forceResetBtn").addEventListener("click", forceResetUserDevices);
+
+      try {
+        allRecords = await fetchAllRecords();
+        filteredRecords = [...allRecords].sort((a, b) => (a.username || "").localeCompare(b.username || ""));
+        renderUserList();
+      } catch (err) {
+        console.error(err);
+        showToast("Could not load device records", "error");
+      }
+    });
+  </script>
 </body>
 </html>
