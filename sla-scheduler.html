@@ -589,12 +589,11 @@
     try{
       const res = await fetch(`${SLA_API_BASE}/jobs`, { cache:"no-store" });
       const data = await res.json();
-      const rawJobs = data.jobs || [];
+      const rawJobs = Array.isArray(data) ? data : [];
 
       jobs = rawJobs.map(j => normaliseJob(j));
       applyLocalOverrides();
     }catch{
-      // fallback demo
       useDemoJobs();
     }
   }
@@ -639,7 +638,6 @@
     };
   }
 
-  // DEMO JOBS
   function useDemoJobs(){
     const base = selectedDate;
     jobs = [
@@ -657,7 +655,6 @@
     applyLocalOverrides();
   }
 
-  // OVERRIDES
   const LOCAL_OVERRIDES_KEY = "slaSchedulerOverrides_v1";
   function loadOverrides(){
     try{
@@ -690,7 +687,66 @@
     saveOverrides(ov);
   }
 
-  // RENDER
+  function renderWeekView(container){
+    const start = new Date(selectedDate);
+    const day = start.getDay();
+    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(start.setDate(diff));
+
+    const engineerList = getFilteredEngineers();
+
+    const grid = document.createElement("div");
+    grid.className = "week-grid";
+
+    grid.appendChild(document.createElement("div"));
+
+    for(let i=0;i<7;i++){
+      const d = new Date(monday);
+      d.setDate(monday.getDate()+i);
+
+      const h = document.createElement("div");
+      h.className = "week-day-header";
+      h.textContent = d.toDateString().slice(0,10);
+      grid.appendChild(h);
+    }
+
+    engineerList.forEach(engineer=>{
+      const nameCell = document.createElement("div");
+      nameCell.className = "week-day-header";
+      nameCell.textContent = engineer.name;
+      grid.appendChild(nameCell);
+
+      for(let i=0;i<7;i++){
+        const dayCell = document.createElement("div");
+        dayCell.className = "week-engineer-cell";
+
+        const date = new Date(monday);
+        date.setDate(monday.getDate()+i);
+        const dateString = date.toDateString();
+
+        const jobsForDay = jobs
+          .filter(j =>
+            j.assignedEngineers
+              .map(a=>a.toLowerCase())
+              .includes(engineer.username.toLowerCase())
+          )
+          .filter(j => new Date(j.scheduledStart).toDateString() === dateString);
+
+        jobsForDay.forEach(job=>{
+          const chip = document.createElement("div");
+          chip.className = "week-job-chip";
+          chip.textContent = job.title;
+          chip.addEventListener("click", ()=>openJobModal(job.id));
+          dayCell.appendChild(chip);
+        });
+
+        grid.appendChild(dayCell);
+      }
+    });
+
+    container.appendChild(grid);
+  }
+
   function render(){
     document.getElementById("schedulerLoading").style.display="none";
     const wrapper = document.getElementById("schedulerWrapper");
@@ -704,7 +760,6 @@
     return engineers.filter(e => e.username === engineerFilter);
   }
 
-  // DAY VIEW
   function renderDayView(container){
     const dayDate = selectedDate;
     const engineerList = getFilteredEngineers();
@@ -761,7 +816,11 @@
       }
 
       const jobsForEngineer = jobs
-        .filter(j => j.assignedEngineers.includes(engineer.username))
+        .filter(j =>
+          j.assignedEngineers
+            .map(a => a.toLowerCase())
+            .includes(engineer.username.toLowerCase())
+        )
         .filter(j => {
           const d = new Date(j.scheduledStart);
           return d.toDateString() === dayDate.toDateString();
@@ -829,7 +888,6 @@
     container.appendChild(grid);
   }
 
-  // DRAG & DROP
   function onJobDragStart(e){
     dragState.jobId = e.currentTarget.dataset.jobId;
     e.currentTarget.classList.add("dragging");
@@ -881,7 +939,6 @@
     setStatus(`Updated job ${job.title}`);
   }
 
-  // MODAL
   let modalJobId = null;
 
   function openJobModal(jobId){
@@ -922,7 +979,6 @@
 
   document.getElementById("jobCancel").addEventListener("click", closeJobModal);
 
-  // ************** CLEANED FINAL SAVE HANDLER — ONLY ONE **************
   document.getElementById("jobForm").addEventListener("submit", async function(e){
     e.preventDefault();
     if(!modalJobId) return;
@@ -965,11 +1021,10 @@
     closeJobModal();
     setStatus(`Saved changes for job: ${job.title}`);
   });
-  // *******************************************************************
 
   async function pushJobUpdate(job){
     try{
-      const res=await fetch(`${SLA_API_BASE}/job/${encodeURIComponent(job.id)}`,{
+      const res=await fetch(`${SLA_API_BASE}/jobs/${encodeURIComponent(job.id)}`,{   // <-- FIXED HERE
         method:"PUT",
         headers:{ "Content-Type":"application/json"},
         body:JSON.stringify(job)
