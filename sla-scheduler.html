@@ -1,911 +1,902 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <title>Mostlane • SLA Scheduler</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SLA Scheduler</title>
   <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      margin: 0;
-      padding: 20px;
-      color: #333;
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --bg:#e6e8eb;
+      --panel:rgba(255,255,255,0.94);
+      --text:#0f172a;
+      --muted:#6b7280;
+      --danger:#dc2626;
+      --grid-line:#e5e7eb;
     }
 
-    .shell {
-      max-width: 1200px;
-      margin: 0 auto;
-      background: rgba(255,255,255,0.9);
-      border-radius: 12px;
-      padding: 16px 20px 22px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    html,body{
+      margin:0;
+      padding:0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+      background: var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
     }
 
-    h1 {
-      margin: 0 0 12px 0;
-      color: #003366;
-      text-align: center;
-      font-size: 22px;
+    .shell{
+      max-width:1100px;
+      margin:24px auto;
+      padding:0 16px 24px;
     }
 
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 12px;
+    .card{
+      background:var(--panel);
+      border-radius:14px;
+      padding:18px 18px 20px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      border:1px solid rgba(15,23,42,0.06);
     }
 
-    .toolbar > * {
-      font-size: 14px;
+    header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      margin-bottom:14px;
     }
 
-    .toolbar label {
-      font-weight: 600;
-      color: #003366;
-      margin-right: 4px;
+    header h1{
+      margin:0;
+      font-size:20px;
+      color:var(--ml-blue);
     }
 
-    .toolbar select,
-    .toolbar input[type="date"] {
-      padding: 4px 8px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
+    .sub{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
     }
 
-    .toolbar .btn {
-      padding: 6px 12px;
-      border-radius: 8px;
-      border: none;
-      background: rgba(0,74,153,0.9);
-      color: #fff;
-      cursor: pointer;
-      font-size: 14px;
+    a.back-btn{
+      text-decoration:none;
+      font-size:13px;
+      padding:8px 12px;
+      border-radius:999px;
+      border:1px solid rgba(15,23,42,0.1);
+      background:#fff;
+      color:var(--ml-blue);
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
     }
 
-    .toolbar .btn.secondary {
-      background: #777;
+    .toolbar{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+      margin-bottom:10px;
+      font-size:13px;
     }
 
-    .view-toggle {
-      display: flex;
-      gap: 4px;
+    .toolbar-group{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex-wrap:wrap;
     }
 
-    .view-toggle button {
-      padding: 4px 10px;
-      border-radius: 14px;
-      border: 1px solid #ccc;
-      background: #f3f4f6;
-      cursor: pointer;
-      font-size: 13px;
+    .chip-group{
+      display:inline-flex;
+      border-radius:999px;
+      background:#e5e7eb;
+      padding:2px;
+    }
+    .chip{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:none;
+      background:transparent;
+      color:#4b5563;
+      cursor:pointer;
+    }
+    .chip.active{
+      background:#fff;
+      color:var(--ml-blue);
+      box-shadow:0 0 0 1px rgba(15,23,42,0.06);
     }
 
-    .view-toggle button.active {
-      background: rgba(0,74,153,0.9);
-      color: #fff;
-      border-color: rgba(0,74,153,0.9);
+    select, input[type="date"]{
+      padding:6px 8px;
+      border-radius:999px;
+      border:1px solid rgba(15,23,42,0.14);
+      font-size:12px;
+      background:#fff;
     }
 
-    .scheduler-wrapper {
-      margin-top: 10px;
-      border-radius: 8px;
-      overflow: hidden;
-      border: 1px solid #ddd;
-      background: #fff;
+    /* Scheduler layout */
+    .scheduler-wrapper{
+      margin-top:8px;
+      border-radius:12px;
+      border:1px solid rgba(15,23,42,0.08);
+      overflow:hidden;
+      background:#f9fafb;
     }
 
-    .scheduler-header {
-      display: grid;
-      grid-template-columns: 160px 1fr;
-      border-bottom: 1px solid #ddd;
-      background: #f3f4f6;
-      font-size: 12px;
-      font-weight: 600;
-      color: #003366;
+    .scheduler-header{
+      display:grid;
+      grid-template-columns:160px 1fr;
+      background:#f3f4f6;
+      border-bottom:1px solid var(--grid-line);
     }
 
-    .scheduler-header-left {
-      padding: 6px 10px;
-      border-right: 1px solid #ddd;
+    .scheduler-header-left{
+      padding:8px 10px;
+      font-size:12px;
+      color:var(--muted);
     }
 
-    .scheduler-header-right {
-      position: relative;
-      overflow-x: auto;
-      overflow-y: hidden;
+    .scheduler-header-grid{
+      position:relative;
+      overflow:hidden;
     }
 
-    .time-scale {
-      position: relative;
-      height: 32px;
-      white-space: nowrap;
+    .scheduler-hours{
+      display:flex;
+      font-size:11px;
+      color:var(--muted);
+    }
+    .scheduler-hours div{
+      flex:1;
+      text-align:center;
+      padding:4px 0;
+      border-left:1px solid var(--grid-line);
     }
 
-    .time-cell {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 80px; /* slot width */
-      border-left: 1px solid #e0e0e0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .scheduler-body{
+      max-height:480px;
+      overflow:auto;
     }
 
-    .time-cell:nth-child(odd) {
-      background: #f8fafc;
+    .lane{
+      display:grid;
+      grid-template-columns:160px 1fr;
+      border-bottom:1px solid var(--grid-line);
+      background:#fff;
     }
 
-    .scheduler-body {
-      display: grid;
-      grid-template-columns: 160px 1fr;
-      max-height: 540px;
-      overflow-y: auto;
-      font-size: 13px;
+    .lane:nth-child(odd){
+      background:#fdfdfd;
     }
 
-    .engineer-column {
-      border-right: 1px solid #ddd;
-      background: #fafafa;
+    .lane-left{
+      padding:8px 10px;
+      border-right:1px solid var(--grid-line);
+      font-size:12px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
     }
 
-    .engineer-row-label {
-      padding: 10px;
-      border-bottom: 1px solid #eee;
-      font-weight: 600;
-      color: #003366;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .lane-engineer{
+      font-weight:600;
+      color:var(--ml-blue);
     }
 
-    .engineer-row-label span.small {
-      font-size: 11px;
-      color: #777;
-      font-weight: 400;
+    .lane-meta{
+      font-size:11px;
+      color:var(--muted);
     }
 
-    .timeline-column {
-      position: relative;
-      overflow-x: auto;
+    .lane-grid{
+      position:relative;
+      min-height:50px;
+      background-image:linear-gradient(to right, transparent 0, transparent calc(100%/14 - 0.5px), var(--grid-line) calc(100%/14 - 0.5px));
+      background-size:calc(100%/14) 100%;
     }
 
-    .engineer-timeline-row {
-      position: relative;
-      height: 52px;
-      border-bottom: 1px solid #eee;
-      background-image: linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px);
-      background-size: 80px 100%;
+    .job-block{
+      position:absolute;
+      top:7px;
+      height:36px;
+      border-radius:8px;
+      padding:4px 8px;
+      font-size:11px;
+      color:#fff;
+      background:linear-gradient(135deg,#1d4ed8,#2563eb);
+      box-shadow:0 4px 10px rgba(15,23,42,0.35);
+      cursor:grab;
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+    }
+    .job-block.dragging{
+      opacity:0.85;
+      cursor:grabbing;
+      z-index:20;
+    }
+    .job-title{
+      font-weight:600;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+      overflow:hidden;
+    }
+    .job-meta{
+      font-size:10px;
+      opacity:0.9;
+      display:flex;
+      justify-content:space-between;
+      gap:4px;
+    }
+    .job-priority-high{
+      background:linear-gradient(135deg,#b91c1c,#ef4444);
     }
 
-    /* Job blocks */
-    .job-block {
-      position: absolute;
-      top: 6px;
-      height: 40px;
-      border-radius: 6px;
-      padding: 4px 6px;
-      box-sizing: border-box;
-      background: rgba(0,74,153,0.85);
-      color: #fff;
-      font-size: 11px;
-      cursor: grab;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-      overflow: hidden;
-    }
-
-    .job-block.dragging {
-      opacity: 0.75;
-      cursor: grabbing;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.35);
-      z-index: 10;
-    }
-
-    .job-title {
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .job-meta {
-      font-size: 10px;
-      opacity: 0.9;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .job-sla-warning {
-      background: #b91c1c;
+    .no-jobs{
+      font-size:11px;
+      color:var(--muted);
+      padding:14px 10px;
     }
 
     /* Modal */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.45);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,0.55);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:9999;
     }
 
-    .modal {
-      background: #fff;
-      border-radius: 12px;
-      max-width: 460px;
-      width: calc(100% - 40px);
-      padding: 18px 20px 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    .modal{
+      background:#fff;
+      border-radius:14px;
+      padding:16px 16px 18px;
+      width:calc(100% - 40px);
+      max-width:420px;
+      box-shadow:0 20px 40px rgba(15,23,42,0.45);
+      font-size:13px;
     }
 
-    .modal h2 {
-      margin: 0 0 12px 0;
-      color: #003366;
-      font-size: 18px;
+    .modal h2{
+      margin:0 0 6px;
+      font-size:16px;
+      color:var(--ml-blue);
     }
 
-    .modal-row {
-      margin-top: 10px;
-    }
-    .modal-row label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: #003366;
-      margin-bottom: 4px;
+    .modal-sub{
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:8px;
     }
 
-    .modal-row input,
-    .modal-row textarea {
-      width: 100%;
-      padding: 6px 8px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      font-size: 13px;
-      box-sizing: border-box;
+    .modal label{
+      display:block;
+      font-size:12px;
+      font-weight:600;
+      margin-top:10px;
     }
 
-    .modal-row textarea {
-      min-height: 60px;
-      resize: vertical;
+    .modal input,
+    .modal select,
+    .modal textarea{
+      width:100%;
+      margin-top:4px;
+      padding:6px 8px;
+      border-radius:6px;
+      border:1px solid rgba(15,23,42,0.18);
+      font-size:12px;
+      box-sizing:border-box;
     }
 
-    .engineer-checkboxes {
-      max-height: 120px;
-      overflow-y: auto;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      padding: 6px 8px;
-      background: #f9fafb;
+    .modal textarea{
+      min-height:60px;
+      resize:vertical;
     }
 
-    .engineer-checkboxes label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-weight: 400;
-      margin-bottom: 2px;
+    .engineer-list{
+      margin-top:4px;
+      max-height:110px;
+      overflow:auto;
+      border:1px solid rgba(15,23,42,0.18);
+      border-radius:8px;
+      padding:6px 8px;
     }
 
-    .modal-footer {
-      margin-top: 14px;
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
+    .engineer-list-item{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:12px;
+      padding:2px 0;
     }
 
-    .modal-footer button {
-      padding: 6px 12px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .modal-footer .primary {
-      background: rgba(0,74,153,0.9);
-      color: #fff;
-    }
-    .modal-footer .secondary {
-      background: #e5e7eb;
-      color: #111827;
+    .modal-actions{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      margin-top:14px;
     }
 
-    @media (max-width: 768px) {
-      .scheduler-header {
-        grid-template-columns: 120px 1fr;
-      }
-      .scheduler-body {
-        grid-template-columns: 120px 1fr;
-      }
+    .btn{
+      flex:1;
+      padding:8px 10px;
+      border-radius:999px;
+      border:none;
+      font-size:12px;
+      cursor:pointer;
+    }
+
+    .btn-primary{
+      background:linear-gradient(135deg,#1d4ed8,#1e40af);
+      color:#fff;
+    }
+
+    .btn-secondary{
+      background:#e5e7eb;
+      color:#111827;
+    }
+
+    .btn-danger{
+      background:var(--danger);
+      color:#fff;
+    }
+
+    .empty-msg{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:6px;
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <h1>SLA – Job Scheduler</h1>
+<div class="shell">
+  <div class="card">
+    <header>
+      <div>
+        <h1>SLA Scheduler</h1>
+        <div class="sub" id="userLabel"></div>
+      </div>
+      <a href="sla-menu.html" class="back-btn">← Back</a>
+    </header>
 
     <div class="toolbar">
-      <div class="view-toggle">
-        <button type="button" id="viewDayBtn" class="active">Day</button>
-        <button type="button" id="viewWeekBtn">Week</button>
+      <div class="toolbar-group">
+        <span style="font-size:12px;color:var(--muted);">View</span>
+        <div class="chip-group" id="viewModeGroup">
+          <button class="chip active" data-view="day">Day</button>
+          <button class="chip" data-view="week">Week</button>
+        </div>
       </div>
 
-      <div>
-        <label for="datePicker">Date:</label>
-        <input type="date" id="datePicker">
-      </div>
-
-      <div>
-        <label for="engineerFilter">Engineer:</label>
+      <div class="toolbar-group">
+        <span style="font-size:12px;color:var(--muted);">Engineer</span>
         <select id="engineerFilter">
           <option value="all">All engineers</option>
         </select>
       </div>
 
-      <button type="button" class="btn secondary" id="todayBtn">Today</button>
+      <div class="toolbar-group">
+        <span style="font-size:12px;color:var(--muted);">Date</span>
+        <input type="date" id="datePicker">
+      </div>
+
+      <div class="toolbar-group" style="margin-left:auto;">
+        <span id="statusMsg" style="font-size:11px;color:var(--muted);">Loading engineers…</span>
+      </div>
     </div>
 
-    <div class="scheduler-wrapper">
+    <div class="scheduler-wrapper" id="schedulerWrapper">
       <div class="scheduler-header">
-        <div class="scheduler-header-left">
-          Engineer
-        </div>
-        <div class="scheduler-header-right">
-          <div id="timeScale" class="time-scale"></div>
+        <div class="scheduler-header-left">Engineer</div>
+        <div class="scheduler-header-grid">
+          <div class="scheduler-hours" id="hoursHeader"></div>
         </div>
       </div>
-
-      <div class="scheduler-body">
-        <div id="engineerColumn" class="engineer-column"></div>
-        <div id="timelineColumn" class="timeline-column"></div>
+      <div class="scheduler-body" id="lanesContainer">
+        <!-- Lanes injected here -->
       </div>
     </div>
-  </div>
 
-  <!-- MODAL -->
-  <div id="jobModalBackdrop" class="modal-backdrop">
-    <div class="modal">
-      <h2>Edit Job</h2>
-      <div class="modal-row">
-        <label for="modalTitle">Title</label>
-        <input id="modalTitle" type="text">
-      </div>
-      <div class="modal-row">
-        <label for="modalStart">Start (local)</label>
-        <input id="modalStart" type="datetime-local">
-      </div>
-      <div class="modal-row">
-        <label for="modalEnd">End (local)</label>
-        <input id="modalEnd" type="datetime-local">
-      </div>
-      <div class="modal-row">
-        <label>Assigned Engineers</label>
-        <div id="modalEngineerCheckboxes" class="engineer-checkboxes"></div>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="secondary" id="modalCancelBtn">Cancel</button>
-        <button type="button" class="primary" id="modalSaveBtn">Save</button>
-      </div>
+    <div class="empty-msg" id="emptyMsg" style="display:none;">
+      No jobs to show for this period.
     </div>
   </div>
+</div>
+
+<!-- Job Detail Modal -->
+<div class="modal-backdrop" id="jobModalBackdrop">
+  <div class="modal">
+    <h2 id="modalTitle">Job details</h2>
+    <div class="modal-sub" id="modalSub"></div>
+
+    <label for="modalSummary">Summary</label>
+    <input id="modalSummary" type="text">
+
+    <label for="modalPriority">Priority</label>
+    <select id="modalPriority">
+      <option value="Normal">Normal</option>
+      <option value="High">High</option>
+    </select>
+
+    <label>Assigned engineers (tick to multi-assign)</label>
+    <div class="engineer-list" id="modalEngineerList">
+      <!-- checkboxes injected -->
+    </div>
+
+    <label for="modalNotes">Notes</label>
+    <textarea id="modalNotes"></textarea>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="modalCancelBtn">Close</button>
+      <button class="btn btn-primary" id="modalSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
 
 <script>
-/* ==========================
-   CONFIG & MOCK DATA
-========================== */
+  const USERS_ENDPOINT = "https://mostlane-users.jamie-def.workers.dev/all";
+  // TODO: replace with your real SLA jobs endpoint when ready:
+  const JOBS_ENDPOINT  = "https://mostlane-sla.jamie-def.workers.dev/jobs"; // example / placeholder path
 
-// one slot = 30 minutes, 80px wide
-const SLOT_MINUTES = 30;
-const SLOT_WIDTH = 80;
+  const byId = id => document.getElementById(id);
 
-let viewMode = 'day'; // 'day' | 'week'
-let currentDate = new Date(); // reference date for view
+  let engineers = []; // {id, name}
+  let jobs = [];      // {id, title, engineerId, start, end, priority, notes, engineers[]}
+  let viewMode = "day"; // 'day' or 'week'
+  let currentDate = new Date();
+  let dragState = null; // {jobId, engineerId, offsetPercent, widthPercent}
 
-// Mock engineers (replace with Worker later)
-const engineers = [
-  { id: 'Connor.Brady', name: 'Connor Brady' },
-  { id: 'Ryan.Diggens', name: 'Ryan Diggens' },
-  { id: 'Brad.Graham',  name: 'Brad Graham' },
-  { id: 'James.Baczynski', name: 'James Baczynski' },
-];
-
-// Mock jobs (replace with Worker later)
-let jobs = [
-  {
-    id: 'JOB-001',
-    title: '0307 – Leak in ceiling',
-    slaTarget: '2025-12-12T12:00:00Z',
-    start: addHours(startOfDay(new Date()), 9).toISOString(),
-    end:   addHours(startOfDay(new Date()), 11).toISOString(),
-    assignedEngineers: ['Connor.Brady']
-  },
-  {
-    id: 'JOB-002',
-    title: '0123 – EICR follow up',
-    slaTarget: '2025-12-11T15:00:00Z',
-    start: addHours(startOfDay(new Date()), 12).toISOString(),
-    end:   addHours(startOfDay(new Date()), 14).toISOString(),
-    assignedEngineers: ['Ryan.Diggens','Brad.Graham']
-  },
-  {
-    id: 'JOB-003',
-    title: '0456 – EM test failure',
-    slaTarget: '2025-12-13T09:00:00Z',
-    start: addHours(startOfDay(new Date()), 15).toISOString(),
-    end:   addHours(startOfDay(new Date()), 16).toISOString(),
-    assignedEngineers: ['James.Baczynski']
+  // ------------- Dates / time helpers -------------
+  function toISODate(d){
+    return d.toISOString().split("T")[0];
   }
-];
 
-/* ==========================
-   UTILS
-========================== */
-
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0,0,0,0);
-  return x;
-}
-
-function startOfWeek(d) {
-  const x = startOfDay(d);
-  const day = x.getDay(); // 0 Sun, 1 Mon
-  const diff = (day === 0 ? -6 : 1) - day; // move to Monday
-  x.setDate(x.getDate() + diff);
-  return x;
-}
-
-function addMinutes(d, m) {
-  return new Date(d.getTime() + m*60000);
-}
-function addHours(d, h) {
-  return addMinutes(d, h*60);
-}
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate()+n);
-  return x;
-}
-
-function formatDateInput(d) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth()+1).padStart(2,'0');
-  const day = String(d.getDate()).padStart(2,'0');
-  return `${year}-${month}-${day}`;
-}
-
-function parseDateInputValue(val) {
-  if(!val) return new Date();
-  const [year,month,day] = val.split('-').map(Number);
-  return new Date(year,month-1,day);
-}
-
-function toLocalInputValue(iso) {
-  if(!iso) return '';
-  const d = new Date(iso);
-  const pad = n => String(n).padStart(2,'0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth()+1);
-  const day = pad(d.getDate());
-  const hrs = pad(d.getHours());
-  const mins = pad(d.getMinutes());
-  return `${year}-${month}-${day}T${hrs}:${mins}`;
-}
-function fromLocalInputValue(val) {
-  if(!val) return null;
-  // treat as local and convert to ISO
-  const d = new Date(val);
-  return d.toISOString();
-}
-
-/* ==========================
-   TIME SCALE
-========================== */
-
-function getViewStartEnd() {
-  if(viewMode === 'day') {
-    const start = startOfDay(currentDate);
-    const end = addDays(start, 1);
-    return {start,end};
-  } else {
-    const start = startOfWeek(currentDate);
-    const end = addDays(start, 7);
-    return {start,end};
+  function hoursRange(view){
+    return view === "day"
+      ? {start:7, end:19, slots:12} // 12 hours
+      : {start:6, end:20, slots:14}; // 14 hours
   }
-}
 
-function buildTimeScale() {
-  const {start,end} = getViewStartEnd();
-  const scaleEl = document.getElementById('timeScale');
-  scaleEl.innerHTML = '';
-
-  const totalMinutes = (end - start)/60000;
-  const slots = totalMinutes / SLOT_MINUTES;
-
-  scaleEl.style.width = (slots * SLOT_WIDTH) + 'px';
-
-  for(let i=0; i<slots; i++) {
-    const slotStart = addMinutes(start, i*SLOT_MINUTES);
-    const cell = document.createElement('div');
-    cell.className = 'time-cell';
-
-    const left = i * SLOT_WIDTH;
-    cell.style.left = left + 'px';
-
-    if(viewMode === 'day') {
-      const h = slotStart.getHours();
-      const m = slotStart.getMinutes();
-      if(m === 0) cell.textContent = `${String(h).padStart(2,'0')}:00`;
-    } else {
-      // week: show day+time for major hours
-      const h = slotStart.getHours();
-      const m = slotStart.getMinutes();
-      if(h === 9 && m === 0) {
-        const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-        const monday = startOfWeek(currentDate);
-        const diffDays = Math.round((startOfDay(slotStart)-monday)/86400000);
-        const label = dayNames[diffDays] || '';
-        cell.textContent = label;
-      }
+  function buildHoursHeader(){
+    const hdr = byId("hoursHeader");
+    hdr.innerHTML = "";
+    const cfg = hoursRange(viewMode);
+    const span = cfg.end - cfg.start;
+    for(let h = cfg.start; h < cfg.end; h++){
+      const div = document.createElement("div");
+      const label = (h < 10 ? "0" : "") + h + ":00";
+      div.textContent = label;
+      hdr.appendChild(div);
     }
-
-    scaleEl.appendChild(cell);
   }
-}
 
-/* ==========================
-   RENDER SCHEDULER
-========================== */
+  // Convert date+time fraction (0-1 across visible span) to actual Date
+  function dateFromFraction(baseDate, fraction){
+    const cfg = hoursRange(viewMode);
+    const span = cfg.end - cfg.start;
+    const hour = cfg.start + fraction * span;
+    const d = new Date(baseDate);
+    d.setHours(Math.floor(hour), (hour%1)*60, 0, 0);
+    return d;
+  }
 
-function getFilteredEngineers() {
-  const filter = document.getElementById('engineerFilter').value;
-  if(filter === 'all') return engineers;
-  return engineers.filter(e => e.id === filter);
-}
+  function fractionFromDate(d){
+    const cfg = hoursRange(viewMode);
+    const h = d.getHours() + d.getMinutes()/60;
+    const span = cfg.end - cfg.start;
+    return Math.min(1, Math.max(0,(h - cfg.start)/span));
+  }
 
-function renderEngineersColumn() {
-  const col = document.getElementById('engineerColumn');
-  col.innerHTML = '';
-  const list = getFilteredEngineers();
+  // Format job times
+  function fmtTime(d){
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    return hh + ":" + mm;
+  }
 
-  list.forEach(e => {
-    const row = document.createElement('div');
-    row.className = 'engineer-row-label';
-    const pretty = e.name;
-    row.innerHTML = `<span>${pretty}</span><span class="small">${e.id}</span>`;
-    col.appendChild(row);
-  });
-}
+  // ------------- Data fetch -------------
+  async function loadEngineers(){
+    try{
+      const res = await fetch(USERS_ENDPOINT, {cache:"no-store"});
+      const data = await res.json();
 
-function renderTimeline() {
-  const {start,end} = getViewStartEnd();
-  const totalMinutes = (end - start)/60000;
-  const slots = totalMinutes / SLOT_MINUTES;
-  const totalWidth = slots * SLOT_WIDTH;
+      const rawList = Array.isArray(data) ? data : (data.users || data.data || []);
+      engineers = rawList
+        .map(u=>{
+          const id = u.Username || u.username || u.User || u.user;
+          if(!id) return null;
+          const nameRaw = u.DisplayName || u.displayName || id;
+          const name = nameRaw.replace(/\./g," ");
+          return { id, name };
+        })
+        .filter(Boolean)
+        .sort((a,b)=>a.name.localeCompare(b.name));
 
-  const timelineCol = document.getElementById('timelineColumn');
-  timelineCol.innerHTML = '';
-
-  const engList = getFilteredEngineers();
-  engList.forEach(e => {
-    const row = document.createElement('div');
-    row.className = 'engineer-timeline-row';
-    row.dataset.engineerId = e.id;
-    row.style.width = totalWidth + 'px';
-    timelineCol.appendChild(row);
-  });
-
-  // Add jobs
-  jobs.forEach(job => {
-    // For each assigned engineer, draw a block
-    job.assignedEngineers.forEach(engId => {
-      const row = [...timelineCol.children].find(r => r.dataset.engineerId === engId);
-      if(!row) return;
-
-      const jobStart = new Date(job.start);
-      const jobEnd = new Date(job.end);
-      if(jobEnd <= start || jobStart >= end) {
-        // not in view range
-        return;
-      }
-
-      // clamp to view boundaries
-      const visibleStart = jobStart < start ? start : jobStart;
-      const visibleEnd = jobEnd > end ? end : jobEnd;
-
-      const minutesFromStart = (visibleStart - start)/60000;
-      const durationMinutes = (visibleEnd - visibleStart)/60000;
-
-      const left = (minutesFromStart / SLOT_MINUTES) * SLOT_WIDTH;
-      const width = Math.max(40, (durationMinutes / SLOT_MINUTES) * SLOT_WIDTH);
-
-      const block = document.createElement('div');
-      block.className = 'job-block';
-      block.style.left = left + 'px';
-      block.style.width = width + 'px';
-      block.dataset.jobId = job.id;
-      block.dataset.engineerId = engId;
-
-      // SLA warning (simple – if start > SLA target)
-      if(job.slaTarget && new Date(job.start) > new Date(job.slaTarget)) {
-        block.classList.add('job-sla-warning');
-      }
-
-      const timeLabel = jobStart.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-      block.innerHTML = `
-        <div class="job-title">${job.title}</div>
-        <div class="job-meta">${timeLabel} • ${engId}</div>
-      `;
-
-      // Drag handlers
-      makeJobBlockDraggable(block, row);
-
-      // Click -> modal
-      block.addEventListener('click', (ev) => {
-        // ignore click if we were dragging
-        if(block.dataset.dragged === 'true') {
-          block.dataset.dragged = 'false';
-          return;
-        }
-        ev.stopPropagation();
-        openJobModal(job.id);
+      const sel = byId("engineerFilter");
+      sel.innerHTML = '<option value="all">All engineers</option>';
+      engineers.forEach(e=>{
+        const o = document.createElement("option");
+        o.value = e.id;
+        o.textContent = e.name;
+        sel.appendChild(o);
       });
 
-      row.appendChild(block);
-    });
-  });
-}
+      if(!engineers.length){
+        byId("statusMsg").textContent = "No engineers found.";
+      } else {
+        byId("statusMsg").textContent = "Loaded " + engineers.length + " engineers.";
+      }
 
-/* ==========================
-   DRAG & DROP
-========================== */
-
-function makeJobBlockDraggable(block, rowElement) {
-  let dragging = false;
-  let startX = 0;
-  let startLeft = 0;
-  let startY = 0;
-  let originalRow = rowElement;
-
-  const {start, end} = getViewStartEnd();
-  const totalMinutes = (end - start)/60000;
-  const slots = totalMinutes / SLOT_MINUTES;
-  const maxLeft = slots * SLOT_WIDTH;
-
-  function onMouseDown(e) {
-    if(e.button !== 0) return;
-    dragging = true;
-    block.classList.add('dragging');
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = parseFloat(block.style.left || '0');
-    block.dataset.dragged = 'false';
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    }catch(err){
+      console.error(err);
+      byId("statusMsg").textContent = "Failed to load engineers.";
+      engineers = [];
+    }
   }
 
-  function onMouseMove(e) {
-    if(!dragging) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if(Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      block.dataset.dragged = 'true';
+  async function loadJobs(){
+    // If you haven't wired the jobs worker yet, this will fail; in that case,
+    // we fall back to some simple in-memory demo jobs so the scheduler still works.
+    try{
+      const res = await fetch(JOBS_ENDPOINT + "?date=" + encodeURIComponent(toISODate(currentDate)) + "&view=" + viewMode, {cache:"no-store"});
+      if(!res.ok) throw new Error("Jobs endpoint not ready");
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data.jobs || data.data || []);
+      jobs = list.map(j => normalizeJob(j));
+      byId("statusMsg").textContent = "Jobs loaded.";
+    }catch(err){
+      console.warn("Jobs endpoint error, using demo jobs:", err.message);
+      const dayStart = new Date(currentDate);
+      dayStart.setHours(9,0,0,0);
+      const d2 = new Date(dayStart); d2.setHours(13);
+      const d3 = new Date(dayStart); d3.setHours(15);
+      const e1 = engineers[0]?.id;
+      const e2 = engineers[1]?.id || e1;
+      jobs = [
+        {
+          id:"DEMO-001",
+          title:"Leak at 0307 Winchester",
+          engineerId:e1,
+          start:dayStart,
+          end:d2,
+          priority:"High",
+          notes:"",
+          engineers:[e1]
+        },
+        {
+          id:"DEMO-002",
+          title:"EM test – Lakeside",
+          engineerId:e2,
+          start:d2,
+          end:d3,
+          priority:"Normal",
+          notes:"",
+          engineers:[e2]
+        }
+      ];
+      byId("statusMsg").textContent = "Demo jobs (endpoint not wired yet).";
+    }
+  }
+
+  function normalizeJob(j){
+    const id = j.id || j.jobId || j.reference || ("JOB-" + Math.random().toString(36).slice(2,8));
+    const engineerId = j.engineerId || j.engineer || j.assignedTo || (j.engineers && j.engineers[0]);
+    const start = j.start ? new Date(j.start) : new Date();
+    const end = j.end ? new Date(j.end) : new Date(start.getTime() + 60*60*1000);
+    const title = j.title || j.summary || ("Job " + id);
+    const priority = j.priority || "Normal";
+    const notes = j.notes || "";
+    const engArr = Array.isArray(j.engineers) ? j.engineers : (engineerId ? [engineerId] : []);
+    return { id, engineerId, start, end, title, priority, notes, engineers: engArr };
+  }
+
+  // ------------- Rendering -------------
+  function renderScheduler(){
+    buildHoursHeader();
+    const container = byId("lanesContainer");
+    container.innerHTML = "";
+
+    const filterEngineer = byId("engineerFilter").value;
+    const visibleEngineers = filterEngineer === "all"
+      ? engineers
+      : engineers.filter(e=>e.id === filterEngineer);
+
+    if(!visibleEngineers.length){
+      container.innerHTML = '<div class="no-jobs">No engineers available.</div>';
+      return;
     }
 
-    // horizontal drag -> time
-    let newLeft = startLeft + dx;
-    newLeft = Math.max(0, Math.min(newLeft, maxLeft - 20));
-    block.style.left = newLeft + 'px';
+    const cfg = hoursRange(viewMode);
 
-    // vertical drag -> engineer row
-    const rows = [...document.querySelectorAll('.engineer-timeline-row')];
-    let closestRow = originalRow;
-    let smallestDist = Infinity;
-    const blockRect = block.getBoundingClientRect();
-    const midY = blockRect.top + blockRect.height/2;
+    // Filter jobs for the current view
+    const startOfDay = new Date(currentDate);
+    startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(startOfDay); endOfDay.setDate(endOfDay.getDate()+1);
 
-    rows.forEach(r => {
-      const rect = r.getBoundingClientRect();
-      const rowMid = rect.top + rect.height/2;
-      const dist = Math.abs(rowMid - midY);
-      if(dist < smallestDist) {
-        smallestDist = dist;
-        closestRow = r;
+    function jobInView(j){
+      if(viewMode === "day"){
+        return j.start < endOfDay && j.end > startOfDay;
+      } else {
+        const startWeek = new Date(startOfDay);
+        const endWeek = new Date(startOfDay); endWeek.setDate(endWeek.getDate()+7);
+        return j.start < endWeek && j.end > startWeek;
+      }
+    }
+
+    const jobsInView = jobs.filter(jobInView);
+    byId("emptyMsg").style.display = jobsInView.length ? "none" : "block";
+
+    visibleEngineers.forEach(eng=>{
+      const lane = document.createElement("div");
+      lane.className = "lane";
+      lane.dataset.engineerId = eng.id;
+
+      const left = document.createElement("div");
+      left.className = "lane-left";
+      const nameDiv = document.createElement("div");
+      nameDiv.className = "lane-engineer";
+      nameDiv.textContent = eng.name;
+      const metaDiv = document.createElement("div");
+      metaDiv.className = "lane-meta";
+      metaDiv.textContent = eng.id;
+      left.appendChild(nameDiv);
+      left.appendChild(metaDiv);
+
+      const grid = document.createElement("div");
+      grid.className = "lane-grid";
+
+      const engJobs = jobsInView.filter(j => j.engineerId === eng.id);
+      if(!engJobs.length){
+        const msg = document.createElement("div");
+        msg.className = "no-jobs";
+        msg.textContent = "No jobs.";
+        msg.style.padding = "10px";
+        grid.appendChild(msg);
+      } else {
+        engJobs.forEach(job=>{
+          const block = document.createElement("div");
+          block.className = "job-block";
+          if(job.priority === "High") block.classList.add("job-priority-high");
+          block.dataset.jobId = job.id;
+          block.dataset.engineerId = eng.id;
+
+          const fracStart = fractionFromDate(job.start);
+          const fracEnd   = fractionFromDate(job.end);
+          const leftPct   = fracStart * 100;
+          const widthPct  = Math.max(6, (fracEnd - fracStart) * 100);
+
+          block.style.left = leftPct + "%";
+          block.style.width = widthPct + "%";
+
+          const titleDiv = document.createElement("div");
+          titleDiv.className = "job-title";
+          titleDiv.textContent = job.title;
+
+          const metaDiv2 = document.createElement("div");
+          metaDiv2.className = "job-meta";
+          metaDiv2.innerHTML = `
+            <span>${fmtTime(job.start)}–${fmtTime(job.end)}</span>
+            <span>${job.priority}</span>
+          `;
+
+          block.appendChild(titleDiv);
+          block.appendChild(metaDiv2);
+
+          // Drag behaviour
+          block.addEventListener("pointerdown", e=>{
+            e.preventDefault();
+            const rect = grid.getBoundingClientRect();
+            const startX = e.clientX;
+            const offsetPct = ((startX - rect.left)/rect.width) * 100 - leftPct;
+            dragState = {
+              jobId: job.id,
+              engineerId: eng.id,
+              laneEl: grid,
+              initialLeftPct: leftPct,
+              widthPct,
+              offsetPct
+            };
+            block.classList.add("dragging");
+            block.setPointerCapture(e.pointerId);
+          });
+
+          block.addEventListener("pointermove", e=>{
+            if(!dragState || dragState.jobId !== job.id) return;
+            const rect = grid.getBoundingClientRect();
+            const x = e.clientX;
+            let newLeftPct = ((x - rect.left)/rect.width)*100 - dragState.offsetPct;
+            newLeftPct = Math.max(0, Math.min(100 - dragState.widthPct, newLeftPct));
+            block.style.left = newLeftPct + "%";
+          });
+
+          block.addEventListener("pointerup", e=>{
+            if(!dragState || dragState.jobId !== job.id) return;
+            block.releasePointerCapture(e.pointerId);
+            block.classList.remove("dragging");
+
+            const rect = dragState.laneEl.getBoundingClientRect();
+            const x = e.clientX;
+            let newLeftPct = ((x - rect.left)/rect.width)*100 - dragState.offsetPct;
+            newLeftPct = Math.max(0, Math.min(100 - dragState.widthPct, newLeftPct));
+            const fracStartNew = newLeftPct / 100;
+            const newStart = dateFromFraction(currentDate, fracStartNew);
+            const dur = job.end - job.start;
+            const newEnd = new Date(newStart.getTime() + dur);
+
+            // Check if pointer ended over a different lane for engineer change
+            const targetLane = document.elementFromPoint(e.clientX, e.clientY)?.closest(".lane");
+            const newEngineerId = targetLane?.dataset.engineerId || eng.id;
+
+            job.start = newStart;
+            job.end   = newEnd;
+            job.engineerId = newEngineerId;
+
+            // If multi-assign array exists, ensure main engineerId present
+            if(Array.isArray(job.engineers) && !job.engineers.includes(newEngineerId)){
+              job.engineers.push(newEngineerId);
+            }
+
+            dragState = null;
+            renderScheduler();
+            saveJobUpdate(job);
+          });
+
+          // Click to open modal
+          block.addEventListener("click", e=>{
+            // Ignore click immediately after drag (small heuristic)
+            if(dragState) return;
+            openJobModal(job);
+          });
+
+          grid.appendChild(block);
+        });
+      }
+
+      lane.appendChild(left);
+      lane.appendChild(grid);
+      container.appendChild(lane);
+    });
+  }
+
+  // ------------- Modal -------------
+  let modalJob = null;
+
+  function openJobModal(job){
+    modalJob = job;
+    byId("modalTitle").textContent = job.title;
+    byId("modalSub").textContent = job.id + " • " + fmtTime(job.start) + "–" + fmtTime(job.end);
+
+    byId("modalSummary").value = job.title;
+    byId("modalPriority").value = job.priority || "Normal";
+    byId("modalNotes").value = job.notes || "";
+
+    const list = byId("modalEngineerList");
+    list.innerHTML = "";
+    const jobEngs = Array.isArray(job.engineers) ? job.engineers : (job.engineerId ? [job.engineerId] : []);
+    engineers.forEach(e=>{
+      const row = document.createElement("label");
+      row.className = "engineer-list-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = e.id;
+      cb.checked = jobEngs.includes(e.id);
+      const span = document.createElement("span");
+      span.textContent = e.name;
+      row.appendChild(cb);
+      row.appendChild(span);
+      list.appendChild(row);
+    });
+
+    byId("jobModalBackdrop").style.display = "flex";
+  }
+
+  function closeJobModal(){
+    modalJob = null;
+    byId("jobModalBackdrop").style.display = "none";
+  }
+
+  async function saveJobUpdate(job){
+    // Placeholder: when you have an SLA worker endpoint for updates, call it here.
+    // Example:
+    // await fetch("https://mostlane-sla.jamie-def.workers.dev/job/update", {
+    //   method:"POST",
+    //   headers:{"Content-Type":"application/json"},
+    //   body:JSON.stringify(jobToPayload(job))
+    // });
+    console.log("Job updated:", job);
+  }
+
+  function jobToPayload(job){
+    return {
+      id: job.id,
+      title: job.title,
+      engineerId: job.engineerId,
+      engineers: job.engineers,
+      start: job.start.toISOString(),
+      end: job.end.toISOString(),
+      priority: job.priority,
+      notes: job.notes
+    };
+  }
+
+  // ------------- Events -------------
+  function attachEvents(){
+    // View mode chips
+    byId("viewModeGroup").addEventListener("click", e=>{
+      const chip = e.target.closest(".chip");
+      if(!chip) return;
+      const mode = chip.dataset.view;
+      if(!mode || mode === viewMode) return;
+      viewMode = mode;
+      [...byId("viewModeGroup").querySelectorAll(".chip")].forEach(c=>c.classList.remove("active"));
+      chip.classList.add("active");
+      renderScheduler();
+    });
+
+    byId("engineerFilter").addEventListener("change", ()=>{
+      renderScheduler();
+    });
+
+    byId("datePicker").addEventListener("change", e=>{
+      const val = e.target.value;
+      if(!val) return;
+      currentDate = new Date(val + "T00:00:00");
+      loadJobs().then(renderScheduler);
+    });
+
+    byId("modalCancelBtn").addEventListener("click", closeJobModal);
+
+    byId("modalSaveBtn").addEventListener("click", async ()=>{
+      if(!modalJob) return;
+      modalJob.title = byId("modalSummary").value.trim() || modalJob.title;
+      modalJob.priority = byId("modalPriority").value;
+      modalJob.notes = byId("modalNotes").value;
+
+      const checks = [...byId("modalEngineerList").querySelectorAll("input[type=checkbox]")];
+      const selected = checks.filter(c=>c.checked).map(c=>c.value);
+      if(selected.length){
+        modalJob.engineers = selected;
+        if(!selected.includes(modalJob.engineerId)){
+          modalJob.engineerId = selected[0];
+        }
+      }
+
+      await saveJobUpdate(modalJob);
+      renderScheduler();
+      closeJobModal();
+    });
+
+    byId("jobModalBackdrop").addEventListener("click", e=>{
+      if(e.target === byId("jobModalBackdrop")){
+        closeJobModal();
       }
     });
+  }
 
-    if(closestRow && closestRow !== block.parentElement) {
-      closestRow.appendChild(block);
+  // ------------- Init -------------
+  async function init(){
+    const user = sessionStorage.getItem("mostlaneUser");
+    if(!user){
+      window.location.href = "login.html";
+      return;
     }
-  }
+    byId("userLabel").textContent = "Logged in as " + user;
 
-  function onMouseUp(e) {
-    if(!dragging) return;
-    dragging = false;
-    block.classList.remove('dragging');
-    document.removeEventListener('mousemove', onMouseMove);
-    document.removeEventListener('mouseup', onMouseUp);
+    byId("datePicker").value = toISODate(currentDate);
 
-    // Snap to nearest slot
-    const left = parseFloat(block.style.left || '0');
-    const snappedSlots = Math.round(left / SLOT_WIDTH);
-    const snappedLeft = snappedSlots * SLOT_WIDTH;
-    block.style.left = snappedLeft + 'px';
-
-    const {start, end} = getViewStartEnd();
-    const newStart = addMinutes(start, snappedSlots * SLOT_MINUTES);
-
-    const jobId = block.dataset.jobId;
-    const engineerId = block.parentElement.dataset.engineerId;
-    const job = jobs.find(j => j.id === jobId);
-    if(!job) return;
-
-    // keep same duration
-    const oldStart = new Date(job.start);
-    const oldEnd = new Date(job.end);
-    const durationMinutes = (oldEnd - oldStart)/60000;
-    const newEnd = addMinutes(newStart, durationMinutes);
-
-    job.start = newStart.toISOString();
-    job.end   = newEnd.toISOString();
-
-    // update assignedEngineers to include engineerId if not already
-    if(!job.assignedEngineers.includes(engineerId)) {
-      job.assignedEngineers.push(engineerId);
-    }
-
-    // if previously multi-assigned and we wanted to move it just for one engineer
-    // we keep it simple: time change applies to all assigned engineers.
-    // (We can get fancier later if you want per-engineer timing.)
-
-    // Re-render to reflect updated meta text
+    attachEvents();
+    await loadEngineers();
+    await loadJobs();
     renderScheduler();
   }
 
-  block.addEventListener('mousedown', onMouseDown);
-}
-
-/* ==========================
-   MODAL
-========================== */
-
-let modalJobId = null;
-
-function openJobModal(jobId) {
-  const job = jobs.find(j => j.id === jobId);
-  if(!job) return;
-
-  modalJobId = jobId;
-
-  document.getElementById('modalTitle').value = job.title || '';
-  document.getElementById('modalStart').value = toLocalInputValue(job.start);
-  document.getElementById('modalEnd').value   = toLocalInputValue(job.end);
-
-  const boxContainer = document.getElementById('modalEngineerCheckboxes');
-  boxContainer.innerHTML = '';
-
-  engineers.forEach(e => {
-    const label = document.createElement('label');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = e.id;
-    cb.checked = (job.assignedEngineers || []).includes(e.id);
-    label.appendChild(cb);
-    label.appendChild(document.createTextNode(' ' + e.name));
-    boxContainer.appendChild(label);
-  });
-
-  document.getElementById('jobModalBackdrop').style.display = 'flex';
-}
-
-function closeJobModal() {
-  modalJobId = null;
-  document.getElementById('jobModalBackdrop').style.display = 'none';
-}
-
-document.getElementById('modalCancelBtn').addEventListener('click', closeJobModal);
-document.getElementById('jobModalBackdrop').addEventListener('click', (e)=>{
-  if(e.target.id === 'jobModalBackdrop') closeJobModal();
-});
-
-document.getElementById('modalSaveBtn').addEventListener('click', ()=>{
-  if(!modalJobId) return;
-  const job = jobs.find(j => j.id === modalJobId);
-  if(!job) return;
-
-  job.title = document.getElementById('modalTitle').value.trim();
-
-  const newStartIso = fromLocalInputValue(document.getElementById('modalStart').value);
-  const newEndIso   = fromLocalInputValue(document.getElementById('modalEnd').value);
-  if(newStartIso && newEndIso) {
-    job.start = newStartIso;
-    job.end   = newEndIso;
-  }
-
-  const selected = [];
-  document.querySelectorAll('#modalEngineerCheckboxes input[type="checkbox"]').forEach(cb=>{
-    if(cb.checked) selected.push(cb.value);
-  });
-  if(selected.length > 0) {
-    job.assignedEngineers = selected;
-  }
-
-  closeJobModal();
-  renderScheduler();
-});
-
-/* ==========================
-   MAIN RENDER
-========================== */
-
-function renderScheduler() {
-  buildTimeScale();
-  renderEngineersColumn();
-  renderTimeline();
-}
-
-/* ==========================
-   INIT
-========================== */
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  // Populate engineer filter
-  const sel = document.getElementById('engineerFilter');
-  engineers.forEach(e=>{
-    const opt = document.createElement('option');
-    opt.value = e.id;
-    opt.textContent = e.name;
-    sel.appendChild(opt);
-  });
-
-  // Date picker
-  const datePicker = document.getElementById('datePicker');
-  datePicker.value = formatDateInput(currentDate);
-  datePicker.addEventListener('change', ()=>{
-    currentDate = parseDateInputValue(datePicker.value);
-    renderScheduler();
-  });
-
-  // Today button
-  document.getElementById('todayBtn').addEventListener('click', ()=>{
-    currentDate = new Date();
-    datePicker.value = formatDateInput(currentDate);
-    renderScheduler();
-  });
-
-  // View toggles
-  const dayBtn = document.getElementById('viewDayBtn');
-  const weekBtn = document.getElementById('viewWeekBtn');
-
-  dayBtn.addEventListener('click', ()=>{
-    viewMode = 'day';
-    dayBtn.classList.add('active');
-    weekBtn.classList.remove('active');
-    renderScheduler();
-  });
-  weekBtn.addEventListener('click', ()=>{
-    viewMode = 'week';
-    weekBtn.classList.add('active');
-    dayBtn.classList.remove('active');
-    renderScheduler();
-  });
-
-  // Engineer filter
-  sel.addEventListener('change', renderScheduler);
-
-  renderScheduler();
-});
+  document.addEventListener("DOMContentLoaded", init);
 </script>
 </body>
 </html>
