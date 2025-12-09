@@ -267,6 +267,7 @@ overflow-x: auto;
     }
     checkAccess();
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -284,7 +285,7 @@ border-radius:8px;border:1px solid #ccc;font-size:15px;width:100%;box-sizing:bor
     <div class="summary-controls">
       <button class="button" type="button" onclick="setSummarySort('value')">Sort by Value (High → Low)</button>
       <button class="button" type="button" onclick="setSummarySort('name')">Sort by Name (A → Z)</button>
-      <button class="button" type="button" onclick="downloadSummaryCSV()">Export Summary CSV</button>
+<button class="button" type="button" onclick="exportFullExcel()">Export Asset Report</button>
       <span class="summary-legend">Bar length shows relative value held. Rows highlighted green are holding more than £5,000 of assets.</span>
     </div>
 
@@ -752,31 +753,53 @@ currentAsset.images.push(data.url);
       }
     }
 
-    function downloadSummaryCSV(){
-      if(!lastSummaryData || !lastSummaryData.length){
-        alert("No summary data available to export.");
-        return;
-      }
+    async function exportFullExcel() {
+  if (!currentAssets || !currentAssets.length) {
+    alert("No asset data available.");
+    return;
+  }
 
-      let csv="Engineer,Username,Total Value (£),Asset Count\n";
-      lastSummaryData.forEach(d=>{
-        csv += `"${d.displayName.replace(/"/g,'""')}",` +
-               `"${d.username.replace(/"/g,'""')}",` +
-               `${d.totalValue.toFixed(2)},` +
-               `${d.count}\n`;
-      });
+  const engineerTabs = {}; // each engineer = one sheet
 
-      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");
-      a.href=url;
-      a.download="asset-value-summary.csv";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
+  for (const asset of currentAssets) {
+    const engineer = asset.assignedTo || "Unassigned";
 
+    if (!engineerTabs[engineer]) engineerTabs[engineer] = [];
+
+    // Fetch transfer history for each asset
+    const history = await fetch(`${apiBase}/transfer-log?assetID=${asset.id}`)
+      .then(r => r.json())
+      .catch(() => []);
+
+    // Store asset info + transfer history
+    engineerTabs[engineer].push({
+      "Asset ID": asset.id,
+      "Name": asset.name,
+      "Category": asset.category,
+      "Serial": asset.serial,
+      "Value (£)": asset.value,
+      "Calibration Date": asset.calibrationDate || "",
+      "Images": (asset.images || []).join("\n"),
+
+      // Multi-line history block
+      "History": history.length
+        ? history.map(h =>
+            `FROM: ${h.from}\nTO: ${h.to}\nDATE: ${h.timestamp}\nPDF: ${h.pdfURL || "—"}`
+          ).join("\n\n")
+        : "No transfer history"
+    });
+  }
+
+  // Build workbook
+  const wb = XLSX.utils.book_new();
+
+  for (const engineer in engineerTabs) {
+    const ws = XLSX.utils.json_to_sheet(engineerTabs[engineer]);
+    XLSX.utils.book_append_sheet(wb, ws, engineer.replace(/\./g, "_"));
+  }
+
+  XLSX.writeFile(wb, "Asset_History_Report.xlsx");
+}
     /* LOAD ASSETS (with safe Edit handler) */
     async function loadAssets(){
       await loadPortalUsers();
