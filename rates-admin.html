@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane • Rates Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    body.rates-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: cover;
+      margin: 0;
+      padding: 30px 10px;
+      display: flex;
+      justify-content: center;
+    }
+    .content {
+      background: rgba(255,255,255,0.7);
+      border-radius: 12px;
+      padding: 20px;
+      max-width: 900px;
+      width: 100%;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    h1 {
+      margin-top: 0;
+      text-align: center;
+      color: #004a99;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    .btn {
+      background-color: #004a99;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .btn:hover {
+      background-color: #003366;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #d1d5db;
+      text-align: left;
+      font-size: 14px;
+    }
+    th {
+      background-color: #004a99;
+      color: white;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid #cbd5e1;
+      box-sizing: border-box;
+    }
+    .status {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #065f46;
+    }
+    .error {
+      color: #b91c1c;
+    }
+  </style>
+</head>
+<body class="rates-body">
+
+<div class="content">
+  <div class="top-bar">
+    <a href="main.html" class="btn">← Main Menu</a>
+    <div id="userLabel"></div>
+  </div>
+
+  <h1>Hourly Rates Admin</h1>
+  <p style="font-size:13px; color:#374151;">
+    View and edit hourly rates for all portal users. Changes are stored securely in KV and used by <strong>weekly.html</strong>.
+  </p>
+
+  <table id="ratesTable">
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Standard Rate (£/hr)</th>
+        <th>OT Multiplier</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- rows injected via JS -->
+    </tbody>
+  </table>
+
+  <button class="btn" style="margin-top:15px;" onclick="saveAll()">💾 Save All Changes</button>
+  <div id="status" class="status"></div>
+</div>
+
+<script>
+  const API_BASE = "https://mostlane-api.jamie-def.workers.dev";
+  // 🔐 This must match env.RATES_ADMIN_SECRET in the Worker
+  const ADMIN_SECRET = "PUT-YOUR-SECRET-HERE"; // <-- replace in your real file
+
+  let currentUser = sessionStorage.getItem("mostlaneUser") || "";
+
+  if (!currentUser) {
+    alert("Not logged in.");
+    window.location.href = "login.html";
+  } else {
+    document.getElementById("userLabel").textContent = "Logged in as " + currentUser;
+  }
+
+  // Hard lock to your own account (adjust name if needed)
+  if (currentUser !== "Jamie.Line") {
+    alert("You do not have permission to view this page.");
+    window.location.href = "main.html";
+  }
+
+  async function loadRates() {
+    const status = document.getElementById("status");
+    status.textContent = "Loading rates…";
+
+    try {
+      const res = await fetch(API_BASE + "/rate/all", {
+        headers: { "X-Admin-Secret": ADMIN_SECRET }
+      });
+      if (!res.ok) throw new Error("Failed to fetch");
+
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Unknown error");
+
+      const tbody = document.querySelector("#ratesTable tbody");
+      tbody.innerHTML = "";
+
+      data.rates.sort((a, b) => a.user.localeCompare(b.user));
+
+      for (const entry of data.rates) {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>${entry.user}</td>
+          <td><input type="number" step="0.01" value="${entry.rate ?? ""}" data-user="${entry.user}" data-field="rate"></td>
+          <td><input type="number" step="0.1" value="${entry.otMultiplier ?? 1.5}" data-user="${entry.user}" data-field="otMultiplier"></td>
+        `;
+
+        tbody.appendChild(tr);
+      }
+
+      status.textContent = "Loaded rates from KV.";
+    } catch (err) {
+      console.error(err);
+      status.textContent = "Error loading rates.";
+      status.classList.add("error");
+    }
+  }
+
+  async function saveAll() {
+    const status = document.getElementById("status");
+    status.textContent = "Saving…";
+    status.classList.remove("error");
+
+    const inputs = document.querySelectorAll("#ratesTable tbody input");
+    const byUser = {};
+
+    inputs.forEach(input => {
+      const user = input.dataset.user;
+      const field = input.dataset.field;
+      const value = parseFloat(input.value);
+      if (!byUser[user]) byUser[user] = {};
+      if (!isNaN(value)) byUser[user][field] = value;
+    });
+
+    try {
+      const entries = Object.entries(byUser);
+      for (const [user, cfg] of entries) {
+        if (typeof cfg.rate !== "number") continue; // skip invalid
+
+        await fetch(API_BASE + "/rate/set", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Admin-Secret": ADMIN_SECRET
+          },
+          body: JSON.stringify({
+            user,
+            rate: cfg.rate,
+            otMultiplier: cfg.otMultiplier ?? 1.5
+          })
+        });
+      }
+
+      status.textContent = "All changes saved to KV.";
+    } catch (err) {
+      console.error(err);
+      status.textContent = "Error saving changes.";
+      status.classList.add("error");
+    }
+  }
+
+  loadRates();
+</script>
+
+</body>
+</html>
