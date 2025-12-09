@@ -37,10 +37,13 @@ background-size: cover;
       margin:5px 5px 15px 0;cursor:pointer;
       border:none;
     }
-    table{
-      width:100%;border-collapse:collapse;
-      background:white;font-size:14px;
-    }
+table{
+  width:100%;
+  border-collapse:collapse;
+  background:rgba(255,255,255,0.6);  /* ← 60% opaque */
+  backdrop-filter: blur(4px);         /* ← optional but looks premium */
+  font-size:14px;
+}
     th, td {
       border:1px solid #ccc;
       padding:8px;
