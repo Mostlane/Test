@@ -4,7 +4,7 @@
   <script src="auth.js"></script>
   <meta charset="UTF-8">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
+<link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Asset Administration</title>
 
@@ -12,18 +12,18 @@
     body{
       margin:0;padding:0;
       background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center;
-      background-size: cover;
+background-size: cover;
       font-family:Arial,sans-serif;
     }
-    .content{
-      background:rgba(255,255,255,0.6);
-      margin:40px auto;
-      padding:20px;
-      border-radius:12px;
-      max-width:1200px;
-      width:100%;
-      box-sizing:border-box;
-    }
+.content{
+  background:rgba(255,255,255,0.6);
+  margin:40px auto;
+  padding:20px;
+  border-radius:12px;
+  max-width:1200px;
+  width:100%;
+  box-sizing:border-box;
+}
     h1{
       background:rgba(0,74,153,0.6);
       color:white;text-align:center;
@@ -48,20 +48,15 @@
       vertical-align:middle;
     }
     th{background:#f3f4f6;}
+    .actions button{
+      margin-right:5px;padding:4px 8px;font-size:12px;
+    }
 
     .thumb-img{
       height:40px;
       width:40px;
       object-fit:cover;
       border-radius:4px;
-
-      /* ⭐ NEW — FORCE BROWSER TO RENDER SMALLER THUMBNAILS */
-      image-rendering: crisp-edges;
-      image-rendering: -webkit-optimize-contrast;
-    }
-
-    .actions button{
-      margin-right:5px;padding:4px 8px;font-size:12px;
     }
 
     .modal{
@@ -70,17 +65,19 @@
       background:rgba(0,0,0,0.7);
       justify-content:center;align-items:center;
     }
-    .modal-content{
+.modal-content{
       background:white;
       padding:20px;
       border-radius:8px;
       width:90%;
       max-width:500px;
       position:relative;
+
+      /* ⭐ MAKE EDIT MODAL SCROLLABLE ON MOBILE */
       max-height: 85vh;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-    }
+}
     .modal-content input,
     .modal-content select{
       width:100%;margin:6px 0;padding:8px;
@@ -159,6 +156,7 @@
       font-weight:bold;
     }
 
+    /* Nav buttons in fullscreen viewer */
     .img-nav-btn{
       position:absolute;
       top:50%;
@@ -178,6 +176,7 @@
     #imgPrev{ left:20px; }
     #imgNext{ right:20px; }
 
+    /* Summary / bar chart styles */
     .summary-row{
       display:flex;
       align-items:center;
@@ -232,23 +231,26 @@
       font-style:italic;
     }
     #valueSummary {
-      width: 100% !important;
-      display: block !important;
-      box-sizing: border-box;
-    }
-    .content {
-      overflow-x: auto;
-    }
-    #assetTable {
-      width: 100%;
-      max-width: 100%;
-    }
-    table {
-      display: block;
-      width: 100%;
-      overflow-x: auto;
-    }
+  width: 100% !important;
+  display: block !important;
+  box-sizing: border-box;
+}
+   .content {
+  overflow-x: auto;
+}
+
+#assetTable {
+  width: 100%;
+  max-width: 100%;
+}
+
+table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+} 
   </style>
+
   <script>
     async function checkAccess(){
       const user=sessionStorage.getItem("mostlaneUser");
@@ -270,10 +272,10 @@
     <button class="button" onclick="openAddModal()">Add Asset</button>
     <h1>Asset Administration</h1>
 
+    <!-- New summary panel -->
     <div id="valueSummary" style="margin:15px 0;padding:15px;background:white;border-radius:8px;border:1px solid #ccc;font-size:15px;width:100%;box-sizing:border-box;display:block;">
       <strong>Loading asset summary…</strong>
     </div>
-
     <div class="summary-controls">
       <button class="button" type="button" onclick="setSummarySort('value')">Sort by Value (High → Low)</button>
       <button class="button" type="button" onclick="setSummarySort('name')">Sort by Name (A → Z)</button>
@@ -292,6 +294,7 @@
     </table>
   </div>
 
+  <!-- MODAL -->
   <div id="assetModal" class="modal">
     <div class="modal-content">
       <span class="close-btn" onclick="closeModal()">×</span>
@@ -335,6 +338,7 @@
     </div>
   </div>
 
+  <!-- Image Viewer -->
   <div id="imageViewer" class="image-viewer-overlay">
     <span class="image-viewer-close" onclick="closeImageViewer()">×</span>
     <button id="imgPrev" class="img-nav-btn" onclick="prevImage()">&#8592;</button>
@@ -343,19 +347,20 @@
   </div>
 
   <script>
-    const ASSET_DELETE_PIN = "1976";
-    const apiBase="https://mostlane-assets.jamie-def.workers.dev";
+    const ASSET_DELETE_PIN = "1976";   // ← change to whatever PIN you want
 
+    const apiBase="https://mostlane-assets.jamie-def.workers.dev";
     let currentEditId=null;
     let currentAsset=null;
     let portalUsers=[];
     let currentImageList=[];
-    let currentImageIndex=0;
+    let currentImageIndex=0; // track which image is open
 
+    // summary state
     let currentAssets = [];
-    let lastSummarySort = "value";
+    let lastSummarySort = "value"; // "value" or "name"
     let lastSummaryData = [];
-    const HIGH_VALUE_THRESHOLD = 5000;
+    const HIGH_VALUE_THRESHOLD = 5000; // £5k
 
     async function loadPortalUsers(){
       const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
@@ -376,20 +381,18 @@
           (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
         );
     }
+function updateImageNavVisibility() {
+  const prevBtn = document.getElementById("imgPrev");
+  const nextBtn = document.getElementById("imgNext");
 
-    function updateImageNavVisibility() {
-      const prevBtn = document.getElementById("imgPrev");
-      const nextBtn = document.getElementById("imgNext");
-
-      if (!currentImageList || currentImageList.length <= 1) {
-        prevBtn.style.display = "none";
-        nextBtn.style.display = "none";
-      } else {
-        prevBtn.style.display = "flex";
-        nextBtn.style.display = "flex";
-      }
-    }
-
+  if (!currentImageList || currentImageList.length <= 1) {
+    prevBtn.style.display = "none";
+    nextBtn.style.display = "none";
+  } else {
+    prevBtn.style.display = "flex";
+    nextBtn.style.display = "flex";
+  }
+}
     function populateUserDropdown(selected=""){
       const sel=document.getElementById("assignedField");
       sel.innerHTML = `<option value="">-- Select User --</option>`;
@@ -419,24 +422,30 @@
       }
     }
 
+    /* ADD MODAL */
     function openAddModal(){
       currentEditId=null;
       currentAsset=null;
 
       document.getElementById("modalTitle").textContent="Add Asset";
+
       document.querySelectorAll("#assetModal input").forEach(i=>i.value="");
+
       document.getElementById("imageGallery").innerHTML="";
       currentImageList = [];
 
       populateUserDropdown("");
       validateSaveButton();
+
       document.getElementById("calibrationField").value =
         new Date().toISOString().slice(0,10);
 
       document.getElementById("assignedField").onchange = validateSaveButton;
+
       document.getElementById("assetModal").style.display="flex";
     }
 
+    /* EDIT MODAL */
     function openEditModal(asset){
       currentEditId=asset.id;
       currentAsset=asset;
@@ -453,13 +462,16 @@
       validateSaveButton();
 
       document.getElementById("assignedField").onchange = validateSaveButton;
+
       document.getElementById("sharedField").value=asset.shared;
       document.getElementById("calibrationField").value =
         new Date().toISOString().slice(0,10);
 
       loadImageGallery(asset);
+
       document.getElementById("assetModal").style.display="flex";
     }
+
     function closeModal(){
       document.getElementById("assetModal").style.display="none";
     }
@@ -502,8 +514,8 @@
       currentImageIndex = idx >= 0 ? idx : 0;
 
       img.src=url;
-      modal.style.display="flex";
-      updateImageNavVisibility();
+    modal.style.display="flex";
+updateImageNavVisibility();
     }
 
     function closeImageViewer(){
@@ -521,9 +533,15 @@
       img.src = url;
     }
 
-    function nextImage(){ showImageAt(currentImageIndex + 1); }
-    function prevImage(){ showImageAt(currentImageIndex - 1); }
+    function nextImage(){
+      showImageAt(currentImageIndex + 1);
+    }
 
+    function prevImage(){
+      showImageAt(currentImageIndex - 1);
+    }
+
+    // Swipe support
     const viewerEl = document.getElementById("imageViewer");
     let touchStartX = null;
 
@@ -537,11 +555,9 @@
       viewerEl.addEventListener("touchend", e=>{
         if(touchStartX === null) return;
         if(!e.changedTouches || !e.changedTouches.length) return;
-
         const endX = e.changedTouches[0].clientX;
         const dx = endX - touchStartX;
         const threshold = 40;
-
         if(Math.abs(dx) > threshold){
           if(dx < 0) nextImage();
           else       prevImage();
@@ -550,6 +566,7 @@
       }, { passive:true });
     }
 
+    /* DELETE IMAGE */
     async function deleteImage(url){
       if(!currentAsset) return;
 
@@ -559,6 +576,7 @@
       if(!confirmDelete) return;
 
       const key = url.split("key=")[1];
+
       if(!key){
         alert("Image key missing — cannot delete.");
         return;
@@ -568,7 +586,10 @@
         const res = await fetch(`${apiBase}/delete-asset-image`, {
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({ assetId: currentAsset.id, key: key })
+          body:JSON.stringify({
+            assetId: currentAsset.id,
+            key: key
+          })
         });
 
         const data = await res.json();
@@ -585,6 +606,7 @@
       }
     }
 
+    /* IMAGE UPLOAD */
     async function uploadImage(){
       if(!currentAsset){
         alert("Please save the asset before uploading images.");
@@ -610,13 +632,12 @@
 
         const data=await res.json();
         if(!data.ok){
-          alert("Upload failed");
-          return;
+          alert("Upload failed");return;
         }
 
-        if (!currentAsset) currentAsset = {};
-        if (!Array.isArray(currentAsset.images)) currentAsset.images = [];
-        currentAsset.images.push(data.url);
+if (!currentAsset) currentAsset = {};
+if (!Array.isArray(currentAsset.images)) currentAsset.images = [];
+currentAsset.images.push(data.url);
 
         await fetch(`${apiBase}/asset/update`,{
           method:"POST",
@@ -630,6 +651,7 @@
       input.click();
     }
 
+    /* SUMMARY + VALUE PROCESSING */
     function renderValueSummary(assets){
       const summaryEl=document.getElementById("valueSummary");
       if(!summaryEl) return;
@@ -677,13 +699,13 @@
       }
 
       lastSummaryData=data;
+
       const maxVal=data.length ? Math.max(...data.map(d=>d.totalValue)) : 0;
 
       let rowsHtml="";
       data.forEach(d=>{
         const pct = maxVal>0 ? (d.totalValue/maxVal)*100 : 0;
         const highlight = d.totalValue>=HIGH_VALUE_THRESHOLD ? " highlight" : "";
-
         rowsHtml += `
           <div class="summary-row${highlight}">
             <div class="summary-name">${d.displayName}</div>
@@ -716,6 +738,7 @@
         ${rowsHtml || `<div style="font-size:13px;color:#555;margin-top:4px;">No assets currently assigned to engineers.</div>`}
       `;
     }
+
     function setSummarySort(mode){
       if(mode !== "value" && mode !== "name") return;
       lastSummarySort = mode;
@@ -749,6 +772,7 @@
       URL.revokeObjectURL(url);
     }
 
+    /* LOAD ASSETS (with safe Edit handler) */
     async function loadAssets(){
       await loadPortalUsers();
 
@@ -762,11 +786,9 @@
       tbody.innerHTML="";
 
       currentAssets.forEach(a=>{
-
-        /* ⭐⭐⭐ USE LOW-QUALITY THUMBNAIL VERSION IN TABLE ⭐⭐⭐ */
-        const thumb = (a.images && a.images.length)
-          ? `<img loading="lazy" src="${a.images[0].replace('asset-image','asset-thumb')}" class="thumb-img" onclick='openImageViewerFromTable(${JSON.stringify(a.images)})'>`
-          : "—";
+const thumb = (a.images && a.images.length)
+  ? `<img loading="lazy" src="${a.images[0].replace('asset-image', 'asset-thumb')}" class="thumb-img" onclick='openImageViewerFromTable(${JSON.stringify(a.images)})'>`
+  : "—";
 
         const tr=document.createElement("tr");
         tr.innerHTML=`
@@ -793,11 +815,11 @@
       });
     }
 
+    /* SAVE */
     async function saveAsset(){
       const assigned=document.getElementById("assignedField").value;
       if(assigned===""){
-        alert("Please select a user before saving.");
-        return;
+        alert("Please select a user before saving.");return;
       }
 
       const id=document.getElementById("idField").value.trim();
@@ -829,38 +851,44 @@
       loadAssets();
     }
 
-    async function deleteAsset(id){
-      if (!confirm(`Are you sure you want to delete asset ${id}?`)) return;
+    /* DELETE ASSET */
+   async function deleteAsset(id){
+  // Step 1: User confirmation
+  if (!confirm(`Are you sure you want to delete asset ${id}?`)) return;
 
-      const enteredPin = prompt("Enter PIN to confirm deletion:");
-      if (enteredPin === null) return;
-      if (enteredPin !== ASSET_DELETE_PIN) {
-        alert("Incorrect PIN. Deletion cancelled.");
-        return;
-      }
+  // Step 2: PIN entry
+  const enteredPin = prompt("Enter PIN to confirm deletion:");
 
-      const res = await fetch(`${apiBase}/asset/delete?id=${id}`, { method: "DELETE" });
-      const r = await res.json();
-      alert(r.message || r.error);
+  // Step 3: Cancel if no PIN or incorrect
+  if (enteredPin === null) return; // cancel
+  if (enteredPin !== ASSET_DELETE_PIN) {
+    alert("Incorrect PIN. Deletion cancelled.");
+    return;
+  }
 
-      loadAssets();
-    }
+  // Step 4: Proceed with deletion
+  const res = await fetch(`${apiBase}/asset/delete?id=${id}`, {
+    method: "DELETE"
+  });
+
+  const r = await res.json();
+  alert(r.message || r.error);
+
+  loadAssets();
+}
+
 
     loadAssets();
-
-    function openImageViewerFromTable(images){
-      if(!images || !images.length) return;
-      currentImageList = images;
-      currentImageIndex = 0;
-
-      const modal = document.getElementById("imageViewer");
-      const img = document.getElementById("imageViewerImg");
-
-      img.src = images[0]; // Full resolution for viewer
-      modal.style.display = "flex";
-
-      updateImageNavVisibility();
-    }
+function openImageViewerFromTable(images){
+  if(!images || !images.length) return;
+  currentImageList = images;
+  currentImageIndex = 0;
+  const modal = document.getElementById("imageViewer");
+  const img = document.getElementById("imageViewerImg");
+  img.src = images[0];
+  modal.style.display = "flex";
+  updateImageNavVisibility();
+}
   </script>
 
 </body>
