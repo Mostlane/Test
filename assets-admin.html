@@ -345,6 +345,8 @@ table {
   </div>
 
   <script>
+    const ASSET_DELETE_PIN = "1976";   // ← change to whatever PIN you want
+
     const apiBase="https://mostlane-assets.jamie-def.workers.dev";
     let currentEditId=null;
     let currentAsset=null;
@@ -848,18 +850,31 @@ const thumb = (a.images && a.images.length)
     }
 
     /* DELETE ASSET */
-    async function deleteAsset(id){
-      if(!confirm(`Delete asset ${id}?`))return;
+   async function deleteAsset(id){
+  // Step 1: User confirmation
+  if (!confirm(`Are you sure you want to delete asset ${id}?`)) return;
 
-      const res=await fetch(`${apiBase}/asset/delete?id=${id}`,{
-        method:"DELETE"
-      });
+  // Step 2: PIN entry
+  const enteredPin = prompt("Enter PIN to confirm deletion:");
 
-      const r=await res.json();
-      alert(r.message||r.error);
+  // Step 3: Cancel if no PIN or incorrect
+  if (enteredPin === null) return; // cancel
+  if (enteredPin !== ASSET_DELETE_PIN) {
+    alert("Incorrect PIN. Deletion cancelled.");
+    return;
+  }
 
-      loadAssets();
-    }
+  // Step 4: Proceed with deletion
+  const res = await fetch(`${apiBase}/asset/delete?id=${id}`, {
+    method: "DELETE"
+  });
+
+  const r = await res.json();
+  alert(r.message || r.error);
+
+  loadAssets();
+}
+
 
     loadAssets();
 function openImageViewerFromTable(images){
