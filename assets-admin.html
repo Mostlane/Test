@@ -16,7 +16,8 @@ background-size: cover;
       font-family:Arial,sans-serif;
     }
 .content{
-  background:rgba(255,255,255,0.6);
+ background:rgba(255,255,255,0.4); /* more transparent */
+backdrop-filter: blur(6px);
   margin:40px auto;
   padding:20px;
   border-radius:12px;
@@ -43,6 +44,8 @@ table{
   background:rgba(255,255,255,0.6);  /* ← 60% opaque */
   backdrop-filter: blur(4px);         /* ← optional but looks premium */
   font-size:14px;
+  display: block;
+overflow-x: auto;
 }
     th, td {
       border:1px solid #ccc;
@@ -50,7 +53,10 @@ table{
       text-align:center; 
       vertical-align:middle;
     }
-    th{background:#f3f4f6;}
+   th{
+  background:rgba(243,244,246,0.6);
+  backdrop-filter: blur(4px);
+}
     .actions button{
       margin-right:5px;padding:4px 8px;font-size:12px;
     }
@@ -246,12 +252,6 @@ table{
   width: 100%;
   max-width: 100%;
 }
-
-table {
-  display: block;
-  width: 100%;
-  overflow-x: auto;
-} 
   </style>
 
   <script>
@@ -276,7 +276,9 @@ table {
     <h1>Asset Administration</h1>
 
     <!-- New summary panel -->
-    <div id="valueSummary" style="margin:15px 0;padding:15px;background:white;border-radius:8px;border:1px solid #ccc;font-size:15px;width:100%;box-sizing:border-box;display:block;">
+    <div id="valueSummary" style="margin:15px 0;padding:15px;background:rgba(255,255,255,0.5);
+backdrop-filter: blur(6px);
+border-radius:8px;border:1px solid #ccc;font-size:15px;width:100%;box-sizing:border-box;display:block;">
       <strong>Loading asset summary…</strong>
     </div>
     <div class="summary-controls">
