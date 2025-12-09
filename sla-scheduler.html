@@ -427,6 +427,7 @@
   </style>
 </head>
 <body>
+
 <div class="shell">
   <div class="card">
     <header>
@@ -470,21 +471,16 @@
     </div>
 
     <div class="status-bar">
-      <div>
-        <span id="statusMessage">Ready.</span>
-      </div>
-      <div>
-        <span class="pill-status">Red line = current time</span>
-      </div>
+      <div><span id="statusMessage">Ready.</span></div>
+      <div><span class="pill-status">Red line = current time</span></div>
     </div>
   </div>
 </div>
 
+<!-- MODAL -->
 <div class="modal-backdrop" id="jobModalBackdrop">
   <div class="modal">
-    <header>
-      <h2>Edit Job</h2>
-    </header>
+    <header><h2>Edit Job</h2></header>
     <form id="jobForm">
       <label for="jobTitle">Title</label>
       <input id="jobTitle" type="text" required>
@@ -523,7 +519,7 @@
       <div class="engineer-checks" id="jobEngineerChecks"></div>
 
       <label for="jobNotes">Notes</label>
-      <textarea id="jobNotes" placeholder="Short notes / scope…"></textarea>
+      <textarea id="jobNotes"></textarea>
 
       <div class="buttons">
         <button type="button" class="btn btn-secondary" id="jobCancel">Cancel</button>
@@ -534,560 +530,551 @@
 </div>
 
 <script>
-  const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
-  const SLA_API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
+const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
+const SLA_API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
-  const DAY_START_HOUR = 6;
-  const DAY_END_HOUR = 20;
-  const HOUR_HEIGHT = 40;
+const DAY_START_HOUR = 6;
+const DAY_END_HOUR = 20;
+const HOUR_HEIGHT = 40;
 
-  let currentUser = null;
-  let engineers = [];
-  let jobs = [];
-  let viewMode = "day";
-  let selectedDate = new Date();
-  let engineerFilter = "all";
-  let dragState = { jobId:null };
+let currentUser=null;
+let engineers=[];
+let jobs=[];
+let viewMode="day";
+let selectedDate=new Date();
+let engineerFilter="all";
+let dragState={ jobId:null };
 
-  function setStatus(msg, isError=false){
-    const el = document.getElementById("statusMessage");
-    el.textContent = msg;
-    el.className = isError ? "badge-error" : "";
-  }
+function setStatus(msg,isError=false){
+  const el=document.getElementById("statusMessage");
+  el.textContent=msg;
+  el.className=isError?"badge-error":"";
+}
 
-  function pad2(n){ return String(n).padStart(2,"0"); }
-  function formatDateInput(d){ return d.toISOString().slice(0,10); }
-  function parseDateInput(val){
-    if(!val) return new Date();
-    const [y,m,day] = val.split("-").map(n=>parseInt(n,10));
-    return new Date(y,m-1,day);
-  }
-  function minsSinceMidnight(date){ return date.getHours()*60 + date.getMinutes(); }
-  function withTime(baseDate, hour, minute){
-    const d = new Date(baseDate);
-    d.setHours(hour, minute, 0, 0);
-    return d;
-  }
-  function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+function pad2(n){return String(n).padStart(2,"0");}
+function formatDateInput(d){return d.toISOString().slice(0,10);}
+function parseDateInput(v){
+  if(!v) return new Date();
+  const [y,m,d]=v.split("-").map(Number);
+  return new Date(y,m-1,d);
+}
+function minsSinceMidnight(d){
+  return d.getHours()*60 + d.getMinutes();
+}
+function withTime(base,h,m){
+  const d=new Date(base);
+  d.setHours(h,m,0,0);
+  return d;
+}
+function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
 
-  // LOAD ENGINEERS + JOBS
-  async function loadEngineers(){
-    const res = await fetch(USERS_API, { cache:"no-store" });
-    const data = await res.json();
-    const arr = data.Users || [];
-    engineers = arr
-      .filter(u => (u.Status || "").toLowerCase() === "active")
-      .map(u => ({
-        username: u.Username,
-        name: ((u.FirstName || "")+" "+(u.LastName || "")).trim(),
-        engineerNumber: u.EngineerNumber || ""
-      }));
-    if(!engineers.length) throw new Error("No active engineers found");
-  }
+async function loadEngineers(){
+  const res=await fetch(USERS_API,{cache:"no-store"});
+  const data=await res.json();
+  const arr=data.Users||[];
+  engineers = arr
+    .filter(u => (u.Status||"").toLowerCase()==="active")
+    .map(u=>({
+      username:u.Username,
+      name:((u.FirstName||"")+" "+(u.LastName||"")).trim(),
+      engineerNumber:u.EngineerNumber||""
+    }));
+  if(!engineers.length) throw new Error("No active engineers");
+}
 
-  async function loadJobs(){
-    try{
-      const res = await fetch(`${SLA_API_BASE}/jobs`, { cache:"no-store" });
-      const data = await res.json();
-      const rawJobs = Array.isArray(data) ? data : [];
+async function loadJobs(){
+  try{
+    const res=await fetch(`${SLA_API_BASE}/jobs`,{cache:"no-store"});
+    const data=await res.json();
+    const rawJobs = Array.isArray(data) ? data : [];
 
-      jobs = rawJobs.map(j => normaliseJob(j));
-      applyLocalOverrides();
-    }catch{
-      useDemoJobs();
-    }
-  }
-
-  function normaliseJob(j){
-    const id = j.id || ("job_"+Math.random().toString(36).slice(2));
-    const title = j.title || "Job "+id;
-    const site  = j.site || "";
-    const priority = j.priority || "";
-    const notes = j.notes || "";
-
-    let start = j.scheduledStart;
-    if(!start){
-      const base = withTime(selectedDate, 8, 0);
-      start = base.toISOString();
-    }
-    const startDate = new Date(start);
-
-    let durationMinutes = j.durationMinutes || 60;
-    if(j.scheduledEnd){
-      const end = new Date(j.scheduledEnd);
-      durationMinutes = (end - startDate)/60000;
-    }
-
-    let assigned = j.assignedEngineers || [];
-    if(typeof assigned === "string"){
-      assigned = assigned.split(/[;,]+/).map(s=>s.trim());
-    }
-    if(!assigned.length && engineers.length){
-      assigned = [ engineers[0].username ];
-    }
-
-    return {
-      id,
-      title,
-      site,
-      priority,
-      notes,
-      scheduledStart: startDate.toISOString(),
-      durationMinutes,
-      assignedEngineers: assigned
-    };
-  }
-
-  function useDemoJobs(){
-    const base = selectedDate;
-    jobs = [
-      {
-        id:"demo1",
-        title:"Callout – Water leak",
-        site:"SR00366 Winchester",
-        priority:"P3",
-        notes:"",
-        scheduledStart: withTime(base,9,0).toISOString(),
-        durationMinutes:90,
-        assignedEngineers:[ engineers[0]?.username || "" ]
-      }
-    ];
+    jobs = rawJobs.map(j => normaliseJob(j));
     applyLocalOverrides();
+  }catch(err){
+    console.error("Failed to load jobs:",err);
+    useDemoJobs();
+  }
+}
+
+/* **************************************************
+   FIXED normaliseJob — matches your Worker fields
+*************************************************** */
+function normaliseJob(j){
+  const id = j.id || ("job_"+Math.random().toString(36).slice(2));
+
+  const title = j.description || j.title || ("Job "+id);
+  const site  = j.siteName || j.site || "";
+  const priority = j.priority || "";
+  const notes = j.notes || "";
+
+  let start = j.scheduledStart;
+  if(!start){
+    const base = withTime(selectedDate,8,0);
+    start = base.toISOString();
+  }
+  const startDate = new Date(start);
+
+  let durationMinutes = j.durationMinutes || 60;
+  if(j.scheduledEnd){
+    const end=new Date(j.scheduledEnd);
+    durationMinutes = (end-startDate)/60000;
   }
 
-  const LOCAL_OVERRIDES_KEY = "slaSchedulerOverrides_v1";
-  function loadOverrides(){
-    try{
-      return JSON.parse(localStorage.getItem(LOCAL_OVERRIDES_KEY)) || {};
-    }catch{ return {}; }
+  let assigned = j.assignedEngineers || j.assignedTo || [];
+  if(typeof assigned === "string"){
+    assigned = assigned.split(/[;,]+/).map(s=>s.trim());
   }
-  function saveOverrides(o){
-    localStorage.setItem(LOCAL_OVERRIDES_KEY, JSON.stringify(o));
+
+  if(!assigned.length && engineers.length){
+    assigned=[ engineers[0].username ];
   }
-  function applyLocalOverrides(){
-    const ov = loadOverrides();
-    jobs = jobs.map(j=>{
-      const x = ov[j.id];
-      if(!x) return j;
-      return {
-        ...j,
-        scheduledStart: x.scheduledStart || j.scheduledStart,
-        durationMinutes: x.durationMinutes || j.durationMinutes,
-        assignedEngineers: x.assignedEngineers || j.assignedEngineers
-      };
-    });
-  }
-  function updateOverridesForJob(job){
-    const ov = loadOverrides();
-    ov[job.id] = {
-      scheduledStart: job.scheduledStart,
-      durationMinutes: job.durationMinutes,
-      assignedEngineers: job.assignedEngineers.slice()
+
+  return {
+    id,
+    title,
+    site,
+    priority,
+    notes,
+    scheduledStart: startDate.toISOString(),
+    durationMinutes,
+    assignedEngineers: assigned
+  };
+}
+
+function useDemoJobs(){
+  const base=selectedDate;
+  jobs=[{
+    id:"demo1",
+    title:"Demo callout",
+    site:"SR00000",
+    priority:"P3",
+    notes:"",
+    scheduledStart:withTime(base,9,0).toISOString(),
+    durationMinutes:90,
+    assignedEngineers:[ engineers[0]?.username || "" ]
+  }];
+  applyLocalOverrides();
+}
+
+const LOCAL_OVERRIDES_KEY="slaSchedulerOverrides_v1";
+function loadOverrides(){
+  try{return JSON.parse(localStorage.getItem(LOCAL_OVERRIDES_KEY))||{};}
+  catch{return {};}
+}
+function saveOverrides(o){
+  localStorage.setItem(LOCAL_OVERRIDES_KEY,JSON.stringify(o));
+}
+function applyLocalOverrides(){
+  const ov=loadOverrides();
+  jobs = jobs.map(j=>{
+    const x=ov[j.id];
+    if(!x) return j;
+    return {
+      ...j,
+      scheduledStart:x.scheduledStart||j.scheduledStart,
+      durationMinutes:x.durationMinutes||j.durationMinutes,
+      assignedEngineers:x.assignedEngineers||j.assignedEngineers
     };
-    saveOverrides(ov);
+  });
+}
+function updateOverridesForJob(job){
+  const ov=loadOverrides();
+  ov[job.id]={
+    scheduledStart:job.scheduledStart,
+    durationMinutes:job.durationMinutes,
+    assignedEngineers:[...job.assignedEngineers]
+  };
+  saveOverrides(ov);
+}
+
+function render(){
+  document.getElementById("schedulerLoading").style.display="none";
+  const wrapper=document.getElementById("schedulerWrapper");
+  wrapper.innerHTML="";
+  if(viewMode==="day") renderDayView(wrapper);
+  else renderWeekView(wrapper);
+}
+
+function getFilteredEngineers(){
+  if(engineerFilter==="all") return engineers;
+  return engineers.filter(e=>e.username===engineerFilter);
+}
+
+function renderDayView(container){
+  const dayDate=selectedDate;
+  const engineerList=getFilteredEngineers();
+
+  const grid=document.createElement("div");
+  grid.className="scheduler-grid";
+
+  const timeCol=document.createElement("div");
+  timeCol.className="time-column";
+  const headerSpacer=document.createElement("div");
+  headerSpacer.style.height="30px";
+  timeCol.appendChild(headerSpacer);
+
+  for(let h=DAY_START_HOUR;h<=DAY_END_HOUR;h++){
+    const tl=document.createElement("div");
+    tl.className="time-label";
+    tl.style.height=HOUR_HEIGHT+"px";
+    tl.textContent=pad2(h)+":00";
+    timeCol.appendChild(tl);
   }
+  grid.appendChild(timeCol);
 
-  function renderWeekView(container){
-    const start = new Date(selectedDate);
-    const day = start.getDay();
-    const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(start.setDate(diff));
+  const engWrap=document.createElement("div");
+  engWrap.className="engineers-column-wrapper";
 
-    const engineerList = getFilteredEngineers();
+  const engRow=document.createElement("div");
+  engRow.className="engineers-row";
 
-    const grid = document.createElement("div");
-    grid.className = "week-grid";
+  const dayStartMins=DAY_START_HOUR*60;
+  const dayEndMins=DAY_END_HOUR*60;
+  const laneHeight=(DAY_END_HOUR-DAY_START_HOUR)*HOUR_HEIGHT;
 
-    grid.appendChild(document.createElement("div"));
+  engineerList.forEach(engineer=>{
+    const lane=document.createElement("div");
+    lane.className="engineer-lane";
 
-    for(let i=0;i<7;i++){
-      const d = new Date(monday);
-      d.setDate(monday.getDate()+i);
+    const header=document.createElement("div");
+    header.className="engineer-header";
+    header.innerHTML=`<span>${engineer.name}</span><span class="role">ENG ${engineer.engineerNumber}</span>`;
+    lane.appendChild(header);
 
-      const h = document.createElement("div");
-      h.className = "week-day-header";
-      h.textContent = d.toDateString().slice(0,10);
-      grid.appendChild(h);
+    const body=document.createElement("div");
+    body.className="lane-body";
+    body.style.height=laneHeight+"px";
+    body.dataset.engineer=engineer.username;
+
+    for(let h=DAY_START_HOUR+1;h<=DAY_END_HOUR;h++){
+      const line=document.createElement("div");
+      line.className="time-slot-line";
+      const offsetMins=(h*60 - dayStartMins);
+      line.style.top=((offsetMins/60)*HOUR_HEIGHT)+"px";
+      body.appendChild(line);
     }
 
-    engineerList.forEach(engineer=>{
-      const nameCell = document.createElement("div");
-      nameCell.className = "week-day-header";
-      nameCell.textContent = engineer.name;
-      grid.appendChild(nameCell);
+    const jobsForEngineer=jobs
+      .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
+      .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
 
-      for(let i=0;i<7;i++){
-        const dayCell = document.createElement("div");
-        dayCell.className = "week-engineer-cell";
+    jobsForEngineer.forEach(job=>{
+      const dStart=new Date(job.scheduledStart);
+      let startMins=minsSinceMidnight(dStart);
+      let dur=job.durationMinutes;
 
-        const date = new Date(monday);
-        date.setDate(monday.getDate()+i);
-        const dateString = date.toDateString();
+      startMins = clamp(startMins,dayStartMins,dayEndMins-30);
+      const endMins=clamp(startMins+dur,dayStartMins+30,dayEndMins);
+      dur=endMins-startMins;
 
-        const jobsForDay = jobs
-          .filter(j =>
-            j.assignedEngineers
-              .map(a=>a.toLowerCase())
-              .includes(engineer.username.toLowerCase())
-          )
-          .filter(j => new Date(j.scheduledStart).toDateString() === dateString);
+      const top=((startMins-dayStartMins)/60)*HOUR_HEIGHT;
+      const height=Math.max(24,(dur/60)*HOUR_HEIGHT);
 
-        jobsForDay.forEach(job=>{
-          const chip = document.createElement("div");
-          chip.className = "week-job-chip";
-          chip.textContent = job.title;
-          chip.addEventListener("click", ()=>openJobModal(job.id));
-          dayCell.appendChild(chip);
-        });
+      const el=document.createElement("div");
+      el.className="job-block";
+      el.draggable=true;
+      el.dataset.jobId=job.id;
+      el.dataset.engineer=engineer.username;
+      el.style.top=top+"px";
+      el.style.height=height+"px";
 
-        grid.appendChild(dayCell);
-      }
+      const timeLabel=pad2(Math.floor(startMins/60))+":"+pad2(startMins%60);
+      el.innerHTML=`
+        <div class="job-title">${job.title}</div>
+        <div class="job-meta">
+          <span>${timeLabel}</span>
+          <span>${job.site}</span>
+        </div>`;
+
+      el.addEventListener("dragstart",onJobDragStart);
+      el.addEventListener("dragend",onJobDragEnd);
+      el.addEventListener("click",()=>openJobModal(job.id));
+
+      body.appendChild(el);
     });
 
-    container.appendChild(grid);
-  }
+    body.addEventListener("dragover",onLaneDragOver);
+    body.addEventListener("drop",onLaneDrop);
 
-  function render(){
-    document.getElementById("schedulerLoading").style.display="none";
-    const wrapper = document.getElementById("schedulerWrapper");
-    wrapper.innerHTML = "";
-    if(viewMode==="day") renderDayView(wrapper);
-    else renderWeekView(wrapper);
-  }
-
-  function getFilteredEngineers(){
-    if(engineerFilter==="all") return engineers;
-    return engineers.filter(e => e.username === engineerFilter);
-  }
-
-  function renderDayView(container){
-    const dayDate = selectedDate;
-    const engineerList = getFilteredEngineers();
-
-    const grid = document.createElement("div");
-    grid.className = "scheduler-grid";
-
-    const timeCol = document.createElement("div");
-    timeCol.className = "time-column";
-    const headerSpacer = document.createElement("div");
-    headerSpacer.style.height="30px";
-    timeCol.appendChild(headerSpacer);
-
-    for(let h = DAY_START_HOUR; h <= DAY_END_HOUR; h++){
-      const tl = document.createElement("div");
-      tl.className="time-label";
-      tl.style.height=HOUR_HEIGHT+"px";
-      tl.textContent = pad2(h)+":00";
-      timeCol.appendChild(tl);
-    }
-
-    grid.appendChild(timeCol);
-
-    const engWrap = document.createElement("div");
-    engWrap.className="engineers-column-wrapper";
-
-    const engRow = document.createElement("div");
-    engRow.className="engineers-row";
-
-    const dayStartMins = DAY_START_HOUR*60;
-    const dayEndMins   = DAY_END_HOUR*60;
-    const laneHeight   = (DAY_END_HOUR - DAY_START_HOUR) * HOUR_HEIGHT;
-
-    engineerList.forEach(engineer=>{
-      const lane = document.createElement("div");
-      lane.className="engineer-lane";
-
-      const header = document.createElement("div");
-      header.className="engineer-header";
-      header.innerHTML = `<span>${engineer.name}</span><span class="role">ENG ${engineer.engineerNumber}</span>`;
-      lane.appendChild(header);
-
-      const body = document.createElement("div");
-      body.className="lane-body";
-      body.style.height=laneHeight+"px";
-      body.dataset.engineer = engineer.username;
-
-      for(let h = DAY_START_HOUR+1; h <= DAY_END_HOUR; h++){
-        const line = document.createElement("div");
-        line.className="time-slot-line";
-        const offsetMins = (h*60 - dayStartMins);
-        line.style.top = (offsetMins/60*HOUR_HEIGHT)+"px";
-        body.appendChild(line);
-      }
-
-      const jobsForEngineer = jobs
-        .filter(j =>
-          j.assignedEngineers
-            .map(a => a.toLowerCase())
-            .includes(engineer.username.toLowerCase())
-        )
-        .filter(j => {
-          const d = new Date(j.scheduledStart);
-          return d.toDateString() === dayDate.toDateString();
-        });
-
-      jobsForEngineer.forEach(job=>{
-        const dStart = new Date(job.scheduledStart);
-        let startMins = minsSinceMidnight(dStart);
-        let dur = job.durationMinutes;
-
-        startMins = clamp(startMins, dayStartMins, dayEndMins-30);
-        const endMins = clamp(startMins+dur, dayStartMins+30, dayEndMins);
-        dur = endMins - startMins;
-
-        const top = ((startMins - dayStartMins)/60)*HOUR_HEIGHT;
-        const height = Math.max(24,(dur/60)*HOUR_HEIGHT);
-
-        const el = document.createElement("div");
-        el.className="job-block";
-        el.draggable=true;
-        el.dataset.jobId = job.id;
-        el.dataset.engineer = engineer.username;
-        el.style.top = top+"px";
-        el.style.height = height+"px";
-
-        const timeLabel = pad2(Math.floor(startMins/60))+":"+pad2(startMins%60);
-        el.innerHTML = `
-          <div class="job-title">${job.title}</div>
-          <div class="job-meta">
-            <span>${timeLabel}</span>
-            <span>${job.site}</span>
-          </div>
-        `;
-
-        el.addEventListener("dragstart", onJobDragStart);
-        el.addEventListener("dragend", onJobDragEnd);
-        el.addEventListener("click", ()=>openJobModal(job.id));
-
-        body.appendChild(el);
-      });
-
-      body.addEventListener("dragover", onLaneDragOver);
-      body.addEventListener("drop", onLaneDrop);
-
-      lane.appendChild(body);
-      engRow.appendChild(lane);
-    });
-
-    const now=new Date();
-    if(now.toDateString()===dayDate.toDateString()){
-      const nowMins = minsSinceMidnight(now);
-      if(nowMins>=dayStartMins && nowMins<=dayEndMins){
-        const relTop = ((nowMins-dayStartMins)/60)*HOUR_HEIGHT;
-        const nowLine = document.createElement("div");
-        nowLine.className="now-line";
-        nowLine.style.top = (30+relTop)+"px";
-        nowLine.style.left="80px";
-        nowLine.style.right="0";
-        grid.appendChild(nowLine);
-      }
-    }
-
-    engWrap.appendChild(engRow);
-    grid.appendChild(engWrap);
-    container.appendChild(grid);
-  }
-
-  function onJobDragStart(e){
-    dragState.jobId = e.currentTarget.dataset.jobId;
-    e.currentTarget.classList.add("dragging");
-    e.dataTransfer.effectAllowed="move";
-  }
-
-  function onJobDragEnd(e){
-    e.currentTarget.classList.remove("dragging");
-    dragState.jobId = null;
-  }
-
-  function onLaneDragOver(e){
-    e.preventDefault();
-    e.dataTransfer.dropEffect="move";
-  }
-
-  async function onLaneDrop(e){
-    e.preventDefault();
-    if(!dragState.jobId) return;
-    const job = jobs.find(j=>j.id===dragState.jobId);
-    if(!job) return;
-
-    const laneBody = e.currentTarget;
-    const engineerUsername = laneBody.dataset.engineer;
-    const rect = laneBody.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-
-    const dayStart = DAY_START_HOUR*60;
-    const dayEnd   = DAY_END_HOUR*60;
-
-    let mins = (y/HOUR_HEIGHT)*60;
-    let newStart = clamp(Math.round((dayStart+mins)/15)*15, dayStart, dayEnd-30);
-
-    const base = selectedDate;
-    const h = Math.floor(newStart/60);
-    const m = newStart%60;
-
-    const startDate = withTime(base,h,m);
-    job.scheduledStart = startDate.toISOString();
-
-    if(!job.assignedEngineers.includes(engineerUsername)){
-      job.assignedEngineers=[engineerUsername];
-    }
-
-    updateOverridesForJob(job);
-    pushJobUpdate(job);
-
-    render();
-    setStatus(`Updated job ${job.title}`);
-  }
-
-  let modalJobId = null;
-
-  function openJobModal(jobId){
-    const job = jobs.find(j=>j.id===jobId);
-    if(!job) return;
-    modalJobId = jobId;
-
-    const modal=document.getElementById("jobModalBackdrop");
-    modal.style.display="flex";
-
-    const d=new Date(job.scheduledStart);
-    document.getElementById("jobTitle").value = job.title;
-    document.getElementById("jobSite").value = job.site;
-    document.getElementById("jobDate").value = formatDateInput(d);
-    document.getElementById("jobTime").value = pad2(d.getHours())+":"+pad2(d.getMinutes());
-    document.getElementById("jobDuration").value = (job.durationMinutes/60);
-    document.getElementById("jobPriority").value = job.priority || "";
-    document.getElementById("jobNotes").value = job.notes || "";
-
-    const checks=document.getElementById("jobEngineerChecks");
-    checks.innerHTML="";
-    engineers.forEach(e=>{
-      const label=document.createElement("label");
-      const input=document.createElement("input");
-      input.type="checkbox";
-      input.value=e.username;
-      input.checked=job.assignedEngineers.includes(e.username);
-      label.appendChild(input);
-      label.appendChild(document.createTextNode(" "+e.name));
-      checks.appendChild(label);
-    });
-  }
-
-  function closeJobModal(){
-    modalJobId=null;
-    document.getElementById("jobModalBackdrop").style.display="none";
-  }
-
-  document.getElementById("jobCancel").addEventListener("click", closeJobModal);
-
-  document.getElementById("jobForm").addEventListener("submit", async function(e){
-    e.preventDefault();
-    if(!modalJobId) return;
-    const job = jobs.find(j => j.id === modalJobId);
-    if(!job) return;
-
-    const title=document.getElementById("jobTitle").value.trim();
-    const site=document.getElementById("jobSite").value.trim();
-    const dateVal=document.getElementById("jobDate").value;
-    const timeVal=document.getElementById("jobTime").value || "08:00";
-    const durHours=parseFloat(document.getElementById("jobDuration").value)||1;
-    const priority=document.getElementById("jobPriority").value;
-    const notes=document.getElementById("jobNotes").value.trim();
-
-    const [hh,mm]=timeVal.split(":").map(Number);
-    const baseDate=parseDateInput(dateVal);
-    const start=withTime(baseDate,hh||8,mm||0);
-
-    const checks=[...document.querySelectorAll("#jobEngineerChecks input[type=checkbox]")];
-    let assigned = checks.filter(c=>c.checked).map(c=>c.value);
-    if(!assigned.length && engineers.length){
-      assigned = [engineers[0].username];
-    }
-
-    job.title=title;
-    job.site=site;
-    job.priority=priority;
-    job.notes=notes;
-    job.scheduledStart=start.toISOString();
-    job.durationMinutes=Math.max(15,Math.round(durHours*60));
-    job.assignedEngineers=assigned;
-
-    updateOverridesForJob(job);
-    await pushJobUpdate(job);
-
-    selectedDate = baseDate;
-    document.getElementById("datePicker").value = formatDateInput(baseDate);
-
-    render();
-    closeJobModal();
-    setStatus(`Saved changes for job: ${job.title}`);
+    lane.appendChild(body);
+    engRow.appendChild(lane);
   });
 
-  async function pushJobUpdate(job){
-    try{
-      const res=await fetch(`${SLA_API_BASE}/jobs/${encodeURIComponent(job.id)}`,{   // <-- FIXED HERE
-        method:"PUT",
-        headers:{ "Content-Type":"application/json"},
-        body:JSON.stringify(job)
-      });
-      if(!res.ok){
-        console.error("Failed update:",await res.text());
-      }
-    }catch(err){
-      console.error("Update error:",err);
+  const now=new Date();
+  if(now.toDateString()===dayDate.toDateString()){
+    const nowMins=minsSinceMidnight(now);
+    if(nowMins>=dayStartMins && nowMins<=dayEndMins){
+      const relTop=((nowMins-dayStartMins)/60)*HOUR_HEIGHT;
+      const nowLine=document.createElement("div");
+      nowLine.className="now-line";
+      nowLine.style.top=(30+relTop)+"px";
+      nowLine.style.left="80px";
+      nowLine.style.right="0";
+      grid.appendChild(nowLine);
     }
   }
 
-  async function init(){
-    const u=sessionStorage.getItem("mostlaneUser");
-    if(!u){ window.location.href="login.html"; return; }
-    currentUser=u;
-    document.getElementById("userLabel").textContent="Logged in as "+u;
+  engWrap.appendChild(engRow);
+  grid.appendChild(engWrap);
+  container.appendChild(grid);
+}
 
-    const dp=document.getElementById("datePicker");
-    selectedDate=new Date();
-    dp.value=formatDateInput(selectedDate);
-    dp.addEventListener("change",()=>{
-      selectedDate=parseDateInput(dp.value);
-      render();
-    });
+function renderWeekView(container){
+  const start=new Date(selectedDate);
+  const day=start.getDay();
+  const diff=start.getDate()-day+(day===0 ? -6:1);
+  const monday=new Date(start.setDate(diff));
 
-    document.getElementById("viewToggle").addEventListener("click",e=>{
-      if(e.target.tagName!=="BUTTON") return;
-      const mode=e.target.dataset.mode;
-      if(mode===viewMode) return;
-      viewMode=mode;
-      [...document.querySelectorAll("#viewToggle button")]
-        .forEach(b=>b.classList.toggle("active",b.dataset.mode===viewMode));
-      render();
-    });
+  const engineerList=getFilteredEngineers();
 
-    document.getElementById("engineerFilter").addEventListener("change",e=>{
-      engineerFilter=e.target.value;
-      render();
-    });
+  const grid=document.createElement("div");
+  grid.className="week-grid";
 
-    try{
-      await loadEngineers();
-      const sel=document.getElementById("engineerFilter");
-      engineers.forEach(e=>{
-        const opt=document.createElement("option");
-        opt.value=e.username;
-        opt.textContent=e.name;
-        sel.appendChild(opt);
-      });
+  grid.appendChild(document.createElement("div"));
 
-      await loadJobs();
-      render();
-      setStatus("Scheduler ready");
-    }catch(err){
-      console.error(err);
-      setStatus("Error loading engineers/jobs.",true);
-      document.getElementById("schedulerWrapper").innerHTML=
-        `<div style="padding:14px;color:#b91c1c;">Could not load engineers or jobs.</div>`;
-    }
+  for(let i=0;i<7;i++){
+    const d=new Date(monday);
+    d.setDate(monday.getDate()+i);
+    const h=document.createElement("div");
+    h.className="week-day-header";
+    h.textContent=d.toDateString().slice(0,10);
+    grid.appendChild(h);
   }
 
-  init();
+  engineerList.forEach(engineer=>{
+    const nameCell=document.createElement("div");
+    nameCell.className="week-day-header";
+    nameCell.textContent=engineer.name;
+    grid.appendChild(nameCell);
+
+    for(let i=0;i<7;i++){
+      const dayCell=document.createElement("div");
+      dayCell.className="week-engineer-cell";
+
+      const date=new Date(monday);
+      date.setDate(monday.getDate()+i);
+      const dateString=date.toDateString();
+
+      const jobsForDay=jobs
+        .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
+        .filter(j => new Date(j.scheduledStart).toDateString() === dateString);
+
+      jobsForDay.forEach(job=>{
+        const chip=document.createElement("div");
+        chip.className="week-job-chip";
+        chip.textContent=job.title;
+        chip.addEventListener("click",()=>openJobModal(job.id));
+        dayCell.appendChild(chip);
+      });
+
+      grid.appendChild(dayCell);
+    }
+  });
+
+  container.appendChild(grid);
+}
+
+/* DRAGGING */
+function onJobDragStart(e){
+  dragState.jobId=e.currentTarget.dataset.jobId;
+  e.currentTarget.classList.add("dragging");
+  e.dataTransfer.effectAllowed="move";
+}
+function onJobDragEnd(e){
+  e.currentTarget.classList.remove("dragging");
+  dragState.jobId=null;
+}
+function onLaneDragOver(e){
+  e.preventDefault();
+  e.dataTransfer.dropEffect="move";
+}
+async function onLaneDrop(e){
+  e.preventDefault();
+  if(!dragState.jobId) return;
+  const job=jobs.find(j=>j.id===dragState.jobId);
+  if(!job) return;
+
+  const laneBody=e.currentTarget;
+  const engineerUsername=laneBody.dataset.engineer;
+  const rect=laneBody.getBoundingClientRect();
+  const y=e.clientY - rect.top;
+
+  const dayStart=DAY_START_HOUR*60;
+  const dayEnd=DAY_END_HOUR*60;
+
+  let mins=(y/HOUR_HEIGHT)*60;
+  let newStart=clamp(Math.round((dayStart+mins)/15)*15,dayStart,dayEnd-30);
+
+  const base=selectedDate;
+  const h=Math.floor(newStart/60);
+  const m=newStart%60;
+
+  const startDate=withTime(base,h,m);
+  job.scheduledStart=startDate.toISOString();
+
+  if(!job.assignedEngineers.includes(engineerUsername)){
+    job.assignedEngineers=[engineerUsername];
+  }
+
+  updateOverridesForJob(job);
+  pushJobUpdate(job);
+
+  render();
+  setStatus(`Updated job ${job.title}`);
+}
+
+/* MODAL */
+let modalJobId=null;
+
+function openJobModal(jobId){
+  const job=jobs.find(j=>j.id===jobId);
+  if(!job) return;
+
+  modalJobId=jobId;
+  const modal=document.getElementById("jobModalBackdrop");
+  modal.style.display="flex";
+
+  const d=new Date(job.scheduledStart);
+  document.getElementById("jobTitle").value = job.title;
+  document.getElementById("jobSite").value  = job.site;
+  document.getElementById("jobDate").value  = formatDateInput(d);
+  document.getElementById("jobTime").value  = pad2(d.getHours())+":"+pad2(d.getMinutes());
+  document.getElementById("jobDuration").value = job.durationMinutes/60;
+  document.getElementById("jobPriority").value = job.priority||"";
+  document.getElementById("jobNotes").value = job.notes||"";
+
+  const checks=document.getElementById("jobEngineerChecks");
+  checks.innerHTML="";
+  engineers.forEach(e=>{
+    const label=document.createElement("label");
+    const input=document.createElement("input");
+    input.type="checkbox";
+    input.value=e.username;
+    input.checked=job.assignedEngineers.includes(e.username);
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(" "+e.name));
+    checks.appendChild(label);
+  });
+}
+
+function closeJobModal(){
+  modalJobId=null;
+  document.getElementById("jobModalBackdrop").style.display="none";
+}
+document.getElementById("jobCancel").addEventListener("click",closeJobModal);
+
+/* SAVE HANDLER (Correct & final) */
+document.getElementById("jobForm").addEventListener("submit",async function(e){
+  e.preventDefault();
+  if(!modalJobId) return;
+
+  const job=jobs.find(j=>j.id===modalJobId);
+  if(!job) return;
+
+  const title=document.getElementById("jobTitle").value.trim();
+  const site=document.getElementById("jobSite").value.trim();
+  const dateVal=document.getElementById("jobDate").value;
+  const timeVal=document.getElementById("jobTime").value || "08:00";
+  const durHours=parseFloat(document.getElementById("jobDuration").value)||1;
+  const priority=document.getElementById("jobPriority").value;
+  const notes=document.getElementById("jobNotes").value.trim();
+
+  const [hh,mm]=timeVal.split(":").map(Number);
+  const baseDate=parseDateInput(dateVal);
+  const start=withTime(baseDate,hh||8,mm||0);
+
+  const checks=[...document.querySelectorAll("#jobEngineerChecks input[type=checkbox]")];
+  let assigned = checks.filter(c=>c.checked).map(c=>c.value);
+  if(!assigned.length && engineers.length){
+    assigned=[ engineers[0].username ];
+  }
+
+  job.title=title;
+  job.site=site;
+  job.priority=priority;
+  job.notes=notes;
+  job.scheduledStart=start.toISOString();
+  job.durationMinutes=Math.max(15,Math.round(durHours*60));
+  job.assignedEngineers=assigned;
+
+  updateOverridesForJob(job);
+  await pushJobUpdate(job);
+
+  selectedDate = baseDate;
+  document.getElementById("datePicker").value = formatDateInput(baseDate);
+
+  render();
+  closeJobModal();
+  setStatus(`Saved changes for job: ${job.title}`);
+});
+
+async function pushJobUpdate(job){
+  try{
+    const res=await fetch(`${SLA_API_BASE}/job/${encodeURIComponent(job.id)}`,{
+      method:"PUT",
+      headers:{ "Content-Type":"application/json"},
+      body:JSON.stringify(job)
+    });
+    if(!res.ok){
+      console.error("Failed update:",await res.text());
+    }
+  }catch(err){
+    console.error("Update error:",err);
+  }
+}
+
+async function init(){
+  const u=sessionStorage.getItem("mostlaneUser");
+  if(!u){ window.location.href="login.html"; return; }
+  currentUser=u;
+  document.getElementById("userLabel").textContent="Logged in as "+u;
+
+  const dp=document.getElementById("datePicker");
+  selectedDate=new Date();
+  dp.value=formatDateInput(selectedDate);
+  dp.addEventListener("change",()=>{
+    selectedDate=parseDateInput(dp.value);
+    render();
+  });
+
+  document.getElementById("viewToggle").addEventListener("click",e=>{
+    if(e.target.tagName!=="BUTTON") return;
+    const mode=e.target.dataset.mode;
+    if(mode===viewMode) return;
+    viewMode=mode;
+    [...document.querySelectorAll("#viewToggle button")]
+      .forEach(b=>b.classList.toggle("active",b.dataset.mode===viewMode));
+    render();
+  });
+
+  document.getElementById("engineerFilter").addEventListener("change",e=>{
+    engineerFilter=e.target.value;
+    render();
+  });
+
+  try{
+    await loadEngineers();
+    const sel=document.getElementById("engineerFilter");
+    engineers.forEach(e=>{
+      const opt=document.createElement("option");
+      opt.value=e.username;
+      opt.textContent=e.name;
+      sel.appendChild(opt);
+    });
+
+    await loadJobs();
+    render();
+    setStatus("Scheduler ready");
+  }catch(err){
+    console.error(err);
+    setStatus("Error loading engineers/jobs.",true);
+    document.getElementById("schedulerWrapper").innerHTML=
+      `<div style="padding:14px;color:#b91c1c;">Could not load engineers or jobs.</div>`;
+  }
+}
+
+init();
 </script>
+
 </body>
 </html>
