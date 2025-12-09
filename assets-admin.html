@@ -787,7 +787,7 @@ currentAsset.images.push(data.url);
 
       currentAssets.forEach(a=>{
 const thumb = (a.images && a.images.length)
-  ? `<img src="${a.images[0]}" class="thumb-img" onclick='openImageViewerFromTable(${JSON.stringify(a.images)})'>`
+  ? `<img loading="lazy" src="${a.images[0].replace('asset-image', 'asset-thumb')}" class="thumb-img" onclick='openImageViewerFromTable(${JSON.stringify(a.images)})'>`
   : "—";
 
         const tr=document.createElement("tr");
