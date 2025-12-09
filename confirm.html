@@ -67,6 +67,14 @@
       border-radius: 10px;
       border: 1px solid #ccc;
     }
+
+    /* ⭐ NEW – Verified tick styling (minimal and clean) */
+    #verifiedTick {
+      font-size: 20px;
+      font-weight: 700;
+      color: #15803d; /* green */
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 
@@ -74,6 +82,9 @@
 
   <div class="content-box">
     <img src="mostlane-logo.jpg" style="height:60px; margin-bottom:15px;">
+
+    <!-- ⭐ NEW: Verified Tick -->
+    <div id="verifiedTick"></div>
 
     <h1 id="statusText">Success</h1>
 
@@ -102,6 +113,9 @@
   document.getElementById("timeText").textContent = time;
   document.getElementById("latText").textContent = lat;
   document.getElementById("lonText").textContent = lon;
+
+  // ⭐ NEW — Set Verified tick (check-in/out pages already validated device)
+  document.getElementById("verifiedTick").textContent = "✔ Verified";
 
   // STATIC MAP
   if (lat && lon) {
@@ -150,7 +164,6 @@
     }
 
     if (nearest && nearestDist <= 100) {
-      // Show site number & name in Mostlane style
       const num = nearest.siteNumber ? ` (${nearest.siteNumber})` : "";
       siteNameEl.textContent = `${nearest.siteName}${num}`;
     } else {
