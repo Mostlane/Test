@@ -215,23 +215,22 @@
 /* --------------------------------------------
    CONFIG
 ---------------------------------------------*/
-const API_SAVE_URL =
-  "https://mostlane-labour-api.jamie-def.workers.dev/save";
+const API_SAVE_URL = "https://mostlane-labour-api.jamie-def.workers.dev/save";
 
 /* --------------------------------------------
-   NAMED ENGINEERS (fixed)
+   NAMED ENGINEERS
 ---------------------------------------------*/
 const engineers = [
   { key:"Connor", name:"Connor", rate:20 },
-  { key:"Brad",   name:"Brad",   rate:22 },
-  { key:"JT",     name:"JT",     rate:25 },
-  { key:"Ryan",   name:"Ryan",   rate:15 }
+  { key:"Brad", name:"Brad", rate:22 },
+  { key:"JT", name:"JT", rate:25 },
+  { key:"Ryan", name:"Ryan", rate:15 }
 ];
 
 /* --------------------------------------------
-   SUBCONTRACTORS
+   EXTRA ENGINEERS / SUBCONTRACTORS
 ---------------------------------------------*/
-let extraEngineers = [];   // each = { id, name, rate }
+let extraEngineers = [];
 let nextExtraId = 1;
 
 /* --------------------------------------------
@@ -247,34 +246,25 @@ let projectState = {
   metrics:{}
 };
 
-/* --------------------------------------------
-   DOM ELEMENTS
----------------------------------------------*/
-const buildBtn   = document.getElementById("buildPlanBtn");
-const saveBtn    = document.getElementById("saveBtn");
-const saveStatus = document.getElementById("saveStatus");
-const planBody   = document.getElementById("planBody");
-const tableHead  = document.getElementById("tableHead");
-const tableWrap  = document.getElementById("tableContainer");
-const summaryEl  = document.getElementById("summary");
+/* DOM */
+const buildBtn     = document.getElementById("buildPlanBtn");
+const saveBtn      = document.getElementById("saveBtn");
+const saveStatus   = document.getElementById("saveStatus");
+const planBody     = document.getElementById("planBody");
+const tableHead    = document.getElementById("tableHead");
+const tableWrap    = document.getElementById("tableContainer");
+const summaryEl    = document.getElementById("summary");
 
-/* --------------------------------------------
-   EVENT HANDLERS
----------------------------------------------*/
+/* EVENTS */
 buildBtn.addEventListener("click", buildPlan);
 document.getElementById("addExtraBtn").addEventListener("click", addExtraEngineer);
 
 /* --------------------------------------------
-   ADD ADDITIONAL ENGINEERS
+   ADD EXTRA ENGINEERS
 ---------------------------------------------*/
 function addExtraEngineer(){
   const id = nextExtraId++;
-
-  extraEngineers.push({
-    id,
-    name: `Engineer ${id}`,
-    rate: 20
-  });
+  extraEngineers.push({ id, name:`Engineer ${id}`, rate:20 });
 
   renderExtraEngineers();
   renderTable();
@@ -282,46 +272,42 @@ function addExtraEngineer(){
 }
 
 function renderExtraEngineers(){
-  const container = document.getElementById("extra-engineer-list");
-  container.innerHTML = "";
+  const box = document.getElementById("extra-engineer-list");
+  box.innerHTML = "";
 
-  extraEngineers.forEach(e => {
+  extraEngineers.forEach(e=>{
     const div = document.createElement("div");
     div.className = "extra-engineer";
-
     div.innerHTML = `
       <label>Name:</label>
       <input type="text" value="${e.name}" onchange="updateExtraName(${e.id}, this.value)">
-      <label>Hourly Rate (£):</label>
-      <input type="number" step="0.5" min="0" value="${e.rate}" onchange="updateExtraRate(${e.id}, this.value)">
-      <button onclick="removeExtraEngineer(${e.id})"
-              style="background:#b91c1c;color:white;padding:4px 10px;border:none;border-radius:6px;margin-left:8px;">
-        Remove
-      </button>
+      <label>Rate (£):</label>
+      <input type="number" value="${e.rate}" step="0.5" onchange="updateExtraRate(${e.id}, this.value)">
+      <button onclick="removeExtraEngineer(${e.id})" style="background:#b91c1c;color:#fff;margin-left:6px;">Remove</button>
     `;
-    container.appendChild(div);
+    box.appendChild(div);
   });
 }
 
-window.updateExtraName = function(id, value){
-  const e = extraEngineers.find(x => x.id === id);
-  if(e){ e.name = value; renderTable(); recalcAll(); }
-};
+window.updateExtraName = function(id, val){
+  const ex = extraEngineers.find(x=>x.id===id);
+  if(ex){ ex.name = val; renderTable(); recalcAll(); }
+}
 
-window.updateExtraRate = function(id, value){
-  const e = extraEngineers.find(x => x.id === id);
-  if(e){ e.rate = Number(value); renderTable(); recalcAll(); }
-};
+window.updateExtraRate = function(id, val){
+  const ex = extraEngineers.find(x=>x.id===id);
+  if(ex){ ex.rate = Number(val); renderTable(); recalcAll(); }
+}
 
 window.removeExtraEngineer = function(id){
-  extraEngineers = extraEngineers.filter(x => x.id !== id);
+  extraEngineers = extraEngineers.filter(x=>x.id !== id);
   renderExtraEngineers();
   renderTable();
   recalcAll();
-};
+}
 
 /* --------------------------------------------
-   BUILD PROJECT PLAN
+   BUILD PLAN
 ---------------------------------------------*/
 function buildPlan(){
   const name = document.getElementById("projectName").value.trim();
@@ -330,22 +316,22 @@ function buildPlan(){
   const totalHours = Number(document.getElementById("totalHours").value);
 
   if(!name || !startStr || !endStr || !totalHours){
-    alert("Please complete all fields.");
+    alert("Complete all fields.");
     return;
   }
 
   const start = new Date(startStr);
   const end   = new Date(endStr);
   if(end < start){
-    alert("End date cannot be before start date.");
+    alert("End cannot be before start.");
     return;
   }
 
   const days = [];
   let d = new Date(start);
   while(d <= end){
-    days.push({ dateISO: d.toISOString().slice(0,10) });
-    d.setDate(d.getDate() + 1);
+    days.push({ dateISO:d.toISOString().slice(0,10) });
+    d.setDate(d.getDate()+1);
   }
 
   projectState = {
@@ -363,12 +349,10 @@ function buildPlan(){
   saveBtn.disabled = false;
 }
 
-
 /* --------------------------------------------
-   RENDER TABLE WITH MAIN + SUBCONTRACTORS
+   RENDER TABLE
 ---------------------------------------------*/
 function renderTable(){
-
   if(projectState.days.length === 0){
     tableWrap.style.display = "none";
     return;
@@ -376,31 +360,26 @@ function renderTable(){
 
   tableWrap.style.display = "block";
 
-  /* Build Table Header */
   let headHTML = `
     <tr>
       <th rowspan="2">Date</th>
       <th rowspan="2">Planned<br>Hours</th>
   `;
 
-  // Main engineers
   engineers.forEach(e=>{
     headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
   });
 
-  // Extra engineers
   extraEngineers.forEach(e=>{
     headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
   });
 
   headHTML += `
       <th rowspan="2">Total<br>Hours</th>
-      <th rowspan="2">Daily<br>Cost (£)</th>
-    </tr>
-    <tr>
+      <th rowspan="2">Cost (£)</th>
+    </tr><tr>
   `;
 
-  // Night columns
   [...engineers, ...extraEngineers].forEach(()=>{
     headHTML += `<th>Hrs</th><th>Night?</th>`;
   });
@@ -408,17 +387,12 @@ function renderTable(){
   headHTML += `</tr>`;
   tableHead.innerHTML = headHTML;
 
-  /* Build Rows */
   planBody.innerHTML = "";
 
-  projectState.days.forEach(day => {
+  projectState.days.forEach(day=>{
     const dateISO = day.dateISO;
     const dateObj = new Date(dateISO);
-
-    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
-    const pretty = dateObj.toLocaleDateString("en-GB", {
-      weekday:"short", day:"2-digit", month:"2-digit"
-    });
+    const pretty = dateObj.toLocaleDateString("en-GB",{weekday:"short", day:"2-digit", month:"2-digit"});
 
     const tr = document.createElement("tr");
     tr.dataset.date = dateISO;
@@ -428,27 +402,20 @@ function renderTable(){
       <td class="planned-cell">${projectState.plannedPerDay.toFixed(1)}</td>
     `;
 
-    function appendEngineerCells(e, prefix, id=null){
-      const engKey = prefix + (id ? id : e.key);
-
+    function addCells(e, prefix, id=null){
+      const key = prefix + (id ?? e.key);
       tr.innerHTML += `
-        <td><input type="number" min="0" step="0.5"
-              class="hours-input"
-              data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}"></td>
+        <td><input type="number" step="0.5" min="0" class="hours-input"
+              data-eng="${key}" data-rate="${e.rate}"></td>
         <td><label class="night-label">
-              <input type="checkbox"
-                     class="night-checkbox"
-                     data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}">
+              <input type="checkbox" class="night-checkbox" data-eng="${key}">
               Night
             </label></td>
       `;
     }
 
-    // Named engineers
-    engineers.forEach(e => appendEngineerCells(e, "main_"));
-
-    // Extra engineers
-    extraEngineers.forEach(e => appendEngineerCells(e, "extra_", e.id));
+    engineers.forEach(e=> addCells(e,"main_"));
+    extraEngineers.forEach(e=> addCells(e,"extra_",e.id));
 
     tr.innerHTML += `
       <td class="day-total-hours">0.0</td>
@@ -460,148 +427,103 @@ function renderTable(){
 }
 
 /* --------------------------------------------
-   COST LOGIC (same rules for all engineers)
+   COST LOGIC
 ---------------------------------------------*/
 function calcCost(hours, rate, isWeekend, isNight){
   if(hours <= 0) return { normal:0, ot:0, cost:0 };
 
-  /* Weekend OR night → all OT */
   if(isWeekend || isNight){
-    return {
-      normal:0,
-      ot:hours,
-      cost: hours * rate * 1.5
-    };
+    return { normal:0, ot:hours, cost:hours*rate*1.5 };
   }
 
-  /* Weekday normal rules */
   if(hours > 10){
     return {
       normal:10,
-      ot: hours - 10,
-      cost: (10 * rate) + ((hours - 10) * rate * 1.5)
+      ot:hours-10,
+      cost:(10*rate) + ((hours-10)*rate*1.5)
     };
   }
 
-  return {
-    normal:hours,
-    ot:0,
-    cost: hours * rate
-  };
+  return { normal:hours, ot:0, cost:hours*rate };
 }
 
 /* --------------------------------------------
-   RECALCULATE EVERYTHING
+   RECALCULATE
 ---------------------------------------------*/
 function recalcAll(){
-  if(!projectState.days.length) return;
+  let cumPlanned = 0, cumActual = 0, cumCost = 0;
+  let lastDate = null, activeDays = 0;
 
-  let cumPlanned = 0;
-  let cumActual  = 0;
-  let cumCost    = 0;
-
-  let lastDateWithData = null;
-  let daysWithHours    = 0;
-
-  [...planBody.querySelectorAll("tr")].forEach(row => {
+  [...planBody.querySelectorAll("tr")].forEach(row=>{
     const dateISO = row.dataset.date;
     const dateObj = new Date(dateISO);
-    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+    const isWeekend = (dateObj.getDay()===0 || dateObj.getDay()===6);
 
     const planned = Number(row.querySelector(".planned-cell").textContent);
-
     cumPlanned += planned;
 
-    let dayHours = 0;
-    let dayCost  = 0;
+    let hrs = 0, cost = 0;
 
-    // ALL ENGINEERS (main + extra)
-    row.querySelectorAll(".hours-input").forEach(input => {
-      const hrs = Number(input.value) || 0;
-      const engRate = Number(input.dataset.rate);
-      const engKey  = input.dataset.eng;
-      const nightCheckbox = row.querySelector(`.night-checkbox[data-eng="${engKey}"]`);
-      const isNight = nightCheckbox && nightCheckbox.checked;
+    row.querySelectorAll(".hours-input").forEach(input=>{
+      const h = Number(input.value)||0;
+      const rate = Number(input.dataset.rate);
+      const key = input.dataset.eng;
+      const night = row.querySelector(`.night-checkbox[data-eng="${key}"]`).checked;
 
-      const costObj = calcCost(hrs, engRate, isWeekend, isNight);
-      dayHours += hrs;
-      dayCost  += costObj.cost;
+      const c = calcCost(h, rate, isWeekend, night);
+      hrs += h;
+      cost += c.cost;
     });
 
-    if(dayHours > 0){
-      lastDateWithData = dateObj;
-      daysWithHours++;
-    }
+    if(hrs>0){ lastDate = dateObj; activeDays++; }
 
-    cumActual += dayHours;
-    cumCost   += dayCost;
+    cumActual += hrs;
+    cumCost   += cost;
 
-    row.querySelector(".day-total-hours").textContent = dayHours.toFixed(1);
-    row.querySelector(".day-cost").textContent = dayCost.toFixed(2);
+    row.querySelector(".day-total-hours").textContent = hrs.toFixed(1);
+    row.querySelector(".day-cost").textContent        = cost.toFixed(2);
   });
 
-  /* SPI + forecast */
-  let statusText = "No hours entered yet.";
-  let statusClass = "";
-  let spi = null;
+  let spi = cumActual>0 ? cumActual/cumPlanned : null;
+  let status = "No hours yet";
+  let css = "";
 
-  if(cumActual > 0){
-    spi = cumActual / cumPlanned;
-    if(spi > 1.05){
-      statusText = "Ahead of schedule";
-      statusClass = "status-good";
-    } else if (spi < 0.95){
-      statusText = "Behind schedule";
-      statusClass = "status-bad";
-    } else {
-      statusText = "On schedule";
-      statusClass = "status-good";
+  if(spi){
+    if(spi>1.05){ status="Ahead"; css="status-good"; }
+    else if(spi<0.95){ status="Behind"; css="status-bad"; }
+    else { status="On track"; css="status-good"; }
+  }
+
+  let forecast = "Not enough data";
+  if(activeDays>0 && cumActual>0){
+    const avg = cumActual/activeDays;
+    const remain = Math.max(projectState.totalHours-cumActual,0);
+
+    if(avg>0){
+      const daysLeft = Math.ceil(remain/avg);
+      const f = new Date(lastDate);
+      f.setDate(f.getDate()+daysLeft);
+
+      forecast = f>projectState.endDate
+        ? `⚠ Finishes late (${f.toLocaleDateString("en-GB")})`
+        : `✔ Expected finish ${f.toLocaleDateString("en-GB")}`;
     }
   }
 
-  let forecastLine = "Not enough data to forecast.";
-  let forecastEndISO = null;
-
-  if(daysWithHours > 0 && cumActual > 0){
-    const avg = cumActual / daysWithHours;
-    const remaining = Math.max(projectState.totalHours - cumActual, 0);
-
-    if(avg > 0 && remaining > 0){
-      const daysLeft = Math.ceil(remaining / avg);
-      const start = lastDateWithData || projectState.startDate;
-      const f = new Date(start);
-      f.setDate(f.getDate() + daysLeft);
-      forecastEndISO = f.toISOString().slice(0,10);
-
-      if(f > projectState.endDate){
-        forecastLine = `⚠ Project will finish late (${f.toLocaleDateString("en-GB")}).`;
-      } else {
-        forecastLine = `✅ Project expected to finish by ${f.toLocaleDateString("en-GB")}.`;
-      }
-    }
-  }
-
-  summaryEl.style.display = "block";
+  summaryEl.style.display="block";
   summaryEl.innerHTML = `
     <div><b>Total Planned:</b> ${projectState.totalHours}h</div>
     <div><b>Actual Hours:</b> ${cumActual.toFixed(1)}h</div>
     <div><b>Total Cost So Far:</b> £${cumCost.toFixed(2)}</div>
-    <div><b>SPI:</b> ${spi ? spi.toFixed(2) : "N/A"} 
-      <span class="${statusClass}"> – ${statusText}</span></div>
-    <div>${forecastLine}</div>
+    <div><b>SPI:</b> ${spi ? spi.toFixed(2) : "N/A"} <span class="${css}">– ${status}</span></div>
+    <div>${forecast}</div>
   `;
 
-  projectState.metrics = {
-    cumPlanned,
-    cumActual,
-    cumCost,
-    spi,
-    forecastEndISO
-  };
+  projectState.metrics = { cumPlanned, cumActual, cumCost, spi };
 }
 
 /* --------------------------------------------
-   SAVE PAYLOAD
+   SAVE PLAN → WORKER (correct payload)
 ---------------------------------------------*/
 async function savePlan(){
   saveBtn.disabled = true;
@@ -612,86 +534,89 @@ async function savePlan(){
   const days = rows.map(row=>{
     const dateISO = row.dataset.date;
     const dateObj = new Date(dateISO);
-    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+    const isWeekend = (dateObj.getDay()===0||dateObj.getDay()===6);
 
     const planned = Number(row.querySelector(".planned-cell").textContent);
     const totalHours = Number(row.querySelector(".day-total-hours").textContent);
     const totalCost  = Number(row.querySelector(".day-cost").textContent);
 
-    // MAIN ENGINEERS
     const main = {};
     engineers.forEach(e=>{
-      const hrs = Number(row.querySelector(`.hours-input[data-eng="main_${e.key}"]`)?.value || 0);
-      const night = row.querySelector(`.night-checkbox[data-eng="main_${e.key}"]`)?.checked || false;
-      const costObj = calcCost(hrs, e.rate, isWeekend, night);
+      const hrs = Number(row.querySelector(`.hours-input[data-eng="main_${e.key}"]`)?.value||0);
+      const night = row.querySelector(`.night-checkbox[data-eng="main_${e.key}"]`)?.checked||false;
+      const c = calcCost(hrs,e.rate,isWeekend,night);
 
       main[e.key] = {
-        name: e.name,
-        rate: e.rate,
-        hours: hrs,
+        name:e.name,
+        rate:e.rate,
+        hours:hrs,
         night,
-        normalHours: costObj.normal,
-        otHours: costObj.ot,
-        cost: costObj.cost
+        normalHours:c.normal,
+        otHours:c.ot,
+        cost:c.cost
       };
     });
 
-    // EXTRA ENGINEERS
     const extra = {};
     extraEngineers.forEach(ex=>{
       const key = `extra_${ex.id}`;
-      const hrs = Number(row.querySelector(`.hours-input[data-eng="${key}"]`)?.value || 0);
-      const night = row.querySelector(`.night-checkbox[data-eng="${key}"]`)?.checked || false;
-      const costObj = calcCost(hrs, ex.rate, isWeekend, night);
+      const hrs = Number(row.querySelector(`.hours-input[data-eng="${key}"]`)?.value||0);
+      const night = row.querySelector(`.night-checkbox[data-eng="${key}"]`)?.checked||false;
+      const c = calcCost(hrs,ex.rate,isWeekend,night);
 
       extra[ex.id] = {
-        name: ex.name,
-        rate: ex.rate,
-        hours: hrs,
+        name:ex.name,
+        rate:ex.rate,
+        hours:hrs,
         night,
-        normalHours: costObj.normal,
-        otHours: costObj.ot,
-        cost: costObj.cost
+        normalHours:c.normal,
+        otHours:c.ot,
+        cost:c.cost
       };
     });
 
     return {
-      date: dateISO,
-      plannedHours: planned,
+      date:dateISO,
+      isWeekend,
+      planned,
       totalHours,
       totalCost,
-      mainEngineers: main,
-      extraEngineers: extra
+      mainEngineers:main,
+      extraEngineers:extra
     };
   });
 
   const payload = {
-    projectName: projectState.projectName,
-    startDate: document.getElementById("startDate").value,
-    endDate: document.getElementById("endDate").value,
-    totalPlannedHours: projectState.totalHours,
-    plannedPerDay: projectState.plannedPerDay,
-    namedEngineers: engineers,
-    extraEngineers,
-    metrics: projectState.metrics,
-    days,
-    savedAt: new Date().toISOString()
+    projectName: document.getElementById("projectName").value.trim(),
+    startDate:   document.getElementById("startDate").value,
+    endDate:     document.getElementById("endDate").value,
+    days
   };
 
-  try{
+  if(!payload.projectName){
+    saveStatus.textContent = "❌ Project name required";
+    saveBtn.disabled = false;
+    return;
+  }
+
+  try {
     const res = await fetch(API_SAVE_URL, {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
       body:JSON.stringify(payload)
     });
 
+    const data = await res.json();
     if(!res.ok){
-      throw new Error("Save failed");
+      console.error(data);
+      saveStatus.textContent = "❌ Worker rejected request";
+    } else {
+      saveStatus.textContent = "✅ Saved successfully!";
     }
 
-    saveStatus.textContent = "Saved!";
   } catch(err){
-    saveStatus.textContent = "Error saving.";
+    console.error(err);
+    saveStatus.textContent = "❌ Network error";
   }
 
   saveBtn.disabled = false;
