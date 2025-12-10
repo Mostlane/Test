@@ -86,9 +86,20 @@
       margin-top:8px;
     }
 
+    button.secondary{
+      background:#4b5563;
+    }
+
     button:disabled{
       opacity:0.5;
       cursor:not-allowed;
+    }
+
+    .actions-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:8px;
     }
 
     .summary{
@@ -167,12 +178,26 @@
       background:#fff;
     }
 
+    #saveStatus{
+      margin-left:10px;
+      font-size:12px;
+      color:var(--muted);
+      align-self:center;
+    }
+
     @media(max-width:768px){
       table{
         font-size:11px;
       }
       td input[type="number"]{
         width:52px;
+      }
+      .actions-row{
+        flex-direction:column;
+      }
+      #saveStatus{
+        margin-left:0;
+        margin-top:4px;
       }
     }
   </style>
@@ -204,7 +229,11 @@
     </div>
   </div>
 
-  <button id="buildPlanBtn">Create / Rebuild Plan</button>
+  <div class="actions-row">
+    <button id="buildPlanBtn">Create / Rebuild Plan</button>
+    <button id="saveBtn" class="secondary" disabled>Save Plan to Server</button>
+    <span id="saveStatus"></span>
+  </div>
 
   <div id="summary" class="summary" style="display:none;"></div>
 
@@ -234,6 +263,10 @@
 </div>
 
 <script>
+  // === CONFIG: CHANGE THIS TO MATCH YOUR WORKER ENDPOINT ===
+  const API_SAVE_URL = "https://mostlane-api.jamie-def.workers.dev/labour/save";
+  // ========================================================
+
   // Engineer config with base rates
   const engineers = [
     { key:"Connor", name:"Connor", rate:20 },
@@ -248,15 +281,19 @@
     endDate:null,
     totalHours:0,
     plannedPerDay:0,
-    days:[] // { dateISO, plannedHours }
+    days:[],   // { dateISO }
+    metrics:{} // filled in recalcAll
   };
 
   const buildBtn   = document.getElementById("buildPlanBtn");
+  const saveBtn    = document.getElementById("saveBtn");
   const bodyEl     = document.getElementById("planBody");
   const tableWrap  = document.getElementById("tableContainer");
   const summaryEl  = document.getElementById("summary");
+  const saveStatus = document.getElementById("saveStatus");
 
   buildBtn.addEventListener("click", buildPlan);
+  saveBtn.addEventListener("click", savePlan);
 
   function buildPlan(){
     const name = document.getElementById("projectName").value.trim();
@@ -294,11 +331,14 @@
       endDate:end,
       totalHours,
       plannedPerDay,
-      days
+      days,
+      metrics:{}
     };
 
     renderTable();
     recalcAll();
+    saveBtn.disabled = false;
+    saveStatus.textContent = "";
   }
 
   function renderTable(){
@@ -306,6 +346,7 @@
     if(!projectState.days.length){
       tableWrap.style.display = "none";
       summaryEl.style.display = "none";
+      saveBtn.disabled = true;
       return;
     }
     tableWrap.style.display = "block";
@@ -358,7 +399,6 @@
         tdNight.appendChild(label);
         tr.appendChild(tdNight);
 
-        // Automatically all OT on weekend anyway, but user can still tick Night if a late shift
         if(isWeekend){
           // purely visual hint; cost logic uses weekend rule automatically
           tdNight.style.backgroundColor = "#fef3c7";
@@ -434,9 +474,11 @@
     let statusText = "";
     let statusClass = "";
     let spiText = "N/A";
+    let spiVal = null;
 
     if(cumPlanned > 0 && cumActual > 0){
       const spi = cumActual / cumPlanned;
+      spiVal = spi;
       spiText = spi.toFixed(2);
       if(spi > 1.05){
         statusText = "Ahead of schedule";
@@ -455,12 +497,13 @@
 
     // Forecast finish date
     let forecastLine = "Not enough data to forecast finish date yet.";
+    let forecastEndISO = null;
+
     if(daysWithHours > 0 && cumActual > 0){
       const avgDaily = cumActual / daysWithHours;
       const remainingHours = Math.max(projectState.totalHours - cumActual, 0);
       if(avgDaily > 0 && remainingHours > 0){
         const remainingDays = Math.ceil(remainingHours / avgDaily);
-        // use later of lastDateWithData or project start
         const base = lastDateWithData || projectState.startDate;
         const forecastEnd = new Date(base);
         forecastEnd.setDate(forecastEnd.getDate() + remainingDays);
@@ -468,6 +511,7 @@
 
         const forecastStr = forecastEnd.toLocaleDateString("en-GB");
         const plannedStr  = plannedEnd.toLocaleDateString("en-GB");
+        forecastEndISO = forecastEnd.toISOString().slice(0,10);
 
         if(forecastEnd > plannedEnd){
           forecastLine = `⚠ Forecast finish: ${forecastStr} (later than planned end ${plannedStr}) – at current pace you will not make the date.`;
@@ -490,6 +534,18 @@
         ${statusText ? `<span class="${statusClass}"> – ${statusText}</span>` : ""}</div>
       <div style="margin-top:6px;">${forecastLine}</div>
     `;
+
+    projectState.metrics = {
+      cumPlanned,
+      cumActual,
+      cumCost,
+      spi: spiVal,
+      spiText,
+      statusText,
+      statusClass,
+      forecastEndISO,
+      forecastLine
+    };
   }
 
   // Core OT cost calculation:
@@ -518,6 +574,107 @@
     const cost       = normalCost + otCost;
 
     return { normalHours, otHours, cost };
+  }
+
+  function collectPayload(){
+    if(!projectState.days.length){
+      return null;
+    }
+
+    const rows = Array.from(bodyEl.querySelectorAll("tr"));
+    const dayEntries = rows.map(row => {
+      const dateISO = row.dataset.date;
+      const date    = new Date(dateISO);
+      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+
+      const planned = Number(row.querySelector(".planned-cell").textContent) || 0;
+      const totalHours = Number(row.querySelector(".day-total-hours").textContent) || 0;
+      const totalCost  = Number(row.querySelector(".day-cost").textContent) || 0;
+
+      const engineersData = {};
+      engineers.forEach(engineer => {
+        const hoursInput = row.querySelector(`.hours-input[data-engineer="${engineer.key}"]`);
+        const nightCb    = row.querySelector(`.night-checkbox[data-engineer="${engineer.key}"]`);
+        const hrs = Number(hoursInput.value) || 0;
+        const isNight = nightCb && nightCb.checked;
+
+        let normalHours = 0;
+        let otHours = 0;
+        let cost = 0;
+
+        if(hrs > 0){
+          const calc = calcEngineerDayCost(hrs, engineer.rate, isWeekend, isNight);
+          normalHours = calc.normalHours;
+          otHours = calc.otHours;
+          cost = calc.cost;
+        }
+
+        engineersData[engineer.key] = {
+          hours: hrs,
+          isNight,
+          normalHours,
+          otHours,
+          cost
+        };
+      });
+
+      return {
+        date: dateISO,
+        plannedHours: planned,
+        totalHours,
+        totalCost,
+        engineers: engineersData
+      };
+    });
+
+    const payload = {
+      projectName: projectState.projectName,
+      startDate: document.getElementById("startDate").value,
+      endDate: document.getElementById("endDate").value,
+      totalPlannedHours: projectState.totalHours,
+      plannedPerDay: projectState.plannedPerDay,
+      engineers: engineers.reduce((acc,e) => {
+        acc[e.key] = { name:e.name, baseRate:e.rate };
+        return acc;
+      },{}),
+      metrics: projectState.metrics,
+      days: dayEntries,
+      savedAt: new Date().toISOString()
+    };
+
+    return payload;
+  }
+
+  async function savePlan(){
+    const payload = collectPayload();
+    if(!payload){
+      alert("Nothing to save yet.");
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveStatus.textContent = "Saving…";
+
+    try{
+      const res = await fetch(API_SAVE_URL, {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if(!res.ok){
+        throw new Error("HTTP " + res.status);
+      }
+
+      saveStatus.textContent = "Saved successfully.";
+    }catch(err){
+      console.error(err);
+      saveStatus.textContent = "Error saving plan.";
+    }finally{
+      saveBtn.disabled = false;
+    }
   }
 </script>
 
