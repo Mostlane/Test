@@ -545,30 +545,47 @@ function buildPlan(){
    RENDER TABLE WITH MAIN + EXTRA ENGINEERS
 ---------------------------------------------*/
 function renderTable(){
-
-  if(projectState.days.length === 0){
+  if (projectState.days.length === 0) {
     tableWrap.style.display = "none";
-    planBody.innerHTML = "";
-    tableHead.innerHTML = "";
     return;
   }
 
+  // -------------------------
+  // 1. CAPTURE EXISTING INPUT
+  // -------------------------
+  let saved = {};
+
+  [...planBody.querySelectorAll("tr")].forEach(row => {
+    const date = row.dataset.date;
+    saved[date] = saved[date] || {};
+
+    row.querySelectorAll(".hours-input").forEach(inp => {
+      const key = inp.dataset.eng;
+      saved[date][key] = {
+        hours: inp.value,
+        night: row.querySelector(`.night-checkbox[data-eng="${key}"]`)?.checked || false
+      };
+    });
+  });
+
   tableWrap.style.display = "block";
 
-  /* Build Table Header */
+  // -------------------------
+  // 2. BUILD NEW TABLE HEADER
+  // -------------------------
   let headHTML = `
     <tr>
       <th rowspan="2">Date</th>
       <th rowspan="2">Planned<br>Hours</th>
   `;
 
-  // Main engineers
-  engineers.forEach(e=>{
+  // Named engineers
+  engineers.forEach(e => {
     headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
   });
 
   // Extra engineers
-  extraEngineers.forEach(e=>{
+  extraEngineers.forEach(e => {
     headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
   });
 
@@ -579,15 +596,16 @@ function renderTable(){
     <tr>
   `;
 
-  // Night columns
-  [...engineers, ...extraEngineers].forEach(()=>{
+  [...engineers, ...extraEngineers].forEach(() => {
     headHTML += `<th>Hrs</th><th>Night?</th>`;
   });
 
   headHTML += `</tr>`;
   tableHead.innerHTML = headHTML;
 
-  /* Build Rows */
+  // -------------------------
+  // 3. BUILD NEW TABLE BODY
+  // -------------------------
   planBody.innerHTML = "";
 
   projectState.days.forEach(day => {
@@ -606,27 +624,34 @@ function renderTable(){
       <td class="planned-cell">${projectState.plannedPerDay.toFixed(1)}</td>
     `;
 
-    function appendEngineerCells(e, prefix, id=null){
-      const engKey = prefix + (id ? id : e.key);
+    const restore = saved[dateISO] || {};
+
+    function addEngineerInputs(e, prefix, id=null){
+      const key = prefix + (id ?? e.key);
+      const prev = restore[key] || { hours: "", night: false };
 
       tr.innerHTML += `
-        <td><input type="number" min="0" step="0.5"
-              class="hours-input"
-              data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}"></td>
-        <td><label class="night-label">
-              <input type="checkbox"
-                     class="night-checkbox"
-                     data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}">
-              Night
-            </label></td>
+        <td>
+          <input type="number" min="0" step="0.5"
+                 class="hours-input"
+                 data-eng="${key}"
+                 data-rate="${e.rate}"
+                 value="${prev.hours}">
+        </td>
+        <td>
+          <label class="night-label">
+            <input type="checkbox"
+                   class="night-checkbox"
+                   data-eng="${key}"
+                   ${prev.night ? "checked" : ""}>
+            Night
+          </label>
+        </td>
       `;
     }
 
-    // Named engineers
-    engineers.forEach(e => appendEngineerCells(e, "main_"));
-
-    // Extra engineers
-    extraEngineers.forEach(e => appendEngineerCells(e, "extra_", e.id));
+    engineers.forEach(e => addEngineerInputs(e, "main_"));
+    extraEngineers.forEach(e => addEngineerInputs(e, "extra_", e.id));
 
     tr.innerHTML += `
       <td class="day-total-hours">0.0</td>
@@ -635,6 +660,11 @@ function renderTable(){
 
     planBody.appendChild(tr);
   });
+
+  // -------------------------
+  // 4. RECALCULATE COSTS
+  // -------------------------
+  recalcAll();
 }
 
 /* --------------------------------------------
