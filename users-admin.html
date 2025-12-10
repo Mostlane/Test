@@ -278,84 +278,49 @@
       return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
     }
 
-    // 🔑 Map DOM id/label/href → stable permission key
-    function mapToPermKey(id,label,href){
-      const mapByExact = {
-        // === NEW MAIN.HTML IDS → PERMISSION KEYS ===
-        "CheckInOut": "CheckInOut",
-        "Vehicles": "Vehicles",
-        "Holiday": "Holiday",
-        "EngineersHoursMenu": "EngineersHoursMenu",
-        "PurchaseOrders": "PurchaseOrders",
-        "PurchaseOrders2": "PurchaseOrders",   // share same permission
-        "Sites": "Sites",
-        "Assets": "Assets",
-        "MyDocuments": "MyDocuments",
-        "Weekly": "Weekly",
-        "Forms": "Forms",
-        "Compliance": "Compliance",
-        "HoursDashboard": "HoursDashboard",
-        "Users": "Users",
-        "SLA": "SLA",   // <-- SLA main button
+   // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
+function mapToPermKey(id, label, href) {
+  const mapByExact = {
+    "CheckInOut": "CheckInOut",
+    "Vehicles": "Vehicles",
+    "Holiday": "Holiday",
+    "EngineersHoursMenu": "EngineersHoursMenu",
+    "PurchaseOrders": "PurchaseOrders",
+    "PurchaseOrders2": "PurchaseOrders",
+    "Sites": "Sites",
+    "Assets": "Assets",
+    "MyDocuments": "MyDocuments",
+    "Compliance": "Compliance",
+    "HoursDashboard": "HoursDashboard",
+    "Users": "Users",
+    "Weekly": "Weekly",
+    "Forms": "Forms",
+    "SLA": "SLA",
+    "SLA Menu": "SLA"
+  };
 
-        // Legacy / other button ids
-        checkinBtn: "CheckInOut",
-        holidayBtn: "Holiday",
-        purchaseBtn: "PurchaseOrders",
-        poMenuBtn: "PurchaseOrders",
-        assetsBtn: "Assets",
-        formsBtn: "Forms",
-        "my-documents-btn": "MyDocuments",
-        complianceBtn: "Compliance",
-        "hours-dashboard-btn": "HoursDashboard",
-        weeklyBtn: "Weekly",
-        usersAdminBtn: "Users",
-        poDirectorBtn: "PODirector",
-        poCostingBtn: "POCosting",
+  // Direct match on ID or label
+  if (id && mapByExact[id]) return mapByExact[id];
+  if (label && mapByExact[label]) return mapByExact[label];
 
-        // Labels (emoji-less)
-        "Check In / Out": "CheckInOut",
-        "Holiday Requests": "Holiday",
-        "Generate Purchase Order Reference": "PurchaseOrders",
-        "Plant & Equipment": "Assets",
-        "Weekly Summary": "Weekly",
-        "Purchase Orders": "PurchaseOrders",
-        "Users": "Users",
-        "My Documents": "MyDocuments",
-        "Compliance": "Compliance",
-        "Hours Dashboard": "HoursDashboard",
-        "SLA": "SLA",          // label-based match
-        "SLA Menu": "SLA"      // label-based match
-      };
+  // Only *.html internal pages
+  if (href && href.endsWith(".html")) {
+    const clean = href.toLowerCase();
 
-      if (id && mapByExact[id]) return mapByExact[id];
-      if (label && mapByExact[label]) return mapByExact[label];
+    if (clean.includes("sla")) return "SLA";
+    if (clean.includes("users")) return "Users";
+    if (clean.includes("weekly")) return "Weekly";
+    if (clean.includes("assets")) return "Assets";
+    if (clean.includes("forms")) return "Forms";
+    if (clean.includes("compliance")) return "Compliance";
+    if (clean.includes("purchase")) return "PurchaseOrders";
+    if (clean.includes("sites")) return "Sites";
+    if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
+  }
 
-      if (href){
-        const clean = href.toLowerCase();
-        if (clean.includes('podirector'))   return 'PODirector';
-        if (clean.includes('pocosting'))    return 'POCosting';
-        if (clean.includes('po-menu'))      return 'PurchaseOrders';
-        if (clean.includes('purchase'))     return 'PurchaseOrders';
-        if (clean.includes('checkin') || clean.includes('checkout')) return 'CheckInOut';
-        if (clean.includes('weekly'))       return 'Weekly';
-        if (clean.includes('compliance'))   return 'Compliance';
-        if (clean.includes('forms'))        return 'Forms';
-        if (clean.includes('assets'))       return 'Assets';
-        if (clean.includes('holiday'))      return 'Holiday';
-        if (clean.includes('hours-dashboard')) return 'HoursDashboard';
-        if (clean.includes('users-admin'))  return 'Users';
-        if (clean.includes('vehicles'))     return 'Vehicles';
-        if (clean.includes('sla-menu'))     return 'SLA';   // sla-menu.html → SLA perm
-      }
-
-      // Fallback: stable-ish key from href, id, or label
-      if (href) return normalizeIdForKey(href.replace(/\.html$/,''));
-      if (id)   return normalizeIdForKey(id);
-      if (label)return normalizeIdForKey(label);
-      return null;
-    }
-
+  // ❌ Reject all external links, javascript:void(), forms, etc.
+  return null;
+}
     // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
       const parser=new DOMParser();
@@ -614,15 +579,15 @@
             const val = (chk && chk.checked) ? 'Yes' : 'No';
             u[permKey] = val;
           };
+__STRUCT.forEach(p => {
+  const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
+  if (parentKey) assign(parentKey);
 
-          __STRUCT.forEach(p=>{
-            const parentKey = p.key || mapToPermKey(p.id,p.label,p.href);
-            assign(parentKey);
-            (p.subpages || []).forEach(sp=>{
-              const sid = sp.key || mapToPermKey(sp.id,sp.label,sp.href);
-              assign(sid);
-            });
-          });
+  (p.subpages || []).forEach(sp => {
+    const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+    if (sid) assign(sid);
+  });
+});
         });
 
         await saveUsers(users);
