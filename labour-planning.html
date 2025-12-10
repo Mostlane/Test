@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane • Labour Planning</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --bg:#e6e8eb;
+      --panel:rgba(255,255,255,0.95);
+      --border:#d1d5db;
+      --muted:#6b7280;
+      --danger:#b91c1c;
+      --success:#15803d;
+    }
+
+    body{
+      margin:0;
+      padding:0;
+      font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+      background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:cover;
+    }
+
+    .panel{
+      max-width:1200px;
+      margin:30px auto;
+      background:var(--panel);
+      border-radius:12px;
+      padding:20px;
+      box-shadow:0 4px 12px rgba(0,0,0,0.18);
+    }
+
+    h1{
+      margin:0 0 10px;
+      text-align:center;
+      color:var(--ml-blue);
+    }
+
+    .subheading{
+      text-align:center;
+      color:var(--muted);
+      margin-bottom:20px;
+      font-size:14px;
+    }
+
+    .form-row{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      margin-bottom:10px;
+    }
+
+    .form-group{
+      flex:1 1 160px;
+      min-width:150px;
+    }
+
+    label{
+      display:block;
+      font-weight:600;
+      margin-bottom:4px;
+      font-size:13px;
+    }
+
+    input{
+      width:100%;
+      padding:8px 10px;
+      border-radius:8px;
+      border:1px solid var(--border);
+      font-size:14px;
+      box-sizing:border-box;
+    }
+
+    button{
+      padding:10px 16px;
+      border-radius:8px;
+      border:none;
+      background:var(--ml-blue);
+      color:#fff;
+      font-weight:600;
+      cursor:pointer;
+      margin-top:8px;
+    }
+
+    button:disabled{
+      opacity:0.5;
+      cursor:not-allowed;
+    }
+
+    .summary{
+      margin-top:15px;
+      padding:10px 12px;
+      border-radius:10px;
+      background:#f3f4f6;
+      font-size:13px;
+      line-height:1.5;
+    }
+
+    .summary b{ font-weight:600; }
+
+    .status-good{ color:var(--success); font-weight:700; }
+    .status-bad{ color:var(--danger); font-weight:700; }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:18px;
+      font-size:12px;
+    }
+
+    thead{
+      position:sticky;
+      top:0;
+      background:#f9fafb;
+      z-index:1;
+    }
+
+    th,td{
+      border:1px solid var(--border);
+      padding:4px 6px;
+      text-align:center;
+      vertical-align:middle;
+    }
+
+    th{
+      font-size:11px;
+      background:#e5e7eb;
+    }
+
+    td input[type="number"]{
+      width:60px;
+      font-size:11px;
+      padding:4px;
+      text-align:right;
+    }
+
+    .night-label{
+      display:flex;
+      align-items:center;
+      gap:3px;
+      font-size:10px;
+      color:var(--muted);
+      justify-content:center;
+      margin-top:2px;
+    }
+
+    .night-label input{
+      width:auto;
+      padding:0;
+    }
+
+    .totals-row{
+      background:#f3f4f6;
+      font-weight:600;
+    }
+
+    .scroll-box{
+      max-height:420px;
+      overflow:auto;
+      margin-top:10px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#fff;
+    }
+
+    @media(max-width:768px){
+      table{
+        font-size:11px;
+      }
+      td input[type="number"]{
+        width:52px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>Labour Planning &amp; Job Costing</h1>
+  <div class="subheading">
+    Plan labour, track actual hours per engineer, and see live progress vs cost.
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="projectName">Project Name</label>
+      <input id="projectName" placeholder="e.g. Co-op Fibre Portsmouth">
+    </div>
+    <div class="form-group">
+      <label for="startDate">Start Date</label>
+      <input id="startDate" type="date">
+    </div>
+    <div class="form-group">
+      <label for="endDate">End Date</label>
+      <input id="endDate" type="date">
+    </div>
+    <div class="form-group">
+      <label for="totalHours">Total Planned Labour (hours)</label>
+      <input id="totalHours" type="number" min="0" step="1" placeholder="e.g. 400">
+    </div>
+  </div>
+
+  <button id="buildPlanBtn">Create / Rebuild Plan</button>
+
+  <div id="summary" class="summary" style="display:none;"></div>
+
+  <div id="tableContainer" class="scroll-box" style="display:none;">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Date</th>
+          <th rowspan="2">Planned<br>Hours</th>
+          <th colspan="2">Connor (£20)</th>
+          <th colspan="2">Brad (£22)</th>
+          <th colspan="2">JT (£25)</th>
+          <th colspan="2">Ryan (£15)</th>
+          <th rowspan="2">Total<br>Hours</th>
+          <th rowspan="2">Daily Cost<br>(£)</th>
+        </tr>
+        <tr>
+          <th>Hours</th><th>Night?</th>
+          <th>Hours</th><th>Night?</th>
+          <th>Hours</th><th>Night?</th>
+          <th>Hours</th><th>Night?</th>
+        </tr>
+      </thead>
+      <tbody id="planBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  // Engineer config with base rates
+  const engineers = [
+    { key:"Connor", name:"Connor", rate:20 },
+    { key:"Brad",   name:"Brad",   rate:22 },
+    { key:"JT",     name:"JT",     rate:25 },
+    { key:"Ryan",   name:"Ryan",   rate:15 }
+  ];
+
+  let projectState = {
+    projectName:"",
+    startDate:null,
+    endDate:null,
+    totalHours:0,
+    plannedPerDay:0,
+    days:[] // { dateISO, plannedHours }
+  };
+
+  const buildBtn   = document.getElementById("buildPlanBtn");
+  const bodyEl     = document.getElementById("planBody");
+  const tableWrap  = document.getElementById("tableContainer");
+  const summaryEl  = document.getElementById("summary");
+
+  buildBtn.addEventListener("click", buildPlan);
+
+  function buildPlan(){
+    const name = document.getElementById("projectName").value.trim();
+    const startStr = document.getElementById("startDate").value;
+    const endStr   = document.getElementById("endDate").value;
+    const totalHours = Number(document.getElementById("totalHours").value);
+
+    if(!name || !startStr || !endStr || !totalHours || totalHours <= 0){
+      alert("Please enter project name, dates and total planned hours.");
+      return;
+    }
+
+    const start = new Date(startStr);
+    const end   = new Date(endStr);
+    if(isNaN(start) || isNaN(end) || end < start){
+      alert("Please check the start and end dates.");
+      return;
+    }
+
+    // Build day list
+    const days = [];
+    let d = new Date(start);
+    while(d <= end){
+      days.push({
+        dateISO: d.toISOString().slice(0,10)
+      });
+      d.setDate(d.getDate() + 1);
+    }
+
+    const plannedPerDay = totalHours / days.length;
+
+    projectState = {
+      projectName:name,
+      startDate:start,
+      endDate:end,
+      totalHours,
+      plannedPerDay,
+      days
+    };
+
+    renderTable();
+    recalcAll();
+  }
+
+  function renderTable(){
+    bodyEl.innerHTML = "";
+    if(!projectState.days.length){
+      tableWrap.style.display = "none";
+      summaryEl.style.display = "none";
+      return;
+    }
+    tableWrap.style.display = "block";
+
+    projectState.days.forEach(dayObj => {
+      const dateISO = dayObj.dateISO;
+      const date = new Date(dateISO);
+      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+
+      const tr = document.createElement("tr");
+      tr.dataset.date = dateISO;
+
+      const pretty = date.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"2-digit" });
+
+      const tdDate = document.createElement("td");
+      tdDate.textContent = pretty;
+      tr.appendChild(tdDate);
+
+      const tdPlanned = document.createElement("td");
+      tdPlanned.className = "planned-cell";
+      tdPlanned.textContent = projectState.plannedPerDay.toFixed(1);
+      tr.appendChild(tdPlanned);
+
+      engineers.forEach(engineer => {
+        const tdHours = document.createElement("td");
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = "0.5";
+        input.className = "hours-input";
+        input.dataset.engineer = engineer.key;
+        input.dataset.date = dateISO;
+        input.addEventListener("input", recalcAll);
+        tdHours.appendChild(input);
+        tr.appendChild(tdHours);
+
+        const tdNight = document.createElement("td");
+        const label = document.createElement("label");
+        label.className = "night-label";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "night-checkbox";
+        cb.dataset.engineer = engineer.key;
+        cb.dataset.date = dateISO;
+        cb.addEventListener("change", recalcAll);
+        label.appendChild(cb);
+        const span = document.createElement("span");
+        span.textContent = "Night";
+        label.appendChild(span);
+        tdNight.appendChild(label);
+        tr.appendChild(tdNight);
+
+        // Automatically all OT on weekend anyway, but user can still tick Night if a late shift
+        if(isWeekend){
+          // purely visual hint; cost logic uses weekend rule automatically
+          tdNight.style.backgroundColor = "#fef3c7";
+        }
+      });
+
+      const tdTotalHours = document.createElement("td");
+      tdTotalHours.className = "day-total-hours";
+      tdTotalHours.textContent = "0.0";
+      tr.appendChild(tdTotalHours);
+
+      const tdCost = document.createElement("td");
+      tdCost.className = "day-cost";
+      tdCost.textContent = "0.00";
+      tr.appendChild(tdCost);
+
+      bodyEl.appendChild(tr);
+    });
+  }
+
+  function recalcAll(){
+    if(!projectState.days.length) return;
+
+    let cumPlanned = 0;
+    let cumActual  = 0;
+    let cumCost    = 0;
+
+    let lastDateWithData = null;
+    let daysWithHours    = 0;
+
+    const rows = Array.from(bodyEl.querySelectorAll("tr"));
+
+    rows.forEach(row => {
+      const dateISO = row.dataset.date;
+      const date    = new Date(dateISO);
+      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+
+      const plannedCell = row.querySelector(".planned-cell");
+      const planned = Number(plannedCell.textContent) || 0;
+      cumPlanned += planned;
+
+      let dayHours = 0;
+      let dayCost  = 0;
+
+      engineers.forEach(engineer => {
+        const hoursInput = row.querySelector(`.hours-input[data-engineer="${engineer.key}"]`);
+        const nightCb    = row.querySelector(`.night-checkbox[data-engineer="${engineer.key}"]`);
+        const hrs = Number(hoursInput.value) || 0;
+        const isNight = nightCb && nightCb.checked;
+
+        if(hrs > 0){
+          const { cost } = calcEngineerDayCost(hrs, engineer.rate, isWeekend, isNight);
+          dayHours += hrs;
+          dayCost  += cost;
+        }
+      });
+
+      if(dayHours > 0){
+        lastDateWithData = date;
+        daysWithHours++;
+      }
+
+      cumActual += dayHours;
+      cumCost   += dayCost;
+
+      const totalCell = row.querySelector(".day-total-hours");
+      const costCell  = row.querySelector(".day-cost");
+      totalCell.textContent = dayHours.toFixed(1);
+      costCell.textContent  = dayCost.toFixed(2);
+    });
+
+    // Schedule performance
+    let statusText = "";
+    let statusClass = "";
+    let spiText = "N/A";
+
+    if(cumPlanned > 0 && cumActual > 0){
+      const spi = cumActual / cumPlanned;
+      spiText = spi.toFixed(2);
+      if(spi > 1.05){
+        statusText = "Ahead of schedule";
+        statusClass = "status-good";
+      }else if(spi < 0.95){
+        statusText = "Behind schedule";
+        statusClass = "status-bad";
+      }else{
+        statusText = "Roughly on schedule";
+        statusClass = "status-good";
+      }
+    }else{
+      statusText = "No actual hours entered yet.";
+      statusClass = "";
+    }
+
+    // Forecast finish date
+    let forecastLine = "Not enough data to forecast finish date yet.";
+    if(daysWithHours > 0 && cumActual > 0){
+      const avgDaily = cumActual / daysWithHours;
+      const remainingHours = Math.max(projectState.totalHours - cumActual, 0);
+      if(avgDaily > 0 && remainingHours > 0){
+        const remainingDays = Math.ceil(remainingHours / avgDaily);
+        // use later of lastDateWithData or project start
+        const base = lastDateWithData || projectState.startDate;
+        const forecastEnd = new Date(base);
+        forecastEnd.setDate(forecastEnd.getDate() + remainingDays);
+        const plannedEnd = projectState.endDate;
+
+        const forecastStr = forecastEnd.toLocaleDateString("en-GB");
+        const plannedStr  = plannedEnd.toLocaleDateString("en-GB");
+
+        if(forecastEnd > plannedEnd){
+          forecastLine = `⚠ Forecast finish: ${forecastStr} (later than planned end ${plannedStr}) – at current pace you will not make the date.`;
+        }else{
+          forecastLine = `✅ Forecast finish: ${forecastStr} (on or before planned end ${plannedStr}) at current pace.`;
+        }
+      }else if(remainingHours === 0){
+        forecastLine = "✅ All planned hours delivered – project complete on labour basis.";
+      }
+    }
+
+    summaryEl.style.display = "block";
+    summaryEl.innerHTML = `
+      <div><b>Project:</b> ${projectState.projectName}</div>
+      <div><b>Total Planned Hours:</b> ${projectState.totalHours.toFixed(1)}</div>
+      <div><b>Planned Hours To Date:</b> ${cumPlanned.toFixed(1)}</div>
+      <div><b>Actual Hours Entered:</b> ${cumActual.toFixed(1)}</div>
+      <div><b>Total Labour Cost So Far:</b> £${cumCost.toFixed(2)}</div>
+      <div><b>Schedule Performance Index (SPI):</b> ${spiText} 
+        ${statusText ? `<span class="${statusClass}"> – ${statusText}</span>` : ""}</div>
+      <div style="margin-top:6px;">${forecastLine}</div>
+    `;
+  }
+
+  // Core OT cost calculation:
+  // - Weekends: all hours at 1.5x
+  // - Weekdays:
+  //    - if isNight = true → all hours at 1.5x
+  //    - else → first 10h at base, remaining at 1.5x
+  function calcEngineerDayCost(hours, baseRate, isWeekend, isNight){
+    let normalHours = 0;
+    let otHours = 0;
+
+    if(isWeekend || isNight){
+      // All OT
+      otHours = hours;
+    }else{
+      if(hours > 10){
+        normalHours = 10;
+        otHours = hours - 10;
+      }else{
+        normalHours = hours;
+      }
+    }
+
+    const normalCost = normalHours * baseRate;
+    const otCost     = otHours * baseRate * 1.5;
+    const cost       = normalCost + otCost;
+
+    return { normalHours, otHours, cost };
+  }
+</script>
+
+</body>
+</html>
