@@ -34,10 +34,10 @@
       box-shadow:0 4px 12px rgba(0,0,0,0.18);
     }
 
-    h1{
-      margin:0 0 10px;
+    h1, h2{
       text-align:center;
       color:var(--ml-blue);
+      margin:0 0 10px;
     }
 
     .subheading{
@@ -90,18 +90,6 @@
       background:#4b5563;
     }
 
-    button:disabled{
-      opacity:0.5;
-      cursor:not-allowed;
-    }
-
-    .actions-row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:8px;
-    }
-
     .summary{
       margin-top:15px;
       padding:10px 12px;
@@ -110,8 +98,6 @@
       font-size:13px;
       line-height:1.5;
     }
-
-    .summary b{ font-weight:600; }
 
     .status-good{ color:var(--success); font-weight:700; }
     .status-bad{ color:var(--danger); font-weight:700; }
@@ -134,19 +120,13 @@
       border:1px solid var(--border);
       padding:4px 6px;
       text-align:center;
-      vertical-align:middle;
-    }
-
-    th{
-      font-size:11px;
-      background:#e5e7eb;
     }
 
     td input[type="number"]{
       width:60px;
-      font-size:11px;
       padding:4px;
       text-align:right;
+      font-size:11px;
     }
 
     .night-label{
@@ -154,528 +134,570 @@
       align-items:center;
       gap:3px;
       font-size:10px;
-      color:var(--muted);
       justify-content:center;
-      margin-top:2px;
-    }
-
-    .night-label input{
-      width:auto;
-      padding:0;
-    }
-
-    .totals-row{
-      background:#f3f4f6;
-      font-weight:600;
     }
 
     .scroll-box{
       max-height:420px;
       overflow:auto;
-      margin-top:10px;
       border-radius:10px;
       border:1px solid var(--border);
-      background:#fff;
+      background:white;
+      margin-top:10px;
     }
 
     #saveStatus{
       margin-left:10px;
       font-size:12px;
       color:var(--muted);
-      align-self:center;
     }
 
-    @media(max-width:768px){
-      table{
-        font-size:11px;
-      }
-      td input[type="number"]{
-        width:52px;
-      }
-      .actions-row{
-        flex-direction:column;
-      }
-      #saveStatus{
-        margin-left:0;
-        margin-top:4px;
-      }
+    .extra-engineer{
+      background:#f9fafb;
+      padding:10px;
+      border:1px solid #d1d5db;
+      border-radius:8px;
+      margin-bottom:10px;
     }
   </style>
 </head>
 <body>
 
+<!-- MAIN PANEL -->
 <div class="panel">
-  <h1>Labour Planning &amp; Job Costing</h1>
-  <div class="subheading">
-    Plan labour, track actual hours per engineer, and see live progress vs cost.
-  </div>
+  <h1>Labour Planning & Job Costing</h1>
+  <div class="subheading">Track daily engineer hours, subcontractors, project cost & schedule performance.</div>
 
   <div class="form-row">
     <div class="form-group">
-      <label for="projectName">Project Name</label>
-      <input id="projectName" placeholder="e.g. Co-op Fibre Portsmouth">
+      <label>Project Name</label>
+      <input id="projectName">
     </div>
     <div class="form-group">
-      <label for="startDate">Start Date</label>
+      <label>Start Date</label>
       <input id="startDate" type="date">
     </div>
     <div class="form-group">
-      <label for="endDate">End Date</label>
+      <label>End Date</label>
       <input id="endDate" type="date">
     </div>
     <div class="form-group">
-      <label for="totalHours">Total Planned Labour (hours)</label>
-      <input id="totalHours" type="number" min="0" step="1" placeholder="e.g. 400">
+      <label>Total Planned Hours</label>
+      <input id="totalHours" type="number" min="0">
     </div>
   </div>
 
-  <div class="actions-row">
-    <button id="buildPlanBtn">Create / Rebuild Plan</button>
-    <button id="saveBtn" class="secondary" disabled>Save Plan to Server</button>
-    <span id="saveStatus"></span>
-  </div>
+  <button id="buildPlanBtn">Create / Rebuild Plan</button>
+  <button id="saveBtn" class="secondary" disabled>Save Plan to Server</button>
+  <span id="saveStatus"></span>
 
   <div id="summary" class="summary" style="display:none;"></div>
 
   <div id="tableContainer" class="scroll-box" style="display:none;">
     <table>
-      <thead>
-        <tr>
-          <th rowspan="2">Date</th>
-          <th rowspan="2">Planned<br>Hours</th>
-          <th colspan="2">Connor (£20)</th>
-          <th colspan="2">Brad (£22)</th>
-          <th colspan="2">JT (£25)</th>
-          <th colspan="2">Ryan (£15)</th>
-          <th rowspan="2">Total<br>Hours</th>
-          <th rowspan="2">Daily Cost<br>(£)</th>
-        </tr>
-        <tr>
-          <th>Hours</th><th>Night?</th>
-          <th>Hours</th><th>Night?</th>
-          <th>Hours</th><th>Night?</th>
-          <th>Hours</th><th>Night?</th>
-        </tr>
-      </thead>
+      <thead id="tableHead"></thead>
       <tbody id="planBody"></tbody>
     </table>
   </div>
 </div>
 
+<!-- SUBCONTRACTOR PANEL -->
+<div class="panel">
+  <h2>Additional Engineers / Subcontractors</h2>
+
+  <div id="extra-engineer-list"></div>
+
+  <button id="addExtraBtn">Add Additional Engineer</button>
+</div>
+
+
 <script>
-  // === CONFIG: CHANGE THIS TO MATCH YOUR WORKER ENDPOINT ===
-  const API_SAVE_URL = "https://mostlane-api.jamie-def.workers.dev/labour/save";
-  // ========================================================
+/* --------------------------------------------
+   CONFIG
+---------------------------------------------*/
+const API_SAVE_URL =
+  "https://mostlane-labour-api.jamie-def.workers.dev/save";
 
-  // Engineer config with base rates
-  const engineers = [
-    { key:"Connor", name:"Connor", rate:20 },
-    { key:"Brad",   name:"Brad",   rate:22 },
-    { key:"JT",     name:"JT",     rate:25 },
-    { key:"Ryan",   name:"Ryan",   rate:15 }
-  ];
+/* --------------------------------------------
+   NAMED ENGINEERS (fixed)
+---------------------------------------------*/
+const engineers = [
+  { key:"Connor", name:"Connor", rate:20 },
+  { key:"Brad",   name:"Brad",   rate:22 },
+  { key:"JT",     name:"JT",     rate:25 },
+  { key:"Ryan",   name:"Ryan",   rate:15 }
+];
 
-  let projectState = {
-    projectName:"",
-    startDate:null,
-    endDate:null,
-    totalHours:0,
-    plannedPerDay:0,
-    days:[],   // { dateISO }
-    metrics:{} // filled in recalcAll
+/* --------------------------------------------
+   SUBCONTRACTORS
+---------------------------------------------*/
+let extraEngineers = [];   // each = { id, name, rate }
+let nextExtraId = 1;
+
+/* --------------------------------------------
+   PROJECT STATE
+---------------------------------------------*/
+let projectState = {
+  projectName:"",
+  startDate:null,
+  endDate:null,
+  totalHours:0,
+  plannedPerDay:0,
+  days:[],
+  metrics:{}
+};
+
+/* --------------------------------------------
+   DOM ELEMENTS
+---------------------------------------------*/
+const buildBtn   = document.getElementById("buildPlanBtn");
+const saveBtn    = document.getElementById("saveBtn");
+const saveStatus = document.getElementById("saveStatus");
+const planBody   = document.getElementById("planBody");
+const tableHead  = document.getElementById("tableHead");
+const tableWrap  = document.getElementById("tableContainer");
+const summaryEl  = document.getElementById("summary");
+
+/* --------------------------------------------
+   EVENT HANDLERS
+---------------------------------------------*/
+buildBtn.addEventListener("click", buildPlan);
+document.getElementById("addExtraBtn").addEventListener("click", addExtraEngineer);
+
+/* --------------------------------------------
+   ADD ADDITIONAL ENGINEERS
+---------------------------------------------*/
+function addExtraEngineer(){
+  const id = nextExtraId++;
+
+  extraEngineers.push({
+    id,
+    name: `Engineer ${id}`,
+    rate: 20
+  });
+
+  renderExtraEngineers();
+  renderTable();
+  recalcAll();
+}
+
+function renderExtraEngineers(){
+  const container = document.getElementById("extra-engineer-list");
+  container.innerHTML = "";
+
+  extraEngineers.forEach(e => {
+    const div = document.createElement("div");
+    div.className = "extra-engineer";
+
+    div.innerHTML = `
+      <label>Name:</label>
+      <input type="text" value="${e.name}" onchange="updateExtraName(${e.id}, this.value)">
+      <label>Hourly Rate (£):</label>
+      <input type="number" step="0.5" min="0" value="${e.rate}" onchange="updateExtraRate(${e.id}, this.value)">
+      <button onclick="removeExtraEngineer(${e.id})"
+              style="background:#b91c1c;color:white;padding:4px 10px;border:none;border-radius:6px;margin-left:8px;">
+        Remove
+      </button>
+    `;
+    container.appendChild(div);
+  });
+}
+
+window.updateExtraName = function(id, value){
+  const e = extraEngineers.find(x => x.id === id);
+  if(e){ e.name = value; renderTable(); recalcAll(); }
+};
+
+window.updateExtraRate = function(id, value){
+  const e = extraEngineers.find(x => x.id === id);
+  if(e){ e.rate = Number(value); renderTable(); recalcAll(); }
+};
+
+window.removeExtraEngineer = function(id){
+  extraEngineers = extraEngineers.filter(x => x.id !== id);
+  renderExtraEngineers();
+  renderTable();
+  recalcAll();
+};
+
+/* --------------------------------------------
+   BUILD PROJECT PLAN
+---------------------------------------------*/
+function buildPlan(){
+  const name = document.getElementById("projectName").value.trim();
+  const startStr = document.getElementById("startDate").value;
+  const endStr   = document.getElementById("endDate").value;
+  const totalHours = Number(document.getElementById("totalHours").value);
+
+  if(!name || !startStr || !endStr || !totalHours){
+    alert("Please complete all fields.");
+    return;
+  }
+
+  const start = new Date(startStr);
+  const end   = new Date(endStr);
+  if(end < start){
+    alert("End date cannot be before start date.");
+    return;
+  }
+
+  const days = [];
+  let d = new Date(start);
+  while(d <= end){
+    days.push({ dateISO: d.toISOString().slice(0,10) });
+    d.setDate(d.getDate() + 1);
+  }
+
+  projectState = {
+    projectName:name,
+    startDate:start,
+    endDate:end,
+    totalHours,
+    plannedPerDay: totalHours / days.length,
+    days,
+    metrics:{}
   };
 
-  const buildBtn   = document.getElementById("buildPlanBtn");
-  const saveBtn    = document.getElementById("saveBtn");
-  const bodyEl     = document.getElementById("planBody");
-  const tableWrap  = document.getElementById("tableContainer");
-  const summaryEl  = document.getElementById("summary");
-  const saveStatus = document.getElementById("saveStatus");
+  renderTable();
+  recalcAll();
+  saveBtn.disabled = false;
+}
 
-  buildBtn.addEventListener("click", buildPlan);
-  saveBtn.addEventListener("click", savePlan);
 
-  function buildPlan(){
-    const name = document.getElementById("projectName").value.trim();
-    const startStr = document.getElementById("startDate").value;
-    const endStr   = document.getElementById("endDate").value;
-    const totalHours = Number(document.getElementById("totalHours").value);
+/* --------------------------------------------
+   RENDER TABLE WITH MAIN + SUBCONTRACTORS
+---------------------------------------------*/
+function renderTable(){
 
-    if(!name || !startStr || !endStr || !totalHours || totalHours <= 0){
-      alert("Please enter project name, dates and total planned hours.");
-      return;
-    }
-
-    const start = new Date(startStr);
-    const end   = new Date(endStr);
-    if(isNaN(start) || isNaN(end) || end < start){
-      alert("Please check the start and end dates.");
-      return;
-    }
-
-    // Build day list
-    const days = [];
-    let d = new Date(start);
-    while(d <= end){
-      days.push({
-        dateISO: d.toISOString().slice(0,10)
-      });
-      d.setDate(d.getDate() + 1);
-    }
-
-    const plannedPerDay = totalHours / days.length;
-
-    projectState = {
-      projectName:name,
-      startDate:start,
-      endDate:end,
-      totalHours,
-      plannedPerDay,
-      days,
-      metrics:{}
-    };
-
-    renderTable();
-    recalcAll();
-    saveBtn.disabled = false;
-    saveStatus.textContent = "";
+  if(projectState.days.length === 0){
+    tableWrap.style.display = "none";
+    return;
   }
 
-  function renderTable(){
-    bodyEl.innerHTML = "";
-    if(!projectState.days.length){
-      tableWrap.style.display = "none";
-      summaryEl.style.display = "none";
-      saveBtn.disabled = true;
-      return;
-    }
-    tableWrap.style.display = "block";
+  tableWrap.style.display = "block";
 
-    projectState.days.forEach(dayObj => {
-      const dateISO = dayObj.dateISO;
-      const date = new Date(dateISO);
-      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+  /* Build Table Header */
+  let headHTML = `
+    <tr>
+      <th rowspan="2">Date</th>
+      <th rowspan="2">Planned<br>Hours</th>
+  `;
 
-      const tr = document.createElement("tr");
-      tr.dataset.date = dateISO;
+  // Main engineers
+  engineers.forEach(e=>{
+    headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
+  });
 
-      const pretty = date.toLocaleDateString("en-GB", { weekday:"short", day:"2-digit", month:"2-digit" });
+  // Extra engineers
+  extraEngineers.forEach(e=>{
+    headHTML += `<th colspan="2">${e.name} (£${e.rate})</th>`;
+  });
 
-      const tdDate = document.createElement("td");
-      tdDate.textContent = pretty;
-      tr.appendChild(tdDate);
+  headHTML += `
+      <th rowspan="2">Total<br>Hours</th>
+      <th rowspan="2">Daily<br>Cost (£)</th>
+    </tr>
+    <tr>
+  `;
 
-      const tdPlanned = document.createElement("td");
-      tdPlanned.className = "planned-cell";
-      tdPlanned.textContent = projectState.plannedPerDay.toFixed(1);
-      tr.appendChild(tdPlanned);
+  // Night columns
+  [...engineers, ...extraEngineers].forEach(()=>{
+    headHTML += `<th>Hrs</th><th>Night?</th>`;
+  });
 
-      engineers.forEach(engineer => {
-        const tdHours = document.createElement("td");
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.step = "0.5";
-        input.className = "hours-input";
-        input.dataset.engineer = engineer.key;
-        input.dataset.date = dateISO;
-        input.addEventListener("input", recalcAll);
-        tdHours.appendChild(input);
-        tr.appendChild(tdHours);
+  headHTML += `</tr>`;
+  tableHead.innerHTML = headHTML;
 
-        const tdNight = document.createElement("td");
-        const label = document.createElement("label");
-        label.className = "night-label";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.className = "night-checkbox";
-        cb.dataset.engineer = engineer.key;
-        cb.dataset.date = dateISO;
-        cb.addEventListener("change", recalcAll);
-        label.appendChild(cb);
-        const span = document.createElement("span");
-        span.textContent = "Night";
-        label.appendChild(span);
-        tdNight.appendChild(label);
-        tr.appendChild(tdNight);
+  /* Build Rows */
+  planBody.innerHTML = "";
 
-        if(isWeekend){
-          // purely visual hint; cost logic uses weekend rule automatically
-          tdNight.style.backgroundColor = "#fef3c7";
-        }
-      });
+  projectState.days.forEach(day => {
+    const dateISO = day.dateISO;
+    const dateObj = new Date(dateISO);
 
-      const tdTotalHours = document.createElement("td");
-      tdTotalHours.className = "day-total-hours";
-      tdTotalHours.textContent = "0.0";
-      tr.appendChild(tdTotalHours);
-
-      const tdCost = document.createElement("td");
-      tdCost.className = "day-cost";
-      tdCost.textContent = "0.00";
-      tr.appendChild(tdCost);
-
-      bodyEl.appendChild(tr);
-    });
-  }
-
-  function recalcAll(){
-    if(!projectState.days.length) return;
-
-    let cumPlanned = 0;
-    let cumActual  = 0;
-    let cumCost    = 0;
-
-    let lastDateWithData = null;
-    let daysWithHours    = 0;
-
-    const rows = Array.from(bodyEl.querySelectorAll("tr"));
-
-    rows.forEach(row => {
-      const dateISO = row.dataset.date;
-      const date    = new Date(dateISO);
-      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
-
-      const plannedCell = row.querySelector(".planned-cell");
-      const planned = Number(plannedCell.textContent) || 0;
-      cumPlanned += planned;
-
-      let dayHours = 0;
-      let dayCost  = 0;
-
-      engineers.forEach(engineer => {
-        const hoursInput = row.querySelector(`.hours-input[data-engineer="${engineer.key}"]`);
-        const nightCb    = row.querySelector(`.night-checkbox[data-engineer="${engineer.key}"]`);
-        const hrs = Number(hoursInput.value) || 0;
-        const isNight = nightCb && nightCb.checked;
-
-        if(hrs > 0){
-          const { cost } = calcEngineerDayCost(hrs, engineer.rate, isWeekend, isNight);
-          dayHours += hrs;
-          dayCost  += cost;
-        }
-      });
-
-      if(dayHours > 0){
-        lastDateWithData = date;
-        daysWithHours++;
-      }
-
-      cumActual += dayHours;
-      cumCost   += dayCost;
-
-      const totalCell = row.querySelector(".day-total-hours");
-      const costCell  = row.querySelector(".day-cost");
-      totalCell.textContent = dayHours.toFixed(1);
-      costCell.textContent  = dayCost.toFixed(2);
+    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+    const pretty = dateObj.toLocaleDateString("en-GB", {
+      weekday:"short", day:"2-digit", month:"2-digit"
     });
 
-    // Schedule performance
-    let statusText = "";
-    let statusClass = "";
-    let spiText = "N/A";
-    let spiVal = null;
+    const tr = document.createElement("tr");
+    tr.dataset.date = dateISO;
 
-    if(cumPlanned > 0 && cumActual > 0){
-      const spi = cumActual / cumPlanned;
-      spiVal = spi;
-      spiText = spi.toFixed(2);
-      if(spi > 1.05){
-        statusText = "Ahead of schedule";
-        statusClass = "status-good";
-      }else if(spi < 0.95){
-        statusText = "Behind schedule";
-        statusClass = "status-bad";
-      }else{
-        statusText = "Roughly on schedule";
-        statusClass = "status-good";
-      }
-    }else{
-      statusText = "No actual hours entered yet.";
-      statusClass = "";
-    }
-
-    // Forecast finish date
-    let forecastLine = "Not enough data to forecast finish date yet.";
-    let forecastEndISO = null;
-
-    if(daysWithHours > 0 && cumActual > 0){
-      const avgDaily = cumActual / daysWithHours;
-      const remainingHours = Math.max(projectState.totalHours - cumActual, 0);
-      if(avgDaily > 0 && remainingHours > 0){
-        const remainingDays = Math.ceil(remainingHours / avgDaily);
-        const base = lastDateWithData || projectState.startDate;
-        const forecastEnd = new Date(base);
-        forecastEnd.setDate(forecastEnd.getDate() + remainingDays);
-        const plannedEnd = projectState.endDate;
-
-        const forecastStr = forecastEnd.toLocaleDateString("en-GB");
-        const plannedStr  = plannedEnd.toLocaleDateString("en-GB");
-        forecastEndISO = forecastEnd.toISOString().slice(0,10);
-
-        if(forecastEnd > plannedEnd){
-          forecastLine = `⚠ Forecast finish: ${forecastStr} (later than planned end ${plannedStr}) – at current pace you will not make the date.`;
-        }else{
-          forecastLine = `✅ Forecast finish: ${forecastStr} (on or before planned end ${plannedStr}) at current pace.`;
-        }
-      }else if(remainingHours === 0){
-        forecastLine = "✅ All planned hours delivered – project complete on labour basis.";
-      }
-    }
-
-    summaryEl.style.display = "block";
-    summaryEl.innerHTML = `
-      <div><b>Project:</b> ${projectState.projectName}</div>
-      <div><b>Total Planned Hours:</b> ${projectState.totalHours.toFixed(1)}</div>
-      <div><b>Planned Hours To Date:</b> ${cumPlanned.toFixed(1)}</div>
-      <div><b>Actual Hours Entered:</b> ${cumActual.toFixed(1)}</div>
-      <div><b>Total Labour Cost So Far:</b> £${cumCost.toFixed(2)}</div>
-      <div><b>Schedule Performance Index (SPI):</b> ${spiText} 
-        ${statusText ? `<span class="${statusClass}"> – ${statusText}</span>` : ""}</div>
-      <div style="margin-top:6px;">${forecastLine}</div>
+    tr.innerHTML = `
+      <td>${pretty}</td>
+      <td class="planned-cell">${projectState.plannedPerDay.toFixed(1)}</td>
     `;
 
-    projectState.metrics = {
-      cumPlanned,
-      cumActual,
-      cumCost,
-      spi: spiVal,
-      spiText,
-      statusText,
-      statusClass,
-      forecastEndISO,
-      forecastLine
+    function appendEngineerCells(e, prefix, id=null){
+      const engKey = prefix + (id ? id : e.key);
+
+      tr.innerHTML += `
+        <td><input type="number" min="0" step="0.5"
+              class="hours-input"
+              data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}"></td>
+        <td><label class="night-label">
+              <input type="checkbox"
+                     class="night-checkbox"
+                     data-eng="${engKey}" data-rate="${e.rate}" data-date="${dateISO}">
+              Night
+            </label></td>
+      `;
+    }
+
+    // Named engineers
+    engineers.forEach(e => appendEngineerCells(e, "main_"));
+
+    // Extra engineers
+    extraEngineers.forEach(e => appendEngineerCells(e, "extra_", e.id));
+
+    tr.innerHTML += `
+      <td class="day-total-hours">0.0</td>
+      <td class="day-cost">0.00</td>
+    `;
+
+    planBody.appendChild(tr);
+  });
+}
+
+/* --------------------------------------------
+   COST LOGIC (same rules for all engineers)
+---------------------------------------------*/
+function calcCost(hours, rate, isWeekend, isNight){
+  if(hours <= 0) return { normal:0, ot:0, cost:0 };
+
+  /* Weekend OR night → all OT */
+  if(isWeekend || isNight){
+    return {
+      normal:0,
+      ot:hours,
+      cost: hours * rate * 1.5
     };
   }
 
-  // Core OT cost calculation:
-  // - Weekends: all hours at 1.5x
-  // - Weekdays:
-  //    - if isNight = true → all hours at 1.5x
-  //    - else → first 10h at base, remaining at 1.5x
-  function calcEngineerDayCost(hours, baseRate, isWeekend, isNight){
-    let normalHours = 0;
-    let otHours = 0;
-
-    if(isWeekend || isNight){
-      // All OT
-      otHours = hours;
-    }else{
-      if(hours > 10){
-        normalHours = 10;
-        otHours = hours - 10;
-      }else{
-        normalHours = hours;
-      }
-    }
-
-    const normalCost = normalHours * baseRate;
-    const otCost     = otHours * baseRate * 1.5;
-    const cost       = normalCost + otCost;
-
-    return { normalHours, otHours, cost };
+  /* Weekday normal rules */
+  if(hours > 10){
+    return {
+      normal:10,
+      ot: hours - 10,
+      cost: (10 * rate) + ((hours - 10) * rate * 1.5)
+    };
   }
 
-  function collectPayload(){
-    if(!projectState.days.length){
-      return null;
+  return {
+    normal:hours,
+    ot:0,
+    cost: hours * rate
+  };
+}
+
+/* --------------------------------------------
+   RECALCULATE EVERYTHING
+---------------------------------------------*/
+function recalcAll(){
+  if(!projectState.days.length) return;
+
+  let cumPlanned = 0;
+  let cumActual  = 0;
+  let cumCost    = 0;
+
+  let lastDateWithData = null;
+  let daysWithHours    = 0;
+
+  [...planBody.querySelectorAll("tr")].forEach(row => {
+    const dateISO = row.dataset.date;
+    const dateObj = new Date(dateISO);
+    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+
+    const planned = Number(row.querySelector(".planned-cell").textContent);
+
+    cumPlanned += planned;
+
+    let dayHours = 0;
+    let dayCost  = 0;
+
+    // ALL ENGINEERS (main + extra)
+    row.querySelectorAll(".hours-input").forEach(input => {
+      const hrs = Number(input.value) || 0;
+      const engRate = Number(input.dataset.rate);
+      const engKey  = input.dataset.eng;
+      const nightCheckbox = row.querySelector(`.night-checkbox[data-eng="${engKey}"]`);
+      const isNight = nightCheckbox && nightCheckbox.checked;
+
+      const costObj = calcCost(hrs, engRate, isWeekend, isNight);
+      dayHours += hrs;
+      dayCost  += costObj.cost;
+    });
+
+    if(dayHours > 0){
+      lastDateWithData = dateObj;
+      daysWithHours++;
     }
 
-    const rows = Array.from(bodyEl.querySelectorAll("tr"));
-    const dayEntries = rows.map(row => {
-      const dateISO = row.dataset.date;
-      const date    = new Date(dateISO);
-      const isWeekend = (date.getDay() === 0 || date.getDay() === 6);
+    cumActual += dayHours;
+    cumCost   += dayCost;
 
-      const planned = Number(row.querySelector(".planned-cell").textContent) || 0;
-      const totalHours = Number(row.querySelector(".day-total-hours").textContent) || 0;
-      const totalCost  = Number(row.querySelector(".day-cost").textContent) || 0;
+    row.querySelector(".day-total-hours").textContent = dayHours.toFixed(1);
+    row.querySelector(".day-cost").textContent = dayCost.toFixed(2);
+  });
 
-      const engineersData = {};
-      engineers.forEach(engineer => {
-        const hoursInput = row.querySelector(`.hours-input[data-engineer="${engineer.key}"]`);
-        const nightCb    = row.querySelector(`.night-checkbox[data-engineer="${engineer.key}"]`);
-        const hrs = Number(hoursInput.value) || 0;
-        const isNight = nightCb && nightCb.checked;
+  /* SPI + forecast */
+  let statusText = "No hours entered yet.";
+  let statusClass = "";
+  let spi = null;
 
-        let normalHours = 0;
-        let otHours = 0;
-        let cost = 0;
+  if(cumActual > 0){
+    spi = cumActual / cumPlanned;
+    if(spi > 1.05){
+      statusText = "Ahead of schedule";
+      statusClass = "status-good";
+    } else if (spi < 0.95){
+      statusText = "Behind schedule";
+      statusClass = "status-bad";
+    } else {
+      statusText = "On schedule";
+      statusClass = "status-good";
+    }
+  }
 
-        if(hrs > 0){
-          const calc = calcEngineerDayCost(hrs, engineer.rate, isWeekend, isNight);
-          normalHours = calc.normalHours;
-          otHours = calc.otHours;
-          cost = calc.cost;
-        }
+  let forecastLine = "Not enough data to forecast.";
+  let forecastEndISO = null;
 
-        engineersData[engineer.key] = {
-          hours: hrs,
-          isNight,
-          normalHours,
-          otHours,
-          cost
-        };
-      });
+  if(daysWithHours > 0 && cumActual > 0){
+    const avg = cumActual / daysWithHours;
+    const remaining = Math.max(projectState.totalHours - cumActual, 0);
 
-      return {
-        date: dateISO,
-        plannedHours: planned,
-        totalHours,
-        totalCost,
-        engineers: engineersData
+    if(avg > 0 && remaining > 0){
+      const daysLeft = Math.ceil(remaining / avg);
+      const start = lastDateWithData || projectState.startDate;
+      const f = new Date(start);
+      f.setDate(f.getDate() + daysLeft);
+      forecastEndISO = f.toISOString().slice(0,10);
+
+      if(f > projectState.endDate){
+        forecastLine = `⚠ Project will finish late (${f.toLocaleDateString("en-GB")}).`;
+      } else {
+        forecastLine = `✅ Project expected to finish by ${f.toLocaleDateString("en-GB")}.`;
+      }
+    }
+  }
+
+  summaryEl.style.display = "block";
+  summaryEl.innerHTML = `
+    <div><b>Total Planned:</b> ${projectState.totalHours}h</div>
+    <div><b>Actual Hours:</b> ${cumActual.toFixed(1)}h</div>
+    <div><b>Total Cost So Far:</b> £${cumCost.toFixed(2)}</div>
+    <div><b>SPI:</b> ${spi ? spi.toFixed(2) : "N/A"} 
+      <span class="${statusClass}"> – ${statusText}</span></div>
+    <div>${forecastLine}</div>
+  `;
+
+  projectState.metrics = {
+    cumPlanned,
+    cumActual,
+    cumCost,
+    spi,
+    forecastEndISO
+  };
+}
+
+/* --------------------------------------------
+   SAVE PAYLOAD
+---------------------------------------------*/
+async function savePlan(){
+  saveBtn.disabled = true;
+  saveStatus.textContent = "Saving…";
+
+  const rows = [...planBody.querySelectorAll("tr")];
+
+  const days = rows.map(row=>{
+    const dateISO = row.dataset.date;
+    const dateObj = new Date(dateISO);
+    const isWeekend = (dateObj.getDay() === 0 || dateObj.getDay() === 6);
+
+    const planned = Number(row.querySelector(".planned-cell").textContent);
+    const totalHours = Number(row.querySelector(".day-total-hours").textContent);
+    const totalCost  = Number(row.querySelector(".day-cost").textContent);
+
+    // MAIN ENGINEERS
+    const main = {};
+    engineers.forEach(e=>{
+      const hrs = Number(row.querySelector(`.hours-input[data-eng="main_${e.key}"]`)?.value || 0);
+      const night = row.querySelector(`.night-checkbox[data-eng="main_${e.key}"]`)?.checked || false;
+      const costObj = calcCost(hrs, e.rate, isWeekend, night);
+
+      main[e.key] = {
+        name: e.name,
+        rate: e.rate,
+        hours: hrs,
+        night,
+        normalHours: costObj.normal,
+        otHours: costObj.ot,
+        cost: costObj.cost
       };
     });
 
-    const payload = {
-      projectName: projectState.projectName,
-      startDate: document.getElementById("startDate").value,
-      endDate: document.getElementById("endDate").value,
-      totalPlannedHours: projectState.totalHours,
-      plannedPerDay: projectState.plannedPerDay,
-      engineers: engineers.reduce((acc,e) => {
-        acc[e.key] = { name:e.name, baseRate:e.rate };
-        return acc;
-      },{}),
-      metrics: projectState.metrics,
-      days: dayEntries,
-      savedAt: new Date().toISOString()
+    // EXTRA ENGINEERS
+    const extra = {};
+    extraEngineers.forEach(ex=>{
+      const key = `extra_${ex.id}`;
+      const hrs = Number(row.querySelector(`.hours-input[data-eng="${key}"]`)?.value || 0);
+      const night = row.querySelector(`.night-checkbox[data-eng="${key}"]`)?.checked || false;
+      const costObj = calcCost(hrs, ex.rate, isWeekend, night);
+
+      extra[ex.id] = {
+        name: ex.name,
+        rate: ex.rate,
+        hours: hrs,
+        night,
+        normalHours: costObj.normal,
+        otHours: costObj.ot,
+        cost: costObj.cost
+      };
+    });
+
+    return {
+      date: dateISO,
+      plannedHours: planned,
+      totalHours,
+      totalCost,
+      mainEngineers: main,
+      extraEngineers: extra
     };
+  });
 
-    return payload;
-  }
+  const payload = {
+    projectName: projectState.projectName,
+    startDate: document.getElementById("startDate").value,
+    endDate: document.getElementById("endDate").value,
+    totalPlannedHours: projectState.totalHours,
+    plannedPerDay: projectState.plannedPerDay,
+    namedEngineers: engineers,
+    extraEngineers,
+    metrics: projectState.metrics,
+    days,
+    savedAt: new Date().toISOString()
+  };
 
-  async function savePlan(){
-    const payload = collectPayload();
-    if(!payload){
-      alert("Nothing to save yet.");
-      return;
+  try{
+    const res = await fetch(API_SAVE_URL, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
+
+    if(!res.ok){
+      throw new Error("Save failed");
     }
 
-    saveBtn.disabled = true;
-    saveStatus.textContent = "Saving…";
-
-    try{
-      const res = await fetch(API_SAVE_URL, {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if(!res.ok){
-        throw new Error("HTTP " + res.status);
-      }
-
-      saveStatus.textContent = "Saved successfully.";
-    }catch(err){
-      console.error(err);
-      saveStatus.textContent = "Error saving plan.";
-    }finally{
-      saveBtn.disabled = false;
-    }
+    saveStatus.textContent = "Saved!";
+  } catch(err){
+    saveStatus.textContent = "Error saving.";
   }
+
+  saveBtn.disabled = false;
+}
+
+saveBtn.addEventListener("click", savePlan);
 </script>
 
 </body>
