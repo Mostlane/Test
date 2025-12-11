@@ -29,9 +29,64 @@
     }
     .shell{
       max-width:1200px;
-      margin:32px auto;
+      margin:24px auto 32px;
       padding:0 16px;
     }
+
+    /* -------- HERO + KPI TILES (mock-up style) -------- */
+    .hero{
+      background:var(--ml-blue);
+      border-radius:24px;
+      padding:18px 18px 20px;
+      box-shadow:0 18px 32px rgba(0,0,0,0.35);
+      color:#e5ecff;
+      margin-bottom:18px;
+    }
+    .hero-logo{
+      display:flex;
+      justify-content:flex-start;
+      align-items:center;
+      margin-bottom:16px;
+    }
+    .hero-logo img{
+      height:30px;
+      width:auto;
+      display:block;
+    }
+    .hero-sub{
+      font-size:12px;
+      opacity:0.85;
+      margin-left:4px;
+      margin-bottom:10px;
+    }
+    .kpi-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:10px;
+    }
+    .kpi-card{
+      background:#f9fafb;
+      border-radius:18px;
+      padding:10px 12px;
+      box-shadow:0 6px 14px rgba(0,0,0,0.22);
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      color:#111827;
+    }
+    .kpi-label{
+      font-size:12px;
+      color:#4b5563;
+      margin-bottom:2px;
+    }
+    .kpi-value{
+      font-size:24px;
+      font-weight:700;
+      line-height:1.1;
+      color:#111827;
+    }
+
+    /* card that holds filters + list */
     .card{
       background:var(--panel);
       border-radius:14px;
@@ -44,14 +99,19 @@
       align-items:center;
       justify-content:space-between;
       gap:12px;
-      padding:16px 20px;
+      padding:12px 20px;
       border-bottom:1px solid #e5e7eb;
       background:linear-gradient(90deg,#ffffff,#f3f4f6);
     }
     header.main-header h1{
       margin:0;
-      font-size:20px;
+      font-size:18px;
       color:var(--ml-blue);
+    }
+    .header-main-sub{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
     }
     .header-right{
       display:flex;
@@ -155,6 +215,7 @@
       width:100%;
       overflow-x:auto;
       -webkit-overflow-scrolling:touch;
+      margin-bottom:8px;
     }
 
     table{
@@ -245,6 +306,56 @@
       margin-top:8px;
       font-size:12px;
       color:var(--muted);
+    }
+
+    /* ---------- MOBILE JOB CARDS ---------- */
+    .job-cards{
+      display:none;
+      flex-direction:column;
+      gap:8px;
+      margin-bottom:8px;
+    }
+    .job-card{
+      background:#ffffff;
+      border-radius:12px;
+      padding:10px 12px;
+      box-shadow:0 4px 10px rgba(15,23,42,0.12);
+      border:1px solid #e5e7eb;
+    }
+    .job-card-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:4px;
+      gap:6px;
+    }
+    .job-card-ref{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .job-card-title{
+      font-size:13px;
+      font-weight:600;
+      margin-bottom:2px;
+    }
+    .job-card-site{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .job-card-meta{
+      display:flex;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      gap:4px;
+      margin-top:6px;
+      align-items:center;
+    }
+    .job-card-actions{
+      display:flex;
+      gap:4px;
+      margin-top:8px;
+      flex-wrap:wrap;
     }
 
     /* ---------- MODALS ---------- */
@@ -343,16 +454,50 @@
       table{
         font-size:12px;
       }
+      /* hide table, show cards on mobile */
+      .table-wrapper{
+        display:none;
+      }
+      .job-cards{
+        display:flex;
+      }
     }
   </style>
 </head>
 <body>
 <div class="shell">
+
+  <!-- HERO HEADER WITH LOGO + KPI TILES -->
+  <section class="hero">
+    <div class="hero-logo">
+      <img src="Mostlane Logo.jpg" alt="Mostlane">
+    </div>
+    <div class="hero-sub">Live SLA overview • Powered by Mostlane SLA Worker</div>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Open Jobs</div>
+        <div class="kpi-value" id="kpiOpenJobs">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Due Today</div>
+        <div class="kpi-value" id="kpiDueToday">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Overdue</div>
+        <div class="kpi-value" id="kpiOverdue">0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">SLA at Risk</div>
+        <div class="kpi-value" id="kpiAtRisk">0</div>
+      </div>
+    </div>
+  </section>
+
   <div class="card">
     <header class="main-header">
       <div>
         <h1>SLA Tracker</h1>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+        <div class="header-main-sub">
           Live countdown for open jobs • Data: mostlane-sla Worker
         </div>
       </div>
@@ -398,23 +543,27 @@
         </div>
       </div>
 
+      <!-- DESKTOP TABLE VIEW -->
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr>
-              <th style="width:80px;">Ref</th>
-              <th style="width:110px;">Priority</th>
-              <th>Description / Site</th>
-              <th style="width:130px;">Raised</th>
-              <th style="width:130px;">SLA Target</th>
-              <th style="width:130px;">Time Left</th>
-              <th style="width:120px;">Status</th>
-              <th style="width:120px;">Actions</th>
-            </tr>
+          <tr>
+            <th style="width:80px;">Ref</th>
+            <th style="width:110px;">Priority</th>
+            <th>Description / Site</th>
+            <th style="width:130px;">Raised</th>
+            <th style="width:130px;">SLA Target</th>
+            <th style="width:130px;">Time Left</th>
+            <th style="width:120px;">Status</th>
+            <th style="width:120px;">Actions</th>
+          </tr>
           </thead>
           <tbody id="jobsTbody"></tbody>
         </table>
       </div>
+
+      <!-- MOBILE CARD VIEW -->
+      <div id="jobCards" class="job-cards"></div>
 
       <div id="statusBar">Loading jobs…</div>
     </div>
@@ -452,7 +601,7 @@
           <option value="Closed">Closed</option>
         </select>
       </div>
-      <!-- NEW: Engineer + scheduled date/time inside UPDATE modal -->
+      <!-- Engineer + scheduled date/time inside UPDATE modal -->
       <div class="field">
         <label for="updateModalEngineer">Engineer Assigned</label>
         <select id="updateModalEngineer">
@@ -467,7 +616,6 @@
         <label for="updateModalTime">Scheduled Time</label>
         <input type="time" id="updateModalTime">
       </div>
-      <!-- /NEW -->
       <div class="field">
         <label for="updateModalNote">Event / Notes (history log)</label>
         <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
@@ -552,7 +700,7 @@ function fmtDateTimeShort(d){
   });
 }
 
-// NEW: split ISO → {date, time} for inputs
+// split ISO → {date, time} for inputs
 function isoToDateAndTime(iso){
   if(!iso) return {date:"", time:""};
   const d = new Date(iso);
@@ -706,14 +854,56 @@ function isCompleted(job){
 }
 
 /* =========================
-   RENDER TABLE
+   KPI UPDATE
+   ========================= */
+function updateKpis(){
+  const openElem = $("kpiOpenJobs");
+  const dueElem = $("kpiDueToday");
+  const overElem = $("kpiOverdue");
+  const riskElem = $("kpiAtRisk");
+  if(!openElem || !dueElem || !overElem || !riskElem) return;
+
+  const now = new Date();
+  let open = 0, dueToday = 0, overdue = 0, atRisk = 0;
+
+  allJobs.forEach(job => {
+    if(isCompleted(job)) return;
+
+    open++;
+    const slaInfo = computeSlaCountdown(job.slaTarget);
+    const t = parseDate(job.slaTarget);
+
+    if(t &&
+       t.getFullYear() === now.getFullYear() &&
+       t.getMonth() === now.getMonth() &&
+       t.getDate() === now.getDate()){
+      dueToday++;
+    }
+
+    if(slaInfo.status === "overdue"){
+      overdue++;
+    } else if(slaInfo.status === "warn" || slaInfo.status === "overdueSoon"){
+      atRisk++;
+    }
+  });
+
+  openElem.textContent = open;
+  dueElem.textContent = dueToday;
+  overElem.textContent = overdue;
+  riskElem.textContent = atRisk;
+}
+
+/* =========================
+   RENDER TABLE + CARDS
    ========================= */
 function render(){
   const tbody = $("jobsTbody");
   const wrapper = document.querySelector(".table-wrapper");
+  const cardsContainer = $("jobCards");
   const prevScrollLeft = wrapper ? wrapper.scrollLeft : 0;
 
-  tbody.innerHTML = "";
+  if(tbody) tbody.innerHTML = "";
+  if(cardsContainer) cardsContainer.innerHTML = "";
 
   const openJobs = allJobs.filter(j => !isCompleted(j));
   const completedJobs = allJobs.filter(j => isCompleted(j));
@@ -763,43 +953,83 @@ function render(){
     const raised = parseDate(job.raisedAt);
     const slaInfo = computeSlaCountdown(job.slaTarget);
 
-    const tr = document.createElement("tr");
-    tr.dataset.jobId = job.id || "";
+    // TABLE ROW (desktop)
+    if(tbody){
+      const tr = document.createElement("tr");
+      tr.dataset.jobId = job.id || "";
 
-    tr.innerHTML = `
-      <td>
-        <div class="ref">${job.reference}</div>
-        ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
-      </td>
-      <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
-      <td>
-        <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
-        <div class="small muted">${job.site || ""}</div>
-      </td>
-      <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
-      <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
-      <td class="small nowrap">
-        <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-          ${slaInfo.text}
-        </span>
-      </td>
-      <td class="small">
-        <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
-      </td>
-      <td>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      tr.innerHTML = `
+        <td>
+          <div class="ref">${job.reference}</div>
+          ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
+        </td>
+        <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
+        <td>
+          <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
+          <div class="small muted">${job.site || ""}</div>
+        </td>
+        <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
+        <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
+        <td class="small nowrap">
+          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
+            ${slaInfo.text}
+          </span>
+        </td>
+        <td class="small">
+          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
+        </td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+            <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    // MOBILE CARD
+    if(cardsContainer){
+      const card = document.createElement("div");
+      card.className = "job-card";
+      card.dataset.jobId = job.id || "";
+
+      card.innerHTML = `
+        <div class="job-card-header">
+          <div class="job-card-ref">
+            <span class="ref">${job.reference}</span>
+            ${job.engineer ? `<span class="small muted">${job.engineer}</span>` : ""}
+          </div>
+          <div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div>
+        </div>
+        <div class="job-card-title">${job.description || ""}</div>
+        <div class="job-card-site">${job.site || ""}</div>
+        <div class="job-card-meta">
+          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
+            ${slaInfo.text}
+          </span>
+          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
+        </div>
+        <div class="job-card-meta small muted">
+          <span>Raised: ${fmtDateTimeShort(raised)}</span>
+          <span>SLA: ${fmtDateTimeShort(parseDate(job.slaTarget))}</span>
+        </div>
+        <div class="job-card-actions">
           <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
           <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
         </div>
-      </td>
-    `;
-    tbody.appendChild(tr);
+      `;
+      cardsContainer.appendChild(card);
+    }
   }
 
-  // restore horizontal scroll position to stop snapback on mobile
+  // restore horizontal scroll position on desktop
   if(wrapper){
     wrapper.scrollLeft = prevScrollLeft;
   }
+
+  // update KPI tiles
+  updateKpis();
 
   startCountdownLoop();
 }
@@ -871,7 +1101,6 @@ function openUpdateModal(jobId){
     statusSelect.value = "In Progress";
   }
 
-  // NEW: populate engineer + scheduled date/time
   ensureUsersLoaded().then(() => {
     populateUpdateEngineerSelect(job.engineer || "");
   });
@@ -879,7 +1108,6 @@ function openUpdateModal(jobId){
   const dt = isoToDateAndTime(job.scheduledAt);
   $("updateModalDate").value = dt.date;
   $("updateModalTime").value = dt.time;
-  // /NEW
 
   $("updateModalNote").value = "";
   $("updateModalStatusText").textContent = "";
@@ -923,7 +1151,6 @@ async function saveUpdateModal(){
       changedBy: user
     };
 
-    // NEW: include engineer & scheduledAt in PATCH
     if(engineer){
       payload.assignedTo = engineer;
     } else {
@@ -934,7 +1161,6 @@ async function saveUpdateModal(){
     } else {
       payload.scheduledAt = null;
     }
-    // /NEW
 
     const res = await fetch(
       SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
@@ -968,14 +1194,12 @@ async function ensureUsersLoaded(){
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
     const data = await res.json();
 
-    /* FIX — Your API returns `Users` with a capital U */
     if (Array.isArray(data.Users)) {
       cachedUsers = data.Users.map(u => ({
         username: u.Username,
         displayName: `${u.FirstName} ${u.LastName}`.trim()
       })).filter(u => u.username);
     }
-    /* fallback handling */
     else if (Array.isArray(data.users)) {
       cachedUsers = data.users.map(u => ({
         username: u.username || u.user || "",
@@ -1021,11 +1245,9 @@ function populateEngineerSelect(){
     opt.textContent = u.displayName;
     sel.appendChild(opt);
   });
-
-  // If current logged-in user is in list, we could auto-select them if you ever want that
 }
 
-// NEW: populate engineer dropdown in UPDATE modal
+// populate engineer dropdown in UPDATE modal
 function populateUpdateEngineerSelect(selected){
   const sel = $("updateModalEngineer");
   if(!sel) return;
@@ -1049,6 +1271,7 @@ function populateUpdateEngineerSelect(selected){
     sel.value = selected;
   }
 }
+
 /* =========================
    ASSIGN MODAL
    ========================= */
@@ -1062,7 +1285,7 @@ function defaultDateAndTime(){
   const hh = String(now.getHours()).padStart(2,"0");
   const min = now.getMinutes();
   const roundedMin = Math.round(min/15)*15;
-  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0"); // keep simple
+  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0");
   const timeStr = `${hh}:${mmStr}`;
 
   return {dateStr, timeStr};
@@ -1080,7 +1303,6 @@ async function openAssignModal(jobId){
   await ensureUsersLoaded();
   populateEngineerSelect();
 
-  // Pre-select existing assignedTo if present
   const sel = $("assignEngineerSelect");
   if(job.engineer){
     Array.from(sel.options).forEach(opt => {
@@ -1092,7 +1314,6 @@ async function openAssignModal(jobId){
     sel.value = "";
   }
 
-  // Default date/time
   const {dateStr, timeStr} = defaultDateAndTime();
   $("assignDate").value = dateStr;
   $("assignTime").value = timeStr;
@@ -1127,7 +1348,6 @@ async function saveAssignModal(){
     return;
   }
 
-  // scheduledAt stored as ISO
   const scheduledAt = new Date(date + "T" + time + ":00").toISOString();
 
   $("assignModalStatusText").textContent = "Assigning…";
@@ -1165,6 +1385,22 @@ async function saveAssignModal(){
 /* =========================
    EVENTS + INIT
    ========================= */
+function handleJobActionClick(e){
+  const btn = e.target.closest("button[data-action]");
+  if(!btn) return;
+  const action = btn.dataset.action;
+  const container = e.currentTarget;
+  const rowOrCard = e.target.closest("[data-job-id]");
+  const id = rowOrCard && rowOrCard.dataset.jobId;
+  if(!id) return;
+
+  if(action === "update"){
+    openUpdateModal(id);
+  } else if(action === "assign"){
+    openAssignModal(id);
+  }
+}
+
 function initEvents(){
   $("tabOpen").addEventListener("click", () => {
     showingCompleted = false;
@@ -1192,20 +1428,8 @@ function initEvents(){
   $("statusFilter").addEventListener("change", render);
   $("searchBox").addEventListener("input", render);
 
-  $("jobsTbody").addEventListener("click", e => {
-    const btn = e.target.closest("button[data-action]");
-    if(!btn) return;
-    const action = btn.dataset.action;
-    const tr = e.target.closest("tr");
-    const id = tr && tr.dataset.jobId;
-    if(!id) return;
-
-    if(action === "update"){
-      openUpdateModal(id);
-    } else if(action === "assign"){
-      openAssignModal(id);
-    }
-  });
+  $("jobsTbody").addEventListener("click", handleJobActionClick);
+  $("jobCards").addEventListener("click", handleJobActionClick);
 
   // Update modal buttons
   $("updateModalCloseBtn").addEventListener("click", closeUpdateModal);
