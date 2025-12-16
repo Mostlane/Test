@@ -133,27 +133,42 @@
 
 <script>
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
+
+// ---- HARD SESSION GUARD (iPhone safe) ----
 const user = sessionStorage.getItem("mostlaneUser");
 const role = sessionStorage.getItem("mostlaneRole");
 
+if (!user) {
+  alert("Your session has expired. Please log in again.");
+  window.location.href = "login.html";
+}
+
+// ---- SET ENGINEER FIELD ----
 engineer.value = user.replace(".", " ");
 
+// ---- LOAD SUMMARY ----
 async function loadSummary() {
   const res = await fetch(API + "/holiday/summary", {
     headers: { "X-User": user }
   });
+
+  if (!res.ok) return;
+
   const s = await res.json();
   allowance.innerText = s.allowance;
   used.innerText = s.used;
   remaining.innerText = s.remaining;
 }
 
+// ---- LOAD USER HOLIDAYS ----
 async function loadMyHolidays() {
   const res = await fetch(API + "/holiday/my", {
     headers: { "X-User": user }
   });
-  const data = await res.json();
 
+  if (!res.ok) return;
+
+  const data = await res.json();
   approvedList.innerHTML = "";
   pendingList.innerHTML = "";
 
@@ -171,6 +186,7 @@ async function loadMyHolidays() {
   });
 }
 
+// ---- SUBMIT REQUEST ----
 holidayForm.addEventListener("submit", async e => {
   e.preventDefault();
   submitBtn.disabled = true;
@@ -205,6 +221,7 @@ holidayForm.addEventListener("submit", async e => {
   loadMyHolidays();
 });
 
+// ---- INITIAL LOAD ----
 loadSummary();
 loadMyHolidays();
 </script>
