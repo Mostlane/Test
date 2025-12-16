@@ -1,117 +1,90 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Mostlane • Holiday Request</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="auth.js"></script>
+<script src="auth.js"></script>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Holiday Booking</title>
 
-  <style>
-    body{
-      margin:0;
-      font-family: "Segoe UI", sans-serif;
-      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size:180%;
-      padding:30px 16px;
-    }
+<style>
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: 180%;
+    margin: 0;
+    padding: 40px 20px;
+  }
 
-    .container{
-      max-width:1100px;
-      margin:auto;
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:20px;
-    }
+  .container {
+    max-width: 1000px;
+    margin: auto;
+  }
 
-    .card{
-      background:rgba(255,255,255,0.75);
-      backdrop-filter: blur(6px);
-      border-radius:10px;
-      padding:24px;
-    }
+  .form-section, .summary-section {
+    background: rgba(255,255,255,0.6);
+    padding: 30px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+  }
 
-    h2{
-      margin-top:0;
-      color:#003b82;
-      text-align:center;
-    }
+  h2 {
+    text-align: center;
+    color: #003366;
+    margin-top: 0;
+  }
 
-    label{
-      display:block;
-      margin-top:14px;
-      font-weight:600;
-    }
+  label {
+    display: block;
+    margin-top: 15px;
+    font-weight: bold;
+  }
 
-    input, select{
-      width:100%;
-      padding:10px;
-      margin-top:6px;
-      font-size:15px;
-      border-radius:6px;
-      border:1px solid #ccc;
-    }
+  input, select {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    margin-top: 5px;
+  }
 
-    button{
-      margin-top:22px;
-      width:100%;
-      padding:12px;
-      font-size:16px;
-      background:#004a99;
-      color:white;
-      border:none;
-      border-radius:6px;
-      cursor:pointer;
-    }
+  button {
+    margin-top: 30px;
+    padding: 12px;
+    width: 100%;
+    background-color: rgba(0, 74, 153, 0.6);
+    color: white;
+    font-size: 18px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
 
-    button:disabled{
-      opacity:.6;
-      cursor:not-allowed;
-    }
+  ul {
+    padding-left: 18px;
+    font-size: 14px;
+  }
 
-    ul{
-      padding-left:18px;
-      font-size:14px;
-    }
-
-    .top-bar{
-      max-width:1100px;
-      margin:0 auto 20px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
-
-    .top-bar button{
-      width:auto;
-      padding:8px 14px;
-      font-size:14px;
-    }
-
-    .stat{
-      font-size:15px;
-      margin:6px 0;
-    }
-
-    .approved{ color:#15803d; }
-    .pending{ color:#b45309; }
-  </style>
+  .approved { color: #15803d; }
+  .pending { color: #b45309; }
+</style>
 </head>
 
 <body>
 
-<div class="top-bar">
-  <strong id="userLabel"></strong>
-  <button onclick="location.href='main.html'">Main Menu</button>
+<div style="text-align:right; margin-bottom:20px;">
+  <button onclick="location.href='main.html'"
+    style="width:auto; padding:10px 20px; font-size:16px;">
+    Main Menu
+  </button>
 </div>
 
 <div class="container">
 
   <!-- REQUEST FORM -->
-  <div class="card">
+  <div class="form-section">
     <h2>Holiday Request</h2>
 
     <form id="holidayForm">
-      <label>Engineer</label>
+      <label>Engineer Name</label>
       <input id="engineer" readonly>
 
       <label>Start Date</label>
@@ -131,24 +104,29 @@
       <label>Notes</label>
       <input id="notes" placeholder="Optional">
 
-      <button id="submitBtn">Submit Request</button>
+      <button type="submit" id="submitBtn">Submit</button>
     </form>
   </div>
 
   <!-- SUMMARY -->
-  <div class="card">
-    <h2>My Holiday Summary</h2>
+  <div class="summary-section">
+    <h2>Holiday Summary</h2>
 
-    <div id="summary">
-      <p class="stat">Allowance: <strong id="allowance">–</strong></p>
-      <p class="stat">Used: <strong id="used">–</strong></p>
-      <p class="stat">Remaining: <strong id="remaining">–</strong></p>
-    </div>
+    <p><strong>Allowance:</strong> <span id="allowance">–</span></p>
+    <p><strong>Used:</strong> <span id="used">–</span></p>
+    <p><strong>Remaining:</strong> <span id="remaining">–</span></p>
+  </div>
 
-    <hr>
+  <!-- APPROVED -->
+  <div class="summary-section">
+    <h2>Approved Holidays</h2>
+    <ul id="approvedList"></ul>
+  </div>
 
-    <h3>My Requests</h3>
-    <ul id="myList"></ul>
+  <!-- PENDING -->
+  <div class="summary-section">
+    <h2>Pending Requests</h2>
+    <ul id="pendingList"></ul>
   </div>
 
 </div>
@@ -158,10 +136,9 @@ const API = "https://mostlane-holidays.jamie-def.workers.dev";
 const user = sessionStorage.getItem("mostlaneUser");
 const role = sessionStorage.getItem("mostlaneRole");
 
-document.getElementById("engineer").value = user.replace(".", " ");
-document.getElementById("userLabel").innerText = "Logged in as: " + user.replace(".", " ");
+engineer.value = user.replace(".", " ");
 
-async function loadSummary(){
+async function loadSummary() {
   const res = await fetch(API + "/holiday/summary", {
     headers: { "X-User": user }
   });
@@ -171,27 +148,30 @@ async function loadSummary(){
   remaining.innerText = s.remaining;
 }
 
-async function loadMyHolidays(){
+async function loadMyHolidays() {
   const res = await fetch(API + "/holiday/my", {
     headers: { "X-User": user }
   });
   const data = await res.json();
-  myList.innerHTML = "";
 
-  data.sort((a,b)=>new Date(a.start)-new Date(b.start));
+  approvedList.innerHTML = "";
+  pendingList.innerHTML = "";
 
-  data.forEach(h=>{
+  data.forEach(h => {
     const li = document.createElement("li");
-    li.innerHTML = `
-      ${h.start} → ${h.end}
-      (${h.days} days)
-      <strong class="${h.status.toLowerCase()}">– ${h.status}</strong>
-    `;
-    myList.appendChild(li);
+    li.innerHTML = `${h.start} → ${h.end} (${h.days} days)`;
+
+    if (h.status === "Approved") {
+      li.className = "approved";
+      approvedList.appendChild(li);
+    } else if (h.status === "Pending") {
+      li.className = "pending";
+      pendingList.appendChild(li);
+    }
   });
 }
 
-holidayForm.addEventListener("submit", async e=>{
+holidayForm.addEventListener("submit", async e => {
   e.preventDefault();
   submitBtn.disabled = true;
 
@@ -203,26 +183,26 @@ holidayForm.addEventListener("submit", async e=>{
   };
 
   const res = await fetch(API + "/holiday/request", {
-    method:"POST",
-    headers:{
-      "Content-Type":"application/json",
-      "X-User":user,
-      "X-Role":role
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": user,
+      "X-Role": role
     },
-    body:JSON.stringify(payload)
+    body: JSON.stringify(payload)
   });
 
   submitBtn.disabled = false;
 
-  if(!res.ok){
-    alert("Failed to submit request");
+  if (!res.ok) {
+    alert("Failed to submit holiday request");
     return;
   }
 
   alert("Holiday request submitted");
   holidayForm.reset();
-  loadMyHolidays();
   loadSummary();
+  loadMyHolidays();
 });
 
 loadSummary();
