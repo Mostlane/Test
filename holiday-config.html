@@ -96,15 +96,54 @@
 
 <script>
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
-const user = sessionStorage.getItem("mostlaneUser");
+const username = sessionStorage.getItem("mostlaneUser");
 const role = sessionStorage.getItem("mostlaneRole");
 
-if (!["Admin","Director"].includes(role)) {
-  alert("Access denied");
-  location.href = "main.html";
+// ----------------------------
+// 🔐 HARD SESSION GUARD
+// ----------------------------
+if (!username) {
+  alert("Session expired. Please log in again.");
+  location.href = "login.html";
 }
 
-let config = { allowance: 28, bankHolidays: [], shutdownDays: [] };
+// ----------------------------
+// 🔐 PERMISSION CHECK
+// FullAccess OR HolidayAdmin allowed
+// ----------------------------
+(async () => {
+  const res = await fetch(
+    "https://mostlane-users.jamie-def.workers.dev/user?u=" +
+    encodeURIComponent(username)
+  );
+  const data = await res.json();
+
+  if (!data.found) {
+    alert("User not found");
+    location.href = "main.html";
+    return;
+  }
+
+  const u = data.user;
+  const fullAccess = (u.FullAccess || "").toLowerCase() === "yes";
+  const holidayAdmin =
+    (u.HolidayAdmin || "").toLowerCase() === "yes" ||
+    (u.HolidayAdminAccess || "").toLowerCase() === "yes";
+
+  if (!fullAccess && !holidayAdmin) {
+    alert("Access denied");
+    location.href = "main.html";
+  }
+})();
+
+// ----------------------------
+// 📦 CONFIG MODEL
+// ----------------------------
+let config = {
+  allowance: 28,
+  bankHolidays: [],
+  shutdownDays: []
+};
 
 function render(){
   allowance.value = config.allowance;
@@ -112,17 +151,31 @@ function render(){
   shutdownList.innerHTML = config.shutdownDays.map(d=>`<li>${d}</li>`).join("");
 }
 
+// ----------------------------
+// 🔄 LOAD CONFIG
+// ----------------------------
 async function load(){
   const res = await fetch(API + "/holiday/config", {
-    headers:{ "X-User":user, "X-Role":role }
+    headers:{
+      "X-User": username,
+      "X-Role": role
+    }
   });
-  config = await res.json();
+
+  if (res.ok) {
+    config = await res.json();
+  }
+
   render();
 }
 
+// ----------------------------
+// ➕ ADD ITEMS
+// ----------------------------
 function addBank(){
   if(bankInput.value){
-    config.bankHolidays.push(bankInput.value);
+    if (!config.bankHolidays.includes(bankInput.value))
+      config.bankHolidays.push(bankInput.value);
     bankInput.value="";
     render();
   }
@@ -130,23 +183,29 @@ function addBank(){
 
 function addShutdown(){
   if(shutdownInput.value){
-    config.shutdownDays.push(shutdownInput.value);
+    if (!config.shutdownDays.includes(shutdownInput.value))
+      config.shutdownDays.push(shutdownInput.value);
     shutdownInput.value="";
     render();
   }
 }
 
+// ----------------------------
+// 💾 SAVE CONFIG
+// ----------------------------
 async function saveConfig(){
-  config.allowance = Number(allowance.value);
+  config.allowance = Number(allowance.value) || 28;
+
   await fetch(API + "/holiday/config", {
     method:"POST",
     headers:{
       "Content-Type":"application/json",
-      "X-User":user,
-      "X-Role":role
+      "X-User": username,
+      "X-Role": role
     },
     body:JSON.stringify(config)
   });
+
   alert("Holiday configuration saved");
 }
 
