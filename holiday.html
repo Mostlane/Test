@@ -1,189 +1,233 @@
-
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-<script src="auth.js"></script>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Holiday Booking</title>
-<style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 40px 20px;
+  <meta charset="UTF-8" />
+  <title>Mostlane • Holiday Request</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="auth.js"></script>
+
+  <style>
+    body{
+      margin:0;
+      font-family: "Segoe UI", sans-serif;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+      padding:30px 16px;
     }
-    .container {
-      max-width: 1000px;
-      margin: auto;
-      display: block;
+
+    .container{
+      max-width:1100px;
+      margin:auto;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:20px;
     }
-    .form-section, .summary-section {
-      background: rgba(255,255,255,0.6);
-      padding: 30px;
-      border-radius: 8px;
-      flex: 1;
+
+    .card{
+      background:rgba(255,255,255,0.75);
+      backdrop-filter: blur(6px);
+      border-radius:10px;
+      padding:24px;
     }
-    h2 {
-      text-align: center;
-      color: #003366;
+
+    h2{
+      margin-top:0;
+      color:#003b82;
+      text-align:center;
     }
-    label {
-      display: block;
-      margin-top: 15px;
-      font-weight: bold;
+
+    label{
+      display:block;
+      margin-top:14px;
+      font-weight:600;
     }
-    input, select {
-      width: 100%;
-      padding: 10px;
-      font-size: 16px;
-      margin-top: 5px;
+
+    input, select{
+      width:100%;
+      padding:10px;
+      margin-top:6px;
+      font-size:15px;
+      border-radius:6px;
+      border:1px solid #ccc;
     }
-    button {
-      margin-top: 30px;
-      padding: 12px;
-      width: 100%;
-      background-color: rgba(0, 74, 153, 0.6);
-      color: white;
-      font-size: 18px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
+
+    button{
+      margin-top:22px;
+      width:100%;
+      padding:12px;
+      font-size:16px;
+      background:#004a99;
+      color:white;
+      border:none;
+      border-radius:6px;
+      cursor:pointer;
     }
+
+    button:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+    }
+
+    ul{
+      padding-left:18px;
+      font-size:14px;
+    }
+
+    .top-bar{
+      max-width:1100px;
+      margin:0 auto 20px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+
+    .top-bar button{
+      width:auto;
+      padding:8px 14px;
+      font-size:14px;
+    }
+
+    .stat{
+      font-size:15px;
+      margin:6px 0;
+    }
+
+    .approved{ color:#15803d; }
+    .pending{ color:#b45309; }
   </style>
 </head>
+
 <body>
-<div style="text-align: right; margin-bottom: 20px;">
-<button onclick="window.location.href='main.html'" style="background-color:#004080; color:white; padding: 10px 20px; border:none; border-radius:6px; font-size: 16px; cursor: pointer;">Main Menu</button>
+
+<div class="top-bar">
+  <strong id="userLabel"></strong>
+  <button onclick="location.href='main.html'">Main Menu</button>
 </div>
+
 <div class="container">
-<div class="form-section">
-<h2>Holiday Request</h2>
-<form id="holidayForm">
-<label>Engineer Name:</label>
-<input id="engineer" name="engineer" readonly="" type="text"/>
-<label>Start Date:</label>
-<input id="start" name="start" required="" type="date"/>
-<label>End Date:</label>
-<input id="end" name="end" required="" type="date"/>
-<label>Leave Type:</label>
-<select id="type" name="type" required="">
-<option value="Annual Leave">Annual Leave</option>
-<option value="Sick Leave">Sick Leave</option>
-<option value="Bank Holiday">Bank Holiday</option>
-<option value="Compulsory Leave">Compulsory Leave</option>
-</select>
-<label>Notes:</label>
-<input id="notes" name="notes" placeholder="Optional" type="text"/>
-<button type="submit">Submit</button>
-</form>
-</div>
-<div class="summary-section">
-<h2>Holiday Summary</h2>
-<div id="summaryContent">
-<div style="margin-top:20px; font-size: 13px; color: gray;">
-<p>Last Update: <span id="lastUpdate">Loading...</span></p>
-<p>Next Update: <span id="nextUpdate">Loading...</span></p>
-</div>
-<p><strong>Allowance:</strong> 28 Days</p>
-<p><strong>Used:</strong> -</p>
-<p><strong>Booked:</strong> -</p>
-<p><strong>Mandatory Days:</strong> -</p>
-<p><strong>Remaining:</strong> -</p>
-</div>
-<div class="summary-section">
-<h2>Approved Holidays</h2>
-<ul id="approvedList"></ul>
-</div>
-<div class="summary-section">
-<h2>Pending Requests</h2>
-<ul id="pendingList"></ul>
-<div class="summary-section">
-<h2>Compulsory Shutdown Days</h2>
-<ul id="shutdownList"></ul>
-</div>
-<div class="summary-section">
-<h2>Bank Holidays</h2>
-<ul id="bankHolidayList"></ul>
-</div>
-</div></div></div><script>
 
-let GITHUB_TOKEN = "";
-fetch("https://pastebin.com/raw/6u0qdhPR")
-  .then(response => response.text())
-  .then(token => {
-    GITHUB_TOKEN = token.trim();
+  <!-- REQUEST FORM -->
+  <div class="card">
+    <h2>Holiday Request</h2>
+
+    <form id="holidayForm">
+      <label>Engineer</label>
+      <input id="engineer" readonly>
+
+      <label>Start Date</label>
+      <input type="date" id="start" required>
+
+      <label>End Date</label>
+      <input type="date" id="end" required>
+
+      <label>Leave Type</label>
+      <select id="type">
+        <option>Annual Leave</option>
+        <option>Sick Leave</option>
+        <option>Compulsory Leave</option>
+        <option>Unpaid Leave</option>
+      </select>
+
+      <label>Notes</label>
+      <input id="notes" placeholder="Optional">
+
+      <button id="submitBtn">Submit Request</button>
+    </form>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="card">
+    <h2>My Holiday Summary</h2>
+
+    <div id="summary">
+      <p class="stat">Allowance: <strong id="allowance">–</strong></p>
+      <p class="stat">Used: <strong id="used">–</strong></p>
+      <p class="stat">Remaining: <strong id="remaining">–</strong></p>
+    </div>
+
+    <hr>
+
+    <h3>My Requests</h3>
+    <ul id="myList"></ul>
+  </div>
+
+</div>
+
+<script>
+const API = "https://mostlane-holidays.jamie-def.workers.dev";
+const user = sessionStorage.getItem("mostlaneUser");
+const role = sessionStorage.getItem("mostlaneRole");
+
+document.getElementById("engineer").value = user.replace(".", " ");
+document.getElementById("userLabel").innerText = "Logged in as: " + user.replace(".", " ");
+
+async function loadSummary(){
+  const res = await fetch(API + "/holiday/summary", {
+    headers: { "X-User": user }
   });
+  const s = await res.json();
+  allowance.innerText = s.allowance;
+  used.innerText = s.used;
+  remaining.innerText = s.remaining;
+}
 
-
-const REPO = "Mostlane/Test";
-const LOG_FILE = "holiday-log.json";
-
-async function fetchSHA() {
-  const res = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
-    headers: { Authorization: "token " + GITHUB_TOKEN }
+async function loadMyHolidays(){
+  const res = await fetch(API + "/holiday/my", {
+    headers: { "X-User": user }
   });
   const data = await res.json();
-  return data.sha;
-}
+  myList.innerHTML = "";
 
-async function fetchLog() {
-  const res = await fetch("https://raw.githubusercontent.com/" + REPO + "/main/" + LOG_FILE);
-  return res.json();
-}
+  data.sort((a,b)=>new Date(a.start)-new Date(b.start));
 
-async function appendToLog(newEntry) {
-  const log = await fetchLog();
-  const sha = await fetchSHA();
-  log.push(newEntry);
-
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(log, null, 2))));
-  const res = await fetch("https://api.github.com/repos/" + REPO + "/contents/" + LOG_FILE, {
-    method: "PUT",
-    headers: {
-      Authorization: "token " + GITHUB_TOKEN,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      message: "New holiday request",
-      committer: { name: "Mostlane Bot", email: "admin@mostlane.com" },
-      content: content,
-      sha: sha
-    })
+  data.forEach(h=>{
+    const li = document.createElement("li");
+    li.innerHTML = `
+      ${h.start} → ${h.end}
+      (${h.days} days)
+      <strong class="${h.status.toLowerCase()}">– ${h.status}</strong>
+    `;
+    myList.appendChild(li);
   });
-  return res.json();
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-  const engineerField = document.getElementById("engineer");
-  if (engineerField) engineerField.value = sessionStorage.getItem("mostlaneUser") || "Unknown";
+holidayForm.addEventListener("submit", async e=>{
+  e.preventDefault();
+  submitBtn.disabled = true;
 
-  const form = document.getElementById("holidayForm");
-  if (form) {
-    form.addEventListener("submit", async function(e) {
-      e.preventDefault();
+  const payload = {
+    start: start.value,
+    end: end.value,
+    type: type.value,
+    notes: notes.value
+  };
 
-      const data = {
-        name: engineerField.value,
-        start: document.getElementById("start").value,
-        end: document.getElementById("end").value,
-        type: document.getElementById("type").value,
-        notes: document.getElementById("notes").value,
-        status: "Pending"
-      };
+  const res = await fetch(API + "/holiday/request", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "X-User":user,
+      "X-Role":role
+    },
+    body:JSON.stringify(payload)
+  });
 
-      try {
-        await appendToLog(data);
-        alert("Holiday request submitted successfully.");
-        form.reset();
-        location.reload();
-      } catch (err) {
-        alert("Error submitting request: " + err.message);
-      }
-    });
+  submitBtn.disabled = false;
+
+  if(!res.ok){
+    alert("Failed to submit request");
+    return;
   }
+
+  alert("Holiday request submitted");
+  holidayForm.reset();
+  loadMyHolidays();
+  loadSummary();
 });
-</script></body>
+
+loadSummary();
+loadMyHolidays();
+</script>
+
+</body>
 </html>
