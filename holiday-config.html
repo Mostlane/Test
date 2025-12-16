@@ -1,152 +1,183 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<script src="auth.js"></script>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Holiday Configuration</title>
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-User, X-Role"
+};
 
-<style>
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-  }
-
-  .container {
-    max-width: 900px;
-    margin: auto;
-  }
-
-  .section {
-    background: rgba(255,255,255,0.6);
-    padding: 30px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-  }
-
-  h2 {
-    text-align: center;
-    color: #003366;
-    margin-top: 0;
-  }
-
-  label {
-    display: block;
-    margin-top: 15px;
-    font-weight: bold;
-  }
-
-  input {
-    width: 100%;
-    padding: 10px;
-    font-size: 16px;
-    margin-top: 5px;
-  }
-
-  button {
-    margin-top: 25px;
-    padding: 12px;
-    width: 100%;
-    background-color: rgba(0, 74, 153, 0.6);
-    color: white;
-    font-size: 18px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .note {
-    font-size: 13px;
-    color: #444;
-    margin-top: 8px;
-  }
-</style>
-</head>
-
-<body>
-
-<div style="text-align:right; margin-bottom:20px;">
-  <button onclick="location.href='main.html'"
-    style="width:auto; padding:10px 20px; font-size:16px;">
-    Main Menu
-  </button>
-</div>
-
-<div class="container">
-
-  <!-- ALLOWANCE -->
-  <div class="section">
-    <h2>Annual Leave Allowance</h2>
-
-    <label>Days per year</label>
-    <input type="number" id="allowance" min="0">
-
-    <p class="note">
-      This value is used to calculate remaining holiday for all users.
-    </p>
-
-    <button onclick="saveConfig()">Save Configuration</button>
-  </div>
-
-</div>
-
-<script>
-const API = "https://mostlane-holidays.jamie-def.workers.dev";
-const user = sessionStorage.getItem("mostlaneUser");
-const role = sessionStorage.getItem("mostlaneRole");
-
-if (!["Admin", "Director"].includes(role)) {
-  alert("Access denied");
-  location.href = "main.html";
-}
-
-// Load existing config
-async function loadConfig() {
-  const res = await fetch(API + "/holiday/config", {
-    headers: {
-      "X-User": user,
-      "X-Role": role
+export default {
+  async fetch(req, env) {
+    // --------------------
+    // CORS PREFLIGHT
+    // --------------------
+    if (req.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
     }
-  });
 
-  if (!res.ok) {
-    alert("Failed to load holiday configuration");
-    return;
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const method = req.method;
+
+    const user = req.headers.get("X-User");
+    const role = req.headers.get("X-Role");
+
+    if (!user) {
+      return new Response("Unauthorised", {
+        status: 401,
+        headers: corsHeaders
+      });
+    }
+
+    // ---------------------------
+    // SUBMIT HOLIDAY REQUEST
+    // ---------------------------
+    if (path === "/holiday/request" && method === "POST") {
+      const body = await req.json();
+
+      const id = `H-${Date.now()}`;
+      const start = body.start;
+      const end = body.end;
+
+      const days =
+        (new Date(end) - new Date(start)) / (1000 * 60 * 60 * 24) + 1;
+
+      const entry = {
+        id,
+        engineer: user.replace(".", " "),
+        username: user,
+        start,
+        end,
+        days,
+        type: body.type,
+        notes: body.notes || "",
+        status: "Pending",
+        submittedAt: new Date().toISOString(),
+        approvedBy: null,
+        decisionAt: null
+      };
+
+      await env.HOLIDAYS_KV.put(`holiday:${id}`, JSON.stringify(entry));
+
+      await env.HOLIDAY_LOG_KV.put(
+        `log:${id}:001`,
+        JSON.stringify({
+          requestId: id,
+          action: "Submitted",
+          by: user,
+          timestamp: new Date().toISOString()
+        })
+      );
+
+      return new Response(
+        JSON.stringify({ success: true, id }),
+        { headers: corsHeaders }
+      );
+    }
+
+    // ---------------------------
+    // MY HOLIDAYS
+    // ---------------------------
+    if (path === "/holiday/my" && method === "GET") {
+      const list = await env.HOLIDAYS_KV.list({ prefix: "holiday:" });
+      const results = [];
+
+      for (const key of list.keys) {
+        const item = JSON.parse(await env.HOLIDAYS_KV.get(key.name));
+        if (item.username === user) results.push(item);
+      }
+
+      return new Response(JSON.stringify(results), { headers: corsHeaders });
+    }
+
+    // ---------------------------
+    // SUMMARY
+    // ---------------------------
+    if (path === "/holiday/summary" && method === "GET") {
+      const config = JSON.parse(
+        (await env.HOLIDAY_CONFIG_KV.get("config")) ||
+        JSON.stringify({ allowance: 28 })
+      );
+
+      const list = await env.HOLIDAYS_KV.list({ prefix: "holiday:" });
+      let used = 0;
+
+      for (const key of list.keys) {
+        const h = JSON.parse(await env.HOLIDAYS_KV.get(key.name));
+        if (h.username === user && h.status === "Approved") {
+          used += h.days;
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          allowance: config.allowance,
+          used,
+          remaining: config.allowance - used
+        }),
+        { headers: corsHeaders }
+      );
+    }
+
+    // ---------------------------
+    // ADMIN – ALL HOLIDAYS
+    // ---------------------------
+    if (path === "/holiday/all" && method === "GET") {
+      if (!["Admin", "Director"].includes(role)) {
+        return new Response("Forbidden", {
+          status: 403,
+          headers: corsHeaders
+        });
+      }
+
+      const list = await env.HOLIDAYS_KV.list({ prefix: "holiday:" });
+      const results = [];
+
+      for (const key of list.keys) {
+        results.push(JSON.parse(await env.HOLIDAYS_KV.get(key.name)));
+      }
+
+      return new Response(JSON.stringify(results), { headers: corsHeaders });
+    }
+
+    // ---------------------------
+    // APPROVE / REJECT
+    // ---------------------------
+    if (
+      ["/holiday/approve", "/holiday/reject"].includes(path) &&
+      method === "POST"
+    ) {
+      if (!["Admin", "Director"].includes(role)) {
+        return new Response("Forbidden", {
+          status: 403,
+          headers: corsHeaders
+        });
+      }
+
+      const { id } = await req.json();
+      const record = JSON.parse(
+        await env.HOLIDAYS_KV.get(`holiday:${id}`)
+      );
+
+      record.status = path.endsWith("approve") ? "Approved" : "Rejected";
+      record.approvedBy = user;
+      record.decisionAt = new Date().toISOString();
+
+      await env.HOLIDAYS_KV.put(`holiday:${id}`, JSON.stringify(record));
+
+      await env.HOLIDAY_LOG_KV.put(
+        `log:${id}:${Date.now()}`,
+        JSON.stringify({
+          requestId: id,
+          action: record.status,
+          by: user,
+          timestamp: new Date().toISOString()
+        })
+      );
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: corsHeaders
+      });
+    }
+
+    return new Response("Not Found", { status: 404, headers: corsHeaders });
   }
-
-  const cfg = await res.json();
-  allowance.value = cfg.allowance ?? 28;
-}
-
-// Save config back to KV
-async function saveConfig() {
-  const payload = {
-    allowance: Number(allowance.value)
-  };
-
-  const res = await fetch(API + "/holiday/config", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-User": user,
-      "X-Role": role
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    alert("Failed to save configuration");
-    return;
-  }
-
-  alert("Holiday configuration updated");
-}
-
-loadConfig();
-</script>
-
-</body>
-</html>
+};
