@@ -6029,6 +6029,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-12-17T13:59:27.972Z"
+    },
+    {
+      "id": "1765980139121-n7blzh",
+      "receivedAt": "2025-12-17T14:02:19.138Z",
+      "date": "2025-12-09",
+      "day": "Tuesday",
+      "engineer": "Ryan Diggens",
+      "vehicle": "HN73 KFO",
+      "leaveHome": "05:31",
+      "arriveFirstSite": "07:26",
+      "leaveLastSite": "14:03",
+      "arriveHome": "14:39",
+      "deductLunch": true,
+      "totalHours": 8.63,
+      "standardHours": 8.63,
+      "overtimeHours": null,
+      "travelToHours": 1.92,
+      "travelFromHours": 0.6,
+      "totalTravelHours": 2.52,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-12-17T14:02:19.138Z"
     }
   ]
 }
