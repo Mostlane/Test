@@ -5519,6 +5519,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-12-17T13:41:29.272Z"
+    },
+    {
+      "id": "1765979087178-uiflqa",
+      "receivedAt": "2025-12-17T13:44:47.178Z",
+      "date": "2025-12-08",
+      "day": "Monday",
+      "engineer": "Connor Brady",
+      "vehicle": "LE73 UHX",
+      "leaveHome": "08:00",
+      "arriveFirstSite": "00:00",
+      "leaveLastSite": "00:00",
+      "arriveHome": "18:30",
+      "deductLunch": true,
+      "totalHours": 10,
+      "standardHours": 10,
+      "overtimeHours": null,
+      "travelToHours": null,
+      "travelFromHours": 18.5,
+      "totalTravelHours": 18.5,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-12-17T13:44:47.178Z"
     }
   ]
 }
