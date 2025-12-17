@@ -3,6 +3,16 @@
 // MOSTLANE PORTAL - DEVICE AUTH FRONT-END
 // --------------------------------------------------------------
 
+// ✅ GLOBAL SINGLE-RUN GUARD
+if (window.__mlDeviceAuthRan) {
+  console.warn("DeviceAuth already ran — skipping duplicate execution");
+} else {
+  window.__mlDeviceAuthRan = true;
+}
+
+// ✅ Prompt-once-per-page-load guard
+let devicePromptShown = false;
+
 // Your Cloudflare Worker endpoint
 const DEVICE_AUTH_BASE = "https://userdevicekv.jamie-def.workers.dev";
 
@@ -137,6 +147,11 @@ window.DeviceAuth = {
     }
 
     if (body.status === "NEW_DEVICE_REQUIRED") {
+      if (devicePromptShown) {
+        console.warn("Device prompt already shown — retrying silently");
+        return onSuccess();
+      }
+      devicePromptShown = true;
       return showRegisterPopup(username, onSuccess);
     }
 
@@ -171,6 +186,11 @@ window.DeviceAuth = {
     if (body.status === "OK") return;
 
     if (body.status === "NEW_DEVICE_REQUIRED") {
+      if (devicePromptShown) {
+        console.warn("Device prompt already shown — reloading");
+        return location.reload();
+      }
+      devicePromptShown = true;
       return showRegisterPopup(username, () => location.reload());
     }
 
