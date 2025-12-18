@@ -455,7 +455,7 @@
 
         const tagSpan = document.createElement("span");
         tagSpan.className = "user-row-tag";
-        const devCount = (rec.deviceIds || []).length;
+        const devCount = (rec.devices || []).length;
         tagSpan.textContent = devCount + " device" + (devCount === 1 ? "" : "s");
 
         row.appendChild(nameSpan);
