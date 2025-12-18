@@ -530,14 +530,46 @@
       const container = document.getElementById("devicesSection");
       container.innerHTML = "";
 
-      const devIds = selectedRecord.deviceIds || [];
-      const fps = selectedRecord.fingerprints || [];
-      const labels = selectedRecord.labels || [];
+     function renderDevicesTable() {
+  const container = document.getElementById("devicesSection");
+  container.innerHTML = "";
 
-      if (!devIds.length) {
-        container.innerHTML = '<span class="muted">No devices registered for this user.</span>';
-        return;
-      }
+  const devices = selectedRecord.devices || [];
+
+  if (!devices.length) {
+    container.innerHTML = '<span class="muted">No devices registered for this user.</span>';
+    return;
+  }
+
+  let html = `
+    <table class="device-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Device ID</th>
+          <th>Label</th>
+          <th>First Seen</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  devices.forEach((d, i) => {
+    html += `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${d.deviceId}</td>
+        <td>${d.label || ""}</td>
+        <td>${formatDate(d.firstSeen)}</td>
+        <td>${formatDate(d.lastSeen)}</td>
+      </tr>
+    `;
+  });
+
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
 
       let html = '<table class="device-table"><thead><tr>' +
         '<th>#</th><th>Device ID</th><th>Fingerprint</th><th>Label</th><th>Last Seen</th>' +
