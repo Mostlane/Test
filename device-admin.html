@@ -503,28 +503,15 @@
       detailContent.style.display = "block";
 
       const allowedInput = document.getElementById("allowedDevicesInput");
-      const lastDevChange = document.getElementById("lastDeviceChangeText");
-      const changeCount = document.getElementById("changeCountText");
-      const rebindCount = document.getElementById("rebindCountText");
-
       const allowedDevices = typeof selectedRecord.allowedDevices === "number"
         ? selectedRecord.allowedDevices
         : 1;
       allowedInput.value = allowedDevices;
-
-      lastDevChange.textContent = formatDate(selectedRecord.lastDeviceChange);
-      changeCount.textContent = selectedRecord.changeCount || 0;
-      rebindCount.textContent = selectedRecord.rebindCount || 0;
-
       renderDevicesTable();
       renderHistoryTable();
     }
 
-    function renderDevicesTable() {
-      const container = document.getElementById("devicesSection");
-      container.innerHTML = "";
-
-     function renderDevicesTable() {
+function renderDevicesTable() {
   const container = document.getElementById("devicesSection");
   container.innerHTML = "";
 
@@ -564,24 +551,6 @@
   html += "</tbody></table>";
   container.innerHTML = html;
 }
-
-      let html = '<table class="device-table"><thead><tr>' +
-        '<th>#</th><th>Device ID</th><th>Fingerprint</th><th>Label</th><th>Last Seen</th>' +
-        '</tr></thead><tbody>';
-
-      for (let i = 0; i < devIds.length; i++) {
-        html += `<tr>
-          <td>${i + 1}</td>
-          <td>${devIds[i]}</td>
-          <td>${fps[i] || ""}</td>
-          <td>${labels[i] || ""}</td>
-          <td>${formatDate(selectedRecord.lastSeen)}</td>
-        </tr>`;
-      }
-
-      html += "</tbody></table>";
-      container.innerHTML = html;
-    }
 
     function renderHistoryTable() {
       const container = document.getElementById("historySection");
