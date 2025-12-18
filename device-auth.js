@@ -1,6 +1,6 @@
 // device-auth.js (FINAL PRODUCTION VERSION)
 // --------------------------------------------------------------
-// MOSTLANE PORTAL - DEVICE AUTH FRONT-END
+// MOSTLANE PORTAL - DEVICE AUTH FRONT-END (DEVICE ID ONLY)
 // --------------------------------------------------------------
 
 // ✅ GLOBAL SINGLE-RUN GUARD
@@ -20,56 +20,19 @@ const DEVICE_AUTH_BASE = "https://userdevicekv.jamie-def.workers.dev";
 const USERNAME_SESSION_KEY = "mostlaneUsername";
 
 // ───────────────────────────────────────────────────────────────
-// HELPERS: HASH + FINGERPRINT + DEVICE ID
+// DEVICE ID (SINGLE SOURCE OF TRUTH)
 // ───────────────────────────────────────────────────────────────
-
-// Simple hashing function
-function hashString(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
-  }
-  return (h >>> 0).toString(16);
-}
-
-// Compute stable fingerprint based on device/browser characteristics
-function computeFingerprint() {
-  try {
-    const nav = navigator;
-    const scr = screen;
-
-    const fpData = {
-      ua: nav.userAgent || "",
-      platform: nav.platform || "",
-      lang: nav.language || "",
-      langs: nav.languages || [],
-      hw: nav.hardwareConcurrency || "",
-      mem: nav.deviceMemory || "",
-      res: `${scr.width}x${scr.height}`,
-      depth: scr.colorDepth,
-      tz: new Date().getTimezoneOffset(),
-      touch: "ontouchstart" in window,
-      maxTouch: nav.maxTouchPoints || 0
-    };
-
-    return "fp_" + hashString(JSON.stringify(fpData));
-  } catch (e) {
-    return "fp_fallback_" + hashString(navigator.userAgent || "unknown");
-  }
-}
-
-// Generate or retrieve persistent device ID
 function getOrCreateDeviceId() {
   try {
-    let id = localStorage.getItem("mlDeviceId");
+    let id = localStorage.getItem("deviceID");
     if (!id) {
-      id = "dev-" + Math.random().toString(36).slice(2, 9);
-      localStorage.setItem("mlDeviceId", id);
+      id = "dev-" + crypto.randomUUID().slice(0, 7);
+      localStorage.setItem("deviceID", id);
     }
+    sessionStorage.setItem("deviceID", id);
     return id;
   } catch (e) {
-    return "dev-session-" + Math.random().toString(36).slice(2, 9);
+    return "dev-session-" + crypto.randomUUID().slice(0, 7);
   }
 }
 
@@ -102,12 +65,10 @@ function showRegisterPopup(username, callback) {
   }
 
   const deviceId = getOrCreateDeviceId();
-  const fingerprint = computeFingerprint();
 
   postToWorker("/auth/register-device", {
     username,
     deviceId,
-    fingerprint,
     label
   }).then((res) => {
     if (res.body.status === "OK") {
@@ -132,12 +93,10 @@ window.DeviceAuth = {
   // Called immediately after successful username/password login
   async checkOnLogin(username, onSuccess) {
     const deviceId = getOrCreateDeviceId();
-    const fingerprint = computeFingerprint();
 
     const res = await postToWorker("/auth/check-device", {
       username,
-      deviceId,
-      fingerprint
+      deviceId
     });
 
     const body = res.body;
@@ -173,12 +132,10 @@ window.DeviceAuth = {
     }
 
     const deviceId = getOrCreateDeviceId();
-    const fingerprint = computeFingerprint();
 
     const res = await postToWorker("/auth/check-device", {
       username,
-      deviceId,
-      fingerprint
+      deviceId
     });
 
     const body = res.body;
