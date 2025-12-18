@@ -172,12 +172,7 @@
         set('roleType', user.EmploymentType || '');
         set('assignedUser', user.Username);
 
-        if (!sessionStorage.getItem('deviceID')) {
-          const dev = 'dev-' + Math.random().toString(36).slice(2);
-          sessionStorage.setItem('deviceID', dev);
-          localStorage.setItem('deviceID', dev);
-        }
-
+        
         // ⭐ THE ONLY CHANGE: run device check here instead of redirecting
         runDeviceCheckAndContinue(user.Username);
 
