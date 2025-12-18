@@ -337,6 +337,7 @@
         <!-- Settings -->
         <div class="section-card">
           <div class="section-title">Device Settings</div>
+          <div class="muted" id="deviceUsageText"></div>
           <div class="form-row">
             <label for="allowedDevicesInput"><strong>Allowed Devices</strong></label>
             <input type="number" id="allowedDevicesInput" min="1" max="5" step="1" style="width:70px;">
@@ -496,21 +497,27 @@
         detailContent.style.display = "none";
         return;
       }
-
-      titleEl.textContent = selectedUsername;
+titleEl.textContent = selectedUsername;
       subtitleEl.textContent = "Manage device limits, reset devices and view history.";
 
       detailContent.style.display = "block";
 
-      const allowedInput = document.getElementById("allowedDevicesInput");
-      const allowedDevices = typeof selectedRecord.allowedDevices === "number"
-        ? selectedRecord.allowedDevices
-        : 1;
-      allowedInput.value = allowedDevices;
-      renderDevicesTable();
-      renderHistoryTable();
-    }
+const allowedInput = document.getElementById("allowedDevicesInput");
+const allowedDevices = typeof selectedRecord.allowedDevices === "number"
+  ? selectedRecord.allowedDevices
+  : 1;
+allowedInput.value = allowedDevices;
 
+// ✅ ADD THIS PART
+const used = (selectedRecord.devices || []).length;
+const usageEl = document.getElementById("deviceUsageText");
+if (usageEl) {
+  usageEl.textContent = `Devices used: ${used} of ${allowedDevices}`;
+}
+
+renderDevicesTable();
+renderHistoryTable();
+    }
 function renderDevicesTable() {
   const container = document.getElementById("devicesSection");
   container.innerHTML = "";
