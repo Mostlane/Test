@@ -220,6 +220,32 @@
     </div>
   </div>
 
+  <!-- Manage User Modal (ADDED) -->
+  <div id="manageUserModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Manage User</h3>
+
+      <div class="field"><label>Engineer Number</label><input id="mu_engineerNumber" type="text" disabled></div>
+      <div class="field"><label>Username</label><input id="mu_username" type="text" disabled></div>
+
+      <div class="field"><label>First Name</label><input id="mu_firstName" type="text"></div>
+      <div class="field"><label>Last Name</label><input id="mu_lastName" type="text"></div>
+      <div class="field"><label>Email</label><input id="mu_email" type="email"></div>
+
+      <div class="field"><label>Vehicle Assigned</label><input id="mu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="mu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
+      <div class="field"><label>Status</label><input id="mu_status" type="text" placeholder="Active / Not Active"></div>
+      <div class="field"><label>SharePoint Path URL</label><input id="mu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
+
+      <div class="field"><label>Reset Password (optional)</label><input id="mu_password" type="password" placeholder="Leave blank to keep existing"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="cancelManage">Cancel</button>
+        <button class="btn btn-primary" id="saveManageBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
   <script>
@@ -431,13 +457,84 @@ function mapToPermKey(id, label, href) {
       );
     }
 
+    // Manage Modal Logic (ADDED)
+    const manageModal = document.getElementById('manageUserModal');
+    let __MANAGING = null;
+
+    const openManage = (user)=>{
+      __MANAGING = user;
+      document.getElementById('mu_engineerNumber').value = user.EngineerNumber || '';
+      document.getElementById('mu_username').value = user.Username || '';
+      document.getElementById('mu_firstName').value = user.FirstName || '';
+      document.getElementById('mu_lastName').value = user.LastName || '';
+      document.getElementById('mu_email').value = user.Email || '';
+      document.getElementById('mu_vehicle').value = user.VehicleAssigned || '';
+      document.getElementById('mu_employmentType').value = user.EmploymentType || '';
+      document.getElementById('mu_status').value = user.Status || '';
+      document.getElementById('mu_sharepoint').value = user.SharePointPath || '';
+      document.getElementById('mu_password').value = '';
+      manageModal.classList.add('show');
+      manageModal.setAttribute('aria-hidden','false');
+    };
+    const closeManage = ()=>{
+      manageModal.classList.remove('show');
+      manageModal.setAttribute('aria-hidden','true');
+      __MANAGING = null;
+    };
+
+    document.getElementById('cancelManage').addEventListener('click',closeManage);
+
+    document.getElementById('saveManageBtn').addEventListener('click',async()=>{
+      if(!__MANAGING) return;
+
+      try{
+        showMask(true);
+
+        __MANAGING.FirstName = document.getElementById('mu_firstName').value.trim();
+        __MANAGING.LastName = document.getElementById('mu_lastName').value.trim();
+        __MANAGING.Email = document.getElementById('mu_email').value.trim();
+        __MANAGING.VehicleAssigned = document.getElementById('mu_vehicle').value.trim();
+        __MANAGING.EmploymentType = document.getElementById('mu_employmentType').value.trim();
+        __MANAGING.Status = document.getElementById('mu_status').value.trim();
+        __MANAGING.SharePointPath = document.getElementById('mu_sharepoint').value.trim();
+
+        const newPw = document.getElementById('mu_password').value;
+        if(newPw && newPw.trim()){
+          __MANAGING.HashedPassword = await sha256Hex(newPw);
+        }
+
+        await saveUsers(__USERS);
+
+        // Update visible fields without re-rendering permissions (ADDED)
+        const nameEl = document.getElementById(`name_${__MANAGING.Username}`);
+        const subEl = document.getElementById(`sub_${__MANAGING.Username}`);
+        if(nameEl){
+          nameEl.innerHTML = `${__MANAGING.EngineerNumber ? ('#'+__MANAGING.EngineerNumber+' – ') : ''}${__MANAGING.FirstName||''} ${__MANAGING.LastName||''} <span style="color:#6b7280;font-weight:500">(${__MANAGING.Username})</span>`;
+        }
+        if(subEl){
+          subEl.textContent = `${__MANAGING.EmploymentType||''} · ${__MANAGING.Status||''} · ${__MANAGING.Email||''}`;
+        }
+
+        closeManage();
+        showBanner('✅ User updated successfully.','ok');
+      }catch(err){
+        console.error(err);
+        showBanner('❌ Could not update user. '+(err?.message||''),'err');
+      }finally{
+        showMask(false);
+      }
+    });
+
     function userCard(user,structure){
       const header = h('div',{class:'user-header'},
-        h('div',null,
+        h('div',{id:`name_${user.Username}`},
           `${user.EngineerNumber ? ('#'+user.EngineerNumber+' – ') : ''}${user.FirstName||''} ${user.LastName||''} `,
           h('span',{style:'color:#6b7280;font-weight:500'},`(${user.Username})`)
         ),
         h('div',null,
+          h('div',{style:'display:flex;justify-content:flex-end;margin-bottom:6px'},
+            h('button',{class:'btn btn-outline',style:'padding:6px 10px;font-size:12px',onclick:()=>openManage(user)},'⚙ Manage')
+          ),
           h('div',{class:'toggle-row'},
             h('span',{class:'lbl'},'Full Access'),
             switchControl(`fa_${user.Username}__chk`,(user.FullAccess||'').toLowerCase()==='yes','FullAccess','fa')
@@ -445,7 +542,7 @@ function mapToPermKey(id, label, href) {
         )
       );
 
-      const sub = h('div',{class:'user-sub'},
+      const sub = h('div',{class:'user-sub',id:`sub_${user.Username}`},
         `${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`
       );
 
