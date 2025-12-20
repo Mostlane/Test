@@ -106,28 +106,31 @@
       errorBox.textContent = "";
 
       try {
-        const res = await fetch(usersJsonURL + '?v=' + Date.now());
-        if (!res.ok) throw new Error('Network error');
+const res = await fetch(
+  "https://login.jamie-def.workers.dev/auth/login",
+  {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: usernameInput,
+      password: passwordInput
+    })
+  }
+);
 
-        const data = await res.json();
-        const users = data.Users || [];
+if (!res.ok) {
+  errorBox.textContent = "Login failed.";
+  return;
+}
 
-        const user = users.find(u => u.Username.toLowerCase() === usernameInput.toLowerCase());
-        if (!user) {
-          errorBox.textContent = "Invalid login credentials.";
-          return;
-        }
+const result = await res.json();
 
-        if ((user.Status || '').toLowerCase() !== 'active') {
-          errorBox.textContent = "Account is not active.";
-          return;
-        }
+if (!result.ok) {
+  errorBox.textContent = "Invalid login credentials.";
+  return;
+}
 
-        const hashedInput = await hashPassword(passwordInput);
-        if (hashedInput !== (user.HashedPassword || '').toLowerCase()) {
-          errorBox.textContent = "Invalid login credentials.";
-          return;
-        }
+const user = result.user;
 
         // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
