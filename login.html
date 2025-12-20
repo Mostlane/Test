@@ -69,9 +69,6 @@
   <script src="device-auth.js"></script>
 
   <script>
-    const usersJsonURL = "https://mostlane-users.jamie-def.workers.dev/users";
-
-    async function hashPassword(password) {
       const enc = new TextEncoder();
       const data = enc.encode(password.trim());
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -118,18 +115,23 @@ const res = await fetch(
   }
 );
 
-if (!res.ok) {
-  errorBox.textContent = "Login failed.";
+let result;
+try {
+  result = await res.json();
+} catch {
+  errorBox.textContent = `Login failed (HTTP ${res.status})`;
   return;
 }
 
-const result = await res.json();
+if (!res.ok) {
+  errorBox.textContent = result.error || `Login failed (HTTP ${res.status})`;
+  return;
+}
 
 if (!result.ok) {
-  errorBox.textContent = "Invalid login credentials.";
+  errorBox.textContent = result.error || "Invalid login credentials.";
   return;
 }
-
 const user = result.user;
 
         // Stored session — unchanged
