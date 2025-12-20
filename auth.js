@@ -21,8 +21,22 @@
 
   // Check expiry or missing login
   if (!localStorage.getItem("mostlaneLoggedIn") || !expiry || now > parseInt(expiry)) {
-    localStorage.clear();
+
+    // 🔒 Preserve device ID
+    const deviceId = localStorage.getItem("mlDeviceId");
+
+    // Clear auth-related keys only
+    localStorage.removeItem("mostlaneLoggedIn");
+    localStorage.removeItem("mostlaneUser");
+    localStorage.removeItem("mostlaneExpiry");
+
     sessionStorage.clear();
+
+    // 🔁 Restore device ID
+    if (deviceId) {
+      localStorage.setItem("mlDeviceId", deviceId);
+    }
+
     window.location.href = "login.html";
   }
 })();
