@@ -5,7 +5,6 @@
   <title>Mostlane • SLA Tracker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-
   <style>
     :root{
       --ml-blue:#003b82;
@@ -20,65 +19,81 @@
       --warn:#f97316;
       --bad:#dc2626;
     }
-
     *{box-sizing:border-box;}
-
     html,body{
-      margin:0;
-      padding:0;
+      margin:0;padding:0;
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       color:var(--text);
       background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
     }
-
     .shell{
       max-width:1200px;
       margin:24px auto 32px;
       padding:0 16px;
     }
 
-    /* HERO */
+    /* -------- HERO + KPI TILES (mock-up style) -------- */
     .hero{
       background:var(--ml-blue);
       border-radius:24px;
-      padding:18px;
+      padding:18px 18px 20px;
       box-shadow:0 18px 32px rgba(0,0,0,0.35);
       color:#e5ecff;
       margin-bottom:18px;
     }
-
+    .hero-logo{
+      display:flex;
+      justify-content:flex-start;
+      align-items:center;
+      margin-bottom:16px;
+    }
     .hero-logo img{
       height:30px;
+      width:auto;
+      display:block;
     }
-
-    /* KPI */
+    .hero-sub{
+      font-size:12px;
+      opacity:0.85;
+      margin-left:4px;
+      margin-bottom:10px;
+    }
     .kpi-grid{
       display:grid;
-      grid-template-columns:repeat(2,1fr);
+      grid-template-columns:repeat(2,minmax(0,1fr));
       gap:10px;
     }
-
     .kpi-card{
       background:#f9fafb;
       border-radius:18px;
       padding:10px 12px;
       box-shadow:0 6px 14px rgba(0,0,0,0.22);
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      color:#111827;
+    }
+    .kpi-label{
+      font-size:12px;
+      color:#4b5563;
+      margin-bottom:2px;
+    }
+    .kpi-value{
+      font-size:24px;
+      font-weight:700;
+      line-height:1.1;
+      color:#111827;
     }
 
-    .kpi-label{font-size:12px;color:#4b5563;}
-    .kpi-value{font-size:24px;font-weight:700;}
-
-    /* TABLE / CARDS / MODALS */
-    /* --- UNCHANGED STYLES CONTINUE --- */
-        .card{
+    /* card that holds filters + list */
+    .card{
       background:var(--panel);
       border-radius:14px;
       box-shadow:0 12px 28px rgba(0,0,0,0.12);
       overflow:hidden;
       border:1px solid rgba(15,23,42,0.05);
     }
-
     header.main-header{
       display:flex;
       align-items:center;
@@ -88,19 +103,21 @@
       border-bottom:1px solid #e5e7eb;
       background:linear-gradient(90deg,#ffffff,#f3f4f6);
     }
-
     header.main-header h1{
       margin:0;
       font-size:18px;
       color:var(--ml-blue);
     }
-
+    .header-main-sub{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
+    }
     .header-right{
       display:flex;
       gap:8px;
       flex-wrap:wrap;
     }
-
     .btn{
       border-radius:999px;
       padding:8px 14px;
@@ -114,12 +131,18 @@
       text-decoration:none;
       color:var(--text);
       font-weight:500;
+      white-space:nowrap;
     }
-
     .btn.primary{
       background:var(--ml-blue);
       color:#fff;
       border-color:var(--ml-blue);
+    }
+    .btn.icon-only{
+      padding:6px 8px;
+      border-radius:8px;
+      min-width:0;
+      justify-content:center;
     }
 
     .tabs{
@@ -129,7 +152,6 @@
       padding:0 20px;
       gap:4px;
     }
-
     .tab{
       padding:10px 14px;
       font-size:14px;
@@ -138,8 +160,10 @@
       background:transparent;
       border-bottom:2px solid transparent;
       color:var(--muted);
+      display:flex;
+      align-items:center;
+      gap:6px;
     }
-
     .tab.active{
       color:var(--ml-blue);
       border-bottom-color:var(--ml-blue);
@@ -147,13 +171,51 @@
     }
 
     .content{
-      padding:16px 20px;
+      padding:16px 20px 18px;
+    }
+    .filters{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .filters label{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .chip{
+      border-radius:999px;
+      padding:5px 9px;
+      border:1px solid #e5e7eb;
+      background:#f9fafb;
+      font-size:12px;
+      cursor:pointer;
+    }
+    .chip.active{
+      background:#e5edff;
+      color:var(--ml-blue);
+      border-color:var(--ml-blue);
+      font-weight:600;
+    }
+    .filters select,
+    .filters input[type="text"]{
+      border-radius:999px;
+      border:1px solid #d1d5db;
+      padding:6px 10px;
+      font-size:13px;
+      background:#fff;
+      min-width:160px;
+    }
+    .filters .spacer{
+      flex:1;
     }
 
-    /* TABLE */
     .table-wrapper{
       width:100%;
       overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+      margin-bottom:8px;
     }
 
     table{
@@ -167,24 +229,45 @@
       overflow:hidden;
       border:1px solid #e5e7eb;
     }
-
     thead th{
       text-align:left;
       padding:8px 10px;
       background:#f3f4f6;
+      color:#111827;
       border-bottom:1px solid #e5e7eb;
       font-weight:600;
+      white-space:nowrap;
     }
-
     tbody td{
       padding:8px 10px;
       border-bottom:1px solid #f1f5f9;
       vertical-align:top;
     }
-
     tbody tr:nth-child(even){
       background:#fafbff;
     }
+
+    .ref{
+      font-family:monospace;
+      font-size:12px;
+      background:#f9fafb;
+      padding:2px 6px;
+      border-radius:999px;
+      display:inline-block;
+    }
+    .priority-badge{
+      border-radius:999px;
+      padding:2px 7px;
+      font-size:11px;
+      font-weight:600;
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+    }
+    .p1{background:#fef2f2;color:#b91c1c;}
+    .p2{background:#fffbeb;color:#92400e;}
+    .p3{background:#ecfdf5;color:#166534;}
+    .p4{background:#eff6ff;color:#1d4ed8;}
 
     .sla-badge{
       border-radius:999px;
@@ -196,7 +279,6 @@
       font-variant-numeric:tabular-nums;
       white-space:nowrap;
     }
-
     .sla-green{background:#ecfdf5;color:#166534;}
     .sla-amber{background:#fffbeb;color:#92400e;}
     .sla-red{background:#fef2f2;color:#b91c1c;}
@@ -208,23 +290,189 @@
       font-size:11px;
       display:inline-flex;
       align-items:center;
+      gap:4px;
+      background:#e5e7eb;
+      color:#111827;
+    }
+    .status-open{background:#dcfce7;color:#166534;}
+    .status-overdue{background:#fee2e2;color:#b91c1c;}
+    .status-complete{background:#e5e7eb;color:#374151;}
+
+    .small{font-size:11px;}
+    .muted{color:var(--muted);}
+    .nowrap{white-space:nowrap;}
+
+    #statusBar{
+      margin-top:8px;
+      font-size:12px;
+      color:var(--muted);
     }
 
-    .status-complete{background:#e5e7eb;color:#374151;}
-    .status-overdue{background:#fee2e2;color:#b91c1c;}
-    .status-open{background:#dcfce7;color:#166534;}
+    /* ---------- MOBILE JOB CARDS ---------- */
+    .job-cards{
+      display:none;
+      flex-direction:column;
+      gap:8px;
+      margin-bottom:8px;
+    }
+    .job-card{
+      background:#ffffff;
+      border-radius:12px;
+      padding:10px 12px;
+      box-shadow:0 4px 10px rgba(15,23,42,0.12);
+      border:1px solid #e5e7eb;
+    }
+    .job-card-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:4px;
+      gap:6px;
+    }
+    .job-card-ref{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+    .job-card-title{
+      font-size:13px;
+      font-weight:600;
+      margin-bottom:2px;
+    }
+    .job-card-site{
+      font-size:11px;
+      color:var(--muted);
+    }
+    .job-card-meta{
+      display:flex;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      gap:4px;
+      margin-top:6px;
+      align-items:center;
+    }
+    .job-card-actions{
+      display:flex;
+      gap:4px;
+      margin-top:8px;
+      flex-wrap:wrap;
+    }
+
+    /* ---------- MODALS ---------- */
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,0.35);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:50;
+    }
+    .modal-backdrop.show{
+      display:flex;
+    }
+    .modal{
+      background:#ffffff;
+      border-radius:12px;
+      max-width:420px;
+      width:100%;
+      box-shadow:0 20px 40px rgba(0,0,0,0.25);
+      padding:18px 18px 16px;
+      max-height:90vh;
+      display:flex;
+      flex-direction:column;
+    }
+    .modal header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .modal header h2{
+      margin:0;
+      font-size:16px;
+      color:var(--ml-blue);
+    }
+    .modal header button{
+      border:0;
+      background:transparent;
+      cursor:pointer;
+      font-size:18px;
+      line-height:1;
+      padding:4px;
+    }
+    .modal-body{
+      flex:1;
+      overflow-y:auto;
+      padding-right:4px;
+    }
+    .modal .field{
+      margin-bottom:10px;
+    }
+    .modal label{
+      font-size:12px;
+      color:#4b5563;
+      display:block;
+      margin-bottom:3px;
+    }
+    .modal select,
+    .modal textarea,
+    .modal input[type="date"],
+    .modal input[type="time"]{
+      width:100%;
+      border-radius:8px;
+      border:1px solid #d1d5db;
+      padding:7px 9px;
+      font-size:13px;
+      font-family:inherit;
+    }
+    .modal textarea{
+      min-height:70px;
+      resize:vertical;
+    }
+    .modal .actions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+      margin-top:10px;
+    }
+
+    @media(max-width:768px){
+      header.main-header{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+      .header-right{
+        width:100%;
+        justify-content:flex-start;
+        flex-wrap:wrap;
+      }
+      .filters{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+      table{
+        font-size:12px;
+      }
+      /* hide table, show cards on mobile */
+      .table-wrapper{
+        display:none;
+      }
+      .job-cards{
+        display:flex;
+      }
+    }
   </style>
 </head>
-
 <body>
 <div class="shell">
 
-  <!-- HERO -->
+  <!-- HERO HEADER WITH LOGO + KPI TILES -->
   <section class="hero">
     <div class="hero-logo">
       <img src="Mostlane Logo.jpg" alt="Mostlane">
     </div>
-
+    <div class="hero-sub">Live SLA overview • Powered by Mostlane SLA Worker</div>
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-label">Open Jobs</div>
@@ -247,7 +495,13 @@
 
   <div class="card">
     <header class="main-header">
-      <h1>SLA Tracker</h1>
+      <div>
+        <h1>SLA Tracker</h1>
+        <div class="header-main-sub">
+          Live countdown for open jobs • Data: mostlane-sla Worker
+        </div>
+      </div>
+
       <div class="header-right">
         <a href="financials.html" class="btn">£ Financials</a>
         <a href="sla-performance.html" class="btn">📊 SLA Performance</a>
@@ -257,306 +511,956 @@
     </header>
 
     <div class="tabs">
-      <button class="tab active" id="tabOpen">Open Jobs <span id="countOpen">0</span></button>
-      <button class="tab" id="tabCompleted">Completed <span id="countCompleted">0</span></button>
+      <button class="tab active" id="tabOpen">Open Jobs <span class="count" id="countOpen">0</span></button>
+      <button class="tab" id="tabCompleted">Completed <span class="count" id="countCompleted">0</span></button>
     </div>
 
     <div class="content">
+      <div class="filters">
+        <div class="group">
+          <label>Priority:</label>
+          <button class="chip active" data-priority="all">All</button>
+          <button class="chip" data-priority="P1">P1</button>
+          <button class="chip" data-priority="P2">P2</button>
+          <button class="chip" data-priority="P3">P3</button>
+          <button class="chip" data-priority="P4">P4</button>
+        </div>
+
+        <div class="group">
+          <label for="statusFilter">Status:</label>
+          <select id="statusFilter">
+            <option value="all">All</option>
+            <option value="open">Open only</option>
+            <option value="overdue">Overdue</option>
+          </select>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div class="group">
+          <label for="searchBox">Search:</label>
+          <input type="text" id="searchBox" placeholder="Ref, site, description…">
+        </div>
+      </div>
+
+      <!-- DESKTOP TABLE VIEW -->
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr>
-              <th>Ref</th>
-              <th>Priority</th>
-              <th>Description / Site</th>
-              <th>Raised</th>
-              <th>SLA Target</th>
-              <th>SLA</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
+          <tr>
+            <th style="width:80px;">Ref</th>
+            <th style="width:110px;">Priority</th>
+            <th>Description / Site</th>
+            <th style="width:130px;">Raised</th>
+            <th style="width:130px;">SLA Target</th>
+            <th style="width:130px;">Time Left</th>
+            <th style="width:120px;">Status</th>
+            <th style="width:120px;">Actions</th>
+          </tr>
           </thead>
           <tbody id="jobsTbody"></tbody>
         </table>
       </div>
 
+      <!-- MOBILE CARD VIEW -->
       <div id="jobCards" class="job-cards"></div>
+
       <div id="statusBar">Loading jobs…</div>
     </div>
   </div>
 </div>
+
+<!-- UPDATE JOB MODAL -->
+<div class="modal-backdrop" id="updateModalBackdrop">
+  <div class="modal">
+    <header>
+      <h2 id="updateModalTitle">Update Job</h2>
+      <button type="button" id="updateModalCloseBtn">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="field">
+        <label>Reference</label>
+        <div class="ref" id="updateModalRef">—</div>
+      </div>
+      <div class="field">
+        <label for="updateModalPriority">Priority</label>
+        <select id="updateModalPriority">
+          <option value="P1">P1 – Emergency</option>
+          <option value="P2">P2 – Urgent</option>
+          <option value="P3">P3 – Routine</option>
+          <option value="P4">P4 – Low</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateModalStatus">Status</label>
+        <select id="updateModalStatus">
+          <option value="With Contractor - R">With Contractor</option>
+          <option value="In Progress">In Progress</option>
+          <option value="On Hold">On Hold</option>
+          <option value="Completed">Completed</option>
+          <option value="Closed">Closed</option>
+        </select>
+      </div>
+      <!-- Engineer + scheduled date/time inside UPDATE modal -->
+      <div class="field">
+        <label for="updateModalEngineer">Engineer Assigned</label>
+        <select id="updateModalEngineer">
+          <option value="">Unassigned</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateModalDate">Scheduled Date</label>
+        <input type="date" id="updateModalDate">
+      </div>
+      <div class="field">
+        <label for="updateModalTime">Scheduled Time</label>
+        <input type="time" id="updateModalTime">
+      </div>
+      <div class="field">
+        <label for="updateModalNote">Event / Notes (history log)</label>
+        <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="updateModalCancelBtn">Cancel</button>
+      <button type="button" class="btn primary" id="updateModalSaveBtn">Save</button>
+    </div>
+    <div id="updateModalStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
+<!-- ASSIGN JOB MODAL -->
+<div class="modal-backdrop" id="assignModalBackdrop">
+  <div class="modal">
+    <header>
+      <h2 id="assignModalTitle">Assign Job</h2>
+      <button type="button" id="assignModalCloseBtn">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="field">
+        <label>Reference</label>
+        <div class="ref" id="assignModalRef">—</div>
+      </div>
+      <div class="field">
+        <label for="assignEngineerSelect">Engineer</label>
+        <select id="assignEngineerSelect">
+          <option value="">Loading engineers…</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="assignDate">Scheduled Date</label>
+        <input type="date" id="assignDate">
+      </div>
+      <div class="field">
+        <label for="assignTime">Scheduled Time</label>
+        <input type="time" id="assignTime">
+      </div>
+      <div class="field">
+        <label for="assignNote">Note (optional)</label>
+        <textarea id="assignNote" placeholder="e.g. Booked for Connor on early shift."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="assignModalCancelBtn">Cancel</button>
+      <button type="button" class="btn primary" id="assignModalSaveBtn">Assign</button>
+    </div>
+    <div id="assignModalStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
 <script>
-/* =========================================================
-   CONFIG
-========================================================= */
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
 
-/* =========================================================
-   STATE
-========================================================= */
 let allJobs = [];
 let showingCompleted = false;
 let activePriority = "all";
 let countdownTimerId = null;
+
 let currentUpdateJobId = null;
 let currentAssignJobId = null;
 let cachedUsers = [];
 
 const $ = id => document.getElementById(id);
 
-/* =========================================================
-   STATUS + SLA HELPERS  (✔️ UPDATED – SAFE)
-========================================================= */
-
-const CANONICAL_STATUSES = [
-  "Pending",
-  "Scheduled",
-  "Travelling",
-  "In Progress",
-  "Complete",
-  "On Hold",
-  "Closed Jobs",
-  "Order",
-  "Quote"
-];
-
-function isCompleted(job){
-  const s = (job.status || "").toLowerCase();
-  return s.includes("complete") || s.includes("closed");
+/* =========================
+   DATE HELPERS
+   ========================= */
+function parseDate(v){
+  if(!v) return null;
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
 }
 
-/*
- SLA RULE:
- - If "Complete" exists → compare COMPLETE time vs SLA target
- - Else if "Closed Jobs" exists → compare CLOSED time vs SLA target
- - Else SLA is live / pending
-*/
-function evaluateSla(job){
-  if(!job || !job.sla || !job.sla.targetAt){
-    return { text:"SLA", cls:"sla-badge sla-none", state:"NONE" };
-  }
-
-  const target = new Date(job.sla.targetAt).getTime();
-  let completedAt = null;
-
-  if(Array.isArray(job.events)){
-    for(const e of job.events){
-      if(e.type === "status-changed"){
-        if(e.to === "Complete" || e.to === "Closed Jobs"){
-          completedAt = new Date(e.at).getTime();
-        }
-      }
-    }
-  }
-
-  if(completedAt){
-    return completedAt <= target
-      ? { text:"SLA", cls:"sla-badge sla-green", state:"MET" }
-      : { text:"SLA", cls:"sla-badge sla-red", state:"BREACHED" };
-  }
-
-  // still open
-  return { text:"SLA", cls:"sla-badge sla-none", state:"PENDING" };
+function fmtDateTimeShort(d){
+  if(!(d instanceof Date) || isNaN(d)) return "—";
+  return d.toLocaleString("en-GB", {
+    day:"2-digit", month:"short",
+    hour:"2-digit", minute:"2-digit"
+  });
 }
 
-/* =========================================================
-   NORMALISE JOB (unchanged structure)
-========================================================= */
+// split ISO → {date, time} for inputs
+function isoToDateAndTime(iso){
+  if(!iso) return {date:"", time:""};
+  const d = new Date(iso);
+  if(isNaN(d)) return {date:"", time:""};
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  const hh = String(d.getHours()).padStart(2,"0");
+  const min = String(d.getMinutes()).padStart(2,"0");
+  return {date:`${yyyy}-${mm}-${dd}`, time:`${hh}:${min}`};
+}
+
+/* =========================
+   USER HELPER
+   ========================= */
+function getCurrentUser(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "Portal User";
+}
+
+/* =========================
+   NORMALISE JOB
+   ========================= */
 function normaliseJob(raw){
   const j = raw || {};
 
+  const id =
+    j.id || j.jobId || j.reference || j.helpdeskRef || j.ref;
+
+  const reference =
+    j.reference || j.helpdeskRef || j.ref || id || "N/A";
+
+  let priority = (j.priority || j.slaPriority || j.urgency || "").toString().trim().toUpperCase();
+  if(!/^P[1-4]$/.test(priority)){
+    if(priority.includes("1")) priority = "P1";
+    else if(priority.includes("2")) priority = "P2";
+    else if(priority.includes("3")) priority = "P3";
+    else if(priority.includes("4")) priority = "P4";
+    else priority = "P4";
+  }
+
+  const site =
+    j.site || j.siteName || j.siteCode || j.location || j.address || "";
+
+  const description =
+    j.description || j.summary || j.title || "";
+
+  const raisedAt =
+    j.raisedAt || j.raised_on || j.createdAt || j.dateRaised;
+
+  // SLA target from Worker (targetAt)
+  const slaTarget =
+    j.slaTarget || j.targetAt || j.target || j.slaDue;
+
+  const status =
+    j.status || j.callStatus || j.state || "With Contractor - R";
+
+  const engineer =
+    j.engineer || j.assignedEngineer || j.assignedTo || "";
+
+  // keep scheduledAt from Worker
+  const scheduledAt = j.scheduledAt || null;
+
   return {
-    id: j.id,
-    reference: j.helpdeskRef || j.reference || j.id,
-    priority: j.priority || "P4",
-    description: j.description || "",
-    site: j.siteName || "",
-    status: j.status || "Pending",
-    engineer: j.assignedTo || "",
-    raisedAt: j.raisedAt,
-    slaTarget: j.targetAt,
-    scheduledAt: j.scheduledAt,
-    sla: j.sla,
-    events: j.events || []
+    id,
+    reference,
+    priority,
+    site,
+    description,
+    raisedAt,
+    slaTarget,
+    status,
+    engineer,
+    scheduledAt,
+    raw
   };
 }
 
-/* =========================================================
-   KPI UPDATE (✔️ SLA badge driven)
-========================================================= */
+/* =========================
+   SLA COUNTDOWN
+   ========================= */
+function computeSlaCountdown(targetISO){
+  if(!targetISO){
+    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+  }
+  const now = new Date();
+  const target = parseDate(targetISO);
+  if(!target){
+    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+  }
+
+  let diff = target - now;
+  const overdue = diff < 0;
+  if(overdue) diff = -diff;
+
+  const secs = Math.floor(diff/1000);
+  const days = Math.floor(secs/86400);
+  const hours = Math.floor((secs%86400)/3600);
+  const mins = Math.floor((secs%3600)/60);
+
+  let label = overdue ? "+" : "";
+  if(days>0){
+    label += `${days}d ${String(hours).padStart(2,"0")}h`;
+  } else {
+    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
+  }
+
+  const hoursLeft = (target - now) / 3600000;
+
+  let cls = "sla-badge sla-green";
+  let status = "ok";
+
+  if(overdue || hoursLeft <= 0){
+    cls = "sla-badge sla-red";
+    status = "overdue";
+  } else if(hoursLeft <= 1){
+    cls = "sla-badge sla-red";
+    status = "overdueSoon";
+  } else if(hoursLeft <= 4){
+    cls = "sla-badge sla-amber";
+    status = "warn";
+  }
+
+  return {
+    text: (overdue ? "Overdue " : "Due in ") + label,
+    cls,
+    status
+  };
+}
+
+/* =========================
+   STATUS PILL
+   ========================= */
+function statusClass(status, slaStatus){
+  const s = (status || "").toLowerCase();
+  if(s.includes("complete") || s.includes("closed")){
+    return "status-pill status-complete";
+  }
+  if(slaStatus === "overdue" || slaStatus === "overdueSoon"){
+    return "status-pill status-overdue";
+  }
+  return "status-pill status-open";
+}
+
+function isCompleted(job){
+  const s = (job.status || "").toLowerCase();
+  if(s.includes("complete") || s.includes("closed")) return true;
+  return false;
+}
+
+/* =========================
+   KPI UPDATE
+   ========================= */
 function updateKpis(){
-  let open = 0, overdue = 0, met = 0;
+  const openElem = $("kpiOpenJobs");
+  const dueElem = $("kpiDueToday");
+  const overElem = $("kpiOverdue");
+  const riskElem = $("kpiAtRisk");
+  if(!openElem || !dueElem || !overElem || !riskElem) return;
+
+  const now = new Date();
+  let open = 0, dueToday = 0, overdue = 0, atRisk = 0;
 
   allJobs.forEach(job => {
     if(isCompleted(job)) return;
-    open++;
 
-    const sla = evaluateSla(job);
-    if(sla.state === "BREACHED") overdue++;
-    if(sla.state === "MET") met++;
+    open++;
+    const slaInfo = computeSlaCountdown(job.slaTarget);
+    const t = parseDate(job.slaTarget);
+
+    if(t &&
+       t.getFullYear() === now.getFullYear() &&
+       t.getMonth() === now.getMonth() &&
+       t.getDate() === now.getDate()){
+      dueToday++;
+    }
+
+    if(slaInfo.status === "overdue"){
+      overdue++;
+    } else if(slaInfo.status === "warn" || slaInfo.status === "overdueSoon"){
+      atRisk++;
+    }
   });
 
-  $("kpiOpenJobs").textContent = open;
-  $("kpiOverdue").textContent = overdue;
-  $("kpiAtRisk").textContent = overdue;
+  openElem.textContent = open;
+  dueElem.textContent = dueToday;
+  overElem.textContent = overdue;
+  riskElem.textContent = atRisk;
 }
 
-/* =========================================================
-   RENDER TABLE
-========================================================= */
+/* =========================
+   RENDER TABLE + CARDS
+   ========================= */
 function render(){
   const tbody = $("jobsTbody");
-  tbody.innerHTML = "";
+  const wrapper = document.querySelector(".table-wrapper");
+  const cardsContainer = $("jobCards");
+  const prevScrollLeft = wrapper ? wrapper.scrollLeft : 0;
 
-  const list = showingCompleted
-    ? allJobs.filter(isCompleted)
-    : allJobs.filter(j => !isCompleted(j));
+  if(tbody) tbody.innerHTML = "";
+  if(cardsContainer) cardsContainer.innerHTML = "";
 
-  list.forEach(job => {
-    const sla = evaluateSla(job);
+  const openJobs = allJobs.filter(j => !isCompleted(j));
+  const completedJobs = allJobs.filter(j => isCompleted(j));
 
-    const tr = document.createElement("tr");
-    tr.dataset.jobId = job.id;
+  $("countOpen").textContent = openJobs.length;
+  $("countCompleted").textContent = completedJobs.length;
 
-    tr.innerHTML = `
-      <td>${job.reference}</td>
-      <td>${job.priority}</td>
-      <td>${job.description}<br><span class="muted">${job.site}</span></td>
-      <td>${job.raisedAt || "—"}</td>
-      <td>${job.slaTarget || "—"}</td>
-      <td><span class="${sla.cls}">${sla.text}</span></td>
-      <td><span class="status-pill">${job.status}</span></td>
-      <td>
-        <button class="btn icon-only" data-action="update">✏️</button>
-        <button class="btn icon-only" data-action="assign">👤</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
+  const list = showingCompleted ? completedJobs : openJobs;
+
+  const search = $("searchBox").value.trim().toLowerCase();
+  const statusFilter = $("statusFilter").value;
+
+  const filtered = list.filter(job => {
+    if(activePriority !== "all" && job.priority !== activePriority) return false;
+
+    const slaInfo = computeSlaCountdown(job.slaTarget);
+
+    if(!showingCompleted){
+      if(statusFilter === "open"){
+        if(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon") return false;
+      }
+      if(statusFilter === "overdue"){
+        if(!(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon")) return false;
+      }
+    }
+
+    if(search){
+      const blob = [
+        job.reference,
+        job.site,
+        job.description,
+        job.status,
+        job.engineer
+      ].join(" ").toLowerCase();
+      if(!blob.includes(search)) return false;
+    }
+
+    return true;
   });
 
+  $("statusBar").textContent =
+    filtered.length === 0
+      ? "No jobs match filters."
+      : `${filtered.length} job(s) shown`;
+
+  for(const job of filtered){
+    const raised = parseDate(job.raisedAt);
+    const slaInfo = computeSlaCountdown(job.slaTarget);
+
+    // TABLE ROW (desktop)
+    if(tbody){
+      const tr = document.createElement("tr");
+      tr.dataset.jobId = job.id || "";
+
+      tr.innerHTML = `
+        <td>
+          <div class="ref">${job.reference}</div>
+          ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
+        </td>
+        <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
+        <td>
+          <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
+          <div class="small muted">${job.site || ""}</div>
+        </td>
+        <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
+        <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
+        <td class="small nowrap">
+          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
+            ${slaInfo.text}
+          </span>
+        </td>
+        <td class="small">
+          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
+        </td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+            <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    // MOBILE CARD
+    if(cardsContainer){
+      const card = document.createElement("div");
+      card.className = "job-card";
+      card.dataset.jobId = job.id || "";
+
+      card.innerHTML = `
+        <div class="job-card-header">
+          <div class="job-card-ref">
+            <span class="ref">${job.reference}</span>
+            ${job.engineer ? `<span class="small muted">${job.engineer}</span>` : ""}
+          </div>
+          <div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div>
+        </div>
+        <div class="job-card-title">${job.description || ""}</div>
+        <div class="job-card-site">${job.site || ""}</div>
+        <div class="job-card-meta">
+          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
+            ${slaInfo.text}
+          </span>
+          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
+        </div>
+        <div class="job-card-meta small muted">
+          <span>Raised: ${fmtDateTimeShort(raised)}</span>
+          <span>SLA: ${fmtDateTimeShort(parseDate(job.slaTarget))}</span>
+        </div>
+        <div class="job-card-actions">
+          <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+          <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+        </div>
+      `;
+      cardsContainer.appendChild(card);
+    }
+  }
+
+  // restore horizontal scroll position on desktop
+  if(wrapper){
+    wrapper.scrollLeft = prevScrollLeft;
+  }
+
+  // update KPI tiles
   updateKpis();
+
+  startCountdownLoop();
 }
 
-/* =========================================================
+/* =========================
+   COUNTDOWN LOOP
+   ========================= */
+function startCountdownLoop(){
+  if(countdownTimerId) clearInterval(countdownTimerId);
+  if(showingCompleted) return;
+
+  const tick = () => {
+    document.querySelectorAll(".sla-badge[data-sla-target]").forEach(el => {
+      const iso = el.getAttribute("data-sla-target");
+      if(!iso) return;
+      const info = computeSlaCountdown(iso);
+      el.textContent = info.text;
+      el.className = info.cls;
+    });
+  };
+
+  tick();
+  countdownTimerId = setInterval(tick, 1000);
+}
+
+/* =========================
    LOAD JOBS
-========================================================= */
+   ========================= */
 async function loadJobs(){
   $("statusBar").textContent = "Loading jobs…";
   try{
     const res = await fetch(SLA_API + "/jobs?t=" + Date.now());
-    const data = await res.json();
-    allJobs = data.map(normaliseJob);
+    const json = await res.json();
+
+    const rawList = Array.isArray(json) ? json : (json.jobs || json.data || []);
+    allJobs = rawList.map(normaliseJob);
+
+    $("statusBar").textContent = `Loaded ${allJobs.length} job(s).`;
     render();
-    $("statusBar").textContent = `${allJobs.length} jobs loaded`;
   }catch(err){
-    console.error(err);
-    $("statusBar").textContent = "Error loading jobs";
+    console.error("load error", err);
+    $("statusBar").textContent = "❌ Error loading jobs.";
+    allJobs = [];
+    render();
   }
 }
 
-/* =========================================================
-   EVENTS
-========================================================= */
+/* =========================
+   UPDATE MODAL
+   ========================= */
+function openUpdateModal(jobId){
+  const job = allJobs.find(j => j.id === jobId);
+  if(!job) return;
+
+  currentUpdateJobId = jobId;
+  $("updateModalTitle").textContent = `Update Job – ${job.reference}`;
+  $("updateModalRef").textContent = job.reference;
+  $("updateModalPriority").value = job.priority || "P4";
+
+  const statusSelect = $("updateModalStatus");
+  let matched = false;
+  Array.from(statusSelect.options).forEach(opt => {
+    if(opt.value.toLowerCase() === (job.status || "").toLowerCase()){
+      matched = true;
+      statusSelect.value = opt.value;
+    }
+  });
+  if(!matched){
+    statusSelect.value = "In Progress";
+  }
+
+  ensureUsersLoaded().then(() => {
+    populateUpdateEngineerSelect(job.engineer || "");
+  });
+
+  const dt = isoToDateAndTime(job.scheduledAt);
+  $("updateModalDate").value = dt.date;
+  $("updateModalTime").value = dt.time;
+
+  $("updateModalNote").value = "";
+  $("updateModalStatusText").textContent = "";
+
+  $("updateModalBackdrop").classList.add("show");
+}
+
+function closeUpdateModal(){
+  $("updateModalBackdrop").classList.remove("show");
+  currentUpdateJobId = null;
+  $("updateModalNote").value = "";
+  $("updateModalStatusText").textContent = "";
+  $("updateModalEngineer").value = "";
+  $("updateModalDate").value = "";
+  $("updateModalTime").value = "";
+}
+
+async function saveUpdateModal(){
+  if(!currentUpdateJobId) return;
+
+  const priority = $("updateModalPriority").value;
+  const status = $("updateModalStatus").value;
+  const note = $("updateModalNote").value.trim();
+  const engineer = $("updateModalEngineer").value;
+  const date = $("updateModalDate").value;
+  const time = $("updateModalTime").value;
+  const user = getCurrentUser();
+
+  let scheduledAt = null;
+  if(date && time){
+    scheduledAt = new Date(date + "T" + time + ":00").toISOString();
+  }
+
+  $("updateModalStatusText").textContent = "Saving…";
+
+  try{
+    const payload = {
+      priority,
+      status,
+      note,
+      changedBy: user
+    };
+
+    if(engineer){
+      payload.assignedTo = engineer;
+    } else {
+      payload.assignedTo = "";
+    }
+    if(scheduledAt){
+      payload.scheduledAt = scheduledAt;
+    } else {
+      payload.scheduledAt = null;
+    }
+
+    const res = await fetch(
+      SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
+      {
+        method:"PATCH",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify(payload)
+      }
+    );
+
+    if(!res.ok){
+      throw new Error(res.status + " " + res.statusText);
+    }
+
+    $("updateModalStatusText").textContent = "✅ Saved – refreshing list…";
+    await loadJobs();
+    setTimeout(closeUpdateModal, 600);
+  }catch(err){
+    console.error("Update modal error:", err);
+    $("updateModalStatusText").textContent = "❌ Error saving changes.";
+  }
+}
+
+/* =========================
+   LOAD ENGINEERS LIST
+   ========================= */
+async function ensureUsersLoaded(){
+  if(cachedUsers.length) return;
+  try{
+    const res = await fetch(USERS_API + "?t=" + Date.now());
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const data = await res.json();
+
+    if (Array.isArray(data.Users)) {
+      cachedUsers = data.Users.map(u => ({
+        username: u.Username,
+        displayName: `${u.FirstName} ${u.LastName}`.trim()
+      })).filter(u => u.username);
+    }
+    else if (Array.isArray(data.users)) {
+      cachedUsers = data.users.map(u => ({
+        username: u.username || u.user || "",
+        displayName: u.displayName || u.name || (u.username || "").replace(".", " ")
+      })).filter(u => u.username);
+    }
+    else if (Array.isArray(data)) {
+      cachedUsers = data.map(u => ({
+        username: u.username || u.user || u.Username || "",
+        displayName:
+          u.displayName ||
+          u.name ||
+          `${u.FirstName || ""} ${u.LastName || ""}`.trim() ||
+          (u.username || u.Username || "").replace(".", " ")
+      })).filter(u => u.username);
+    }
+  }catch(err){
+    console.error("User load error:", err);
+    cachedUsers = [];
+  }
+}
+
+function populateEngineerSelect(){
+  const sel = $("assignEngineerSelect");
+  sel.innerHTML = "";
+
+  if(!cachedUsers.length){
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No users found";
+    sel.appendChild(opt);
+    return;
+  }
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select engineer…";
+  sel.appendChild(placeholder);
+
+  cachedUsers.forEach(u => {
+    const opt = document.createElement("option");
+    opt.value = u.username;
+    opt.textContent = u.displayName;
+    sel.appendChild(opt);
+  });
+}
+
+// populate engineer dropdown in UPDATE modal
+function populateUpdateEngineerSelect(selected){
+  const sel = $("updateModalEngineer");
+  if(!sel) return;
+  sel.innerHTML = "";
+
+  const optNone = document.createElement("option");
+  optNone.value = "";
+  optNone.textContent = "Unassigned";
+  sel.appendChild(optNone);
+
+  if(cachedUsers.length){
+    cachedUsers.forEach(u => {
+      const opt = document.createElement("option");
+      opt.value = u.username;
+      opt.textContent = u.displayName;
+      sel.appendChild(opt);
+    });
+  }
+
+  if(selected){
+    sel.value = selected;
+  }
+}
+
+/* =========================
+   ASSIGN MODAL
+   ========================= */
+function defaultDateAndTime(){
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth()+1).padStart(2,"0");
+  const dd = String(now.getDate()).padStart(2,"0");
+  const dateStr = `${yyyy}-${mm}-${dd}`;
+
+  const hh = String(now.getHours()).padStart(2,"0");
+  const min = now.getMinutes();
+  const roundedMin = Math.round(min/15)*15;
+  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0");
+  const timeStr = `${hh}:${mmStr}`;
+
+  return {dateStr, timeStr};
+}
+
+async function openAssignModal(jobId){
+  const job = allJobs.find(j => j.id === jobId);
+  if(!job) return;
+
+  currentAssignJobId = jobId;
+  $("assignModalTitle").textContent = `Assign Job – ${job.reference}`;
+  $("assignModalRef").textContent = job.reference;
+  $("assignModalStatusText").textContent = "";
+
+  await ensureUsersLoaded();
+  populateEngineerSelect();
+
+  const sel = $("assignEngineerSelect");
+  if(job.engineer){
+    Array.from(sel.options).forEach(opt => {
+      if(opt.value === job.engineer){
+        sel.value = opt.value;
+      }
+    });
+  } else {
+    sel.value = "";
+  }
+
+  const {dateStr, timeStr} = defaultDateAndTime();
+  $("assignDate").value = dateStr;
+  $("assignTime").value = timeStr;
+
+  $("assignNote").value = "";
+
+  $("assignModalBackdrop").classList.add("show");
+}
+
+function closeAssignModal(){
+  $("assignModalBackdrop").classList.remove("show");
+  currentAssignJobId = null;
+  $("assignNote").value = "";
+  $("assignModalStatusText").textContent = "";
+}
+
+async function saveAssignModal(){
+  if(!currentAssignJobId) return;
+
+  const engineer = $("assignEngineerSelect").value;
+  const date = $("assignDate").value;
+  const time = $("assignTime").value;
+  const note = $("assignNote").value.trim();
+  const user = getCurrentUser();
+
+  if(!engineer){
+    $("assignModalStatusText").textContent = "Please select an engineer.";
+    return;
+  }
+  if(!date || !time){
+    $("assignModalStatusText").textContent = "Please choose date and time.";
+    return;
+  }
+
+  const scheduledAt = new Date(date + "T" + time + ":00").toISOString();
+
+  $("assignModalStatusText").textContent = "Assigning…";
+
+  try{
+    const payload = {
+      assignedTo: engineer,
+      scheduledAt,
+      note,
+      changedBy: user
+    };
+
+    const res = await fetch(
+      SLA_API + "/jobs/" + encodeURIComponent(currentAssignJobId),
+      {
+        method:"PATCH",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify(payload)
+      }
+    );
+
+    if(!res.ok){
+      throw new Error(res.status + " " + res.statusText);
+    }
+
+    $("assignModalStatusText").textContent = "✅ Assigned – refreshing list…";
+    await loadJobs();
+    setTimeout(closeAssignModal, 600);
+  }catch(err){
+    console.error("Assign modal error:", err);
+    $("assignModalStatusText").textContent = "❌ Error assigning job.";
+  }
+}
+
+/* =========================
+   EVENTS + INIT
+   ========================= */
+function handleJobActionClick(e){
+  const btn = e.target.closest("button[data-action]");
+  if(!btn) return;
+  const action = btn.dataset.action;
+  const container = e.currentTarget;
+  const rowOrCard = e.target.closest("[data-job-id]");
+  const id = rowOrCard && rowOrCard.dataset.jobId;
+  if(!id) return;
+
+  if(action === "update"){
+    openUpdateModal(id);
+  } else if(action === "assign"){
+    openAssignModal(id);
+  }
+}
+
 function initEvents(){
-  $("tabOpen").onclick = () => {
+  $("tabOpen").addEventListener("click", () => {
     showingCompleted = false;
     $("tabOpen").classList.add("active");
     $("tabCompleted").classList.remove("active");
     render();
-  };
+  });
 
-  $("tabCompleted").onclick = () => {
+  $("tabCompleted").addEventListener("click", () => {
     showingCompleted = true;
     $("tabCompleted").classList.add("active");
     $("tabOpen").classList.remove("active");
     render();
-  };
+  });
+
+  document.querySelectorAll(".chip[data-priority]").forEach(chip => {
+    chip.addEventListener("click", () => {
+      activePriority = chip.dataset.priority;
+      document.querySelectorAll(".chip[data-priority]").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      render();
+    });
+  });
+
+  $("statusFilter").addEventListener("change", render);
+  $("searchBox").addEventListener("input", render);
+
+  $("jobsTbody").addEventListener("click", handleJobActionClick);
+  $("jobCards").addEventListener("click", handleJobActionClick);
+
+  // Update modal buttons
+  $("updateModalCloseBtn").addEventListener("click", closeUpdateModal);
+  $("updateModalCancelBtn").addEventListener("click", closeUpdateModal);
+  $("updateModalSaveBtn").addEventListener("click", saveUpdateModal);
+
+  // Assign modal buttons
+  $("assignModalCloseBtn").addEventListener("click", closeAssignModal);
+  $("assignModalCancelBtn").addEventListener("click", closeAssignModal);
+  $("assignModalSaveBtn").addEventListener("click", saveAssignModal);
+
+  // Backdrop click to close
+  $("updateModalBackdrop").addEventListener("click", e => {
+    if(e.target === $("updateModalBackdrop")) closeUpdateModal();
+  });
+  $("assignModalBackdrop").addEventListener("click", e => {
+    if(e.target === $("assignModalBackdrop")) closeAssignModal();
+  });
+
+  document.addEventListener("keydown", e => {
+    if(e.key === "Escape"){
+      if(currentAssignJobId) closeAssignModal();
+      else if(currentUpdateJobId) closeUpdateModal();
+    }
+  });
 }
 
-/* =========================================================
-   INIT
-========================================================= */
 window.addEventListener("DOMContentLoaded", () => {
   initEvents();
   loadJobs();
 });
 </script>
-<script>
-/* =========================================================
-   JOB ACTION HANDLERS (UNCHANGED)
-========================================================= */
-function handleJobActionClick(e){
-  const btn = e.target.closest("button[data-action]");
-  if(!btn) return;
-
-  const row = e.target.closest("[data-job-id]");
-  if(!row) return;
-
-  const jobId = row.dataset.jobId;
-
-  if(btn.dataset.action === "update"){
-    openUpdateModal(jobId);
-  }
-  if(btn.dataset.action === "assign"){
-    openAssignModal(jobId);
-  }
-}
-
-/* =========================================================
-   UPDATE MODAL EVENTS (UNCHANGED)
-========================================================= */
-document.getElementById("jobsTbody")
-  .addEventListener("click", handleJobActionClick);
-
-document.getElementById("jobCards")
-  .addEventListener("click", handleJobActionClick);
-
-document.getElementById("updateModalCloseBtn")
-  .addEventListener("click", closeUpdateModal);
-
-document.getElementById("updateModalCancelBtn")
-  .addEventListener("click", closeUpdateModal);
-
-document.getElementById("updateModalSaveBtn")
-  .addEventListener("click", saveUpdateModal);
-
-/* =========================================================
-   ASSIGN MODAL EVENTS (UNCHANGED)
-========================================================= */
-document.getElementById("assignModalCloseBtn")
-  .addEventListener("click", closeAssignModal);
-
-document.getElementById("assignModalCancelBtn")
-  .addEventListener("click", closeAssignModal);
-
-document.getElementById("assignModalSaveBtn")
-  .addEventListener("click", saveAssignModal);
-
-/* =========================================================
-   BACKDROP + ESC KEY (UNCHANGED)
-========================================================= */
-document.getElementById("updateModalBackdrop")
-  .addEventListener("click", e => {
-    if(e.target.id === "updateModalBackdrop"){
-      closeUpdateModal();
-    }
-  });
-
-document.getElementById("assignModalBackdrop")
-  .addEventListener("click", e => {
-    if(e.target.id === "assignModalBackdrop"){
-      closeAssignModal();
-    }
-  });
-
-document.addEventListener("keydown", e => {
-  if(e.key === "Escape"){
-    closeAssignModal();
-    closeUpdateModal();
-  }
-});
-</script>
-
 </body>
 </html>
