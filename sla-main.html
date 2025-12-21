@@ -1226,15 +1226,16 @@ async function saveUpdateModal(){
     );
 
     if(!res.ok){
-      throw new Error(res.status + " " + res.statusText);
-    }
+  const text = await res.text();
+  throw new Error(`HTTP ${res.status}: ${text}`);
+}
 
     $("updateModalStatusText").textContent = "✅ Saved – refreshing list…";
     await loadJobs();
     setTimeout(closeUpdateModal, 600);
   }catch(err){
     console.error("Update modal error:", err);
-    $("updateModalStatusText").textContent = "❌ Error saving changes.";
+$("updateModalStatusText").textContent = "❌ " + err.message;
   }
 }
 
