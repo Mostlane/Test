@@ -236,7 +236,33 @@
       text-align:center;
       padding:20px 0;
     }
+/* --- Mobile photo upload (Step 2) --- */
+.photo-upload-mobile{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:10px;
+}
 
+.photo-pick-btn{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:14px;
+  border-radius:12px;
+  border:2px dashed #c7d2fe;
+  background:#eef2ff;
+  color:#1e3a8a;
+  font-weight:600;
+  font-size:15px;
+  cursor:pointer;
+  text-align:center;
+}
+
+.photo-pick-btn:active{
+  background:#e0e7ff;
+}
     /* --- Modal viewer --- */
     .photo-modal{
       position:fixed;
@@ -420,10 +446,11 @@
       Upload site / before / after photos for this job. Files are stored against this job ID in R2.
     </p>
 
-    <div class="photo-upload-row">
-      <input type="file" id="photoInput" accept="image/*" multiple>
-      <button class="btn primary" id="uploadBtn">Upload Photos</button>
-    </div>
+<div class="photo-upload-mobile">
+  <label for="photoInput" class="photo-pick-btn">📷 Add photos</label>
+  <input type="file" id="photoInput" accept="image/*" multiple hidden>
+  <button class="btn primary" id="uploadBtn">Upload selected</button>
+</div>
     <div id="photoUploadStatus">No photos uploaded in this session yet.</div>
 
     <div id="photoGrid" class="photo-grid">
