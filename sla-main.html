@@ -784,30 +784,61 @@ function normaliseJob(raw){
 /* =========================
    SLA COUNTDOWN
    ========================= */
-function computeSlaCountdown(targetISO){
+function computeSlaCountdown(targetISO, completedAtISO){
   if(!targetISO){
-    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+    return { text:"—", cls:"sla-badge sla-none", status:"none" };
   }
+
   const now = new Date();
   const target = parseDate(targetISO);
   if(!target){
-    return {text:"—", cls:"sla-badge sla-none", status:"none"};
+    return { text:"—", cls:"sla-badge sla-none", status:"none" };
   }
 
+  // If job is completed, compare completion vs target
+  if(completedAtISO){
+    const completedAt = parseDate(completedAtISO);
+    if(!completedAt){
+      return { text:"—", cls:"sla-badge sla-none", status:"none" };
+    }
+
+    let diff = completedAt - target;
+    const late = diff > 0;
+    diff = Math.abs(diff);
+
+    const secs = Math.floor(diff / 1000);
+    const days = Math.floor(secs / 86400);
+    const hours = Math.floor((secs % 86400) / 3600);
+
+    let label = "";
+    if(days > 0){
+      label = `${days}d ${hours}h`;
+    } else {
+      label = `${hours}h`;
+    }
+
+    return {
+      text: late ? `${label} late` : `${label} early`,
+      cls: late ? "sla-badge sla-red" : "sla-badge sla-green",
+      status: late ? "late" : "early"
+    };
+  }
+
+  // OPEN JOB LOGIC
   let diff = target - now;
   const overdue = diff < 0;
   if(overdue) diff = -diff;
 
-  const secs = Math.floor(diff/1000);
-  const days = Math.floor(secs/86400);
-  const hours = Math.floor((secs%86400)/3600);
-  const mins = Math.floor((secs%3600)/60);
+  const secs = Math.floor(diff / 1000);
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
 
-  let label = overdue ? "+" : "";
-  if(days>0){
-    label += `${days}d ${String(hours).padStart(2,"0")}h`;
+  let label = "";
+  if(days > 0){
+    label = `${days}d ${String(hours).padStart(2,"0")}h`;
   } else {
-    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
+    label = `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
   }
 
   const hoursLeft = (target - now) / 3600000;
@@ -818,9 +849,6 @@ function computeSlaCountdown(targetISO){
   if(overdue || hoursLeft <= 0){
     cls = "sla-badge sla-red";
     status = "overdue";
-  } else if(hoursLeft <= 1){
-    cls = "sla-badge sla-red";
-    status = "overdueSoon";
   } else if(hoursLeft <= 4){
     cls = "sla-badge sla-amber";
     status = "warn";
@@ -832,7 +860,6 @@ function computeSlaCountdown(targetISO){
     status
   };
 }
-
 /* =========================
    STATUS PILL
    ========================= */
@@ -870,7 +897,12 @@ function updateKpis(){
     if(isCompleted(job)) return;
 
     open++;
-    const slaInfo = computeSlaCountdown(job.slaTarget);
+const completedAt =
+  isCompleted(job)
+    ? (job.raw?.completedAt || job.raw?.closedAt || null)
+    : null;
+
+const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
     const t = parseDate(job.slaTarget);
 
     if(t &&
@@ -919,7 +951,12 @@ function render(){
   const filtered = list.filter(job => {
     if(activePriority !== "all" && job.priority !== activePriority) return false;
 
-    const slaInfo = computeSlaCountdown(job.slaTarget);
+    const completedAt =
+  isCompleted(job)
+    ? (job.raw?.completedAt || job.raw?.closedAt || null)
+    : null;
+
+const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
 
     if(!showingCompleted){
       if(statusFilter === "open"){
@@ -951,8 +988,12 @@ function render(){
 
   for(const job of filtered){
     const raised = parseDate(job.raisedAt);
-    const slaInfo = computeSlaCountdown(job.slaTarget);
+   const completedAt =
+  isCompleted(job)
+    ? (job.raw?.completedAt || job.raw?.closedAt || null)
+    : null;
 
+const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
     // TABLE ROW (desktop)
     if(tbody){
       const tr = document.createElement("tr");
@@ -1038,13 +1079,23 @@ function render(){
    COUNTDOWN LOOP
    ========================= */
 function startCountdownLoop(){
-  if(countdownTimerId) clearInterval(countdownTimerId);
-  if(showingCompleted) return;
+  if (countdownTimerId) clearInterval(countdownTimerId);
+  if (showingCompleted) return;
 
   const tick = () => {
     document.querySelectorAll(".sla-badge[data-sla-target]").forEach(el => {
+      const row = el.closest("[data-job-id]");
+      if (!row) return;
+
+      const jobId = row.dataset.jobId;
+      const job = allJobs.find(j => j.id === jobId);
+
+      // ✅ STEP 4: completed jobs NEVER tick again
+      if (!job || isCompleted(job)) return;
+
       const iso = el.getAttribute("data-sla-target");
-      if(!iso) return;
+      if (!iso) return;
+
       const info = computeSlaCountdown(iso);
       el.textContent = info.text;
       el.className = info.cls;
@@ -1054,7 +1105,6 @@ function startCountdownLoop(){
   tick();
   countdownTimerId = setInterval(tick, 1000);
 }
-
 /* =========================
    LOAD JOBS
    ========================= */
