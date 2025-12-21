@@ -73,6 +73,7 @@
       user-select:none;
       -webkit-user-select:none;
       -webkit-touch-callout:none;
+      touch-action:manipulation;
     }
     .btn.primary{
       background:var(--ml-blue);
@@ -100,6 +101,7 @@
       font-size:11px;
       color:var(--muted);
       margin-top:4px;
+      margin-bottom:12px;
     }
 
     /* === Timeline Styles === */
@@ -261,10 +263,9 @@
     </header>
 
     <div class="content">
-      <!-- NEW: Week navigation buttons -->
       <div class="nav-row">
-        <button class="btn" id="prevWeekBtn">← Previous Week</button>
-        <button class="btn" id="nextWeekBtn">Next Week →</button>
+        <button type="button" class="btn" id="prevWeekBtn">← Previous Week</button>
+        <button type="button" class="btn" id="nextWeekBtn">Next Week →</button>
       </div>
       <div class="hint">Tip: Hold either button for 3 seconds to load 30 / 60 / 90 day history</div>
 
@@ -277,16 +278,15 @@
   </div>
 </div>
 
-<!-- NEW: Long-press range modal -->
 <div class="modal-backdrop" id="rangeModal" role="dialog" aria-modal="true" aria-hidden="true">
   <div class="modal-card">
     <h3 class="modal-title">Load job history</h3>
-    <p class="modal-sub">Choose a range to load. This will add jobs for all days in the range (grouped by date).</p>
+    <p class="modal-sub">Choose a range to load. Jobs are grouped by date.</p>
     <div class="modal-actions">
-      <button class="btn" id="load30Btn">Last 30 days</button>
-      <button class="btn" id="load60Btn">Last 60 days</button>
-      <button class="btn" id="load90Btn">Last 90 days</button>
-      <button class="btn danger" id="closeModalBtn">Cancel</button>
+      <button type="button" class="btn" id="load30Btn">Last 30 days</button>
+      <button type="button" class="btn" id="load60Btn">Last 60 days</button>
+      <button type="button" class="btn" id="load90Btn">Last 90 days</button>
+      <button type="button" class="btn danger" id="closeModalBtn">Cancel</button>
     </div>
   </div>
 </div>
@@ -296,10 +296,9 @@ const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
 let countdownTimerId = null;
 
-// NEW: Week/range paging state
-let anchorDate = new Date();                 // moves +/- 7 days when buttons pressed
-let loadedDates = new Set();                 // track individual dates already loaded to avoid duplicates
-let loadedRanges = new Set();                // track week ranges already requested
+let anchorDate = new Date();
+let loadedDates = new Set();
+let loadedRanges = new Set();
 let loading = false;
 
 const $ = id => document.getElementById(id);
@@ -375,18 +374,14 @@ function statusClass(status, slaStatus){
   return "status-pill status-open";
 }
 
-// ---------------------------
-// NEW: Date helpers
-// ---------------------------
 function isoDate(d){
   return d.toISOString().slice(0,10);
 }
 
-// Monday-start week
 function startOfWeek(d){
   const date = new Date(d);
   date.setHours(0,0,0,0);
-  const day = date.getDay() || 7; // Sun=7
+  const day = date.getDay() || 7;
   if(day !== 1) date.setDate(date.getDate() - (day - 1));
   return date;
 }
@@ -397,17 +392,12 @@ function endOfWeek(d){
   e.setHours(0,0,0,0);
   return e;
 }
-
 function addDays(d, n){
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
 }
 
-// ---------------------------
-// Render
-// mode: "append" | "prepend"
-// ---------------------------
 function renderDay(dateStr, jobs, mode){
   const container = $("jobsTimeline");
 
@@ -465,9 +455,6 @@ function renderDay(dateStr, jobs, mode){
   }
 }
 
-// ---------------------------
-// Load a single day (uses EXISTING endpoint exactly as before)
-// ---------------------------
 async function loadDay(dateObj, mode){
   const engineer = getEngineer();
   if(!engineer){
@@ -478,8 +465,6 @@ async function loadDay(dateObj, mode){
   const dateStr = isoDate(dateObj);
   if(loadedDates.has(dateStr)) return;
 
-  $("statusBar").textContent = "Loading jobs…";
-
   try{
     const res = await fetch(
       `${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}&date=${encodeURIComponent(dateStr)}`,
@@ -489,7 +474,6 @@ async function loadDay(dateObj, mode){
 
     renderDay(dateStr, Array.isArray(list) ? list : [], mode);
     loadedDates.add(dateStr);
-
     startCountdownLoop();
   }catch(err){
     console.error(err);
@@ -497,49 +481,33 @@ async function loadDay(dateObj, mode){
   }
 }
 
-// ---------------------------
-// NEW: Load a week (7 individual day calls) — NO worker changes required
-// direction: -1 previous, +1 next
-// ---------------------------
 async function loadWeek(direction){
   if(loading) return;
   loading = true;
 
-  const base = new Date(anchorDate);
-  base.setDate(base.getDate() + (direction * 7));
-
-  const from = startOfWeek(base);
-  const to = endOfWeek(base);
-
-  const rangeKey = `${isoDate(from)}:${isoDate(to)}`;
-  if(loadedRanges.has(rangeKey)){
-    $("statusBar").textContent = "Week already loaded.";
-    loading = false;
-    return;
-  }
-
-  $("statusBar").textContent = "Loading week…";
-
   try{
-    // Load days in a stable order:
-    // - Previous week (append): newest-to-oldest so it reads naturally when added below
-    // - Next week (prepend): oldest-to-newest so it stays in correct order when prepended
-    const days = [];
-    for(let i=0;i<7;i++){
-      days.push(addDays(from, i));
+    const base = new Date(anchorDate);
+    base.setDate(base.getDate() + (direction * 7));
+
+    const from = startOfWeek(base);
+    const to = endOfWeek(base);
+
+    const rangeKey = `${isoDate(from)}:${isoDate(to)}`;
+    if(loadedRanges.has(rangeKey)){
+      $("statusBar").textContent = "Week already loaded.";
+      return;
     }
 
+    $("statusBar").textContent = "Loading week…";
+
+    const days = [];
+    for(let i=0;i<7;i++) days.push(addDays(from, i));
+
     if(direction < 0){
-      // append, show newest first for that week
       days.reverse();
-      for(const d of days){
-        await loadDay(d, "append");
-      }
+      for(const d of days) await loadDay(d, "append");
     }else{
-      // prepend, load oldest first so the week stays ordered top→bottom
-      for(const d of days){
-        await loadDay(d, "prepend");
-      }
+      for(const d of days) await loadDay(d, "prepend");
     }
 
     loadedRanges.add(rangeKey);
@@ -550,20 +518,15 @@ async function loadWeek(direction){
   }
 }
 
-// ---------------------------
-// NEW: Load last N days (append only, newest first)
-// ---------------------------
 async function loadLastNDays(n){
   if(loading) return;
   loading = true;
 
-  $("statusBar").textContent = `Loading last ${n} days…`;
-
   try{
+    $("statusBar").textContent = `Loading last ${n} days…`;
     const today = new Date();
     today.setHours(0,0,0,0);
 
-    // newest first feels best when appending below the current content
     for(let i=0;i<n;i++){
       const d = addDays(today, -i);
       await loadDay(d, "append");
@@ -575,9 +538,6 @@ async function loadLastNDays(n){
   }
 }
 
-// ---------------------------
-// Countdown loop (UNCHANGED behaviour)
-// ---------------------------
 function startCountdownLoop(){
   if(countdownTimerId) clearInterval(countdownTimerId);
 
@@ -593,9 +553,7 @@ function startCountdownLoop(){
   countdownTimerId = setInterval(tick, 1000);
 }
 
-// ---------------------------
-// Modal helpers
-// ---------------------------
+/* Modal helpers */
 function openModal(){
   const m = $("rangeModal");
   m.style.display = "flex";
@@ -607,80 +565,75 @@ function closeModal(){
   m.setAttribute("aria-hidden","true");
 }
 
-// Long press helper (3 seconds)
+/* FIXED: Long-press that DOES NOT kill normal taps */
 function addLongPress(el, onLongPress){
   let timer = null;
-  const start = (e) => {
-    // prevent context menu long-press on iOS
-    if(e && e.preventDefault) e.preventDefault();
-    timer = setTimeout(onLongPress, 3000);
+
+  const start = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      onLongPress();
+    }, 3000);
   };
   const cancel = () => {
-    if(timer) clearTimeout(timer);
-    timer = null;
+    if(timer){
+      clearTimeout(timer);
+      timer = null;
+    }
   };
 
-  el.addEventListener("touchstart", start, {passive:false});
-  el.addEventListener("touchend", cancel);
-  el.addEventListener("touchcancel", cancel);
-
-  el.addEventListener("mousedown", start);
-  el.addEventListener("mouseup", cancel);
-  el.addEventListener("mouseleave", cancel);
+  el.addEventListener("pointerdown", start);
+  el.addEventListener("pointerup", cancel);
+  el.addEventListener("pointercancel", cancel);
+  el.addEventListener("pointerleave", cancel);
 }
 
-// ---------------------------
-// Init
-// ---------------------------
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
 
-  // Button clicks load whole weeks
-  $("prevWeekBtn").addEventListener("click", () => loadWeek(-1));
-  $("nextWeekBtn").addEventListener("click", () => loadWeek(+1));
+  const prevBtn = $("prevWeekBtn");
+  const nextBtn = $("nextWeekBtn");
 
-  // Long-press opens modal
-  addLongPress($("prevWeekBtn"), openModal);
-  addLongPress($("nextWeekBtn"), openModal);
+  // Tap = week navigation (guaranteed to fire)
+  prevBtn.addEventListener("click", () => loadWeek(-1));
+  nextBtn.addEventListener("click", () => loadWeek(+1));
 
-  // Modal buttons
+  // Hold (3s) = modal
+  addLongPress(prevBtn, openModal);
+  addLongPress(nextBtn, openModal);
+
+  // Modal actions
   $("load30Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(30); });
   $("load60Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(60); });
   $("load90Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(90); });
   $("closeModalBtn").addEventListener("click", closeModal);
 
-  // Click outside modal card closes it
   $("rangeModal").addEventListener("click", (e) => {
     if(e.target && e.target.id === "rangeModal") closeModal();
   });
 
-  // First load: THIS WEEK (Mon→Sun), but only show up to today by default?
-  // You asked for it to be busy, so we load the current week in full (Mon→Sun) using existing per-day calls.
-  // This keeps behaviour predictable for engineers (they can also tap Next Week for future jobs).
-  anchorDate = new Date();
+  // Initial load: current week (newest first so today is near the top)
   (async () => {
-    $("jobsTimeline").innerHTML = "";
-    loadedDates.clear();
-    loadedRanges.clear();
+    $("statusBar").textContent = "Loading this week…";
+    anchorDate = new Date();
 
-    // Load current week (append) newest first so "today" appears at the top of the list
     const from = startOfWeek(anchorDate);
     const to = endOfWeek(anchorDate);
     const rangeKey = `${isoDate(from)}:${isoDate(to)}`;
 
-    $("statusBar").textContent = "Loading this week…";
-
     const days = [];
     for(let i=0;i<7;i++) days.push(addDays(from, i));
-    // newest first
     days.reverse();
-    for(const d of days){
-      await loadDay(d, "append");
-    }
-    loadedRanges.add(rangeKey);
 
-    $("statusBar").textContent = "Ready";
+    loading = true;
+    try{
+      for(const d of days) await loadDay(d, "append");
+      loadedRanges.add(rangeKey);
+      $("statusBar").textContent = "Ready";
+    }finally{
+      loading = false;
+    }
   })();
 }
 
