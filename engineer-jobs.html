@@ -5,6 +5,7 @@
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+
   <style>
     :root{
       --ml-blue:#003b82;
@@ -78,57 +79,44 @@
     .content{
       padding:14px 18px 16px;
     }
-    .filters-row{
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      margin-bottom:10px;
+
+    /* === Timeline Styles === */
+
+    .day-group{
+      margin-top:18px;
     }
-    .filters-row label{
+
+    .day-banner{
+      position:sticky;
+      top:0;
+      z-index:5;
+      background:#f1f5f9;
+      padding:6px 12px;
       font-size:12px;
-      color:var(--muted);
-    }
-    .filters-row input[type="date"]{
-      border-radius:999px;
-      border:1px solid #d1d5db;
-      padding:6px 10px;
-      font-size:13px;
-      background:#fff;
-    }
-    .table-wrap{
-      width:100%;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-    }
-    table{
-      width:100%;
-      border-collapse:separate;
-      border-spacing:0;
-      font-size:13px;
-      background:#fff;
-      border-radius:10px;
-      overflow:hidden;
-      border:1px solid #e5e7eb;
-      min-width:700px;
-    }
-    thead th{
-      text-align:left;
-      padding:8px 10px;
-      background:#f3f4f6;
-      color:#111827;
-      border-bottom:1px solid #e5e7eb;
       font-weight:600;
-      white-space:nowrap;
+      color:#334155;
+      border-radius:8px;
+      margin-bottom:8px;
+      border:1px solid #e5e7eb;
     }
-    tbody td{
-      padding:8px 10px;
-      border-bottom:1px solid #f1f5f9;
-      vertical-align:top;
+
+    .job-card{
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:12px;
+      margin-bottom:10px;
+      box-shadow:0 4px 10px rgba(0,0,0,0.05);
     }
-    tbody tr:nth-child(even){
-      background:#fafbff;
+
+    .job-top{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:8px;
+      margin-bottom:6px;
     }
+
     .ref{
       font-family:monospace;
       font-size:12px;
@@ -137,6 +125,7 @@
       border-radius:999px;
       display:inline-block;
     }
+
     .priority-badge{
       border-radius:999px;
       padding:2px 7px;
@@ -144,12 +133,31 @@
       font-weight:600;
       display:inline-flex;
       align-items:center;
-      gap:4px;
     }
     .p1{background:#fef2f2;color:#b91c1c;}
     .p2{background:#fffbeb;color:#92400e;}
     .p3{background:#ecfdf5;color:#166534;}
     .p4{background:#eff6ff;color:#1d4ed8;}
+
+    .job-desc{
+      font-size:14px;
+      font-weight:500;
+    }
+
+    .job-site{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
+    }
+
+    .job-meta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top:10px;
+      align-items:center;
+    }
+
     .sla-badge{
       border-radius:999px;
       padding:3px 8px;
@@ -164,6 +172,7 @@
     .sla-amber{background:#fffbeb;color:#92400e;}
     .sla-red{background:#fef2f2;color:#b91c1c;}
     .sla-none{background:#e5e7eb;color:#4b5563;}
+
     .status-pill{
       border-radius:999px;
       padding:3px 8px;
@@ -177,23 +186,12 @@
     .status-open{background:#dcfce7;color:#166534;}
     .status-overdue{background:#fee2e2;color:#b91c1c;}
     .status-complete{background:#e5e7eb;color:#374151;}
+
     .small{font-size:11px;}
     .muted{color:var(--muted);}
-    .nowrap{white-space:nowrap;}
-    #statusBar{
-      margin-top:8px;
-      font-size:12px;
-      color:var(--muted);
-    }
-    @media(max-width:768px){
-      header.main-header{
-        flex-direction:column;
-        align-items:flex-start;
-        gap:4px;
-      }
-    }
   </style>
 </head>
+
 <body>
 <div class="shell">
   <div class="card">
@@ -206,60 +204,35 @@
     </header>
 
     <div class="content">
-      <div class="filters-row">
-        <label for="datePicker">Day:</label>
-        <input type="date" id="datePicker">
-        <button class="btn primary" id="reloadBtn">Refresh</button>
-      </div>
+      <div id="jobsTimeline"></div>
 
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Ref</th>
-              <th>Priority</th>
-              <th>Description / Site</th>
-              <th>Raised</th>
-              <th>SLA</th>
-              <th>Status</th>
-              <th>Open</th>
-            </tr>
-          </thead>
-          <tbody id="jobsTbody"></tbody>
-        </table>
+      <div id="statusBar" class="muted small" style="text-align:center;padding:12px">
+        Loading jobs…
       </div>
-
-      <div id="statusBar">Loading…</div>
     </div>
   </div>
 </div>
 
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+
 let countdownTimerId = null;
-let jobs = [];
+let loadedDates = new Set();
+let offsetDays = 0;
+let loading = false;
 
 const $ = id => document.getElementById(id);
 
 function getEngineer(){
   return sessionStorage.getItem("mostlaneUser") ||
          sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") ||
-         "";
+         sessionStorage.getItem("username") || "";
 }
 
 function parseDate(v){
   if(!v) return null;
   const d = new Date(v);
   return isNaN(d) ? null : d;
-}
-
-function fmtDateTimeShort(d){
-  if(!(d instanceof Date) || isNaN(d)) return "—";
-  return d.toLocaleString("en-GB", {
-    day:"2-digit", month:"short",
-    hour:"2-digit", minute:"2-digit"
-  });
 }
 
 function computeSlaCountdown(targetISO){
@@ -271,6 +244,7 @@ function computeSlaCountdown(targetISO){
   if(!target){
     return {text:"—", cls:"sla-badge sla-none", status:"none"};
   }
+
   let diff = target - now;
   const overdue = diff < 0;
   if(overdue) diff = -diff;
@@ -320,47 +294,99 @@ function statusClass(status, slaStatus){
   return "status-pill status-open";
 }
 
-function render(){
-  const tbody = $("jobsTbody");
-  tbody.innerHTML = "";
+function renderDay(dateStr, jobs){
+  const container = $("jobsTimeline");
+
+  const group = document.createElement("div");
+  group.className = "day-group";
+
+  const banner = document.createElement("div");
+  banner.className = "day-banner";
+  banner.textContent = new Date(dateStr).toLocaleDateString("en-GB", {
+    weekday:"long", day:"2-digit", month:"short", year:"numeric"
+  });
+
+  group.appendChild(banner);
 
   if(!jobs.length){
-    $("statusBar").textContent = "No jobs assigned for this day.";
-    return;
+    const empty = document.createElement("div");
+    empty.className = "muted small";
+    empty.style.padding = "8px 12px";
+    empty.textContent = "No jobs";
+    group.appendChild(empty);
   }
 
-  $("statusBar").textContent = `${jobs.length} job(s) assigned`;
-
   for(const job of jobs){
-    const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
     const target = job.targetAt || job.sla?.targetAt;
     const slaInfo = computeSlaCountdown(target);
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><span class="ref">${job.helpdeskRef || job.id}</span></td>
-      <td><span class="priority-badge ${job.priority?.toLowerCase() || "p4"}">${job.priority || "P4"}</span></td>
-      <td>
-        <div style="font-size:13px;font-weight:500;">${job.description || job.rawPayload?.description || ""}</div>
-        <div class="small muted">${job.siteName || job.siteCode || job.address || ""}</div>
-      </td>
-      <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
-      <td class="small nowrap">
-        <span class="${slaInfo.cls}" data-sla-target="${target || ""}" data-job-id="${job.id}">
+    const card = document.createElement("div");
+    card.className = "job-card";
+    card.innerHTML = `
+      <div class="job-top">
+        <span class="ref">${job.helpdeskRef || job.id}</span>
+        <span class="priority-badge ${job.priority?.toLowerCase() || "p4"}">${job.priority || "P4"}</span>
+      </div>
+
+      <div class="job-desc">${job.description || ""}</div>
+      <div class="job-site">${job.siteName || job.address || ""}</div>
+
+      <div class="job-meta">
+        <span class="${slaInfo.cls}" data-sla-target="${target || ""}">
           ${slaInfo.text}
         </span>
-      </td>
-      <td class="small">
-        <span class="${statusClass(job.status, slaInfo.status)}">${job.status || "With Contractor - R"}</span>
-      </td>
-      <td class="small nowrap">
+        <span class="${statusClass(job.status, slaInfo.status)}">
+          ${job.status || "Open"}
+        </span>
         <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
-      </td>
+      </div>
     `;
-    tbody.appendChild(tr);
+    group.appendChild(card);
   }
 
-  startCountdownLoop();
+  container.appendChild(group);
+}
+
+async function loadNextDay(){
+  if(loading) return;
+  loading = true;
+
+  const engineer = getEngineer();
+  if(!engineer){
+    $("statusBar").textContent = "No logged-in engineer.";
+    return;
+  }
+
+  const d = new Date();
+  d.setDate(d.getDate() - offsetDays);
+  const dateStr = d.toISOString().slice(0,10);
+
+  if(loadedDates.has(dateStr)){
+    loading = false;
+    return;
+  }
+
+  $("statusBar").textContent = "Loading jobs…";
+
+  try{
+    const res = await fetch(
+      `${SLA_API}/jobs/for-engineer?engineer=${engineer}&date=${dateStr}`,
+      { cache:"no-store" }
+    );
+    const list = await res.json();
+
+    renderDay(dateStr, Array.isArray(list) ? list : []);
+    loadedDates.add(dateStr);
+    offsetDays++;
+
+    startCountdownLoop();
+    $("statusBar").textContent = "Scroll to load earlier jobs";
+  }catch(err){
+    console.error(err);
+    $("statusBar").textContent = "Error loading jobs.";
+  }finally{
+    loading = false;
+  }
 }
 
 function startCountdownLoop(){
@@ -378,43 +404,16 @@ function startCountdownLoop(){
   countdownTimerId = setInterval(tick, 1000);
 }
 
-async function loadJobs(){
-  const engineer = getEngineer();
-  if(!engineer){
-    $("statusBar").textContent = "No logged-in engineer found.";
-    return;
+window.addEventListener("scroll", () => {
+  if(window.innerHeight + window.scrollY >= document.body.offsetHeight - 120){
+    loadNextDay();
   }
-
-  const date = $("datePicker").value;
-  const params = new URLSearchParams({ engineer });
-  if(date) params.set("date", date);
-
-  $("statusBar").textContent = "Loading jobs…";
-
-  try{
-    const res = await fetch(`${SLA_API}/jobs/for-engineer?${params.toString()}`, { cache:"no-store" });
-    if(!res.ok) throw new Error(res.status + " " + res.statusText);
-    const list = await res.json();
-    jobs = Array.isArray(list) ? list : [];
-    render();
-  }catch(err){
-    console.error("load error", err);
-    $("statusBar").textContent = "❌ Error loading jobs.";
-    jobs = [];
-  }
-}
+});
 
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
-
-  const today = new Date();
-  $("datePicker").value = today.toISOString().slice(0,10);
-
-  $("reloadBtn").addEventListener("click", loadJobs);
-  $("datePicker").addEventListener("change", loadJobs);
-
-  loadJobs();
+  loadNextDay(); // today
 }
 
 window.addEventListener("DOMContentLoaded", init);
