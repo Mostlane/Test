@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Mostlane • SLA Tracker</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="auth.js"></script>
   <style>
     :root{
@@ -24,114 +24,31 @@
       margin:0;padding:0;
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       color:var(--text);
-      background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
     }
-    .shell{
-      max-width:1200px;
-      margin:24px auto 32px;
-      padding:0 16px;
+    .shell{max-width:1150px;margin:20px auto;padding:0 14px;}
+    .topbar{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      margin-bottom:14px;
     }
-
-    /* -------- HERO + KPI TILES (mock-up style) -------- */
-    .hero{
-      background:var(--ml-blue);
-      border-radius:24px;
-      padding:18px 18px 20px;
-      box-shadow:0 18px 32px rgba(0,0,0,0.35);
-      color:#e5ecff;
-      margin-bottom:18px;
-    }
-    .hero-logo{
-      display:flex;
-      justify-content:flex-start;
-      align-items:center;
-      margin-bottom:16px;
-    }
-    .hero-logo img{
-      height:30px;
-      width:auto;
-      display:block;
-    }
-    .hero-sub{
-      font-size:12px;
-      opacity:0.85;
-      margin-left:4px;
-      margin-bottom:10px;
-    }
-    .kpi-grid{
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:10px;
-    }
-    .kpi-card{
-      background:#f9fafb;
-      border-radius:18px;
-      padding:10px 12px;
-      box-shadow:0 6px 14px rgba(0,0,0,0.22);
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      color:#111827;
-    }
-    .kpi-label{
-      font-size:12px;
-      color:#4b5563;
-      margin-bottom:2px;
-    }
-    .kpi-value{
-      font-size:24px;
-      font-weight:700;
-      line-height:1.1;
-      color:#111827;
-    }
-
-    /* card that holds filters + list */
-    .card{
-      background:var(--panel);
-      border-radius:14px;
-      box-shadow:0 12px 28px rgba(0,0,0,0.12);
-      overflow:hidden;
-      border:1px solid rgba(15,23,42,0.05);
-    }
-    header.main-header{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:12px 20px;
-      border-bottom:1px solid #e5e7eb;
-      background:linear-gradient(90deg,#ffffff,#f3f4f6);
-    }
-    header.main-header h1{
-      margin:0;
-      font-size:18px;
-      color:var(--ml-blue);
-    }
-    .header-main-sub{
-      font-size:12px;
-      color:var(--muted);
-      margin-top:2px;
-    }
-    .header-right{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
+    .brand{display:flex;align-items:center;gap:10px;}
+    .brand h1{margin:0;font-size:18px;color:var(--ml-blue);}
+    .sub{font-size:12px;color:var(--muted);margin-top:2px;}
     .btn{
       border-radius:999px;
-      padding:8px 14px;
+      padding:9px 14px;
       font-size:13px;
       border:1px solid #d1d5db;
-      background:#f9fafb;
+      background:#fff;
       cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
       text-decoration:none;
       color:var(--text);
-      font-weight:500;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
       white-space:nowrap;
+      font-weight:600;
     }
     .btn.primary{
       background:var(--ml-blue);
@@ -139,143 +56,81 @@
       border-color:var(--ml-blue);
     }
     .btn.icon-only{
-      padding:6px 8px;
-      border-radius:8px;
-      min-width:0;
+      padding:8px 10px;
+      width:auto;
       justify-content:center;
+      min-width:40px;
     }
-
-    .tabs{
-      display:flex;
-      border-bottom:1px solid #e5e7eb;
-      background:#f9fafb;
-      padding:0 20px;
-      gap:4px;
-    }
-    .tab{
-      padding:10px 14px;
-      font-size:14px;
-      cursor:pointer;
-      border:0;
-      background:transparent;
-      border-bottom:2px solid transparent;
-      color:var(--muted);
-      display:flex;
-      align-items:center;
-      gap:6px;
-    }
-    .tab.active{
-      color:var(--ml-blue);
-      border-bottom-color:var(--ml-blue);
-      font-weight:600;
-    }
-
-    .content{
-      padding:16px 20px 18px;
+    .panel{
+      background:var(--panel);
+      border-radius:14px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      border:1px solid rgba(15,23,42,0.06);
+      overflow:hidden;
     }
     .filters{
+      padding:12px 12px 10px;
       display:flex;
       flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      margin-bottom:10px;
+      gap:10px;
+      align-items:flex-end;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+      background:rgba(255,255,255,0.65);
     }
-    .filters label{
-      font-size:12px;
-      color:var(--muted);
-    }
-    .chip{
-      border-radius:999px;
-      padding:5px 9px;
-      border:1px solid #e5e7eb;
-      background:#f9fafb;
-      font-size:12px;
-      cursor:pointer;
-    }
-    .chip.active{
-      background:#e5edff;
-      color:var(--ml-blue);
-      border-color:var(--ml-blue);
-      font-weight:600;
-    }
-    .filters select,
-    .filters input[type="text"]{
-      border-radius:999px;
-      border:1px solid #d1d5db;
-      padding:6px 10px;
-      font-size:13px;
-      background:#fff;
-      min-width:160px;
-    }
-    .filters .spacer{
-      flex:1;
-    }
-
-    .table-wrapper{
+    .f-group{display:flex;flex-direction:column;gap:6px;min-width:170px;}
+    .f-group label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
+    input,select{
       width:100%;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-      margin-bottom:8px;
-    }
-
-    table{
-      width:100%;
-      min-width:900px;
-      border-collapse:separate;
-      border-spacing:0;
-      font-size:13px;
-      background:#fff;
       border-radius:10px;
-      overflow:hidden;
-      border:1px solid #e5e7eb;
+      border:1px solid #d1d5db;
+      padding:10px 10px;
+      font-size:13px;
+      background:#fff;
     }
+    .table-wrap{width:100%;overflow:auto;}
+    table{width:100%;border-collapse:separate;border-spacing:0;}
     thead th{
-      text-align:left;
-      padding:8px 10px;
-      background:#f3f4f6;
-      color:#111827;
-      border-bottom:1px solid #e5e7eb;
-      font-weight:600;
+      position:sticky;top:0;
+      background:rgba(255,255,255,0.95);
+      border-bottom:1px solid rgba(15,23,42,0.10);
+      font-size:11px;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.02em;
+      padding:10px 10px;
       white-space:nowrap;
+      z-index:2;
     }
     tbody td{
-      padding:8px 10px;
-      border-bottom:1px solid #f1f5f9;
+      border-bottom:1px solid rgba(15,23,42,0.06);
+      padding:10px 10px;
+      font-size:13px;
       vertical-align:top;
     }
-    tbody tr:nth-child(even){
-      background:#fafbff;
-    }
-
-    .ref{
-      font-family:monospace;
-      font-size:12px;
-      background:#f9fafb;
-      padding:2px 6px;
+    tbody tr:hover{background:rgba(26,115,232,0.06);}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;}
+    .badge{
       border-radius:999px;
-      display:inline-block;
-    }
-    .priority-badge{
-      border-radius:999px;
-      padding:2px 7px;
+      padding:3px 8px;
       font-size:11px;
-      font-weight:600;
+      font-weight:700;
       display:inline-flex;
       align-items:center;
-      gap:4px;
+      gap:6px;
+      white-space:nowrap;
     }
     .p1{background:#fef2f2;color:#b91c1c;}
     .p2{background:#fffbeb;color:#92400e;}
     .p3{background:#ecfdf5;color:#166534;}
     .p4{background:#eff6ff;color:#1d4ed8;}
-
-    .sla-badge{
+    .p5{background:#f3f4f6;color:#374151;}
+    .sla{
       border-radius:999px;
       padding:3px 8px;
       font-size:11px;
       display:inline-flex;
       align-items:center;
-      gap:4px;
+      gap:6px;
       font-variant-numeric:tabular-nums;
       white-space:nowrap;
     }
@@ -283,413 +138,385 @@
     .sla-amber{background:#fffbeb;color:#92400e;}
     .sla-red{background:#fef2f2;color:#b91c1c;}
     .sla-none{background:#e5e7eb;color:#4b5563;}
-
     .status-pill{
       border-radius:999px;
       padding:3px 8px;
       font-size:11px;
       display:inline-flex;
       align-items:center;
-      gap:4px;
+      gap:6px;
       background:#e5e7eb;
       color:#111827;
+      white-space:nowrap;
     }
     .status-open{background:#dcfce7;color:#166534;}
     .status-overdue{background:#fee2e2;color:#b91c1c;}
     .status-complete{background:#e5e7eb;color:#374151;}
+    .actions{display:flex;gap:8px;align-items:center;}
+    .dim{color:var(--muted);font-size:12px;}
+    .cards{display:none;padding:12px;gap:12px;flex-direction:column;}
+    .card{
+      background:rgba(255,255,255,0.9);
+      border:1px solid rgba(15,23,42,0.08);
+      border-radius:14px;
+      padding:12px;
+      box-shadow:0 10px 20px rgba(0,0,0,0.08);
+    }
+    .card-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+    .card h3{margin:0;font-size:15px;color:#0f172a;}
+    .card .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;}
+    .kv{min-width:140px;flex:1 1 140px;}
+    .k{font-size:11px;color:var(--muted);text-transform:uppercase;}
+    .v{font-size:13px;margin-top:2px;}
+    .card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+    .hint{padding:10px 12px;font-size:12px;color:var(--muted);border-top:1px solid rgba(15,23,42,0.08);background:rgba(255,255,255,0.65);}
+    .modal-backdrop{
+      position:fixed;inset:0;background:rgba(15,23,42,0.75);
+      display:none;align-items:center;justify-content:center;z-index:9999;
+      padding:18px;
+    }
+    .modal-backdrop.show{display:flex;}
+    .modal{
+      width:min(900px, 96vw);
+      background:rgba(255,255,255,0.96);
+      border-radius:16px;
+      border:1px solid rgba(15,23,42,0.10);
+      box-shadow:0 22px 60px rgba(0,0,0,0.35);
+      overflow:hidden;
+    }
+    .modal-header{
+      padding:14px 14px 12px;
+      border-bottom:1px solid rgba(15,23,42,0.08);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .modal-title{font-weight:800;color:#0f172a;}
+    .modal-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+    .modal-body{padding:14px;}
+    textarea{
+      width:100%;
+      border-radius:12px;
+      border:1px solid #d1d5db;
+      padding:10px 12px;
+      font-size:13px;
+      min-height:84px;
+      resize:vertical;
+      background:#fff;
+      font-family:inherit;
+    }
+    .modal-actions{
+      padding:12px 14px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      border-top:1px solid rgba(15,23,42,0.08);
+      background:rgba(255,255,255,0.65);
+    }
 
-    .small{font-size:11px;}
-    .muted{color:var(--muted);}
-    .nowrap{white-space:nowrap;}
+    @media(max-width:880px){
+      .table-wrap{display:none;}
+      .cards{display:flex;}
+      .filters{gap:8px;}
+      .f-group{min-width:140px;}
+    }
 
-    #statusBar{
-      margin-top:8px;
+    /* =====================================================
+       ACTIVITY TIMELINE (MODAL)
+    ===================================================== */
+    .timeline-wrap{margin-top:6px;}
+    .timeline-scroller{
+      overflow-x:auto;
+      padding:10px 6px 2px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      background:#f9fafb;
+    }
+    .timeline{
+      display:flex;
+      align-items:center;
+      gap:0;
+      min-width:max-content;
+    }
+    .tl-node{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      min-width:120px;
+      padding:6px 10px;
+    }
+    .tl-dot{
+      width:16px;height:16px;border-radius:999px;
+      background:#94a3b8;
+      border:3px solid #fff;
+      box-shadow:0 0 0 2px #cbd5e1;
+    }
+    .tl-label{
+      margin-top:6px;
+      font-size:12px;
+      font-weight:600;
+      color:#0f172a;
+      text-align:center;
+      white-space:nowrap;
+    }
+    .tl-time{
+      margin-top:2px;
+      font-size:11px;
+      color:var(--muted);
+      text-align:center;
+      white-space:nowrap;
+    }
+    .tl-seg{
+      position:relative;
+      height:4px;
+      width:140px;
+      background:#cbd5e1;
+      border-radius:999px;
+      margin:0 4px;
+      flex:0 0 auto;
+    }
+    .tl-dur{
+      position:absolute;
+      top:-18px;
+      left:50%;
+      transform:translateX(-50%);
+      font-size:11px;
+      color:var(--muted);
+      background:rgba(255,255,255,0.9);
+      padding:2px 6px;
+      border-radius:999px;
+      border:1px solid #e5e7eb;
+      white-space:nowrap;
+    }
+    .timeline-empty{
+      padding:10px 2px;
       font-size:12px;
       color:var(--muted);
     }
-
-    /* ---------- MOBILE JOB CARDS ---------- */
-    .job-cards{
-      display:none;
-      flex-direction:column;
-      gap:8px;
-      margin-bottom:8px;
-    }
-    .job-card{
-      background:#ffffff;
-      border-radius:12px;
-      padding:10px 12px;
-      box-shadow:0 4px 10px rgba(15,23,42,0.12);
-      border:1px solid #e5e7eb;
-    }
-    .job-card-header{
+    .timeline-list{
+      margin-top:10px;
+      border-top:1px solid rgba(15,23,42,0.08);
+      padding-top:10px;
       display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:4px;
+      flex-direction:column;
       gap:6px;
     }
-    .job-card-ref{
+    .tl-row{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 10px;
+      border:1px solid #e5e7eb;
+      border-radius:10px;
+      background:#fff;
+    }
+    .tl-row-left{
       display:flex;
       flex-direction:column;
       gap:2px;
+      min-width:0;
     }
-    .job-card-title{
+    .tl-row-status{
+      font-weight:700;
       font-size:13px;
-      font-weight:600;
-      margin-bottom:2px;
+      color:#0f172a;
     }
-    .job-card-site{
+    .tl-row-meta{
       font-size:11px;
       color:var(--muted);
     }
-    .job-card-meta{
-      display:flex;
-      justify-content:space-between;
-      flex-wrap:wrap;
-      gap:4px;
-      margin-top:6px;
-      align-items:center;
-    }
-    .job-card-actions{
-      display:flex;
-      gap:4px;
-      margin-top:8px;
-      flex-wrap:wrap;
-    }
-
-    /* ---------- MODALS ---------- */
-    .modal-backdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(15,23,42,0.35);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:50;
-    }
-    .modal-backdrop.show{
-      display:flex;
-    }
-    .modal{
-      background:#ffffff;
-      border-radius:12px;
-      max-width:420px;
-      width:100%;
-      box-shadow:0 20px 40px rgba(0,0,0,0.25);
-      padding:18px 18px 16px;
-      max-height:90vh;
-      display:flex;
-      flex-direction:column;
-    }
-    .modal header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:10px;
-    }
-    .modal header h2{
-      margin:0;
-      font-size:16px;
-      color:var(--ml-blue);
-    }
-    .modal header button{
-      border:0;
-      background:transparent;
-      cursor:pointer;
-      font-size:18px;
-      line-height:1;
-      padding:4px;
-    }
-    .modal-body{
-      flex:1;
-      overflow-y:auto;
-      padding-right:4px;
-    }
-    .modal .field{
-      margin-bottom:10px;
-    }
-    .modal label{
-      font-size:12px;
-      color:#4b5563;
-      display:block;
-      margin-bottom:3px;
-    }
-    .modal select,
-    .modal textarea,
-    .modal input[type="date"],
-    .modal input[type="time"]{
-      width:100%;
-      border-radius:8px;
-      border:1px solid #d1d5db;
-      padding:7px 9px;
-      font-size:13px;
-      font-family:inherit;
-    }
-    .modal textarea{
-      min-height:70px;
-      resize:vertical;
-    }
-    .modal .actions{
-      display:flex;
-      justify-content:flex-end;
-      gap:8px;
-      margin-top:10px;
-    }
-
-    @media(max-width:768px){
-      header.main-header{
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      .header-right{
-        width:100%;
-        justify-content:flex-start;
-        flex-wrap:wrap;
-      }
-      .filters{
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      table{
-        font-size:12px;
-      }
-      /* hide table, show cards on mobile */
-      .table-wrapper{
-        display:none;
-      }
-      .job-cards{
-        display:flex;
-      }
+    .tl-row-right{
+      font-size:11px;
+      color:var(--muted);
+      white-space:nowrap;
     }
   </style>
 </head>
 <body>
-<div class="shell">
-
-  <!-- HERO HEADER WITH LOGO + KPI TILES -->
-  <section class="hero">
-    <div class="hero-logo">
-      <img src="Mostlane Logo.jpg" alt="Mostlane">
-    </div>
-    <div class="hero-sub">Live SLA overview • Powered by Mostlane SLA Worker</div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Open Jobs</div>
-        <div class="kpi-value" id="kpiOpenJobs">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Due Today</div>
-        <div class="kpi-value" id="kpiDueToday">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Overdue</div>
-        <div class="kpi-value" id="kpiOverdue">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">SLA at Risk</div>
-        <div class="kpi-value" id="kpiAtRisk">0</div>
-      </div>
-    </div>
-  </section>
-
-  <div class="card">
-    <header class="main-header">
-      <div>
-        <h1>SLA Tracker</h1>
-        <div class="header-main-sub">
-          Live countdown for open jobs • Data: mostlane-sla Worker
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div>
+          <h1>Mostlane • SLA Tracker</h1>
+          <div class="sub" id="subtitle">Loading…</div>
         </div>
       </div>
-
-      <div class="header-right">
-        <a href="financials.html" class="btn">£ Financials</a>
-        <a href="sla-performance.html" class="btn">📊 SLA Performance</a>
-        <a href="settings.html" class="btn">⚙️ Settings</a>
-        <a href="add-job.html" class="btn primary">＋ Create Job</a>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="btn" href="main.html">← Main Menu</a>
+        <a class="btn primary" href="assign-job.html">＋ Create Job</a>
       </div>
-    </header>
-
-    <div class="tabs">
-      <button class="tab active" id="tabOpen">Open Jobs <span class="count" id="countOpen">0</span></button>
-      <button class="tab" id="tabCompleted">Completed <span class="count" id="countCompleted">0</span></button>
     </div>
 
-    <div class="content">
+    <div class="panel">
       <div class="filters">
-        <div class="group">
-          <label>Priority:</label>
-          <button class="chip active" data-priority="all">All</button>
-          <button class="chip" data-priority="P1">P1</button>
-          <button class="chip" data-priority="P2">P2</button>
-          <button class="chip" data-priority="P3">P3</button>
-          <button class="chip" data-priority="P4">P4</button>
+        <div class="f-group">
+          <label>Search</label>
+          <input id="q" placeholder="Ref / site / desc / engineer…" />
         </div>
-
-        <div class="group">
-          <label for="statusFilter">Status:</label>
+        <div class="f-group">
+          <label>Status</label>
           <select id="statusFilter">
-            <option value="all">All</option>
-            <option value="open">Open only</option>
-            <option value="overdue">Overdue</option>
+            <option value="">All</option>
+            <option value="Open">Open</option>
+            <option value="In Progress">In Progress</option>
+            <option value="On Hold">On Hold</option>
+            <option value="Completed">Completed</option>
+            <option value="Closed">Closed</option>
           </select>
         </div>
-
-        <div class="spacer"></div>
-
-        <div class="group">
-          <label for="searchBox">Search:</label>
-          <input type="text" id="searchBox" placeholder="Ref, site, description…">
+        <div class="f-group">
+          <label>Priority</label>
+          <select id="prioFilter">
+            <option value="">All</option>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+            <option value="P4">P4</option>
+            <option value="P5">P5</option>
+          </select>
+        </div>
+        <div class="f-group">
+          <label>Engineer</label>
+          <select id="engFilter">
+            <option value="">All</option>
+          </select>
+        </div>
+        <div class="f-group" style="min-width:140px;">
+          <label>&nbsp;</label>
+          <button class="btn" id="refreshBtn" type="button">↻ Refresh</button>
         </div>
       </div>
 
-      <!-- DESKTOP TABLE VIEW -->
-      <div class="table-wrapper">
+      <div class="table-wrap">
         <table>
           <thead>
-          <tr>
-            <th style="width:80px;">Ref</th>
-            <th style="width:110px;">Priority</th>
-            <th>Description / Site</th>
-            <th style="width:130px;">Raised</th>
-            <th style="width:130px;">SLA Target</th>
-            <th style="width:130px;">Time Left</th>
-            <th style="width:120px;">Status</th>
-            <th style="width:120px;">Actions</th>
-          </tr>
+            <tr>
+              <th>Ref</th>
+              <th>Priority</th>
+              <th>Site</th>
+              <th>Raised</th>
+              <th>SLA / Countdown</th>
+              <th>Status</th>
+              <th>Engineer</th>
+              <th>Actions</th>
+            </tr>
           </thead>
-          <tbody id="jobsTbody"></tbody>
+          <tbody id="jobsTbody">
+            <tr><td colspan="8" class="dim">Loading…</td></tr>
+          </tbody>
         </table>
       </div>
 
-      <!-- MOBILE CARD VIEW -->
-      <div id="jobCards" class="job-cards"></div>
+      <div class="cards" id="jobsCards"></div>
 
-      <div id="statusBar">Loading jobs…</div>
+      <div class="hint" id="hintBar">Tip: Use Update (✎) to add notes + change status. Assign (👤) to allocate an engineer.</div>
+    </div>
+
+    <!-- Update Modal -->
+    <div class="modal-backdrop" id="updateModalBackdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title" id="updateModalTitle">Update Job</div>
+            <div class="modal-sub" id="updateModalSub"> </div>
+          </div>
+          <button class="btn" id="closeUpdateBtn" type="button">Close</button>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="flex:1 1 220px;min-width:220px;">
+              <div class="dim" style="margin-bottom:6px;">Status</div>
+              <select id="updateStatus">
+                <option value="Open">Open</option>
+                <option value="In Progress">In Progress</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Completed">Completed</option>
+                <option value="Closed">Closed</option>
+              </select>
+            </div>
+            <div style="flex:1 1 220px;min-width:220px;">
+              <div class="dim" style="margin-bottom:6px;">Engineer</div>
+              <select id="updateEngineer">
+                <option value="">Unassigned</option>
+              </select>
+            </div>
+          </div>
+          <div class="dim" style="margin-bottom:6px;">Note / update</div>
+          <textarea id="updateNote" placeholder="e.g. attended site, materials ordered, waiting on access…"></textarea>
+          <div class="dim" id="updateStatusBar" style="margin-top:8px;"> </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" id="updateModalSaveBtn" type="button">Save</button>
+          <button class="btn primary" id="updateModalSaveCloseBtn" type="button">Save & Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assign Modal -->
+    <div class="modal-backdrop" id="assignModalBackdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="assignModalTitle">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title" id="assignModalTitle">Assign Job</div>
+            <div class="modal-sub" id="assignModalSub"> </div>
+          </div>
+          <button class="btn" id="closeAssignBtn" type="button">Close</button>
+        </div>
+        <div class="modal-body">
+          <div class="dim" style="margin-bottom:6px;">Engineer</div>
+          <select id="assignEngineer">
+            <option value="">Unassigned</option>
+          </select>
+          <div class="dim" id="assignStatusBar" style="margin-top:8px;"> </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn primary" id="assignModalSaveBtn" type="button">Assign</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Timeline Modal -->
+    <div class="modal-backdrop" id="timelineModalBackdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="timelineModalTitle">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title" id="timelineModalTitle">Activity</div>
+            <div class="modal-sub" id="timelineModalSub"> </div>
+          </div>
+          <button class="btn" id="closeTimelineBtn" type="button">Close</button>
+        </div>
+
+        <div class="timeline-wrap">
+          <div class="timeline-scroller" id="timelineScroller">
+            <div class="timeline" id="timelineTrack"></div>
+          </div>
+          <div class="timeline-empty" id="timelineEmpty" style="display:none;">No activity yet.</div>
+        </div>
+
+        <div class="timeline-list" id="timelineList"></div>
+      </div>
     </div>
   </div>
-</div>
-
-<!-- UPDATE JOB MODAL -->
-<div class="modal-backdrop" id="updateModalBackdrop">
-  <div class="modal">
-    <header>
-      <h2 id="updateModalTitle">Update Job</h2>
-      <button type="button" id="updateModalCloseBtn">&times;</button>
-    </header>
-    <div class="modal-body">
-      <div class="field">
-        <label>Reference</label>
-        <div class="ref" id="updateModalRef">—</div>
-      </div>
-      <div class="field">
-        <label for="updateModalPriority">Priority</label>
-        <select id="updateModalPriority">
-          <option value="P1">P1 – Emergency</option>
-          <option value="P2">P2 – Urgent</option>
-          <option value="P3">P3 – Routine</option>
-          <option value="P4">P4 – Low</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="updateModalStatus">Status</label>
-<select id="updateModalStatus">
-  <option value="Pending">Pending</option>
-  <option value="Scheduled">Scheduled</option>
-  <option value="Travelling">Travelling</option>
-  <option value="In Progress">In Progress</option>
-  <option value="On Hold">On Hold</option>
-  <option value="Complete">Complete</option>
-  <option value="Closed Jobs">Closed Jobs</option>
-  <option value="Order">Order</option>
-  <option value="Quote">Quote</option>
-</select>
-      </div>
-      <!-- Engineer + scheduled date/time inside UPDATE modal -->
-      <div class="field">
-        <label for="updateModalEngineer">Engineer Assigned</label>
-        <select id="updateModalEngineer">
-          <option value="">Unassigned</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="updateModalDate">Scheduled Date</label>
-        <input type="date" id="updateModalDate">
-      </div>
-      <div class="field">
-        <label for="updateModalTime">Scheduled Time</label>
-        <input type="time" id="updateModalTime">
-      </div>
-      <div class="field">
-        <label for="updateModalNote">Event / Notes (history log)</label>
-        <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button type="button" class="btn" id="updateModalCancelBtn">Cancel</button>
-      <button type="button" class="btn primary" id="updateModalSaveBtn">Save</button>
-    </div>
-    <div id="updateModalStatusText" class="small muted" style="margin-top:4px;"></div>
-  </div>
-</div>
-
-<!-- ASSIGN JOB MODAL -->
-<div class="modal-backdrop" id="assignModalBackdrop">
-  <div class="modal">
-    <header>
-      <h2 id="assignModalTitle">Assign Job</h2>
-      <button type="button" id="assignModalCloseBtn">&times;</button>
-    </header>
-    <div class="modal-body">
-      <div class="field">
-        <label>Reference</label>
-        <div class="ref" id="assignModalRef">—</div>
-      </div>
-      <div class="field">
-        <label for="assignEngineerSelect">Engineer</label>
-        <select id="assignEngineerSelect">
-          <option value="">Loading engineers…</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="assignDate">Scheduled Date</label>
-        <input type="date" id="assignDate">
-      </div>
-      <div class="field">
-        <label for="assignTime">Scheduled Time</label>
-        <input type="time" id="assignTime">
-      </div>
-      <div class="field">
-        <label for="assignNote">Note (optional)</label>
-        <textarea id="assignNote" placeholder="e.g. Booked for Connor on early shift."></textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button type="button" class="btn" id="assignModalCancelBtn">Cancel</button>
-      <button type="button" class="btn primary" id="assignModalSaveBtn">Assign</button>
-    </div>
-    <div id="assignModalStatusText" class="small muted" style="margin-top:4px;"></div>
-  </div>
-</div>
 
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
-const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
 
 let allJobs = [];
-let showingCompleted = false;
-let activePriority = "all";
 let countdownTimerId = null;
 
 let currentUpdateJobId = null;
 let currentAssignJobId = null;
-let cachedUsers = [];
 
 const $ = id => document.getElementById(id);
 
-/* =========================
-   DATE HELPERS
-   ========================= */
+function getUser(){
+  return sessionStorage.getItem("mostlaneUser") ||
+         sessionStorage.getItem("mostlaneUsername") ||
+         sessionStorage.getItem("username") ||
+         "Portal User";
+}
+
 function parseDate(v){
   if(!v) return null;
   const d = new Date(v);
@@ -698,163 +525,46 @@ function parseDate(v){
 
 function fmtDateTimeShort(d){
   if(!(d instanceof Date) || isNaN(d)) return "—";
-  return d.toLocaleString("en-GB", {
-    day:"2-digit", month:"short",
-    hour:"2-digit", minute:"2-digit"
-  });
+  return d.toLocaleString("en-GB", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
 }
 
-// split ISO → {date, time} for inputs
-function isoToDateAndTime(iso){
-  if(!iso) return {date:"", time:""};
-  const d = new Date(iso);
-  if(isNaN(d)) return {date:"", time:""};
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,"0");
-  const dd = String(d.getDate()).padStart(2,"0");
-  const hh = String(d.getHours()).padStart(2,"0");
-  const min = String(d.getMinutes()).padStart(2,"0");
-  return {date:`${yyyy}-${mm}-${dd}`, time:`${hh}:${min}`};
-}
-
-/* =========================
-   USER HELPER
-   ========================= */
-function getCurrentUser(){
-  return sessionStorage.getItem("mostlaneUser") ||
-         sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") ||
-         "Portal User";
-}
-
-/* =========================
-   NORMALISE JOB
-   ========================= */
-function normaliseJob(raw){
-  const j = raw || {};
-
-  const id =
-    j.id || j.jobId || j.reference || j.helpdeskRef || j.ref;
-
-  const reference =
-    j.reference || j.helpdeskRef || j.ref || id || "N/A";
-
-  let priority = (j.priority || j.slaPriority || j.urgency || "").toString().trim().toUpperCase();
-  if(!/^P[1-4]$/.test(priority)){
-    if(priority.includes("1")) priority = "P1";
-    else if(priority.includes("2")) priority = "P2";
-    else if(priority.includes("3")) priority = "P3";
-    else if(priority.includes("4")) priority = "P4";
-    else priority = "P4";
-  }
-
-  const site =
-    j.site || j.siteName || j.siteCode || j.location || j.address || "";
-
-  const description =
-    j.description || j.summary || j.title || "";
-
-  const raisedAt =
-    j.raisedAt || j.raised_on || j.createdAt || j.dateRaised;
-
-  // SLA target from Worker (targetAt)
-  const slaTarget =
-    j.slaTarget || j.targetAt || j.target || j.slaDue;
-
-  const status =
-    j.status || j.callStatus || j.state || "With Contractor - R";
-
-  const engineer =
-    j.engineer || j.assignedEngineer || j.assignedTo || "";
-
-  // keep scheduledAt from Worker
-  const scheduledAt = j.scheduledAt || null;
-
-  return {
-    id,
-    reference,
-    priority,
-    site,
-    description,
-    raisedAt,
-    slaTarget,
-    status,
-    engineer,
-    scheduledAt,
-    raw
-  };
-}
-
-/* =========================
-   SLA COUNTDOWN
-   ========================= */
-function computeSlaCountdown(targetISO, completedAtISO){
+function computeSlaCountdown(targetISO){
   if(!targetISO){
-    return { text:"—", cls:"sla-badge sla-none", status:"none" };
+    return {text:"—", cls:"sla sla-none", status:"none"};
   }
-
   const now = new Date();
   const target = parseDate(targetISO);
   if(!target){
-    return { text:"—", cls:"sla-badge sla-none", status:"none" };
+    return {text:"—", cls:"sla sla-none", status:"none"};
   }
-
-  // If job is completed, compare completion vs target
-  if(completedAtISO){
-    const completedAt = parseDate(completedAtISO);
-    if(!completedAt){
-      return { text:"—", cls:"sla-badge sla-none", status:"none" };
-    }
-
-    let diff = completedAt - target;
-    const late = diff > 0;
-    diff = Math.abs(diff);
-
-    const secs = Math.floor(diff / 1000);
-    const days = Math.floor(secs / 86400);
-    const hours = Math.floor((secs % 86400) / 3600);
-
-    let label = "";
-    if(days > 0){
-      label = `${days}d ${hours}h`;
-    } else {
-      label = `${hours}h`;
-    }
-
-    return {
-      text: late ? `${label} late` : `${label} early`,
-      cls: late ? "sla-badge sla-red" : "sla-badge sla-green",
-      status: late ? "late" : "early"
-    };
-  }
-
-  // OPEN JOB LOGIC
   let diff = target - now;
   const overdue = diff < 0;
   if(overdue) diff = -diff;
 
-  const secs = Math.floor(diff / 1000);
-  const days = Math.floor(secs / 86400);
-  const hours = Math.floor((secs % 86400) / 3600);
-  const mins = Math.floor((secs % 3600) / 60);
+  const secs = Math.floor(diff/1000);
+  const days = Math.floor(secs/86400);
+  const hours = Math.floor((secs%86400)/3600);
+  const mins = Math.floor((secs%3600)/60);
 
-  let label = "";
-  if(days > 0){
-    label = `${days}d ${String(hours).padStart(2,"0")}h`;
+  let label = overdue ? "+" : "";
+  if(days>0){
+    label += `${days}d ${String(hours).padStart(2,"0")}h`;
   } else {
-    label = `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
+    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
   }
 
   const hoursLeft = (target - now) / 3600000;
-
-  let cls = "sla-badge sla-green";
+  let cls = "sla sla-green";
   let status = "ok";
 
   if(overdue || hoursLeft <= 0){
-    cls = "sla-badge sla-red";
+    cls = "sla sla-red";
     status = "overdue";
+  } else if(hoursLeft <= 1){
+    cls = "sla sla-red";
+    status = "overdueSoon";
   } else if(hoursLeft <= 4){
-    cls = "sla-badge sla-amber";
+    cls = "sla sla-amber";
     status = "warn";
   }
 
@@ -864,10 +574,8 @@ function computeSlaCountdown(targetISO, completedAtISO){
     status
   };
 }
-/* =========================
-   STATUS PILL
-   ========================= */
-function statusClass(status, slaStatus){
+
+function statusPillClass(status, slaStatus){
   const s = (status || "").toLowerCase();
   if(s.includes("complete") || s.includes("closed")){
     return "status-pill status-complete";
@@ -878,644 +586,427 @@ function statusClass(status, slaStatus){
   return "status-pill status-open";
 }
 
-function isCompleted(job){
-  const s = (job.status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")) return true;
-  return false;
+function priorityBadge(priority){
+  const p = (priority || "P4").toString().toUpperCase();
+  let cls = "badge p4";
+  if(p === "P1") cls = "badge p1";
+  else if(p === "P2") cls = "badge p2";
+  else if(p === "P3") cls = "badge p3";
+  else if(p === "P4") cls = "badge p4";
+  else if(p === "P5") cls = "badge p5";
+  return `<span class="${cls}">${p}</span>`;
 }
 
-/* =========================
-   KPI UPDATE
-   ========================= */
-function updateKpis(){
-  const openElem = $("kpiOpenJobs");
-  const dueElem = $("kpiDueToday");
-  const overElem = $("kpiOverdue");
-  const riskElem = $("kpiAtRisk");
-  if(!openElem || !dueElem || !overElem || !riskElem) return;
-
-  const now = new Date();
-  let open = 0, dueToday = 0, overdue = 0, atRisk = 0;
-
-  allJobs.forEach(job => {
-    if(isCompleted(job)) return;
-
-    open++;
-const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-    const t = parseDate(job.slaTarget);
-
-    if(t &&
-       t.getFullYear() === now.getFullYear() &&
-       t.getMonth() === now.getMonth() &&
-       t.getDate() === now.getDate()){
-      dueToday++;
-    }
-
-    if(slaInfo.status === "overdue"){
-      overdue++;
-    } else if(slaInfo.status === "warn" || slaInfo.status === "overdueSoon"){
-      atRisk++;
-    }
-  });
-
-  openElem.textContent = open;
-  dueElem.textContent = dueToday;
-  overElem.textContent = overdue;
-  riskElem.textContent = atRisk;
+function setSubtitle(){
+  $("subtitle").textContent = `${allJobs.length} job(s) loaded • ${new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}`;
 }
 
-/* =========================
-   RENDER TABLE + CARDS
-   ========================= */
-function render(){
-  const tbody = $("jobsTbody");
-  const wrapper = document.querySelector(".table-wrapper");
-  const cardsContainer = $("jobCards");
-  const prevScrollLeft = wrapper ? wrapper.scrollLeft : 0;
+function buildEngineerDropdown(){
+  const engs = Array.from(new Set(allJobs.map(j => j.assignedTo).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+  const engFilter = $("engFilter");
+  engFilter.innerHTML = `<option value="">All</option>` + engs.map(e => `<option value="${e}">${e}</option>`).join("");
+  $("updateEngineer").innerHTML = `<option value="">Unassigned</option>` + engs.map(e => `<option value="${e}">${e}</option>`).join("");
+  $("assignEngineer").innerHTML = `<option value="">Unassigned</option>` + engs.map(e => `<option value="${e}">${e}</option>`).join("");
+}
 
-  if(tbody) tbody.innerHTML = "";
-  if(cardsContainer) cardsContainer.innerHTML = "";
+function applyFilters(){
+  const q = $("q").value.trim().toLowerCase();
+  const status = $("statusFilter").value;
+  const prio = $("prioFilter").value;
+  const eng = $("engFilter").value;
 
-  const openJobs = allJobs.filter(j => !isCompleted(j));
-  const completedJobs = allJobs.filter(j => isCompleted(j));
+  return allJobs.filter(job => {
+    const ref = (job.reference || job.helpdeskRef || job.id || "").toString();
+    const site = (job.siteName || job.siteCode || job.address || job.location || "").toString();
+    const desc = (job.description || job.rawPayload?.description || "").toString();
+    const assigned = (job.assignedTo || "").toString();
+    const st = (job.status || "").toString();
 
-  $("countOpen").textContent = openJobs.length;
-  $("countCompleted").textContent = completedJobs.length;
-
-  const list = showingCompleted ? completedJobs : openJobs;
-
-  const search = $("searchBox").value.trim().toLowerCase();
-  const statusFilter = $("statusFilter").value;
-
-  const filtered = list.filter(job => {
-    if(activePriority !== "all" && job.priority !== activePriority) return false;
-
-    const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-
-    if(!showingCompleted){
-      if(statusFilter === "open"){
-        if(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon") return false;
-      }
-      if(statusFilter === "overdue"){
-        if(!(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon")) return false;
-      }
-    }
-
-    if(search){
-      const blob = [
-        job.reference,
-        job.site,
-        job.description,
-        job.status,
-        job.engineer
-      ].join(" ").toLowerCase();
-      if(!blob.includes(search)) return false;
-    }
+    const hay = `${ref} ${site} ${desc} ${assigned} ${st}`.toLowerCase();
+    if(q && !hay.includes(q)) return false;
+    if(status && st !== status) return false;
+    if(prio && (job.priority || "").toString().toUpperCase() !== prio) return false;
+    if(eng && assigned !== eng) return false;
 
     return true;
   });
+}
 
-  $("statusBar").textContent =
-    filtered.length === 0
-      ? "No jobs match filters."
-      : `${filtered.length} job(s) shown`;
-
-  for(const job of filtered){
-    const raised = parseDate(job.raisedAt);
-   const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-    // TABLE ROW (desktop)
-    if(tbody){
-      const tr = document.createElement("tr");
-      tr.dataset.jobId = job.id || "";
-
-      tr.innerHTML = `
-        <td>
-          <div class="ref">${job.reference}</div>
-          ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
-        </td>
-        <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
-        <td>
-          <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
-          <div class="small muted">${job.site || ""}</div>
-        </td>
-        <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
-        <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
-        <td class="small nowrap">
-          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-            ${slaInfo.text}
-          </span>
-        </td>
-        <td class="small">
-          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
-        </td>
-        <td>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-            <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-          </div>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
-
-    // MOBILE CARD
-    if(cardsContainer){
-      const card = document.createElement("div");
-      card.className = "job-card";
-      card.dataset.jobId = job.id || "";
-
-      card.innerHTML = `
-        <div class="job-card-header">
-          <div class="job-card-ref">
-            <span class="ref">${job.reference}</span>
-            ${job.engineer ? `<span class="small muted">${job.engineer}</span>` : ""}
-          </div>
-          <div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div>
-        </div>
-        <div class="job-card-title">${job.description || ""}</div>
-        <div class="job-card-site">${job.site || ""}</div>
-        <div class="job-card-meta">
-          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-            ${slaInfo.text}
-          </span>
-          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
-        </div>
-        <div class="job-card-meta small muted">
-          <span>Raised: ${fmtDateTimeShort(raised)}</span>
-          <span>SLA: ${fmtDateTimeShort(parseDate(job.slaTarget))}</span>
-        </div>
-        <div class="job-card-actions">
-          <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-          <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-        </div>
-      `;
-      cardsContainer.appendChild(card);
-    }
-  }
-
-  // restore horizontal scroll position on desktop
-  if(wrapper){
-    wrapper.scrollLeft = prevScrollLeft;
-  }
-
-  // update KPI tiles
-  updateKpis();
-
+function render(){
+  const filtered = applyFilters();
+  renderTable(filtered);
+  renderCards(filtered);
+  setSubtitle();
   startCountdownLoop();
 }
 
-/* =========================
-   COUNTDOWN LOOP
-   ========================= */
+function renderTable(jobs){
+  const tb = $("jobsTbody");
+  if(!jobs.length){
+    tb.innerHTML = `<tr><td colspan="8" class="dim">No jobs found.</td></tr>`;
+    return;
+  }
+
+  tb.innerHTML = jobs.map(job => {
+    const ref = job.reference || job.helpdeskRef || job.id;
+    const site = job.siteName || job.siteCode || job.address || job.location || "—";
+    const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
+    const target = job.targetAt || job.sla?.targetAt;
+    const slaInfo = computeSlaCountdown(target);
+    const pillCls = statusPillClass(job.status, slaInfo.status);
+
+    return `
+      <tr data-job-id="${job.id}">
+        <td class="mono">${ref}</td>
+        <td>${priorityBadge(job.priority)}</td>
+        <td>${site}</td>
+        <td>${fmtDateTimeShort(raised)}</td>
+        <td><span class="${slaInfo.cls}" data-sla-target="${target || ""}">${slaInfo.text}</span></td>
+        <td><span class="${pillCls}">${job.status || "—"}</span></td>
+        <td>${job.assignedTo || "<span class='dim'>Unassigned</span>"}</td>
+        <td>
+          <div class="actions">
+            <button class="btn icon-only" data-action="update" title="Update job">✎</button>
+            <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+            <button class="btn icon-only" data-action="timeline" title="Activity">⏱️</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderCards(jobs){
+  const wrap = $("jobsCards");
+  if(!jobs.length){
+    wrap.innerHTML = `<div class="dim">No jobs found.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = jobs.map(job => {
+    const ref = job.reference || job.helpdeskRef || job.id;
+    const site = job.siteName || job.siteCode || job.address || job.location || "—";
+    const raised = parseDate(job.raisedAt || job.sla?.raisedAt);
+    const target = job.targetAt || job.sla?.targetAt;
+    const slaInfo = computeSlaCountdown(target);
+    const pillCls = statusPillClass(job.status, slaInfo.status);
+
+    return `
+      <div class="card" data-job-id="${job.id}">
+        <div class="card-top">
+          <div>
+            <h3 class="mono">${ref}</h3>
+            <div class="dim">${site}</div>
+          </div>
+          <div>${priorityBadge(job.priority)}</div>
+        </div>
+
+        <div class="row">
+          <div class="kv">
+            <div class="k">Raised</div>
+            <div class="v">${fmtDateTimeShort(raised)}</div>
+          </div>
+          <div class="kv">
+            <div class="k">SLA</div>
+            <div class="v"><span class="${slaInfo.cls}" data-sla-target="${target || ""}">${slaInfo.text}</span></div>
+          </div>
+          <div class="kv">
+            <div class="k">Status</div>
+            <div class="v"><span class="${pillCls}">${job.status || "—"}</span></div>
+          </div>
+          <div class="kv">
+            <div class="k">Engineer</div>
+            <div class="v">${job.assignedTo || "<span class='dim'>Unassigned</span>"}</div>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <button class="btn" data-action="update">✎ Update</button>
+          <button class="btn" data-action="assign">👤 Assign</button>
+          <button class="btn" data-action="timeline">⏱️ Activity</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
 function startCountdownLoop(){
-  if (countdownTimerId) clearInterval(countdownTimerId);
-  if (showingCompleted) return;
-
+  if(countdownTimerId) clearInterval(countdownTimerId);
   const tick = () => {
-    document.querySelectorAll(".sla-badge[data-sla-target]").forEach(el => {
-      const row = el.closest("[data-job-id]");
-      if (!row) return;
-
-      const jobId = row.dataset.jobId;
-      const job = allJobs.find(j => j.id === jobId);
-
-      // ✅ STEP 4: completed jobs NEVER tick again
-      if (!job || isCompleted(job)) return;
-
+    document.querySelectorAll("[data-sla-target]").forEach(el => {
       const iso = el.getAttribute("data-sla-target");
-      if (!iso) return;
-
       const info = computeSlaCountdown(iso);
       el.textContent = info.text;
       el.className = info.cls;
     });
   };
-
   tick();
   countdownTimerId = setInterval(tick, 1000);
 }
-/* =========================
-   LOAD JOBS
-   ========================= */
+
 async function loadJobs(){
-  $("statusBar").textContent = "Loading jobs…";
+  $("subtitle").textContent = "Loading…";
   try{
-    const res = await fetch(SLA_API + "/jobs?t=" + Date.now());
-    const json = await res.json();
-
-    const rawList = Array.isArray(json) ? json : (json.jobs || json.data || []);
-    allJobs = rawList.map(normaliseJob);
-
-    $("statusBar").textContent = `Loaded ${allJobs.length} job(s).`;
+    const res = await fetch(`${SLA_API}/jobs?t=${Date.now()}`, { cache:"no-store" });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const data = await res.json();
+    allJobs = Array.isArray(data.jobs) ? data.jobs : (Array.isArray(data) ? data : []);
+    buildEngineerDropdown();
     render();
   }catch(err){
-    console.error("load error", err);
-    $("statusBar").textContent = "❌ Error loading jobs.";
-    allJobs = [];
-    render();
+    console.error(err);
+    $("jobsTbody").innerHTML = `<tr><td colspan="8" class="dim">❌ Failed to load jobs.</td></tr>`;
+    $("jobsCards").innerHTML = `<div class="dim">❌ Failed to load jobs.</div>`;
+    $("subtitle").textContent = "Failed to load.";
   }
 }
 
-/* =========================
-   UPDATE MODAL
-   ========================= */
+function handleJobActionClick(btn){
+  const action = btn.getAttribute("data-action");
+  const row = btn.closest("[data-job-id]") || btn.closest("tr") || btn.closest(".card");
+  const jobId = row?.getAttribute("data-job-id");
+  if(!jobId) return;
+
+  if(action === "update") openUpdateModal(jobId);
+  else if(action === "assign") openAssignModal(jobId);
+  else if(action === "timeline") openTimelineModal(jobId);
+}
+
 function openUpdateModal(jobId){
-  const job = allJobs.find(j => j.id === jobId);
-  if(!job) return;
-
   currentUpdateJobId = jobId;
-  $("updateModalTitle").textContent = `Update Job – ${job.reference}`;
-  $("updateModalRef").textContent = job.reference;
-  $("updateModalPriority").value = job.priority || "P4";
+  const job = allJobs.find(j => j.id === jobId);
+  $("updateModalTitle").textContent = "Update Job";
+  $("updateModalSub").textContent = job ? `Job – ${job.reference}` : `Job ID: ${jobId}`;
+  $("updateStatusBar").textContent = "";
 
-  const statusSelect = $("updateModalStatus");
-  let matched = false;
-  Array.from(statusSelect.options).forEach(opt => {
-    if(opt.value.toLowerCase() === (job.status || "").toLowerCase()){
-      matched = true;
-      statusSelect.value = opt.value;
-    }
-  });
-  if(!matched){
-    statusSelect.value = "In Progress";
+  if(job){
+    $("updateStatus").value = job.status || "Open";
+    $("updateEngineer").value = job.assignedTo || "";
+    $("updateNote").value = "";
   }
 
-  ensureUsersLoaded().then(() => {
-    populateUpdateEngineerSelect(job.engineer || "");
-  });
-
-  const dt = isoToDateAndTime(job.scheduledAt);
-  $("updateModalDate").value = dt.date;
-  $("updateModalTime").value = dt.time;
-
-  $("updateModalNote").value = "";
-  $("updateModalStatusText").textContent = "";
-
   $("updateModalBackdrop").classList.add("show");
+  $("updateModalBackdrop").setAttribute("aria-hidden", "false");
 }
 
 function closeUpdateModal(){
-  $("updateModalBackdrop").classList.remove("show");
   currentUpdateJobId = null;
-  $("updateModalNote").value = "";
-  $("updateModalStatusText").textContent = "";
-  $("updateModalEngineer").value = "";
-  $("updateModalDate").value = "";
-  $("updateModalTime").value = "";
+  $("updateModalBackdrop").classList.remove("show");
+  $("updateModalBackdrop").setAttribute("aria-hidden", "true");
 }
 
-async function saveUpdateModal(){
+async function saveUpdateModal(closeAfter){
   if(!currentUpdateJobId) return;
+  const status = $("updateStatus").value;
+  const assignedTo = $("updateEngineer").value;
+  const note = $("updateNote").value.trim();
+  const user = getUser();
 
-  const priority = $("updateModalPriority").value;
-  const status = $("updateModalStatus").value;
-  const note = $("updateModalNote").value.trim();
-  const engineer = $("updateModalEngineer").value;
-  const date = $("updateModalDate").value;
-  const time = $("updateModalTime").value;
-  const user = getCurrentUser();
-
-  let scheduledAt = null;
-  if(date && time){
-    scheduledAt = new Date(date + "T" + time + ":00").toISOString();
-  }
-
-  $("updateModalStatusText").textContent = "Saving…";
+  $("updateStatusBar").textContent = "Saving…";
 
   try{
-    const payload = {
-      priority,
-      status,
-      note,
-      changedBy: user
-    };
-
-    if(engineer){
-      payload.assignedTo = engineer;
-    } else {
-      payload.assignedTo = "";
-    }
-    if(scheduledAt){
-      payload.scheduledAt = scheduledAt;
-    } else {
-      payload.scheduledAt = null;
-    }
-
-    const res = await fetch(
-      SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
-      {
-        method:"PATCH",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
-
-    if(!res.ok){
-  const text = await res.text();
-  throw new Error(`HTTP ${res.status}: ${text}`);
-}
-
-    $("updateModalStatusText").textContent = "✅ Saved – refreshing list…";
-    await loadJobs();
-    setTimeout(closeUpdateModal, 600);
-  }catch(err){
-    console.error("Update modal error:", err);
-$("updateModalStatusText").textContent = "❌ " + err.message;
-  }
-}
-
-/* =========================
-   LOAD ENGINEERS LIST
-   ========================= */
-async function ensureUsersLoaded(){
-  if(cachedUsers.length) return;
-  try{
-    const res = await fetch(USERS_API + "?t=" + Date.now());
+    const payload = { status, assignedTo, note, changedBy: user };
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(currentUpdateJobId)}`, {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
-    const data = await res.json();
+    const updated = await res.json();
 
-    if (Array.isArray(data.Users)) {
-      cachedUsers = data.Users.map(u => ({
-        username: u.Username,
-        displayName: `${u.FirstName} ${u.LastName}`.trim()
-      })).filter(u => u.username);
-    }
-    else if (Array.isArray(data.users)) {
-      cachedUsers = data.users.map(u => ({
-        username: u.username || u.user || "",
-        displayName: u.displayName || u.name || (u.username || "").replace(".", " ")
-      })).filter(u => u.username);
-    }
-    else if (Array.isArray(data)) {
-      cachedUsers = data.map(u => ({
-        username: u.username || u.user || u.Username || "",
-        displayName:
-          u.displayName ||
-          u.name ||
-          `${u.FirstName || ""} ${u.LastName || ""}`.trim() ||
-          (u.username || u.Username || "").replace(".", " ")
-      })).filter(u => u.username);
-    }
+    const idx = allJobs.findIndex(j => j.id === currentUpdateJobId);
+    if(idx >= 0) allJobs[idx] = updated;
+
+    $("updateStatusBar").textContent = "✅ Saved.";
+    $("updateNote").value = "";
+    buildEngineerDropdown();
+    render();
+
+    if(closeAfter) closeUpdateModal();
   }catch(err){
-    console.error("User load error:", err);
-    cachedUsers = [];
+    console.error(err);
+    $("updateStatusBar").textContent = "❌ Error saving update.";
   }
 }
 
-function populateEngineerSelect(){
-  const sel = $("assignEngineerSelect");
-  sel.innerHTML = "";
-
-  if(!cachedUsers.length){
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "No users found";
-    sel.appendChild(opt);
-    return;
-  }
-
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Select engineer…";
-  sel.appendChild(placeholder);
-
-  cachedUsers.forEach(u => {
-    const opt = document.createElement("option");
-    opt.value = u.username;
-    opt.textContent = u.displayName;
-    sel.appendChild(opt);
-  });
-}
-
-// populate engineer dropdown in UPDATE modal
-function populateUpdateEngineerSelect(selected){
-  const sel = $("updateModalEngineer");
-  if(!sel) return;
-  sel.innerHTML = "";
-
-  const optNone = document.createElement("option");
-  optNone.value = "";
-  optNone.textContent = "Unassigned";
-  sel.appendChild(optNone);
-
-  if(cachedUsers.length){
-    cachedUsers.forEach(u => {
-      const opt = document.createElement("option");
-      opt.value = u.username;
-      opt.textContent = u.displayName;
-      sel.appendChild(opt);
-    });
-  }
-
-  if(selected){
-    sel.value = selected;
-  }
-}
-
-/* =========================
-   ASSIGN MODAL
-   ========================= */
-function defaultDateAndTime(){
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth()+1).padStart(2,"0");
-  const dd = String(now.getDate()).padStart(2,"0");
-  const dateStr = `${yyyy}-${mm}-${dd}`;
-
-  const hh = String(now.getHours()).padStart(2,"0");
-  const min = now.getMinutes();
-  const roundedMin = Math.round(min/15)*15;
-  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0");
-  const timeStr = `${hh}:${mmStr}`;
-
-  return {dateStr, timeStr};
-}
-
-async function openAssignModal(jobId){
-  const job = allJobs.find(j => j.id === jobId);
-  if(!job) return;
-
+function openAssignModal(jobId){
   currentAssignJobId = jobId;
-  $("assignModalTitle").textContent = `Assign Job – ${job.reference}`;
-  $("assignModalRef").textContent = job.reference;
-  $("assignModalStatusText").textContent = "";
-
-  await ensureUsersLoaded();
-  populateEngineerSelect();
-
-  const sel = $("assignEngineerSelect");
-  if(job.engineer){
-    Array.from(sel.options).forEach(opt => {
-      if(opt.value === job.engineer){
-        sel.value = opt.value;
-      }
-    });
-  } else {
-    sel.value = "";
-  }
-
-  const {dateStr, timeStr} = defaultDateAndTime();
-  $("assignDate").value = dateStr;
-  $("assignTime").value = timeStr;
-
-  $("assignNote").value = "";
+  const job = allJobs.find(j => j.id === jobId);
+  $("assignModalTitle").textContent = "Assign Job";
+  $("assignModalSub").textContent = job ? `Job – ${job.reference}` : `Job ID: ${jobId}`;
+  $("assignStatusBar").textContent = "";
+  $("assignEngineer").value = job?.assignedTo || "";
 
   $("assignModalBackdrop").classList.add("show");
+  $("assignModalBackdrop").setAttribute("aria-hidden", "false");
 }
 
 function closeAssignModal(){
-  $("assignModalBackdrop").classList.remove("show");
   currentAssignJobId = null;
-  $("assignNote").value = "";
-  $("assignModalStatusText").textContent = "";
+  $("assignModalBackdrop").classList.remove("show");
+  $("assignModalBackdrop").setAttribute("aria-hidden", "true");
+}
+
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function formatDuration(ms){
+  const s = Math.max(0, Math.round(ms/1000));
+  const d = Math.floor(s/86400);
+  const h = Math.floor((s%86400)/3600);
+  const m = Math.floor((s%3600)/60);
+  if(d>0) return `${d}d ${h}h`;
+  if(h>0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function openTimelineModal(jobId){
+  const base = allJobs.find(j => j.id === jobId);
+  $("timelineModalTitle").textContent = "Activity";
+  $("timelineModalSub").textContent = base ? `Job – ${base.reference}` : `Job ID: ${jobId}`;
+  $("timelineTrack").innerHTML = "";
+  $("timelineList").innerHTML = "";
+  $("timelineEmpty").style.display = "none";
+  $("timelineEmpty").textContent = "No activity yet.";
+
+  $("timelineModalBackdrop").classList.add("show");
+  $("timelineModalBackdrop").setAttribute("aria-hidden", "false");
+
+  loadTimeline(jobId);
+}
+
+function closeTimelineModal(){
+  $("timelineModalBackdrop").classList.remove("show");
+  $("timelineModalBackdrop").setAttribute("aria-hidden", "true");
+}
+
+async function loadTimeline(jobId){
+  try{
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}?t=${Date.now()}`, { cache:"no-store" });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const j = await res.json();
+
+    const history = Array.isArray(j.statusHistory) ? j.statusHistory.slice() : [];
+    history.sort((a,b) => new Date(a.at) - new Date(b.at));
+
+    if(!history.length){
+      $("timelineEmpty").style.display = "block";
+      return;
+    }
+
+    const track = $("timelineTrack");
+    const list = $("timelineList");
+
+    for(let i=0;i<history.length;i++){
+      const h = history[i];
+      const at = new Date(h.at);
+      const node = document.createElement("div");
+      node.className = "tl-node";
+      node.innerHTML = `
+        <div class="tl-dot"></div>
+        <div class="tl-label">${escapeHtml(h.status || "Status")}</div>
+        <div class="tl-time">${at.toLocaleString("en-GB",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+      `;
+      track.appendChild(node);
+
+      if(i < history.length-1){
+        const nextAt = new Date(history[i+1].at);
+        const seg = document.createElement("div");
+        seg.className = "tl-seg";
+        seg.innerHTML = `<div class="tl-dur">${formatDuration(nextAt - at)}</div>`;
+        track.appendChild(seg);
+      }
+
+      const row = document.createElement("div");
+      row.className = "tl-row";
+      row.innerHTML = `
+        <div class="tl-row-left">
+          <div class="tl-row-status">${escapeHtml(h.status || "Status")}</div>
+          <div class="tl-row-meta">${at.toLocaleString("en-GB",{weekday:"short",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}${h.by ? ` • ${escapeHtml(h.by)}` : ""}</div>
+        </div>
+        <div class="tl-row-right">${i < history.length-1 ? formatDuration(new Date(history[i+1].at) - at) : ""}</div>
+      `;
+      list.appendChild(row);
+    }
+  }catch(err){
+    console.error("Timeline load failed", err);
+    $("timelineEmpty").style.display = "block";
+    $("timelineEmpty").textContent = "❌ Failed to load activity.";
+  }
 }
 
 async function saveAssignModal(){
   if(!currentAssignJobId) return;
-
-  const engineer = $("assignEngineerSelect").value;
-  const date = $("assignDate").value;
-  const time = $("assignTime").value;
-  const note = $("assignNote").value.trim();
-  const user = getCurrentUser();
-
-  if(!engineer){
-    $("assignModalStatusText").textContent = "Please select an engineer.";
-    return;
-  }
-  if(!date || !time){
-    $("assignModalStatusText").textContent = "Please choose date and time.";
-    return;
-  }
-
-  const scheduledAt = new Date(date + "T" + time + ":00").toISOString();
-
-  $("assignModalStatusText").textContent = "Assigning…";
+  const assignedTo = $("assignEngineer").value;
+  const user = getUser();
+  $("assignStatusBar").textContent = "Assigning…";
 
   try{
-    const payload = {
-      assignedTo: engineer,
-      scheduledAt,
-      note,
-      changedBy: user
-    };
+    const payload = { assignedTo, note:"", status: undefined, changedBy: user };
+    const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(currentAssignJobId)}`, {
+      method:"PATCH",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const updated = await res.json();
 
-    const res = await fetch(
-      SLA_API + "/jobs/" + encodeURIComponent(currentAssignJobId),
-      {
-        method:"PATCH",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
+    const idx = allJobs.findIndex(j => j.id === currentAssignJobId);
+    if(idx >= 0) allJobs[idx] = updated;
 
-    if(!res.ok){
-      throw new Error(res.status + " " + res.statusText);
-    }
-
-    $("assignModalStatusText").textContent = "✅ Assigned – refreshing list…";
-    await loadJobs();
-    setTimeout(closeAssignModal, 600);
+    $("assignStatusBar").textContent = "✅ Assigned.";
+    buildEngineerDropdown();
+    render();
+    closeAssignModal();
   }catch(err){
-    console.error("Assign modal error:", err);
-    $("assignModalStatusText").textContent = "❌ Error assigning job.";
-  }
-}
-
-/* =========================
-   EVENTS + INIT
-   ========================= */
-function handleJobActionClick(e){
-  const btn = e.target.closest("button[data-action]");
-  if(!btn) return;
-  const action = btn.dataset.action;
-  const container = e.currentTarget;
-  const rowOrCard = e.target.closest("[data-job-id]");
-  const id = rowOrCard && rowOrCard.dataset.jobId;
-  if(!id) return;
-
-  if(action === "update"){
-    openUpdateModal(id);
-  } else if(action === "assign"){
-    openAssignModal(id);
+    console.error(err);
+    $("assignStatusBar").textContent = "❌ Error assigning job.";
   }
 }
 
 function initEvents(){
-  $("tabOpen").addEventListener("click", () => {
-    showingCompleted = false;
-    $("tabOpen").classList.add("active");
-    $("tabCompleted").classList.remove("active");
-    render();
-  });
-
-  $("tabCompleted").addEventListener("click", () => {
-    showingCompleted = true;
-    $("tabCompleted").classList.add("active");
-    $("tabOpen").classList.remove("active");
-    render();
-  });
-
-  document.querySelectorAll(".chip[data-priority]").forEach(chip => {
-    chip.addEventListener("click", () => {
-      activePriority = chip.dataset.priority;
-      document.querySelectorAll(".chip[data-priority]").forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      render();
-    });
-  });
-
+  $("refreshBtn").addEventListener("click", loadJobs);
+  $("q").addEventListener("input", render);
   $("statusFilter").addEventListener("change", render);
-  $("searchBox").addEventListener("input", render);
+  $("prioFilter").addEventListener("change", render);
+  $("engFilter").addEventListener("change", render);
 
-  $("jobsTbody").addEventListener("click", handleJobActionClick);
-  $("jobCards").addEventListener("click", handleJobActionClick);
+  document.addEventListener("click", e => {
+    const btn = e.target.closest("[data-action]");
+    if(btn) handleJobActionClick(btn);
+  });
 
-  // Update modal buttons
-  $("updateModalCloseBtn").addEventListener("click", closeUpdateModal);
-  $("updateModalCancelBtn").addEventListener("click", closeUpdateModal);
-  $("updateModalSaveBtn").addEventListener("click", saveUpdateModal);
-
-  // Assign modal buttons
-  $("assignModalCloseBtn").addEventListener("click", closeAssignModal);
-  $("assignModalCancelBtn").addEventListener("click", closeAssignModal);
-  $("assignModalSaveBtn").addEventListener("click", saveAssignModal);
-
-  // Backdrop click to close
+  $("closeUpdateBtn").addEventListener("click", closeUpdateModal);
+  $("updateModalSaveBtn").addEventListener("click", () => saveUpdateModal(false));
+  $("updateModalSaveCloseBtn").addEventListener("click", () => saveUpdateModal(true));
   $("updateModalBackdrop").addEventListener("click", e => {
     if(e.target === $("updateModalBackdrop")) closeUpdateModal();
   });
+
+  $("closeAssignBtn").addEventListener("click", closeAssignModal);
+  $("assignModalSaveBtn").addEventListener("click", saveAssignModal);
+
+  $("closeTimelineBtn").addEventListener("click", closeTimelineModal);
+
   $("assignModalBackdrop").addEventListener("click", e => {
     if(e.target === $("assignModalBackdrop")) closeAssignModal();
+  });
+  $("timelineModalBackdrop").addEventListener("click", e => {
+    if(e.target === $("timelineModalBackdrop")) closeTimelineModal();
   });
 
   document.addEventListener("keydown", e => {
     if(e.key === "Escape"){
-      if(currentAssignJobId) closeAssignModal();
+      if($("timelineModalBackdrop").classList.contains("show")) closeTimelineModal();
+      else if(currentAssignJobId) closeAssignModal();
       else if(currentUpdateJobId) closeUpdateModal();
     }
   });
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  initEvents();
-  loadJobs();
-});
+initEvents();
+loadJobs();
 </script>
 </body>
 </html>
