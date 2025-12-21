@@ -492,7 +492,12 @@ async function loadWeek(direction){
   try{
     const base = new Date(anchorDate);
     base.setDate(base.getDate() + (direction * 7));
-
+/* ===== FUTURE WEEK GUARD (ADD THIS BLOCK) ===== */
+if(direction > 0 && startOfWeek(base) > endOfToday()){
+  $("statusBar").textContent = "Cannot load future weeks.";
+  return;
+}
+/* ===== END GUARD ===== */
     const from = startOfWeek(base);
     const to = endOfWeek(base);
 
