@@ -421,11 +421,15 @@
       <div class="col">
         <div class="field-label">Status</div>
         <select id="statusSelect">
-          <option value="With Contractor - R">With Contractor</option>
+          <option value="Pending">Pending</option>
+          <option value="Scheduled">Scheduled</option>
+          <option value="Travelling">Travelling</option>
           <option value="In Progress">In Progress</option>
           <option value="On Hold">On Hold</option>
-          <option value="Completed">Completed</option>
-          <option value="Closed">Closed</option>
+          <option value="Complete">Complete</option>
+          <option value="Closed Jobs">Closed Jobs</option>
+          <option value="Order">Order</option>
+          <option value="Quote">Quote</option>
         </select>
       </div>
       <div class="col">
@@ -604,7 +608,7 @@ function renderJob(){
   slaEl.className = slaInfo.cls;
   slaEl.dataset.slaTarget = target || "";
 
-  const st = job.status || "With Contractor - R";
+  const st = job.status || "Pending";
   const pill = $("jobStatusPill");
   pill.textContent = st;
   pill.className = statusClass(st, slaInfo.status);
@@ -643,7 +647,7 @@ function startCountdownLoop(){
     el.className = info.cls;
     if(job){
       const pill = $("jobStatusPill");
-      pill.className = statusClass(job.status || "With Contractor - R", info.status);
+      pill.className = statusClass(job.status || "Pending", info.status);
     }
   };
   tick();
