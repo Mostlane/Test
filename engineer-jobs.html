@@ -70,6 +70,9 @@
       color:var(--text);
       font-weight:500;
       white-space:nowrap;
+      user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
     }
     .btn.primary{
       background:var(--ml-blue);
@@ -80,12 +83,29 @@
       padding:14px 18px 16px;
     }
 
-    /* === Timeline Styles === */
+    /* === Controls === */
+    .nav-row{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+    .nav-row .btn{
+      flex:1 1 180px;
+      justify-content:center;
+    }
+    .hint{
+      text-align:center;
+      font-size:11px;
+      color:var(--muted);
+      margin-top:4px;
+    }
 
+    /* === Timeline Styles === */
     .day-group{
       margin-top:18px;
     }
-
     .day-banner{
       position:sticky;
       top:0;
@@ -99,7 +119,6 @@
       margin-bottom:8px;
       border:1px solid #e5e7eb;
     }
-
     .job-card{
       background:#fff;
       border:1px solid #e5e7eb;
@@ -108,7 +127,6 @@
       margin-bottom:10px;
       box-shadow:0 4px 10px rgba(0,0,0,0.05);
     }
-
     .job-top{
       display:flex;
       justify-content:space-between;
@@ -116,7 +134,6 @@
       gap:8px;
       margin-bottom:6px;
     }
-
     .ref{
       font-family:monospace;
       font-size:12px;
@@ -125,7 +142,6 @@
       border-radius:999px;
       display:inline-block;
     }
-
     .priority-badge{
       border-radius:999px;
       padding:2px 7px;
@@ -143,13 +159,11 @@
       font-size:14px;
       font-weight:500;
     }
-
     .job-site{
       font-size:12px;
       color:var(--muted);
       margin-top:2px;
     }
-
     .job-meta{
       display:flex;
       flex-wrap:wrap;
@@ -157,7 +171,6 @@
       margin-top:10px;
       align-items:center;
     }
-
     .sla-badge{
       border-radius:999px;
       padding:3px 8px;
@@ -189,6 +202,50 @@
 
     .small{font-size:11px;}
     .muted{color:var(--muted);}
+
+    /* === Modal === */
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,0.45);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+      z-index:9999;
+    }
+    .modal-card{
+      width:min(520px, 100%);
+      background:rgba(255,255,255,0.95);
+      border:1px solid rgba(15,23,42,0.08);
+      border-radius:14px;
+      box-shadow:0 18px 40px rgba(0,0,0,0.18);
+      padding:14px;
+    }
+    .modal-title{
+      margin:0 0 6px 0;
+      font-size:16px;
+      color:var(--ml-blue);
+    }
+    .modal-sub{
+      margin:0 0 12px 0;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .modal-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .modal-actions .btn{
+      flex:1 1 140px;
+      justify-content:center;
+    }
+    .btn.danger{
+      background:#fff;
+      border-color:#ef4444;
+      color:#b91c1c;
+    }
   </style>
 </head>
 
@@ -204,6 +261,13 @@
     </header>
 
     <div class="content">
+      <!-- NEW: Week navigation buttons -->
+      <div class="nav-row">
+        <button class="btn" id="prevWeekBtn">← Previous Week</button>
+        <button class="btn" id="nextWeekBtn">Next Week →</button>
+      </div>
+      <div class="hint">Tip: Hold either button for 3 seconds to load 30 / 60 / 90 day history</div>
+
       <div id="jobsTimeline"></div>
 
       <div id="statusBar" class="muted small" style="text-align:center;padding:12px">
@@ -213,12 +277,29 @@
   </div>
 </div>
 
+<!-- NEW: Long-press range modal -->
+<div class="modal-backdrop" id="rangeModal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal-card">
+    <h3 class="modal-title">Load job history</h3>
+    <p class="modal-sub">Choose a range to load. This will add jobs for all days in the range (grouped by date).</p>
+    <div class="modal-actions">
+      <button class="btn" id="load30Btn">Last 30 days</button>
+      <button class="btn" id="load60Btn">Last 60 days</button>
+      <button class="btn" id="load90Btn">Last 90 days</button>
+      <button class="btn danger" id="closeModalBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
 let countdownTimerId = null;
-let loadedDates = new Set();
-let offsetDays = 0;
+
+// NEW: Week/range paging state
+let anchorDate = new Date();                 // moves +/- 7 days when buttons pressed
+let loadedDates = new Set();                 // track individual dates already loaded to avoid duplicates
+let loadedRanges = new Set();                // track week ranges already requested
 let loading = false;
 
 const $ = id => document.getElementById(id);
@@ -294,7 +375,40 @@ function statusClass(status, slaStatus){
   return "status-pill status-open";
 }
 
-function renderDay(dateStr, jobs){
+// ---------------------------
+// NEW: Date helpers
+// ---------------------------
+function isoDate(d){
+  return d.toISOString().slice(0,10);
+}
+
+// Monday-start week
+function startOfWeek(d){
+  const date = new Date(d);
+  date.setHours(0,0,0,0);
+  const day = date.getDay() || 7; // Sun=7
+  if(day !== 1) date.setDate(date.getDate() - (day - 1));
+  return date;
+}
+function endOfWeek(d){
+  const s = startOfWeek(d);
+  const e = new Date(s);
+  e.setDate(e.getDate() + 6);
+  e.setHours(0,0,0,0);
+  return e;
+}
+
+function addDays(d, n){
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+// ---------------------------
+// Render
+// mode: "append" | "prepend"
+// ---------------------------
+function renderDay(dateStr, jobs, mode){
   const container = $("jobsTimeline");
 
   const group = document.createElement("div");
@@ -344,51 +458,126 @@ function renderDay(dateStr, jobs){
     group.appendChild(card);
   }
 
-  container.appendChild(group);
+  if(mode === "prepend"){
+    container.prepend(group);
+  }else{
+    container.appendChild(group);
+  }
 }
 
-async function loadNextDay(){
-  if(loading) return;
-  loading = true;
-
+// ---------------------------
+// Load a single day (uses EXISTING endpoint exactly as before)
+// ---------------------------
+async function loadDay(dateObj, mode){
   const engineer = getEngineer();
   if(!engineer){
     $("statusBar").textContent = "No logged-in engineer.";
     return;
   }
 
-  const d = new Date();
-  d.setDate(d.getDate() - offsetDays);
-  const dateStr = d.toISOString().slice(0,10);
-
-  if(loadedDates.has(dateStr)){
-    loading = false;
-    return;
-  }
+  const dateStr = isoDate(dateObj);
+  if(loadedDates.has(dateStr)) return;
 
   $("statusBar").textContent = "Loading jobs…";
 
   try{
     const res = await fetch(
-      `${SLA_API}/jobs/for-engineer?engineer=${engineer}&date=${dateStr}`,
+      `${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}&date=${encodeURIComponent(dateStr)}`,
       { cache:"no-store" }
     );
     const list = await res.json();
 
-    renderDay(dateStr, Array.isArray(list) ? list : []);
+    renderDay(dateStr, Array.isArray(list) ? list : [], mode);
     loadedDates.add(dateStr);
-    offsetDays++;
 
     startCountdownLoop();
-    $("statusBar").textContent = "Scroll to load earlier jobs";
   }catch(err){
     console.error(err);
     $("statusBar").textContent = "Error loading jobs.";
+  }
+}
+
+// ---------------------------
+// NEW: Load a week (7 individual day calls) — NO worker changes required
+// direction: -1 previous, +1 next
+// ---------------------------
+async function loadWeek(direction){
+  if(loading) return;
+  loading = true;
+
+  const base = new Date(anchorDate);
+  base.setDate(base.getDate() + (direction * 7));
+
+  const from = startOfWeek(base);
+  const to = endOfWeek(base);
+
+  const rangeKey = `${isoDate(from)}:${isoDate(to)}`;
+  if(loadedRanges.has(rangeKey)){
+    $("statusBar").textContent = "Week already loaded.";
+    loading = false;
+    return;
+  }
+
+  $("statusBar").textContent = "Loading week…";
+
+  try{
+    // Load days in a stable order:
+    // - Previous week (append): newest-to-oldest so it reads naturally when added below
+    // - Next week (prepend): oldest-to-newest so it stays in correct order when prepended
+    const days = [];
+    for(let i=0;i<7;i++){
+      days.push(addDays(from, i));
+    }
+
+    if(direction < 0){
+      // append, show newest first for that week
+      days.reverse();
+      for(const d of days){
+        await loadDay(d, "append");
+      }
+    }else{
+      // prepend, load oldest first so the week stays ordered top→bottom
+      for(const d of days){
+        await loadDay(d, "prepend");
+      }
+    }
+
+    loadedRanges.add(rangeKey);
+    anchorDate = base;
+    $("statusBar").textContent = "Ready";
   }finally{
     loading = false;
   }
 }
 
+// ---------------------------
+// NEW: Load last N days (append only, newest first)
+// ---------------------------
+async function loadLastNDays(n){
+  if(loading) return;
+  loading = true;
+
+  $("statusBar").textContent = `Loading last ${n} days…`;
+
+  try{
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    // newest first feels best when appending below the current content
+    for(let i=0;i<n;i++){
+      const d = addDays(today, -i);
+      await loadDay(d, "append");
+    }
+
+    $("statusBar").textContent = "Ready";
+  }finally{
+    loading = false;
+  }
+}
+
+// ---------------------------
+// Countdown loop (UNCHANGED behaviour)
+// ---------------------------
 function startCountdownLoop(){
   if(countdownTimerId) clearInterval(countdownTimerId);
 
@@ -404,16 +593,95 @@ function startCountdownLoop(){
   countdownTimerId = setInterval(tick, 1000);
 }
 
-window.addEventListener("scroll", () => {
-  if(window.innerHeight + window.scrollY >= document.body.offsetHeight - 120){
-    loadNextDay();
-  }
-});
+// ---------------------------
+// Modal helpers
+// ---------------------------
+function openModal(){
+  const m = $("rangeModal");
+  m.style.display = "flex";
+  m.setAttribute("aria-hidden","false");
+}
+function closeModal(){
+  const m = $("rangeModal");
+  m.style.display = "none";
+  m.setAttribute("aria-hidden","true");
+}
 
+// Long press helper (3 seconds)
+function addLongPress(el, onLongPress){
+  let timer = null;
+  const start = (e) => {
+    // prevent context menu long-press on iOS
+    if(e && e.preventDefault) e.preventDefault();
+    timer = setTimeout(onLongPress, 3000);
+  };
+  const cancel = () => {
+    if(timer) clearTimeout(timer);
+    timer = null;
+  };
+
+  el.addEventListener("touchstart", start, {passive:false});
+  el.addEventListener("touchend", cancel);
+  el.addEventListener("touchcancel", cancel);
+
+  el.addEventListener("mousedown", start);
+  el.addEventListener("mouseup", cancel);
+  el.addEventListener("mouseleave", cancel);
+}
+
+// ---------------------------
+// Init
+// ---------------------------
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
-  loadNextDay(); // today
+
+  // Button clicks load whole weeks
+  $("prevWeekBtn").addEventListener("click", () => loadWeek(-1));
+  $("nextWeekBtn").addEventListener("click", () => loadWeek(+1));
+
+  // Long-press opens modal
+  addLongPress($("prevWeekBtn"), openModal);
+  addLongPress($("nextWeekBtn"), openModal);
+
+  // Modal buttons
+  $("load30Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(30); });
+  $("load60Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(60); });
+  $("load90Btn").addEventListener("click", async () => { closeModal(); await loadLastNDays(90); });
+  $("closeModalBtn").addEventListener("click", closeModal);
+
+  // Click outside modal card closes it
+  $("rangeModal").addEventListener("click", (e) => {
+    if(e.target && e.target.id === "rangeModal") closeModal();
+  });
+
+  // First load: THIS WEEK (Mon→Sun), but only show up to today by default?
+  // You asked for it to be busy, so we load the current week in full (Mon→Sun) using existing per-day calls.
+  // This keeps behaviour predictable for engineers (they can also tap Next Week for future jobs).
+  anchorDate = new Date();
+  (async () => {
+    $("jobsTimeline").innerHTML = "";
+    loadedDates.clear();
+    loadedRanges.clear();
+
+    // Load current week (append) newest first so "today" appears at the top of the list
+    const from = startOfWeek(anchorDate);
+    const to = endOfWeek(anchorDate);
+    const rangeKey = `${isoDate(from)}:${isoDate(to)}`;
+
+    $("statusBar").textContent = "Loading this week…";
+
+    const days = [];
+    for(let i=0;i<7;i++) days.push(addDays(from, i));
+    // newest first
+    days.reverse();
+    for(const d of days){
+      await loadDay(d, "append");
+    }
+    loadedRanges.add(rangeKey);
+
+    $("statusBar").textContent = "Ready";
+  })();
 }
 
 window.addEventListener("DOMContentLoaded", init);
