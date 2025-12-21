@@ -493,11 +493,13 @@ async function loadWeek(direction){
 const base = new Date(anchorDate);
 base.setDate(base.getDate() + (direction * 7));
 
-const endOfCurrentWeek = endOfWeek(new Date());
-if (direction > 0 && startOfWeek(base) > endOfCurrentWeek) {
-  $("statusBar").textContent = "Cannot load future weeks.";
+const maxAllowedWeek = endOfWeek(addDays(anchorDate, 7));
+
+if (direction > 0 && startOfWeek(base) > maxAllowedWeek) {
+  $("statusBar").textContent = "Cannot load further future weeks.";
   return;
 }
+
 /* ===== END GUARD ===== */
     const from = startOfWeek(base);
     const to = endOfWeek(base);
