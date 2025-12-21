@@ -622,7 +622,31 @@ function startCountdownLoop(){
   tick();
   countdownTimerId = setInterval(tick, 1000);
 }
+async function loadExistingPhotos(){
+  if(!job?.id) return;
 
+  try{
+    const res = await fetch(
+      `${SLA_API}/jobs/${encodeURIComponent(job.id)}/files`,
+      { cache:"no-store" }
+    );
+    if(!res.ok) return;
+
+    const data = await res.json();
+    if(!data || !Array.isArray(data.files)) return;
+
+    photoGallery = data.files.map(f => ({
+      url: f.publicURL,
+      name: f.name
+    }));
+
+    renderPhotoGrid();
+    $("photoUploadStatus").textContent =
+      `${photoGallery.length} photo(s) stored for this job.`;
+  }catch(err){
+    console.error("Failed to load existing photos", err);
+  }
+}
 async function loadJob(){
   const jobId = getJobIdFromQuery();
   if(!jobId){
@@ -637,6 +661,7 @@ async function loadJob(){
     $("jobSub").textContent = `From SLA worker • ID: ${job.id}`;
     $("statusBar").textContent = "Loaded.";
     renderJob();
+    loadExistingPhotos();
   }catch(err){
     console.error("load error", err);
     $("statusBar").textContent = "❌ Error loading job.";
