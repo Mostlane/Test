@@ -11,7 +11,7 @@
       --ml-blue-light: #1e66ff;
       --ml-accent: #1a73e8;
       --ml-bg: #e6e8eb;
-      --panel: rgba(255, 255, 255, 0.9);
+      --panel: rgba(255,255,255,0.9);
       --text: #0f172a;
       --muted: #6b7280;
       --border: #d1d5db;
@@ -19,53 +19,118 @@
       --warn: #f97316;
       --bad: #dc2626;
     }
+
     * { box-sizing: border-box; }
+
     html, body {
-      margin: 0; padding: 0;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       color: var(--text);
       background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size: 180%;
     }
-    .shell { max-width: 1150px; margin: 20px auto; padding: 0 14px; }
+
+    .shell {
+      max-width: 1150px;
+      margin: 20px auto;
+      padding: 0 14px;
+    }
+
     .topbar {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       margin-bottom: 14px;
     }
-    .brand { display: flex; align-items: center; gap: 10px; }
-    .brand h1 { margin: 0; font-size: 18px; color: var(--ml-blue); }
-    .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-    .kpi-bar {
+    .brand {
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       gap: 10px;
-      margin-bottom: 18px;
     }
-    .kpi-item {
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--ml-blue);
+    }
+
+    .sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .btn {
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 13px;
+      border: 1px solid #d1d5db;
+      background: #fff;
+      cursor: pointer;
+      text-decoration: none;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    .btn.primary {
       background: var(--ml-blue);
       color: #fff;
-      padding: 12px 18px;
-      border-radius: 12px;
-      font-size: 14px;
-      flex: 1 1 160px;
-      display: flex;
-      flex-direction: column;
+      border-color: var(--ml-blue);
+    }
+
+    .btn.icon-only {
+      padding: 8px 10px;
+      width: auto;
       justify-content: center;
+      min-width: 40px;
     }
+
+    /* --- KPI STYLES --- */
+    .kpi-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .kpi-card {
+      background: var(--ml-blue);
+      color: #fff;
+      padding: 18px;
+      border-radius: 14px;
+      text-align: center;
+    }
+
     .kpi-label {
-      font-size: 12px;
-      opacity: 0.85;
+      font-size: 13px;
+      margin-bottom: 6px;
+      opacity: 0.8;
     }
+
     .kpi-value {
-      font-size: 20px;
+      font-size: 24px;
       font-weight: bold;
-      margin-top: 4px;
     }
+
+    @media(max-width: 600px) {
+      .kpi-bar {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+        }
+    /* rest of your original styles remain unchanged… */
   </style>
 </head>
 <body>
   <div class="shell">
+
     <div class="topbar">
       <div class="brand">
         <div>
@@ -79,26 +144,27 @@
       </div>
     </div>
 
+    <!-- ✅ KPI BAR INJECTION -->
     <div class="kpi-bar">
-      <div class="kpi-item">
+      <div class="kpi-card">
         <div class="kpi-label">Open</div>
-        <div class="kpi-value" id="kpiOpen">—</div>
+        <div class="kpi-value" id="kpiOpen">–</div>
       </div>
-      <div class="kpi-item">
+      <div class="kpi-card">
         <div class="kpi-label">Overdue</div>
-        <div class="kpi-value" id="kpiOverdue">—</div>
+        <div class="kpi-value" id="kpiOverdue">–</div>
       </div>
-      <div class="kpi-item">
+      <div class="kpi-card">
         <div class="kpi-label">Due Today</div>
-        <div class="kpi-value" id="kpiToday">—</div>
+        <div class="kpi-value" id="kpiToday">–</div>
       </div>
-      <div class="kpi-item">
+      <div class="kpi-card">
         <div class="kpi-label">At Risk</div>
-        <div class="kpi-value" id="kpiRisk">—</div>
+        <div class="kpi-value" id="kpiRisk">–</div>
       </div>
-      <div class="kpi-item">
+      <div class="kpi-card" style="grid-column: span 2;">
         <div class="kpi-label">Total</div>
-        <div class="kpi-value" id="kpiTotal">—</div>
+        <div class="kpi-value" id="kpiTotal">–</div>
       </div>
     </div>
         <div class="panel">
@@ -249,31 +315,122 @@
         <div class="timeline-list" id="timelineList"></div>
       </div>
     </div>
-  </div> <!-- end .shell -->
-  function updateKpiBar(jobs){
-  let total = jobs.length;
-  let open = 0, overdue = 0, dueToday = 0, atRisk = 0;
+    <script>
+const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const endToday = new Date(today);
-  endToday.setHours(23, 59, 59, 999);
+let allJobs = [];
+let countdownTimerId = null;
 
-  for(const job of jobs){
-    const status = (job.status || "").toLowerCase();
-    if(status === "open" || status === "in progress" || status === "on hold") open++;
+function $(id) {
+  return document.getElementById(id);
+}
 
-    const sla = computeSlaCountdown(job.targetAt || job.sla?.targetAt);
-    if(sla.status === "overdue") overdue++;
-    if(sla.status === "warn" || sla.status === "overdueSoon") atRisk++;
+function computeSlaCountdown(targetISO){
+  if(!targetISO) return {text:"—", cls:"sla sla-none", status:"none"};
+  const now = new Date();
+  const target = new Date(targetISO);
+  if(isNaN(target)) return {text:"—", cls:"sla sla-none", status:"none"};
 
-    const targetDate = parseDate(job.targetAt || job.sla?.targetAt);
-    if(targetDate && targetDate >= today && targetDate <= endToday) dueToday++;
+  let diff = target - now;
+  const overdue = diff < 0;
+  if(overdue) diff = -diff;
+
+  const secs = Math.floor(diff / 1000);
+  const days = Math.floor(secs / 86400);
+  const hours = Math.floor((secs % 86400) / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+
+  let label = overdue ? "+" : "";
+  if(days > 0){
+    label += `${days}d ${String(hours).padStart(2,"0")}h`;
+  } else {
+    label += `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
   }
 
-  $("kpiTotal").textContent = total;
-  $("kpiOpen").textContent = open;
-  $("kpiOverdue").textContent = overdue;
-  $("kpiToday").textContent = dueToday;
-  $("kpiRisk").textContent = atRisk;
+  const hoursLeft = (target - now) / 3600000;
+  let cls = "sla sla-green", status = "ok";
+
+  if(overdue || hoursLeft <= 0){
+    cls = "sla sla-red"; status = "overdue";
+  } else if(hoursLeft <= 1){
+    cls = "sla sla-red"; status = "overdueSoon";
+  } else if(hoursLeft <= 4){
+    cls = "sla sla-amber"; status = "warn";
+  }
+
+  return {
+    text: (overdue ? "Overdue " : "Due in ") + label,
+    cls, status
+  };
 }
+
+function updateKpiBar(){
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  let overdue = 0, atRisk = 0, dueToday = 0;
+
+  for(const job of allJobs){
+    const targetISO = job.targetAt || job.sla?.targetAt;
+    const info = computeSlaCountdown(targetISO);
+    const target = new Date(targetISO);
+
+    if(!isNaN(target)){
+      const targetDateStr = target.toISOString().split("T")[0];
+      if(info.status === "overdue") overdue++;
+      if(info.status === "warn" || info.status === "overdueSoon") atRisk++;
+      if(info.status !== "overdue" && targetDateStr === todayStr) dueToday++;
+    }
+  }
+
+  $("kpiOverdue").textContent = overdue;
+  $("kpiAtRisk").textContent = atRisk;
+  $("kpiDueToday").textContent = dueToday;
+}
+      function render(){
+  const filtered = applyFilters();
+  renderTable(filtered);
+  renderCards(filtered);
+  setSubtitle();
+  updateKpiBar(); // ✅ Refresh KPIs when rendering
+  startCountdownLoop();
+}
+
+function startCountdownLoop(){
+  if(countdownTimerId) clearInterval(countdownTimerId);
+  const tick = () => {
+    document.querySelectorAll("[data-sla-target]").forEach(el => {
+      const iso = el.getAttribute("data-sla-target");
+      const info = computeSlaCountdown(iso);
+      el.textContent = info.text;
+      el.className = info.cls;
+    });
+    updateKpiBar(); // ✅ Update KPIs every second too
+  };
+  tick();
+  countdownTimerId = setInterval(tick, 1000);
+}
+
+async function loadJobs(){
+  $("subtitle").textContent = "Loading…";
+  try {
+    const res = await fetch(`${SLA_API}/jobs?t=${Date.now()}`, { cache:"no-store" });
+    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const data = await res.json();
+    allJobs = Array.isArray(data.jobs) ? data.jobs : (Array.isArray(data) ? data : []);
+    buildEngineerDropdown();
+    render();
+  } catch (err) {
+    console.error(err);
+    $("jobsTbody").innerHTML = `<tr><td colspan="8" class="dim">❌ Failed to load jobs.</td></tr>`;
+    $("jobsCards").innerHTML = `<div class="dim">❌ Failed to load jobs.</div>`;
+    $("subtitle").textContent = "Failed to load.";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initEvents();
+  loadJobs();
+});
+</script>
+</body>
+</html>
