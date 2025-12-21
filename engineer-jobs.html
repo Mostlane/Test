@@ -397,7 +397,11 @@ function addDays(d, n){
   x.setDate(x.getDate() + n);
   return x;
 }
-
+function endOfToday(){
+  const d = new Date();
+  d.setHours(23,59,59,999);
+  return d;
+}
 function renderDay(dateStr, jobs, mode){
   const container = $("jobsTimeline");
 
