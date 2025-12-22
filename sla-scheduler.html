@@ -761,10 +761,13 @@ function renderDayView(container){
       .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
       .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
 
-    jobsForEngineer.forEach(job=>{
-      const dStart=new Date(job.scheduledStart);
-      let startMins=minsSinceMidnight(dStart);
-      let dur=job.durationMinutes;
+jobsForEngineer.forEach(job=>{
+  const dStart = job._localStart
+    ? job._localStart
+    : new Date(job.scheduledStart.replace("Z",""));
+
+  let startMins = minsSinceMidnight(dStart);
+  let dur = job.durationMinutes;
 
       startMins = clamp(startMins,dayStartMins,dayEndMins-30);
       const endMins=clamp(startMins+dur,dayStartMins+30,dayEndMins);
@@ -932,10 +935,13 @@ async function onLaneDrop(e){
   const h = Math.floor(newStartMins / 60);
   const m = newStartMins % 60;
 
-  const startDate = withTime(selectedDate, h, m);
- job.scheduledStart = startDate.toISOString();
-job.scheduledAt = job.scheduledStart; // 🔧 keep fields in sync
+const startDate = withTime(selectedDate, h, m);
 
+job.scheduledStart = startDate.toISOString();
+job.scheduledAt = job.scheduledStart;
+
+// ✅ ADD THIS LINE (CRITICAL)
+job._localStart = startDate;
 
   // Move engineer if lane changed
   if (!job.assignedEngineers.includes(engineerUsername)) {
