@@ -899,40 +899,51 @@ function onLaneDragOver(e){
 async function onLaneDrop(e){
   e.preventDefault();
   if(!dragState.jobId) return;
-  const job=jobs.find(j=>j.id===dragState.jobId);
+
+  const job = jobs.find(j => j.id === dragState.jobId);
   if(!job) return;
 
-  const laneBody=e.currentTarget;
-  const engineerUsername=laneBody.dataset.engineer;
-  const rect=laneBody.getBoundingClientRect();
-  const y=e.clientY - rect.top;
+  const laneBody = e.currentTarget;
+  const engineerUsername = laneBody.dataset.engineer;
+  const rect = laneBody.getBoundingClientRect();
 
-  const dayStart=DAY_START_HOUR*60;
-  const dayEnd=DAY_END_HOUR*60;
+  // Distance from top of lane
+  const y = e.clientY - rect.top;
 
-  let mins=(y/HOUR_HEIGHT)*60;
-  let newStart=clamp(Math.round((dayStart+mins)/15)*15,dayStart,dayEnd-30);
+  const dayStart = DAY_START_HOUR * 60;
+  const dayEnd   = DAY_END_HOUR * 60;
 
-  const base=selectedDate;
-  const h=Math.floor(newStart/60);
-  const m=newStart%60;
+  // Convert pixels → minutes from day start
+  let minutesFromDayStart = (y / HOUR_HEIGHT) * 60;
 
-  const startDate=withTime(base,h,m);
-  job.scheduledStart=startDate.toISOString();
+  // Absolute minutes since midnight
+  let newStartMins = dayStart + minutesFromDayStart;
 
-  if(!job.assignedEngineers.includes(engineerUsername)){
-    job.assignedEngineers=[engineerUsername];
+  // Snap to 15-minute grid
+  newStartMins = Math.round(newStartMins / 15) * 15;
+
+  // Clamp inside working hours
+  newStartMins = clamp(newStartMins, dayStart, dayEnd - 30);
+
+  const h = Math.floor(newStartMins / 60);
+  const m = newStartMins % 60;
+
+  const startDate = withTime(selectedDate, h, m);
+  job.scheduledStart = startDate.toISOString();
+
+  // Move engineer if lane changed
+  if (!job.assignedEngineers.includes(engineerUsername)) {
+    job.assignedEngineers = [engineerUsername];
   }
 
   updateOverridesForJob(job);
   pushJobUpdate(job);
 
+  dragState.jobId = null;
   render();
-  setStatus(`Updated job ${job.title}`);
 
-  dragState.jobId = null; // ✅ ADD THIS LINE
+  setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
 }
-
 
 /* MODAL */
 let modalJobId=null;
