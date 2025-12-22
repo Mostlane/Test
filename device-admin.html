@@ -402,15 +402,20 @@
       let perms = {};
       try { perms = JSON.parse(permsRaw || "{}"); } catch (e) {}
 
-      const isDeviceAdmin = perms.DeviceAdmin === true || String(perms.DeviceAdmin || "").toLowerCase() === "yes";
-      const isUsersAdmin = perms.Users === true || String(perms.Users || "").toLowerCase() === "yes";
+     const hasUsersAccess =
+  String(perms.Users || "").toLowerCase() === "yes";
 
-      if (!isDeviceAdmin && !isUsersAdmin) {
-        alert("You do not have permission to access Device Management.");
-        window.location.href = "main.html";
-        return false;
-      }
+const hasDeviceAccess =
+  String(perms.DeviceAdmin || "").toLowerCase() === "yes";
 
+const hasFullAccess =
+  String(perms.FullAccess || "").toLowerCase() === "yes";
+
+if (!hasFullAccess && !hasUsersAccess && !hasDeviceAccess) {
+  alert("You do not have permission to access Device Management.");
+  window.location.href = "main.html";
+  return false;
+}
       const adminUser = sessionStorage.getItem("mostlaneUser") || "";
       const adminUserDisplay = document.getElementById("adminUserDisplay");
       if (adminUserDisplay && adminUser) {
