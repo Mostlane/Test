@@ -143,21 +143,27 @@ const user = result.user;
         set('mostlaneEmployment', user.EmploymentType || '');
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
-        const perms = {
-          CheckInOut: user.CheckInOut,
-          Vehicles: user.Vehicles,
-          Holiday: user.Holiday,
-          EngineersHoursMenu: user.EngineersHoursMenu,
-          HoursDashboard: user.HoursDashboard,
-          PurchaseOrders: user.PurchaseOrders,
-          Sites: user.Sites,
-          Assets: user.Assets,
-          MyDocuments: user.MyDocuments,
-          Weekly: user.Weekly,
-          Forms: user.Forms,
-          Compliance: user.Compliance,
-          Users: user.Users
-        };
+       const perms = {
+  // 🔐 Admin permissions (THIS IS THE FIX)
+  FullAccess: user.FullAccess,
+  Users: user.Users,
+  DeviceAdmin: user.DeviceAdmin,
+
+  // 🔹 Existing permissions (unchanged)
+  CheckInOut: user.CheckInOut,
+  Vehicles: user.Vehicles,
+  Holiday: user.Holiday,
+  EngineersHoursMenu: user.EngineersHoursMenu,
+  HoursDashboard: user.HoursDashboard,
+  PurchaseOrders: user.PurchaseOrders,
+  Sites: user.Sites,
+  Assets: user.Assets,
+  MyDocuments: user.MyDocuments,
+  Weekly: user.Weekly,
+  Forms: user.Forms,
+  Compliance: user.Compliance
+};
+
 
         sessionStorage.setItem('mostlanePermissions', JSON.stringify(perms));
         localStorage.setItem('mostlanePermissions', JSON.stringify(perms));
