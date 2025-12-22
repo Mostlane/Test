@@ -495,38 +495,48 @@ if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
       return d.toLocaleString();
     }
 
-    function loadDetailForSelected() {
-      const titleEl = document.getElementById("detailTitle");
-      const subtitleEl = document.getElementById("detailSubtitle");
-      const detailContent = document.getElementById("detailContent");
+function loadDetailForSelected() {
+  const titleEl = document.getElementById("detailTitle");
+  const subtitleEl = document.getElementById("detailSubtitle");
+  const detailContent = document.getElementById("detailContent");
 
-      if (!selectedRecord || !selectedUsername) {
-        titleEl.textContent = "Select a user";
-        subtitleEl.textContent = "Choose a user from the left to view and edit device settings.";
-        detailContent.style.display = "none";
-        return;
-      }
-titleEl.textContent = selectedUsername;
-      subtitleEl.textContent = "Manage device limits, reset devices and view history.";
+  if (!selectedRecord || !selectedUsername) {
+    titleEl.textContent = "Select a user";
+    subtitleEl.textContent = "Choose a user from the left to view and edit device settings.";
+    detailContent.style.display = "none";
+    return;
+  }
 
-      detailContent.style.display = "block";
+  titleEl.textContent = selectedUsername;
+  subtitleEl.textContent = "Manage device limits, reset devices and view history.";
 
-const allowedInput = document.getElementById("allowedDevicesInput");
-const allowedDevices = typeof selectedRecord.allowedDevices === "number"
-  ? selectedRecord.allowedDevices
-  : 1;
-allowedInput.value = allowedDevices;
+  detailContent.style.display = "block";
 
-// ✅ ADD THIS PART
-const used = (selectedRecord.devices || []).length;
-const usageEl = document.getElementById("deviceUsageText");
-if (usageEl) {
-  usageEl.textContent = `Devices used: ${used} of ${allowedDevices}`;
+  const allowedInput = document.getElementById("allowedDevicesInput");
+  const allowedDevices = typeof selectedRecord.allowedDevices === "number"
+    ? selectedRecord.allowedDevices
+    : 1;
+  allowedInput.value = allowedDevices;
+
+  const used = (selectedRecord.devices || []).length;
+  const usageEl = document.getElementById("deviceUsageText");
+  if (usageEl) {
+    usageEl.textContent = `Devices used: ${used} of ${allowedDevices}`;
+  }
+
+  renderDevicesTable();
+  renderHistoryTable();
+
+  // ✅ ADD THIS BLOCK (THIS IS THE IMPORTANT PART)
+  const btn = document.getElementById("viewLoginHistoryBtn");
+  if (btn) {
+    btn.onclick = () => {
+      if (!selectedUsername) return;
+      openLoginHistory(selectedUsername);
+    };
+  }
 }
 
-renderDevicesTable();
-renderHistoryTable();
-    }
 function renderDevicesTable() {
   const container = document.getElementById("devicesSection");
   container.innerHTML = "";
@@ -680,10 +690,6 @@ function renderDevicesTable() {
         showToast("Could not load device records", "error");
       }
     });
-    document.getElementById("viewLoginHistoryBtn")?.addEventListener("click", () => {
-  if (!selectedUsername) return;
-  openLoginHistory(selectedUsername);
-});
 
 async function openLoginHistory(username) {
   const modal = document.getElementById("loginHistoryModal");
