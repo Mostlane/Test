@@ -1,241 +1,146 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <script src="auth.js"></script>
-  <meta charset="UTF-8" />
-  <title>My Timesheet – Mostlane</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      padding: 20px;
-    }
-    .container {
-      background: rgba(255,255,255,0.9);
-      padding: 20px;
-      border-radius: 12px;
-      max-width: 950px;
-      margin: auto;
-    }
-    h2 {
-      color: #003366;
-      text-align: center;
-    }
-    .week-nav {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 15px;
-    }
-    .week-nav button {
-      background-color: #003366;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 20px;
-      font-size: 14px;
-    }
-    table, th, td {
-      border: 1px solid #ccc;
-    }
-    th {
-      background-color: #003366;
-      color: white;
-    }
-    th, td {
-      padding: 8px;
-      text-align: center;
-    }
-    .submitted {
-      text-align: center;
-      color: green;
-      font-weight: bold;
-      font-size: 16px;
-      margin-bottom: 10px;
-    }
-    .submit-area {
-      text-align: center;
-      margin-top: 20px;
-    }
-    .submit-area button {
-      background-color: #003366;
-      color: white;
-      border: none;
-      padding: 12px 20px;
-      font-size: 16px;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    .submit-area button:disabled {
-      background-color: #999;
-    }
-  </style>
+<meta charset="UTF-8" />
+<title>My Timesheet – Mostlane</title>
+
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+    background-size: 180%;
+    padding: 20px;
+  }
+  .container {
+    background: rgba(255,255,255,0.9);
+    padding: 20px;
+    border-radius: 12px;
+    max-width: 950px;
+    margin: auto;
+  }
+  h2 { color:#003366; text-align:center; }
+  .week-nav {
+    display:flex; justify-content:space-between; margin-bottom:15px;
+  }
+  .week-nav button {
+    background:#003366; color:white; border:none;
+    padding:8px 16px; border-radius:6px; cursor:pointer;
+  }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  table, th, td { border:1px solid #ccc; }
+  th { background:#003366; color:white; }
+  th, td { padding:8px; text-align:center; }
+  .submitted { text-align:center; color:green; font-weight:bold; }
+</style>
 </head>
+
 <body>
-  <div class="container">
-    <h2>Weekly Timesheet</h2>
-    <div class="submitted" id="submittedStamp" style="display:none;">✅ Submitted</div>
-    <div class="week-nav">
-      <button onclick="changeWeek(-1)">← Previous Week</button>
-      <div id="weekLabel">Loading…</div>
-      <button onclick="changeWeek(1)">Next Week →</button>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Standard Hours</th>
-          <th>Overtime</th>
-          <th>Travel Time</th>
-          <th>Fuel (£)</th>
-          <th>Standard Pay (£)</th>
-          <th>Overtime Pay (£)</th>
-          <th>Total Pay (£)</th>
-          <th>Claim Mileage</th>
-        </tr>
-      </thead>
-      <tbody id="timesheetBody"></tbody>
-    </table>
-    <div class="submit-area">
-      <button id="submitBtn" onclick="submitTimesheet()">Submit Timesheet</button>
-    </div>
+<div class="container">
+  <h2>Weekly Timesheet</h2>
+  <div class="submitted" id="submittedStamp" style="display:none;">✅ Submitted</div>
+
+  <div class="week-nav">
+    <button onclick="changeWeek(-1)">← Previous Week</button>
+    <div id="weekLabel">Loading…</div>
+    <button onclick="changeWeek(1)">Next Week →</button>
   </div>
 
-<script>
-let currentWeekOffset = 0;
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Site(s)</th>
+        <th>Standard Hours</th>
+        <th>Overtime</th>
+        <th>Fuel (£)</th>
+        <th>Standard Pay (£)</th>
+        <th>Overtime Pay (£)</th>
+        <th>Total Pay (£)</th>
+      </tr>
+    </thead>
+    <tbody id="timesheetBody"></tbody>
+  </table>
+</div>
 
-function getMonday(d) {
-  d = new Date(d);
-  const day = d.getDay(),
-        diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
+<script>
+const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
+let weekOffset = 0;
+
+function getMonday(d){
+  d=new Date(d);
+  const day=d.getDay();
+  const diff=d.getDate()-(day===0?6:day-1);
+  d.setDate(diff); d.setHours(0,0,0,0);
   return d;
 }
 
-function changeWeek(offset) {
-  currentWeekOffset += offset;
-  renderTimesheet();
-}
+function changeWeek(n){ weekOffset+=n; renderTimesheet(); }
 
-function submitTimesheet() {
-  const username = sessionStorage.getItem("mostlaneUser");
-  const monday = getMonday(new Date());
-  monday.setDate(monday.getDate() + (currentWeekOffset * 7));
-  const key = `${username}_${monday.toISOString().split("T")[0]}`;
-  localStorage.setItem("submitted_" + key, "true");
-  document.getElementById("submittedStamp").style.display = "block";
-  document.getElementById("submitBtn").disabled = true;
-}
+async function getText(url){ return fetch(url).then(r=>r.text()); }
 
-async function renderTimesheet() {
-  const rawUser = sessionStorage.getItem("mostlaneUser") || "Unknown";
-  const username = rawUser.replace(".", " ");
-  const weekStart = getMonday(new Date());
-  weekStart.setDate(weekStart.getDate() + (currentWeekOffset * 7));
-  const weekKey = `${rawUser}_${weekStart.toISOString().split("T")[0]}`;
-  const weekLabel = document.getElementById("weekLabel");
-  const submittedStamp = document.getElementById("submittedStamp");
-  const submitBtn = document.getElementById("submitBtn");
-  const body = document.getElementById("timesheetBody");
+async function renderTimesheet(){
+  const rawUser=sessionStorage.getItem("mostlaneUser")||"Unknown";
+  const weekStart=getMonday(new Date());
+  weekStart.setDate(weekStart.getDate()+weekOffset*7);
+  const weekEnd=new Date(weekStart); weekEnd.setDate(weekEnd.getDate()+6);
 
-  weekLabel.innerText = `Week of ${weekStart.toISOString().split("T")[0]}`;
-  submittedStamp.style.display = localStorage.getItem("submitted_" + weekKey) ? "block" : "none";
-  submitBtn.disabled = localStorage.getItem("submitted_" + weekKey) ? true : false;
+  document.getElementById("weekLabel").innerText =
+    `${weekStart.toISOString().slice(0,10)} → ${weekEnd.toISOString().slice(0,10)}`;
 
-  const [logs, ratesTxt, empTxt, travelTxt, rolesTxt, siteList] = await Promise.all([
-    fetch("https://mostlane.github.io/Test/logs/activity-log.json").then(r => r.json()),
-    fetch("https://mostlane.github.io/Test/rates.txt").then(r => r.text()),
-    fetch("https://mostlane.github.io/Test/employment.txt").then(r => r.text()),
-    fetch("https://mostlane.github.io/Test/travel-time.txt").then(r => r.text()),
-    fetch("https://mostlane.github.io/Test/role-type.txt").then(r => r.text()),
-    fetch("https://mostlane.github.io/Test/assets/sites.json").then(r => r.json())
-  ]);
+  const events = await fetch(
+    `${WORKER_BASE}/events?user=${encodeURIComponent(rawUser)}`
+  ).then(r=>r.json());
 
-  function parseMap(txt) {
-    const out = {};
-    txt.split("\n").forEach(line => {
-      const [k, v] = line.split(" - ");
-      if (k && v) out[k.trim()] = v.trim();
-    });
-    return out;
-  }
+  const ratesTxt = await getText("https://raw.githubusercontent.com/Mostlane/Test/main/logs/rates.txt");
+  const rateLine = ratesTxt.split("\n").find(l=>l.startsWith(rawUser));
+  const rate = rateLine ? parseFloat(rateLine.split("£")[1]) : 0;
 
-  const allLogs = logs[username] || [];
-  const rateMap = parseMap(ratesTxt);
-  const empMap = parseMap(empTxt);
-  const travelMap = parseMap(travelTxt);
-  const roleMap = parseMap(rolesTxt);
+  const days={};
+  events.forEach(e=>{
+    const d=new Date(e.datetime);
+    if(d<weekStart||d>weekEnd) return;
+    const key=d.toISOString().slice(0,10);
+    if(!days[key]) days[key]=[];
+    days[key].push(e);
+  });
 
-  const rate = parseFloat(rateMap[username]) || 0;
-  const travelTime = travelMap[username] === "Yes";
-  const isSelfEmployed = empMap[username] === "SelfEmployed";
-  const isField = roleMap[username] !== "Office";
+  const body=document.getElementById("timesheetBody");
+  body.innerHTML="";
 
-  body.innerHTML = "";
+  Object.keys(days).sort().forEach(day=>{
+    const logs=days[day].sort((a,b)=>new Date(a.datetime)-new Date(b.datetime));
+    const ins=logs.filter(l=>l.type==="checkin");
+    const outs=logs.filter(l=>l.type==="checkout");
+    if(!ins.length||!outs.length) return;
 
-  for (let i = 0; i < 7; i++) {
-    const day = new Date(weekStart);
-    day.setDate(day.getDate() + i);
-    const dateStr = day.toISOString().split("T")[0];
+    const start=new Date(ins[0].datetime);
+    const end=new Date(outs[outs.length-1].datetime);
+    const hours=(end-start)/36e5;
 
-    const entries = allLogs.filter(e => e.datetime.startsWith(dateStr));
-    const checkIn = entries.find(e => e.type === "Check In");
-    const checkOut = entries.find(e => e.type === "Check Out");
+    const std=Math.min(10,hours);
+    const ot=Math.max(0,hours-10);
 
-    if (!checkIn || !checkOut) continue;
+    const sites=[...new Set(logs.map(l=>l.matchedSite?.siteName).filter(Boolean))].join(", ");
+    const miles=logs.find(l=>l.matchedSite?.mileageFromHQ)?.matchedSite.mileageFromHQ||0;
+    const fuel=Math.max(0,miles-10)*0.25;
 
-    const start = new Date(checkIn.datetime);
-    const end = new Date(checkOut.datetime);
-    const hoursWorked = (end - start) / 36e5;
-    const standard = Math.min(10, hoursWorked);
-    const overtime = Math.max(0, hoursWorked - 10);
-    const travelHrs = travelTime ? ((checkIn.travelDuration || 0) + (checkOut.travelDuration || 0)) / 60 : 0;
+    const stdPay=std*rate;
+    const otPay=ot*rate*1.5;
 
-    // Find site based on location match
-    let miles = 0;
-    if (checkIn.location_coords) {
-      for (const site of siteList) {
-        if (!site.location_coords) continue;
-        const dx = checkIn.location_coords[0] - site.location_coords[0];
-        const dy = checkIn.location_coords[1] - site.location_coords[1];
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 0.01) {
-          miles = site.mileageFromHQ || 0;
-          break;
-        }
-      }
-    }
-
-    const mileagePaid = (!travelTime && isSelfEmployed && isField);
-    const fuelCost = mileagePaid ? Math.max(0, miles - 10) * 0.25 * 2 : 0;
-
-    const standardPay = standard * rate;
-    const overtimePay = overtime * rate * 1.5;
-    const totalPay = standardPay + overtimePay + fuelCost;
-
-    const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${dateStr}</td>
-      <td>${standard.toFixed(2)}</td>
-      <td>${overtime.toFixed(2)}</td>
-      <td>${travelHrs.toFixed(2)}</td>
-      <td>£${fuelCost.toFixed(2)}</td>
-      <td>£${standardPay.toFixed(2)}</td>
-      <td>£${overtimePay.toFixed(2)}</td>
-      <td>£${totalPay.toFixed(2)}</td>
-      <td><input type="checkbox" ${mileagePaid ? "checked" : "disabled"}></td>
+    const row=document.createElement("tr");
+    row.innerHTML=`
+      <td>${day}</td>
+      <td>${sites||"—"}</td>
+      <td>${std.toFixed(2)}</td>
+      <td>${ot.toFixed(2)}</td>
+      <td>£${fuel.toFixed(2)}</td>
+      <td>£${stdPay.toFixed(2)}</td>
+      <td>£${otPay.toFixed(2)}</td>
+      <td>£${(stdPay+otPay+fuel).toFixed(2)}</td>
     `;
     body.appendChild(row);
-  }
+  });
 }
 
 renderTimesheet();
