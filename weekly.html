@@ -8,61 +8,68 @@
 <link rel="stylesheet" href="style.css"/>
 
 <style>
-  body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 0;
-  }
-  .content-box {
-    background: rgba(255,255,255,0.6);
-    margin: 60px auto;
-    padding: 20px;
-    max-width: 900px;
-    border-radius: 10px;
-  }
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: #004a99;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 6px;
-  }
-  .arrow {
-    font-size: 20px;
-    cursor: pointer;
-    user-select: none;
-  }
-  .week-range {
-    font-size: 18px;
-    font-weight: bold;
-  }
-  .activity {
-    background: white;
-    border-left: 5px solid #004a99;
-    padding: 10px;
-    margin-top: 10px;
-    border-radius: 6px;
-  }
-  .mileage {
-    color: #004a99;
-    font-style: italic;
-    margin-top: 5px;
-  }
-  .portal-btn {
-    background-color: #004a99;
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-weight: bold;
-    font-size: 16px;
-    border: none;
-    cursor: pointer;
-  }
+body {
+  font-family: "Segoe UI", sans-serif;
+  background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+  background-size: 180%;
+  margin: 0;
+  padding: 0;
+}
+.content-box {
+  background: rgba(255,255,255,0.6);
+  margin: 60px auto;
+  padding: 20px;
+  max-width: 900px;
+  border-radius: 10px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #004a99;
+  color: white;
+  padding: 10px 20px;
+  border-radius: 6px;
+}
+.arrow {
+  font-size: 20px;
+  cursor: pointer;
+  user-select: none;
+}
+.week-range {
+  font-size: 18px;
+  font-weight: bold;
+}
+.activity {
+  background: white;
+  border-left: 5px solid #004a99;
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: 6px;
+}
+.mileage {
+  color: #004a99;
+  font-style: italic;
+  margin-top: 5px;
+}
+.portal-btn {
+  background-color: #004a99;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 16px;
+  border: none;
+  cursor: pointer;
+}
+.portal-btn:hover {
+  background-color: #003366;
+}
+.unknown {
+  color: red;
+  font-weight: bold;
+}
 </style>
 </head>
 
@@ -70,7 +77,6 @@
 
 <div style="display:flex;justify-content:center;gap:15px;margin-bottom:20px;">
   <a class="portal-btn" href="main.html">Main Menu</a>
-  <span id="actionButtons"></span>
 </div>
 
 <div class="content-box">
@@ -83,130 +89,136 @@
 </div>
 
 <script>
-let user = sessionStorage.getItem("mostlaneUser") || "admin";
+/* ============================================================
+   CONFIG
+============================================================ */
+const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
+const user = sessionStorage.getItem("mostlaneUser");
 let offset = 0;
-let dataStore = [];
-let sites = [];
 
-const RATE = 0.25;
-const FREE_MILES = 10;
+/* ============================================================
+   DATE HELPERS
+============================================================ */
+function getWeekRange(baseDate) {
+  const monday = new Date(baseDate);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
+  monday.setHours(0,0,0,0);
 
-/* --------------------------------------------------
-   HELPERS
--------------------------------------------------- */
-function getOrdinal(n) {
-  const s=["th","st","nd","rd"],v=n%100;
-  return s[(v-20)%10]||s[v]||s[0];
-}
-
-function getWeekRange(baseDate){
-  const monday=new Date(baseDate);
-  monday.setDate(monday.getDate()-((monday.getDay()+6)%7)+offset*7);
-  const sunday=new Date(monday);
-  sunday.setDate(monday.getDate()+6);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
   sunday.setHours(23,59,59,999);
 
-  const fmt=d=>{
-    const day=d.getDate();
-    return `${day}${getOrdinal(day)} ${d.toLocaleDateString("en-GB",{month:"short"})}${String(d.getFullYear()).slice(-2)}`;
-  };
-
-  return {start:monday,end:sunday,label:`${fmt(monday)} – ${fmt(sunday)}`};
+  return { monday, sunday };
 }
 
-function changeWeek(delta){
-  offset+=delta;
+function formatRange(monday) {
+  const end = new Date(monday);
+  end.setDate(end.getDate() + 6);
+  return `${monday.toLocaleDateString("en-GB")} – ${end.toLocaleDateString("en-GB")}`;
+}
+
+/* ============================================================
+   LOAD MONTH FROM CHECKLOG_KV
+============================================================ */
+async function loadMonth(year, month) {
+  const key = `pv:${user}:${year}-${String(month).padStart(2,"0")}`;
+  const res = await fetch(`${WORKER_BASE}/get-log?key=${encodeURIComponent(key)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/* ============================================================
+   LOAD + RENDER WEEK
+============================================================ */
+async function loadWeek() {
+  const now = new Date();
+  const { monday, sunday } = getWeekRange(now);
+
+  document.getElementById("weekRange").textContent = formatRange(monday);
+
+  const months = new Set([
+    `${monday.getFullYear()}-${monday.getMonth()+1}`,
+    `${sunday.getFullYear()}-${sunday.getMonth()+1}`
+  ]);
+
+  let events = [];
+  for (const m of months) {
+    const [y, mo] = m.split("-").map(Number);
+    events.push(...await loadMonth(y, mo));
+  }
+
+  const weekEvents = events.filter(e => {
+    const d = new Date(e.datetime);
+    return d >= monday && d <= sunday;
+  });
+
+  renderEvents(weekEvents);
+}
+
+/* ============================================================
+   RENDER EVENTS
+============================================================ */
+function renderEvents(events) {
+  const container = document.getElementById("activityLog");
+  container.innerHTML = "";
+
+  if (!events.length) {
+    container.innerHTML = "<p>No activity this week.</p>";
+    return;
+  }
+
+  events.forEach(log => {
+    const div = document.createElement("div");
+    div.className = "activity";
+
+    const d = new Date(log.datetime);
+    const time = d.toLocaleString("en-GB", {
+      weekday:"short",
+      day:"numeric",
+      month:"short",
+      hour:"2-digit",
+      minute:"2-digit"
+    });
+
+    let locationHTML = "";
+    if (log.matchedSite) {
+      locationHTML = `
+        <strong>${log.matchedSite.siteName}</strong><br>
+        <span class="mileage">${log.matchedSite.distance_m} m from site</span>
+      `;
+    } else if (log.nearestSite) {
+      locationHTML = `
+        <span class="unknown">
+          Near ${log.nearestSite.siteName} (${log.nearestSite.distance_m} m)
+        </span>
+      `;
+    } else {
+      locationHTML = `<span class="unknown">Location not matched</span>`;
+    }
+
+    div.innerHTML = `
+      <strong>${log.type.toUpperCase()}</strong><br>
+      ${time}<br>
+      ${locationHTML}
+    `;
+
+    container.appendChild(div);
+  });
+}
+
+/* ============================================================
+   WEEK NAV
+============================================================ */
+function changeWeek(delta) {
+  offset += delta;
   loadWeek();
 }
 
-function haversine(lat1,lon1,lat2,lon2){
-  const R=6371000;
-  const toRad=d=>d*Math.PI/180;
-  const dLat=toRad(lat2-lat1);
-  const dLon=toRad(lon2-lon1);
-  const a=Math.sin(dLat/2)**2+
-    Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-}
-
-/* --------------------------------------------------
-   LOAD EVENTS FROM WORKER (FIXED)
--------------------------------------------------- */
-async function loadEventsForMonth(range){
-  const ym = range.start.toISOString().slice(0,7);
-
-  const res = await fetch(
-    `https://ckeck-in-out.jamie-def.workers.dev/events?user=${encodeURIComponent(user)}&month=${ym}`
-  );
-  if(!res.ok) throw new Error("Failed to load events");
-
-  const events = await res.json();
-
-  // NORMALISE EVENT TYPES
-  return events.map(e=>({
-    ...e,
-    type: e.type==="checkin" ? "check in"
-         : e.type==="checkout" ? "check out"
-         : e.type
-  }));
-}
-
-/* --------------------------------------------------
-   LOAD WEEK
--------------------------------------------------- */
-async function loadWeek(){
-  const range=getWeekRange(new Date());
-  document.getElementById("weekRange").textContent=range.label;
-
-  dataStore = await loadEventsForMonth(range);
-
-  const filtered=dataStore.filter(log=>{
-    const d=new Date(log.datetime);
-    return d>=range.start && d<=range.end;
-  });
-
-  const container=document.getElementById("activityLog");
-  container.innerHTML="";
-
-  for(const log of filtered){
-    const div=document.createElement("div");
-    div.className="activity";
-
-    const d=new Date(log.datetime);
-    const dateStr=`${d.toLocaleDateString("en-GB",{weekday:"short"})} ${d.getDate()}${getOrdinal(d.getDate())} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
-
-    let location="";
-    if(log.location_coords){
-      const {lat,lon}=log.location_coords;
-      location=`<a href="https://maps.google.com/?q=${lat},${lon}" target="_blank">View location</a>`;
-    }
-
-    div.innerHTML=`<strong>${log.type.toUpperCase()}</strong><br>${dateStr}<br>${location}`;
-    container.appendChild(div);
-  }
-
-  if(!filtered.length){
-    container.innerHTML="<p>No activity this week.</p>";
-  }
-}
-
-/* --------------------------------------------------
-   INIT
--------------------------------------------------- */
-fetch("https://raw.githubusercontent.com/Mostlane/Test/main/sites.json")
-  .then(r=>r.json())
-  .then(siteData=>{
-    sites=siteData;
-    loadWeek();
-  })
-  .catch(err=>{
-    document.getElementById("activityLog").innerHTML="<p style='color:red'>Failed to load data</p>";
-    console.error(err);
-  });
+loadWeek();
 </script>
 
 <footer style="text-align:center;font-size:11px;color:#999;margin-top:40px;">
-Weekly Summary • Mostlane Portal © 2025
+Weekly Summary • Mostlane Portal
 </footer>
 
 </body>
