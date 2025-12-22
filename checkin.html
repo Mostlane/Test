@@ -2,6 +2,7 @@
 <html>
 <head>
 <script src="auth.js"></script>
+<script src="device-auth.js"></script>
 <title>Check In</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="style.css" />
@@ -41,11 +42,12 @@
 </head>
 
 <body class="checkin-body">
+
 <h1>Checking In...</h1>
 
 <script>
 /* -------------------------------------------------
-   DEVICE ID (always exists)
+   DEVICE ID (unchanged)
 ------------------------------------------------- */
 let deviceID = localStorage.getItem("mostlane_device_id");
 if (!deviceID) {
@@ -54,28 +56,7 @@ if (!deviceID) {
 }
 
 /* -------------------------------------------------
-   DEVICE VERIFICATION (EVENT-TIME ONLY)
-------------------------------------------------- */
-async function verifyDevice() {
-  const username = sessionStorage.getItem("mostlaneUsername");
-  if (!username) return false;
-
-  const localDevice = localStorage.getItem("mostlane_device_id");
-  if (!localDevice) return false;
-
-  try {
-    const res = await fetch(
-      `https://mostlane-api.jamie-def.workers.dev/device/get?user=${username}`
-    );
-    const data = await res.json();
-    return data.deviceID === localDevice;
-  } catch {
-    return false;
-  }
-}
-
-/* -------------------------------------------------
-   WORKER + OFFLINE QUEUE
+   WORKER + OFFLINE QUEUE (unchanged)
 ------------------------------------------------- */
 const WORKER_URL = "https://check-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
@@ -100,55 +81,63 @@ async function sendToWorker(payload) {
 }
 
 /* -------------------------------------------------
-   CHECK-IN FLOW (VERIFICATION GATE)
+   CHECK-IN FLOW (DeviceAuth source of truth)
 ------------------------------------------------- */
-async function startCheckIn() {
+function startCheckIn() {
   const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
 
-  navigator.geolocation.getCurrentPosition(async pos => {
+  navigator.geolocation.getCurrentPosition(pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
 
-    // 🔒 VERIFY HERE — NOT ON PAGE LOAD
-    const verified = await verifyDevice();
-    if (!verified) {
-      alert("🔒 This device is not authorised to check in. Please use your registered device.");
-      return;
+    // 🔐 USE SAME DEVICE AUTH AS LOGIN
+    if (window.DeviceAuth && typeof DeviceAuth.checkOnAction === "function") {
+      DeviceAuth.checkOnAction(username, async () => {
+        await proceedWithCheckIn(username, lat, lon);
+      });
+    } else {
+      // Fallback — mirrors login behaviour
+      proceedWithCheckIn(username, lat, lon);
     }
-
-    const payload = {
-      type: "checkin",
-      username,
-      deviceID,
-      datetime: new Date().toISOString(),
-      lat,
-      lon,
-      fuelClaim: null,
-      offlineEvent: !navigator.onLine
-    };
-
-    if (!navigator.onLine) {
-      const pending = getPendingChecks();
-      pending.push(payload);
-      savePendingChecks(pending);
-      window.location.href = `confirm.html?status=Check%20In`;
-      return;
-    }
-
-    try {
-      await sendToWorker(payload);
-    } catch {
-      payload.offlineEvent = true;
-      const pending = getPendingChecks();
-      pending.push(payload);
-      savePendingChecks(pending);
-    }
-
-    window.location.href = `confirm.html?status=Check%20In`;
 
   }, err => {
     alert("Please enable location to check in.\n" + err.message);
   }, { enableHighAccuracy: true, timeout: 20000 });
+}
+
+/* -------------------------------------------------
+   SUBMIT CHECK-IN (unchanged payload)
+------------------------------------------------- */
+async function proceedWithCheckIn(username, lat, lon) {
+  const payload = {
+    type: "checkin",
+    username,
+    deviceID,
+    datetime: new Date().toISOString(),
+    lat,
+    lon,
+    fuelClaim: null,
+    offlineEvent: !navigator.onLine
+  };
+
+  if (!navigator.onLine) {
+    const pending = getPendingChecks();
+    pending.push(payload);
+    savePendingChecks(pending);
+    window.location.href = "confirm.html?status=Check%20In";
+    return;
+  }
+
+  try {
+    await sendToWorker(payload);
+  } catch {
+    payload.offlineEvent = true;
+    const pending = getPendingChecks();
+    pending.push(payload);
+    savePendingChecks(pending);
+  }
+
+  window.location.href = "confirm.html?status=Check%20In";
 }
 
 /* -------------------------------------------------
