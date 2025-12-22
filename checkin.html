@@ -45,7 +45,7 @@
 
 <script>
 /* -------------------------------------------------
-   DEVICE ID (must exist before verification)
+   DEVICE ID (always exists)
 ------------------------------------------------- */
 let deviceID = localStorage.getItem("mostlane_device_id");
 if (!deviceID) {
@@ -54,46 +54,22 @@ if (!deviceID) {
 }
 
 /* -------------------------------------------------
-   DEVICE VERIFICATION (BLOCKING)
+   DEVICE VERIFICATION (EVENT-TIME ONLY)
 ------------------------------------------------- */
 async function verifyDevice() {
   const username = sessionStorage.getItem("mostlaneUsername");
-  if (!username) {
-    alert("No user logged in.");
-    window.location.href = "login.html";
-    return false;
-  }
+  if (!username) return false;
 
   const localDevice = localStorage.getItem("mostlane_device_id");
-  if (!localDevice) {
-    alert("🔒 This device is not recognised on Mostlane Portal. Either this device is being used in Incognito mode or the device is different. Please ensure you are using your normal device and not in private browser.");
-    window.location.href = "main.html";
-    return false;
-  }
+  if (!localDevice) return false;
 
   try {
     const res = await fetch(
       `https://mostlane-api.jamie-def.workers.dev/device/get?user=${username}`
     );
     const data = await res.json();
-
-    if (!data.deviceID) {
-      alert("No registered device found for this user. Please complete onboarding again.");
-      window.location.href = "onboard.html";
-      return false;
-    }
-
-    if (data.deviceID !== localDevice) {
-      alert("🔒 This device is registered to a different user. You are not permitted to check in/out on this device. Please log in on your assigned device.");
-      window.location.href = "main.html";
-      return false;
-    }
-
-    return true;
-
-  } catch (err) {
-    alert("Error verifying device. Please try again.");
-    window.location.href = "main.html";
+    return data.deviceID === localDevice;
+  } catch {
     return false;
   }
 }
@@ -124,21 +100,27 @@ async function sendToWorker(payload) {
 }
 
 /* -------------------------------------------------
-   CHECK-IN LOGIC
+   CHECK-IN FLOW (VERIFICATION GATE)
 ------------------------------------------------- */
-function startCheckIn() {
+async function startCheckIn() {
   const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
 
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    const datetime = new Date().toISOString();
+
+    // 🔒 VERIFY HERE — NOT ON PAGE LOAD
+    const verified = await verifyDevice();
+    if (!verified) {
+      alert("🔒 This device is not authorised to check in. Please use your registered device.");
+      return;
+    }
 
     const payload = {
       type: "checkin",
       username,
       deviceID,
-      datetime,
+      datetime: new Date().toISOString(),
       lat,
       lon,
       fuelClaim: null,
@@ -170,11 +152,10 @@ function startCheckIn() {
 }
 
 /* -------------------------------------------------
-   ENTRY POINT (ORDER MATTERS)
+   START (page always loads)
 ------------------------------------------------- */
-window.onload = async () => {
-  const verified = await verifyDevice();
-  if (verified) startCheckIn();
+window.onload = () => {
+  startCheckIn();
 };
 </script>
 
