@@ -933,7 +933,9 @@ async function onLaneDrop(e){
   const m = newStartMins % 60;
 
   const startDate = withTime(selectedDate, h, m);
-  job.scheduledStart = startDate.toISOString();
+ job.scheduledStart = startDate.toISOString();
+job.scheduledAt = job.scheduledStart; // 🔧 keep fields in sync
+
 
   // Move engineer if lane changed
   if (!job.assignedEngineers.includes(engineerUsername)) {
@@ -944,6 +946,7 @@ async function onLaneDrop(e){
   pushJobUpdate(job);
 
   dragState.jobId = null;
+  job._lastDraggedAt = Date.now(); // force re-render uniqueness
   render();
 
   setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
@@ -1050,12 +1053,15 @@ async function pushJobUpdate(job){
 
     if(!res.ok){
       console.error("Failed update:", await res.text());
+      return;
     }
+
+await res.json(); // fire & forget response
+
   }catch(err){
     console.error("Update error:", err);
   }
 }
-
 
 async function init(){
   const u=sessionStorage.getItem("mostlaneUser");
