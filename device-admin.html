@@ -344,11 +344,12 @@
             <span class="muted">Overrides default limit for this user.</span>
           </div>
  
-          <div class="form-row">
-            <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
-            <button class="btn btn-danger" id="forceResetBtn">Force Reset All Devices</button>
-          </div>
-        </div>
+<div class="form-row">
+  <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+  <button class="btn btn-danger" id="forceResetBtn">Force Reset All Devices</button>
+  <button class="btn btn-secondary" id="viewLoginHistoryBtn">📜 Login Activity</button>
+</div>
+</div> <!-- END Device Settings section-card -->
 
         <!-- Devices -->
         <div class="section-card">
@@ -679,6 +680,88 @@ function renderDevicesTable() {
         showToast("Could not load device records", "error");
       }
     });
+    document.getElementById("viewLoginHistoryBtn")?.addEventListener("click", () => {
+  if (!selectedUsername) return;
+  openLoginHistory(selectedUsername);
+});
+
+async function openLoginHistory(username) {
+  const modal = document.getElementById("loginHistoryModal");
+  const content = document.getElementById("loginHistoryContent");
+
+  modal.style.display = "block";
+  content.innerHTML = "Loading login history…";
+
+  try {
+    const res = await fetch(
+      `https://login.jamie-def.workers.dev/admin/login-history?username=${encodeURIComponent(username)}`
+    );
+
+    if (!res.ok) throw new Error("Failed to load login history");
+
+    const data = await res.json();
+    const history = data.history || [];
+
+    if (!history.length) {
+      content.innerHTML = "<div class='muted'>No login activity recorded.</div>";
+      return;
+    }
+
+    let html = `
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>IP Address</th>
+            <th>User Agent</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    history.slice().reverse().forEach(e => {
+      html += `
+        <tr>
+          <td>${formatDate(e.at)}</td>
+          <td>${e.ip || "–"}</td>
+          <td style="max-width:500px; word-break:break-all;">${e.userAgent || "–"}</td>
+        </tr>
+      `;
+    });
+
+    html += "</tbody></table>";
+    content.innerHTML = html;
+
+  } catch (err) {
+    console.error(err);
+    content.innerHTML = "<span class='muted'>Unable to load login history.</span>";
+  }
+}
+
+function closeLoginHistory() {
+  document.getElementById("loginHistoryModal").style.display = "none";
+}
   </script>
+    <!-- Login History Modal -->
+<div id="loginHistoryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99999;">
+  <div style="
+    background:#fff;
+    max-width:900px;
+    margin:5vh auto;
+    padding:20px;
+    border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.3);
+    max-height:80vh;
+    display:flex;
+    flex-direction:column;
+  ">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h3 style="margin:0; color:#003366;">Login Activity</h3>
+      <button class="btn btn-secondary" onclick="closeLoginHistory()">Close</button>
+    </div>
+
+    <div id="loginHistoryContent" style="overflow:auto; font-size:13px;"></div>
+  </div>
+</div>
 </body>
 </html>
