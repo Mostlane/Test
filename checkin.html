@@ -60,10 +60,21 @@
 
 <script>
 /* ------------------------------------------------------------------------
-   DEVICE VERIFICATION  (⭐ NEW – NO existing code edited)
+   Device ID (must exist BEFORE verification)
+------------------------------------------------------------------------ */
+let deviceID = localStorage.getItem("mostlane_device_id");
+if (!deviceID) {
+  deviceID = "dev-" + Math.random().toString(36).substring(2, 10);
+  localStorage.setItem("mostlane_device_id", deviceID);
+}
+</script>
+
+<script>
+/* ------------------------------------------------------------------------
+   DEVICE VERIFICATION
 ------------------------------------------------------------------------ */
 async function verifyDevice() {
-  const username = sessionStorage.getItem("mostlaneUser");
+  const username = sessionStorage.getItem("mostlaneUsername");
   if (!username) {
     alert("No user logged in.");
     window.location.href = "login.html";
@@ -105,21 +116,11 @@ async function verifyDevice() {
 verifyDevice();
 </script>
 
-
 <script>
-/* ------------------------------------------------------------------------
-   Device ID (still generated + used)
------------------------------------------------------------------------- */
-let deviceID = localStorage.getItem("mostlane_device_id");
-if (!deviceID) {
-  deviceID = "dev-" + Math.random().toString(36).substring(2, 10);
-  localStorage.setItem("mostlane_device_id", deviceID);
-}
-
 /* ------------------------------------------------------------------------
    Cloudflare Worker + Offline Queue
 ------------------------------------------------------------------------ */
-const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
+const WORKER_URL = "https://check-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
 
 function getPendingChecks() {
@@ -162,7 +163,7 @@ window.addEventListener("online", flushPendingChecks);
 function startCheckIn() {
 
   // ⭐ username loaded AFTER auth.js has run
-  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
 
   navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
