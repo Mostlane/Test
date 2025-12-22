@@ -26,30 +26,14 @@
     text-align: center;
   }
 
-  .button {
-    display: block;
-    margin: 10px auto;
-    padding: 12px 20px;
-    font-size: 16px;
-    text-align: center;
-    color: #ffffff;
-    background-color: rgba(0, 74, 153, 0.6);
-    text-decoration: none;
-    border-radius: 6px;
-    width: 90%;
-    max-width: 300px;
-  }
-
   h1 {
     background-color: rgba(0, 74, 153, 0.6);
-    color: #ffffff;
+    color: white;
     padding: 12px 20px;
     border-radius: 8px;
-    font-weight: bold;
     font-size: 22px;
+    font-weight: bold;
     margin-bottom: 30px;
-    max-width: 90%;
-    text-align: center;
   }
 </style>
 </head>
@@ -60,28 +44,7 @@
 
 <script>
 /* ------------------------------------------------------------------------
-   DEVICE VERIFICATION (LEFT IN PLACE BUT NOT RUN)
------------------------------------------------------------------------- */
-async function verifyDevice() {
-  const username = sessionStorage.getItem("mostlaneUser");
-  if (!username) return false;
-
-  const localDevice = localStorage.getItem("mostlane_device_id");
-  if (!localDevice) return false;
-
-  try {
-    const res = await fetch(`https://mostlane-api.jamie-def.workers.dev/device/get?user=${username}`);
-    const data = await res.json();
-    return data.deviceID === localDevice;
-  } catch {
-    return false;
-  }
-}
-</script>
-
-<script>
-/* ------------------------------------------------------------------------
-   Device ID (still generated + used)
+   Device ID (stored only – NOT validated here)
 ------------------------------------------------------------------------ */
 let deviceID = localStorage.getItem("mostlane_device_id");
 if (!deviceID) {
@@ -96,8 +59,11 @@ const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
 
 function getPendingChecks() {
-  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); }
-  catch { return []; }
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
+  } catch {
+    return [];
+  }
 }
 
 function savePendingChecks(list) {
@@ -130,13 +96,14 @@ window.addEventListener("load", flushPendingChecks);
 window.addEventListener("online", flushPendingChecks);
 
 /* ------------------------------------------------------------------------
-   Automatic Check-In (UNCHANGED)
+   AUTO CHECK-IN  (STRUCTURALLY IDENTICAL TO CHECK-OUT)
 ------------------------------------------------------------------------ */
 function startCheckIn() {
 
   const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
 
   navigator.geolocation.getCurrentPosition(async pos => {
+
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     const datetime = new Date().toISOString();
@@ -152,6 +119,7 @@ function startCheckIn() {
       offlineEvent: !navigator.onLine
     };
 
+    // OFFLINE → Queue event
     if (!navigator.onLine) {
       const pending = getPendingChecks();
       pending.push(payload);
@@ -162,6 +130,7 @@ function startCheckIn() {
       return;
     }
 
+    // ONLINE → Send to Worker
     try { await sendToWorker(payload); }
     catch {
       payload.offlineEvent = true;
@@ -179,7 +148,7 @@ function startCheckIn() {
   }, { enableHighAccuracy: true, timeout: 20000 });
 }
 
-window.onload = () => startCheckIn();
+window.onload = startCheckIn;
 </script>
 
 </body>
