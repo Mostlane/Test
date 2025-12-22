@@ -77,6 +77,7 @@ body {
 
 <div style="display:flex;justify-content:center;gap:15px;margin-bottom:20px;">
   <a class="portal-btn" href="main.html">Main Menu</a>
+  <span id="actionButtons"></span>
 </div>
 
 <div class="content-box">
@@ -88,18 +89,148 @@ body {
   <div id="activityLog"></div>
 </div>
 
+<div class="content-box">
+  <hr style="margin-top: 0;"/>
+  <p><strong>Total standard rate hours:</strong> <span id="std-hours"></span> at <span id="std-rate"></span> (<span id="std-pay"></span>)</p>
+  <p><strong>Total overtime rate hours:</strong> <span id="ot-hours"></span> at <span id="ot-rate"></span> (<span id="ot-pay"></span>)</p>
+  <p><strong>Total earnings:</strong> <span id="total-earnings"></span></p>
+
+  <p style="margin-top: 18px;"><strong>Total mileage (claimable):</strong> <span id="total-mileage"></span> mi</p>
+  <p><strong>Total mileage pay:</strong> <span id="total-mileage-pay"></span></p>
+
+  <p id="mileageTotalDisplay" style="margin-top: 20px; font-weight: bold; color: #004a99;"></p>
+</div>
+
+<footer style="text-align:center;font-size:11px;color:#999;margin-top:40px;">
+Weekly Summary • Mostlane Portal
+</footer>
+
 <script>
 /* ============================================================
    CONFIG
 ============================================================ */
 const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
-const user = sessionStorage.getItem("mostlaneUser");
+let user = sessionStorage.getItem("mostlaneUser") || "admin";
 let offset = 0;
-let allEvents = [];
+
+const RATE = 0.25;
+const FREE_MILES = 10;
 
 /* ============================================================
-   DATE HELPERS
+   ZAPIER ACTIONS (UNCHANGED LOGIC, JUST USING CURRENT PAGE DOM)
 ============================================================ */
+function createInvoice() {
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+  const name = username.replace(".", " ");
+  const stdHours = document.getElementById("std-hours")?.textContent || "0";
+  const otHours = document.getElementById("ot-hours")?.textContent || "0";
+  const stdRate = document.getElementById("std-rate")?.textContent || "£0.00";
+  const otRate = document.getElementById("ot-rate")?.textContent || "£0.00";
+  const stdPay = document.getElementById("std-pay")?.textContent || "£0.00";
+  const otPay = document.getElementById("ot-pay")?.textContent || "£0.00";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "£0.00";
+  const paidMileageText = document.getElementById("mileageTotalDisplay")?.textContent || "";
+  const weekRange = document.getElementById("weekRange")?.textContent || "";
+
+  const screenSnapshot = document.querySelector('.content-box')?.outerHTML || "";
+  const payload = {
+    screen_snapshot: screenSnapshot,
+    engineer: name,
+    username: username,
+    week_range: weekRange,
+    standard_hours: stdHours,
+    overtime_hours: otHours,
+    hourly_rate: stdRate,
+    overtime_rate: otRate,
+    std_pay: stdPay,
+    ot_pay: otPay,
+    total_earnings: totalEarnings,
+    mileage_summary: paidMileageText
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/275rzr5/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(payload).toString()
+  }).then(response => {
+    if (response.ok) alert("Invoice submitted successfully!");
+    else alert("Failed to submit invoice.");
+  }).catch(error => {
+    alert("Error sending invoice.");
+    console.error(error);
+  });
+}
+
+function createTimesheet() {
+  const week = document.getElementById("weekRange")?.textContent || "Unknown";
+  const stdHours = document.getElementById("std-hours")?.textContent || "";
+  const stdRate = document.getElementById("std-rate")?.textContent || "";
+  const stdPay = document.getElementById("std-pay")?.textContent || "";
+  const otHours = document.getElementById("ot-hours")?.textContent || "";
+  const otRate = document.getElementById("ot-rate")?.textContent || "";
+  const otPay = document.getElementById("ot-pay")?.textContent || "";
+  const totalEarnings = document.getElementById("total-earnings")?.textContent || "";
+  const mileage = document.getElementById("total-mileage")?.textContent || "";
+  const mileagePay = document.getElementById("total-mileage-pay")?.textContent || "";
+
+  const payload = {
+    user,
+    week,
+    stdHours,
+    stdRate,
+    stdPay,
+    otHours,
+    otRate,
+    otPay,
+    totalEarnings,
+    mileage,
+    mileagePay
+  };
+
+  fetch("https://hooks.zapier.com/hooks/catch/20261714/273lt6z/", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(payload).toString()
+  })
+  .then(res => {
+    if (!res.ok) throw new Error("Submission failed");
+    alert("Timesheet submitted successfully!");
+  })
+  .catch(err => {
+    console.error(err);
+    alert("Submission failed.");
+  });
+}
+
+/* ============================================================
+   TEXT FILE HELPERS (UNCHANGED BEHAVIOUR)
+============================================================ */
+async function getTextFile(url) {
+  const res = await fetch(url);
+  return res.text();
+}
+
+async function eligibleForFuel(username) {
+  const [employment, role, travel] = await Promise.all([
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt'),
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/role-type.txt'),
+    getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/travel-time.txt')
+  ]);
+  return (
+    employment.includes(`${username} - SelfEmployed`) &&
+    role.includes(`${username} - Field`) &&
+    travel.includes(`${username} - No`)
+  );
+}
+
+/* ============================================================
+   WEEK RANGE (KEEPING YOUR STYLE)
+============================================================ */
+function getOrdinal(n) {
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+}
+
 function getWeekRange(baseDate) {
   const monday = new Date(baseDate);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
@@ -109,76 +240,103 @@ function getWeekRange(baseDate) {
   sunday.setDate(monday.getDate() + 6);
   sunday.setHours(23,59,59,999);
 
-  return { monday, sunday };
+  const format = d => {
+    const day = d.getDate();
+    const suffix = getOrdinal(day);
+    const month = d.toLocaleDateString("en-UK", { month: 'short' });
+    const year = String(d.getFullYear()).slice(-2);
+    return `${day}${suffix} ${month}${year}`;
+  };
+
+  return { monday, sunday, label: `${format(monday)} – ${format(sunday)}` };
 }
 
-function formatRange(monday) {
-  const end = new Date(monday);
-  end.setDate(end.getDate() + 6);
-  return `${monday.toLocaleDateString("en-GB")} – ${end.toLocaleDateString("en-GB")}`;
+function changeWeek(delta) {
+  offset += delta;
+  loadWeek();
 }
 
 /* ============================================================
-   LOAD ALL EVENTS (FIXED)
+   FORMAT TIME
 ============================================================ */
-async function loadAllEvents() {
+function formatTime(decimalHours) {
+  const hrs = Math.floor(decimalHours);
+  const mins = Math.round((decimalHours - hrs) * 60);
+  return `${hrs} Hours, ${mins} Mins`;
+}
+
+/* ============================================================
+   LOAD EVENTS (NEW WORKER)
+   - Uses /events?user=Jamie.Line (now working)
+============================================================ */
+async function loadAllEventsForUser() {
   const res = await fetch(`${WORKER_BASE}/events?user=${encodeURIComponent(user)}`);
   if (!res.ok) return [];
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
 /* ============================================================
-   LOAD + RENDER WEEK
+   RENDER EVENTS + CALCS (WAGES + MILEAGE)
 ============================================================ */
-function loadWeek() {
-  const now = new Date();
-  const { monday, sunday } = getWeekRange(now);
+async function loadWeek() {
+  const range = getWeekRange(new Date());
+  document.getElementById("weekRange").textContent = range.label;
 
-  document.getElementById("weekRange").textContent = formatRange(monday);
+  const allEvents = await loadAllEventsForUser();
 
   const weekEvents = allEvents.filter(e => {
     const d = new Date(e.datetime);
-    return d >= monday && d <= sunday;
+    return d >= range.monday && d <= range.sunday;
   });
 
-  renderEvents(weekEvents);
-}
+  // Sort chronologically (stable output)
+  weekEvents.sort((a,b) => new Date(a.datetime) - new Date(b.datetime));
 
-/* ============================================================
-   RENDER EVENTS
-============================================================ */
-function renderEvents(events) {
   const container = document.getElementById("activityLog");
   container.innerHTML = "";
 
-  if (!events.length) {
+  const fuelOK = await eligibleForFuel(user);
+
+  if (!weekEvents.length) {
     container.innerHTML = "<p>No activity this week.</p>";
+    // still write totals as zero
+    writeTotals(0, 0, 0, 0, 0);
+    updateMileageTotal(); // ensure display clears
     return;
   }
 
-  events.forEach(log => {
+  // Render each event row (with mileage checkbox per trip when allowed)
+  for (const log of weekEvents) {
     const div = document.createElement("div");
     div.className = "activity";
 
     const d = new Date(log.datetime);
-    const time = d.toLocaleString("en-GB", {
-      weekday:"short",
-      day:"numeric",
-      month:"short",
-      hour:"2-digit",
-      minute:"2-digit"
-    });
+    const day = d.toLocaleDateString('en-GB', { weekday: 'short' });
+    const date = d.getDate();
+    const suffix = getOrdinal(date);
+    const hour = d.getHours().toString().padStart(2, '0');
+    const minute = d.getMinutes().toString().padStart(2, '0');
+    const formatted = `${day} ${date}${suffix} ${hour}:${minute}`;
 
     let locationHTML = "";
     if (log.matchedSite) {
       locationHTML = `
-        <strong>${log.matchedSite.siteName}</strong><br>
-        <span class="mileage">${log.matchedSite.distance_m} m from site</span>
+        <strong>Location:</strong> ${log.matchedSite.siteName || "Matched Site"}<br>
+        <span class="mileage">${Math.round(log.matchedSite.distance_m || 0)} m from site</span>
       `;
+
+      // Mileage from office (claim checkbox) — NEW STRUCTURE
+      const milesFromHQ = Number(log.matchedSite.mileageFromHQ);
+      if (fuelOK && Number.isFinite(milesFromHQ)) {
+        locationHTML += `<br><span class="mileage">Distance from office: ${milesFromHQ.toFixed(1)} miles</span>`;
+        locationHTML += `<br><label><input type="checkbox" class="claim-mileage" data-miles="${milesFromHQ.toFixed(1)}"> Claim mileage for this trip</label>`;
+      }
+
     } else if (log.nearestSite) {
       locationHTML = `
         <span class="unknown">
-          Near ${log.nearestSite.siteName} (${log.nearestSite.distance_m} m)
+          Near ${log.nearestSite.siteName || "Nearest Site"} (${Math.round(log.nearestSite.distance_m || 0)} m)
         </span>
       `;
     } else {
@@ -186,35 +344,165 @@ function renderEvents(events) {
     }
 
     div.innerHTML = `
-      <strong>${log.type.toUpperCase()}</strong><br>
-      ${time}<br>
+      <strong>${String(log.type || "").toUpperCase()}</strong><br>
+      ${formatted}<br>
       ${locationHTML}
     `;
-
     container.appendChild(div);
+  }
+
+  // -----------------------------
+  // WAGE CALCULATION (PAIR IN/OUT PER DAY)
+  // -----------------------------
+  const dayGroups = {};
+  for (const log of weekEvents) {
+    const dayKey = new Date(log.datetime).toISOString().split('T')[0];
+    if (!dayGroups[dayKey]) dayGroups[dayKey] = [];
+    dayGroups[dayKey].push(log);
+  }
+
+  let totalStandardHours = 0;
+  let totalOvertimeHours = 0;
+
+  for (const dateKey in dayGroups) {
+    const logs = dayGroups[dateKey].slice().sort((a,b) => new Date(a.datetime) - new Date(b.datetime));
+
+    // Find earliest checkin and latest checkout for that day
+    const checkIns = logs.filter(l => String(l.type || "").toLowerCase() === "checkin");
+    const checkOuts = logs.filter(l => String(l.type || "").toLowerCase() === "checkout");
+
+    if (!checkIns.length || !checkOuts.length) continue;
+
+    const start = new Date(checkIns[0].datetime);
+    const end = new Date(checkOuts[checkOuts.length - 1].datetime);
+
+    if (!isNaN(start) && !isNaN(end) && end > start) {
+      const hours = (end - start) / (1000 * 60 * 60);
+      if (hours > 10) {
+        totalStandardHours += 10;
+        totalOvertimeHours += (hours - 10);
+      } else {
+        totalStandardHours += hours;
+      }
+    }
+  }
+
+  // -----------------------------
+  // RATES.TXT LOOKUP
+  // -----------------------------
+  const rateText = await getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/logs/rates.txt');
+  const rateLines = rateText.split('\n');
+  let stdRate = 15; // fallback
+  for (const line of rateLines) {
+    const [name, value] = line.split(' - ');
+    if (name && value && name.trim() === user) {
+      const cleaned = value.replace(/[^\d.]/g, '');
+      const parsed = parseFloat(cleaned);
+      if (Number.isFinite(parsed)) stdRate = parsed;
+      break;
+    }
+  }
+  const otRate = stdRate * 1.5;
+
+  const stdPay = totalStandardHours * stdRate;
+  const otPay = totalOvertimeHours * otRate;
+  const totalPay = stdPay + otPay;
+
+  // -----------------------------
+  // MILEAGE TOTAL (from checked boxes)
+  // (We set base values to 0 here; live updateMileageTotal() handles display)
+  // -----------------------------
+  // We still populate totals now (unchecked state = 0)
+  writeTotals(totalStandardHours, totalOvertimeHours, stdRate, stdPay, otPay, totalPay, 0, 0);
+
+  // force listeners + initial display
+  updateMileageTotal();
+}
+
+/* ============================================================
+   TOTALS WRITER
+============================================================ */
+function writeTotals(totalStandardHours, totalOvertimeHours, stdRate, stdPay, otPay, totalPay, totalMiles, mileagePay) {
+  const stdHoursEl = document.getElementById("std-hours");
+  const otHoursEl = document.getElementById("ot-hours");
+  const stdRateEl = document.getElementById("std-rate");
+  const otRateEl = document.getElementById("ot-rate");
+  const stdPayEl = document.getElementById("std-pay");
+  const otPayEl = document.getElementById("ot-pay");
+  const totalEarnEl = document.getElementById("total-earnings");
+  const totalMilesEl = document.getElementById("total-mileage");
+  const totalMilesPayEl = document.getElementById("total-mileage-pay");
+
+  if (stdHoursEl) stdHoursEl.innerText = formatTime(totalStandardHours || 0);
+  if (otHoursEl) otHoursEl.innerText = formatTime(totalOvertimeHours || 0);
+
+  const otRate = (Number(stdRate) || 0) * 1.5;
+
+  if (stdRateEl) stdRateEl.innerText = "£" + (Number(stdRate) || 0).toFixed(2);
+  if (otRateEl) otRateEl.innerText = "£" + (Number(otRate) || 0).toFixed(2);
+
+  if (stdPayEl) stdPayEl.innerText = "£" + (Number(stdPay) || 0).toFixed(2);
+  if (otPayEl) otPayEl.innerText = "£" + (Number(otPay) || 0).toFixed(2);
+  if (totalEarnEl) totalEarnEl.innerText = "£" + (Number(totalPay) || 0).toFixed(2);
+
+  if (totalMilesEl) totalMilesEl.innerText = (Number(totalMiles) || 0).toFixed(1);
+  if (totalMilesPayEl) totalMilesPayEl.innerText = "£" + (Number(mileagePay) || 0).toFixed(2);
+}
+
+/* ============================================================
+   MILEAGE LIVE TOTAL (UNCHANGED LOGIC, NOW WORKS WITH data-miles)
+============================================================ */
+function updateMileageTotal() {
+  let total = 0;
+
+  document.querySelectorAll(".claim-mileage:checked").forEach(el => {
+    const miles = parseFloat(el.dataset.miles || "0");
+    const chargeable = Math.max(0, miles - FREE_MILES);
+    total += chargeable;
   });
+
+  const display = document.getElementById("mileageTotalDisplay");
+  if (display) {
+    if (total > 0) {
+      display.innerHTML = `<strong>Total Paid Mileage:</strong> ${total.toFixed(1)} mi @ £0.25 = £${(total * RATE).toFixed(2)}`;
+    } else {
+      display.innerHTML = "";
+    }
+  }
+
+  const milesEl = document.getElementById("total-mileage");
+  const payEl = document.getElementById("total-mileage-pay");
+  if (milesEl) milesEl.innerText = total.toFixed(1);
+  if (payEl) payEl.innerText = "£" + (total * RATE).toFixed(2);
 }
 
-/* ============================================================
-   WEEK NAV
-============================================================ */
-function changeWeek(delta) {
-  offset += delta;
-  loadWeek();
-}
-
-/* ============================================================
-   INIT
-============================================================ */
-loadAllEvents().then(events => {
-  allEvents = events;
-  loadWeek();
+const observer = new MutationObserver(() => {
+  document.querySelectorAll(".claim-mileage").forEach(el => {
+    el.removeEventListener("change", updateMileageTotal);
+    el.addEventListener("change", updateMileageTotal);
+  });
 });
-</script>
+observer.observe(document.body, { childList: true, subtree: true });
 
-<footer style="text-align:center;font-size:11px;color:#999;margin-top:40px;">
-Weekly Summary • Mostlane Portal
-</footer>
+/* ============================================================
+   BUTTON SWAP (INVOICE VS TIMESHEET)
+============================================================ */
+async function showCorrectButton() {
+  const text = await getTextFile('https://raw.githubusercontent.com/Mostlane/Test/main/employment.txt');
+  const type = text.includes(`${user} - SelfEmployed`) ? 'SelfEmployed' : 'Employed';
+  const container = document.getElementById("actionButtons");
+  if (!container) return;
+
+  if (type === 'SelfEmployed') {
+    container.innerHTML = '<button onclick="createInvoice()" class="portal-btn">Create Invoice</button>';
+  } else {
+    container.innerHTML = '<button onclick="location.href=\'my-timesheet.html\'" class="portal-btn">Timesheet</button>';
+  }
+}
+
+showCorrectButton();
+loadWeek();
+</script>
 
 </body>
 </html>
