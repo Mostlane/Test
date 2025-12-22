@@ -889,7 +889,8 @@ function onJobDragStart(e){
 }
 function onJobDragEnd(e){
   e.currentTarget.classList.remove("dragging");
-  dragState.jobId=null;
+  // ❗ DO NOT clear dragState here
+  // Chrome fires dragend BEFORE drop
 }
 function onLaneDragOver(e){
   e.preventDefault(); // REQUIRED
