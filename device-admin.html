@@ -406,10 +406,9 @@ const has = (k) =>
   perms[k] === true || String(perms[k] || "").toLowerCase() === "yes";
 
 const hasFullAccess  = has("FullAccess");
-const hasUsersAccess = has("Users");
 const hasDeviceAccess = has("DeviceAdmin");
 
-if (!hasFullAccess && !hasUsersAccess && !hasDeviceAccess) {
+if (!hasFullAccess && !hasDeviceAccess) {
   alert("You do not have permission to access Device Management.");
   window.location.href = "main.html";
   return false;
