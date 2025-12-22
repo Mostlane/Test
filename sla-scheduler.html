@@ -607,12 +607,15 @@ function normaliseJob(j){
   const priority = j.priority || "";
   const notes = j.notes || "";
 
-  let start = j.scheduledStart;
-  if(!start){
-    const base = withTime(selectedDate,8,0);
-    start = base.toISOString();
-  }
-  const startDate = new Date(start);
+// 🔧 FIX: support worker field "scheduledAt"
+let start = j.scheduledAt || j.scheduledStart;
+
+if (!start) {
+  const base = withTime(selectedDate, 8, 0);
+  start = base.toISOString();
+}
+
+const startDate = new Date(start);
 
   let durationMinutes = j.durationMinutes || 60;
   if(j.scheduledEnd){
@@ -1033,18 +1036,26 @@ document.getElementById("jobForm").addEventListener("submit",async function(e){
 
 async function pushJobUpdate(job){
   try{
-    const res=await fetch(`${SLA_API_BASE}/job/${encodeURIComponent(job.id)}`,{
+    const payload = {
+      scheduledAt: job.scheduledStart,
+      assignedTo: job.assignedEngineers[0] || "",
+      priority: job.priority || undefined
+    };
+
+    const res = await fetch(`${SLA_API_BASE}/job/${encodeURIComponent(job.id)}`,{
       method:"PUT",
-      headers:{ "Content-Type":"application/json"},
-      body:JSON.stringify(job)
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(payload)
     });
+
     if(!res.ok){
-      console.error("Failed update:",await res.text());
+      console.error("Failed update:", await res.text());
     }
   }catch(err){
-    console.error("Update error:",err);
+    console.error("Update error:", err);
   }
 }
+
 
 async function init(){
   const u=sessionStorage.getItem("mostlaneUser");
