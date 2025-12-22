@@ -95,6 +95,7 @@ body {
 const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
 const user = sessionStorage.getItem("mostlaneUser");
 let offset = 0;
+let allEvents = [];
 
 /* ============================================================
    DATE HELPERS
@@ -118,11 +119,10 @@ function formatRange(monday) {
 }
 
 /* ============================================================
-   LOAD MONTH FROM CHECKLOG_KV
+   LOAD ALL EVENTS (FIXED)
 ============================================================ */
-async function loadMonth(year, month) {
-  const key = `pv:${user}:${year}-${String(month).padStart(2,"0")}`;
-  const res = await fetch(`${WORKER_BASE}/get-log?key=${encodeURIComponent(key)}`);
+async function loadAllEvents() {
+  const res = await fetch(`${WORKER_BASE}/events?user=${encodeURIComponent(user)}`);
   if (!res.ok) return [];
   return res.json();
 }
@@ -130,24 +130,13 @@ async function loadMonth(year, month) {
 /* ============================================================
    LOAD + RENDER WEEK
 ============================================================ */
-async function loadWeek() {
+function loadWeek() {
   const now = new Date();
   const { monday, sunday } = getWeekRange(now);
 
   document.getElementById("weekRange").textContent = formatRange(monday);
 
-  const months = new Set([
-    `${monday.getFullYear()}-${monday.getMonth()+1}`,
-    `${sunday.getFullYear()}-${sunday.getMonth()+1}`
-  ]);
-
-  let events = [];
-  for (const m of months) {
-    const [y, mo] = m.split("-").map(Number);
-    events.push(...await loadMonth(y, mo));
-  }
-
-  const weekEvents = events.filter(e => {
+  const weekEvents = allEvents.filter(e => {
     const d = new Date(e.datetime);
     return d >= monday && d <= sunday;
   });
@@ -214,7 +203,13 @@ function changeWeek(delta) {
   loadWeek();
 }
 
-loadWeek();
+/* ============================================================
+   INIT
+============================================================ */
+loadAllEvents().then(events => {
+  allEvents = events;
+  loadWeek();
+});
 </script>
 
 <footer style="text-align:center;font-size:11px;color:#999;margin-top:40px;">
