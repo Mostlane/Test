@@ -191,11 +191,11 @@
       font-weight:400;
     }
 
-    .lane-body{
-      position:relative;
-      padding:0 4px 6px 4px;
-      height:40px * 14;
-    }
+.lane-body{
+  position: relative;
+  padding: 0 4px 6px 4px;
+  height: 560px;
+}
 
     .time-slot-line{
       position:absolute;
@@ -788,7 +788,11 @@ function renderDayView(container){
 
       el.addEventListener("dragstart",onJobDragStart);
       el.addEventListener("dragend",onJobDragEnd);
-      el.addEventListener("click",()=>openJobModal(job.id));
+   el.addEventListener("click", (e) => {
+  if (dragState.jobId) return; // ✅ ignore click if dragging
+  openJobModal(job.id);
+});
+
 
       body.appendChild(el);
     });
@@ -876,17 +880,21 @@ function renderWeekView(container){
 
 /* DRAGGING */
 function onJobDragStart(e){
-  dragState.jobId=e.currentTarget.dataset.jobId;
+  dragState.jobId = e.currentTarget.dataset.jobId;
   e.currentTarget.classList.add("dragging");
-  e.dataTransfer.effectAllowed="move";
+
+  // ✅ REQUIRED for Chrome drag/drop
+  e.dataTransfer.setData("text/plain", dragState.jobId);
+  e.dataTransfer.effectAllowed = "move";
 }
 function onJobDragEnd(e){
   e.currentTarget.classList.remove("dragging");
   dragState.jobId=null;
 }
 function onLaneDragOver(e){
-  e.preventDefault();
-  e.dataTransfer.dropEffect="move";
+  e.preventDefault(); // REQUIRED
+  e.stopPropagation();
+  e.dataTransfer.dropEffect = "move";
 }
 async function onLaneDrop(e){
   e.preventDefault();
@@ -921,7 +929,10 @@ async function onLaneDrop(e){
 
   render();
   setStatus(`Updated job ${job.title}`);
+
+  dragState.jobId = null; // ✅ ADD THIS LINE
 }
+
 
 /* MODAL */
 let modalJobId=null;
