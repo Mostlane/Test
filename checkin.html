@@ -2,7 +2,6 @@
 <html>
 <head>
 <script src="auth.js"></script>
-<script src="device-auth.js"></script>
 <title>Check In</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <link rel="stylesheet" href="style.css" />
@@ -27,6 +26,20 @@
     text-align: center;
   }
 
+  .button {
+    display: block;
+    margin: 10px auto;
+    padding: 12px 20px;
+    font-size: 16px;
+    text-align: center;
+    color: #ffffff;
+    background-color: rgba(0, 74, 153, 0.6);
+    text-decoration: none;
+    border-radius: 6px;
+    width: 90%;
+    max-width: 300px;
+  }
+
   h1 {
     background-color: rgba(0, 74, 153, 0.6);
     color: #ffffff;
@@ -46,19 +59,40 @@
 <h1>Checking In...</h1>
 
 <script>
-/* -------------------------------------------------
-   DEVICE ID (unchanged)
-------------------------------------------------- */
+/* ------------------------------------------------------------------------
+   DEVICE VERIFICATION (LEFT IN PLACE BUT NOT RUN)
+------------------------------------------------------------------------ */
+async function verifyDevice() {
+  const username = sessionStorage.getItem("mostlaneUser");
+  if (!username) return false;
+
+  const localDevice = localStorage.getItem("mostlane_device_id");
+  if (!localDevice) return false;
+
+  try {
+    const res = await fetch(`https://mostlane-api.jamie-def.workers.dev/device/get?user=${username}`);
+    const data = await res.json();
+    return data.deviceID === localDevice;
+  } catch {
+    return false;
+  }
+}
+</script>
+
+<script>
+/* ------------------------------------------------------------------------
+   Device ID (still generated + used)
+------------------------------------------------------------------------ */
 let deviceID = localStorage.getItem("mostlane_device_id");
 if (!deviceID) {
   deviceID = "dev-" + Math.random().toString(36).substring(2, 10);
   localStorage.setItem("mostlane_device_id", deviceID);
 }
 
-/* -------------------------------------------------
-   WORKER + OFFLINE QUEUE (unchanged)
-------------------------------------------------- */
-const WORKER_URL = "https://check-in-out.jamie-def.workers.dev/check";
+/* ------------------------------------------------------------------------
+   Cloudflare Worker + Offline Queue
+------------------------------------------------------------------------ */
+const WORKER_URL = "https://ckeck-in-out.jamie-def.workers.dev/check";
 const PENDING_KEY = "ml_pending_check_events_v1";
 
 function getPendingChecks() {
@@ -80,72 +114,72 @@ async function sendToWorker(payload) {
   return res.json();
 }
 
-/* -------------------------------------------------
-   CHECK-IN FLOW (DeviceAuth source of truth)
-------------------------------------------------- */
-function startCheckIn() {
-  const username = sessionStorage.getItem("mostlaneUsername") || "Unknown";
+async function flushPendingChecks() {
+  const pending = getPendingChecks();
+  if (!pending.length || !navigator.onLine) return;
 
-  navigator.geolocation.getCurrentPosition(pos => {
+  const remaining = [];
+  for (const ev of pending) {
+    try { await sendToWorker(ev); }
+    catch { remaining.push(ev); }
+  }
+  savePendingChecks(remaining);
+}
+
+window.addEventListener("load", flushPendingChecks);
+window.addEventListener("online", flushPendingChecks);
+
+/* ------------------------------------------------------------------------
+   Automatic Check-In (UNCHANGED)
+------------------------------------------------------------------------ */
+function startCheckIn() {
+
+  const username = sessionStorage.getItem("mostlaneUser") || "Unknown";
+
+  navigator.geolocation.getCurrentPosition(async pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
+    const datetime = new Date().toISOString();
 
-    // 🔐 USE SAME DEVICE AUTH AS LOGIN
-    if (window.DeviceAuth && typeof DeviceAuth.checkOnAction === "function") {
-      DeviceAuth.checkOnAction(username, async () => {
-        await proceedWithCheckIn(username, lat, lon);
-      });
-    } else {
-      // Fallback — mirrors login behaviour
-      proceedWithCheckIn(username, lat, lon);
+    const payload = {
+      type: "checkin",
+      username,
+      deviceID,
+      datetime,
+      lat,
+      lon,
+      fuelClaim: null,
+      offlineEvent: !navigator.onLine
+    };
+
+    if (!navigator.onLine) {
+      const pending = getPendingChecks();
+      pending.push(payload);
+      savePendingChecks(pending);
+
+      window.location.href =
+        `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(new Date().toLocaleString())}`;
+      return;
     }
+
+    try { await sendToWorker(payload); }
+    catch {
+      payload.offlineEvent = true;
+      const pending = getPendingChecks();
+      pending.push(payload);
+      savePendingChecks(pending);
+    }
+
+    const now = new Date().toLocaleString();
+    window.location.href =
+      `confirm.html?status=Check%20In&lat=${lat}&lon=${lon}&time=${encodeURIComponent(now)}`;
 
   }, err => {
     alert("Please enable location to check in.\n" + err.message);
   }, { enableHighAccuracy: true, timeout: 20000 });
 }
 
-/* -------------------------------------------------
-   SUBMIT CHECK-IN (unchanged payload)
-------------------------------------------------- */
-async function proceedWithCheckIn(username, lat, lon) {
-  const payload = {
-    type: "checkin",
-    username,
-    deviceID,
-    datetime: new Date().toISOString(),
-    lat,
-    lon,
-    fuelClaim: null,
-    offlineEvent: !navigator.onLine
-  };
-
-  if (!navigator.onLine) {
-    const pending = getPendingChecks();
-    pending.push(payload);
-    savePendingChecks(pending);
-    window.location.href = "confirm.html?status=Check%20In";
-    return;
-  }
-
-  try {
-    await sendToWorker(payload);
-  } catch {
-    payload.offlineEvent = true;
-    const pending = getPendingChecks();
-    pending.push(payload);
-    savePendingChecks(pending);
-  }
-
-  window.location.href = "confirm.html?status=Check%20In";
-}
-
-/* -------------------------------------------------
-   START (page always loads)
-------------------------------------------------- */
-window.onload = () => {
-  startCheckIn();
-};
+window.onload = () => startCheckIn();
 </script>
 
 </body>
