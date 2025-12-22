@@ -405,14 +405,19 @@
 const has = (k) =>
   perms[k] === true || String(perms[k] || "").toLowerCase() === "yes";
 
-const hasFullAccess  = has("FullAccess");
+const hasFullAccess   = has("FullAccess");
 const hasDeviceAccess = has("DeviceAdmin");
 
-if (!hasFullAccess && !hasDeviceAccess) {
+// Backwards-compatible aliases (older portal keys)
+const hasUsersAdmin   = has("UsersAdmin") || has("Users Admin") || has("Users");
+const hasDeviceAdmin2 = has("Device Management") || has("DeviceManagement");
+
+if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
   alert("You do not have permission to access Device Management.");
   window.location.href = "main.html";
   return false;
 }
+
 
       const adminUser = sessionStorage.getItem("mostlaneUser") || "";
       const adminUserDisplay = document.getElementById("adminUserDisplay");
