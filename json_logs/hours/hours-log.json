@@ -6419,6 +6419,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2025-12-23T09:45:58.503Z"
+    },
+    {
+      "id": "1766483347699-y38y4k",
+      "receivedAt": "2025-12-23T09:49:07.699Z",
+      "date": "2025-12-15",
+      "day": "Monday",
+      "engineer": "Chris Cooke",
+      "vehicle": "LA70 FPJ",
+      "leaveHome": "08:00",
+      "arriveFirstSite": "00:00",
+      "leaveLastSite": "00:00",
+      "arriveHome": "16:00",
+      "deductLunch": true,
+      "totalHours": 7.5,
+      "standardHours": 7.5,
+      "overtimeHours": null,
+      "travelToHours": null,
+      "travelFromHours": 16,
+      "totalTravelHours": 16,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2025-12-23T09:49:07.699Z"
     }
   ]
 }
