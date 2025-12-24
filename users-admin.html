@@ -657,50 +657,54 @@ function mapToPermKey(id, label, href) {
       }
     }
 
-    let saving=false;
-    async function saveAll(){
-      if(saving) return;
-      if(!__USERS || !__STRUCT) return;
-      saving = true;
-      showMask(true);
-      try{
-        const users = JSON.parse(JSON.stringify(__USERS));
+  let saving=false;
+async function saveAll(){
+  if(saving) return;
+  if(!__USERS || !__STRUCT) return;
+  saving = true;
+  showMask(true);
+  try{
+    const users = JSON.parse(JSON.stringify(__USERS));
 
-        users.forEach(u=>{
-          // Full Access
-          const faEl = document.getElementById(`fa_${u.Username}__chk`);
-          u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
+    users.forEach(u=>{
+      // ✅ FIX: scope to this user's card only
+      const card = document.querySelector(`#name_${u.Username}`)?.closest('.user-card');
+      if(!card) return;
 
-          const assign = (permKey)=>{
-            if (!permKey) return;
-            const chk = document.getElementById(`${u.Username}::${permKey}__chk`);
-            const val = (chk && chk.checked) ? 'Yes' : 'No';
-            u[permKey] = val;
-          };
-__STRUCT.forEach(p => {
-  const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
-  if (parentKey) assign(parentKey);
+      // Full Access
+      const faEl = card.querySelector(`#fa_${u.Username}__chk`);
+      u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
 
-  (p.subpages || []).forEach(sp => {
-    const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-    if (sid) assign(sid);
-  });
-});
+      const assign = (permKey)=>{
+        if (!permKey) return;
+        const chk = card.querySelector(`[id="${u.Username}::${permKey}__chk"]`);
+        u[permKey] = (chk && chk.checked) ? 'Yes' : 'No';
+      };
+
+      __STRUCT.forEach(p=>{
+        const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
+        if (parentKey) assign(parentKey);
+
+        (p.subpages || []).forEach(sp=>{
+          const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+          if (sid) assign(sid);
         });
+      });
+    });
 
-        await saveUsers(users);
-        __USERS = users;
-        showBanner('✅ Changes saved successfully.','ok');
-      }
-      catch(err){
-        console.error(err);
-        showBanner('❌ Save failed. '+(err?.message||''),'err');
-      }
-      finally{
-        showMask(false);
-        saving=false;
-      }
-    }
+    await saveUsers(users);
+    __USERS = users;
+    showBanner('✅ Changes saved successfully.','ok');
+  }
+  catch(err){
+    console.error(err);
+    showBanner('❌ Save failed. '+(err?.message||''),'err');
+  }
+  finally{
+    showMask(false);
+    saving=false;
+  }
+}
 
     // Modal logic
     const modal=document.getElementById('addUserModal');
