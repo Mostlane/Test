@@ -155,6 +155,39 @@
 
     /* Submenu visibility (we toggle display via JS) */
     .submenu-row{ display:flex; }
+
+    /* NEW: Manage Users modal layout */
+    .manage-wrap{
+      display:flex; gap:12px;
+    }
+    .manage-left{
+      flex: 1;
+      min-width: 240px;
+    }
+    .manage-right{
+      flex: 1;
+      min-width: 240px;
+      border-left: 1px solid #e5e7eb;
+      padding-left: 12px;
+    }
+    @media (max-width: 820px){
+      .manage-wrap{flex-direction:column}
+      .manage-right{border-left:none; padding-left:0; border-top:1px solid #e5e7eb; padding-top:12px}
+    }
+    .user-row{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px; padding:10px; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:8px;
+      background:#fff;
+    }
+    .user-row .who{display:flex; flex-direction:column; gap:2px}
+    .user-row .who .t{font-weight:600; color:#111827; font-size:14px}
+    .user-row .who .s{font-size:12px; color:#6b7280}
+    .chip{
+      font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #d1d5db; background:#f9fafb; color:#374151;
+    }
+    .chip.active{border-color:#86efac; background:#ecfdf5; color:#166534}
+    .chip.inactive{border-color:#fecaca; background:#fef2f2; color:#991b1b}
+    .row-actions{display:flex; gap:8px; align-items:center}
   </style>
 </head>
 <body>
@@ -166,6 +199,11 @@
       <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
       <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
       <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
+
+      <!-- NEW: top-level Manage users button -->
+      <button class="btn btn-outline" id="manageUsersBtn">👥 Manage users</button>
+
+      <!-- Existing button retained exactly -->
       <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
     </div>
   </div>
@@ -203,8 +241,7 @@
     <div id="list">Loading users…</div>
   </div>
 
-  <!-- Add User Modal -->
-
+  <!-- Add User Modal (EXISTING - kept) -->
   <div id="addUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Add New User</h3>
@@ -220,7 +257,7 @@
     </div>
   </div>
 
-  <!-- Manage User Modal (ADDED) -->
+  <!-- Manage User Modal (EXISTING - kept) -->
   <div id="manageUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Manage User</h3>
@@ -246,10 +283,89 @@
     </div>
   </div>
 
+  <!-- NEW: Manage Users Modal (first-level modal) -->
+  <div id="manageUsersModal" class="modal" aria-hidden="true">
+    <div class="modal-card" style="max-width: 980px;">
+      <h3>Manage users</h3>
+
+      <div class="util" style="padding:0; margin: 6px 0 10px;">
+        <input id="muSearch" class="input" placeholder="Search users…" style="flex:1; min-width:180px;">
+        <button class="btn btn-outline" id="openAddNewUserBtn">➕ Add New User</button>
+      </div>
+
+      <div class="manage-wrap">
+        <div class="manage-left">
+          <div id="muList">Loading…</div>
+          <div class="small" style="margin-top:10px;">
+            Tip: toggling <span class="kbd">Active</span> only changes that user’s <span class="kbd">Status</span> field (DELTA safe).
+          </div>
+        </div>
+
+        <div class="manage-right">
+          <div class="small" style="margin-bottom:8px;">Select a user to edit.</div>
+
+          <div class="field"><label>Engineer Number</label><input id="mue_engineerNumber" type="text" disabled></div>
+          <div class="field"><label>Username</label><input id="mue_username" type="text" disabled></div>
+
+          <div class="field"><label>First Name</label><input id="mue_firstName" type="text"></div>
+          <div class="field"><label>Last Name</label><input id="mue_lastName" type="text"></div>
+
+          <!-- NEW fields (do not break existing Email) -->
+          <div class="field"><label>Email Address</label><input id="mue_emailAddress" type="email" placeholder="name@mostlane.com"></div>
+          <div class="field"><label>Mobile Number</label><input id="mue_mobileNumber" type="text" placeholder="07…"></div>
+
+          <div class="field"><label>Vehicle Assigned</label><input id="mue_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+          <div class="field"><label>Employment Type</label><input id="mue_employmentType" type="text" placeholder="Employed / Self Employed"></div>
+          <div class="field"><label>SharePoint Path URL</label><input id="mue_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
+
+          <div class="field"><label>Status</label><input id="mue_status" type="text" placeholder="Active / Not Active"></div>
+
+          <div class="field"><label>Reset Password (optional)</label><input id="mue_password" type="password" placeholder="Leave blank to keep existing"></div>
+
+          <div class="modal-actions">
+            <button class="btn btn-outline" id="closeManageUsersBtn">Close</button>
+            <button class="btn btn-primary" id="saveManageUsersBtn">Save user changes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW: Add New User modal (second-level modal) -->
+  <div id="addNewUserModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Add New User</h3>
+
+      <div class="field"><label>First Name</label><input id="anu_firstName" type="text" placeholder="First Name" required></div>
+      <div class="field"><label>Last Name</label><input id="anu_lastName" type="text" placeholder="Last Name" required></div>
+
+      <div class="field"><label>Username</label><input id="anu_username" type="text" disabled></div>
+
+      <div class="field"><label>Password</label><input id="anu_password" type="password" placeholder="Initial password" required></div>
+
+      <div class="field"><label>Email Address</label><input id="anu_emailAddress" type="email" placeholder="name@mostlane.com"></div>
+      <div class="field"><label>Mobile Number</label><input id="anu_mobileNumber" type="text" placeholder="07…"></div>
+
+      <div class="field"><label>Vehicle Assigned (optional)</label><input id="anu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="anu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
+
+      <div class="field"><label>SharePoint Path URL</label><input id="anu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
+
+      <div class="small" style="margin-top:8px;">
+        All page permissions will be set to <span class="kbd">No</span> by default (DELTA safe).
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="anu_cancel">Cancel</button>
+        <button class="btn btn-primary" id="anu_create">Create User</button>
+      </div>
+    </div>
+  </div>
+
   <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
   <script>
-    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+        const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
     const USERS_URL = API_BASE + "/users";
     const SAVE_URL  = API_BASE + "/save";
     const TOKEN     = sessionStorage.getItem("mostlaneToken");
@@ -457,7 +573,7 @@ function mapToPermKey(id, label, href) {
       );
     }
 
-    // Manage Modal Logic (ADDED)
+    // Manage Modal Logic (EXISTING)
     const manageModal = document.getElementById('manageUserModal');
     let __MANAGING = null;
 
@@ -490,22 +606,34 @@ function mapToPermKey(id, label, href) {
       try{
         showMask(true);
 
-        __MANAGING.FirstName = document.getElementById('mu_firstName').value.trim();
-        __MANAGING.LastName = document.getElementById('mu_lastName').value.trim();
-        __MANAGING.Email = document.getElementById('mu_email').value.trim();
-        __MANAGING.VehicleAssigned = document.getElementById('mu_vehicle').value.trim();
-        __MANAGING.EmploymentType = document.getElementById('mu_employmentType').value.trim();
-        __MANAGING.Status = document.getElementById('mu_status').value.trim();
-        __MANAGING.SharePointPath = document.getElementById('mu_sharepoint').value.trim();
+        // DELTA SAFE: only write fields if they actually changed
+        const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MANAGING.Username||'')) || null;
+
+        const setIfChanged = (obj, key, newVal) => {
+          const nv = (newVal ?? '');
+          const ov = orig ? (orig[key] ?? '') : (obj[key] ?? '');
+          if (String(nv) !== String(ov)) obj[key] = nv;
+        };
+
+        setIfChanged(__MANAGING, 'FirstName', document.getElementById('mu_firstName').value.trim());
+        setIfChanged(__MANAGING, 'LastName', document.getElementById('mu_lastName').value.trim());
+        setIfChanged(__MANAGING, 'Email', document.getElementById('mu_email').value.trim());
+        setIfChanged(__MANAGING, 'VehicleAssigned', document.getElementById('mu_vehicle').value.trim());
+        setIfChanged(__MANAGING, 'EmploymentType', document.getElementById('mu_employmentType').value.trim());
+        setIfChanged(__MANAGING, 'Status', document.getElementById('mu_status').value.trim());
+        setIfChanged(__MANAGING, 'SharePointPath', document.getElementById('mu_sharepoint').value.trim());
 
         const newPw = document.getElementById('mu_password').value;
         if(newPw && newPw.trim()){
-          __MANAGING.HashedPassword = await sha256Hex(newPw);
+          const hp = await sha256Hex(newPw);
+          if (!orig || String(orig.HashedPassword||'') !== String(hp)) {
+            __MANAGING.HashedPassword = hp;
+          }
         }
 
         await saveUsers(__USERS);
 
-        // Update visible fields without re-rendering permissions (ADDED)
+        // Update visible fields without re-rendering permissions
         const nameEl = document.getElementById(`name_${__MANAGING.Username}`);
         const subEl = document.getElementById(`sub_${__MANAGING.Username}`);
         if(nameEl){
@@ -626,6 +754,7 @@ function mapToPermKey(id, label, href) {
 
     let __USERS = [];
     let __STRUCT = [];
+    let __ORIGINAL_USERS = []; // NEW: snapshot for DELTA saving
 
     async function buildUI(){
       showMask(true);
@@ -633,6 +762,9 @@ function mapToPermKey(id, label, href) {
         const [users,struct] = await Promise.all([fetchAllUsers(),scanPortal()]);
         __USERS = users;
         __STRUCT = struct;
+
+        // Snapshot (deep copy) for DELTA logic
+        __ORIGINAL_USERS = JSON.parse(JSON.stringify(users || []));
 
         // Populate username dropdown
         userFilter.innerHTML = '<option value="">All Users</option>';
@@ -646,6 +778,7 @@ function mapToPermKey(id, label, href) {
         });
 
         renderUsers(__USERS,__STRUCT);
+        refreshManageUsersUI(); // NEW
       }
       catch(err){
         console.error(err);
@@ -664,36 +797,63 @@ async function saveAll(){
   saving = true;
   showMask(true);
   try{
-    const users = JSON.parse(JSON.stringify(__USERS));
+    // DELTA SAFE:
+    // Start from a clone of the ORIGINAL snapshot so we do NOT "rewrite" fields.
+    const users = JSON.parse(JSON.stringify(__ORIGINAL_USERS || __USERS || []));
+
+    const byUsername = new Map();
+    (__USERS || []).forEach(u => byUsername.set(u.Username, u));
 
     users.forEach(u=>{
-      // ✅ FIX: scope to this user's card only
+      const live = byUsername.get(u.Username);
+      if(!live) return;
+
+      // scope to this user's card only
       const card = document.querySelector(`#name_${u.Username}`)?.closest('.user-card');
       if(!card) return;
 
       // Full Access
       const faEl = card.querySelector(`#fa_${u.Username}__chk`);
-      u.FullAccess = (faEl && faEl.checked) ? 'Yes' : 'No';
+      const newFA = (faEl && faEl.checked) ? 'Yes' : 'No';
+      if (String((u.FullAccess||'No')) !== String(newFA)) {
+        u.FullAccess = newFA;
+      }
 
-      const assign = (permKey)=>{
+      const assignDelta = (permKey)=>{
         if (!permKey) return;
         const chk = card.querySelector(`[id="${u.Username}::${permKey}__chk"]`);
-        u[permKey] = (chk && chk.checked) ? 'Yes' : 'No';
+        if(!chk) return;
+
+        const uiVal = chk.checked ? 'Yes' : 'No';
+        const origVal = (u[permKey] ?? undefined);
+
+        // If the field never existed and UI is "No", DO NOT write it.
+        // Only write if it existed, OR UI is Yes, OR it differs from existing.
+        if (origVal === undefined && uiVal === 'No') return;
+
+        if (String(origVal ?? '') !== String(uiVal ?? '')) {
+          u[permKey] = uiVal;
+        }
       };
 
       __STRUCT.forEach(p=>{
         const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
-        if (parentKey) assign(parentKey);
+        if (parentKey) assignDelta(parentKey);
 
         (p.subpages || []).forEach(sp=>{
           const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-          if (sid) assign(sid);
+          if (sid) assignDelta(sid);
         });
       });
     });
 
     await saveUsers(users);
-    __USERS = users;
+
+    // Update live + snapshot to new saved state
+    __USERS = JSON.parse(JSON.stringify(users));
+    __ORIGINAL_USERS = JSON.parse(JSON.stringify(users));
+
+    refreshManageUsersUI();
     showBanner('✅ Changes saved successfully.','ok');
   }
   catch(err){
@@ -706,7 +866,7 @@ async function saveAll(){
   }
 }
 
-    // Modal logic
+    // Modal logic (EXISTING Add User)
     const modal=document.getElementById('addUserModal');
     const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
@@ -800,8 +960,7 @@ async function saveAll(){
 
     searchBox.addEventListener('input', debounce(applyFilters, 150));
     userFilter.addEventListener('change', applyFilters);
-
-    document.getElementById('saveBtn').addEventListener('click',saveAll);
+        document.getElementById('saveBtn').addEventListener('click',saveAll);
     document.getElementById('reloadBtn').addEventListener('click',buildUI);
     document.getElementById('rescanBtn').addEventListener('click',async()=>{
       showMask(true);
@@ -818,6 +977,436 @@ async function saveAll(){
         showMask(false);
       }
     });
+
+    // ==========================================================
+    // NEW: Manage users (LIST + EDIT) + Add New User (DELTA SAFE)
+    // ==========================================================
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const manageUsersModal = document.getElementById('manageUsersModal');
+    const muList = document.getElementById('muList');
+    const muSearch = document.getElementById('muSearch');
+
+    const closeManageUsersBtn = document.getElementById('closeManageUsersBtn');
+    const openAddNewUserBtn = document.getElementById('openAddNewUserBtn');
+
+    const addNewUserModal = document.getElementById('addNewUserModal');
+    const anu_cancel = document.getElementById('anu_cancel');
+    const anu_create = document.getElementById('anu_create');
+
+    let __MUE = null; // currently selected user in manage users modal
+
+    function openManageUsers(){
+      manageUsersModal.classList.add('show');
+      manageUsersModal.setAttribute('aria-hidden','false');
+      refreshManageUsersUI();
+    }
+    function closeManageUsers(){
+      manageUsersModal.classList.remove('show');
+      manageUsersModal.setAttribute('aria-hidden','true');
+      __MUE = null;
+      clearManageUserEditor();
+    }
+
+    function openAddNewUser(){
+      addNewUserModal.classList.add('show');
+      addNewUserModal.setAttribute('aria-hidden','false');
+      // reset fields
+      document.getElementById('anu_firstName').value = '';
+      document.getElementById('anu_lastName').value = '';
+      document.getElementById('anu_username').value = '';
+      document.getElementById('anu_password').value = '';
+      document.getElementById('anu_emailAddress').value = '';
+      document.getElementById('anu_mobileNumber').value = '';
+      document.getElementById('anu_vehicle').value = '';
+      document.getElementById('anu_employmentType').value = '';
+      document.getElementById('anu_sharepoint').value = '';
+    }
+    function closeAddNewUser(){
+      addNewUserModal.classList.remove('show');
+      addNewUserModal.setAttribute('aria-hidden','true');
+    }
+
+    function clearManageUserEditor(){
+      document.getElementById('mue_engineerNumber').value = '';
+      document.getElementById('mue_username').value = '';
+      document.getElementById('mue_firstName').value = '';
+      document.getElementById('mue_lastName').value = '';
+      document.getElementById('mue_emailAddress').value = '';
+      document.getElementById('mue_mobileNumber').value = '';
+      document.getElementById('mue_vehicle').value = '';
+      document.getElementById('mue_employmentType').value = '';
+      document.getElementById('mue_sharepoint').value = '';
+      document.getElementById('mue_status').value = '';
+      document.getElementById('mue_password').value = '';
+    }
+
+    function safeUsernameFromNames(fn, ln){
+      const f = (fn||'').trim();
+      const l = (ln||'').trim();
+      if(!f || !l) return '';
+      return `${f}.${l}`.replace(/\s+/g,'').replace(/[^\w.\-]/g,'');
+    }
+
+    // Auto-generate username in Add New User modal
+    const anu_firstName = document.getElementById('anu_firstName');
+    const anu_lastName  = document.getElementById('anu_lastName');
+    function syncANUUsername(){
+      const u = safeUsernameFromNames(anu_firstName.value, anu_lastName.value);
+      document.getElementById('anu_username').value = u;
+    }
+    anu_firstName.addEventListener('input', syncANUUsername);
+    anu_lastName.addEventListener('input', syncANUUsername);
+
+    // Collect all known permission keys from current users + portal scan
+    function collectAllPermissionKeys(){
+      const keys = new Set();
+
+      // from portal structure
+      (__STRUCT || []).forEach(p=>{
+        const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
+        if (parentKey) keys.add(parentKey);
+        (p.subpages || []).forEach(sp=>{
+          const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+          if (sid) keys.add(sid);
+        });
+      });
+
+      // from existing users (anything that looks like Yes/No)
+      (__USERS || []).forEach(u=>{
+        Object.keys(u || {}).forEach(k=>{
+          const v = u[k];
+          if (typeof v === 'string' && (v.toLowerCase()==='yes' || v.toLowerCase()==='no')) {
+            // skip core identity fields that can be Yes/No sometimes (rare), but keep FullAccess
+            if (k === 'FullAccess') keys.add(k);
+            else if (!['Status'].includes(k)) keys.add(k);
+          }
+        });
+      });
+
+      // ensure FullAccess is NOT treated as normal permission in defaults (we set separately)
+      keys.delete('FullAccess');
+
+      return Array.from(keys);
+    }
+
+    function refreshManageUsersUI(){
+      if(!muList) return;
+
+      const q = (muSearch?.value || '').trim().toLowerCase();
+      const users = (__USERS || []).slice().sort((a,b)=>{
+        const an = parseInt(a.EngineerNumber||'0',10) || 0;
+        const bn = parseInt(b.EngineerNumber||'0',10) || 0;
+        return an - bn;
+      }).filter(u=>{
+        if(!q) return true;
+        const blob = `${u.FirstName||''} ${u.LastName||''} ${u.Username||''} ${u.EngineerNumber||''}`.toLowerCase();
+        return blob.includes(q);
+      });
+
+      muList.innerHTML = '';
+      if(!users.length){
+        muList.textContent = 'No users found.';
+        return;
+      }
+
+      users.forEach(u=>{
+        const status = (u.Status||'').toLowerCase();
+        const isActive = status === 'active';
+
+        const row = document.createElement('div');
+        row.className = 'user-row';
+
+        const who = document.createElement('div');
+        who.className = 'who';
+        const t = document.createElement('div');
+        t.className = 't';
+        t.textContent = `#${u.EngineerNumber || '-'} – ${(u.FirstName||'')} ${(u.LastName||'')}`.trim();
+        const s = document.createElement('div');
+        s.className = 's';
+        s.textContent = `${u.Username || ''}`;
+        who.appendChild(t);
+        who.appendChild(s);
+
+        const chip = document.createElement('span');
+        chip.className = 'chip ' + (isActive ? 'active' : 'inactive');
+        chip.textContent = isActive ? 'Active' : 'Not Active';
+
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        // Active toggle (DELTA safe on Status only)
+        const sw = switchControl(`mu_status_${u.Username}`, isActive, 'Status', 'manage');
+        // We repurpose switchControl but handle change ourselves
+        sw.querySelector('input').addEventListener('change', async (e)=>{
+          try{
+            showMask(true);
+
+            // update only this user Status in the live model
+            const target = (__USERS || []).find(x => x.Username === u.Username);
+            if(!target) return;
+
+            const newStatus = e.target.checked ? 'Active' : 'Not Active';
+            const orig = (__ORIGINAL_USERS || []).find(x => x.Username === u.Username);
+
+            // only write if changed
+            if (!orig || String(orig.Status||'') !== String(newStatus)) {
+              target.Status = newStatus;
+            }
+
+            // save full users, but DELTA safe overall (we use snapshot on permission save; here we persist via saveUsers)
+            // For consistency with your current behaviour: we save immediately on toggle.
+            const payload = JSON.parse(JSON.stringify(__ORIGINAL_USERS || __USERS || []));
+            const idx = payload.findIndex(x => x.Username === u.Username);
+            if(idx >= 0){
+              // preserve everything else; update Status only if changed
+              const existingStatus = payload[idx].Status;
+              if (String(existingStatus||'') !== String(newStatus)) payload[idx].Status = newStatus;
+            }
+
+            await saveUsers(payload);
+
+            // sync live + snapshot
+            __USERS = JSON.parse(JSON.stringify(payload));
+            __ORIGINAL_USERS = JSON.parse(JSON.stringify(payload));
+
+            chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive');
+            chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active';
+
+            // update main card subline if present
+            const subEl = document.getElementById(`sub_${u.Username}`);
+            if(subEl){
+              const liveNow = (__USERS || []).find(x => x.Username === u.Username) || u;
+              subEl.textContent = `${liveNow.EmploymentType||''} · ${liveNow.Status||''} · ${liveNow.Email||''}`;
+            }
+
+            showBanner('✅ Status updated.','ok');
+          }catch(err){
+            console.error(err);
+            showBanner('❌ Could not update status. '+(err?.message||''),'err');
+            // revert UI
+            refreshManageUsersUI();
+          }finally{
+            showMask(false);
+          }
+        });
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-outline';
+        editBtn.style.padding = '6px 10px';
+        editBtn.style.fontSize = '12px';
+        editBtn.textContent = '✏️ Edit';
+        editBtn.addEventListener('click', ()=>{
+          __MUE = (__USERS || []).find(x => x.Username === u.Username) || u;
+
+          document.getElementById('mue_engineerNumber').value = __MUE.EngineerNumber || '';
+          document.getElementById('mue_username').value = __MUE.Username || '';
+          document.getElementById('mue_firstName').value = __MUE.FirstName || '';
+          document.getElementById('mue_lastName').value = __MUE.LastName || '';
+
+          // Existing Email field is kept; EmailAddress maps to Email unless you specifically change it
+          const emailAddr = (__MUE.EmailAddress ?? __MUE.Email ?? '');
+          document.getElementById('mue_emailAddress').value = emailAddr || '';
+
+          document.getElementById('mue_mobileNumber').value = (__MUE.MobileNumber ?? __MUE.Mobile ?? __MUE.Phone ?? '') || '';
+
+          document.getElementById('mue_vehicle').value = __MUE.VehicleAssigned || '';
+          document.getElementById('mue_employmentType').value = __MUE.EmploymentType || '';
+          document.getElementById('mue_sharepoint').value = __MUE.SharePointPath || '';
+          document.getElementById('mue_status').value = __MUE.Status || '';
+          document.getElementById('mue_password').value = '';
+        });
+
+        actions.appendChild(chip);
+        actions.appendChild(sw);
+        actions.appendChild(editBtn);
+
+        row.appendChild(who);
+        row.appendChild(actions);
+
+        muList.appendChild(row);
+      });
+    }
+
+    if(muSearch){
+      muSearch.addEventListener('input', debounce(refreshManageUsersUI, 120));
+    }
+
+    document.getElementById('saveManageUsersBtn').addEventListener('click', async ()=>{
+      if(!__MUE) {
+        showBanner('⚠️ Select a user to edit first.','warn');
+        return;
+      }
+      try{
+        showMask(true);
+
+        const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MUE.Username||'')) || null;
+
+        const setIfChanged = (obj, key, newVal) => {
+          const nv = (newVal ?? '');
+          const ov = orig ? (orig[key] ?? '') : (obj[key] ?? '');
+          if (String(nv) !== String(ov)) obj[key] = nv;
+        };
+
+        setIfChanged(__MUE, 'FirstName', document.getElementById('mue_firstName').value.trim());
+        setIfChanged(__MUE, 'LastName', document.getElementById('mue_lastName').value.trim());
+
+        // EmailAddress + backwards compatibility:
+        // - If you edit EmailAddress, we set BOTH EmailAddress and Email to same value (so no page breaks).
+        const newEmailAddr = document.getElementById('mue_emailAddress').value.trim();
+        if (newEmailAddr) {
+          if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) __MUE.EmailAddress = newEmailAddr;
+          if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) __MUE.Email = newEmailAddr;
+        } else {
+          // if user clears it, only clear if it was previously set (DELTA safe)
+          if (orig && String(orig.EmailAddress ?? '') !== '') __MUE.EmailAddress = '';
+          if (orig && String(orig.Email ?? '') !== '') __MUE.Email = '';
+        }
+
+        const newMobile = document.getElementById('mue_mobileNumber').value.trim();
+        if (newMobile) {
+          if (!orig || String(orig.MobileNumber ?? '') !== String(newMobile)) __MUE.MobileNumber = newMobile;
+        } else {
+          if (orig && String(orig.MobileNumber ?? '') !== '') __MUE.MobileNumber = '';
+        }
+
+        setIfChanged(__MUE, 'VehicleAssigned', document.getElementById('mue_vehicle').value.trim());
+        setIfChanged(__MUE, 'EmploymentType', document.getElementById('mue_employmentType').value.trim());
+        setIfChanged(__MUE, 'SharePointPath', document.getElementById('mue_sharepoint').value.trim());
+        setIfChanged(__MUE, 'Status', document.getElementById('mue_status').value.trim());
+
+        const newPw = document.getElementById('mue_password').value;
+        if(newPw && newPw.trim()){
+          const hp = await sha256Hex(newPw);
+          if (!orig || String(orig.HashedPassword||'') !== String(hp)) {
+            __MUE.HashedPassword = hp;
+          }
+        }
+
+        // Save (full array, but only this user is changed in-memory)
+        await saveUsers(__USERS);
+
+        // Sync snapshot to avoid future delta confusion
+        __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
+
+        // Update main card header/sub if visible
+        const nameEl = document.getElementById(`name_${__MUE.Username}`);
+        const subEl = document.getElementById(`sub_${__MUE.Username}`);
+        if(nameEl){
+          nameEl.innerHTML = `${__MUE.EngineerNumber ? ('#'+__MUE.EngineerNumber+' – ') : ''}${__MUE.FirstName||''} ${__MUE.LastName||''} <span style="color:#6b7280;font-weight:500">(${__MUE.Username})</span>`;
+        }
+        if(subEl){
+          subEl.textContent = `${__MUE.EmploymentType||''} · ${__MUE.Status||''} · ${__MUE.Email||''}`;
+        }
+
+        refreshManageUsersUI();
+        showBanner('✅ User details updated.','ok');
+      }catch(err){
+        console.error(err);
+        showBanner('❌ Could not save user. '+(err?.message||''),'err');
+      }finally{
+        showMask(false);
+      }
+    });
+
+    // Create new user (permissions default No)
+    document.getElementById('anu_create').addEventListener('click', async ()=>{
+      try{
+        showMask(true);
+
+        const res=await fetch(USERS_URL+'?v='+Date.now(),{
+          headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}
+        });
+        const data=await res.json();
+        const users=data.Users||[];
+
+        const maxNum=users.reduce((m,u)=>{
+          const n=parseInt(u.EngineerNumber,10);
+          return isNaN(n)?m:Math.max(m,n);
+        },0);
+        const nextNum=String(maxNum+1);
+
+        const firstName = document.getElementById('anu_firstName').value.trim();
+        const lastName  = document.getElementById('anu_lastName').value.trim();
+        const username  = document.getElementById('anu_username').value.trim();
+        const password  = document.getElementById('anu_password').value;
+
+        const emailAddr = document.getElementById('anu_emailAddress').value.trim();
+        const mobileNum = document.getElementById('anu_mobileNumber').value.trim();
+
+        const vehicle   = document.getElementById('anu_vehicle').value.trim();
+        const empType   = document.getElementById('anu_employmentType').value.trim();
+        const spPath    = document.getElementById('anu_sharepoint').value.trim();
+
+        if(!firstName || !lastName || !username || !password){
+          showBanner('❌ Please complete First Name, Last Name, and Password.','err');
+          return;
+        }
+
+        // Prevent duplicates
+        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) {
+          showBanner('❌ That username already exists.','err');
+          return;
+        }
+
+        const hashedPassword = await sha256Hex(password);
+
+        const newUser = {
+          EngineerNumber: nextNum,
+          FirstName: firstName,
+          LastName: lastName,
+          Username: username,
+
+          // Backwards compatible email
+          Email: emailAddr || '',
+          EmailAddress: emailAddr || '',
+
+          MobileNumber: mobileNum || '',
+
+          HashedPassword: hashedPassword,
+          VehicleAssigned: vehicle,
+          EmploymentType: empType || 'Employed',
+          Status: 'Active',
+          FullAccess: 'No',
+          SharePointPath: spPath
+        };
+
+        // Set ALL permissions to No by default
+        const keys = collectAllPermissionKeys();
+        keys.forEach(k=>{
+          if (!k) return;
+          if (typeof newUser[k] === 'undefined') newUser[k] = 'No';
+        });
+
+        users.push(newUser);
+        await saveUsers(users);
+
+        closeAddNewUser();
+        showBanner('✅ User added (all permissions defaulted to No).','ok');
+
+        await buildUI();
+      }catch(err){
+        console.error(err);
+        showBanner('❌ Could not add user. '+(err?.message||''),'err');
+      }finally{
+        showMask(false);
+      }
+    });
+
+    // Wire up Manage Users modal buttons
+    manageUsersBtn.addEventListener('click', openManageUsers);
+    closeManageUsersBtn.addEventListener('click', closeManageUsers);
+    openAddNewUserBtn.addEventListener('click', openAddNewUser);
+    anu_cancel.addEventListener('click', closeAddNewUser);
+
+    // Optional: close modals if clicking backdrop
+    manageUsersModal.addEventListener('click', (e)=>{ if(e.target === manageUsersModal) closeManageUsers(); });
+    addNewUserModal.addEventListener('click', (e)=>{ if(e.target === addNewUserModal) closeAddNewUser(); });
+
+    // (Your earlier requirement): only Jamie.Line should manage users
+    if (CURRENT !== 'Jamie.Line') {
+      manageUsersBtn.disabled = true;
+      manageUsersBtn.title = 'Only Jamie.Line can manage users';
+    }
 
     (async()=>{await buildUI();})();
   </script>
