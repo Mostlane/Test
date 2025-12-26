@@ -790,79 +790,101 @@ function mapToPermKey(id, label, href) {
       }
     }
 
-  let saving=false;
 async function saveAll(){
-  if(saving) return;
-  if(!__USERS || !__STRUCT) return;
+  if (saving) return;
+  if (!__USERS || !__STRUCT) return;
+
   saving = true;
   showMask(true);
-  try{
-    // DELTA SAFE:
-    // Start from a clone of the ORIGINAL snapshot so we do NOT "rewrite" fields.
-    const users = JSON.parse(JSON.stringify(__ORIGINAL_USERS || __USERS || []));
 
-    const byUsername = new Map();
-    (__USERS || []).forEach(u => byUsername.set(u.Username, u));
+  try {
+    const patchUsers = [];
 
-    users.forEach(u=>{
-      const live = byUsername.get(u.Username);
-      if(!live) return;
+    __USERS.forEach(user => {
+      const orig = (__ORIGINAL_USERS || []).find(o => o.Username === user.Username);
+      if (!orig) return;
 
-      // scope to this user's card only
-      const card = document.querySelector(`#name_${u.Username}`)?.closest('.user-card');
-      if(!card) return;
+      const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
+      if (!card) return;
 
-      // Full Access
-      const faEl = card.querySelector(`#fa_${u.Username}__chk`);
-      const newFA = (faEl && faEl.checked) ? 'Yes' : 'No';
-      if (String((u.FullAccess||'No')) !== String(newFA)) {
-        u.FullAccess = newFA;
+      const changes = {};
+
+      // FULL ACCESS
+      const faEl = card.querySelector(`#fa_${user.Username}__chk`);
+      const newFA = faEl && faEl.checked ? 'Yes' : 'No';
+      if (String(orig.FullAccess || 'No') !== newFA) {
+        changes.FullAccess = newFA;
       }
 
-      const assignDelta = (permKey)=>{
-        if (!permKey) return;
-        const chk = card.querySelector(`[id="${u.Username}::${permKey}__chk"]`);
-        if(!chk) return;
+      // PERMISSIONS
+      const checkPerm = (key) => {
+        const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
+        if (!chk) return;
 
         const uiVal = chk.checked ? 'Yes' : 'No';
-        const origVal = (u[permKey] ?? undefined);
+        const origVal = orig[key];
 
-        // If the field never existed and UI is "No", DO NOT write it.
-        // Only write if it existed, OR UI is Yes, OR it differs from existing.
+        // do not create new "No" keys
         if (origVal === undefined && uiVal === 'No') return;
 
-        if (String(origVal ?? '') !== String(uiVal ?? '')) {
-          u[permKey] = uiVal;
+        if (String(origVal ?? '') !== uiVal) {
+          changes[key] = uiVal;
         }
       };
 
-      __STRUCT.forEach(p=>{
-        const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
-        if (parentKey) assignDelta(parentKey);
+      __STRUCT.forEach(p => {
+        const pk = p.key || mapToPermKey(p.id, p.label, p.href);
+        if (pk) checkPerm(pk);
 
-        (p.subpages || []).forEach(sp=>{
-          const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-          if (sid) assignDelta(sid);
+        (p.subpages || []).forEach(sp => {
+          const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+          if (sk) checkPerm(sk);
         });
       });
+
+      if (Object.keys(changes).length) {
+        patchUsers.push({
+          Username: user.Username,
+          Changes: changes
+        });
+      }
     });
 
-    await saveUsers(users);
+    if (!patchUsers.length) {
+      showBanner('ℹ️ No permission changes detected.','warn');
+      return;
+    }
 
-    // Update live + snapshot to new saved state
-    __USERS = JSON.parse(JSON.stringify(users));
-    __ORIGINAL_USERS = JSON.parse(JSON.stringify(users));
+    const res = await fetch(SAVE_DELTA_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {})
+      },
+      body: JSON.stringify({ patchUsers })
+    });
 
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t);
+    }
+
+    // sync snapshot
+    patchUsers.forEach(p => {
+      const u = __USERS.find(x => x.Username === p.Username);
+      if (u) Object.assign(u, p.Changes);
+    });
+
+    __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
     refreshManageUsersUI();
-    showBanner('✅ Changes saved successfully.','ok');
-  }
-  catch(err){
+    showBanner('✅ Permissions updated safely.','ok');
+
+  } catch (err) {
     console.error(err);
-    showBanner('❌ Save failed. '+(err?.message||''),'err');
-  }
-  finally{
+    showBanner('❌ Permission save failed. ' + (err.message || ''), 'err');
+  } finally {
     showMask(false);
-    saving=false;
+    saving = false;
   }
 }
 
