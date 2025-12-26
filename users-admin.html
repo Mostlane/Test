@@ -368,6 +368,7 @@
         const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
     const USERS_URL = API_BASE + "/users";
     const SAVE_URL  = API_BASE + "/save";
+    const SAVE_DELTA_URL = API_BASE + "/save-delta";
     const TOKEN     = sessionStorage.getItem("mostlaneToken");
     const CURRENT   = sessionStorage.getItem("mostlaneUser");
     if (!CURRENT) { window.location.href = "login.html"; }
@@ -789,7 +790,7 @@ function mapToPermKey(id, label, href) {
         showMask(false);
       }
     }
-
+let saving = false;
 async function saveAll(){
   if (saving) return;
   if (!__USERS || !__STRUCT) return;
