@@ -385,11 +385,18 @@ async function apiGET(path){
   return res.json();
 }
   
-  async function apiPOST(path, body){
-    const res = await fetch(`${API}${path}`, { method:"POST", headers: headersJson(), body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  }
+async function apiPOST(path, body){
+  const res = await fetch(`${API}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": user
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
 
   function buildYearOptions(){
     const sel = $("yearSel");
