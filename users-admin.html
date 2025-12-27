@@ -755,65 +755,25 @@
         const patchUsers = [];
 
         __USERS.forEach(user => {
-          const orig = (__ORIGINAL_USERS || []).find(o => o.Username === user.Username);
-          if (!orig) return;
-
           const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
           if (!card) return;
 
           const changes = {};
 
-          const faEl = card.querySelector(`input[data-user="${user.Username}"][data-key="FullAccess"][data-role="fa"]`);
-          const newFA = faEl && faEl.checked ? 'Yes' : 'No';
-          if (String(orig.FullAccess || 'No') !== newFA) {
-            changes.FullAccess = newFA;
-          }
-
-          const fullAccessOnNow = newFA === 'Yes';
-
-          const fullAccessJustDisabled =
-            (orig.FullAccess || '').toLowerCase() === 'yes' &&
-            newFA === 'No';
-
-          const checkPerm = (key) => {
-            if (!key) return;
-
-            if (fullAccessOnNow) return;
-
-            const chk = card.querySelector(`input[data-user="${user.Username}"][data-key="${key}"]`);
-            if (!chk) return;
-
-            const uiVal = chk.checked ? 'Yes' : 'No';
-
-            const origVal = orig[key];
-
-            if (origVal === undefined && uiVal === 'No' && !fullAccessJustDisabled) return;
-
-if (fullAccessJustDisabled) {
-  changes[key] = uiVal;
-  return;
-}
-            if (String(origVal ?? '') !== uiVal) {
-              changes[key] = uiVal;
-            }
-          };
-
-         const cardInputs = Array.from(card.querySelectorAll('input[type="checkbox"]')).filter(chk => chk.getAttribute('data-role') !== 'fa')
-          const seenKeys = new Set();
-          cardInputs.forEach(input => {
+          const allInputs = Array.from(card.querySelectorAll('input[type="checkbox"]'));
+          allInputs.forEach(input => {
             const key = input.getAttribute('data-key');
-            if (key && !seenKeys.has(key)) {
-              seenKeys.add(key);
-              checkPerm(key);
-            }
+            const checked = input.checked ? 'Yes' : 'No';
+            if (key) changes[key] = checked;
           });
+
           if (Object.keys(changes).length) {
             patchUsers.push({ Username: user.Username, Changes: changes });
           }
         });
 
         if (!patchUsers.length) {
-          showBanner('ℹ️ No permission changes detected.','warn');
+          showBanner('ℹ️ Nothing to save.','warn');
           return;
         }
 
@@ -836,7 +796,6 @@ if (fullAccessJustDisabled) {
         saving = false;
       }
     }
-
     const modal=document.getElementById('addUserModal');
     const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
