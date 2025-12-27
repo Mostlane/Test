@@ -746,7 +746,7 @@
     let saving = false;
     async function saveAll(){
       if (saving) return;
-      if (!__USERS || !__STRUCT) return;
+      if (!__USERS) return;
 
       saving = true;
       showMask(true);
