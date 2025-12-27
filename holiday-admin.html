@@ -19,9 +19,9 @@
       --warn:#b45309;
       --bad:#b00020;
 
-      --cell:28px;         /* day cell height */
-      --nameCol:220px;     /* engineer name col */
-      --dayCol:28px;       /* day col width */
+      --cell:28px;
+      --nameCol:220px;
+      --dayCol:28px;
     }
 
     html,body{width:100%;max-width:100%;overflow-x:hidden;}
@@ -135,7 +135,6 @@
     .tagApproved{color:var(--good);background:rgba(21,128,61,0.1)}
     .tagRejected{color:var(--bad);background:rgba(176,0,32,0.08)}
 
-    /* Calendar */
     .calWrap{
       overflow:auto;
       border:1px solid var(--border);
@@ -183,7 +182,6 @@
     .calRow .dayCell{background:#fff}
     .dayCell.weekend{background:#f8fafc;color:#94a3b8}
 
-    /* Mostlane-style colours for events */
     .evHoliday{background:rgba(0,74,153,0.20)}
     .evSick{background:rgba(180,83,9,0.18)}
     .evUnpaid{background:rgba(176,0,32,0.15)}
@@ -239,7 +237,6 @@
 
     <div class="content">
       <div class="row">
-        <!-- Pending approvals -->
         <div class="panel" style="flex:1;min-width:420px;">
           <h2>Pending Approvals</h2>
           <div class="muted" id="pendingHint" style="margin-bottom:8px;">—</div>
@@ -260,7 +257,6 @@
           </div>
         </div>
 
-        <!-- Allowances -->
         <div class="panel" style="flex:0.9;min-width:380px;">
           <h2>Allowance Overview</h2>
           <div class="muted" id="allowanceHint" style="margin-bottom:8px;">Year totals (includes bank holidays + shutdown; credited back if worked).</div>
@@ -282,19 +278,15 @@
       </div>
 
       <div class="row" style="margin-top:14px;">
-        <!-- Calendar -->
         <div class="panel" style="flex:1;min-width:600px;">
           <h2>Month View</h2>
           <div class="muted" id="calHint" style="margin-bottom:10px;">Approved leave shown in blue. Bank holidays and shutdown shown; holiday requests override system days visually.</div>
 
-          <div class="calWrap" id="calWrap">
-            <!-- injected -->
-          </div>
+          <div class="calWrap" id="calWrap"></div>
         </div>
       </div>
 
       <div class="row" style="margin-top:14px;">
-        <!-- Config management -->
         <div class="panel" style="flex:1;min-width:600px;">
           <h2>Bank Holidays & Company Shutdown</h2>
           <div class="split">
@@ -319,7 +311,7 @@
             </div>
           </div>
           <div class="muted" style="margin-top:10px;">
-            Tip: mark a system day as “worked” from the month grid by clicking the day cell (bank holiday/shutdown only).
+            Tip: mark a system day as "worked" from the month grid by clicking the day cell (bank holiday/shutdown only).
           </div>
         </div>
       </div>
@@ -351,40 +343,43 @@ if (!HOLIDAY_ADMINS.includes(user)) {
   location.href = "main.html";
 }
 
-  const $ = (id)=>document.getElementById(id);
+const $ = (id)=>document.getElementById(id);
 
-  let state = {
-    year: new Date().getFullYear(),
-    month: new Date().getMonth() + 1, // 1-12
-    config: { bankholidays: [], shutdown: [], defaultAllowance: 28, allowances:{} },
-    allRequests: [],
-    summary: null,
-    calendar: null
-  };
+let state = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  config: { bankholidays: [], shutdown: [], defaultAllowance: 28, allowances:{} },
+  allRequests: [],
+  summary: null,
+  calendar: null
+};
 
-  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-  function fmtMonthLabel(){
-    $("monthLabel").textContent = `${monthNames[state.month-1]} ${state.year}`;
-  }
+function fmtMonthLabel(){
+  $("monthLabel").textContent = `${monthNames[state.month-1]} ${state.year}`;
+}
 
-  function setStatus(msg){ $("status").textContent = msg || ""; }
-  
+function setStatus(msg){ $("status").textContent = msg || ""; }
+
 async function apiGET(path){
+  const role = HOLIDAY_ADMINS.includes(user) ? "Admin" : "Engineer";
   const res = await fetch(`${API}${path}`, {
-    headers: { "X-User": user },
+    headers: { "X-User": user, "X-Role": role },
     cache: "no-store"
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
-  
+
 async function apiPOST(path, body){
+  const role = HOLIDAY_ADMINS.includes(user) ? "Admin" : "Engineer";
   const res = await fetch(`${API}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User": user
+      "X-User": user,
+      "X-Role": role
     },
     body: JSON.stringify(body)
   });
@@ -392,328 +387,318 @@ async function apiPOST(path, body){
   return res.json();
 }
 
-  function buildYearOptions(){
-    const sel = $("yearSel");
-    sel.innerHTML = "";
-    const now = new Date().getFullYear();
-    for (let y = now - 1; y <= now + 2; y++){
-      const opt = document.createElement("option");
-      opt.value = y;
-      opt.textContent = y;
-      if (y === state.year) opt.selected = true;
-      sel.appendChild(opt);
-    }
-    sel.onchange = () => { state.year = parseInt(sel.value,10); refreshAll(); };
+function buildYearOptions(){
+  const sel = $("yearSel");
+  sel.innerHTML = "";
+  const now = new Date().getFullYear();
+  for (let y = now - 1; y <= now + 2; y++){
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = y;
+    if (y === state.year) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => { state.year = parseInt(sel.value,10); refreshAll(); };
+}
+
+function renderPending(){
+  const tbody = $("pendingTbody");
+  tbody.innerHTML = "";
+
+  const pending = state.allRequests
+    .filter(r => (r.year ?? state.year) === state.year && r.status === "Pending")
+    .sort((a,b)=>(a.submittedAt||"").localeCompare(b.submittedAt||""));
+
+  $("pendingHint").textContent = pending.length ? `${pending.length} pending request(s).` : "No pending requests.";
+
+  for (const r of pending){
+    const tr = document.createElement("tr");
+    const name = (r.username || "").replace(".", " ");
+    const note = (r.notes || "").replace(/</g,"&lt;");
+    tr.innerHTML = `
+      <td><b>${name}</b><div class="muted" style="font-size:12px;">${r.username}</div></td>
+      <td>${r.start} → ${r.end}</td>
+      <td>${Number(r.days||0).toFixed(0)}</td>
+      <td>${r.type || "Annual Leave"}</td>
+      <td>${note || "<span class='muted'>—</span>"}</td>
+      <td>
+        <button class="btn btnSmall btnOk" data-act="approve" data-id="${r.id}">Approve</button>
+        <button class="btn btnSmall btnDanger" data-act="reject" data-id="${r.id}">Decline</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
   }
 
-  // ----- Pending approvals -----
-  function renderPending(){
-    const tbody = $("pendingTbody");
-    tbody.innerHTML = "";
+  tbody.querySelectorAll("button[data-act]").forEach(btn=>{
+    btn.onclick = async () => {
+      const id = btn.getAttribute("data-id");
+      const act = btn.getAttribute("data-act");
+      try{
+        setStatus("Saving…");
+        await apiPOST(act === "approve" ? `/holiday/approve?year=${state.year}` : `/holiday/reject?year=${state.year}`, { id });
+        await refreshAll();
+        setStatus("");
+      }catch(e){
+        alert("Action failed: " + e.message);
+        setStatus("");
+      }
+    };
+  });
+}
 
-    const pending = state.allRequests
-      .filter(r => (r.year ?? state.year) === state.year && r.status === "Pending")
-      .sort((a,b)=>(a.submittedAt||"").localeCompare(b.submittedAt||""));
+function renderAllowance(){
+  const tbody = $("allowTbody");
+  tbody.innerHTML = "";
+  if (!state.summary?.engineers) return;
 
-    $("pendingHint").textContent = pending.length ? `${pending.length} pending request(s).` : "No pending requests.";
-
-    for (const r of pending){
-      const tr = document.createElement("tr");
-      const name = (r.username || "").replace(".", " ");
-      const note = (r.notes || "").replace(/</g,"&lt;");
-      tr.innerHTML = `
-        <td><b>${name}</b><div class="muted" style="font-size:12px;">${r.username}</div></td>
-        <td>${r.start} → ${r.end}</td>
-        <td>${Number(r.days||0).toFixed(0)}</td>
-        <td>${r.type || "Annual Leave"}</td>
-        <td>${note || "<span class='muted'>—</span>"}</td>
-        <td>
-          <button class="btn btnSmall btnOk" data-act="approve" data-id="${r.id}">Approve</button>
-          <button class="btn btnSmall btnDanger" data-act="reject" data-id="${r.id}">Decline</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
-
-    tbody.querySelectorAll("button[data-act]").forEach(btn=>{
-      btn.onclick = async () => {
-        const id = btn.getAttribute("data-id");
-        const act = btn.getAttribute("data-act");
-        try{
-          setStatus("Saving…");
-          await apiPOST(act === "approve" ? `/holiday/approve?year=${state.year}` : `/holiday/reject?year=${state.year}`, { id });
-          await refreshAll();
-          setStatus("");
-        }catch(e){
-          alert("Action failed: " + e.message);
-          setStatus("");
-        }
-      };
-    });
+  for (const e of state.summary.engineers){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><b>${e.name}</b><div class="muted" style="font-size:12px;">${e.username}</div></td>
+      <td>${Number(e.allowance||0).toFixed(0)}</td>
+      <td>${Number(e.used||0).toFixed(0)}</td>
+      <td><b>${Number(e.remaining||0).toFixed(0)}</b></td>
+      <td>
+        <button class="btn btnSmall" data-edit="${e.username}">Edit</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
   }
 
-  // ----- Allowance overview -----
-  function renderAllowance(){
-    const tbody = $("allowTbody");
-    tbody.innerHTML = "";
-    if (!state.summary?.engineers) return;
+  tbody.querySelectorAll("button[data-edit]").forEach(b=>{
+    b.onclick = async ()=>{
+      const username = b.getAttribute("data-edit");
+      const current = state.summary.engineers.find(x=>x.username===username)?.allowance ?? 28;
+      const val = prompt(`Set allowance for ${username} (${state.year})`, String(current));
+      if (val === null) return;
+      const num = Number(val);
+      if (!Number.isFinite(num)) { alert("Invalid number"); return; }
 
-    for (const e of state.summary.engineers){
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><b>${e.name}</b><div class="muted" style="font-size:12px;">${e.username}</div></td>
-        <td>${Number(e.allowance||0).toFixed(0)}</td>
-        <td>${Number(e.used||0).toFixed(0)}</td>
-        <td><b>${Number(e.remaining||0).toFixed(0)}</b></td>
-        <td>
-          <button class="btn btnSmall" data-edit="${e.username}">Edit</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
-    }
+      try{
+        setStatus("Saving allowance…");
+        await apiPOST(`/holiday/set-allowance?year=${state.year}`, { username, allowance: num });
+        await refreshAll();
+        setStatus("");
+      }catch(e){
+        alert("Save failed: " + e.message);
+        setStatus("");
+      }
+    };
+  });
+}
 
-    tbody.querySelectorAll("button[data-edit]").forEach(b=>{
-      b.onclick = async ()=>{
-        const username = b.getAttribute("data-edit");
-        const current = state.summary.engineers.find(x=>x.username===username)?.allowance ?? 28;
-        const val = prompt(`Set allowance for ${username} (${state.year})`, String(current));
-        if (val === null) return;
-        const num = Number(val);
-        if (!Number.isFinite(num)) { alert("Invalid number"); return; }
+function dayIsWeekend(year, month, day){
+  const d = new Date(Date.UTC(year, month-1, day));
+  const wd = d.getUTCDay();
+  return wd === 0 || wd === 6;
+}
+function isoForDay(year, month, day){
+  const d = new Date(Date.UTC(year, month-1, day));
+  return d.toISOString().split("T")[0];
+}
 
-        try{
-          setStatus("Saving allowance…");
-          await apiPOST(`/holiday/set-allowance?year=${state.year}`, { username, allowance: num });
-          await refreshAll();
-          setStatus("");
-        }catch(e){
-          alert("Save failed: " + e.message);
-          setStatus("");
-        }
-      };
-    });
+function classForCell(cell){
+  if (!cell) return "";
+  if (cell.kind === "holiday") {
+    const t = (cell.type || "").toLowerCase();
+    if (t.includes("sick")) return "evSick";
+    if (t.includes("unpaid")) return "evUnpaid";
+    if (t.includes("compulsory")) return "evCompulsory";
+    return "evHoliday";
   }
+  if (cell.kind === "bankholiday") return "evBank" + (cell.worked ? " evWorked" : "");
+  if (cell.kind === "shutdown") return "evShutdown" + (cell.worked ? " evWorked" : "");
+  return "";
+}
 
-  // ----- Calendar grid -----
-  function dayIsWeekend(year, month, day){
-    const d = new Date(Date.UTC(year, month-1, day));
-    const wd = d.getUTCDay(); // 0 Sun .. 6 Sat
-    return wd === 0 || wd === 6;
-  }
-  function isoForDay(year, month, day){
-    const d = new Date(Date.UTC(year, month-1, day));
-    return d.toISOString().split("T")[0];
-  }
+function tooltipShow(html, x, y){
+  const t = $("tooltip");
+  t.innerHTML = html;
+  t.style.left = x + "px";
+  t.style.top = y + "px";
+  t.style.display = "block";
+}
+function tooltipHide(){
+  $("tooltip").style.display = "none";
+}
 
-  function classForCell(cell){
-    if (!cell) return "";
-    if (cell.kind === "holiday") {
-      const t = (cell.type || "").toLowerCase();
-      if (t.includes("sick")) return "evSick";
-      if (t.includes("unpaid")) return "evUnpaid";
-      if (t.includes("compulsory")) return "evCompulsory";
-      return "evHoliday";
-    }
-    if (cell.kind === "bankholiday") return "evBank" + (cell.worked ? " evWorked" : "");
-    if (cell.kind === "shutdown") return "evShutdown" + (cell.worked ? " evWorked" : "");
-    return "";
-  }
+function renderCalendar(){
+  const wrap = $("calWrap");
+  wrap.innerHTML = "";
 
-  function tooltipShow(html, x, y){
-    const t = $("tooltip");
-    t.innerHTML = html;
-    t.style.left = x + "px";
-    t.style.top = y + "px";
-    t.style.display = "block";
-  }
-  function tooltipHide(){
-    $("tooltip").style.display = "none";
-  }
+  const cal = state.calendar;
+  if (!cal) return;
 
-  function renderCalendar(){
-    const wrap = $("calWrap");
-    wrap.innerHTML = "";
+  const daysInMonth = cal.daysInMonth;
 
-    const cal = state.calendar;
-    if (!cal) return;
+  const head = document.createElement("div");
+  head.className = "calHeader";
+  head.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
+  head.innerHTML = `<div class="nameCell">Engineer</div>` + Array.from({length:daysInMonth}, (_,i)=>{
+    const day = i+1;
+    const wk = dayIsWeekend(state.year, state.month, day) ? " weekend" : "";
+    return `<div class="dayCell${wk}">${day}</div>`;
+  }).join("");
+  wrap.appendChild(head);
 
-    const daysInMonth = cal.daysInMonth;
+  for (const eng of cal.engineers){
+    const row = document.createElement("div");
+    row.className = "calRow";
+    row.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
 
-    // Header row
-    const head = document.createElement("div");
-    head.className = "calHeader";
-    head.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
-    head.innerHTML = `<div class="nameCell">Engineer</div>` + Array.from({length:daysInMonth}, (_,i)=>{
+    const remaining = (state.summary?.engineers || []).find(x=>x.username===eng.username)?.remaining;
+    const remTxt = (Number.isFinite(remaining)) ? `<span class="tag" style="margin-left:auto;background:#eef2f9;">${remaining} left</span>` : "";
+
+    row.innerHTML = `
+      <div class="nameCell">
+        <span>${eng.name}</span>
+        ${remTxt}
+      </div>
+    ` + Array.from({length:daysInMonth}, (_,i)=>{
       const day = i+1;
+      const di = isoForDay(state.year, state.month, day);
       const wk = dayIsWeekend(state.year, state.month, day) ? " weekend" : "";
-      return `<div class="dayCell${wk}">${day}</div>`;
+      const cell = eng.cells?.[di];
+      const cls = classForCell(cell);
+      const data = cell ? encodeURIComponent(JSON.stringify({ ...cell, date: di, username: eng.username })) : "";
+      return `<div class="dayCell${wk} ${cls}" data-cell="${data}"></div>`;
     }).join("");
-    wrap.appendChild(head);
 
-    // Rows
-    for (const eng of cal.engineers){
-      const row = document.createElement("div");
-      row.className = "calRow";
-      row.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
+    wrap.appendChild(row);
+  }
 
-      const remaining = (state.summary?.engineers || []).find(x=>x.username===eng.username)?.remaining;
-      const remTxt = (Number.isFinite(remaining)) ? `<span class="tag" style="margin-left:auto;background:#eef2f9;">${remaining} left</span>` : "";
+  wrap.querySelectorAll(".dayCell").forEach(el=>{
+    const raw = el.getAttribute("data-cell");
+    if (!raw) return;
 
-      row.innerHTML = `
-        <div class="nameCell">
-          <span>${eng.name}</span>
-          ${remTxt}
-        </div>
-      ` + Array.from({length:daysInMonth}, (_,i)=>{
-        const day = i+1;
-        const di = isoForDay(state.year, state.month, day);
-        const wk = dayIsWeekend(state.year, state.month, day) ? " weekend" : "";
-        const cell = eng.cells?.[di];
-        const cls = classForCell(cell);
-        const data = cell ? encodeURIComponent(JSON.stringify({ ...cell, date: di, username: eng.username })) : "";
-        return `<div class="dayCell${wk} ${cls}" data-cell="${data}"></div>`;
-      }).join("");
+    let cell;
+    try{ cell = JSON.parse(decodeURIComponent(raw)); }catch{ return; }
 
-      wrap.appendChild(row);
-    }
+    el.addEventListener("mousemove", (ev)=>{
+      const title = cell.kind === "holiday"
+        ? `${cell.type || "Holiday"}`
+        : (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
 
-    // Tooltip + click for worked toggle
-    wrap.querySelectorAll(".dayCell").forEach(el=>{
-      const raw = el.getAttribute("data-cell");
-      if (!raw) return;
+      const sub = cell.kind === "holiday"
+        ? (cell.note ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>` : "")
+        : `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
 
-      let cell;
-      try{ cell = JSON.parse(decodeURIComponent(raw)); }catch{ return; }
+      const extra = (cell.kind === "bankholiday" || cell.kind === "shutdown")
+        ? `<div style="margin-top:6px;color:#cbd5e1;">Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br><span style="opacity:0.85;">Click to toggle</span></div>`
+        : "";
 
-      el.addEventListener("mousemove", (ev)=>{
-        const title = cell.kind === "holiday"
-          ? `${cell.type || "Holiday"}`
-          : (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
-
-        const sub = cell.kind === "holiday"
-          ? (cell.note ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>` : "")
-          : `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
-
-        const extra = (cell.kind === "bankholiday" || cell.kind === "shutdown")
-          ? `<div style="margin-top:6px;color:#cbd5e1;">Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br><span style="opacity:0.85;">Click to toggle</span></div>`
-          : "";
-
-        tooltipShow(`<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`, ev.clientX, ev.clientY);
-      });
-      el.addEventListener("mouseleave", tooltipHide);
-
-      el.addEventListener("click", async ()=>{
-        if (!(cell.kind === "bankholiday" || cell.kind === "shutdown")) return;
-
-        const kind = cell.kind; // bankholiday | shutdown
-        const worked = !cell.worked;
-
-        try{
-          setStatus("Updating worked status…");
-          await apiPOST(`/holiday/toggle-worked?year=${state.year}`, {
-            kind,
-            username: cell.username,
-            date: cell.date,
-            worked
-          });
-          await refreshAll();
-          setStatus("");
-        }catch(e){
-          alert("Toggle failed: " + e.message);
-          setStatus("");
-        }
-      });
+      tooltipShow(`<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`, ev.clientX, ev.clientY);
     });
+    el.addEventListener("mouseleave", tooltipHide);
+
+    el.addEventListener("click", async ()=>{
+      if (!(cell.kind === "bankholiday" || cell.kind === "shutdown")) return;
+
+      const kind = cell.kind;
+      const worked = !cell.worked;
+
+      try{
+        setStatus("Updating worked status…");
+        await apiPOST(`/holiday/toggle-worked?year=${state.year}`, {
+          kind,
+          username: cell.username,
+          date: cell.date,
+          worked
+        });
+        await refreshAll();
+        setStatus("");
+      }catch(e){
+        alert("Toggle failed: " + e.message);
+        setStatus("");
+      }
+    });
+  });
+}
+
+function renderConfigLists(){
+  const bhDiv = $("bhList");
+  bhDiv.innerHTML = "";
+  const bank = (state.config.bankholidays || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  for (const b of bank){
+    const row = document.createElement("div");
+    row.className = "listRow";
+    row.innerHTML = `
+      <input type="date" value="${b.date}">
+      <input type="text" value="${(b.label||"").replace(/"/g,"&quot;")}">
+      <button class="btn btnSmall btnDanger">Delete</button>
+      <button class="btn btnSmall btnPrimary">Save</button>
+    `;
+    const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
+    delBtn.onclick = async ()=>{
+      state.config.bankholidays = state.config.bankholidays.filter(x=>!(x.date===b.date && (x.label||"")===(b.label||"")));
+      await saveBank();
+    };
+    saveBtn.onclick = async ()=>{
+      const nd = dateEl.value;
+      const nl = labelEl.value.trim();
+      if (!nd) return alert("Date required");
+      const idx = state.config.bankholidays.findIndex(x=>x.date===b.date && (x.label||"")===(b.label||""));
+      if (idx >= 0) state.config.bankholidays[idx] = { date: nd, label: nl || "Bank Holiday" };
+      await saveBank();
+    };
+    bhDiv.appendChild(row);
   }
 
-  // ----- Bank holidays & shutdown management -----
-  function renderConfigLists(){
-    // bank
-    const bhDiv = $("bhList");
-    bhDiv.innerHTML = "";
-    const bank = (state.config.bankholidays || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-    for (const b of bank){
-      const row = document.createElement("div");
-      row.className = "listRow";
-      row.innerHTML = `
-        <input type="date" value="${b.date}">
-        <input type="text" value="${(b.label||"").replace(/"/g,"&quot;")}">
-        <button class="btn btnSmall btnDanger">Delete</button>
-        <button class="btn btnSmall btnPrimary">Save</button>
-      `;
-      const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
-      delBtn.onclick = async ()=>{
-        state.config.bankholidays = state.config.bankholidays.filter(x=>!(x.date===b.date && (x.label||"")===(b.label||"")));
-        await saveBank();
-      };
-      saveBtn.onclick = async ()=>{
-        const nd = dateEl.value;
-        const nl = labelEl.value.trim();
-        if (!nd) return alert("Date required");
-        // update by original index match
-        const idx = state.config.bankholidays.findIndex(x=>x.date===b.date && (x.label||"")===(b.label||""));
-        if (idx >= 0) state.config.bankholidays[idx] = { date: nd, label: nl || "Bank Holiday" };
-        await saveBank();
-      };
-      bhDiv.appendChild(row);
-    }
-
-    // shutdown
-    const sdDiv = $("sdList");
-    sdDiv.innerHTML = "";
-    const shut = (state.config.shutdown || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-    for (const s of shut){
-      const row = document.createElement("div");
-      row.className = "listRow";
-      row.innerHTML = `
-        <input type="date" value="${s.date}">
-        <input type="text" value="${(s.label||"").replace(/"/g,"&quot;")}">
-        <button class="btn btnSmall btnDanger">Delete</button>
-        <button class="btn btnSmall btnPrimary">Save</button>
-      `;
-      const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
-      delBtn.onclick = async ()=>{
-        state.config.shutdown = state.config.shutdown.filter(x=>!(x.date===s.date && (x.label||"")===(s.label||"")));
-        await saveShutdown();
-      };
-      saveBtn.onclick = async ()=>{
-        const nd = dateEl.value;
-        const nl = labelEl.value.trim();
-        if (!nd) return alert("Date required");
-        const idx = state.config.shutdown.findIndex(x=>x.date===s.date && (x.label||"")===(s.label||""));
-        if (idx >= 0) state.config.shutdown[idx] = { date: nd, label: nl || "Company Shutdown" };
-        await saveShutdown();
-      };
-      sdDiv.appendChild(row);
-    }
+  const sdDiv = $("sdList");
+  sdDiv.innerHTML = "";
+  const shut = (state.config.shutdown || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  for (const s of shut){
+    const row = document.createElement("div");
+    row.className = "listRow";
+    row.innerHTML = `
+      <input type="date" value="${s.date}">
+      <input type="text" value="${(s.label||"").replace(/"/g,"&quot;")}">
+      <button class="btn btnSmall btnDanger">Delete</button>
+      <button class="btn btnSmall btnPrimary">Save</button>
+    `;
+    const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
+    delBtn.onclick = async ()=>{
+      state.config.shutdown = state.config.shutdown.filter(x=>!(x.date===s.date && (x.label||"")===(s.label||"")));
+      await saveShutdown();
+    };
+    saveBtn.onclick = async ()=>{
+      const nd = dateEl.value;
+      const nl = labelEl.value.trim();
+      if (!nd) return alert("Date required");
+      const idx = state.config.shutdown.findIndex(x=>x.date===s.date && (x.label||"")===(s.label||""));
+      if (idx >= 0) state.config.shutdown[idx] = { date: nd, label: nl || "Company Shutdown" };
+      await saveShutdown();
+    };
+    sdDiv.appendChild(row);
   }
+}
 
-  async function saveBank(){
-    try{
-      setStatus("Saving bank holidays…");
-      await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: state.config.bankholidays });
-      await loadConfig();
-      await refreshAll();
-      setStatus("");
-    }catch(e){
-      alert("Save failed: " + e.message);
-      setStatus("");
-    }
+async function saveBank(){
+  try{
+    setStatus("Saving bank holidays…");
+    await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: state.config.bankholidays });
+    await loadConfig();
+    await refreshAll();
+    setStatus("");
+  }catch(e){
+    alert("Save failed: " + e.message);
+    setStatus("");
   }
-  async function saveShutdown(){
-    try{
-      setStatus("Saving shutdown days…");
-      await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: state.config.shutdown });
-      await loadConfig();
-      await refreshAll();
-      setStatus("");
-    }catch(e){
-      alert("Save failed: " + e.message);
-      setStatus("");
-    }
+}
+async function saveShutdown(){
+  try{
+    setStatus("Saving shutdown days…");
+    await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: state.config.shutdown });
+    await loadConfig();
+    await refreshAll();
+    setStatus("");
+  }catch(e){
+    alert("Save failed: " + e.message);
+    setStatus("");
   }
+}
 
-  $("addBH").onclick = async ()=>{
+$("addBH").onclick = async ()=>{
   const d = $("bhDate").value;
   const l = $("bhLabel").value.trim() || "Bank Holiday";
   if (!d) return alert("Choose a date");
@@ -723,15 +708,13 @@ async function apiPOST(path, body){
 
   try {
     setStatus("Saving bank holiday…");
-
-    // send a NEW array, do not mutate state yet
     const next = [...(state.config.bankholidays || []), { date:d, label:l }];
     await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: next });
 
     $("bhDate").value = "";
     $("bhLabel").value = "";
 
-    await loadConfig();   // reload from KV (source of truth)
+    await loadConfig();
     await refreshAll();
     setStatus("");
   } catch (e) {
@@ -739,8 +722,8 @@ async function apiPOST(path, body){
     setStatus("");
   }
 };
-  
-  $("addSD").onclick = async ()=>{
+
+$("addSD").onclick = async ()=>{
   const d = $("sdDate").value;
   const l = $("sdLabel").value.trim() || "Company Shutdown";
   if (!d) return alert("Choose a date");
@@ -750,7 +733,6 @@ async function apiPOST(path, body){
 
   try {
     setStatus("Saving shutdown…");
-
     const next = [...(state.config.shutdown || []), { date:d, label:l }];
     await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: next });
 
@@ -766,58 +748,55 @@ async function apiPOST(path, body){
   }
 };
 
-  // ----- Loaders -----
-  async function loadConfig(){
+async function loadConfig(){
   const fresh = await apiGET(`/holiday/config?year=${state.year}&t=${Date.now()}`);
-state.config = {
-  ...fresh,
-  bankholidays: Array.isArray(fresh.bankholidays) ? [...fresh.bankholidays] : [],
-  shutdown: Array.isArray(fresh.shutdown) ? [...fresh.shutdown] : []
-};
-    renderConfigLists();
-  }
-  async function loadRequests(){
-    state.allRequests = await apiGET(`/holiday/all?year=${state.year}&t=${Date.now()}`);
-  }
-  async function loadSummary(){
-    state.summary = await apiGET(`/holiday/admin-summary?year=${state.year}&t=${Date.now()}`);
-  }
-  async function loadCalendar(){
-    state.calendar = await apiGET(`/holiday/calendar?year=${state.year}&month=${state.month}&t=${Date.now()}`);
-  }
-
-  async function refreshAll(){
-    fmtMonthLabel();
-    try{
-      setStatus("Loading…");
-      await Promise.all([loadConfig(), loadRequests(), loadSummary(), loadCalendar()]);
-      renderPending();
-      renderAllowance();
-      renderCalendar();
-      setStatus("");
-    }catch(e){
-      setStatus("");
-      alert("Load failed: " + e.message);
-    }
-  }
-
-  // Month nav
-  $("prevMonth").onclick = ()=> {
-    state.month--;
-    if (state.month < 1){ state.month = 12; state.year--; $("yearSel").value = state.year; }
-    refreshAll();
+  state.config = {
+    ...fresh,
+    bankholidays: Array.isArray(fresh.bankholidays) ? [...fresh.bankholidays] : [],
+    shutdown: Array.isArray(fresh.shutdown) ? [...fresh.shutdown] : []
   };
-  $("nextMonth").onclick = ()=> {
-    state.month++;
-    if (state.month > 12){ state.month = 1; state.year++; $("yearSel").value = state.year; }
-    refreshAll();
-  };
-  $("refreshBtn").onclick = refreshAll;
+  renderConfigLists();
+}
+async function loadRequests(){
+  state.allRequests = await apiGET(`/holiday/all?year=${state.year}&t=${Date.now()}`);
+}
+async function loadSummary(){
+  state.summary = await apiGET(`/holiday/admin-summary?year=${state.year}&t=${Date.now()}`);
+}
+async function loadCalendar(){
+  state.calendar = await apiGET(`/holiday/calendar?year=${state.year}&month=${state.month}&t=${Date.now()}`);
+}
 
-  // Init
-  buildYearOptions();
+async function refreshAll(){
   fmtMonthLabel();
+  try{
+    setStatus("Loading…");
+    await Promise.all([loadConfig(), loadRequests(), loadSummary(), loadCalendar()]);
+    renderPending();
+    renderAllowance();
+    renderCalendar();
+    setStatus("");
+  }catch(e){
+    setStatus("");
+    alert("Load failed: " + e.message);
+  }
+}
+
+$("prevMonth").onclick = ()=> {
+  state.month--;
+  if (state.month < 1){ state.month = 12; state.year--; $("yearSel").value = state.year; }
   refreshAll();
+};
+$("nextMonth").onclick = ()=> {
+  state.month++;
+  if (state.month > 12){ state.month = 1; state.year++; $("yearSel").value = state.year; }
+  refreshAll();
+};
+$("refreshBtn").onclick = refreshAll;
+
+buildYearOptions();
+fmtMonthLabel();
+refreshAll();
 </script>
 
 </body>
