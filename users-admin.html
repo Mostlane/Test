@@ -365,7 +365,7 @@
   <div class="mask" id="mask"><div class="spinner" aria-label="Loading"></div></div>
 
   <script>
-        const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+    const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
     const USERS_URL = API_BASE + "/users";
     const SAVE_URL  = API_BASE + "/save";
     const SAVE_DELTA_URL = API_BASE + "/save-delta";
@@ -417,10 +417,6 @@
       return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
 
-    function normalizeIdForKey(s){
-      return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
-    }
-
     // ✅ NEW: DELTA POST helper (centralised + consistent error text)
     async function postDelta(patchUsers){
       const res = await fetch(SAVE_DELTA_URL, {
@@ -438,56 +434,52 @@
       return true;
     }
 
-   // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
-function mapToPermKey(id, label, href) {
-  const mapByExact = {
-    "CheckInOut": "CheckInOut",
-    "Vehicles": "Vehicles",
-    "Holiday": "Holiday",
-    "EngineersHoursMenu": "EngineersHoursMenu",
-    "PurchaseOrders": "PurchaseOrders",
-    "PurchaseOrders2": "PurchaseOrders",
-    "Sites": "Sites",
-    "Assets": "Assets",
-    "MyDocuments": "MyDocuments",
-    "Compliance": "Compliance",
-    "HoursDashboard": "HoursDashboard",
-    "Users": "Users",
-    "Weekly": "Weekly",
-    "Forms": "Forms",
-    "SLA": "SLA",
-    "SLA Menu": "SLA",
-    "HolidayAdmin": "Holiday Admin"
-  };
+    // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
+    function mapToPermKey(id, label, href) {
+      const mapByExact = {
+        "CheckInOut": "CheckInOut",
+        "Vehicles": "Vehicles",
+        "Holiday": "Holiday",
+        "EngineersHoursMenu": "EngineersHoursMenu",
+        "PurchaseOrders": "PurchaseOrders",
+        "PurchaseOrders2": "PurchaseOrders",
+        "Sites": "Sites",
+        "Assets": "Assets",
+        "MyDocuments": "MyDocuments",
+        "Compliance": "Compliance",
+        "HoursDashboard": "HoursDashboard",
+        "Users": "Users",
+        "Weekly": "Weekly",
+        "Forms": "Forms",
+        "SLA": "SLA",
+        "SLA Menu": "SLA",
+        "HolidayAdmin": "Holiday Admin"
+      };
 
-  // Direct match on ID or label
-  if (id && mapByExact[id]) return mapByExact[id];
-  if (label && mapByExact[label]) return mapByExact[label];
+      if (id && mapByExact[id]) return mapByExact[id];
+      if (label && mapByExact[label]) return mapByExact[label];
 
-  // Only *.html internal pages
-  if (href && href.endsWith(".html")) {
-    const clean = href.toLowerCase();
+      if (href && href.endsWith(".html")) {
+        const clean = href.toLowerCase();
 
-    if (clean.includes("sla")) return "SLA";
-    if (clean.includes("users")) return "Users";
-    if (clean.includes("weekly")) return "Weekly";
-    if (clean.includes("assets")) return "Assets";
-    if (clean.includes("forms")) return "Forms";
-    if (clean.includes("compliance")) return "Compliance";
-    if (clean.includes("purchase")) return "PurchaseOrders";
-    if (clean.includes("sites")) return "Sites";
-    if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
-  }
+        if (clean.includes("sla")) return "SLA";
+        if (clean.includes("users")) return "Users";
+        if (clean.includes("weekly")) return "Weekly";
+        if (clean.includes("assets")) return "Assets";
+        if (clean.includes("forms")) return "Forms";
+        if (clean.includes("compliance")) return "Compliance";
+        if (clean.includes("purchase")) return "PurchaseOrders";
+        if (clean.includes("sites")) return "Sites";
+        if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
+      }
 
-  // ❌ Reject all external links, javascript:void(), forms, etc.
-  return null;
-}
+      return null;
+    }
 
     // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
       const parser=new DOMParser();
       const visited=new Set();
-      const struct=[];
 
       async function scanPage(url,depth=0){
         if(!url || visited.has(url)) return [];
@@ -498,7 +490,6 @@ function mapToPermKey(id, label, href) {
           const html=await res.text();
           const doc=parser.parseFromString(html,'text/html');
 
-          // Support emoji buttons as long as they have these classes
           const rawButtons = [
             ...doc.querySelectorAll('a.button,button.button,a.menu-btn,button.menu-btn')
           ];
@@ -510,7 +501,7 @@ function mapToPermKey(id, label, href) {
             const href = hrefAttr;
             const key = mapToPermKey(id,label,href);
             return { id, label, href, key, subpages: [] };
-          }).filter(b => !!b.key); // only keep ones with a key
+          }).filter(b => !!b.key);
 
           if (depth < 2){
             for (const btn of buttons){
@@ -530,7 +521,7 @@ function mapToPermKey(id, label, href) {
       }
 
       const rootUrl = new URL('main.html', window.location.href).toString();
-      struct.push(...await scanPage(rootUrl));
+      const struct = await scanPage(rootUrl);
       structCount.textContent = `Discovered ${struct.length} main buttons (deep scan)`;
       return struct;
     }
@@ -556,12 +547,13 @@ function mapToPermKey(id, label, href) {
       }
     }
 
-    function switchControl(domId,checked,permKey,role){
+    // ✅ CRITICAL FIX: all inputs are located via data-user + data-key (never fragile IDs)
+    function switchControl(userName,checked,permKey,role){
       const inputAttrs = {
         type:'checkbox',
-        id:domId,
-        'data-key':permKey,
-        'data-role':role || 'main'
+        'data-user': userName,
+        'data-key': permKey,
+        'data-role': role || 'main'
       };
       if (checked) inputAttrs.checked = true;
       return h('label',{class:'switch'},
@@ -581,14 +573,12 @@ function mapToPermKey(id, label, href) {
         attrs['data-parent'] = parentKey;
       }
 
-      const domId = `${user.Username}::${permKey}__chk`;
-
       return h('div',attrs,
         h('div',{class:'lbl'},
           label || permKey || '(unnamed)',
           pathSpan ? h('div',null,pathSpan) : null
         ),
-        switchControl(domId,!!checked,permKey,role)
+        switchControl(user.Username,!!checked,permKey,role)
       );
     }
 
@@ -619,7 +609,7 @@ function mapToPermKey(id, label, href) {
 
     document.getElementById('cancelManage').addEventListener('click',closeManage);
 
-    // ✅ FIXED: single-user modal now uses SAVE-DELTA, not saveUsers(__USERS)
+    // ✅ FIXED: single-user modal uses SAVE-DELTA
     document.getElementById('saveManageBtn').addEventListener('click',async()=>{
       if(!__MANAGING) return;
 
@@ -657,15 +647,12 @@ function mapToPermKey(id, label, href) {
 
         await postDelta([{ Username: __MANAGING.Username, Changes: changes }]);
 
-        // apply changes locally (only after successful delta)
         Object.assign(__MANAGING, changes);
 
-        // sync snapshot
         const idx = (__ORIGINAL_USERS || []).findIndex(x => x.Username === __MANAGING.Username);
         if(idx >= 0) Object.assign(__ORIGINAL_USERS[idx], changes);
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
 
-        // Update visible fields without re-rendering permissions
         const nameEl = document.getElementById(`name_${__MANAGING.Username}`);
         const subEl = document.getElementById(`sub_${__MANAGING.Username}`);
         if(nameEl){
@@ -697,7 +684,7 @@ function mapToPermKey(id, label, href) {
           ),
           h('div',{class:'toggle-row'},
             h('span',{class:'lbl'},'Full Access'),
-            switchControl(`fa_${user.Username}__chk`,(user.FullAccess||'').toLowerCase()==='yes','FullAccess','fa')
+            switchControl(user.Username,(user.FullAccess||'').toLowerCase()==='yes','FullAccess','fa')
           )
         )
       );
@@ -714,7 +701,6 @@ function mapToPermKey(id, label, href) {
         )
       );
 
-      // Main buttons
       structure.forEach(p=>{
         const permKey = p.key || mapToPermKey(p.id,p.label,p.href);
         if (!permKey) return;
@@ -724,7 +710,6 @@ function mapToPermKey(id, label, href) {
         );
       });
 
-      // Sub menus
       const subs = structure.flatMap(s=>s.subpages || []);
       if (subs.length){
         grid.appendChild(
@@ -754,7 +739,6 @@ function mapToPermKey(id, label, href) {
     }
 
     function initSubmenuVisibility(){
-      // For each user card, tie submenus to their main switches
       document.querySelectorAll('.user-card').forEach(card=>{
         const mains = card.querySelectorAll('input[type="checkbox"][data-role="main"]');
         mains.forEach(main=>{
@@ -768,7 +752,6 @@ function mapToPermKey(id, label, href) {
             });
           };
           main.addEventListener('change', sync);
-          // initial state
           sync();
         });
       });
@@ -786,7 +769,7 @@ function mapToPermKey(id, label, href) {
 
     let __USERS = [];
     let __STRUCT = [];
-    let __ORIGINAL_USERS = []; // snapshot for DELTA saving
+    let __ORIGINAL_USERS = [];
 
     async function buildUI(){
       showMask(true);
@@ -840,50 +823,46 @@ function mapToPermKey(id, label, href) {
 
           const changes = {};
 
-          // FULL ACCESS
-          const faEl = card.querySelector(`#fa_${user.Username}__chk`);
+          // FULL ACCESS (read via data selector)
+          const faEl = card.querySelector(`input[data-user="${user.Username}"][data-key="FullAccess"][data-role="fa"]`);
           const newFA = faEl && faEl.checked ? 'Yes' : 'No';
           if (String(orig.FullAccess || 'No') !== newFA) {
             changes.FullAccess = newFA;
           }
 
-// PERMISSIONS
-const checkPerm = (key) => {
-  const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
-  if (!chk) return;
+          // If FullAccess is ON, don't touch individual permissions (FullAccess overrides)
+          const fullAccessOnNow = newFA === 'Yes';
 
-  const uiVal = chk.checked ? 'Yes' : 'No';
+          const fullAccessJustDisabled =
+            (orig.FullAccess || '').toLowerCase() === 'yes' &&
+            newFA === 'No';
 
-  // ✅ IMPORTANT: only treat FullAccess as "Yes" baseline if it's still ON in the UI
-  const effectiveOrigFA =
-    (orig.FullAccess || '').toLowerCase() === 'yes' &&
-    newFA === 'Yes';
+          const checkPerm = (key) => {
+            if (!key) return;
 
-  const origVal = effectiveOrigFA ? 'Yes' : orig[key];
+            // When FullAccess is currently ON, we do not patch individual keys
+            if (fullAccessOnNow) return;
 
-  // do not create new "No" keys
-  // If FullAccess was just turned OFF, we MUST write explicit No's
-const fullAccessJustDisabled =
-  (orig.FullAccess || '').toLowerCase() === 'yes' &&
-  newFA === 'No';
+            const chk = card.querySelector(`input[data-user="${user.Username}"][data-key="${key}"]`);
+            if (!chk) return;
 
-// If FullAccess was just disabled, write explicit No's
-if (
-  origVal === undefined &&
-  uiVal === 'No' &&
-  !fullAccessJustDisabled
-) return;
+            const uiVal = chk.checked ? 'Yes' : 'No';
 
-// If FullAccess was just disabled and checkbox exists, force explicit write
-if (fullAccessJustDisabled && origVal === undefined) {
-  changes[key] = uiVal;
-  return;
-}
+            const origVal = orig[key];
 
-  if (String(origVal ?? '') !== uiVal) {
-    changes[key] = uiVal;
-  }
-};
+            // If key doesn't exist in KV and UI is No, don't create it
+            // BUT if FullAccess was just turned OFF, force explicit values
+            if (origVal === undefined && uiVal === 'No' && !fullAccessJustDisabled) return;
+
+            if (fullAccessJustDisabled && origVal === undefined) {
+              changes[key] = uiVal;
+              return;
+            }
+
+            if (String(origVal ?? '') !== uiVal) {
+              changes[key] = uiVal;
+            }
+          };
 
           __STRUCT.forEach(p => {
             const pk = p.key || mapToPermKey(p.id, p.label, p.href);
@@ -907,7 +886,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
 
         await postDelta(patchUsers);
 
-        // sync live model
         patchUsers.forEach(p => {
           const u = __USERS.find(x => x.Username === p.Username);
           if (u) Object.assign(u, p.Changes);
@@ -1053,7 +1031,7 @@ if (fullAccessJustDisabled && origVal === undefined) {
     const addNewUserModal = document.getElementById('addNewUserModal');
     const anu_cancel = document.getElementById('anu_cancel');
 
-    let __MUE = null; // currently selected user in manage users modal
+    let __MUE = null;
 
     function openManageUsers(){
       manageUsersModal.classList.add('show');
@@ -1106,7 +1084,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
       return `${f}.${l}`.replace(/\s+/g,'').replace(/[^\w.\-]/g,'');
     }
 
-    // Auto-generate username in Add New User modal
     const anu_firstName = document.getElementById('anu_firstName');
     const anu_lastName  = document.getElementById('anu_lastName');
     function syncANUUsername(){
@@ -1187,14 +1164,11 @@ if (fullAccessJustDisabled && origVal === undefined) {
         const actions = document.createElement('div');
         actions.className = 'row-actions';
 
-        // ✅ FIXED: status toggle is NOW DELTA POST only (no full payload save)
-        const sw = switchControl(`mu_status_${u.Username}`, isActive, 'Status', 'manage');
+        const sw = switchControl(u.Username, isActive, 'Status', 'manage');
         const swInput = sw.querySelector('input');
 
         swInput.addEventListener('change', async (e)=>{
           const newStatus = e.target.checked ? 'Active' : 'Not Active';
-
-          // optimistic UI (keep it snappy) - revert on error
           const oldChecked = !e.target.checked;
           const oldStatus = oldChecked ? 'Active' : 'Not Active';
 
@@ -1211,7 +1185,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
 
             await postDelta([{ Username: u.Username, Changes: { Status: newStatus } }]);
 
-            // apply to live + snapshot
             const live = (__USERS || []).find(x => x.Username === u.Username);
             if(live) live.Status = newStatus;
 
@@ -1233,7 +1206,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
           }catch(err){
             console.error(err);
             showBanner('❌ Could not update status. '+(err?.message||''),'err');
-            // revert UI state
             swInput.checked = oldChecked;
             chip.className = 'chip ' + (oldStatus === 'Active' ? 'active' : 'inactive');
             chip.textContent = oldStatus === 'Active' ? 'Active' : 'Not Active';
@@ -1281,7 +1253,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
       muSearch.addEventListener('input', debounce(refreshManageUsersUI, 120));
     }
 
-    // ✅ FIXED: Manage Users editor now saves via SAVE-DELTA (no full overwrite)
     document.getElementById('saveManageUsersBtn').addEventListener('click', async ()=>{
       if(!__MUE) {
         showBanner('⚠️ Select a user to edit first.','warn');
@@ -1304,7 +1275,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
 
         const newEmailAddr = document.getElementById('mue_emailAddress').value.trim();
         if (newEmailAddr) {
-          // keep backwards compat
           if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) changes.EmailAddress = newEmailAddr;
           if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) changes.Email = newEmailAddr;
         } else {
@@ -1338,7 +1308,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
 
         await postDelta([{ Username: __MUE.Username, Changes: changes }]);
 
-        // apply changes locally only after success
         Object.assign(__MUE, changes);
 
         const snap = (__ORIGINAL_USERS || []).find(x => x.Username === __MUE.Username);
@@ -1364,7 +1333,6 @@ if (fullAccessJustDisabled && origVal === undefined) {
       }
     });
 
-    // Create new user (permissions default No) - keeps SAVE_URL (intentional full add)
     document.getElementById('anu_create').addEventListener('click', async ()=>{
       try{
         showMask(true);
@@ -1442,7 +1410,13 @@ if (fullAccessJustDisabled && origVal === undefined) {
       }
     });
 
-    // Wire up Manage Users modal buttons
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const manageUsersModal = document.getElementById('manageUsersModal');
+    const closeManageUsersBtn = document.getElementById('closeManageUsersBtn');
+    const openAddNewUserBtn = document.getElementById('openAddNewUserBtn');
+    const addNewUserModal = document.getElementById('addNewUserModal');
+    const anu_cancel = document.getElementById('anu_cancel');
+
     manageUsersBtn.addEventListener('click', openManageUsers);
     closeManageUsersBtn.addEventListener('click', closeManageUsers);
     openAddNewUserBtn.addEventListener('click', openAddNewUser);
@@ -1457,7 +1431,7 @@ if (fullAccessJustDisabled && origVal === undefined) {
     }
 
     (async()=>{await buildUI();})();
-      </script>
+  </script>
 
 </body>
 </html>
