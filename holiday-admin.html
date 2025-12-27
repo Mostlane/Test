@@ -369,12 +369,6 @@ if (!HOLIDAY_ADMINS.includes(user)) {
   }
 
   function setStatus(msg){ $("status").textContent = msg || ""; }
-
-  async function apiGET(path){
-    const res = await fetch(`${API}${path}`, { headers: { "X-User": user, "X-Role": role }, cache:"no-store" });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  }
   
 async function apiGET(path){
   const res = await fetch(`${API}${path}`, {
