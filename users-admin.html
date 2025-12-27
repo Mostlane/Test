@@ -798,7 +798,7 @@ if (fullAccessJustDisabled) {
             }
           };
 
-          const cardInputs = card.querySelectorAll(`input[data-user="${user.Username}"][data-key]:not([data-role="fa"])`);
+         const cardInputs = Array.from(card.querySelectorAll('input[type="checkbox"]')).filter(chk => chk.getAttribute('data-role') !== 'fa')
           const seenKeys = new Set();
           cardInputs.forEach(input => {
             const key = input.getAttribute('data-key');
