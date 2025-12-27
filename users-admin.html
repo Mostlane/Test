@@ -31,8 +31,6 @@
       margin: 0;
       color: var(--ink);
     }
-
-    /* Top bar */
     .topbar {
       position: sticky; top: 0; z-index: 50;
       background: var(--glass); backdrop-filter: blur(6px);
@@ -50,14 +48,11 @@
     .btn-outline{background:#fff; color:var(--ml-blue); border:1px solid var(--ml-blue)}
     .btn-ghost{background:transparent; color:var(--ml-blue); border:1px dashed var(--ml-blue)}
     .btn:disabled{opacity:.6; cursor:not-allowed}
-
     .mini{
       display:inline-flex; align-items:center; gap:6px;
       font-size:12px; padding:6px 10px; border-radius:999px;
       color:var(--ml-blue); background:#fff; border:1px solid var(--ml-blue);
     }
-
-    /* Banner */
     .banner {
       position: sticky; top: 56px; z-index: 45;
       margin: 10px 14px 0;
@@ -68,8 +63,6 @@
     .banner.err{background:var(--err-bg); border:1px solid var(--err-bd); color:var(--err)}
     .banner.warn{background:var(--warn-bg); border:1px solid var(--warn-bd); color:var(--warn)}
     .banner .close{float:right; cursor:pointer; margin-left:10px; font-weight:700}
-
-    /* Wrap */
     .wrap{
       max-width: 1100px;
       margin: 16px auto 70px;
@@ -78,8 +71,6 @@
       border-radius: 10px;
     }
     .subnote{padding:14px; color:#374151; font-size:14px}
-
-    /* Utility row */
     .util {
       display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding: 0 14px 10px;
     }
@@ -89,8 +80,6 @@
     }
     .input:focus{outline:none; border-color:var(--ml-blue)}
     .spacer{flex:1}
-
-    /* Cards */
     .user-card{
       background:#fff; border:1px solid #e5e7eb; border-radius:10px; margin:14px; padding:12px;
       box-shadow:0 1px 3px rgba(0,0,0,.04)
@@ -104,7 +93,6 @@
       display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px;
     }
     @media (max-width: 700px){ .grid{grid-template-columns:1fr} }
-
     .section-title{
       margin:10px 2px 4px; font-size:13px; font-weight:600; color:#374151;
       display:flex; align-items:center; gap:6px
@@ -113,14 +101,12 @@
       font-size:11px; background:var(--ml-blue-50); color:var(--ml-blue);
       padding:4px 8px; border-radius:999px; border:1px solid var(--ml-blue)
     }
-
     .toggle-row{
       display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 2px;
     }
     .toggle-row .lbl{font-size:14px; color:#111827; flex:1}
     .toggle-row .path{font-size:11px; color:#6b7280}
     .toggle-row.indent{ padding-left:22px; }
-
     .switch{ position:relative; display:inline-block; width:44px; height:24px; flex:0 0 auto }
     .switch input{display:none}
     .slider{
@@ -132,8 +118,6 @@
     }
     input:checked + .slider{background:var(--ml-blue)}
     input:checked + .slider:before{transform:translateX(20px)}
-
-    /* Modal, Spinner, misc */
     .modal{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; z-index:60 }
     .modal.show{display:flex}
     .modal-card{ background:#fff; width:92%; max-width:480px; max-height:85vh; overflow:auto; border-radius:10px; padding:16px; box-shadow:0 10px 25px rgba(0,0,0,.15) }
@@ -142,21 +126,15 @@
     .field label{display:block; font-size:12px; color:#374151; margin-bottom:4px}
     .field input{width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; background:#fff; box-sizing:border-box}
     .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:8px}
-
     .mask{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:70; background:rgba(255,255,255,.55); backdrop-filter: blur(2px)}
     .mask.show{display:flex}
     .spinner{
       width:46px; height:46px; border-radius:50%; border:4px solid #c7d2fe; border-top-color: var(--ml-blue); animation:spin 1s linear infinite
     }
     @keyframes spin{ to{ transform: rotate(360deg) } }
-
     .small{font-size:12px; color:#6b7280}
     .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:4px; padding:1px 4px}
-
-    /* Submenu visibility (we toggle display via JS) */
     .submenu-row{ display:flex; }
-
-    /* NEW: Manage Users modal layout */
     .manage-wrap{
       display:flex; gap:12px;
     }
@@ -192,29 +170,22 @@
 </head>
 <body>
 
-  <!-- Top bar -->
   <div class="topbar">
     <h1>User Administration</h1>
     <div class="bar-actions">
       <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
       <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
       <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-
-      <!-- NEW: top-level Manage users button -->
       <button class="btn btn-outline" id="manageUsersBtn">👥 Manage users</button>
-
-      <!-- Existing button retained exactly -->
       <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
     </div>
   </div>
 
-  <!-- Banner -->
   <div id="banner" class="banner">
     <span class="close" id="bannerClose">✖</span>
     <span id="bannerText">Status…</span>
   </div>
 
-  <!-- Body -->
   <div class="wrap">
     <div class="subnote">
       This page auto-discovers buttons from <b>main.html</b> (and linked sub-menus),
@@ -225,12 +196,9 @@
     </div>
 
     <div class="util">
-
-      <!-- Username dropdown -->
       <select id="userFilter" class="input" style="max-width:180px;">
         <option value="">All Users</option>
       </select>
-
       <input id="searchBox" class="input" placeholder="Search users (name / username / number)…" />
       <div class="spacer"></div>
       <span class="mini" id="structCount">Scanning…</span>
@@ -241,7 +209,6 @@
     <div id="list">Loading users…</div>
   </div>
 
-  <!-- Add User Modal (EXISTING - kept) -->
   <div id="addUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Add New User</h3>
@@ -257,25 +224,19 @@
     </div>
   </div>
 
-  <!-- Manage User Modal (EXISTING - kept) -->
   <div id="manageUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Manage User</h3>
-
       <div class="field"><label>Engineer Number</label><input id="mu_engineerNumber" type="text" disabled></div>
       <div class="field"><label>Username</label><input id="mu_username" type="text" disabled></div>
-
       <div class="field"><label>First Name</label><input id="mu_firstName" type="text"></div>
       <div class="field"><label>Last Name</label><input id="mu_lastName" type="text"></div>
       <div class="field"><label>Email</label><input id="mu_email" type="email"></div>
-
       <div class="field"><label>Vehicle Assigned</label><input id="mu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
       <div class="field"><label>Employment Type</label><input id="mu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
       <div class="field"><label>Status</label><input id="mu_status" type="text" placeholder="Active / Not Active"></div>
       <div class="field"><label>SharePoint Path URL</label><input id="mu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-
       <div class="field"><label>Reset Password (optional)</label><input id="mu_password" type="password" placeholder="Leave blank to keep existing"></div>
-
       <div class="modal-actions">
         <button class="btn btn-outline" id="cancelManage">Cancel</button>
         <button class="btn btn-primary" id="saveManageBtn">Save</button>
@@ -283,45 +244,33 @@
     </div>
   </div>
 
-  <!-- NEW: Manage Users Modal (first-level modal) -->
   <div id="manageUsersModal" class="modal" aria-hidden="true">
     <div class="modal-card" style="max-width: 980px;">
       <h3>Manage users</h3>
-
       <div class="util" style="padding:0; margin: 6px 0 10px;">
         <input id="muSearch" class="input" placeholder="Search users…" style="flex:1; min-width:180px;">
         <button class="btn btn-outline" id="openAddNewUserBtn">➕ Add New User</button>
       </div>
-
       <div class="manage-wrap">
         <div class="manage-left">
           <div id="muList">Loading…</div>
           <div class="small" style="margin-top:10px;">
-            Tip: toggling <span class="kbd">Active</span> only changes that user’s <span class="kbd">Status</span> field (DELTA safe).
+            Tip: toggling <span class="kbd">Active</span> only changes that user's <span class="kbd">Status</span> field (DELTA safe).
           </div>
         </div>
-
         <div class="manage-right">
           <div class="small" style="margin-bottom:8px;">Select a user to edit.</div>
-
           <div class="field"><label>Engineer Number</label><input id="mue_engineerNumber" type="text" disabled></div>
           <div class="field"><label>Username</label><input id="mue_username" type="text" disabled></div>
-
           <div class="field"><label>First Name</label><input id="mue_firstName" type="text"></div>
           <div class="field"><label>Last Name</label><input id="mue_lastName" type="text"></div>
-
-          <!-- NEW fields (do not break existing Email) -->
           <div class="field"><label>Email Address</label><input id="mue_emailAddress" type="email" placeholder="name@mostlane.com"></div>
           <div class="field"><label>Mobile Number</label><input id="mue_mobileNumber" type="text" placeholder="07…"></div>
-
           <div class="field"><label>Vehicle Assigned</label><input id="mue_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
           <div class="field"><label>Employment Type</label><input id="mue_employmentType" type="text" placeholder="Employed / Self Employed"></div>
           <div class="field"><label>SharePoint Path URL</label><input id="mue_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-
           <div class="field"><label>Status</label><input id="mue_status" type="text" placeholder="Active / Not Active"></div>
-
           <div class="field"><label>Reset Password (optional)</label><input id="mue_password" type="password" placeholder="Leave blank to keep existing"></div>
-
           <div class="modal-actions">
             <button class="btn btn-outline" id="closeManageUsersBtn">Close</button>
             <button class="btn btn-primary" id="saveManageUsersBtn">Save user changes</button>
@@ -331,30 +280,21 @@
     </div>
   </div>
 
-  <!-- NEW: Add New User modal (second-level modal) -->
   <div id="addNewUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Add New User</h3>
-
       <div class="field"><label>First Name</label><input id="anu_firstName" type="text" placeholder="First Name" required></div>
       <div class="field"><label>Last Name</label><input id="anu_lastName" type="text" placeholder="Last Name" required></div>
-
       <div class="field"><label>Username</label><input id="anu_username" type="text" disabled></div>
-
       <div class="field"><label>Password</label><input id="anu_password" type="password" placeholder="Initial password" required></div>
-
       <div class="field"><label>Email Address</label><input id="anu_emailAddress" type="email" placeholder="name@mostlane.com"></div>
       <div class="field"><label>Mobile Number</label><input id="anu_mobileNumber" type="text" placeholder="07…"></div>
-
       <div class="field"><label>Vehicle Assigned (optional)</label><input id="anu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
       <div class="field"><label>Employment Type</label><input id="anu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
-
       <div class="field"><label>SharePoint Path URL</label><input id="anu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-
       <div class="small" style="margin-top:8px;">
         All page permissions will be set to <span class="kbd">No</span> by default (DELTA safe).
       </div>
-
       <div class="modal-actions">
         <button class="btn btn-outline" id="anu_cancel">Cancel</button>
         <button class="btn btn-primary" id="anu_create">Create User</button>
@@ -417,7 +357,6 @@
       return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
 
-    // ✅ NEW: DELTA POST helper (centralised + consistent error text)
     async function postDelta(patchUsers){
       const res = await fetch(SAVE_DELTA_URL, {
         method: 'POST',
@@ -434,7 +373,6 @@
       return true;
     }
 
-    // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
     function mapToPermKey(id, label, href) {
       const mapByExact = {
         "CheckInOut": "CheckInOut",
@@ -476,7 +414,6 @@
       return null;
     }
 
-    // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
       const parser=new DOMParser();
       const visited=new Set();
@@ -547,7 +484,6 @@
       }
     }
 
-    // ✅ CRITICAL FIX: all inputs are located via data-user + data-key (never fragile IDs)
     function switchControl(userName,checked,permKey,role){
       const inputAttrs = {
         type:'checkbox',
@@ -582,7 +518,6 @@
       );
     }
 
-    // Manage Modal Logic (EXISTING)
     const manageModal = document.getElementById('manageUserModal');
     let __MANAGING = null;
 
@@ -609,7 +544,6 @@
 
     document.getElementById('cancelManage').addEventListener('click',closeManage);
 
-    // ✅ FIXED: single-user modal uses SAVE-DELTA
     document.getElementById('saveManageBtn').addEventListener('click',async()=>{
       if(!__MANAGING) return;
 
@@ -774,13 +708,13 @@
     async function buildUI(){
       showMask(true);
       try{
-const users = await fetchAllUsers();
-let struct = [];
-try {
-  struct = await scanPortal();
-} catch(e){
-  console.warn('Portal scan failed – continuing without it', e);
-}
+        const users = await fetchAllUsers();
+        let struct = [];
+        try {
+          struct = await scanPortal();
+        } catch(e){
+          console.warn('Portal scan failed – continuing without it', e);
+        }
         __USERS = users;
         __STRUCT = struct;
 
@@ -829,14 +763,12 @@ try {
 
           const changes = {};
 
-          // FULL ACCESS (read via data selector)
           const faEl = card.querySelector(`input[data-user="${user.Username}"][data-key="FullAccess"][data-role="fa"]`);
           const newFA = faEl && faEl.checked ? 'Yes' : 'No';
           if (String(orig.FullAccess || 'No') !== newFA) {
             changes.FullAccess = newFA;
           }
 
-          // If FullAccess is ON, don't touch individual permissions (FullAccess overrides)
           const fullAccessOnNow = newFA === 'Yes';
 
           const fullAccessJustDisabled =
@@ -846,7 +778,6 @@ try {
           const checkPerm = (key) => {
             if (!key) return;
 
-            // When FullAccess is currently ON, we do not patch individual keys
             if (fullAccessOnNow) return;
 
             const chk = card.querySelector(`input[data-user="${user.Username}"][data-key="${key}"]`);
@@ -856,8 +787,6 @@ try {
 
             const origVal = orig[key];
 
-            // If key doesn't exist in KV and UI is No, don't create it
-            // BUT if FullAccess was just turned OFF, force explicit values
             if (origVal === undefined && uiVal === 'No' && !fullAccessJustDisabled) return;
 
             if (fullAccessJustDisabled && origVal === undefined) {
@@ -910,7 +839,6 @@ try {
       }
     }
 
-    // Modal logic (EXISTING Add User)
     const modal=document.getElementById('addUserModal');
     const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
@@ -946,6 +874,11 @@ try {
           return;
         }
 
+        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) {
+          showBanner('❌ That username already exists.','err');
+          return;
+        }
+
         const hashedPassword=await sha256Hex(password);
 
         const newUser={
@@ -954,6 +887,7 @@ try {
           LastName:lastName,
           Username:username,
           Email:email,
+          EmailAddress:email,
           HashedPassword:hashedPassword,
           VehicleAssigned:vehicle,
           EmploymentType:empType||'Employed',
@@ -962,11 +896,17 @@ try {
           SharePointPath:spPath
         };
 
+        const keys = collectAllPermissionKeys();
+        keys.forEach(k=>{
+          if (!k) return;
+          if (typeof newUser[k] === 'undefined') newUser[k] = 'No';
+        });
+
         users.push(newUser);
         await saveUsers(users);
         closeAdd();
-        showBanner('✅ User added.','ok');
-        buildUI();
+        showBanner('✅ User added with all permissions set to No.','ok');
+        await buildUI();
       }
       catch(err){
         console.error(err);
@@ -979,7 +919,6 @@ try {
 
     document.getElementById('createUserBtn').addEventListener('click',createUser);
 
-    // Combined search + filter
     function applyFilters() {
       const q = (searchBox.value || '').trim().toLowerCase();
       const selected = userFilter.value;
@@ -1012,7 +951,7 @@ try {
       try{
         __STRUCT = await scanPortal();
         renderUsers(__USERS,__STRUCT);
-        showBanner('🔄 Scan complete. Buttons refreshed.','ok');
+        showBanner('✅ Scan complete. Buttons refreshed.','ok');
       }
       catch(e){
         console.error(e);
@@ -1022,18 +961,12 @@ try {
         showMask(false);
       }
     });
-
-    // ==========================================================
-    // Manage users (LIST + EDIT) + Add New User (DELTA SAFE)
-    // ==========================================================
-    const manageUsersBtn = document.getElementById('manageUsersBtn');
+        const manageUsersBtn = document.getElementById('manageUsersBtn');
     const manageUsersModal = document.getElementById('manageUsersModal');
     const muList = document.getElementById('muList');
     const muSearch = document.getElementById('muSearch');
-
     const closeManageUsersBtn = document.getElementById('closeManageUsersBtn');
     const openAddNewUserBtn = document.getElementById('openAddNewUserBtn');
-
     const addNewUserModal = document.getElementById('addNewUserModal');
     const anu_cancel = document.getElementById('anu_cancel');
 
@@ -1368,7 +1301,7 @@ try {
         const spPath    = document.getElementById('anu_sharepoint').value.trim();
 
         if(!firstName || !lastName || !username || !password){
-          showBanner('❌ Please complete First Name, Last Name, and Password.','err');
+          showBanner('❌ Please complete First Name, Last Name, Username and Password.','err');
           return;
         }
 
@@ -1415,13 +1348,6 @@ try {
         showMask(false);
       }
     });
-
-    const manageUsersBtn = document.getElementById('manageUsersBtn');
-    const manageUsersModal = document.getElementById('manageUsersModal');
-    const closeManageUsersBtn = document.getElementById('closeManageUsersBtn');
-    const openAddNewUserBtn = document.getElementById('openAddNewUserBtn');
-    const addNewUserModal = document.getElementById('addNewUserModal');
-    const anu_cancel = document.getElementById('anu_cancel');
 
     manageUsersBtn.addEventListener('click', openManageUsers);
     closeManageUsersBtn.addEventListener('click', closeManageUsers);
