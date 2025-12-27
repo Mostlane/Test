@@ -811,8 +811,8 @@ async function saveAll(){
       const changes = {};
 
       // FULL ACCESS
-      const faEl = card.querySelector(`#fa_${user.Username}__chk`);
-      const newFA = faEl && faEl.checked ? 'Yes' : 'No';
+const faEl = card.querySelector(`input[data-key="FullAccess"]`);
+const newFA = faEl && faEl.checked ? 'Yes' : 'No';
       if (String(orig.FullAccess || 'No') !== newFA) {
         changes.FullAccess = newFA;
       }
