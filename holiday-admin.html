@@ -24,6 +24,7 @@
       --dayCol:28px;
     }
 
+    *{box-sizing:border-box;}
     html,body{width:100%;max-width:100%;overflow-x:hidden;}
     body{
       margin:0;
@@ -64,16 +65,14 @@
       cursor:pointer;
       font-weight:700;
       font-size:14px;
+      white-space:nowrap;
     }
-    .btnPrimary{
-      background:rgba(0,74,153,0.85);
-      color:#fff;
-      border:none;
-    }
+    .btnPrimary{background:rgba(0,74,153,0.85);color:#fff;border:none}
     .btnSmall{padding:6px 10px;font-size:12px;border-radius:8px;font-weight:700}
     .btnDanger{background:rgba(176,0,32,0.9);color:#fff;border:none}
     .btnOk{background:rgba(21,128,61,0.9);color:#fff;border:none}
     .btn:hover{filter:brightness(0.98)}
+    .btn:active{transform:scale(0.98)}
 
     .content{padding:18px;}
     .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
@@ -83,20 +82,12 @@
       border-radius:14px;
       padding:14px;
       box-shadow:0 6px 18px rgba(0,0,0,0.06);
+      width:100%;
     }
 
-    .panel h2{
-      margin:0 0 10px 0;
-      font-size:16px;
-      color:var(--ml-blue);
-    }
+    .panel h2{margin:0 0 10px 0;font-size:16px;color:var(--ml-blue);}
 
-    .controls{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
+    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     select,input{
       height:40px;
       padding:8px 12px;
@@ -104,6 +95,7 @@
       border:1px solid #cbd5e1;
       background:#fff;
       font-size:14px;
+      min-width:0;
     }
     .pill{
       display:inline-flex;align-items:center;gap:8px;
@@ -113,8 +105,10 @@
     }
     .muted{color:var(--muted)}
 
+    .tableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
     table{
       width:100%;
+      min-width:500px;
       border-collapse:separate;
       border-spacing:0;
       overflow:hidden;
@@ -122,25 +116,14 @@
       border-radius:12px;
       background:#fff;
     }
-    th,td{
-      padding:10px 10px;
-      border-bottom:1px solid #eef2f7;
-      font-size:13px;
-      text-align:left;
-      vertical-align:middle;
-    }
-    thead th{background:#f7f9fc;color:#0f172a;font-weight:800}
+    th,td{padding:10px 10px;border-bottom:1px solid #eef2f7;font-size:13px;text-align:left;vertical-align:middle}
+    thead th{background:#f7f9fc;color:#0f172a;font-weight:800;white-space:nowrap}
     .tag{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800;border:1px solid rgba(0,0,0,0.08)}
     .tagPending{color:var(--warn);background:rgba(180,83,9,0.1)}
     .tagApproved{color:var(--good);background:rgba(21,128,61,0.1)}
     .tagRejected{color:var(--bad);background:rgba(176,0,32,0.08)}
 
-    .calWrap{
-      overflow:auto;
-      border:1px solid var(--border);
-      border-radius:14px;
-      background:#fff;
-    }
+    .calWrap{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:14px;background:#fff}
 
     .calHeader, .calRow{
       display:grid;
@@ -149,35 +132,15 @@
       border-bottom:1px solid #eef2f7;
     }
 
-    .calHeader{
-      position:sticky;
-      top:0;
-      z-index:5;
-      background:#f7f9fc;
-    }
+    .calHeader{position:sticky;top:0;z-index:5;background:#f7f9fc}
 
     .nameCell{
-      padding:8px 10px;
-      font-weight:800;
-      color:#0f172a;
-      border-right:1px solid #eef2f7;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      background:inherit;
-      position:sticky;
-      left:0;
-      z-index:6;
+      padding:8px 10px;font-weight:800;color:#0f172a;border-right:1px solid #eef2f7;
+      display:flex;align-items:center;gap:8px;background:inherit;position:sticky;left:0;z-index:6;
     }
     .dayCell{
-      width:var(--dayCol);
-      height:var(--cell);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:12px;
-      color:#334155;
-      border-right:1px solid #f1f5f9;
+      width:var(--dayCol);height:var(--cell);display:flex;align-items:center;justify-content:center;
+      font-size:12px;color:#334155;border-right:1px solid #f1f5f9;
     }
     .calRow .dayCell{background:#fff}
     .dayCell.weekend{background:#f8fafc;color:#94a3b8}
@@ -191,28 +154,66 @@
     .evWorked{outline:2px solid rgba(21,128,61,0.55); outline-offset:-2px}
 
     .tooltip{
-      position:fixed;
-      z-index:9999;
-      background:rgba(15,23,42,0.95);
-      color:#fff;
-      padding:10px 12px;
-      border-radius:10px;
-      font-size:12px;
-      max-width:260px;
-      pointer-events:none;
-      transform:translate(10px,10px);
-      display:none;
+      position:fixed;z-index:9999;background:rgba(15,23,42,0.95);color:#fff;
+      padding:10px 12px;border-radius:10px;font-size:12px;max-width:260px;
+      pointer-events:none;transform:translate(10px,10px);display:none;
     }
 
     .split{display:flex;gap:14px;flex-wrap:wrap}
-    .col{flex:1;min-width:320px}
-    .listRow{display:flex;gap:8px;align-items:center;margin:8px 0}
-    .listRow input{flex:1}
-    .listRow .btnSmall{flex:0}
+    .col{flex:1;min-width:280px}
+    .listRow{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
+    .listRow input{flex:1;min-width:120px}
+    .listRow .btnSmall{flex:0 0 auto}
+    .actionBtns{display:flex;gap:6px;flex-wrap:wrap}
 
     @media(max-width:900px){
       body{padding:14px}
-      :root{ --nameCol:200px; --dayCol:26px; }
+      :root{ --nameCol:180px; --dayCol:26px; }
+      .panel{min-width:0 !important;}
+      header{flex-direction:column;align-items:stretch;gap:10px}
+      header h1{text-align:center}
+      .controls{justify-content:center}
+    }
+
+    @media(max-width:600px){
+      body{padding:8px}
+      :root{ --nameCol:120px; --dayCol:24px; --cell:24px; }
+      .shell{border-radius:10px}
+      header{padding:12px}
+      header h1{font-size:18px}
+      .content{padding:10px}
+      .row{gap:10px}
+      .panel{padding:10px;border-radius:10px}
+      .panel h2{font-size:14px}
+      .btn{padding:8px 10px;font-size:13px}
+      .btnSmall{padding:6px 8px;font-size:11px}
+      .controls{gap:6px}
+      .controls .btn{padding:8px 10px}
+      .pill{padding:6px 10px;font-size:13px}
+      select,input{height:36px;padding:6px 10px;font-size:13px}
+      table{min-width:400px}
+      th,td{padding:8px 6px;font-size:12px}
+      .nameCell{padding:6px 8px;font-size:12px}
+      .nameCell .tag{display:none}
+      .dayCell{font-size:10px}
+      .split{flex-direction:column}
+      .col{min-width:100%}
+      .listRow{gap:6px}
+      .listRow input{min-width:80px}
+      .muted{font-size:12px}
+      .actionBtns{flex-direction:column;gap:4px}
+      .actionBtns .btn{width:100%}
+    }
+
+    @media(max-width:400px){
+      :root{ --nameCol:100px; --dayCol:20px; --cell:20px; }
+      body{padding:4px}
+      .content{padding:6px}
+      header{padding:10px}
+      header h1{font-size:16px}
+      .panel{padding:8px}
+      table{min-width:320px}
+      th,td{padding:6px 4px;font-size:11px}
     }
   </style>
 </head>
@@ -221,56 +222,37 @@
   <div class="shell">
     <header>
       <h1>Holiday Admin</h1>
-
       <div class="controls">
-        <button class="btn" onclick="location.href='main.html'">Main Menu</button>
-
+        <button class="btn" onclick="location.href='main.html'">Menu</button>
         <button id="prevMonth" class="btn">◀</button>
         <div class="pill"><span id="monthLabel">—</span></div>
         <button id="nextMonth" class="btn">▶</button>
-
         <select id="yearSel"></select>
-
         <button id="refreshBtn" class="btn btnPrimary">Refresh</button>
       </div>
     </header>
 
     <div class="content">
       <div class="row">
-        <div class="panel" style="flex:1;min-width:420px;">
+        <div class="panel" style="flex:1;">
           <h2>Pending Approvals</h2>
           <div class="muted" id="pendingHint" style="margin-bottom:8px;">—</div>
-          <div style="overflow:auto;">
+          <div class="tableWrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Engineer</th>
-                  <th>Dates</th>
-                  <th>Days</th>
-                  <th>Type</th>
-                  <th>Note</th>
-                  <th style="width:170px;">Actions</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Engineer</th><th>Dates</th><th>Days</th><th>Type</th><th>Note</th><th>Actions</th></tr></thead>
               <tbody id="pendingTbody"></tbody>
             </table>
           </div>
         </div>
+      </div>
 
-        <div class="panel" style="flex:0.9;min-width:380px;">
+      <div class="row" style="margin-top:14px;">
+        <div class="panel" style="flex:1;">
           <h2>Allowance Overview</h2>
           <div class="muted" id="allowanceHint" style="margin-bottom:8px;">Year totals (includes bank holidays + shutdown; credited back if worked).</div>
-          <div style="overflow:auto;max-height:420px;">
+          <div class="tableWrap" style="max-height:420px;">
             <table>
-              <thead>
-                <tr>
-                  <th>Engineer</th>
-                  <th>Allowance</th>
-                  <th>Used</th>
-                  <th>Remaining</th>
-                  <th style="width:120px;">Edit</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Engineer</th><th>Allowance</th><th>Used</th><th>Remaining</th><th>Edit</th></tr></thead>
               <tbody id="allowTbody"></tbody>
             </table>
           </div>
@@ -278,41 +260,37 @@
       </div>
 
       <div class="row" style="margin-top:14px;">
-        <div class="panel" style="flex:1;min-width:600px;">
+        <div class="panel" style="flex:1;">
           <h2>Month View</h2>
-          <div class="muted" id="calHint" style="margin-bottom:10px;">Approved leave shown in blue. Bank holidays and shutdown shown; holiday requests override system days visually.</div>
-
+          <div class="muted" id="calHint" style="margin-bottom:10px;">Approved leave shown in blue. Bank holidays and shutdown shown.</div>
           <div class="calWrap" id="calWrap"></div>
         </div>
       </div>
 
       <div class="row" style="margin-top:14px;">
-        <div class="panel" style="flex:1;min-width:600px;">
+        <div class="panel" style="flex:1;">
           <h2>Bank Holidays & Company Shutdown</h2>
           <div class="split">
             <div class="col">
-              <div class="muted" style="margin-bottom:6px;">Bank Holidays (manage from here)</div>
+              <div class="muted" style="margin-bottom:6px;">Bank Holidays</div>
               <div class="listRow">
                 <input type="date" id="bhDate">
-                <input type="text" id="bhLabel" placeholder="Label (e.g. Christmas Day)">
+                <input type="text" id="bhLabel" placeholder="Label">
                 <button class="btn btnSmall btnPrimary" id="addBH">Add</button>
               </div>
               <div id="bhList"></div>
             </div>
-
             <div class="col">
               <div class="muted" style="margin-bottom:6px;">Company Shutdown</div>
               <div class="listRow">
                 <input type="date" id="sdDate">
-                <input type="text" id="sdLabel" placeholder="Label (e.g. Christmas Shutdown)">
+                <input type="text" id="sdLabel" placeholder="Label">
                 <button class="btn btnSmall btnPrimary" id="addSD">Add</button>
               </div>
               <div id="sdList"></div>
             </div>
           </div>
-          <div class="muted" style="margin-top:10px;">
-            Tip: mark a system day as "worked" from the month grid by clicking the day cell (bank holiday/shutdown only).
-          </div>
+          <div class="muted" style="margin-top:10px;">Tip: mark a system day as "worked" from the month grid by clicking the day cell.</div>
         </div>
       </div>
 
@@ -321,8 +299,7 @@
   </div>
 
   <div class="tooltip" id="tooltip"></div>
-
-<script>
+  <script>
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
 const user = sessionStorage.getItem("mostlaneUser");
 
@@ -416,14 +393,16 @@ function renderPending(){
     const name = (r.username || "").replace(".", " ");
     const note = (r.notes || "").replace(/</g,"&lt;");
     tr.innerHTML = `
-      <td><b>${name}</b><div class="muted" style="font-size:12px;">${r.username}</div></td>
-      <td>${r.start} → ${r.end}</td>
+      <td><b>${name}</b><div class="muted" style="font-size:11px;">${r.username}</div></td>
+      <td style="white-space:nowrap">${r.start} → ${r.end}</td>
       <td>${Number(r.days||0).toFixed(0)}</td>
       <td>${r.type || "Annual Leave"}</td>
       <td>${note || "<span class='muted'>—</span>"}</td>
       <td>
-        <button class="btn btnSmall btnOk" data-act="approve" data-id="${r.id}">Approve</button>
-        <button class="btn btnSmall btnDanger" data-act="reject" data-id="${r.id}">Decline</button>
+        <div class="actionBtns">
+          <button class="btn btnSmall btnOk" data-act="approve" data-id="${r.id}">Approve</button>
+          <button class="btn btnSmall btnDanger" data-act="reject" data-id="${r.id}">Decline</button>
+        </div>
       </td>
     `;
     tbody.appendChild(tr);
@@ -454,13 +433,11 @@ function renderAllowance(){
   for (const e of state.summary.engineers){
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><b>${e.name}</b><div class="muted" style="font-size:12px;">${e.username}</div></td>
+      <td><b>${e.name}</b><div class="muted" style="font-size:11px;">${e.username}</div></td>
       <td>${Number(e.allowance||0).toFixed(0)}</td>
       <td>${Number(e.used||0).toFixed(0)}</td>
       <td><b>${Number(e.remaining||0).toFixed(0)}</b></td>
-      <td>
-        <button class="btn btnSmall" data-edit="${e.username}">Edit</button>
-      </td>
+      <td><button class="btn btnSmall" data-edit="${e.username}">Edit</button></td>
     `;
     tbody.appendChild(tr);
   }
@@ -514,8 +491,8 @@ function classForCell(cell){
 function tooltipShow(html, x, y){
   const t = $("tooltip");
   t.innerHTML = html;
-  t.style.left = x + "px";
-  t.style.top = y + "px";
+  t.style.left = Math.min(x, window.innerWidth - 270) + "px";
+  t.style.top = Math.min(y, window.innerHeight - 150) + "px";
   t.style.display = "block";
 }
 function tooltipHide(){
@@ -547,7 +524,7 @@ function renderCalendar(){
     row.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
 
     const remaining = (state.summary?.engineers || []).find(x=>x.username===eng.username)?.remaining;
-    const remTxt = (Number.isFinite(remaining)) ? `<span class="tag" style="margin-left:auto;background:#eef2f9;">${remaining} left</span>` : "";
+    const remTxt = (Number.isFinite(remaining)) ? `<span class="tag" style="margin-left:auto;background:#eef2f9;">${remaining}</span>` : "";
 
     row.innerHTML = `
       <div class="nameCell">
@@ -584,12 +561,13 @@ function renderCalendar(){
         : `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
 
       const extra = (cell.kind === "bankholiday" || cell.kind === "shutdown")
-        ? `<div style="margin-top:6px;color:#cbd5e1;">Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br><span style="opacity:0.85;">Click to toggle</span></div>`
+        ? `<div style="margin-top:6px;color:#cbd5e1;">Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br><span style="opacity:0.85;">Click/tap to toggle</span></div>`
         : "";
 
       tooltipShow(`<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`, ev.clientX, ev.clientY);
     });
     el.addEventListener("mouseleave", tooltipHide);
+    el.addEventListener("touchend", tooltipHide);
 
     el.addEventListener("click", async ()=>{
       if (!(cell.kind === "bankholiday" || cell.kind === "shutdown")) return;
@@ -625,7 +603,7 @@ function renderConfigLists(){
     row.innerHTML = `
       <input type="date" value="${b.date}">
       <input type="text" value="${(b.label||"").replace(/"/g,"&quot;")}">
-      <button class="btn btnSmall btnDanger">Delete</button>
+      <button class="btn btnSmall btnDanger">Del</button>
       <button class="btn btnSmall btnPrimary">Save</button>
     `;
     const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
@@ -653,7 +631,7 @@ function renderConfigLists(){
     row.innerHTML = `
       <input type="date" value="${s.date}">
       <input type="text" value="${(s.label||"").replace(/"/g,"&quot;")}">
-      <button class="btn btnSmall btnDanger">Delete</button>
+      <button class="btn btnSmall btnDanger">Del</button>
       <button class="btn btnSmall btnPrimary">Save</button>
     `;
     const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
@@ -685,6 +663,7 @@ async function saveBank(){
     setStatus("");
   }
 }
+
 async function saveShutdown(){
   try{
     setStatus("Saving shutdown days…");
@@ -710,10 +689,8 @@ $("addBH").onclick = async ()=>{
     setStatus("Saving bank holiday…");
     const next = [...(state.config.bankholidays || []), { date:d, label:l }];
     await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: next });
-
     $("bhDate").value = "";
     $("bhLabel").value = "";
-
     await loadConfig();
     await refreshAll();
     setStatus("");
@@ -735,10 +712,8 @@ $("addSD").onclick = async ()=>{
     setStatus("Saving shutdown…");
     const next = [...(state.config.shutdown || []), { date:d, label:l }];
     await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: next });
-
     $("sdDate").value = "";
     $("sdLabel").value = "";
-
     await loadConfig();
     await refreshAll();
     setStatus("");
@@ -757,12 +732,15 @@ async function loadConfig(){
   };
   renderConfigLists();
 }
+
 async function loadRequests(){
   state.allRequests = await apiGET(`/holiday/all?year=${state.year}&t=${Date.now()}`);
 }
+
 async function loadSummary(){
   state.summary = await apiGET(`/holiday/admin-summary?year=${state.year}&t=${Date.now()}`);
 }
+
 async function loadCalendar(){
   state.calendar = await apiGET(`/holiday/calendar?year=${state.year}&month=${state.month}&t=${Date.now()}`);
 }
