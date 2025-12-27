@@ -625,6 +625,7 @@ function mapToPermKey(id, label, href) {
         setIfChanged(__MANAGING, 'EmploymentType', document.getElementById('mu_employmentType').value.trim());
         setIfChanged(__MANAGING, 'Status', document.getElementById('mu_status').value.trim());
         setIfChanged(__MANAGING, 'SharePointPath', document.getElementById('mu_sharepoint').value.trim());
+        setIfChanged(__MANAGING, 'Role', document.getElementById('mu_role').value.trim() );
 
         const newPw = document.getElementById('mu_password').value;
         if(newPw && newPw.trim()){
