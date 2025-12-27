@@ -774,7 +774,13 @@
     async function buildUI(){
       showMask(true);
       try{
-        const [users,struct] = await Promise.all([fetchAllUsers(),scanPortal()]);
+const users = await fetchAllUsers();
+let struct = [];
+try {
+  struct = await scanPortal();
+} catch(e){
+  console.warn('Portal scan failed – continuing without it', e);
+}
         __USERS = users;
         __STRUCT = struct;
 
