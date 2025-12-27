@@ -798,16 +798,15 @@ if (fullAccessJustDisabled) {
             }
           };
 
-          __STRUCT.forEach(p => {
-            const pk = p.key || mapToPermKey(p.id, p.label, p.href);
-            if (pk) checkPerm(pk);
-
-            (p.subpages || []).forEach(sp => {
-              const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-              if (sk) checkPerm(sk);
-            });
+          const cardInputs = card.querySelectorAll(`input[data-user="${user.Username}"][data-key]:not([data-role="fa"])`);
+          const seenKeys = new Set();
+          cardInputs.forEach(input => {
+            const key = input.getAttribute('data-key');
+            if (key && !seenKeys.has(key)) {
+              seenKeys.add(key);
+              checkPerm(key);
+            }
           });
-
           if (Object.keys(changes).length) {
             patchUsers.push({ Username: user.Username, Changes: changes });
           }
