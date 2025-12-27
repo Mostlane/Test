@@ -836,22 +836,28 @@ if (origVal === undefined && uiVal === 'No') {
         }
       };
 
-const checkedKeys = new Set();
+// ✅ SAVE ALL PERMISSIONS THAT EXIST IN THE UI
+const seen = new Set();
 
-__STRUCT.forEach(p => {
-  const pk = p.key || mapToPermKey(p.id, p.label, p.href);
-  if (pk && !checkedKeys.has(pk)) {
-    checkedKeys.add(pk);
-    checkPerm(pk);
+card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
+  const key = chk.dataset.key;
+  if (!key || key === 'FullAccess') return;
+  if (seen.has(key)) return;
+  seen.add(key);
+
+  const uiVal = chk.checked ? 'Yes' : 'No';
+  const origVal = orig[key];
+
+  // Allow first-time "No"
+  if (origVal === undefined && uiVal === 'No') {
+    changes[key] = 'No';
+    return;
   }
 
-  (p.subpages || []).forEach(sp => {
-    const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-    if (sk && !checkedKeys.has(sk)) {
-      checkedKeys.add(sk);
-      checkPerm(sk);
-    }
-  });
+  if (String(origVal ?? '') !== uiVal) {
+    changes[key] = uiVal;
+  }
+});
 });
 
       if (Object.keys(changes).length) {
