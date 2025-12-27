@@ -135,19 +135,9 @@
     .small{font-size:12px; color:#6b7280}
     .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:4px; padding:1px 4px}
     .submenu-row{ display:flex; }
-    .manage-wrap{
-      display:flex; gap:12px;
-    }
-    .manage-left{
-      flex: 1;
-      min-width: 240px;
-    }
-    .manage-right{
-      flex: 1;
-      min-width: 240px;
-      border-left: 1px solid #e5e7eb;
-      padding-left: 12px;
-    }
+    .manage-wrap{display:flex; gap:12px;}
+    .manage-left{flex: 1; min-width: 240px;}
+    .manage-right{flex: 1; min-width: 240px; border-left: 1px solid #e5e7eb; padding-left: 12px;}
     @media (max-width: 820px){
       .manage-wrap{flex-direction:column}
       .manage-right{border-left:none; padding-left:0; border-top:1px solid #e5e7eb; padding-top:12px}
@@ -160,9 +150,7 @@
     .user-row .who{display:flex; flex-direction:column; gap:2px}
     .user-row .who .t{font-weight:600; color:#111827; font-size:14px}
     .user-row .who .s{font-size:12px; color:#6b7280}
-    .chip{
-      font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #d1d5db; background:#f9fafb; color:#374151;
-    }
+    .chip{font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #d1d5db; background:#f9fafb; color:#374151;}
     .chip.active{border-color:#86efac; background:#ecfdf5; color:#166534}
     .chip.inactive{border-color:#fecaca; background:#fef2f2; color:#991b1b}
     .row-actions{display:flex; gap:8px; align-items:center}
@@ -173,16 +161,16 @@
   <div class="topbar">
     <h1>User Administration</h1>
     <div class="bar-actions">
-      <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
-      <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
-      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-      <button class="btn btn-outline" id="manageUsersBtn">👥 Manage users</button>
-      <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
+      <button class="btn btn-outline" id="rescanBtn">Rescan Portal</button>
+      <button class="btn btn-outline" id="reloadBtn">Reload Users</button>
+      <button class="btn btn-primary" id="saveBtn">Save Changes</button>
+      <button class="btn btn-outline" id="manageUsersBtn">Manage users</button>
+      <button class="btn btn-ghost" id="addUserBtn">Add User</button>
     </div>
   </div>
 
   <div id="banner" class="banner">
-    <span class="close" id="bannerClose">✖</span>
+    <span class="close" id="bannerClose">X</span>
     <span id="bannerText">Status…</span>
   </div>
 
@@ -190,11 +178,8 @@
     <div class="subnote">
       This page auto-discovers buttons from <b>main.html</b> (and linked sub-menus),
       then shows matching toggles per user. <b>Full Access</b> overrides everything.
-      <div class="small">
-        Permissions are stored under stable keys per section, so settings will not reset even if you rename buttons or add emojis.
-      </div>
+      <div class="small">Permissions are stored under stable keys per section, so settings will not reset.</div>
     </div>
-
     <div class="util">
       <select id="userFilter" class="input" style="max-width:180px;">
         <option value="">All Users</option>
@@ -205,7 +190,6 @@
       <a class="mini" href="main.html" target="_blank" rel="noopener">Open main.html</a>
       <a class="mini" id="debugLink" href="https://mostlane-users.jamie-def.workers.dev/debug/bindings" target="_blank" rel="noopener">Bindings</a>
     </div>
-
     <div id="list">Loading users…</div>
   </div>
 
@@ -214,29 +198,29 @@
       <h3>Add New User</h3>
       <div class="field"><label>First Name</label><input id="firstName" type="text" placeholder="First Name" required></div>
       <div class="field"><label>Last Name</label><input id="lastName" type="text" placeholder="Last Name" required></div>
-      <div class="field"><label>Email (optional)</label><input id="email" type="email" placeholder="name@company.com"></div>
+      <div class="field"><label>Email</label><input id="email" type="email" placeholder="name@company.com"></div>
       <div class="field"><label>Username</label><input id="username" type="text" placeholder="e.g. John.Doe" required></div>
       <div class="field"><label>Password</label><input id="password" type="password" placeholder="Initial password" required></div>
-      <div class="field"><label>Vehicle Assigned (optional)</label><input id="vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
-      <div class="field"><label>Employment Type</label><input id="employmentType" type="text" placeholder="Employed / Self Employed"></div>
-      <div class="field"><label>SharePoint Path URL</label><input id="sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-      <div class="modal-actions"><button class="btn btn-outline" id="cancelAdd">Cancel</button><button class="btn btn-primary" id="createUserBtn">Create User</button></div>
+      <div class="field"><label>Vehicle</label><input id="vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="employmentType" type="text" placeholder="Employed"></div>
+      <div class="field"><label>SharePoint Path</label><input id="sharepoint" type="text" placeholder="Full link"></div>
+      <div class="modal-actions"><button class="btn btn-outline" id="cancelAdd">Cancel</button><button class="btn btn-primary" id="createUserBtn">Create</button></div>
     </div>
   </div>
 
   <div id="manageUserModal" class="modal" aria-hidden="true">
     <div class="modal-card">
       <h3>Manage User</h3>
-      <div class="field"><label>Engineer Number</label><input id="mu_engineerNumber" type="text" disabled></div>
+      <div class="field"><label>Engineer #</label><input id="mu_engineerNumber" type="text" disabled></div>
       <div class="field"><label>Username</label><input id="mu_username" type="text" disabled></div>
       <div class="field"><label>First Name</label><input id="mu_firstName" type="text"></div>
       <div class="field"><label>Last Name</label><input id="mu_lastName" type="text"></div>
       <div class="field"><label>Email</label><input id="mu_email" type="email"></div>
-      <div class="field"><label>Vehicle Assigned</label><input id="mu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
-      <div class="field"><label>Employment Type</label><input id="mu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
-      <div class="field"><label>Status</label><input id="mu_status" type="text" placeholder="Active / Not Active"></div>
-      <div class="field"><label>SharePoint Path URL</label><input id="mu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-      <div class="field"><label>Reset Password (optional)</label><input id="mu_password" type="password" placeholder="Leave blank to keep existing"></div>
+      <div class="field"><label>Vehicle</label><input id="mu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="mu_employmentType" type="text"></div>
+      <div class="field"><label>Status</label><input id="mu_status" type="text" placeholder="Active"></div>
+      <div class="field"><label>SharePoint</label><input id="mu_sharepoint" type="text"></div>
+      <div class="field"><label>Reset Password</label><input id="mu_password" type="password" placeholder="Leave blank to keep"></div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="cancelManage">Cancel</button>
         <button class="btn btn-primary" id="saveManageBtn">Save</button>
@@ -249,14 +233,11 @@
       <h3>Manage users</h3>
       <div class="util" style="padding:0; margin: 6px 0 10px;">
         <input id="muSearch" class="input" placeholder="Search users…" style="flex:1; min-width:180px;">
-        <button class="btn btn-outline" id="openAddNewUserBtn">➕ Add New User</button>
+        <button class="btn btn-outline" id="openAddNewUserBtn">Add New User</button>
       </div>
       <div class="manage-wrap">
         <div class="manage-left">
           <div id="muList">Loading…</div>
-          <div class="small" style="margin-top:10px;">
-            Tip: toggling <span class="kbd">Active</span> only changes that user's <span class="kbd">Status</span> field (DELTA safe).
-          </div>
         </div>
         <div class="manage-right">
           <div class="small" style="margin-bottom:8px;">Select a user to edit.</div>
@@ -267,13 +248,13 @@
           <div class="field"><label>Email Address</label><input id="mue_emailAddress" type="email" placeholder="name@mostlane.com"></div>
           <div class="field"><label>Mobile Number</label><input id="mue_mobileNumber" type="text" placeholder="07…"></div>
           <div class="field"><label>Vehicle Assigned</label><input id="mue_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
-          <div class="field"><label>Employment Type</label><input id="mue_employmentType" type="text" placeholder="Employed / Self Employed"></div>
-          <div class="field"><label>SharePoint Path URL</label><input id="mue_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-          <div class="field"><label>Status</label><input id="mue_status" type="text" placeholder="Active / Not Active"></div>
-          <div class="field"><label>Reset Password (optional)</label><input id="mue_password" type="password" placeholder="Leave blank to keep existing"></div>
+          <div class="field"><label>Employment Type</label><input id="mue_employmentType" type="text"></div>
+          <div class="field"><label>SharePoint Path URL</label><input id="mue_sharepoint" type="text"></div>
+          <div class="field"><label>Status</label><input id="mue_status" type="text" placeholder="Active"></div>
+          <div class="field"><label>Reset Password</label><input id="mue_password" type="password" placeholder="Leave blank"></div>
           <div class="modal-actions">
             <button class="btn btn-outline" id="closeManageUsersBtn">Close</button>
-            <button class="btn btn-primary" id="saveManageUsersBtn">Save user changes</button>
+            <button class="btn btn-primary" id="saveManageUsersBtn">Save changes</button>
           </div>
         </div>
       </div>
@@ -289,12 +270,10 @@
       <div class="field"><label>Password</label><input id="anu_password" type="password" placeholder="Initial password" required></div>
       <div class="field"><label>Email Address</label><input id="anu_emailAddress" type="email" placeholder="name@mostlane.com"></div>
       <div class="field"><label>Mobile Number</label><input id="anu_mobileNumber" type="text" placeholder="07…"></div>
-      <div class="field"><label>Vehicle Assigned (optional)</label><input id="anu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
-      <div class="field"><label>Employment Type</label><input id="anu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
-      <div class="field"><label>SharePoint Path URL</label><input id="anu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
-      <div class="small" style="margin-top:8px;">
-        All page permissions will be set to <span class="kbd">No</span> by default (DELTA safe).
-      </div>
+      <div class="field"><label>Vehicle Assigned</label><input id="anu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
+      <div class="field"><label>Employment Type</label><input id="anu_employmentType" type="text" placeholder="Employed"></div>
+      <div class="field"><label>SharePoint Path URL</label><input id="anu_sharepoint" type="text"></div>
+      <div class="small" style="margin-top:8px;">All permissions defaulted to No (DELTA safe).</div>
       <div class="modal-actions">
         <button class="btn btn-outline" id="anu_cancel">Cancel</button>
         <button class="btn btn-primary" id="anu_create">Create User</button>
@@ -309,8 +288,8 @@
     const USERS_URL = API_BASE + "/users";
     const SAVE_URL  = API_BASE + "/save";
     const SAVE_DELTA_URL = API_BASE + "/save-delta";
-    const TOKEN     = sessionStorage.getItem("mostlaneToken");
-    const CURRENT   = sessionStorage.getItem("mostlaneUser");
+    const TOKEN = sessionStorage.getItem("mostlaneToken");
+    const CURRENT = sessionStorage.getItem("mostlaneUser");
     if (!CURRENT) { window.location.href = "login.html"; }
 
     const banner = document.getElementById('banner');
@@ -375,31 +354,17 @@
 
     function mapToPermKey(id, label, href) {
       const mapByExact = {
-        "CheckInOut": "CheckInOut",
-        "Vehicles": "Vehicles",
-        "Holiday": "Holiday",
-        "EngineersHoursMenu": "EngineersHoursMenu",
-        "PurchaseOrders": "PurchaseOrders",
-        "PurchaseOrders2": "PurchaseOrders",
-        "Sites": "Sites",
-        "Assets": "Assets",
-        "MyDocuments": "MyDocuments",
-        "Compliance": "Compliance",
-        "HoursDashboard": "HoursDashboard",
-        "Users": "Users",
-        "Weekly": "Weekly",
-        "Forms": "Forms",
-        "SLA": "SLA",
-        "SLA Menu": "SLA",
-        "HolidayAdmin": "Holiday Admin"
+        "CheckInOut": "CheckInOut", "Vehicles": "Vehicles", "Holiday": "Holiday",
+        "EngineersHoursMenu": "EngineersHoursMenu", "PurchaseOrders": "PurchaseOrders",
+        "PurchaseOrders2": "PurchaseOrders", "Sites": "Sites", "Assets": "Assets",
+        "MyDocuments": "MyDocuments", "Compliance": "Compliance", "HoursDashboard": "HoursDashboard",
+        "Users": "Users", "Weekly": "Weekly", "Forms": "Forms", "SLA": "SLA",
+        "SLA Menu": "SLA", "HolidayAdmin": "Holiday Admin"
       };
-
       if (id && mapByExact[id]) return mapByExact[id];
       if (label && mapByExact[label]) return mapByExact[label];
-
       if (href && href.endsWith(".html")) {
         const clean = href.toLowerCase();
-
         if (clean.includes("sla")) return "SLA";
         if (clean.includes("users")) return "Users";
         if (clean.includes("weekly")) return "Weekly";
@@ -410,14 +375,12 @@
         if (clean.includes("sites")) return "Sites";
         if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
       }
-
       return null;
     }
 
     async function scanPortal(){
       const parser=new DOMParser();
       const visited=new Set();
-
       async function scanPage(url,depth=0){
         if(!url || visited.has(url)) return [];
         visited.add(url);
@@ -426,11 +389,7 @@
           const res=await fetch(fullUrl,{cache:'no-store'});
           const html=await res.text();
           const doc=parser.parseFromString(html,'text/html');
-
-          const rawButtons = [
-            ...doc.querySelectorAll('a.button,button.button,a.menu-btn,button.menu-btn')
-          ];
-
+          const rawButtons = [...doc.querySelectorAll('a.button,button.button,a.menu-btn,button.menu-btn')];
           const buttons = rawButtons.map(b=>{
             const id = b.id || '';
             const label = (b.textContent || '').trim();
@@ -439,7 +398,6 @@
             const key = mapToPermKey(id,label,href);
             return { id, label, href, key, subpages: [] };
           }).filter(b => !!b.key);
-
           if (depth < 2){
             for (const btn of buttons){
               if (btn.href && /\.html$/i.test(btn.href) && !/login\.html/i.test(btn.href)){
@@ -449,14 +407,12 @@
               }
             }
           }
-
           return buttons;
         }catch(e){
           console.warn('Scan failed for',url,e);
           return [];
         }
       }
-
       const rootUrl = new URL('main.html', window.location.href).toString();
       const struct = await scanPage(rootUrl);
       structCount.textContent = `Discovered ${struct.length} main buttons (deep scan)`;
@@ -503,12 +459,10 @@
       const rowClasses = ['toggle-row'];
       if (indent) rowClasses.push('indent');
       if (role === 'sub') rowClasses.push('submenu-row');
-
       const attrs = {class:rowClasses.join(' ')};
       if (role === 'sub' && parentKey) {
         attrs['data-parent'] = parentKey;
       }
-
       return h('div',attrs,
         h('div',{class:'lbl'},
           label || permKey || '(unnamed)',
@@ -520,7 +474,6 @@
 
     const manageModal = document.getElementById('manageUserModal');
     let __MANAGING = null;
-
     const openManage = (user)=>{
       __MANAGING = user;
       document.getElementById('mu_engineerNumber').value = user.EngineerNumber || '';
@@ -546,19 +499,15 @@
 
     document.getElementById('saveManageBtn').addEventListener('click',async()=>{
       if(!__MANAGING) return;
-
       try{
         showMask(true);
-
         const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MANAGING.Username||'')) || null;
         const changes = {};
-
         const setChange = (key, newVal) => {
           const nv = (newVal ?? '');
           const ov = orig ? (orig[key] ?? '') : (__MANAGING[key] ?? '');
           if (String(nv) !== String(ov)) changes[key] = nv;
         };
-
         setChange('FirstName', document.getElementById('mu_firstName').value.trim());
         setChange('LastName', document.getElementById('mu_lastName').value.trim());
         setChange('Email', document.getElementById('mu_email').value.trim());
@@ -566,27 +515,21 @@
         setChange('EmploymentType', document.getElementById('mu_employmentType').value.trim());
         setChange('Status', document.getElementById('mu_status').value.trim());
         setChange('SharePointPath', document.getElementById('mu_sharepoint').value.trim());
-
         const newPw = document.getElementById('mu_password').value;
         if(newPw && newPw.trim()){
           const hp = await sha256Hex(newPw);
           const ov = orig ? String(orig.HashedPassword||'') : String(__MANAGING.HashedPassword||'');
           if (String(hp) !== ov) changes.HashedPassword = hp;
         }
-
         if(!Object.keys(changes).length){
-          showBanner('ℹ️ No changes detected for this user.','warn');
+          showBanner('No changes detected for this user.','warn');
           return;
         }
-
         await postDelta([{ Username: __MANAGING.Username, Changes: changes }]);
-
         Object.assign(__MANAGING, changes);
-
         const idx = (__ORIGINAL_USERS || []).findIndex(x => x.Username === __MANAGING.Username);
         if(idx >= 0) Object.assign(__ORIGINAL_USERS[idx], changes);
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
-
         const nameEl = document.getElementById(`name_${__MANAGING.Username}`);
         const subEl = document.getElementById(`sub_${__MANAGING.Username}`);
         if(nameEl){
@@ -595,17 +538,57 @@
         if(subEl){
           subEl.textContent = `${__MANAGING.EmploymentType||''} · ${__MANAGING.Status||''} · ${__MANAGING.Email||''}`;
         }
-
         closeManage();
-        showBanner('✅ User updated successfully.','ok');
+        showBanner('User updated successfully.','ok');
       }catch(err){
         console.error(err);
-        showBanner('❌ Could not update user. '+(err?.message||''),'err');
+        showBanner('Could not update user. '+(err?.message||''),'err');
       }finally{
         showMask(false);
       }
     });
 
+    let __USERS = [];
+    let __STRUCT = [];
+    let __ORIGINAL_USERS = [];
+
+    function renderUsers(users,structure){
+      list.innerHTML='';
+      if(!users.length){
+        list.textContent='No users found.';
+        return;
+      }
+      users.forEach(user => {
+        const card=h('div',{class:'user-card'});
+        const header=h('div',{class:'user-header'},
+          h('div',{id:`name_${user.Username}`},`#${user.EngineerNumber||''}  ${user.FirstName||''} ${user.LastName||''}`),
+          h('div')
+        );
+        header.querySelector('div:last-child').innerHTML=`<span style="font-size:11px;color:#6b7280">${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}</span>`;
+        card.appendChild(header);
+        const sub=h('div',{id:`sub_${user.Username}`,class:'user-sub'},`${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`);
+        card.appendChild(sub);
+        const faCheck=user.FullAccess==='Yes';
+        const faRow=toggleRow(user,'FullAccess','Full Access',null,faCheck,false,'fa');
+        card.appendChild(faRow);
+        const grid=h('div',{class:'grid'});
+        structure.forEach(p=>{
+          const permKey=p.key;
+          const val=user[permKey]||'No';
+          grid.appendChild(toggleRow(user,permKey,p.label,p.href,val,false,'main',permKey));
+          (p.subpages||[]).forEach(sp=>{
+            const subKey=sp.key;
+            const subVal=user[subKey]||'No';
+            grid.appendChild(toggleRow(user,subKey,sp.label,sp.href,subVal,true,'sub',permKey));
+          });
+        });
+        card.appendChild(grid);
+        list.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>
     function userCard(user,structure){
       const header = h('div',{class:'user-header'},
         h('div',{id:`name_${user.Username}`},
@@ -614,7 +597,7 @@
         ),
         h('div',null,
           h('div',{style:'display:flex;justify-content:flex-end;margin-bottom:6px'},
-            h('button',{class:'btn btn-outline',style:'padding:6px 10px;font-size:12px',onclick:()=>openManage(user)},'⚙ Manage')
+            h('button',{class:'btn btn-outline',style:'padding:6px 10px;font-size:12px',onclick:()=>openManage(user)},'Manage')
           ),
           h('div',{class:'toggle-row'},
             h('span',{class:'lbl'},'Full Access'),
@@ -622,39 +605,20 @@
           )
         )
       );
-
       const sub = h('div',{class:'user-sub',id:`sub_${user.Username}`},
         `${user.EmploymentType||''} · ${user.Status||''} · ${user.Email||''}`
       );
-
       const grid = h('div',{class:'grid'});
-      grid.appendChild(
-        h('div',{class:'section-title'},
-          'Main Menu',
-          h('span',{class:'pill'},'auto')
-        )
-      );
-
+      grid.appendChild(h('div',{class:'section-title'},'Main Menu',h('span',{class:'pill'},'auto')));
       structure.forEach(p=>{
         const permKey = p.key || mapToPermKey(p.id,p.label,p.href);
         if (!permKey) return;
         const currentOn = ((user[permKey] || '').toLowerCase() === 'yes');
-        grid.appendChild(
-          toggleRow(user,permKey,p.label,p.href,currentOn,false,'main',null)
-        );
+        grid.appendChild(toggleRow(user,permKey,p.label,p.href,currentOn,false,'main',null));
       });
-
       const subs = structure.flatMap(s=>s.subpages || []);
       if (subs.length){
-        grid.appendChild(
-          h('div',{
-            class:'section-title',
-            style:'grid-column:1/-1'
-          },
-          'Sub-menus',
-          h('span',{class:'pill'},String(subs.length)))
-        );
-
+        grid.appendChild(h('div',{class:'section-title',style:'grid-column:1/-1'},'Sub-menus',h('span',{class:'pill'},String(subs.length))));
         structure.forEach(p=>{
           const parentKey = p.key || mapToPermKey(p.id,p.label,p.href);
           if (!parentKey) return;
@@ -662,13 +626,10 @@
             const sid = sp.key || mapToPermKey(sp.id,sp.label,sp.href);
             if (!sid) return;
             const on = ((user[sid] || '').toLowerCase() === 'yes');
-            grid.appendChild(
-              toggleRow(user,sid,sp.label,sp.href,on,true,'sub',parentKey)
-            );
+            grid.appendChild(toggleRow(user,sid,sp.label,sp.href,on,true,'sub',parentKey));
           });
         });
       }
-
       return h('div',{class:'user-card'},header,sub,grid);
     }
 
@@ -681,9 +642,7 @@
           const rows = card.querySelectorAll(`.submenu-row[data-parent="${key}"]`);
           const sync = ()=>{
             const show = main.checked;
-            rows.forEach(r=>{
-              r.style.display = show ? 'flex' : 'none';
-            });
+            rows.forEach(r=>{ r.style.display = show ? 'flex' : 'none'; });
           };
           main.addEventListener('change', sync);
           sync();
@@ -693,10 +652,7 @@
 
     function renderUsers(users,structure){
       list.innerHTML='';
-      if(!users.length){
-        list.textContent='No users found.';
-        return;
-      }
+      if(!users.length){ list.textContent='No users found.'; return; }
       users.forEach(u=>list.appendChild(userCard(u,structure)));
       initSubmenuVisibility();
     }
@@ -710,16 +666,11 @@
       try{
         const users = await fetchAllUsers();
         let struct = [];
-        try {
-          struct = await scanPortal();
-        } catch(e){
-          console.warn('Portal scan failed – continuing without it', e);
-        }
+        try { struct = await scanPortal(); }
+        catch(e){ console.warn('Portal scan failed – continuing without it', e); }
         __USERS = users;
         __STRUCT = struct;
-
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(users || []));
-
         userFilter.innerHTML = '<option value="">All Users</option>';
         __USERS.forEach(u=>{
           const uname = u.Username || '';
@@ -729,99 +680,89 @@
           opt.textContent = uname;
           userFilter.appendChild(opt);
         });
-
         renderUsers(__USERS,__STRUCT);
         refreshManageUsersUI();
       }
       catch(err){
         console.error(err);
         list.textContent='Failed to load. Check Worker and network.';
-        showBanner('❌ Failed to load users or scan portal','err');
+        showBanner('Failed to load users or scan portal','err');
       }
-      finally{
-        showMask(false);
-      }
+      finally{ showMask(false); }
     }
 
     let saving = false;
     async function saveAll(){
       if (saving) return;
       if (!__USERS) return;
-
       saving = true;
       showMask(true);
-
       try {
         const patchUsers = [];
+        const allCards = Array.from(document.querySelectorAll('.user-card'));
+        console.log('Found', allCards.length, 'user cards');
 
         __USERS.forEach(user => {
-          const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
-          if (!card) return;
-
+          console.log('Processing user:', user.Username);
+          const card = allCards.find(c => {
+            const nameEl = c.querySelector('[id*="name_"]');
+            if (!nameEl) return false;
+            return nameEl.textContent.includes(user.Username) || nameEl.id.includes(user.Username);
+          });
+          if (!card) {
+            console.log('  Card not found for user:', user.Username);
+            return;
+          }
           const changes = {};
-          let foundAny = false;
-
           const allInputs = Array.from(card.querySelectorAll('input[type="checkbox"]'));
+          console.log('  Found', allInputs.length, 'checkboxes');
           allInputs.forEach((input, idx) => {
-            let key = input.getAttribute('data-key');
-            if (!key) {
-              key = 'perm_' + idx;
-            }
+            let key = input.getAttribute('data-key') || input.getAttribute('data-role') || ('perm_' + idx);
             const checked = input.checked ? 'Yes' : 'No';
             changes[key] = checked;
-            foundAny = true;
+            console.log('    -', key, '=', checked);
           });
-
-          if (foundAny) {
+          if (Object.keys(changes).length) {
+            console.log('  Adding to patch:', user.Username, 'with', Object.keys(changes).length, 'changes');
             patchUsers.push({ Username: user.Username, Changes: changes });
           }
         });
-
+        console.log('Total users to patch:', patchUsers.length);
         if (!patchUsers.length) {
-          showBanner('ℹ️ Nothing to save.','warn');
+          showBanner('Nothing to save.','warn');
           return;
         }
-
         await postDelta(patchUsers);
-
         patchUsers.forEach(p => {
           const u = __USERS.find(x => x.Username === p.Username);
           if (u) Object.assign(u, p.Changes);
         });
-
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
         refreshManageUsersUI();
-        showBanner('✅ Permissions updated safely.','ok');
-
+        showBanner('Permissions updated safely.','ok');
       } catch (err) {
         console.error(err);
-        showBanner('❌ Permission save failed. ' + (err.message || ''), 'err');
+        showBanner('Permission save failed. ' + (err.message || ''), 'err');
       } finally {
         showMask(false);
         saving = false;
       }
     }
+
     const modal=document.getElementById('addUserModal');
     const openAdd=()=>{modal.classList.add('show');modal.setAttribute('aria-hidden','false');};
     const closeAdd=()=>{modal.classList.remove('show');modal.setAttribute('aria-hidden','true');};
-
     document.getElementById('addUserBtn').addEventListener('click',openAdd);
     document.getElementById('cancelAdd').addEventListener('click',closeAdd);
 
     async function createUser(){
       try{
         showMask(true);
-        const res=await fetch(USERS_URL+'?v='+Date.now(),{
-          headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}
-        });
+        const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});
         const data=await res.json();
         const users=data.Users||[];
-        const maxNum=users.reduce((m,u)=>{
-          const n=parseInt(u.EngineerNumber,10);
-          return isNaN(n)?m:Math.max(m,n);
-        },0);
+        const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
         const nextNum=String(maxNum+1);
-
         const firstName=document.getElementById('firstName').value.trim();
         const lastName=document.getElementById('lastName').value.trim();
         const email=document.getElementById('email').value.trim();
@@ -830,100 +771,53 @@
         const vehicle=document.getElementById('vehicle').value.trim();
         const empType=document.getElementById('employmentType').value.trim();
         const spPath=document.getElementById('sharepoint').value.trim();
-
-        if(!firstName||!lastName||!username||!password){
-          showBanner('❌ Please complete First, Last, Username and Password.','err');
-          return;
-        }
-
-        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) {
-          showBanner('❌ That username already exists.','err');
-          return;
-        }
-
+        if(!firstName||!lastName||!username||!password){ showBanner('Please complete First, Last, Username and Password.','err'); return; }
+        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) { showBanner('That username already exists.','err'); return; }
         const hashedPassword=await sha256Hex(password);
-
-        const newUser={
-          EngineerNumber:nextNum,
-          FirstName:firstName,
-          LastName:lastName,
-          Username:username,
-          Email:email,
-          EmailAddress:email,
-          HashedPassword:hashedPassword,
-          VehicleAssigned:vehicle,
-          EmploymentType:empType||'Employed',
-          Status:'Active',
-          FullAccess:'No',
-          SharePointPath:spPath
-        };
-
+        const newUser={EngineerNumber:nextNum,FirstName:firstName,LastName:lastName,Username:username,Email:email,EmailAddress:email,HashedPassword:hashedPassword,VehicleAssigned:vehicle,EmploymentType:empType||'Employed',Status:'Active',FullAccess:'No',SharePointPath:spPath};
         const keys = collectAllPermissionKeys();
-        keys.forEach(k=>{
-          if (!k) return;
-          if (typeof newUser[k] === 'undefined') newUser[k] = 'No';
-        });
-
+        keys.forEach(k=>{if (!k) return;if (typeof newUser[k] === 'undefined') newUser[k] = 'No';});
         users.push(newUser);
         await saveUsers(users);
         closeAdd();
-        showBanner('✅ User added with all permissions set to No.','ok');
+        showBanner('User added with all permissions set to No.','ok');
         await buildUI();
       }
       catch(err){
         console.error(err);
-        showBanner('❌ Could not add user. '+(err?.message||''),'err');
+        showBanner('Could not add user. '+(err?.message||''),'err');
       }
-      finally{
-        showMask(false);
-      }
+      finally{ showMask(false); }
     }
-
     document.getElementById('createUserBtn').addEventListener('click',createUser);
 
     function applyFilters() {
       const q = (searchBox.value || '').trim().toLowerCase();
       const selected = userFilter.value;
-
       let filtered = __USERS || [];
-
-      if (selected) {
-        filtered = filtered.filter(u => (u.Username || '') === selected);
-      }
-
+      if (selected) { filtered = filtered.filter(u => (u.Username || '') === selected); }
       if (q) {
-        filtered = filtered.filter(u =>
+        filtered = filtered.filter(u=>
           (u.FirstName || '').toLowerCase().includes(q) ||
           (u.LastName || '').toLowerCase().includes(q) ||
           (u.Username || '').toLowerCase().includes(q) ||
           String(u.EngineerNumber || '').includes(q)
         );
       }
-
       renderUsers(filtered, __STRUCT);
     }
-
     searchBox.addEventListener('input', debounce(applyFilters, 150));
     userFilter.addEventListener('change', applyFilters);
-
     document.getElementById('saveBtn').addEventListener('click',saveAll);
     document.getElementById('reloadBtn').addEventListener('click',buildUI);
     document.getElementById('rescanBtn').addEventListener('click',async()=>{
       showMask(true);
-      try{
-        __STRUCT = await scanPortal();
-        renderUsers(__USERS,__STRUCT);
-        showBanner('✅ Scan complete. Buttons refreshed.','ok');
-      }
-      catch(e){
-        console.error(e);
-        showBanner('❌ Scan failed','err');
-      }
-      finally{
-        showMask(false);
-      }
+      try{ __STRUCT = await scanPortal(); renderUsers(__USERS,__STRUCT); showBanner('Scan complete. Buttons refreshed.','ok'); }
+      catch(e){ console.error(e); showBanner('Scan failed','err'); }
+      finally{ showMask(false); }
     });
-        const manageUsersBtn = document.getElementById('manageUsersBtn');
+
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
     const manageUsersModal = document.getElementById('manageUsersModal');
     const muList = document.getElementById('muList');
     const muSearch = document.getElementById('muSearch');
@@ -931,122 +825,38 @@
     const openAddNewUserBtn = document.getElementById('openAddNewUserBtn');
     const addNewUserModal = document.getElementById('addNewUserModal');
     const anu_cancel = document.getElementById('anu_cancel');
-
     let __MUE = null;
-
-    function openManageUsers(){
-      manageUsersModal.classList.add('show');
-      manageUsersModal.setAttribute('aria-hidden','false');
-      refreshManageUsersUI();
-    }
-    function closeManageUsers(){
-      manageUsersModal.classList.remove('show');
-      manageUsersModal.setAttribute('aria-hidden','true');
-      __MUE = null;
-      clearManageUserEditor();
-    }
-
-    function openAddNewUser(){
-      addNewUserModal.classList.add('show');
-      addNewUserModal.setAttribute('aria-hidden','false');
-      document.getElementById('anu_firstName').value = '';
-      document.getElementById('anu_lastName').value = '';
-      document.getElementById('anu_username').value = '';
-      document.getElementById('anu_password').value = '';
-      document.getElementById('anu_emailAddress').value = '';
-      document.getElementById('anu_mobileNumber').value = '';
-      document.getElementById('anu_vehicle').value = '';
-      document.getElementById('anu_employmentType').value = '';
-      document.getElementById('anu_sharepoint').value = '';
-    }
-    function closeAddNewUser(){
-      addNewUserModal.classList.remove('show');
-      addNewUserModal.setAttribute('aria-hidden','true');
-    }
-
-    function clearManageUserEditor(){
-      document.getElementById('mue_engineerNumber').value = '';
-      document.getElementById('mue_username').value = '';
-      document.getElementById('mue_firstName').value = '';
-      document.getElementById('mue_lastName').value = '';
-      document.getElementById('mue_emailAddress').value = '';
-      document.getElementById('mue_mobileNumber').value = '';
-      document.getElementById('mue_vehicle').value = '';
-      document.getElementById('mue_employmentType').value = '';
-      document.getElementById('mue_sharepoint').value = '';
-      document.getElementById('mue_status').value = '';
-      document.getElementById('mue_password').value = '';
-    }
-
-    function safeUsernameFromNames(fn, ln){
-      const f = (fn||'').trim();
-      const l = (ln||'').trim();
-      if(!f || !l) return '';
-      return `${f}.${l}`.replace(/\s+/g,'').replace(/[^\w.\-]/g,'');
-    }
-
+    function openManageUsers(){ manageUsersModal.classList.add('show'); manageUsersModal.setAttribute('aria-hidden','false'); refreshManageUsersUI(); }
+    function closeManageUsers(){ manageUsersModal.classList.remove('show'); manageUsersModal.setAttribute('aria-hidden','true'); __MUE = null; clearManageUserEditor(); }
+    function openAddNewUser(){ addNewUserModal.classList.add('show'); addNewUserModal.setAttribute('aria-hidden','false'); document.getElementById('anu_firstName').value = ''; document.getElementById('anu_lastName').value = ''; document.getElementById('anu_username').value = ''; document.getElementById('anu_password').value = ''; document.getElementById('anu_emailAddress').value = ''; document.getElementById('anu_mobileNumber').value = ''; document.getElementById('anu_vehicle').value = ''; document.getElementById('anu_employmentType').value = ''; document.getElementById('anu_sharepoint').value = ''; }
+    function closeAddNewUser(){ addNewUserModal.classList.remove('show'); addNewUserModal.setAttribute('aria-hidden','true'); }
+    function clearManageUserEditor(){ document.getElementById('mue_engineerNumber').value = ''; document.getElementById('mue_username').value = ''; document.getElementById('mue_firstName').value = ''; document.getElementById('mue_lastName').value = ''; document.getElementById('mue_emailAddress').value = ''; document.getElementById('mue_mobileNumber').value = ''; document.getElementById('mue_vehicle').value = ''; document.getElementById('mue_employmentType').value = ''; document.getElementById('mue_sharepoint').value = ''; document.getElementById('mue_status').value = ''; document.getElementById('mue_password').value = ''; }
+    function safeUsernameFromNames(fn, ln){ const f = (fn||'').trim(); const l = (ln||'').trim(); if(!f || !l) return ''; return `${f}.${l}`.replace(/\s+/g,'').replace(/[^\w.\-]/g,''); }
     const anu_firstName = document.getElementById('anu_firstName');
     const anu_lastName  = document.getElementById('anu_lastName');
-    function syncANUUsername(){
-      const u = safeUsernameFromNames(anu_firstName.value, anu_lastName.value);
-      document.getElementById('anu_username').value = u;
-    }
+    function syncANUUsername(){ const u = safeUsernameFromNames(anu_firstName.value, anu_lastName.value); document.getElementById('anu_username').value = u; }
     anu_firstName.addEventListener('input', syncANUUsername);
     anu_lastName.addEventListener('input', syncANUUsername);
 
     function collectAllPermissionKeys(){
       const keys = new Set();
-
-      (__STRUCT || []).forEach(p=>{
-        const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
-        if (parentKey) keys.add(parentKey);
-        (p.subpages || []).forEach(sp=>{
-          const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-          if (sid) keys.add(sid);
-        });
-      });
-
-      (__USERS || []).forEach(u=>{
-        Object.keys(u || {}).forEach(k=>{
-          const v = u[k];
-          if (typeof v === 'string' && (v.toLowerCase()==='yes' || v.toLowerCase()==='no')) {
-            if (k === 'FullAccess') keys.add(k);
-            else if (!['Status'].includes(k)) keys.add(k);
-          }
-        });
-      });
-
+      (__STRUCT || []).forEach(p=>{ const parentKey = p.key || mapToPermKey(p.id, p.label, p.href); if (parentKey) keys.add(parentKey); (p.subpages || []).forEach(sp=>{ const sid = sp.key || mapToPermKey(sp.id, sp.label, sp.href); if (sid) keys.add(sid); }); });
+      (__USERS || []).forEach(u=>{ Object.keys(u || {}).forEach(k=>{ const v = u[k]; if (typeof v === 'string' && (v.toLowerCase()==='yes' || v.toLowerCase()==='no')) { if (k === 'FullAccess') keys.add(k); else if (!['Status'].includes(k)) keys.add(k); } }); });
       keys.delete('FullAccess');
       return Array.from(keys);
     }
 
     function refreshManageUsersUI(){
       if(!muList) return;
-
       const q = (muSearch?.value || '').trim().toLowerCase();
-      const users = (__USERS || []).slice().sort((a,b)=>{
-        const an = parseInt(a.EngineerNumber||'0',10) || 0;
-        const bn = parseInt(b.EngineerNumber||'0',10) || 0;
-        return an - bn;
-      }).filter(u=>{
-        if(!q) return true;
-        const blob = `${u.FirstName||''} ${u.LastName||''} ${u.Username||''} ${u.EngineerNumber||''}`.toLowerCase();
-        return blob.includes(q);
-      });
-
+      const users = (__USERS || []).slice().sort((a,b)=>{ const an = parseInt(a.EngineerNumber||'0',10) || 0; const bn = parseInt(b.EngineerNumber||'0',10) || 0; return an - bn; }).filter(u=>{ if(!q) return true; const blob = `${u.FirstName||''} ${u.LastName||''} ${u.Username||''} ${u.EngineerNumber||''}`.toLowerCase(); return blob.includes(q); });
       muList.innerHTML = '';
-      if(!users.length){
-        muList.textContent = 'No users found.';
-        return;
-      }
-
+      if(!users.length){ muList.textContent = 'No users found.'; return; }
       users.forEach(u=>{
         const status = (u.Status||'').toLowerCase();
         const isActive = status === 'active';
-
         const row = document.createElement('div');
         row.className = 'user-row';
-
         const who = document.createElement('div');
         who.className = 'who';
         const t = document.createElement('div');
@@ -1057,258 +867,139 @@
         s.textContent = `${u.Username || ''}`;
         who.appendChild(t);
         who.appendChild(s);
-
         const chip = document.createElement('span');
         chip.className = 'chip ' + (isActive ? 'active' : 'inactive');
         chip.textContent = isActive ? 'Active' : 'Not Active';
-
         const actions = document.createElement('div');
         actions.className = 'row-actions';
-
         const sw = switchControl(u.Username, isActive, 'Status', 'manage');
         const swInput = sw.querySelector('input');
-
         swInput.addEventListener('change', async (e)=>{
           const newStatus = e.target.checked ? 'Active' : 'Not Active';
           const oldChecked = !e.target.checked;
           const oldStatus = oldChecked ? 'Active' : 'Not Active';
-
           try{
             showMask(true);
-
             const orig = (__ORIGINAL_USERS || []).find(x => x.Username === u.Username);
-            if(orig && String(orig.Status||'') === String(newStatus)){
-              chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive');
-              chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active';
-              showBanner('ℹ️ No status change detected.','warn');
-              return;
-            }
-
+            if(orig && String(orig.Status||'') === String(newStatus)){ chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive'); chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active'; showBanner('No status change detected.','warn'); return; }
             await postDelta([{ Username: u.Username, Changes: { Status: newStatus } }]);
-
             const live = (__USERS || []).find(x => x.Username === u.Username);
             if(live) live.Status = newStatus;
-
             const snap = (__ORIGINAL_USERS || []).find(x => x.Username === u.Username);
             if(snap) snap.Status = newStatus;
-
             __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
-
             chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive');
             chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active';
-
             const subEl = document.getElementById(`sub_${u.Username}`);
-            if(subEl){
-              const liveNow = (__USERS || []).find(x => x.Username === u.Username) || u;
-              subEl.textContent = `${liveNow.EmploymentType||''} · ${liveNow.Status||''} · ${liveNow.Email||''}`;
-            }
-
-            showBanner('✅ Status updated.','ok');
+            if(subEl){ const liveNow = (__USERS || []).find(x => x.Username === u.Username) || u; subEl.textContent = `${liveNow.EmploymentType||''} · ${liveNow.Status||''} · ${liveNow.Email||''}`; }
+            showBanner('Status updated.','ok');
           }catch(err){
             console.error(err);
-            showBanner('❌ Could not update status. '+(err?.message||''),'err');
+            showBanner('Could not update status. '+(err?.message||''),'err');
             swInput.checked = oldChecked;
             chip.className = 'chip ' + (oldStatus === 'Active' ? 'active' : 'inactive');
             chip.textContent = oldStatus === 'Active' ? 'Active' : 'Not Active';
-          }finally{
-            showMask(false);
-          }
+          }finally{ showMask(false); }
         });
-
         const editBtn = document.createElement('button');
         editBtn.className = 'btn btn-outline';
         editBtn.style.padding = '6px 10px';
         editBtn.style.fontSize = '12px';
-        editBtn.textContent = '✏️ Edit';
+        editBtn.textContent = 'Edit';
         editBtn.addEventListener('click', ()=>{
           __MUE = (__USERS || []).find(x => x.Username === u.Username) || u;
-
           document.getElementById('mue_engineerNumber').value = __MUE.EngineerNumber || '';
           document.getElementById('mue_username').value = __MUE.Username || '';
           document.getElementById('mue_firstName').value = __MUE.FirstName || '';
           document.getElementById('mue_lastName').value = __MUE.LastName || '';
-
           const emailAddr = (__MUE.EmailAddress ?? __MUE.Email ?? '');
           document.getElementById('mue_emailAddress').value = emailAddr || '';
           document.getElementById('mue_mobileNumber').value = (__MUE.MobileNumber ?? __MUE.Mobile ?? __MUE.Phone ?? '') || '';
-
           document.getElementById('mue_vehicle').value = __MUE.VehicleAssigned || '';
           document.getElementById('mue_employmentType').value = __MUE.EmploymentType || '';
           document.getElementById('mue_sharepoint').value = __MUE.SharePointPath || '';
           document.getElementById('mue_status').value = __MUE.Status || '';
           document.getElementById('mue_password').value = '';
         });
-
         actions.appendChild(chip);
         actions.appendChild(sw);
         actions.appendChild(editBtn);
-
         row.appendChild(who);
         row.appendChild(actions);
-
         muList.appendChild(row);
       });
     }
-
-    if(muSearch){
-      muSearch.addEventListener('input', debounce(refreshManageUsersUI, 120));
-    }
+    if(muSearch){ muSearch.addEventListener('input', debounce(refreshManageUsersUI, 120)); }
 
     document.getElementById('saveManageUsersBtn').addEventListener('click', async ()=>{
-      if(!__MUE) {
-        showBanner('⚠️ Select a user to edit first.','warn');
-        return;
-      }
+      if(!__MUE) { showBanner('Select a user to edit first.','warn'); return; }
       try{
         showMask(true);
-
         const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MUE.Username||'')) || null;
         const changes = {};
-
-        const setChange = (key, newVal) => {
-          const nv = (newVal ?? '');
-          const ov = orig ? (orig[key] ?? '') : (__MUE[key] ?? '');
-          if (String(nv) !== String(ov)) changes[key] = nv;
-        };
-
+        const setChange = (key, newVal) => { const nv = (newVal ?? ''); const ov = orig ? (orig[key] ?? '') : (__MUE[key] ?? ''); if (String(nv) !== String(ov)) changes[key] = nv; };
         setChange('FirstName', document.getElementById('mue_firstName').value.trim());
         setChange('LastName', document.getElementById('mue_lastName').value.trim());
-
         const newEmailAddr = document.getElementById('mue_emailAddress').value.trim();
-        if (newEmailAddr) {
-          if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) changes.EmailAddress = newEmailAddr;
-          if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) changes.Email = newEmailAddr;
-        } else {
-          if (orig && String(orig.EmailAddress ?? '') !== '') changes.EmailAddress = '';
-          if (orig && String(orig.Email ?? '') !== '') changes.Email = '';
-        }
-
+        if (newEmailAddr) { if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) changes.EmailAddress = newEmailAddr; if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) changes.Email = newEmailAddr; } else { if (orig && String(orig.EmailAddress ?? '') !== '') changes.EmailAddress = ''; if (orig && String(orig.Email ?? '') !== '') changes.Email = ''; }
         const newMobile = document.getElementById('mue_mobileNumber').value.trim();
-        if (newMobile) {
-          if (!orig || String(orig.MobileNumber ?? '') !== String(newMobile)) changes.MobileNumber = newMobile;
-        } else {
-          if (orig && String(orig.MobileNumber ?? '') !== '') changes.MobileNumber = '';
-        }
-
+        if (newMobile) { if (!orig || String(orig.MobileNumber ?? '') !== String(newMobile)) changes.MobileNumber = newMobile; } else { if (orig && String(orig.MobileNumber ?? '') !== '') changes.MobileNumber = ''; }
         setChange('VehicleAssigned', document.getElementById('mue_vehicle').value.trim());
         setChange('EmploymentType', document.getElementById('mue_employmentType').value.trim());
         setChange('SharePointPath', document.getElementById('mue_sharepoint').value.trim());
         setChange('Status', document.getElementById('mue_status').value.trim());
-
         const newPw = document.getElementById('mue_password').value;
-        if(newPw && newPw.trim()){
-          const hp = await sha256Hex(newPw);
-          const ov = orig ? String(orig.HashedPassword||'') : String(__MUE.HashedPassword||'');
-          if (String(hp) !== ov) changes.HashedPassword = hp;
-        }
-
-        if(!Object.keys(changes).length){
-          showBanner('ℹ️ No changes detected for this user.','warn');
-          return;
-        }
-
+        if(newPw && newPw.trim()){ const hp = await sha256Hex(newPw); const ov = orig ? String(orig.HashedPassword||'') : String(__MUE.HashedPassword||''); if (String(hp) !== ov) changes.HashedPassword = hp; }
+        if(!Object.keys(changes).length){ showBanner('No changes detected for this user.','warn'); return; }
         await postDelta([{ Username: __MUE.Username, Changes: changes }]);
-
         Object.assign(__MUE, changes);
-
         const snap = (__ORIGINAL_USERS || []).find(x => x.Username === __MUE.Username);
         if(snap) Object.assign(snap, changes);
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
-
         const nameEl = document.getElementById(`name_${__MUE.Username}`);
         const subEl = document.getElementById(`sub_${__MUE.Username}`);
-        if(nameEl){
-          nameEl.innerHTML = `${__MUE.EngineerNumber ? ('#'+__MUE.EngineerNumber+' – ') : ''}${__MUE.FirstName||''} ${__MUE.LastName||''} <span style="color:#6b7280;font-weight:500">(${__MUE.Username})</span>`;
-        }
-        if(subEl){
-          subEl.textContent = `${__MUE.EmploymentType||''} · ${__MUE.Status||''} · ${__MUE.Email||''}`;
-        }
-
+        if(nameEl){ nameEl.innerHTML = `${__MUE.EngineerNumber ? ('#'+__MUE.EngineerNumber+' – ') : ''}${__MUE.FirstName||''} ${__MUE.LastName||''} <span style="color:#6b7280;font-weight:500">(${__MUE.Username})</span>`; }
+        if(subEl){ subEl.textContent = `${__MUE.EmploymentType||''} · ${__MUE.Status||''} · ${__MUE.Email||''}`; }
         refreshManageUsersUI();
-        showBanner('✅ User details updated.','ok');
+        showBanner('User details updated.','ok');
       }catch(err){
         console.error(err);
-        showBanner('❌ Could not save user. '+(err?.message||''),'err');
-      }finally{
-        showMask(false);
-      }
+        showBanner('Could not save user. '+(err?.message||''),'err');
+      }finally{ showMask(false); }
     });
 
     document.getElementById('anu_create').addEventListener('click', async ()=>{
       try{
         showMask(true);
-
-        const res=await fetch(USERS_URL+'?v='+Date.now(),{
-          headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}
-        });
+        const res=await fetch(USERS_URL+'?v='+Date.now(),{headers:TOKEN?{'Authorization':'Bearer '+TOKEN}:{}});
         const data=await res.json();
         const users=data.Users||[];
-
-        const maxNum=users.reduce((m,u)=>{
-          const n=parseInt(u.EngineerNumber,10);
-          return isNaN(n)?m:Math.max(m,n);
-        },0);
+        const maxNum=users.reduce((m,u)=>{const n=parseInt(u.EngineerNumber,10);return isNaN(n)?m:Math.max(m,n);},0);
         const nextNum=String(maxNum+1);
-
         const firstName = document.getElementById('anu_firstName').value.trim();
         const lastName  = document.getElementById('anu_lastName').value.trim();
         const username  = document.getElementById('anu_username').value.trim();
         const password  = document.getElementById('anu_password').value;
-
         const emailAddr = document.getElementById('anu_emailAddress').value.trim();
         const mobileNum = document.getElementById('anu_mobileNumber').value.trim();
-
         const vehicle   = document.getElementById('anu_vehicle').value.trim();
         const empType   = document.getElementById('anu_employmentType').value.trim();
         const spPath    = document.getElementById('anu_sharepoint').value.trim();
-
-        if(!firstName || !lastName || !username || !password){
-          showBanner('❌ Please complete First Name, Last Name, Username and Password.','err');
-          return;
-        }
-
-        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) {
-          showBanner('❌ That username already exists.','err');
-          return;
-        }
-
-        const hashedPassword = await sha256Hex(password);
-
-        const newUser = {
-          EngineerNumber: nextNum,
-          FirstName: firstName,
-          LastName: lastName,
-          Username: username,
-          Email: emailAddr || '',
-          EmailAddress: emailAddr || '',
-          MobileNumber: mobileNum || '',
-          HashedPassword: hashedPassword,
-          VehicleAssigned: vehicle,
-          EmploymentType: empType || 'Employed',
-          Status: 'Active',
-          FullAccess: 'No',
-          SharePointPath: spPath
-        };
-
+        if(!firstName||!lastName||!username||!password){ showBanner('Please complete First, Last, Username and Password.','err'); return; }
+        if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) { showBanner('Username already exists.','err'); return; }
+        const hashedPassword=await sha256Hex(password);
+        const newUser={EngineerNumber:nextNum,FirstName:firstName,LastName:lastName,Username:username,Email:emailAddr,EmailAddress:emailAddr,MobileNumber:mobileNum,HashedPassword:hashedPassword,VehicleAssigned:vehicle,EmploymentType:empType||'Employed',Status:'Active',FullAccess:'No',SharePointPath:spPath};
         const keys = collectAllPermissionKeys();
-        keys.forEach(k=>{
-          if (!k) return;
-          if (typeof newUser[k] === 'undefined') newUser[k] = 'No';
-        });
-
+        keys.forEach(k=>{ if (!k) return; if (typeof newUser[k] === 'undefined') newUser[k] = 'No'; });
         users.push(newUser);
         await saveUsers(users);
-
         closeAddNewUser();
-        showBanner('✅ User added (all permissions defaulted to No).','ok');
-
+        showBanner('New user created with all permissions set to No.','ok');
         await buildUI();
       }catch(err){
         console.error(err);
-        showBanner('❌ Could not add user. '+(err?.message||''),'err');
-      }finally{
-        showMask(false);
-      }
+        showBanner('Could not create user. '+(err?.message||''),'err');
+      }finally{ showMask(false); }
     });
 
     manageUsersBtn.addEventListener('click', openManageUsers);
@@ -1316,16 +1007,7 @@
     openAddNewUserBtn.addEventListener('click', openAddNewUser);
     anu_cancel.addEventListener('click', closeAddNewUser);
 
-    manageUsersModal.addEventListener('click', (e)=>{ if(e.target === manageUsersModal) closeManageUsers(); });
-    addNewUserModal.addEventListener('click', (e)=>{ if(e.target === addNewUserModal) closeAddNewUser(); });
-
-    if (CURRENT !== 'Jamie.Line') {
-      manageUsersBtn.disabled = true;
-      manageUsersBtn.title = 'Only Jamie.Line can manage users';
-    }
-
-    (async()=>{await buildUI();})();
+    buildUI();
   </script>
-
 </body>
 </html>
