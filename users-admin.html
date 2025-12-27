@@ -789,11 +789,10 @@
 
             if (origVal === undefined && uiVal === 'No' && !fullAccessJustDisabled) return;
 
-            if (fullAccessJustDisabled && origVal === undefined) {
-              changes[key] = uiVal;
-              return;
-            }
-
+if (fullAccessJustDisabled) {
+  changes[key] = uiVal;
+  return;
+}
             if (String(origVal ?? '') !== uiVal) {
               changes[key] = uiVal;
             }
