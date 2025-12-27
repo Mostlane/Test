@@ -421,6 +421,23 @@
       return (s||'').trim().toLowerCase().replace(/[^\w]+/g,'');
     }
 
+    // ✅ NEW: DELTA POST helper (centralised + consistent error text)
+    async function postDelta(patchUsers){
+      const res = await fetch(SAVE_DELTA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {})
+        },
+        body: JSON.stringify({ patchUsers })
+      });
+      if(!res.ok){
+        const t = await res.text().catch(()=> '');
+        throw new Error(t || 'Delta save failed');
+      }
+      return true;
+    }
+
    // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
 function mapToPermKey(id, label, href) {
   const mapByExact = {
@@ -465,6 +482,7 @@ function mapToPermKey(id, label, href) {
   // ❌ Reject all external links, javascript:void(), forms, etc.
   return null;
 }
+
     // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
       const parser=new DOMParser();
@@ -601,38 +619,51 @@ function mapToPermKey(id, label, href) {
 
     document.getElementById('cancelManage').addEventListener('click',closeManage);
 
+    // ✅ FIXED: single-user modal now uses SAVE-DELTA, not saveUsers(__USERS)
     document.getElementById('saveManageBtn').addEventListener('click',async()=>{
       if(!__MANAGING) return;
 
       try{
         showMask(true);
 
-        // DELTA SAFE: only write fields if they actually changed
         const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MANAGING.Username||'')) || null;
+        const changes = {};
 
-        const setIfChanged = (obj, key, newVal) => {
+        const setChange = (key, newVal) => {
           const nv = (newVal ?? '');
-          const ov = orig ? (orig[key] ?? '') : (obj[key] ?? '');
-          if (String(nv) !== String(ov)) obj[key] = nv;
+          const ov = orig ? (orig[key] ?? '') : (__MANAGING[key] ?? '');
+          if (String(nv) !== String(ov)) changes[key] = nv;
         };
 
-        setIfChanged(__MANAGING, 'FirstName', document.getElementById('mu_firstName').value.trim());
-        setIfChanged(__MANAGING, 'LastName', document.getElementById('mu_lastName').value.trim());
-        setIfChanged(__MANAGING, 'Email', document.getElementById('mu_email').value.trim());
-        setIfChanged(__MANAGING, 'VehicleAssigned', document.getElementById('mu_vehicle').value.trim());
-        setIfChanged(__MANAGING, 'EmploymentType', document.getElementById('mu_employmentType').value.trim());
-        setIfChanged(__MANAGING, 'Status', document.getElementById('mu_status').value.trim());
-        setIfChanged(__MANAGING, 'SharePointPath', document.getElementById('mu_sharepoint').value.trim());
+        setChange('FirstName', document.getElementById('mu_firstName').value.trim());
+        setChange('LastName', document.getElementById('mu_lastName').value.trim());
+        setChange('Email', document.getElementById('mu_email').value.trim());
+        setChange('VehicleAssigned', document.getElementById('mu_vehicle').value.trim());
+        setChange('EmploymentType', document.getElementById('mu_employmentType').value.trim());
+        setChange('Status', document.getElementById('mu_status').value.trim());
+        setChange('SharePointPath', document.getElementById('mu_sharepoint').value.trim());
 
         const newPw = document.getElementById('mu_password').value;
         if(newPw && newPw.trim()){
           const hp = await sha256Hex(newPw);
-          if (!orig || String(orig.HashedPassword||'') !== String(hp)) {
-            __MANAGING.HashedPassword = hp;
-          }
+          const ov = orig ? String(orig.HashedPassword||'') : String(__MANAGING.HashedPassword||'');
+          if (String(hp) !== ov) changes.HashedPassword = hp;
         }
 
-        await saveUsers(__USERS);
+        if(!Object.keys(changes).length){
+          showBanner('ℹ️ No changes detected for this user.','warn');
+          return;
+        }
+
+        await postDelta([{ Username: __MANAGING.Username, Changes: changes }]);
+
+        // apply changes locally (only after successful delta)
+        Object.assign(__MANAGING, changes);
+
+        // sync snapshot
+        const idx = (__ORIGINAL_USERS || []).findIndex(x => x.Username === __MANAGING.Username);
+        if(idx >= 0) Object.assign(__ORIGINAL_USERS[idx], changes);
+        __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
 
         // Update visible fields without re-rendering permissions
         const nameEl = document.getElementById(`name_${__MANAGING.Username}`);
@@ -755,7 +786,7 @@ function mapToPermKey(id, label, href) {
 
     let __USERS = [];
     let __STRUCT = [];
-    let __ORIGINAL_USERS = []; // NEW: snapshot for DELTA saving
+    let __ORIGINAL_USERS = []; // snapshot for DELTA saving
 
     async function buildUI(){
       showMask(true);
@@ -764,10 +795,8 @@ function mapToPermKey(id, label, href) {
         __USERS = users;
         __STRUCT = struct;
 
-        // Snapshot (deep copy) for DELTA logic
         __ORIGINAL_USERS = JSON.parse(JSON.stringify(users || []));
 
-        // Populate username dropdown
         userFilter.innerHTML = '<option value="">All Users</option>';
         __USERS.forEach(u=>{
           const uname = u.Username || '';
@@ -779,7 +808,7 @@ function mapToPermKey(id, label, href) {
         });
 
         renderUsers(__USERS,__STRUCT);
-        refreshManageUsersUI(); // NEW
+        refreshManageUsersUI();
       }
       catch(err){
         console.error(err);
@@ -790,104 +819,90 @@ function mapToPermKey(id, label, href) {
         showMask(false);
       }
     }
-let saving = false;
-async function saveAll(){
-  if (saving) return;
-  if (!__USERS || !__STRUCT) return;
 
-  saving = true;
-  showMask(true);
+    let saving = false;
+    async function saveAll(){
+      if (saving) return;
+      if (!__USERS || !__STRUCT) return;
 
-  try {
-    const patchUsers = [];
+      saving = true;
+      showMask(true);
 
-    __USERS.forEach(user => {
-      const orig = (__ORIGINAL_USERS || []).find(o => o.Username === user.Username);
-      if (!orig) return;
+      try {
+        const patchUsers = [];
 
-      const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
-      if (!card) return;
+        __USERS.forEach(user => {
+          const orig = (__ORIGINAL_USERS || []).find(o => o.Username === user.Username);
+          if (!orig) return;
 
-      const changes = {};
+          const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
+          if (!card) return;
 
-      // FULL ACCESS
-      const faEl = card.querySelector(`#fa_${user.Username}__chk`);
-      const newFA = faEl && faEl.checked ? 'Yes' : 'No';
-      if (String(orig.FullAccess || 'No') !== newFA) {
-        changes.FullAccess = newFA;
-      }
+          const changes = {};
 
-      // PERMISSIONS
-      const checkPerm = (key) => {
-        const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
-        if (!chk) return;
+          // FULL ACCESS
+          const faEl = card.querySelector(`#fa_${user.Username}__chk`);
+          const newFA = faEl && faEl.checked ? 'Yes' : 'No';
+          if (String(orig.FullAccess || 'No') !== newFA) {
+            changes.FullAccess = newFA;
+          }
 
-        const uiVal = chk.checked ? 'Yes' : 'No';
-        const origVal = orig[key];
+          // PERMISSIONS
+          const checkPerm = (key) => {
+            const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
+            if (!chk) return;
 
-        // do not create new "No" keys
-        if (origVal === undefined && uiVal === 'No') return;
+            const uiVal = chk.checked ? 'Yes' : 'No';
+            const origVal = orig[key];
 
-        if (String(origVal ?? '') !== uiVal) {
-          changes[key] = uiVal;
+            // do not create new "No" keys
+            if (origVal === undefined && uiVal === 'No') return;
+
+            if (String(origVal ?? '') !== uiVal) {
+              changes[key] = uiVal;
+            }
+          };
+
+          __STRUCT.forEach(p => {
+            const pk = p.key || mapToPermKey(p.id, p.label, p.href);
+            if (pk) checkPerm(pk);
+
+            (p.subpages || []).forEach(sp => {
+              const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+              if (sk) checkPerm(sk);
+            });
+          });
+
+          if (Object.keys(changes).length) {
+            patchUsers.push({ Username: user.Username, Changes: changes });
+          }
+        });
+
+        if (!patchUsers.length) {
+          showBanner('ℹ️ No permission changes detected.','warn');
+          return;
         }
-      };
 
-      __STRUCT.forEach(p => {
-        const pk = p.key || mapToPermKey(p.id, p.label, p.href);
-        if (pk) checkPerm(pk);
+        await postDelta(patchUsers);
 
-        (p.subpages || []).forEach(sp => {
-          const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-          if (sk) checkPerm(sk);
+        // sync live model
+        patchUsers.forEach(p => {
+          const u = __USERS.find(x => x.Username === p.Username);
+          if (u) Object.assign(u, p.Changes);
         });
-      });
 
-      if (Object.keys(changes).length) {
-        patchUsers.push({
-          Username: user.Username,
-          Changes: changes
-        });
+        __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
+        refreshManageUsersUI();
+        showBanner('✅ Permissions updated safely.','ok');
+
+      } catch (err) {
+        console.error(err);
+        showBanner('❌ Permission save failed. ' + (err.message || ''), 'err');
+      } finally {
+        showMask(false);
+        saving = false;
       }
-    });
-
-    if (!patchUsers.length) {
-      showBanner('ℹ️ No permission changes detected.','warn');
-      return;
     }
-
-    const res = await fetch(SAVE_DELTA_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {})
-      },
-      body: JSON.stringify({ patchUsers })
-    });
-
-    if (!res.ok) {
-      const t = await res.text();
-      throw new Error(t);
-    }
-
-    // sync snapshot
-    patchUsers.forEach(p => {
-      const u = __USERS.find(x => x.Username === p.Username);
-      if (u) Object.assign(u, p.Changes);
-    });
-
-    __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
-    refreshManageUsersUI();
-    showBanner('✅ Permissions updated safely.','ok');
-
-  } catch (err) {
-    console.error(err);
-    showBanner('❌ Permission save failed. ' + (err.message || ''), 'err');
-  } finally {
-    showMask(false);
-    saving = false;
-  }
-}
 
     // Modal logic (EXISTING Add User)
     const modal=document.getElementById('addUserModal');
@@ -983,7 +998,8 @@ async function saveAll(){
 
     searchBox.addEventListener('input', debounce(applyFilters, 150));
     userFilter.addEventListener('change', applyFilters);
-        document.getElementById('saveBtn').addEventListener('click',saveAll);
+
+    document.getElementById('saveBtn').addEventListener('click',saveAll);
     document.getElementById('reloadBtn').addEventListener('click',buildUI);
     document.getElementById('rescanBtn').addEventListener('click',async()=>{
       showMask(true);
@@ -1002,7 +1018,7 @@ async function saveAll(){
     });
 
     // ==========================================================
-    // NEW: Manage users (LIST + EDIT) + Add New User (DELTA SAFE)
+    // Manage users (LIST + EDIT) + Add New User (DELTA SAFE)
     // ==========================================================
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     const manageUsersModal = document.getElementById('manageUsersModal');
@@ -1014,7 +1030,6 @@ async function saveAll(){
 
     const addNewUserModal = document.getElementById('addNewUserModal');
     const anu_cancel = document.getElementById('anu_cancel');
-    const anu_create = document.getElementById('anu_create');
 
     let __MUE = null; // currently selected user in manage users modal
 
@@ -1033,7 +1048,6 @@ async function saveAll(){
     function openAddNewUser(){
       addNewUserModal.classList.add('show');
       addNewUserModal.setAttribute('aria-hidden','false');
-      // reset fields
       document.getElementById('anu_firstName').value = '';
       document.getElementById('anu_lastName').value = '';
       document.getElementById('anu_username').value = '';
@@ -1080,11 +1094,9 @@ async function saveAll(){
     anu_firstName.addEventListener('input', syncANUUsername);
     anu_lastName.addEventListener('input', syncANUUsername);
 
-    // Collect all known permission keys from current users + portal scan
     function collectAllPermissionKeys(){
       const keys = new Set();
 
-      // from portal structure
       (__STRUCT || []).forEach(p=>{
         const parentKey = p.key || mapToPermKey(p.id, p.label, p.href);
         if (parentKey) keys.add(parentKey);
@@ -1094,21 +1106,17 @@ async function saveAll(){
         });
       });
 
-      // from existing users (anything that looks like Yes/No)
       (__USERS || []).forEach(u=>{
         Object.keys(u || {}).forEach(k=>{
           const v = u[k];
           if (typeof v === 'string' && (v.toLowerCase()==='yes' || v.toLowerCase()==='no')) {
-            // skip core identity fields that can be Yes/No sometimes (rare), but keep FullAccess
             if (k === 'FullAccess') keys.add(k);
             else if (!['Status'].includes(k)) keys.add(k);
           }
         });
       });
 
-      // ensure FullAccess is NOT treated as normal permission in defaults (we set separately)
       keys.delete('FullAccess');
-
       return Array.from(keys);
     }
 
@@ -1157,45 +1165,42 @@ async function saveAll(){
         const actions = document.createElement('div');
         actions.className = 'row-actions';
 
-        // Active toggle (DELTA safe on Status only)
+        // ✅ FIXED: status toggle is NOW DELTA POST only (no full payload save)
         const sw = switchControl(`mu_status_${u.Username}`, isActive, 'Status', 'manage');
-        // We repurpose switchControl but handle change ourselves
-        sw.querySelector('input').addEventListener('change', async (e)=>{
+        const swInput = sw.querySelector('input');
+
+        swInput.addEventListener('change', async (e)=>{
+          const newStatus = e.target.checked ? 'Active' : 'Not Active';
+
+          // optimistic UI (keep it snappy) - revert on error
+          const oldChecked = !e.target.checked;
+          const oldStatus = oldChecked ? 'Active' : 'Not Active';
+
           try{
             showMask(true);
 
-            // update only this user Status in the live model
-            const target = (__USERS || []).find(x => x.Username === u.Username);
-            if(!target) return;
-
-            const newStatus = e.target.checked ? 'Active' : 'Not Active';
             const orig = (__ORIGINAL_USERS || []).find(x => x.Username === u.Username);
-
-            // only write if changed
-            if (!orig || String(orig.Status||'') !== String(newStatus)) {
-              target.Status = newStatus;
+            if(orig && String(orig.Status||'') === String(newStatus)){
+              chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive');
+              chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active';
+              showBanner('ℹ️ No status change detected.','warn');
+              return;
             }
 
-            // save full users, but DELTA safe overall (we use snapshot on permission save; here we persist via saveUsers)
-            // For consistency with your current behaviour: we save immediately on toggle.
-            const payload = JSON.parse(JSON.stringify(__ORIGINAL_USERS || __USERS || []));
-            const idx = payload.findIndex(x => x.Username === u.Username);
-            if(idx >= 0){
-              // preserve everything else; update Status only if changed
-              const existingStatus = payload[idx].Status;
-              if (String(existingStatus||'') !== String(newStatus)) payload[idx].Status = newStatus;
-            }
+            await postDelta([{ Username: u.Username, Changes: { Status: newStatus } }]);
 
-            await saveUsers(payload);
+            // apply to live + snapshot
+            const live = (__USERS || []).find(x => x.Username === u.Username);
+            if(live) live.Status = newStatus;
 
-            // sync live + snapshot
-            __USERS = JSON.parse(JSON.stringify(payload));
-            __ORIGINAL_USERS = JSON.parse(JSON.stringify(payload));
+            const snap = (__ORIGINAL_USERS || []).find(x => x.Username === u.Username);
+            if(snap) snap.Status = newStatus;
+
+            __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
 
             chip.className = 'chip ' + (newStatus === 'Active' ? 'active' : 'inactive');
             chip.textContent = newStatus === 'Active' ? 'Active' : 'Not Active';
 
-            // update main card subline if present
             const subEl = document.getElementById(`sub_${u.Username}`);
             if(subEl){
               const liveNow = (__USERS || []).find(x => x.Username === u.Username) || u;
@@ -1206,8 +1211,10 @@ async function saveAll(){
           }catch(err){
             console.error(err);
             showBanner('❌ Could not update status. '+(err?.message||''),'err');
-            // revert UI
-            refreshManageUsersUI();
+            // revert UI state
+            swInput.checked = oldChecked;
+            chip.className = 'chip ' + (oldStatus === 'Active' ? 'active' : 'inactive');
+            chip.textContent = oldStatus === 'Active' ? 'Active' : 'Not Active';
           }finally{
             showMask(false);
           }
@@ -1226,10 +1233,8 @@ async function saveAll(){
           document.getElementById('mue_firstName').value = __MUE.FirstName || '';
           document.getElementById('mue_lastName').value = __MUE.LastName || '';
 
-          // Existing Email field is kept; EmailAddress maps to Email unless you specifically change it
           const emailAddr = (__MUE.EmailAddress ?? __MUE.Email ?? '');
           document.getElementById('mue_emailAddress').value = emailAddr || '';
-
           document.getElementById('mue_mobileNumber').value = (__MUE.MobileNumber ?? __MUE.Mobile ?? __MUE.Phone ?? '') || '';
 
           document.getElementById('mue_vehicle').value = __MUE.VehicleAssigned || '';
@@ -1254,6 +1259,7 @@ async function saveAll(){
       muSearch.addEventListener('input', debounce(refreshManageUsersUI, 120));
     }
 
+    // ✅ FIXED: Manage Users editor now saves via SAVE-DELTA (no full overwrite)
     document.getElementById('saveManageUsersBtn').addEventListener('click', async ()=>{
       if(!__MUE) {
         showBanner('⚠️ Select a user to edit first.','warn');
@@ -1263,55 +1269,60 @@ async function saveAll(){
         showMask(true);
 
         const orig = (__ORIGINAL_USERS || []).find(x => (x.Username||'') === (__MUE.Username||'')) || null;
+        const changes = {};
 
-        const setIfChanged = (obj, key, newVal) => {
+        const setChange = (key, newVal) => {
           const nv = (newVal ?? '');
-          const ov = orig ? (orig[key] ?? '') : (obj[key] ?? '');
-          if (String(nv) !== String(ov)) obj[key] = nv;
+          const ov = orig ? (orig[key] ?? '') : (__MUE[key] ?? '');
+          if (String(nv) !== String(ov)) changes[key] = nv;
         };
 
-        setIfChanged(__MUE, 'FirstName', document.getElementById('mue_firstName').value.trim());
-        setIfChanged(__MUE, 'LastName', document.getElementById('mue_lastName').value.trim());
+        setChange('FirstName', document.getElementById('mue_firstName').value.trim());
+        setChange('LastName', document.getElementById('mue_lastName').value.trim());
 
-        // EmailAddress + backwards compatibility:
-        // - If you edit EmailAddress, we set BOTH EmailAddress and Email to same value (so no page breaks).
         const newEmailAddr = document.getElementById('mue_emailAddress').value.trim();
         if (newEmailAddr) {
-          if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) __MUE.EmailAddress = newEmailAddr;
-          if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) __MUE.Email = newEmailAddr;
+          // keep backwards compat
+          if (!orig || String(orig.EmailAddress ?? '') !== String(newEmailAddr)) changes.EmailAddress = newEmailAddr;
+          if (!orig || String(orig.Email ?? '') !== String(newEmailAddr)) changes.Email = newEmailAddr;
         } else {
-          // if user clears it, only clear if it was previously set (DELTA safe)
-          if (orig && String(orig.EmailAddress ?? '') !== '') __MUE.EmailAddress = '';
-          if (orig && String(orig.Email ?? '') !== '') __MUE.Email = '';
+          if (orig && String(orig.EmailAddress ?? '') !== '') changes.EmailAddress = '';
+          if (orig && String(orig.Email ?? '') !== '') changes.Email = '';
         }
 
         const newMobile = document.getElementById('mue_mobileNumber').value.trim();
         if (newMobile) {
-          if (!orig || String(orig.MobileNumber ?? '') !== String(newMobile)) __MUE.MobileNumber = newMobile;
+          if (!orig || String(orig.MobileNumber ?? '') !== String(newMobile)) changes.MobileNumber = newMobile;
         } else {
-          if (orig && String(orig.MobileNumber ?? '') !== '') __MUE.MobileNumber = '';
+          if (orig && String(orig.MobileNumber ?? '') !== '') changes.MobileNumber = '';
         }
 
-        setIfChanged(__MUE, 'VehicleAssigned', document.getElementById('mue_vehicle').value.trim());
-        setIfChanged(__MUE, 'EmploymentType', document.getElementById('mue_employmentType').value.trim());
-        setIfChanged(__MUE, 'SharePointPath', document.getElementById('mue_sharepoint').value.trim());
-        setIfChanged(__MUE, 'Status', document.getElementById('mue_status').value.trim());
+        setChange('VehicleAssigned', document.getElementById('mue_vehicle').value.trim());
+        setChange('EmploymentType', document.getElementById('mue_employmentType').value.trim());
+        setChange('SharePointPath', document.getElementById('mue_sharepoint').value.trim());
+        setChange('Status', document.getElementById('mue_status').value.trim());
 
         const newPw = document.getElementById('mue_password').value;
         if(newPw && newPw.trim()){
           const hp = await sha256Hex(newPw);
-          if (!orig || String(orig.HashedPassword||'') !== String(hp)) {
-            __MUE.HashedPassword = hp;
-          }
+          const ov = orig ? String(orig.HashedPassword||'') : String(__MUE.HashedPassword||'');
+          if (String(hp) !== ov) changes.HashedPassword = hp;
         }
 
-        // Save (full array, but only this user is changed in-memory)
-        await saveUsers(__USERS);
+        if(!Object.keys(changes).length){
+          showBanner('ℹ️ No changes detected for this user.','warn');
+          return;
+        }
 
-        // Sync snapshot to avoid future delta confusion
-        __ORIGINAL_USERS = JSON.parse(JSON.stringify(__USERS));
+        await postDelta([{ Username: __MUE.Username, Changes: changes }]);
 
-        // Update main card header/sub if visible
+        // apply changes locally only after success
+        Object.assign(__MUE, changes);
+
+        const snap = (__ORIGINAL_USERS || []).find(x => x.Username === __MUE.Username);
+        if(snap) Object.assign(snap, changes);
+        __ORIGINAL_USERS = JSON.parse(JSON.stringify(__ORIGINAL_USERS));
+
         const nameEl = document.getElementById(`name_${__MUE.Username}`);
         const subEl = document.getElementById(`sub_${__MUE.Username}`);
         if(nameEl){
@@ -1331,7 +1342,7 @@ async function saveAll(){
       }
     });
 
-    // Create new user (permissions default No)
+    // Create new user (permissions default No) - keeps SAVE_URL (intentional full add)
     document.getElementById('anu_create').addEventListener('click', async ()=>{
       try{
         showMask(true);
@@ -1365,7 +1376,6 @@ async function saveAll(){
           return;
         }
 
-        // Prevent duplicates
         if (users.some(u => (u.Username||'').toLowerCase() === username.toLowerCase())) {
           showBanner('❌ That username already exists.','err');
           return;
@@ -1378,13 +1388,9 @@ async function saveAll(){
           FirstName: firstName,
           LastName: lastName,
           Username: username,
-
-          // Backwards compatible email
           Email: emailAddr || '',
           EmailAddress: emailAddr || '',
-
           MobileNumber: mobileNum || '',
-
           HashedPassword: hashedPassword,
           VehicleAssigned: vehicle,
           EmploymentType: empType || 'Employed',
@@ -1393,7 +1399,6 @@ async function saveAll(){
           SharePointPath: spPath
         };
 
-        // Set ALL permissions to No by default
         const keys = collectAllPermissionKeys();
         keys.forEach(k=>{
           if (!k) return;
@@ -1421,18 +1426,16 @@ async function saveAll(){
     openAddNewUserBtn.addEventListener('click', openAddNewUser);
     anu_cancel.addEventListener('click', closeAddNewUser);
 
-    // Optional: close modals if clicking backdrop
     manageUsersModal.addEventListener('click', (e)=>{ if(e.target === manageUsersModal) closeManageUsers(); });
     addNewUserModal.addEventListener('click', (e)=>{ if(e.target === addNewUserModal) closeAddNewUser(); });
 
-    // (Your earlier requirement): only Jamie.Line should manage users
     if (CURRENT !== 'Jamie.Line') {
       manageUsersBtn.disabled = true;
       manageUsersBtn.title = 'Only Jamie.Line can manage users';
     }
 
     (async()=>{await buildUI();})();
-  </script>
+      </script>
 
 </body>
 </html>
