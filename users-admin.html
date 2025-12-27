@@ -825,23 +825,34 @@ async function saveAll(){
         const uiVal = chk.checked ? 'Yes' : 'No';
         const origVal = orig[key];
 
-        // do not create new "No" keys
-        if (origVal === undefined && uiVal === 'No') return;
+// FIX: allow first-time "No" permissions to be saved
+if (origVal === undefined && uiVal === 'No') {
+  changes[key] = 'No';
+  return;
+}
 
         if (String(origVal ?? '') !== uiVal) {
           changes[key] = uiVal;
         }
       };
 
-      __STRUCT.forEach(p => {
-        const pk = p.key || mapToPermKey(p.id, p.label, p.href);
-        if (pk) checkPerm(pk);
+const checkedKeys = new Set();
 
-        (p.subpages || []).forEach(sp => {
-          const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
-          if (sk) checkPerm(sk);
-        });
-      });
+__STRUCT.forEach(p => {
+  const pk = p.key || mapToPermKey(p.id, p.label, p.href);
+  if (pk && !checkedKeys.has(pk)) {
+    checkedKeys.add(pk);
+    checkPerm(pk);
+  }
+
+  (p.subpages || []).forEach(sp => {
+    const sk = sp.key || mapToPermKey(sp.id, sp.label, sp.href);
+    if (sk && !checkedKeys.has(sk)) {
+      checkedKeys.add(sk);
+      checkPerm(sk);
+    }
+  });
+});
 
       if (Object.keys(changes).length) {
         patchUsers.push({
