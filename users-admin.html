@@ -805,7 +805,7 @@ async function saveAll(){
       const orig = (__ORIGINAL_USERS || []).find(o => o.Username === user.Username);
       if (!orig) return;
 
-      const card = document.querySelector(`#name_${user.Username}`)?.closest('.user-card');
+      const card = document.querySelector(`.user-card [id="name_${user.Username}"]`)?.closest('.user-card');
       if (!card) return;
 
       const changes = {};
@@ -819,10 +819,10 @@ async function saveAll(){
 
       // PERMISSIONS
       const checkPerm = (key) => {
-        const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
-        if (!chk) return;
+const chk = card.querySelector(`input[data-key="${key}"]`);
+if (!chk) return;
 
-        const uiVal = chk.checked ? 'Yes' : 'No';
+const uiVal = chk.checked ? 'Yes' : 'No';
         const origVal = orig[key];
 
 // FIX: allow first-time "No" permissions to be saved
