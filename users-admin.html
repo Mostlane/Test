@@ -852,11 +852,12 @@ function mapToPermKey(id, label, href) {
             const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
             if (!chk) return;
 
-            const uiVal = chk.checked ? 'Yes' : 'No';
-            const origVal =
-  (orig.FullAccess || '').toLowerCase() === 'yes'
-    ? 'Yes'
-    : orig[key];
+            const uiVal = chk.checked ? 'Yes' : '
+              const effectiveOrigFA =
+  (orig.FullAccess || '').toLowerCase() === 'yes' &&
+  newFA === 'Yes';
+
+const origVal = effectiveOrigFA ? 'Yes' : orig[key];
 
             // do not create new "No" keys
             if (origVal === undefined && uiVal === 'No') return;
