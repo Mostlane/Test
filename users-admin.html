@@ -440,7 +440,7 @@ function mapToPermKey(id, label, href) {
     "Forms": "Forms",
     "SLA": "SLA",
     "SLA Menu": "SLA",
-    "HolidayAdmin": "Holiday Admin"
+    "HolidayAdmin": "HolidayAdmin"
   };
 
   // Direct match on ID or label
@@ -857,7 +857,6 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
   if (String(origVal ?? '') !== uiVal) {
     changes[key] = uiVal;
   }
-});
 });
 
       if (Object.keys(changes).length) {
