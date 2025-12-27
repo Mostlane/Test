@@ -759,15 +759,20 @@
           if (!card) return;
 
           const changes = {};
+          let foundAny = false;
 
           const allInputs = Array.from(card.querySelectorAll('input[type="checkbox"]'));
-          allInputs.forEach(input => {
-            const key = input.getAttribute('data-key');
+          allInputs.forEach((input, idx) => {
+            let key = input.getAttribute('data-key');
+            if (!key) {
+              key = 'perm_' + idx;
+            }
             const checked = input.checked ? 'Yes' : 'No';
-            if (key) changes[key] = checked;
+            changes[key] = checked;
+            foundAny = true;
           });
 
-          if (Object.keys(changes).length) {
+          if (foundAny) {
             patchUsers.push({ Username: user.Username, Changes: changes });
           }
         });
