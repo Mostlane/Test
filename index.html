@@ -1,102 +1,106 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script src="auth.js"></script>
-<title>Check In / Out</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <title>Check In / Out</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<style>
-  body.index-body {
-    font-family: "Segoe UI", sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 0;
-
-    /* Ensure perfect centering on all screens */
-    min-height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .content-box {
-    background: rgba(255, 255, 255, 0.65);
-    padding: 35px 24px;
-    width: 92%;
-    max-width: 420px;
-    border-radius: 14px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-
-    /* Correct centering of everything inside */
-    text-align: center;
-  }
-
-  .content-box img {
-    width: 150px;
-    max-width: 60%;
-    margin: 0 auto 25px;
-    display: block;
-  }
-
-  h1 {
-    background-color: rgba(0, 74, 153, 0.65);
-    color: white;
-    padding: 14px 20px;
-    border-radius: 10px;
-    font-weight: bold;
-    font-size: 22px;
-    margin-bottom: 28px;
-  }
-
-  a.button {
-    display: block;
-    width: 100%;
-    padding: 15px 20px;
-    margin: 12px 0;
-    font-size: 17px;
-
-    background-color: rgba(0, 74, 153, 0.75);
-    color: white;
-    text-decoration: none;
-    text-align: center;
-    border-radius: 8px;
-
-    /* Smooth look */
-    transition: 0.15s;
-  }
-
-  a.button:hover {
-    background-color: rgba(0, 74, 153, 0.90);
-  }
-
-  /* Make sure spacing looks perfect on small phones */
-  @media (max-width: 400px) {
-    h1 {
-      font-size: 20px;
-      padding: 12px 16px;
+  <style>
+    /* 🔒 GLOBAL RESET */
+    * {
+      box-sizing: border-box;
     }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body.index-body {
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size: 180%;
+      overflow-x: hidden;
+
+      /* TRUE CENTERING */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
     .content-box {
-      padding: 28px 18px;
+      background: rgba(255, 255, 255, 0.65);
+      padding: 36px 24px;
+      width: 92%;
+      max-width: 420px;
+      border-radius: 14px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+
+      text-align: center;
     }
-  }
-</style>
+
+    .content-box img {
+      display: block;
+      width: 150px;
+      max-width: 60%;
+      margin: 0 auto 24px;
+    }
+
+    h1 {
+      margin: 0 0 28px;
+      background-color: rgba(0, 74, 153, 0.65);
+      color: white;
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    a.button {
+      display: block;
+      width: 100%;
+      padding: 15px 20px;
+      margin: 12px 0;
+      font-size: 17px;
+
+      background-color: rgba(0, 74, 153, 0.75);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+
+      transition: background-color 0.15s ease;
+    }
+
+    a.button:hover {
+      background-color: rgba(0, 74, 153, 0.9);
+    }
+
+    /* 📱 SMALL PHONES */
+    @media (max-width: 400px) {
+      .content-box {
+        padding: 28px 18px;
+      }
+
+      h1 {
+        font-size: 20px;
+        padding: 12px 16px;
+      }
+    }
+  </style>
 </head>
 
 <body class="index-body">
 
-<div class="content-box">
+  <div class="content-box">
+    <img src="mostlane-logo.jpg" alt="Mostlane Logo">
 
-  <img src="mostlane-logo.jpg" alt="Mostlane Logo">
+    <h1>Check In / Out</h1>
 
-  <h1>Check In / Out</h1>
-
-  <a class="button" href="checkin.html">Check In</a>
-  <a class="button" href="checkout.html">Check Out</a>
-  <a class="button" href="admin-timesheets.html">Timesheet Manager</a>
-  <a class="button" href="main.html">Main Menu</a>
-
-</div>
+    <a class="button" href="checkin.html">Check In</a>
+    <a class="button" href="checkout.html">Check Out</a>
+    <a class="button" href="admin-timesheets.html">Timesheet Manager</a>
+    <a class="button" href="main.html">Main Menu</a>
+  </div>
 
 </body>
 </html>
