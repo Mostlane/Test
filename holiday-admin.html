@@ -331,12 +331,25 @@
   <div class="tooltip" id="tooltip"></div>
 
 <script>
-  const API = "https://mostlane-holidays.jamie-def.workers.dev";
-  const user = sessionStorage.getItem("mostlaneUser");
-  const role = sessionStorage.getItem("mostlaneRole");
+const API = "https://mostlane-holidays.jamie-def.workers.dev";
+const user = sessionStorage.getItem("mostlaneUser");
 
-  if (!user) { alert("Session expired. Please log in again."); location.href = "login.html"; }
-  if (!["Admin","Director"].includes(role)) { alert("Forbidden"); location.href = "main.html"; }
+const HOLIDAY_ADMINS = [
+  "Jamie.Line",
+  "Joe.Line",
+  "Greg.Line",
+  "Megan.Line"
+];
+
+if (!user) {
+  alert("Session expired. Please log in again.");
+  location.href = "login.html";
+}
+
+if (!HOLIDAY_ADMINS.includes(user)) {
+  alert("You are not authorised to access Holiday Admin.");
+  location.href = "main.html";
+}
 
   const $ = (id)=>document.getElementById(id);
 
