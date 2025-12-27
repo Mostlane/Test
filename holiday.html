@@ -14,38 +14,21 @@
     margin: 0;
     padding: 40px 20px;
   }
-
-  .container {
-    max-width: 1000px;
-    margin: auto;
-  }
-
+  .container { max-width: 1000px; margin: auto; }
   .form-section, .summary-section {
     background: rgba(255,255,255,0.6);
     padding: 30px;
     border-radius: 8px;
     margin-bottom: 20px;
   }
-
-  h2 {
-    text-align: center;
-    color: #003366;
-    margin-top: 0;
-  }
-
-  label {
-    display: block;
-    margin-top: 15px;
-    font-weight: bold;
-  }
-
+  h2 { text-align: center; color: #003366; margin-top: 0; }
+  label { display: block; margin-top: 15px; font-weight: bold; }
   input, select {
     width: 100%;
     padding: 10px;
     font-size: 16px;
     margin-top: 5px;
   }
-
   button {
     margin-top: 30px;
     padding: 12px;
@@ -57,22 +40,23 @@
     border-radius: 6px;
     cursor: pointer;
   }
-
-  ul {
-    padding-left: 18px;
-    font-size: 14px;
-  }
-
+  ul { padding-left: 18px; font-size: 14px; }
   .approved { color: #15803d; }
   .pending { color: #b45309; }
+  .rejected { color: #b00020; }
+  .system { color: #0f172a; }
+  .chip { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; background:rgba(255,255,255,0.7); border:1px solid rgba(0,0,0,0.08); }
+  .chip-ok { color:#15803d; border-color: rgba(21,128,61,0.25); }
+  .chip-warn { color:#b45309; border-color: rgba(180,83,9,0.25); }
+  .chip-bad { color:#b00020; border-color: rgba(176,0,32,0.25); }
+  .tinyBtn { margin-left:10px; width:auto; padding:6px 10px; font-size:12px; border-radius:6px; background:rgba(0,74,153,0.75); }
 </style>
 </head>
 
 <body>
 
 <div style="text-align:right; margin-bottom:20px;">
-  <button onclick="location.href='main.html'"
-    style="width:auto; padding:10px 20px; font-size:16px;">
+  <button onclick="location.href='main.html'" style="width:auto; padding:10px 20px; font-size:16px;">
     Main Menu
   </button>
 </div>
@@ -101,8 +85,8 @@
         <option>Unpaid Leave</option>
       </select>
 
-      <label>Notes</label>
-      <input id="notes" placeholder="Optional">
+      <label>Reminder Note (required)</label>
+      <input id="notes" placeholder="e.g. Ben’s wedding, Half term, Family trip" required>
 
       <button type="submit" id="submitBtn">Submit</button>
     </form>
@@ -111,10 +95,18 @@
   <!-- SUMMARY -->
   <div class="summary-section">
     <h2>Holiday Summary</h2>
-
     <p><strong>Allowance:</strong> <span id="allowance">–</span></p>
     <p><strong>Used:</strong> <span id="used">–</span></p>
     <p><strong>Remaining:</strong> <span id="remaining">–</span></p>
+    <p style="font-size:13px;color:#475569;margin-top:10px;">
+      Includes bank holidays + company shutdown (credited back if marked as worked).
+    </p>
+  </div>
+
+  <!-- SYSTEM DAYS -->
+  <div class="summary-section">
+    <h2>Bank Holidays & Company Shutdown</h2>
+    <ul id="systemList"></ul>
   </div>
 
   <!-- APPROVED -->
@@ -125,7 +117,7 @@
 
   <!-- PENDING -->
   <div class="summary-section">
-    <h2>Pending Requests</h2>
+    <h2>Pending / Other</h2>
     <ul id="pendingList"></ul>
   </div>
 
@@ -134,24 +126,25 @@
 <script>
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
 
-// ---- HARD SESSION GUARD (iPhone safe) ----
+// Session guard
 const user = sessionStorage.getItem("mostlaneUser");
-const role = sessionStorage.getItem("mostlaneRole");
+const role = sessionStorage.getItem("mostlaneRole") || "Engineer";
 
 if (!user) {
   alert("Your session has expired. Please log in again.");
   window.location.href = "login.html";
 }
 
-// ---- SET ENGINEER FIELD ----
+const year = new Date().getFullYear();
+
+// Set engineer display
 engineer.value = user.replace(".", " ");
 
-// ---- LOAD SUMMARY ----
+// Load summary
 async function loadSummary() {
-  const res = await fetch(API + "/holiday/summary", {
-    headers: { "X-User": user }
+  const res = await fetch(`${API}/holiday/summary?year=${year}`, {
+    headers: { "X-User": user, "X-Role": role }
   });
-
   if (!res.ok) return;
 
   const s = await res.json();
@@ -160,45 +153,117 @@ async function loadSummary() {
   remaining.innerText = s.remaining;
 }
 
-// ---- LOAD USER HOLIDAYS ----
-async function loadMyHolidays() {
-  const res = await fetch(API + "/holiday/my", {
-    headers: { "X-User": user }
+// Cancel pending request
+async function cancelRequest(id) {
+  if (!confirm("Cancel this pending holiday request?")) return;
+
+  const res = await fetch(`${API}/holiday/cancel?year=${year}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": user,
+      "X-Role": role
+    },
+    body: JSON.stringify({ id })
   });
 
+  if (!res.ok) {
+    const t = await res.text();
+    alert("Could not cancel: " + t);
+    return;
+  }
+
+  await loadSummary();
+  await loadMyHolidays();
+}
+
+// Load user holidays + system days
+async function loadMyHolidays() {
+  const res = await fetch(`${API}/holiday/my?year=${year}`, {
+    headers: { "X-User": user, "X-Role": role }
+  });
   if (!res.ok) return;
 
   const data = await res.json();
+
   approvedList.innerHTML = "";
   pendingList.innerHTML = "";
+  systemList.innerHTML = "";
 
   data.forEach(h => {
+    // SYSTEM DAYS (bank holiday / shutdown)
+    if (h.category === "BankHoliday" || h.category === "Shutdown") {
+      const li = document.createElement("li");
+      const label = h.label || (h.category === "BankHoliday" ? "Bank Holiday" : "Company Shutdown");
+      const statusChip = h.worked
+        ? `<span class="chip chip-ok">Worked (credited)</span>`
+        : `<span class="chip chip-warn">Deducted</span>`;
+
+      li.className = "system";
+      li.innerHTML = `${h.date} — ${label} ${statusChip}`;
+      systemList.appendChild(li);
+      return;
+    }
+
+    // REQUESTED HOLIDAYS
     const li = document.createElement("li");
-    li.innerHTML = `${h.start} → ${h.end} (${h.days} days)`;
+    const note = h.notes ? ` — <span style="color:#475569;">${String(h.notes).replace(/</g,"&lt;")}</span>` : "";
+    li.innerHTML = `${h.start} → ${h.end} (${h.days} days) — ${h.type}${note}`;
 
     if (h.status === "Approved") {
       li.className = "approved";
       approvedList.appendChild(li);
     } else if (h.status === "Pending") {
       li.className = "pending";
+
+      // Cancel button for engineer
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tinyBtn";
+      btn.textContent = "Cancel";
+      btn.onclick = () => cancelRequest(h.id);
+      li.appendChild(btn);
+
+      pendingList.appendChild(li);
+    } else if (h.status === "Rejected") {
+      li.className = "rejected";
+      pendingList.appendChild(li);
+    } else if (h.status === "Cancelled") {
+      li.className = "rejected";
+      li.innerHTML += ` <span class="chip chip-bad">Cancelled</span>`;
+      pendingList.appendChild(li);
+    } else {
       pendingList.appendChild(li);
     }
   });
 }
 
-// ---- SUBMIT REQUEST ----
+// Submit request
 holidayForm.addEventListener("submit", async e => {
   e.preventDefault();
   submitBtn.disabled = true;
+
+  if (new Date(end.value) < new Date(start.value)) {
+    alert("End date cannot be before start date");
+    submitBtn.disabled = false;
+    return;
+  }
+
+  const reminder = notes.value.trim();
+  if (!reminder) {
+    alert("Please add a short reminder note (e.g. ‘Family trip’).");
+    submitBtn.disabled = false;
+    return;
+  }
 
   const payload = {
     start: start.value,
     end: end.value,
     type: type.value,
-    notes: notes.value
+    notes: reminder
   };
 
-  const res = await fetch(API + "/holiday/request", {
+  const res = await fetch(`${API}/holiday/request?year=${year}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -211,17 +276,18 @@ holidayForm.addEventListener("submit", async e => {
   submitBtn.disabled = false;
 
   if (!res.ok) {
-    alert("Failed to submit holiday request");
+    const t = await res.text();
+    alert("Failed to submit holiday request: " + t);
     return;
   }
 
   alert("Holiday request submitted");
   holidayForm.reset();
-  loadSummary();
-  loadMyHolidays();
+  await loadSummary();
+  await loadMyHolidays();
 });
 
-// ---- INITIAL LOAD ----
+// Initial load
 loadSummary();
 loadMyHolidays();
 </script>
