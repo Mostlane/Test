@@ -853,7 +853,10 @@ function mapToPermKey(id, label, href) {
             if (!chk) return;
 
             const uiVal = chk.checked ? 'Yes' : 'No';
-            const origVal = orig[key];
+            const origVal =
+  (orig.FullAccess || '').toLowerCase() === 'yes'
+    ? 'Yes'
+    : orig[key];
 
             // do not create new "No" keys
             if (origVal === undefined && uiVal === 'No') return;
