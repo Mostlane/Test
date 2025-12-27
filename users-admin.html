@@ -847,25 +847,43 @@ function mapToPermKey(id, label, href) {
             changes.FullAccess = newFA;
           }
 
-          // PERMISSIONS
-          const checkPerm = (key) => {
-            const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
-            if (!chk) return;
+// PERMISSIONS
+const checkPerm = (key) => {
+  const chk = card.querySelector(`[id="${user.Username}::${key}__chk"]`);
+  if (!chk) return;
 
-            const uiVal = chk.checked ? 'Yes' : '
-              const effectiveOrigFA =
+  const uiVal = chk.checked ? 'Yes' : 'No';
+
+  // ✅ IMPORTANT: only treat FullAccess as "Yes" baseline if it's still ON in the UI
+  const effectiveOrigFA =
+    (orig.FullAccess || '').toLowerCase() === 'yes' &&
+    newFA === 'Yes';
+
+  const origVal = effectiveOrigFA ? 'Yes' : orig[key];
+
+  // do not create new "No" keys
+  // If FullAccess was just turned OFF, we MUST write explicit No's
+const fullAccessJustDisabled =
   (orig.FullAccess || '').toLowerCase() === 'yes' &&
-  newFA === 'Yes';
+  newFA === 'No';
 
-const origVal = effectiveOrigFA ? 'Yes' : orig[key];
+// If FullAccess was just disabled, write explicit No's
+if (
+  origVal === undefined &&
+  uiVal === 'No' &&
+  !fullAccessJustDisabled
+) return;
 
-            // do not create new "No" keys
-            if (origVal === undefined && uiVal === 'No') return;
+// If FullAccess was just disabled and checkbox exists, force explicit write
+if (fullAccessJustDisabled && origVal === undefined) {
+  changes[key] = uiVal;
+  return;
+}
 
-            if (String(origVal ?? '') !== uiVal) {
-              changes[key] = uiVal;
-            }
-          };
+  if (String(origVal ?? '') !== uiVal) {
+    changes[key] = uiVal;
+  }
+};
 
           __STRUCT.forEach(p => {
             const pk = p.key || mapToPermKey(p.id, p.label, p.href);
