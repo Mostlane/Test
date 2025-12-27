@@ -250,6 +250,7 @@
       <div class="field"><label>Email (optional)</label><input id="email" type="email" placeholder="name@company.com"></div>
       <div class="field"><label>Username</label><input id="username" type="text" placeholder="e.g. John.Doe" required></div>
       <div class="field"><label>Password</label><input id="password" type="password" placeholder="Initial password" required></div>
+      <div class="field"><label>Role</label><select id="role" class="input"><option value="">-- Select --</option><option value="Office">Office</option><option value="Field">Field</option></select></div>
       <div class="field"><label>Vehicle Assigned (optional)</label><input id="vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
       <div class="field"><label>Employment Type</label><input id="employmentType" type="text" placeholder="Employed / Self Employed"></div>
       <div class="field"><label>SharePoint Path URL</label><input id="sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
@@ -268,7 +269,7 @@
       <div class="field"><label>First Name</label><input id="mu_firstName" type="text"></div>
       <div class="field"><label>Last Name</label><input id="mu_lastName" type="text"></div>
       <div class="field"><label>Email</label><input id="mu_email" type="email"></div>
-
+<div class="field"><label>Role</label><select id="mu_role" class="input"><option value="">-- Select --</option><option value="Office">Office</option><option value="Field">Field</option></select></div>
       <div class="field"><label>Vehicle Assigned</label><input id="mu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
       <div class="field"><label>Employment Type</label><input id="mu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
       <div class="field"><label>Status</label><input id="mu_status" type="text" placeholder="Active / Not Active"></div>
@@ -316,6 +317,7 @@
 
           <div class="field"><label>Vehicle Assigned</label><input id="mue_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
           <div class="field"><label>Employment Type</label><input id="mue_employmentType" type="text" placeholder="Employed / Self Employed"></div>
+          <div class="field"><label>Role</label><select id="mue_role" class="input"><option value="">-- Select --</option><option value="Office">Office</option><option value="Field">Field</option></select></div>
           <div class="field"><label>SharePoint Path URL</label><input id="mue_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
 
           <div class="field"><label>Status</label><input id="mue_status" type="text" placeholder="Active / Not Active"></div>
@@ -348,7 +350,7 @@
 
       <div class="field"><label>Vehicle Assigned (optional)</label><input id="anu_vehicle" type="text" placeholder="e.g. WP64 EJD"></div>
       <div class="field"><label>Employment Type</label><input id="anu_employmentType" type="text" placeholder="Employed / Self Employed"></div>
-
+<div class="field"><label>Role</label><select id="anu_role" class="input"><option value="">-- Select --</option><option value="Office">Office</option><option value="Field">Field</option></select></div>
       <div class="field"><label>SharePoint Path URL</label><input id="anu_sharepoint" type="text" placeholder="Full SharePoint folder link"></div>
 
       <div class="small" style="margin-top:8px;">
@@ -935,6 +937,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
         const vehicle=document.getElementById('vehicle').value.trim();
         const empType=document.getElementById('employmentType').value.trim();
         const spPath=document.getElementById('sharepoint').value.trim();
+        const role = document.getElementById('role').value;
 
         if(!firstName||!lastName||!username||!password){
           showBanner('❌ Please complete First, Last, Username and Password.','err');
@@ -954,7 +957,8 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
           EmploymentType:empType||'Employed',
           Status:'Active',
           FullAccess:'No',
-          SharePointPath:spPath
+            SharePointPath:spPath,
+  Role:role
         };
 
         users.push(newUser);
@@ -1058,6 +1062,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
       document.getElementById('anu_mobileNumber').value = '';
       document.getElementById('anu_vehicle').value = '';
       document.getElementById('anu_employmentType').value = '';
+      document.getElementById('anu_role').value = '';
       document.getElementById('anu_sharepoint').value = '';
     }
     function closeAddNewUser(){
@@ -1074,6 +1079,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
       document.getElementById('mue_mobileNumber').value = '';
       document.getElementById('mue_vehicle').value = '';
       document.getElementById('mue_employmentType').value = '';
+      document.getElementById('mue_role').value = '';
       document.getElementById('mue_sharepoint').value = '';
       document.getElementById('mue_status').value = '';
       document.getElementById('mue_password').value = '';
@@ -1250,6 +1256,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
 
           document.getElementById('mue_vehicle').value = __MUE.VehicleAssigned || '';
           document.getElementById('mue_employmentType').value = __MUE.EmploymentType || '';
+          document.getElementById('mue_role').value = __MUE.Role || '';
           document.getElementById('mue_sharepoint').value = __MUE.SharePointPath || '';
           document.getElementById('mue_status').value = __MUE.Status || '';
           document.getElementById('mue_password').value = '';
@@ -1310,6 +1317,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
 
         setIfChanged(__MUE, 'VehicleAssigned', document.getElementById('mue_vehicle').value.trim());
         setIfChanged(__MUE, 'EmploymentType', document.getElementById('mue_employmentType').value.trim());
+        setIfChanged(__MUE, 'Role', document.getElementById('mue_role').value.trim());
         setIfChanged(__MUE, 'SharePointPath', document.getElementById('mue_sharepoint').value.trim());
         setIfChanged(__MUE, 'Status', document.getElementById('mue_status').value.trim());
 
@@ -1374,6 +1382,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
 
         const vehicle   = document.getElementById('anu_vehicle').value.trim();
         const empType   = document.getElementById('anu_employmentType').value.trim();
+        const role = document.getElementById('anu_role').value.trim();
         const spPath    = document.getElementById('anu_sharepoint').value.trim();
 
         if(!firstName || !lastName || !username || !password){
@@ -1404,6 +1413,7 @@ card.querySelectorAll('input[type="checkbox"][data-key]').forEach(chk => {
           HashedPassword: hashedPassword,
           VehicleAssigned: vehicle,
           EmploymentType: empType || 'Employed',
+          Role: role || '',
           Status: 'Active',
           FullAccess: 'No',
           SharePointPath: spPath
