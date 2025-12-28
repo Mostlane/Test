@@ -126,26 +126,6 @@
 <script>
 const API = "https://mostlane-holidays.jamie-def.workers.dev";
 
-function formatDatePretty(iso) {
-  if (!iso) return "";
-
-  const d = new Date(iso + "T00:00:00");
-
-  const day = d.getDate();
-  const year = d.getFullYear().toString().slice(-2);
-
-  const weekday = d.toLocaleDateString("en-GB", { weekday: "short" });
-  const month = d.toLocaleDateString("en-GB", { month: "short" });
-
-  const suffix =
-    day > 3 && day < 21 ? "th" :
-    day % 10 === 1 ? "st" :
-    day % 10 === 2 ? "nd" :
-    day % 10 === 3 ? "rd" : "th";
-
-  return `${weekday} ${day}${suffix} ${month} ${year}`;
-}
-  
 // Session guard
 const user = sessionStorage.getItem("mostlaneUser");
 const role = sessionStorage.getItem("mostlaneRole") || "Engineer";
@@ -253,18 +233,15 @@ async function loadMyHolidays() {
     }
 
     if (h.status === "Pending") {
-  li.className = "pending";
-  li.innerHTML += ` <span class="chip chip-warn">Pending</span>`;
-
-  const btn = document.createElement("button");
-  btn.className = "tinyBtn";
-  btn.textContent = "Cancel";
-  btn.onclick = () => cancelRequest(h.id);
-
-  li.appendChild(btn);
-  pendingList.appendChild(li);
-  return;
-
+      li.className = "pending";
+      const btn = document.createElement("button");
+      btn.className = "tinyBtn";
+      btn.textContent = "Cancel";
+      btn.onclick = () => cancelRequest(h.id);
+      li.appendChild(btn);
+      pendingList.appendChild(li);
+      return;
+    }
 
     if (h.status === "Rejected") {
   li.className = "rejected";
