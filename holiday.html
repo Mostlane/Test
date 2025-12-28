@@ -243,11 +243,19 @@ async function loadMyHolidays() {
       return;
     }
 
-    if (h.status === "Rejected" || h.status === "Cancelled") {
-      li.className = "rejected";
-      pendingList.appendChild(li);
-      return;
-    }
+    if (h.status === "Rejected") {
+  li.className = "rejected";
+  li.innerHTML += ` <span class="chip chip-bad">Declined</span>`;
+  pendingList.appendChild(li);
+  return;
+}
+
+if (h.status === "Cancelled") {
+  li.className = "rejected";
+  li.innerHTML += ` <span class="chip chip-bad">Cancelled</span>`;
+  pendingList.appendChild(li);
+  return;
+}
   });
 
   // Empty states
