@@ -2,275 +2,236 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Job Sheet</title>
+<title>Generating Job PDF…</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
 <style>
-/* =========================
-   PDF DOCUMENT BASE
-   ========================= */
-@page {
-  size: A4;
-  margin: 20mm;
-}
-
 body{
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  color:#0f172a;
-  background:#fff;
+  font-family:Arial,Helvetica,sans-serif;
+  background:#f3f4f6;
   margin:0;
+  padding:0;
 }
-
-.doc{
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-/* HEADER */
-.header{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  margin-bottom:20px;
-}
-.header img{
-  height:40px;
-}
-.header .meta{
-  text-align:right;
-  font-size:12px;
-  color:#475569;
-}
-
-/* TITLES */
-h1{
-  font-size:22px;
-  margin:0 0 6px;
-  color:#003b82;
-}
-h2{
-  font-size:16px;
-  margin:20px 0 8px;
-  border-bottom:1px solid #e5e7eb;
-  padding-bottom:4px;
-}
-h3{
-  font-size:14px;
-  margin:12px 0 6px;
-}
-
-/* SECTIONS */
-.section{
-  margin-bottom:14px;
-}
-.kv{
-  display:grid;
-  grid-template-columns:160px 1fr;
-  gap:6px 12px;
-  font-size:13px;
-}
-.kv div:nth-child(odd){
-  color:#475569;
-}
-
-/* TIMELINE */
-.timeline{
-  margin-top:8px;
-}
-.timeline-item{
-  display:grid;
-  grid-template-columns:16px 1fr;
-  gap:10px;
-  margin-bottom:10px;
-}
-.timeline-dot{
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#003b82;
-  margin-top:4px;
-}
-.timeline-body{
-  font-size:13px;
-}
-.timeline-time{
-  font-size:11px;
-  color:#64748b;
-}
-
-/* PHOTOS */
-.photos{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:8px;
-}
-.photos img{
-  width:100%;
-  border-radius:6px;
-  border:1px solid #e5e7eb;
-}
-
-/* SIGNATURE */
-.signature-box{
-  border:1px solid #d1d5db;
-  border-radius:6px;
-  padding:10px;
-  margin-top:8px;
-}
-.signature-box img{
-  max-width:100%;
-  max-height:120px;
-}
-
-/* FOOTER */
-.footer{
-  margin-top:30px;
-  font-size:11px;
-  color:#64748b;
+#status{
+  padding:40px;
   text-align:center;
-}
-
-/* PRINT */
-@media print{
-  body{ margin:0 }
+  font-size:14px;
+  color:#374151;
 }
 </style>
 </head>
-
 <body>
-<div class="doc" id="doc">
-  <div class="header">
-    <img src="Mostlane Logo.jpg" alt="Mostlane">
-    <div class="meta">
-      Generated: <span id="genDate"></span><br>
-      Document: <span id="docType"></span>
-    </div>
+
+<div id="status">Preparing job document…</div>
+
+<script>
+/* ===============================
+   CONFIG
+================================ */
+const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+
+/* ===============================
+   HELPERS
+================================ */
+const $ = id => document.getElementById(id);
+
+function qs(name){
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+function fmtDate(d){
+  if(!d) return "—";
+  const dt = new Date(d);
+  if(isNaN(dt)) return "—";
+  return dt.toLocaleString("en-GB", {
+    day:"2-digit", month:"short", year:"numeric",
+    hour:"2-digit", minute:"2-digit"
+  });
+}
+
+/* ===============================
+   MAIN
+================================ */
+(async function(){
+  const jobId = qs("id");
+  const type  = qs("type") || "client";
+
+  if(!jobId){
+    $("status").textContent = "❌ Missing job ID.";
+    return;
+  }
+
+  try{
+    $("status").textContent = "Loading job data…";
+
+    /* ---------- LOAD JOB ---------- */
+    const jobRes = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}`);
+    if(!jobRes.ok) throw new Error("Job not found");
+    const job = await jobRes.json();
+
+    /* ---------- LOAD FILES (PHOTOS) ---------- */
+    let photos = [];
+    try{
+      const fileRes = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}/files`);
+      if(fileRes.ok){
+        const fileJson = await fileRes.json();
+        photos = Array.isArray(fileJson.files)
+          ? fileJson.files.map(f => f.publicURL)
+          : [];
+      }
+    }catch{}
+
+    /* ---------- BUILD PDF HTML ---------- */
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body{
+  font-family:Arial,Helvetica,sans-serif;
+  font-size:12px;
+  color:#111827;
+  margin:30px;
+}
+h1{
+  font-size:18px;
+  margin-bottom:4px;
+}
+h2{
+  font-size:14px;
+  margin-top:20px;
+  border-bottom:1px solid #d1d5db;
+  padding-bottom:4px;
+}
+.small{font-size:11px;color:#4b5563}
+.section{margin-bottom:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.label{font-size:10px;color:#6b7280;text-transform:uppercase}
+.value{font-size:12px}
+.timeline-item{
+  border-left:2px solid #1e66ff;
+  padding-left:8px;
+  margin-bottom:8px;
+}
+.photos{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:6px;
+}
+.photos img{
+  width:100%;
+  height:140px;
+  object-fit:cover;
+  border:1px solid #d1d5db;
+}
+.signature img{
+  width:220px;
+  border:1px solid #d1d5db;
+}
+.footer{
+  position:fixed;
+  bottom:20px;
+  left:30px;
+  right:30px;
+  font-size:10px;
+  color:#6b7280;
+  text-align:center;
+}
+</style>
+</head>
+<body>
+
+<h1>${type === "client" ? "Job Completion Sheet" : "Internal Job Sheet"}</h1>
+<div class="small">Reference: ${job.helpdeskRef || job.reference || job.id}</div>
+
+<div class="section grid">
+  <div>
+    <div class="label">Site</div>
+    <div class="value">${job.siteName || job.site || "—"}</div>
   </div>
-
-  <h1>Job Completion Sheet</h1>
-
-  <div class="section kv" id="jobSummary"></div>
-
-  <h2>Activity Timeline</h2>
-  <div class="timeline" id="timeline"></div>
-
-  <div id="photosSection" class="section">
-    <h2>Site Photos</h2>
-    <div class="photos" id="photos"></div>
+  <div>
+    <div class="label">Engineer</div>
+    <div class="value">${job.assignedTo || "—"}</div>
   </div>
-
-  <div id="signatureSection" class="section">
-    <h2>Customer Sign-Off</h2>
-    <p>I confirm that the works described above have been completed to my satisfaction.</p>
-    <div class="signature-box" id="signature"></div>
+  <div>
+    <div class="label">Status</div>
+    <div class="value">${job.status || "—"}</div>
   </div>
-
-  <div class="footer">
-    Mostlane Construction Ltd • Generated via Mostlane Portal
+  <div>
+    <div class="label">SLA Target</div>
+    <div class="value">${fmtDate(job.targetAt)}</div>
   </div>
 </div>
 
-<script>
-const API = "https://mostlane-sla.jamie-def.workers.dev";
+<h2>Description</h2>
+<div class="section">${job.description || "—"}</div>
 
-const params = new URLSearchParams(location.search);
-const JOB_ID = params.get("id");
-const TYPE = params.get("type") || "client";
+<h2>Timeline</h2>
+<div class="section">
+  ${(job.history || []).map(e => `
+    <div class="timeline-item">
+      <div class="small">${fmtDate(e.at)} – ${e.by || ""}</div>
+      <div>${e.note || e.status || ""}</div>
+    </div>
+  `).join("") || "No history recorded."}
+</div>
 
-if(!JOB_ID){
-  alert("Missing job ID");
-}
+${photos.length ? `
+<h2>Photos</h2>
+<div class="photos">
+  ${photos.map(p => `<img src="${p}">`).join("")}
+</div>
+` : ""}
 
-/* =========================
-   LOAD + BUILD DOCUMENT
-   ========================= */
-(async function(){
-  document.getElementById("genDate").textContent =
-    new Date().toLocaleString("en-GB");
-  document.getElementById("docType").textContent =
-    TYPE === "client" ? "Client Copy" : "Mostlane Internal";
+${job.signature ? `
+<h2>Customer Sign-Off</h2>
+<div class="section signature">
+  <div class="small">Signed by ${job.signature.signedBy} on ${fmtDate(job.signature.signedAt)}</div>
+  <img src="${job.signature.signatureBase64}">
+</div>
+` : ""}
 
-  const res = await fetch(`${API}/jobs/${encodeURIComponent(JOB_ID)}`);
-  const job = await res.json();
+<div class="footer">
+  ${type === "client" ? "Mostlane Construction Ltd" : "Internal document – not for client use"}
+</div>
 
-  buildSummary(job);
-  buildTimeline(job);
-  buildPhotos(job);
-  buildSignature(job);
+</body>
+</html>
+`;
 
-  // Auto-trigger PDF
-  setTimeout(() => window.print(), 500);
+    /* ---------- REQUEST PDF DOWNLOAD ---------- */
+    $("status").textContent = "Generating PDF…";
+
+    const pdfRes = await fetch(`${SLA_API}/pdf`, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        html,
+        filename: `Job-${job.helpdeskRef || job.id}.pdf`
+      })
+    });
+
+    if(!pdfRes.ok) throw new Error("PDF generation failed");
+
+    const blob = await pdfRes.blob();
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Job-${job.helpdeskRef || job.id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+
+    $("status").textContent = "✅ Download started.";
+  }
+  catch(err){
+    console.error(err);
+    $("status").textContent = "❌ Failed to generate job PDF.";
+  }
 })();
-
-/* =========================
-   BUILDERS
-   ========================= */
-function buildSummary(job){
-  const el = document.getElementById("jobSummary");
-
-  addKV(el,"Reference", job.reference || job.id);
-  addKV(el,"Site", job.site || "");
-  addKV(el,"Description", job.description || "");
-  addKV(el,"Status", job.status || "");
-
-  if(TYPE === "mostlane"){
-    addKV(el,"Priority", job.priority || "");
-    addKV(el,"Engineer", job.engineer || "");
-    addKV(el,"SLA Target", job.slaTarget || "");
-  }
-}
-
-function addKV(container, k, v){
-  container.insertAdjacentHTML("beforeend",
-    `<div>${k}</div><div>${v || "—"}</div>`);
-}
-
-function buildTimeline(job){
-  const el = document.getElementById("timeline");
-  const events = job.timeline || job.history || [];
-
-  if(!events.length){
-    el.innerHTML = "<em>No activity recorded.</em>";
-    return;
-  }
-
-  events.forEach(e => {
-    el.insertAdjacentHTML("beforeend", `
-      <div class="timeline-item">
-        <div class="timeline-dot"></div>
-        <div class="timeline-body">
-          <div>${e.text || e.note || "Update"}</div>
-          <div class="timeline-time">${new Date(e.at).toLocaleString("en-GB")}</div>
-        </div>
-      </div>
-    `);
-  });
-}
-
-function buildPhotos(job){
-  if(!job.photos || !job.photos.length){
-    document.getElementById("photosSection").style.display="none";
-    return;
-  }
-
-  const el = document.getElementById("photos");
-  job.photos.forEach(p => {
-    el.insertAdjacentHTML("beforeend", `<img src="${p.url}">`);
-  });
-}
-
-function buildSignature(job){
-  if(!job.signature){
-    document.getElementById("signatureSection").style.display="none";
-    return;
-  }
-
-  const el = document.getElementById("signature");
-  el.innerHTML = `
-    <strong>${job.signature.name || ""}</strong><br>
-    <img src="${job.signature.image}">
-  `;
-}
 </script>
 </body>
 </html>
