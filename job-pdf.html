@@ -251,14 +251,24 @@ async function load(){
       </div>
     `).join("");
 
-  document.getElementById("notes").innerHTML =
-    (job.events||[]).map(n=>`
-      <div class="note">
-        <strong>${cleanName(n.by)}</strong> — ${new Date(n.at).toLocaleString()}<br>
-        ${n.note}
-      </div>
-    `).join("") || "<em>No notes</em>";
+  const realNotes = (job.events || []).filter(e =>
+  e &&
+  e.type === "note" &&
+  typeof e.note === "string" &&
+  e.note.trim().length > 0 &&
+  e.note !== "undefined"
+);
 
+document.getElementById("notes").innerHTML =
+  realNotes.length
+    ? realNotes.map(n => `
+        <div class="note">
+          <strong>${cleanName(n.by)}</strong>
+          — ${new Date(n.at).toLocaleString()}<br>
+          ${n.note}
+        </div>
+      `).join("")
+    : "<em>No notes recorded.</em>";
   document.getElementById("photos").innerHTML =
     (files.files||[]).map(f=>`
       <div class="photo">
