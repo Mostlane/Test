@@ -462,6 +462,35 @@
         display:flex;
       }
     }
+    /* =========================
+   JOB SHEET EXPORT (PRINT)
+   ========================= */
+@media print{
+  body{
+    background:#fff !important;
+  }
+
+  .hero,
+  .tabs,
+  .filters,
+  .header-right,
+  .btn,
+  .chip,
+  .modal-backdrop{
+    display:none !important;
+  }
+
+  .card{
+    box-shadow:none !important;
+    border:1px solid #d1d5db;
+    margin-bottom:12px;
+    page-break-inside:avoid;
+  }
+
+  table{
+    min-width:0 !important;
+  }
+}
   </style>
 </head>
 <body>
@@ -675,7 +704,23 @@
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
+/* =========================
+   JOB SHEET EXPORT
+   ========================= */
+function openJobSheet(jobId, type = "client"){
+  if(!jobId) return;
 
+  // Default client options (can be expanded later)
+  let url =
+    `job-view.html?id=${encodeURIComponent(jobId)}` +
+    `&export=${encodeURIComponent(type)}`;
+
+  if(type === "client"){
+    url += "&photos=1&signature=1&notes=0";
+  }
+
+  window.open(url, "_blank");
+}
 let allJobs = [];
 let showingCompleted = false;
 let activePriority = "all";
@@ -1023,13 +1068,14 @@ const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
         <td class="small">
           <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
         </td>
-        <td>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-            <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-          </div>
-        </td>
-      `;
+<td>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+    <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+    <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+    <button class="btn icon-only" data-action="sheet" title="Job Sheet">📄</button>
+  </div>
+</td>
+`;
       tbody.appendChild(tr);
     }
 
@@ -1060,9 +1106,10 @@ const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
           <span>SLA: ${fmtDateTimeShort(parseDate(job.slaTarget))}</span>
         </div>
         <div class="job-card-actions">
-          <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-          <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-        </div>
+  <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
+  <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
+  <button class="btn icon-only" data-action="sheet" title="Job Sheet">📄</button>
+</div>
       `;
       cardsContainer.appendChild(card);
     }
@@ -1443,16 +1490,20 @@ async function saveAssignModal(){
 function handleJobActionClick(e){
   const btn = e.target.closest("button[data-action]");
   if(!btn) return;
+
   const action = btn.dataset.action;
-  const container = e.currentTarget;
   const rowOrCard = e.target.closest("[data-job-id]");
   const id = rowOrCard && rowOrCard.dataset.jobId;
   if(!id) return;
 
   if(action === "update"){
     openUpdateModal(id);
-  } else if(action === "assign"){
+  }
+  else if(action === "assign"){
     openAssignModal(id);
+  }
+  else if(action === "sheet"){
+    openJobSheet(id, "client");
   }
 }
 
