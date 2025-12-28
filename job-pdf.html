@@ -225,14 +225,33 @@ async function load(){
     `Ref: <strong>${job.helpdeskRef}</strong><br>${new Date().toLocaleString()}`;
 
   document.getElementById("jobDetails").innerHTML = `
-<div>
-  <span class="label">Site</span>
-  <div class="value">${job.siteName || job.siteCode || "—"}</div>
-</div>
-    <div><span class="label">Engineer</span><div class="value">${cleanName(job.assignedTo)}</div></div>
-    <div><span class="label">Priority</span><div class="value">${job.priority}</div></div>
-    <div><span class="label">Status</span><div class="value">${job.status}</div></div>
-  `;
+  <div>
+    <span class="label">Site</span>
+    <div class="value">${job.site || job.siteName || job.siteCode || "-"}</div>
+  </div>
+
+  <div>
+    <span class="label">Engineer</span>
+    <div class="value">${cleanName(job.assignedTo)}</div>
+  </div>
+
+  <div>
+    <span class="label">Priority</span>
+    <div class="value">${job.priority}</div>
+  </div>
+
+  <div>
+    <span class="label">Status</span>
+    <div class="value">${job.status}</div>
+  </div>
+
+  <div style="grid-column:1 / -1;">
+    <span class="label">Description</span>
+    <div class="value">
+      ${job.description || job.summary || job.title || "—"}
+    </div>
+  </div>
+`;
 
   const slaMet = job.sla?.state !== "BREACHED";
   document.getElementById("slaBlock").innerHTML = `
