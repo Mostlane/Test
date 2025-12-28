@@ -224,9 +224,10 @@
       <h1>Holiday Admin</h1>
       <div class="controls">
         <button class="btn" onclick="location.href='main.html'">Menu</button>
-        <button id="prevMonth" class="btn">◀</button>
+        <button id="prevMonth" class="btn">&#9664;</button>
         <div class="pill"><span id="monthLabel">—</span></div>
-        <button id="nextMonth" class="btn">▶</button>
+        <button id="nextMonth" class="btn">&#9654;</button>
+        <button id="todayMonth" class="btn">Today</button>
         <select id="yearSel"></select>
         <button id="refreshBtn" class="btn btnPrimary">Refresh</button>
       </div>
@@ -655,7 +656,6 @@ async function saveBank(){
   try{
     setStatus("Saving bank holidays…");
     await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: state.config.bankholidays });
-    await loadConfig();
     await refreshAll();
     setStatus("");
   }catch(e){
@@ -668,7 +668,6 @@ async function saveShutdown(){
   try{
     setStatus("Saving shutdown days…");
     await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: state.config.shutdown });
-    await loadConfig();
     await refreshAll();
     setStatus("");
   }catch(e){
@@ -680,47 +679,21 @@ async function saveShutdown(){
 $("addBH").onclick = async ()=>{
   const d = $("bhDate").value;
   const l = $("bhLabel").value.trim() || "Bank Holiday";
-  if (!d) return alert("Choose a date");
-
-  const existing = (state.config.bankholidays || []).some(x => x.date === d);
-  if (existing) return alert("That date is already listed.");
-
-  try {
-    setStatus("Saving bank holiday…");
-    const next = [...(state.config.bankholidays || []), { date:d, label:l }];
-    await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: next });
-    $("bhDate").value = "";
-    $("bhLabel").value = "";
-    await loadConfig();
-    await refreshAll();
-    setStatus("");
-  } catch (e) {
-    alert("Save failed: " + e.message);
-    setStatus("");
-  }
+  if (!d) return alert("Date required");
+  state.config.bankholidays.push({ date: d, label: l });
+  $("bhDate").value = "";
+  $("bhLabel").value = "";
+  await saveBank();
 };
 
 $("addSD").onclick = async ()=>{
   const d = $("sdDate").value;
   const l = $("sdLabel").value.trim() || "Company Shutdown";
-  if (!d) return alert("Choose a date");
-
-  const existing = (state.config.shutdown || []).some(x => x.date === d);
-  if (existing) return alert("That date is already listed.");
-
-  try {
-    setStatus("Saving shutdown…");
-    const next = [...(state.config.shutdown || []), { date:d, label:l }];
-    await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: next });
-    $("sdDate").value = "";
-    $("sdLabel").value = "";
-    await loadConfig();
-    await refreshAll();
-    setStatus("");
-  } catch (e) {
-    alert("Save failed: " + e.message);
-    setStatus("");
-  }
+  if (!d) return alert("Date required");
+  state.config.shutdown.push({ date: d, label: l });
+  $("sdDate").value = "";
+  $("sdLabel").value = "";
+  await saveShutdown();
 };
 
 async function loadConfig(){
@@ -732,15 +705,12 @@ async function loadConfig(){
   };
   renderConfigLists();
 }
-
 async function loadRequests(){
   state.allRequests = await apiGET(`/holiday/all?year=${state.year}&t=${Date.now()}`);
 }
-
 async function loadSummary(){
   state.summary = await apiGET(`/holiday/admin-summary?year=${state.year}&t=${Date.now()}`);
 }
-
 async function loadCalendar(){
   state.calendar = await apiGET(`/holiday/calendar?year=${state.year}&month=${state.month}&t=${Date.now()}`);
 }
@@ -768,6 +738,13 @@ $("prevMonth").onclick = ()=> {
 $("nextMonth").onclick = ()=> {
   state.month++;
   if (state.month > 12){ state.month = 1; state.year++; $("yearSel").value = state.year; }
+  refreshAll();
+};
+$("todayMonth").onclick = ()=> {
+  const now = new Date();
+  state.year = now.getFullYear();
+  state.month = now.getMonth() + 1;
+  $("yearSel").value = state.year;
   refreshAll();
 };
 $("refreshBtn").onclick = refreshAll;
