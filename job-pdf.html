@@ -23,6 +23,12 @@ body{
   background:#fff;
   color:#111827;
 }
+  .job-description{
+  font-size:15px;
+  line-height:1.55;
+  font-weight:600;
+  color:#0f172a;
+}
 
 .header{
   display:flex;
@@ -247,9 +253,9 @@ async function load(){
 
   <div style="grid-column:1 / -1;">
     <span class="label">Description</span>
-    <div class="value">
-      ${job.description || job.summary || job.title || "—"}
-    </div>
+    <div class="value job-description">
+  ${job.description || job.summary || job.title || "—"}
+</div>
   </div>
 `;
 
