@@ -700,26 +700,53 @@
     <div id="assignModalStatusText" class="small muted" style="margin-top:4px;"></div>
   </div>
 </div>
+<!-- JOB PDF TYPE MODAL -->
+<div class="modal-backdrop" id="pdfTypeBackdrop">
+  <div class="modal">
+    <header>
+      <h2>Generate Job Sheet</h2>
+      <button type="button" id="pdfTypeClose">&times;</button>
+    </header>
 
+    <div class="modal-body">
+      <p style="font-size:13px;color:#475569;margin-bottom:12px;">
+        Choose which document you want to generate.
+      </p>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn primary" id="pdfClientBtn">📄 Client Copy</button>
+        <button class="btn" id="pdfMostlaneBtn">🏗️ Mostlane Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
 /* =========================
    JOB SHEET EXPORT
    ========================= */
-function openJobSheet(jobId, type = "client"){
-  if(!jobId) return;
+let currentPdfJobId = null;
 
-  // Default client options (can be expanded later)
-  let url =
-    `job-view.html?id=${encodeURIComponent(jobId)}` +
-    `&export=${encodeURIComponent(type)}`;
+function openPdfTypeModal(jobId){
+  currentPdfJobId = jobId;
+  $("pdfTypeBackdrop").classList.add("show");
+}
 
-  if(type === "client"){
-    url += "&photos=1&signature=1&notes=0";
-  }
+function closePdfTypeModal(){
+  $("pdfTypeBackdrop").classList.remove("show");
+  currentPdfJobId = null;
+}
+
+function openJobPdf(type){
+  if(!currentPdfJobId) return;
+
+  const url =
+    `job-pdf.html?id=${encodeURIComponent(currentPdfJobId)}` +
+    `&type=${encodeURIComponent(type)}`;
 
   window.open(url, "_blank");
+  closePdfTypeModal();
 }
 let allJobs = [];
 let showingCompleted = false;
@@ -1503,7 +1530,7 @@ function handleJobActionClick(e){
     openAssignModal(id);
   }
   else if(action === "sheet"){
-    openJobSheet(id, "client");
+    openPdfTypeModal(id);
   }
 }
 
@@ -1561,6 +1588,10 @@ function initEvents(){
       else if(currentUpdateJobId) closeUpdateModal();
     }
   });
+  // PDF type modal buttons
+$("pdfTypeClose").addEventListener("click", closePdfTypeModal);
+$("pdfClientBtn").addEventListener("click", () => openJobPdf("client"));
+$("pdfMostlaneBtn").addEventListener("click", () => openJobPdf("mostlane"));
 }
 
 window.addEventListener("DOMContentLoaded", () => {
