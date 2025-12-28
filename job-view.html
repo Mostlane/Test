@@ -473,15 +473,47 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2 class="section-title">Customer Signature</h2>
-    <p class="section-sub">Later we can add a canvas or JotForm iframe here to capture a sign-off signature and store it per job.</p>
-    <div class="panel-light">
-      Signature capture will be stored in R2 under <code>jobs/{jobId}/signatures/...</code>.
-    </div>
+ <div class="card">
+  <h2 class="section-title">Customer Signature</h2>
+  <p class="section-sub">
+    Please ask the customer to review and sign below to confirm works carried out.
+  </p>
+
+  <div id="signatureStatus" class="panel-light">
+    No signature captured yet.
+  </div>
+
+  <div style="margin-top:10px;">
+    <button class="btn primary" id="openSignatureBtn">✍️ Capture Signature</button>
   </div>
 </div>
+</div>
+  <!-- SIGNATURE MODAL -->
+<div id="signatureModal" class="photo-modal hidden">
+  <div class="photo-modal-inner" style="background:#fff;max-width:500px;padding:16px;">
+    <button class="photo-modal-close" id="closeSignatureModal">Close ✕</button>
 
+    <h3 style="margin-top:0;color:#003b82;">Customer Sign-Off</h3>
+
+    <p style="font-size:13px;color:#374151;">
+      I confirm that the works described for this job have been completed to my satisfaction.
+    </p>
+
+    <label class="field-label">Customer Name</label>
+    <input id="sigName" type="text" placeholder="Type full name">
+
+    <label class="field-label" style="margin-top:10px;">Signature</label>
+    <canvas id="sigCanvas" width="420" height="160"
+      style="border:1px solid #d1d5db;border-radius:8px;touch-action:none;"></canvas>
+
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn" id="clearSig">Clear</button>
+      <button class="btn primary" id="saveSig">Save Signature</button>
+    </div>
+
+    <div id="sigStatus" style="font-size:12px;color:#6b7280;margin-top:6px;"></div>
+  </div>
+</div>
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 let job = null;
@@ -819,6 +851,12 @@ function showPrevPhoto(){
 ---------------------------- */
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
+        $("openSignatureBtn").addEventListener("click", openSignatureModal);
+$("closeSignatureModal").addEventListener("click", closeSignatureModal);
+$("clearSig").addEventListener("click", () => {
+  if(sigCtx) sigCtx.clearRect(0,0,420,160);
+});
+$("saveSig").addEventListener("click", saveSignature);
 
   // Photo upload
   $("uploadBtn").addEventListener("click", async () => {
@@ -852,6 +890,7 @@ function init(){
           failCount++;
           continue;
         }
+
         const data = await res.json();
         if(data && data.ok && data.publicURL){
           photoGallery.push({
@@ -916,6 +955,84 @@ function init(){
 }
 
 window.addEventListener("DOMContentLoaded", init);
+
+  /* ===========================
+   CUSTOMER SIGNATURE
+=========================== */
+let sigCtx, drawing = false;
+
+function openSignatureModal(){
+  $("signatureModal").classList.remove("hidden");
+  initSignatureCanvas();
+}
+
+function closeSignatureModal(){
+  $("signatureModal").classList.add("hidden");
+}
+
+function initSignatureCanvas(){
+  const canvas = $("sigCanvas");
+  sigCtx = canvas.getContext("2d");
+  sigCtx.lineWidth = 2;
+  sigCtx.lineCap = "round";
+  sigCtx.strokeStyle = "#111";
+
+  canvas.onpointerdown = e => {
+    drawing = true;
+    sigCtx.beginPath();
+    sigCtx.moveTo(e.offsetX, e.offsetY);
+  };
+  canvas.onpointermove = e => {
+    if(!drawing) return;
+    sigCtx.lineTo(e.offsetX, e.offsetY);
+    sigCtx.stroke();
+  };
+  canvas.onpointerup = () => drawing = false;
+}
+
+async function saveSignature(){
+  const name = $("sigName").value.trim();
+  if(!name){
+    $("sigStatus").textContent = "❌ Name required.";
+    return;
+  }
+
+  const canvas = $("sigCanvas");
+  const img = canvas.toDataURL("image/png");
+
+  if(img.length < 1000){
+    $("sigStatus").textContent = "❌ Signature required.";
+    return;
+  }
+
+  $("sigStatus").textContent = "Saving…";
+
+  try{
+    const payload = {
+      signedBy: name,
+      signedAt: new Date().toISOString(),
+      signatureBase64: img
+    };
+
+    const res = await fetch(
+      `${SLA_API}/jobs/${encodeURIComponent(job.id)}/signature`,
+      {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify(payload)
+      }
+    );
+
+    if(!res.ok) throw new Error();
+
+    $("signatureStatus").innerHTML =
+      `✔ Signed by <strong>${name}</strong> on ${fmtDateTimeLong(new Date())}`;
+    closeSignatureModal();
+  }catch{
+    $("sigStatus").textContent = "❌ Failed to save signature.";
+  }
+}
+
 </script>
 </body>
 </html>
