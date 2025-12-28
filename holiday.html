@@ -138,6 +138,44 @@ if (!user) {
 const year = new Date().getFullYear();
 engineer.value = user.replace(".", " ");
 
+/* =====================================================
+   DATE FORMATTER (UTC-safe, iPhone-safe)
+   Converts: 2026-01-02 → Fri 2nd Jan 26
+===================================================== */
+function formatDatePretty(iso) {
+  if (!iso) return "";
+
+  // Split YYYY-MM-DD manually (prevents iOS timezone shifts)
+  const parts = iso.split("-");
+  if (parts.length !== 3) return iso;
+
+  const y = Number(parts[0]);
+  const m = Number(parts[1]) - 1;
+  const d = Number(parts[2]);
+
+  const date = new Date(Date.UTC(y, m, d));
+
+  const day = date.getUTCDate();
+  const year = String(date.getUTCFullYear()).slice(-2);
+
+  const weekday = date.toLocaleDateString("en-GB", {
+    weekday: "short",
+    timeZone: "UTC"
+  });
+
+  const month = date.toLocaleDateString("en-GB", {
+    month: "short",
+    timeZone: "UTC"
+  });
+
+  const suffix =
+    day > 3 && day < 21 ? "th" :
+    day % 10 === 1 ? "st" :
+    day % 10 === 2 ? "nd" :
+    day % 10 === 3 ? "rd" : "th";
+
+  return `${weekday} ${day}${suffix} ${month} ${year}`;
+}
 // ─────────────────────────────
 // SUMMARY (always numeric)
 // ─────────────────────────────
@@ -211,7 +249,7 @@ async function loadMyHolidays() {
         : `<span class="chip chip-warn">Deducted</span>`;
 
       li.className = "system";
-      li.innerHTML = `${h.date} — ${label} ${chip}`;
+      li.innerHTML = `${formatDatePretty(h.date)} — ${label} ${chip}`;
       systemList.appendChild(li);
       return;
     }
@@ -224,8 +262,8 @@ async function loadMyHolidays() {
       ? ` — <span style="color:#475569;">${String(h.notes).replace(/</g,"&lt;")}</span>`
       : "";
 
-    li.innerHTML = `${h.start} → ${h.end} (${h.days} days) — ${h.type}${note}`;
-
+li.innerHTML =
+  `${formatDatePretty(h.start)} → ${formatDatePretty(h.end)} (${h.days} day${h.days === 1 ? "" : "s"}) — ${h.type}${note}`;
     if (h.status === "Approved") {
       li.className = "approved";
       approvedList.appendChild(li);
@@ -233,15 +271,18 @@ async function loadMyHolidays() {
     }
 
     if (h.status === "Pending") {
-      li.className = "pending";
-      const btn = document.createElement("button");
-      btn.className = "tinyBtn";
-      btn.textContent = "Cancel";
-      btn.onclick = () => cancelRequest(h.id);
-      li.appendChild(btn);
-      pendingList.appendChild(li);
-      return;
-    }
+  li.className = "pending";
+  li.innerHTML += ` <span class="chip chip-warn">Pending</span>`;
+
+  const btn = document.createElement("button");
+  btn.className = "tinyBtn";
+  btn.textContent = "Cancel";
+  btn.onclick = () => cancelRequest(h.id);
+
+  li.appendChild(btn);
+  pendingList.appendChild(li);
+  return;
+}
 
     if (h.status === "Rejected") {
   li.className = "rejected";
