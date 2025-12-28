@@ -5,189 +5,192 @@
 <title>Generate Job PDF</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+<!-- PDF libs -->
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
 <style>
 body{
-  font-family: Arial, Helvetica, sans-serif;
+  margin:0;
+  font-family:Segoe UI,Roboto,Arial,sans-serif;
   background:#f3f4f6;
-  padding:20px;
 }
-.loading{
-  font-size:14px;
-  color:#334155;
+#pdf{
+  width:794px;
+  padding:32px;
+  background:#fff;
+  color:#111827;
+}
+h1{margin:0;font-size:22px;color:#003b82;}
+h2{margin:20px 0 8px;font-size:16px;border-bottom:2px solid #e5e7eb;padding-bottom:4px;}
+.small{font-size:12px;color:#4b5563;}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:12px;
+}
+.box{
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  padding:10px;
+  font-size:13px;
+}
+.timeline{
+  border-left:3px solid #003b82;
+  padding-left:10px;
+}
+.timeline-item{
+  margin-bottom:10px;
+}
+.photos{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+}
+.photos img{
+  width:100%;
+  border-radius:6px;
+  border:1px solid #e5e7eb;
+}
+.signature{
+  max-width:260px;
+  border:1px solid #e5e7eb;
+  border-radius:6px;
+}
+.footer{
+  margin-top:24px;
+  font-size:11px;
+  color:#6b7280;
+  text-align:center;
 }
 </style>
 </head>
-<body>
 
-<div class="loading" id="status">Preparing job document…</div>
+<body>
+<div id="pdf"></div>
 
 <script>
-/* ===============================
-   CONFIG
-================================ */
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
-/* ===============================
-   HELPERS
-================================ */
-const qs = new URLSearchParams(window.location.search);
-const jobId = qs.get("id");
-const type = qs.get("type") || "client";
+const params = new URLSearchParams(location.search);
+const jobId = params.get("id");
+const type = params.get("type") || "client";
 
 if(!jobId){
-  document.getElementById("status").textContent = "Missing job ID";
+  alert("Missing job ID");
   throw new Error("Missing job ID");
 }
 
-function esc(str){
-  return (str || "").toString()
-    .replace(/&/g,"&amp;")
-    .replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;");
+async function fetchJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(url + " failed");
+  return r.json();
 }
 
-function fmt(dt){
-  if(!dt) return "—";
-  const d = new Date(dt);
-  return isNaN(d) ? "—" : d.toLocaleString("en-GB");
+function fmt(d){
+  if(!d) return "—";
+  const x = new Date(d);
+  return isNaN(x) ? "—" : x.toLocaleString("en-GB");
 }
 
-/* ===============================
-   LOAD ALL DATA
-================================ */
-async function loadAll(){
-  const jobRes = await fetch(`${SLA_API}/jobs/${jobId}`);
-  if(!jobRes.ok) throw new Error("Failed to load job");
+(async () => {
 
-  const job = await jobRes.json();
+  // 1️⃣ Load job
+  const job = await fetchJSON(`${SLA_API}/jobs/${jobId}`);
+  const files = await fetchJSON(`${SLA_API}/jobs/${jobId}/files`);
 
-  const photosRes = await fetch(`${SLA_API}/jobs/${jobId}/files`);
-  const photos = photosRes.ok ? await photosRes.json() : [];
-
-  const sigRes = await fetch(`${SLA_API}/jobs/${jobId}/signature`);
-  const signature = sigRes.ok ? await sigRes.json() : null;
-
-  return { job, photos, signature };
-}
-
-/* ===============================
-   BUILD HTML DOCUMENT
-================================ */
-function buildHtml({ job, photos, signature }){
-  const timeline = (job.history || []).map(h => `
-    <tr>
-      <td>${fmt(h.at)}</td>
-      <td>${esc(h.user || "System")}</td>
-      <td>${esc(h.note || "")}</td>
-    </tr>
-  `).join("");
-
-  const images = photos.map(p => `
-    <div style="margin-bottom:10px;">
-      <img src="${p.url}" style="width:100%;border:1px solid #ccc;">
-      <div style="font-size:11px;color:#475569;">${esc(p.name || "")}</div>
+  // 2️⃣ Build HTML
+  const el = document.getElementById("pdf");
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <h1>Job Sheet</h1>
+        <div class="small">${type === "client" ? "Client Copy" : "Mostlane Internal Copy"}</div>
+      </div>
+      <img src="Mostlane Logo.jpg" style="height:38px;">
     </div>
-  `).join("");
 
-  const signatureHtml = signature?.image
-    ? `<img src="${signature.image}" style="max-width:300px;border-top:1px solid #000;margin-top:10px;">`
-    : "<em>No signature captured</em>";
+    <h2>Job Details</h2>
+    <div class="grid">
+      <div class="box"><strong>Reference</strong><br>${job.helpdeskRef || job.id}</div>
+      <div class="box"><strong>Status</strong><br>${job.status}</div>
+      <div class="box"><strong>Priority</strong><br>${job.priority}</div>
+      <div class="box"><strong>Engineer</strong><br>${job.assignedTo || "—"}</div>
+      <div class="box"><strong>Raised</strong><br>${fmt(job.raisedAt)}</div>
+      <div class="box"><strong>Scheduled</strong><br>${fmt(job.scheduledAt)}</div>
+    </div>
 
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-body{font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#0f172a;}
-h1{font-size:20px;margin-bottom:5px;}
-h2{font-size:16px;margin-top:25px;border-bottom:2px solid #e5e7eb;padding-bottom:4px;}
-table{width:100%;border-collapse:collapse;margin-top:8px;}
-td,th{border:1px solid #e5e7eb;padding:6px;vertical-align:top;}
-th{background:#f1f5f9;text-align:left;}
-.small{font-size:11px;color:#475569;}
-</style>
-</head>
+    <div class="box" style="margin-top:12px;">
+      <strong>Description</strong><br>${job.description || ""}
+    </div>
 
-<body>
+    <h2>Timeline & Notes</h2>
+    <div class="timeline">
+      ${(job.statusHistory || []).map(s => `
+        <div class="timeline-item">
+          <strong>${s.status}</strong><br>
+          <span class="small">${fmt(s.at)} – ${s.by || "system"}</span>
+        </div>
+      `).join("")}
 
-<h1>Job Sheet – ${esc(job.reference)}</h1>
-<div class="small">Generated: ${fmt(new Date())}</div>
+      ${(job.events || []).map(e => `
+        <div class="timeline-item">
+          <strong>Note</strong><br>
+          ${e.note}<br>
+          <span class="small">${fmt(e.at)} – ${e.by}</span>
+        </div>
+      `).join("")}
+    </div>
 
-<h2>Job Details</h2>
-<table>
-<tr><th>Reference</th><td>${esc(job.reference)}</td></tr>
-<tr><th>Status</th><td>${esc(job.status)}</td></tr>
-<tr><th>Priority</th><td>${esc(job.priority)}</td></tr>
-<tr><th>Engineer</th><td>${esc(job.engineer || "Unassigned")}</td></tr>
-<tr><th>Site</th><td>${esc(job.site)}</td></tr>
-<tr><th>Description</th><td>${esc(job.description)}</td></tr>
-<tr><th>Raised</th><td>${fmt(job.raisedAt)}</td></tr>
-<tr><th>SLA Target</th><td>${fmt(job.slaTarget)}</td></tr>
-</table>
+    <h2>Photos</h2>
+    <div class="photos">
+      ${(files.files || []).map(f => `<img src="${f.publicURL}">`).join("") || "<div class='small'>No photos</div>"}
+    </div>
 
-<h2>Photos</h2>
-${images || "<em>No photos uploaded</em>"}
+    <h2>Customer Sign-Off</h2>
+    ${
+      job.signature
+        ? `
+          <div class="box">
+            <strong>Signed by:</strong> ${job.signature.signedBy}<br>
+            <strong>Date:</strong> ${fmt(job.signature.signedAt)}<br><br>
+            <img class="signature" src="https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/${job.signature.fileKey}">
+          </div>
+        `
+        : `<div class="small">No signature recorded</div>`
+    }
 
-<h2>Work History</h2>
-<table>
-<tr><th>Date</th><th>User</th><th>Note</th></tr>
-${timeline || "<tr><td colspan='3'>No history entries</td></tr>"}
-</table>
+    <div class="footer">
+      Generated ${new Date().toLocaleString("en-GB")} • Mostlane Portal
+    </div>
+  `;
 
-<h2>Signature</h2>
-${signatureHtml}
+  // 3️⃣ Render to PDF
+  await new Promise(r => setTimeout(r, 400)); // image settle
 
-</body>
-</html>
-`;
-}
+  const canvas = await html2canvas(el, { scale:2, useCORS:true });
+  const img = canvas.toDataURL("image/png");
 
-/* ===============================
-   SEND TO WORKER & DOWNLOAD
-================================ */
-async function generatePdf(){
-  const data = await loadAll();
-  const html = buildHtml(data);
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF("p","pt","a4");
 
-  document.getElementById("status").textContent = "Generating PDF…";
+  const w = pdf.internal.pageSize.getWidth();
+  const h = canvas.height * (w / canvas.width);
 
-  const res = await fetch(`${SLA_API}/pdf`, {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({
-      html,
-      filename: `Job-${data.job.reference}-${type}.pdf`
-    })
-  });
+  pdf.addImage(img, "PNG", 0, 0, w, h);
 
-  if(!res.ok){
-    throw new Error("Failed to generate job pdf");
-  }
+  const name =
+    `Mostlane-Job-${job.helpdeskRef || job.id}-${type}.pdf`;
 
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  pdf.save(name);
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `Job-${data.job.reference}-${type}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  // 4️⃣ Auto-close
+  setTimeout(() => window.close(), 800);
 
-  URL.revokeObjectURL(url);
-
-  document.getElementById("status").textContent = "Download complete";
-}
-
-/* ===============================
-   START
-================================ */
-generatePdf().catch(err => {
+})().catch(err => {
   console.error(err);
-  document.getElementById("status").textContent = "❌ Failed to generate job PDF";
+  alert("Failed to generate job PDF");
 });
 </script>
-
 </body>
 </html>
