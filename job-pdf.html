@@ -1,259 +1,275 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
+<meta charset="UTF-8" />
 <title>Job Sheet</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-/* =========================
-   BASE
-========================= */
+:root{
+  --ml-blue:#003b82;
+  --ml-grey:#6b7280;
+  --ok:#16a34a;
+  --bad:#dc2626;
+  --border:#e5e7eb;
+}
+
+*{box-sizing:border-box}
+
 body{
+  font-family: "Segoe UI", system-ui, Arial, sans-serif;
   margin:0;
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-  background:#f1f5f9;
-  color:#0f172a;
-}
-
-.page{
-  width:210mm;
-  min-height:297mm;
-  margin:20px auto;
+  padding:24px;
   background:#fff;
-  padding:20mm;
-  box-shadow:0 10px 30px rgba(0,0,0,.15);
+  color:#111827;
 }
 
-h1{
-  margin:0 0 6px;
-  color:#003b82;
+.header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  border-bottom:2px solid var(--border);
+  padding-bottom:12px;
+  margin-bottom:18px;
 }
 
-h2{
-  margin:18px 0 8px;
-  font-size:16px;
-  color:#003b82;
-  border-bottom:2px solid #e5e7eb;
-  padding-bottom:4px;
+.logo{
+  height:34px;
 }
 
-.meta{
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:10px;
-  font-size:13px;
-}
-
-.meta div{
-  background:#f8fafc;
-  padding:8px 10px;
-  border-radius:6px;
+.h-meta{
+  text-align:right;
+  font-size:12px;
+  color:var(--ml-grey);
 }
 
 .section{
-  margin-top:14px;
+  margin-bottom:22px;
+}
+
+.section h2{
+  margin:0 0 10px;
+  font-size:15px;
+  color:var(--ml-blue);
+  border-bottom:1px solid var(--border);
+  padding-bottom:4px;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px 18px;
   font-size:13px;
 }
 
+.label{
+  color:var(--ml-grey);
+  font-size:12px;
+}
+
+.value{
+  font-weight:600;
+}
+
+.sla-ok{color:var(--ok);font-weight:600}
+.sla-bad{color:var(--bad);font-weight:600}
+
 .photos{
   display:grid;
-  grid-template-columns:repeat(3,1fr);
+  grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
   gap:8px;
 }
 
 .photos img{
   width:100%;
-  height:120px;
-  object-fit:cover;
   border-radius:6px;
-  border:1px solid #e5e7eb;
+  border:1px solid var(--border);
 }
 
-.timeline-item{
-  border-left:3px solid #003b82;
-  padding-left:10px;
-  margin-bottom:8px;
+.notes{
+  font-size:13px;
+}
+
+.note{
+  padding:8px;
+  border-left:3px solid var(--ml-blue);
+  background:#f9fafb;
+  margin-bottom:6px;
 }
 
 .signature{
-  margin-top:10px;
+  display:flex;
+  gap:14px;
+  align-items:center;
 }
 
 .signature img{
-  max-width:320px;
-  border:1px solid #d1d5db;
-  border-radius:6px;
+  max-height:80px;
+  border:1px solid var(--border);
+}
+
+/* ---- TIMELINE ---- */
+.timeline{
+  position:relative;
+  margin-left:10px;
+}
+
+.timeline::before{
+  content:"";
+  position:absolute;
+  left:4px;
+  top:0;
+  bottom:0;
+  width:2px;
+  background:#e5e7eb;
+}
+
+.tl-item{
+  position:relative;
+  padding-left:18px;
+  margin-bottom:10px;
+  font-size:12px;
+}
+
+.tl-dot{
+  position:absolute;
+  left:0;
+  top:3px;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:var(--ml-blue);
+}
+
+.tl-time{
+  color:var(--ml-grey);
+  font-size:11px;
 }
 
 .footer{
-  margin-top:20px;
+  margin-top:30px;
   font-size:11px;
-  color:#475569;
+  color:var(--ml-grey);
   text-align:center;
-}
-
-/* =========================
-   LOADER
-========================= */
-#loader{
-  position:fixed;
-  inset:0;
-  background:#f8fafc;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  flex-direction:column;
-  z-index:9999;
-}
-
-#loader h3{
-  margin:0;
-  color:#003b82;
-}
-
-#downloadBtn{
-  position:fixed;
-  top:14px;
-  right:14px;
-  padding:10px 16px;
-  background:#003b82;
-  color:#fff;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-  display:none;
-  z-index:9998;
-}
-
-/* =========================
-   PRINT
-========================= */
-@media print{
-  body{
-    background:#fff;
-  }
-  #downloadBtn,
-  #loader{
-    display:none !important;
-  }
-  .page{
-    box-shadow:none;
-    margin:0;
-    width:auto;
-    min-height:auto;
-  }
 }
 </style>
 </head>
-
 <body>
 
-<!-- LOADER -->
-<div id="loader">
-  <h3>Preparing job sheet…</h3>
-  <div style="font-size:13px;color:#64748b;margin-top:6px;">
-    Loading job details, photos and signatures
-  </div>
+<div class="header">
+  <img src="Mostlane Logo.jpg" class="logo" alt="Mostlane">
+  <div class="h-meta" id="headerMeta"></div>
 </div>
 
-<button id="downloadBtn">⬇ Download PDF</button>
+<div class="section">
+  <h2>Job Details</h2>
+  <div class="grid" id="jobDetails"></div>
+</div>
 
-<div class="page" id="doc">
-  <h1 id="jobTitle">Job Sheet</h1>
+<div class="section">
+  <h2>SLA</h2>
+  <div id="slaBlock"></div>
+</div>
 
-  <div class="meta">
-    <div><strong>Reference:</strong> <span id="ref">—</span></div>
-    <div><strong>Site:</strong> <span id="site">—</span></div>
-    <div><strong>Priority:</strong> <span id="priority">—</span></div>
-    <div><strong>Raised:</strong> <span id="raised">—</span></div>
-    <div><strong>Status:</strong> <span id="status">—</span></div>
-    <div><strong>Engineer:</strong> <span id="engineer">—</span></div>
-  </div>
+<div class="section">
+  <h2>Timeline</h2>
+  <div class="timeline" id="timeline"></div>
+</div>
 
-  <div class="section">
-    <strong>Description</strong>
-    <div id="description">—</div>
-  </div>
+<div class="section">
+  <h2>Notes</h2>
+  <div class="notes" id="notes"></div>
+</div>
 
-  <h2>Timeline & Notes</h2>
-  <div id="timeline"></div>
-
+<div class="section">
   <h2>Photos</h2>
   <div class="photos" id="photos"></div>
+</div>
 
-  <h2>Customer Signature</h2>
-  <div class="signature" id="signature">No signature captured.</div>
+<div class="section">
+  <h2>Customer Sign-Off</h2>
+  <div class="signature" id="signature"></div>
+</div>
 
-  <div class="footer">
-    Generated by Mostlane • Digital job record
-  </div>
+<div class="footer">
+  Generated by Mostlane Portal
 </div>
 
 <script>
 const API = "https://mostlane-sla.jamie-def.workers.dev";
+
 const params = new URLSearchParams(location.search);
 const jobId = params.get("id");
 
-function $(id){ return document.getElementById(id); }
-
-async function loadJob(){
-  const res = await fetch(`${API}/jobs/${jobId}`);
-  const job = await res.json();
-
-  $("jobTitle").textContent = `Job ${job.helpdeskRef || job.id}`;
-  $("ref").textContent = job.helpdeskRef || job.id;
-  $("site").textContent = job.siteName || job.siteCode || "—";
-  $("priority").textContent = job.priority;
-  $("raised").textContent = new Date(job.raisedAt).toLocaleString("en-GB");
-  $("status").textContent = job.status;
-  $("engineer").textContent = job.assignedTo || "—";
-  $("description").textContent = job.description || "—";
-
-  if(Array.isArray(job.events)){
-    job.events.forEach(e=>{
-      const div=document.createElement("div");
-      div.className="timeline-item";
-      div.innerHTML=`<strong>${e.by}</strong> — ${new Date(e.at).toLocaleString("en-GB")}<br>${e.note}`;
-      $("timeline").appendChild(div);
-    });
-  }
-
-  // Photos
-  const pRes = await fetch(`${API}/jobs/${jobId}/files`);
-  const pJson = await pRes.json();
-  if(pJson.files){
-    pJson.files.forEach(f=>{
-      const img=new Image();
-      img.src=f.publicURL;
-      $("photos").appendChild(img);
-    });
-  }
-
-  // Signature
-  if(job.signature?.fileKey){
-    const img=new Image();
-    img.src=`https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/${job.signature.fileKey}`;
-    $("signature").innerHTML=`Signed by <strong>${job.signature.signedBy}</strong><br>`;
-    $("signature").appendChild(img);
-  }
-
-  // Wait for all images
-  await Promise.all([...document.images].map(i=>{
-    if(i.complete) return;
-    return new Promise(res=>i.onload=i.onerror=res);
-  }));
-
-  $("loader").style.display="none";
-  $("downloadBtn").style.display="block";
+function cleanName(n){
+  return (n||"").replace(/\./g," ");
 }
 
-$("downloadBtn").addEventListener("click",()=>{
-  window.print();
-});
+async function load(){
+  const job = await fetch(`${API}/jobs/${jobId}`).then(r=>r.json());
+  const files = await fetch(`${API}/jobs/${jobId}/files`).then(r=>r.json());
 
-loadJob();
+  document.getElementById("headerMeta").innerHTML =
+    `Ref: <strong>${job.helpdeskRef}</strong><br>${new Date().toLocaleString()}`;
+
+  document.getElementById("jobDetails").innerHTML = `
+    <div><span class="label">Site</span><div class="value">${job.site || "-"}</div></div>
+    <div><span class="label">Engineer</span><div class="value">${cleanName(job.assignedTo)}</div></div>
+    <div><span class="label">Priority</span><div class="value">${job.priority}</div></div>
+    <div><span class="label">Status</span><div class="value">${job.status}</div></div>
+  `;
+
+  const slaMet = job.sla?.state !== "BREACHED";
+  document.getElementById("slaBlock").innerHTML = `
+    Target: ${new Date(job.targetAt).toLocaleString()} —
+    <span class="${slaMet?"sla-ok":"sla-bad"}">
+      ${slaMet?"✔ SLA Met":"✖ SLA Breached"}
+    </span>
+  `;
+
+  document.getElementById("timeline").innerHTML =
+    (job.statusHistory||[]).map(e=>`
+      <div class="tl-item">
+        <div class="tl-dot"></div>
+        <div><strong>${e.status}</strong></div>
+        <div class="tl-time">${new Date(e.at).toLocaleString()} — ${cleanName(e.by)}</div>
+      </div>
+    `).join("");
+
+  document.getElementById("notes").innerHTML =
+    (job.events||[]).map(n=>`
+      <div class="note">
+        <strong>${cleanName(n.by)}</strong> — ${new Date(n.at).toLocaleString()}<br>
+        ${n.note}
+      </div>
+    `).join("") || "<em>No notes</em>";
+
+  document.getElementById("photos").innerHTML =
+    (files.files||[]).map(f=>`<img src="${f.publicURL}">`).join("") || "—";
+
+  if(job.signature){
+    document.getElementById("signature").innerHTML = `
+      <img src="https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/${job.signature.fileKey}">
+      <div>
+        <strong>${job.signature.signedBy}</strong><br>
+        ${new Date(job.signature.signedAt).toLocaleString()}
+      </div>
+    `;
+  }else{
+    document.getElementById("signature").innerHTML = "<em>Not signed</em>";
+  }
+
+  // ✅ Delay slightly, then download
+  setTimeout(() => {
+    const blob = new Blob([document.documentElement.outerHTML], {type:"text/html"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `Job-${job.helpdeskRef}.html`;
+    a.click();
+  }, 800);
+}
+
+load();
 </script>
-
 </body>
 </html>
