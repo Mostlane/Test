@@ -95,9 +95,9 @@
   <!-- SUMMARY -->
   <div class="summary-section">
     <h2>Holiday Summary</h2>
-    <p><strong>Allowance:</strong> <span id="allowance">–</span></p>
-    <p><strong>Used:</strong> <span id="used">–</span></p>
-    <p><strong>Remaining:</strong> <span id="remaining">–</span></p>
+    <p><strong>Allowance:</strong> <span id="allowance">0</span></p>
+    <p><strong>Used:</strong> <span id="used">0</span></p>
+    <p><strong>Remaining:</strong> <span id="remaining">0</span></p>
     <p style="font-size:13px;color:#475569;margin-top:10px;">
       Includes bank holidays + company shutdown (credited back if marked as worked).
     </p>
@@ -136,24 +136,33 @@ if (!user) {
 }
 
 const year = new Date().getFullYear();
-
-// Set engineer display
 engineer.value = user.replace(".", " ");
 
-// Load summary
+// ─────────────────────────────
+// SUMMARY (always numeric)
+// ─────────────────────────────
 async function loadSummary() {
-  const res = await fetch(`${API}/holiday/summary?year=${year}`, {
-    headers: { "X-User": user, "X-Role": role }
-  });
-  if (!res.ok) return;
+  try {
+    const res = await fetch(`${API}/holiday/summary?year=${year}`, {
+      headers: { "X-User": user, "X-Role": role }
+    });
 
-  const s = await res.json();
-  allowance.innerText = s.allowance;
-  used.innerText = s.used;
-  remaining.innerText = s.remaining;
+    if (!res.ok) throw new Error();
+
+    const s = await res.json();
+    allowance.innerText = Number(s.allowance ?? 0);
+    used.innerText = Number(s.used ?? 0);
+    remaining.innerText = Number(s.remaining ?? 0);
+  } catch {
+    allowance.innerText = "0";
+    used.innerText = "0";
+    remaining.innerText = "0";
+  }
 }
 
-// Cancel pending request
+// ─────────────────────────────
+// CANCEL REQUEST
+// ─────────────────────────────
 async function cancelRequest(id) {
   if (!confirm("Cancel this pending holiday request?")) return;
 
@@ -168,8 +177,7 @@ async function cancelRequest(id) {
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    alert("Could not cancel: " + t);
+    alert(await res.text());
     return;
   }
 
@@ -177,7 +185,9 @@ async function cancelRequest(id) {
   await loadMyHolidays();
 }
 
-// Load user holidays + system days
+// ─────────────────────────────
+// LOAD HOLIDAYS + SYSTEM DAYS
+// ─────────────────────────────
 async function loadMyHolidays() {
   const res = await fetch(`${API}/holiday/my?year=${year}`, {
     headers: { "X-User": user, "X-Role": role }
@@ -191,54 +201,69 @@ async function loadMyHolidays() {
   systemList.innerHTML = "";
 
   data.forEach(h => {
-    // SYSTEM DAYS (bank holiday / shutdown)
+
+    // SYSTEM DAYS
     if (h.category === "BankHoliday" || h.category === "Shutdown") {
       const li = document.createElement("li");
       const label = h.label || (h.category === "BankHoliday" ? "Bank Holiday" : "Company Shutdown");
-      const statusChip = h.worked
+      const chip = h.worked
         ? `<span class="chip chip-ok">Worked (credited)</span>`
         : `<span class="chip chip-warn">Deducted</span>`;
 
       li.className = "system";
-      li.innerHTML = `${h.date} — ${label} ${statusChip}`;
+      li.innerHTML = `${h.date} — ${label} ${chip}`;
       systemList.appendChild(li);
       return;
     }
 
-    // REQUESTED HOLIDAYS
+    // HOLIDAY REQUESTS
+    if (!h.start || !h.end || !h.status) return;
+
     const li = document.createElement("li");
-    const note = h.notes ? ` — <span style="color:#475569;">${String(h.notes).replace(/</g,"&lt;")}</span>` : "";
+    const note = h.notes
+      ? ` — <span style="color:#475569;">${String(h.notes).replace(/</g,"&lt;")}</span>`
+      : "";
+
     li.innerHTML = `${h.start} → ${h.end} (${h.days} days) — ${h.type}${note}`;
 
     if (h.status === "Approved") {
       li.className = "approved";
       approvedList.appendChild(li);
-    } else if (h.status === "Pending") {
-      li.className = "pending";
+      return;
+    }
 
-      // Cancel button for engineer
+    if (h.status === "Pending") {
+      li.className = "pending";
       const btn = document.createElement("button");
-      btn.type = "button";
       btn.className = "tinyBtn";
       btn.textContent = "Cancel";
       btn.onclick = () => cancelRequest(h.id);
       li.appendChild(btn);
+      pendingList.appendChild(li);
+      return;
+    }
 
-      pendingList.appendChild(li);
-    } else if (h.status === "Rejected") {
+    if (h.status === "Rejected" || h.status === "Cancelled") {
       li.className = "rejected";
       pendingList.appendChild(li);
-    } else if (h.status === "Cancelled") {
-      li.className = "rejected";
-      li.innerHTML += ` <span class="chip chip-bad">Cancelled</span>`;
-      pendingList.appendChild(li);
-    } else {
-      pendingList.appendChild(li);
+      return;
     }
   });
+
+  // Empty states
+  if (!systemList.children.length)
+    systemList.innerHTML = "<li class='system'>No bank holidays or shutdown days.</li>";
+
+  if (!approvedList.children.length)
+    approvedList.innerHTML = "<li class='approved'>No approved holidays.</li>";
+
+  if (!pendingList.children.length)
+    pendingList.innerHTML = "<li class='pending'>No pending or rejected requests.</li>";
 }
 
-// Submit request
+// ─────────────────────────────
+// SUBMIT REQUEST
+// ─────────────────────────────
 holidayForm.addEventListener("submit", async e => {
   e.preventDefault();
   submitBtn.disabled = true;
@@ -251,17 +276,10 @@ holidayForm.addEventListener("submit", async e => {
 
   const reminder = notes.value.trim();
   if (!reminder) {
-    alert("Please add a short reminder note (e.g. ‘Family trip’).");
+    alert("Please add a reminder note.");
     submitBtn.disabled = false;
     return;
   }
-
-  const payload = {
-    start: start.value,
-    end: end.value,
-    type: type.value,
-    notes: reminder
-  };
 
   const res = await fetch(`${API}/holiday/request?year=${year}`, {
     method: "POST",
@@ -270,14 +288,18 @@ holidayForm.addEventListener("submit", async e => {
       "X-User": user,
       "X-Role": role
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      start: start.value,
+      end: end.value,
+      type: type.value,
+      notes: reminder
+    })
   });
 
   submitBtn.disabled = false;
 
   if (!res.ok) {
-    const t = await res.text();
-    alert("Failed to submit holiday request: " + t);
+    alert(await res.text());
     return;
   }
 
