@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Job Sheet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+/* =========================
+   PDF DOCUMENT BASE
+   ========================= */
+@page {
+  size: A4;
+  margin: 20mm;
+}
+
+body{
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color:#0f172a;
+  background:#fff;
+  margin:0;
+}
+
+.doc{
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* HEADER */
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:20px;
+}
+.header img{
+  height:40px;
+}
+.header .meta{
+  text-align:right;
+  font-size:12px;
+  color:#475569;
+}
+
+/* TITLES */
+h1{
+  font-size:22px;
+  margin:0 0 6px;
+  color:#003b82;
+}
+h2{
+  font-size:16px;
+  margin:20px 0 8px;
+  border-bottom:1px solid #e5e7eb;
+  padding-bottom:4px;
+}
+h3{
+  font-size:14px;
+  margin:12px 0 6px;
+}
+
+/* SECTIONS */
+.section{
+  margin-bottom:14px;
+}
+.kv{
+  display:grid;
+  grid-template-columns:160px 1fr;
+  gap:6px 12px;
+  font-size:13px;
+}
+.kv div:nth-child(odd){
+  color:#475569;
+}
+
+/* TIMELINE */
+.timeline{
+  margin-top:8px;
+}
+.timeline-item{
+  display:grid;
+  grid-template-columns:16px 1fr;
+  gap:10px;
+  margin-bottom:10px;
+}
+.timeline-dot{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#003b82;
+  margin-top:4px;
+}
+.timeline-body{
+  font-size:13px;
+}
+.timeline-time{
+  font-size:11px;
+  color:#64748b;
+}
+
+/* PHOTOS */
+.photos{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+}
+.photos img{
+  width:100%;
+  border-radius:6px;
+  border:1px solid #e5e7eb;
+}
+
+/* SIGNATURE */
+.signature-box{
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  padding:10px;
+  margin-top:8px;
+}
+.signature-box img{
+  max-width:100%;
+  max-height:120px;
+}
+
+/* FOOTER */
+.footer{
+  margin-top:30px;
+  font-size:11px;
+  color:#64748b;
+  text-align:center;
+}
+
+/* PRINT */
+@media print{
+  body{ margin:0 }
+}
+</style>
+</head>
+
+<body>
+<div class="doc" id="doc">
+  <div class="header">
+    <img src="Mostlane Logo.jpg" alt="Mostlane">
+    <div class="meta">
+      Generated: <span id="genDate"></span><br>
+      Document: <span id="docType"></span>
+    </div>
+  </div>
+
+  <h1>Job Completion Sheet</h1>
+
+  <div class="section kv" id="jobSummary"></div>
+
+  <h2>Activity Timeline</h2>
+  <div class="timeline" id="timeline"></div>
+
+  <div id="photosSection" class="section">
+    <h2>Site Photos</h2>
+    <div class="photos" id="photos"></div>
+  </div>
+
+  <div id="signatureSection" class="section">
+    <h2>Customer Sign-Off</h2>
+    <p>I confirm that the works described above have been completed to my satisfaction.</p>
+    <div class="signature-box" id="signature"></div>
+  </div>
+
+  <div class="footer">
+    Mostlane Construction Ltd • Generated via Mostlane Portal
+  </div>
+</div>
+
+<script>
+const API = "https://mostlane-sla.jamie-def.workers.dev";
+
+const params = new URLSearchParams(location.search);
+const JOB_ID = params.get("id");
+const TYPE = params.get("type") || "client";
+
+if(!JOB_ID){
+  alert("Missing job ID");
+}
+
+/* =========================
+   LOAD + BUILD DOCUMENT
+   ========================= */
+(async function(){
+  document.getElementById("genDate").textContent =
+    new Date().toLocaleString("en-GB");
+  document.getElementById("docType").textContent =
+    TYPE === "client" ? "Client Copy" : "Mostlane Internal";
+
+  const res = await fetch(`${API}/jobs/${encodeURIComponent(JOB_ID)}`);
+  const job = await res.json();
+
+  buildSummary(job);
+  buildTimeline(job);
+  buildPhotos(job);
+  buildSignature(job);
+
+  // Auto-trigger PDF
+  setTimeout(() => window.print(), 500);
+})();
+
+/* =========================
+   BUILDERS
+   ========================= */
+function buildSummary(job){
+  const el = document.getElementById("jobSummary");
+
+  addKV(el,"Reference", job.reference || job.id);
+  addKV(el,"Site", job.site || "");
+  addKV(el,"Description", job.description || "");
+  addKV(el,"Status", job.status || "");
+
+  if(TYPE === "mostlane"){
+    addKV(el,"Priority", job.priority || "");
+    addKV(el,"Engineer", job.engineer || "");
+    addKV(el,"SLA Target", job.slaTarget || "");
+  }
+}
+
+function addKV(container, k, v){
+  container.insertAdjacentHTML("beforeend",
+    `<div>${k}</div><div>${v || "—"}</div>`);
+}
+
+function buildTimeline(job){
+  const el = document.getElementById("timeline");
+  const events = job.timeline || job.history || [];
+
+  if(!events.length){
+    el.innerHTML = "<em>No activity recorded.</em>";
+    return;
+  }
+
+  events.forEach(e => {
+    el.insertAdjacentHTML("beforeend", `
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-body">
+          <div>${e.text || e.note || "Update"}</div>
+          <div class="timeline-time">${new Date(e.at).toLocaleString("en-GB")}</div>
+        </div>
+      </div>
+    `);
+  });
+}
+
+function buildPhotos(job){
+  if(!job.photos || !job.photos.length){
+    document.getElementById("photosSection").style.display="none";
+    return;
+  }
+
+  const el = document.getElementById("photos");
+  job.photos.forEach(p => {
+    el.insertAdjacentHTML("beforeend", `<img src="${p.url}">`);
+  });
+}
+
+function buildSignature(job){
+  if(!job.signature){
+    document.getElementById("signatureSection").style.display="none";
+    return;
+  }
+
+  const el = document.getElementById("signature");
+  el.innerHTML = `
+    <strong>${job.signature.name || ""}</strong><br>
+    <img src="${job.signature.image}">
+  `;
+}
+</script>
+</body>
+</html>
