@@ -23,11 +23,15 @@ body{
   background:#fff;
   color:#111827;
 }
-  .job-description{
-  font-size:15px;
-  line-height:1.55;
-  font-weight:600;
-  color:#0f172a;
+.job-description{
+  font-size:16px;
+  line-height:1.65;
+  font-weight:500;
+  color:#020617;
+  padding:10px 12px;
+  background:#f8fafc;
+  border-left:4px solid var(--ml-blue);
+  border-radius:6px;
 }
 
 .header{
@@ -277,8 +281,10 @@ async function load(){
     <div class="value">${job.status}</div>
   </div>
 
-  <div style="grid-column:1 / -1;">
-    <span class="label">Description</span>
+  <div style="grid-column:1 / -1; margin-top:6px;">
+    <span class="label" style="font-size:11px; letter-spacing:0.04em;">
+  JOB DESCRIPTION
+</span>
     <div class="value job-description">
   ${job.description || job.summary || job.title || "—"}
 </div>
