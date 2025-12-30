@@ -227,7 +227,10 @@
   function normaliseText(s){
     return (s || '').toString().toLowerCase().replace(/\s+/g, ' ').trim();
   }
-
+  function extractSRCode(str){
+    const m = (str || '').match(/SR\d{5}/i);
+    return m ? m[0].toUpperCase() : null;
+  }
   function findBestMatchingSite(siteParam, sites){
     if(!siteParam || !Array.isArray(sites)) return null;
 
@@ -484,6 +487,12 @@
       jobLinked.jobId = jobIdParam;
       jobLinked.incident = refParam || jobIdParam;
       jobLinked.siteParam = siteParam || '';
+
+      // ⭐ FIX: extract SRxxxxx immediately for PO generation
+      const sr = extractSRCode(siteParam);
+      if (sr) {
+        jobLinked.siteNumber = sr.replace('SR',''); // SR00303 → 00303
+      }
     }
 
     try{
