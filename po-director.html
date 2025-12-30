@@ -2,6 +2,22 @@
 <html lang="en">
 <head>
   <script src="auth.js"></script>
+  <!-- 🔒 Restricted access: named users only -->
+<script>
+  const user = JSON.parse(
+    sessionStorage.getItem("mostlaneUserObj") || "{}"
+  );
+
+  const ALLOWED_USERS = [
+    "Jamie.Line",
+    "Greg.Line",
+    "Joe.Line"
+  ];
+
+  if (!ALLOWED_USERS.includes(user.Username)) {
+    window.location.href = "main.html";
+  }
+</script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Director Dashboard – POs & Job Spend</title>
