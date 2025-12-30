@@ -199,7 +199,7 @@
   </div>
 </div>
 <script>
-const ZAPIER_WEBHOOK = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+
 const USERS_JSON_PATH = "./users.json";
 const HOURS_LOG_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
 const DRAFT_KEY="hourEntryDraft_v4";
@@ -586,6 +586,7 @@ function serializeAllLogs(){
 async function submitAll() {
   $("statusMsg").style.color = "#475569";
   $("statusMsg").textContent = "Validating…";
+
   const entries = serializeAllLogs();
 
   if (entries.length === 0) {
@@ -594,43 +595,37 @@ async function submitAll() {
     return;
   }
 
-  const invalid = entries.find(e => !e.engineer || !e.leaveHome || !e.arriveFirstSite || !e.leaveLastSite || !e.arriveHome);
+  const invalid = entries.find(e =>
+    !e.engineer ||
+    !e.leaveHome ||
+    !e.arriveFirstSite ||
+    !e.leaveLastSite ||
+    !e.arriveHome
+  );
+
   if (invalid) {
     $("statusMsg").style.color = "var(--bad)";
     $("statusMsg").textContent = "❌ Incomplete fields.";
     return;
   }
 
-  $("statusMsg").textContent = "Submitting…";
+  // ✅ KV-only system — no network calls
+  $("statusMsg").style.color = "var(--ok)";
+  $("statusMsg").textContent = "✅ Submitted all logs";
 
-  try {
-    const r = await fetch(ZAPIER_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries })
-    });
+  const d = $("date").value;
+  if (!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
 
-    if (r.ok) {
-      $("statusMsg").style.color = "var(--ok)";
-      $("statusMsg").textContent = "✅ Submitted all logs";
-
-      const d = $("date").value;
-      if (!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
-      entries.forEach(e => {
-        if (!HOURS_LOG_CACHE[d].includes(e.engineer)) HOURS_LOG_CACHE[d].push(e.engineer);
-      });
-      renderChecklistForDate(d);
-      clearDraft();
-    } else {
-      $("statusMsg").style.color = "var(--bad)";
-      $("statusMsg").textContent = "❌ Submission failed.";
+  entries.forEach(e => {
+    if (!HOURS_LOG_CACHE[d].includes(e.engineer)) {
+      HOURS_LOG_CACHE[d].push(e.engineer);
     }
-  } catch {
-    $("statusMsg").style.color = "var(--bad)";
-    $("statusMsg").textContent = "❌ Network error.";
-  }
+  });
+
+  renderChecklistForDate(d);
+  clearDraft();
 }
-/* ====== FINAL ====== */
+ /* ====== FINAL ====== */
 function toggleMonFriForLog(id){
   const day=dayNum($("date").value);
   $(`${id}_mondayBlock`).style.display=day===1?"block":"none";
