@@ -88,14 +88,71 @@
     .refund-notes {
       width: 140px;
     }
-    @media (max-width: 750px) {
-      body { padding: 10px; }
-      .container { padding: 15px; }
-      th, td { font-size: 13px; padding: 8px 6px; }
-      button, .tab-btn, select, input { width: 100%; }
-      .top-bar, .filters { flex-direction: column; align-items: stretch; }
-      .tabs { flex-direction: column; }
-    }
+@media (max-width: 750px) {
+  body { padding: 10px; }
+  .container { padding: 15px; }
+
+  /* Turn tables into stacked cards */
+  table { min-width: 0; border: none; }
+  thead { display: none; }
+
+  tbody tr {
+    display: block;
+    background: #fff;
+    margin-bottom: 14px;
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+
+  tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border: none;
+    font-size: 14px;
+  }
+
+  tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #003366;
+    flex: 0 0 42%;
+    padding-right: 10px;
+    text-align: left;
+  }
+
+  /* Make inputs touch-friendly */
+  button, .tab-btn, select, input {
+    width: 100%;
+    font-size: 15px;
+  }
+
+  .top-bar, .filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tabs { flex-direction: column; }
+
+  /* Stack action buttons */
+  td[data-label="Actions"] {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* Centre map icon */
+  td[data-label="Map"] {
+    justify-content: center;
+  }
+
+  /* Optional: hide VAT on mobile */
+  td[data-label="VAT"],
+  td[data-label="VAT @20%"] {
+    display: none;
+  }
+}
   </style>
 </head>
 <body>
@@ -291,41 +348,46 @@
                 : '';
               return `
               <tr data-po="${p.poNumber}">
-                <td class="nowrap">${formatDateDisplay(p.date)}</td>
-                <td class="nowrap">${p.poNumber}</td>
-                <td>${p.supplierName || ''}</td>
-                <td>${p.description || ''}</td>
-                <td class="right">
-                  <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
-                    oninput="onNetChanged('${id}')" />
-                </td>
-                <td class="right">
-                  <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
-                    oninput="onGrossChanged('${id}')" />
-                </td>
-                <td class="nowrap">
-                  <label class="vat-label">
-                    <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
-                    20%
-                  </label>
-                </td>
-                <td class="nowrap">
-                  <select id="refundFlag-${id}" class="refund-select"
-                    onchange="onRefundChange('${p.poNumber}','${id}')">
-                    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
-                    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
-                    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
-                    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
-                  </select>
-                  <input type="text" id="refundNotes-${id}" class="refund-notes"
-                    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
-                    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
-                </td>
-                <td class="nowrap">${mapCell}</td>
-                <td class="nowrap">
-                  <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
-                  <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
-                </td>
+               <td data-label="Date" class="nowrap">${formatDateDisplay(p.date)}</td>
+<td data-label="PO Number" class="nowrap">${p.poNumber}</td>
+<td data-label="Supplier">${p.supplierName || ''}</td>
+<td data-label="Description">${p.description || ''}</td>
+                <td data-label="Net" class="right">
+  <input type="number" step="0.01" id="net-${id}" placeholder="0.00"
+    oninput="onNetChanged('${id}')" />
+</td>
+
+<td data-label="Gross" class="right">
+  <input type="number" step="0.01" id="gross-${id}" placeholder="0.00"
+    oninput="onGrossChanged('${id}')" />
+</td>
+
+<td data-label="VAT @20%" class="nowrap">
+  <label class="vat-label">
+    <input type="checkbox" id="vat-${id}" checked onchange="onVATToggle('${id}')" />
+    20%
+  </label>
+</td>
+
+<td data-label="Credit" class="nowrap">
+  <select id="refundFlag-${id}" class="refund-select"
+    onchange="onRefundChange('${p.poNumber}','${id}')">
+    <option value="" ${!p.refundFlag ? 'selected' : ''}>None</option>
+    <option value="refund_due" ${p.refundFlag === 'refund_due' ? 'selected' : ''}>Credit due</option>
+    <option value="partial_refund" ${p.refundFlag === 'partial_refund' ? 'selected' : ''}>Partial credit</option>
+    <option value="refunded" ${p.refundFlag === 'refunded' ? 'selected' : ''}>Credited</option>
+  </select>
+  <input type="text" id="refundNotes-${id}" class="refund-notes"
+    placeholder="Notes…" value="${p.refundNotes ? String(p.refundNotes).replace(/"/g,'&quot;') : ''}"
+    onblur="onRefundChange('${p.poNumber}','${id}', true)" />
+</td>
+
+<td data-label="Map" class="nowrap">${mapCell}</td>
+
+<td data-label="Actions" class="nowrap">
+  <button class="save-btn" onclick="saveCost('${p.poNumber}','${id}')">💾 Save</button>
+  <button class="save-btn btn-danger" onclick="deletePO('${p.poNumber}')">🗑</button>
+</td>
               </tr>`;
             }).join('')}
         </tbody>`;
