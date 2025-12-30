@@ -642,20 +642,24 @@ if(!jobLinked.active){
       : (siteNumber || 'NO_SITE');
 
     const data = {
-      poNumber: poCode,
-      engineer: engineerVal,
-      engineerCode,
-      date: dateVal,
-      workType,
-      supplierName,
-      supplierNumber,
-      description: descVal,
-      latitude: geo.lat,
-      longitude: geo.lon,
-      incidentNumber: incidentVal,
-      notes: descVal,
-      createdAt: new Date().toISOString()
-    };
+  engineer: engineerVal,
+  engineerCode,
+  date: dateVal,
+  workType,
+  supplierName,
+  supplierNumber,
+
+  // ✅ REQUIRED for KV-based numbering
+  siteSegment,
+  typeLetter,
+
+  description: descVal,
+  latitude: geo.lat,
+  longitude: geo.lon,
+  incidentNumber: incidentVal,
+  notes: descVal,
+  createdAt: new Date().toISOString()
+};
 
     // Add job-link metadata when relevant
     if(jobLinked.active){
@@ -678,8 +682,17 @@ if(!jobLinked.active){
       });
 
       const result = await res.json();
-      if(res.ok) alert(`✅ Purchase Order ${poCode} submitted successfully.`);
-      else alert(`⚠️ Failed: ${result?.error || 'Unknown error'}`);
+
+if (!res.ok) {
+  alert(`⚠️ Failed: ${result?.error || 'Unknown error'}`);
+  return;
+}
+
+// ✅ Worker-generated PO number
+const poNumber = result.poNumber;
+
+// Show modal with REAL number
+showModal(poNumber);
 
     } catch (err) {
       alert('⚠️ Failed to reach server: ' + err.message);
