@@ -478,24 +478,26 @@
     byId('engineer').value = engineerName;
     byId('date').value = formatDateUK();
 
-    // Read any job-linking query params
-    const params = new URLSearchParams(window.location.search);
-    const jobIdParam = params.get('jobId');
-    const refParam = params.get('ref');
-    const siteParam = params.get('site');
+const params = new URLSearchParams(window.location.search);
 
-    if(jobIdParam){
-      jobLinked.active = true;
-      jobLinked.jobId = jobIdParam;
-      jobLinked.incident = refParam || jobIdParam;
-      jobLinked.siteParam = siteParam || '';
+// 🔒 LOCK job-linked state immediately
+jobLinked.active = params.has('jobId');
 
-      // ⭐ FIX: extract SRxxxxx immediately for PO generation
-      const sr = extractSRCode(siteParam);
-      if (sr) {
-        jobLinked.siteNumber = sr.replace('SR',''); // SR00303 → 00303
-      }
-    }
+const jobIdParam = params.get('jobId');
+const refParam = params.get('ref');
+const siteParam = params.get('site');
+
+if (jobLinked.active) {
+  jobLinked.jobId = jobIdParam;
+  jobLinked.incident = refParam || jobIdParam;
+  jobLinked.siteParam = siteParam || '';
+
+  // ⭐ SR extraction (ONCE, correctly)
+  const sr = extractSRCode(siteParam);
+  if (sr) {
+    jobLinked.siteNumber = sr.replace('SR','');
+  }
+}
 
     try{
       const users = await fetchJSON(USERS_URL);
