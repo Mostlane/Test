@@ -443,6 +443,8 @@ function mapToPermKey(id, label, href) {
     "SLA": "SLA",
     "SLA Menu": "SLA",
     "HolidayAdmin": "HolidayAdmin"
+  "PO Costing": "POCosting",
+  "PO Director": "PODirector"
   };
 
   // Direct match on ID or label
@@ -462,6 +464,8 @@ function mapToPermKey(id, label, href) {
     if (clean.includes("purchase")) return "PurchaseOrders";
     if (clean.includes("sites")) return "Sites";
     if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
+    if (clean.includes("po-costing")) return "POCosting";
+if (clean.includes("po-director")) return "PODirector";
   }
 
   // ❌ Reject all external links, javascript:void(), forms, etc.
