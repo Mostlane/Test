@@ -368,16 +368,6 @@
     if (!allSites.length) sel.innerHTML='<option>(No options)</option>';
   }
 
-  // ---------------------------
-  // PO Number (local sequence only)
-  // ---------------------------
-  function nextPO(engineerCode, supplierNo, siteSegment, typeLetter){
-    const key = `poSeq:${engineerCode}|${supplierNo}|${siteSegment}|${typeLetter}`;
-    let n = parseInt(localStorage.getItem(key) || "0",10)+1;
-    localStorage.setItem(key,n);
-    return `${engineerCode}-${supplierNo}-${siteSegment}-${typeLetter}${n}`;
-  }
-
   function showModal(po){
     byId('poCodeText').textContent=po;
     byId('modalBackdrop').style.display='flex';
@@ -650,10 +640,6 @@ if(!jobLinked.active){
     const siteSegment = isVehicle
       ? (vehicleReg || '').replace(/\s+/g,'')
       : (siteNumber || 'NO_SITE');
-
-    const poCode = nextPO(engineerCode, supplierNumber, siteSegment, typeLetter);
-
-    showModal(poCode);
 
     const data = {
       poNumber: poCode,
