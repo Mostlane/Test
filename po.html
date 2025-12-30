@@ -579,28 +579,30 @@
   }
 
   function activateJobLinkedMode(){
-    const workType = byId('workType');
-    if(workType){
-      workType.value = 'Reactive';
-      workType.disabled = true;
-    }
-
-    const incidentInput = byId('incident');
-    if(incidentInput){
-      incidentInput.value = jobLinked.incident || '';
-      incidentInput.readOnly = true;
-      incidentInput.classList.add('readonly-field');
-    }
-
-    // Ensure incident row and site rows visible
-    byId('incidentRow').style.display = '';
-    byId('siteTypeRow').style.display = '';
-    byId('siteRow').style.display = '';
-    byId('vehicleRow').classList.add('hidden');
-
-    // Hydrate site/type from sites worker
-    hydrateJobLinkedSite();
+  const workType = byId('workType');
+  if(workType){
+    workType.value = 'Reactive';
+    workType.disabled = true;
   }
+
+  const incidentInput = byId('incident');
+  if(incidentInput){
+    incidentInput.value = jobLinked.incident || '';
+    incidentInput.readOnly = true;
+    incidentInput.classList.add('readonly-field');
+  }
+
+  // Ensure incident + site rows visible
+  byId('incidentRow').style.display = '';
+  byId('siteRow').style.display = '';
+  byId('vehicleRow').classList.add('hidden');
+
+  // ✅ HIDE SITE TYPE WHEN JOB-LINKED
+  byId('siteTypeRow').style.display = 'none';
+
+  // Hydrate site/type from sites worker
+  hydrateJobLinkedSite();
+}
 
   // ---------------------------
   // SUBMIT
