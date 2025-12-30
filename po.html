@@ -266,7 +266,9 @@
   async function populateSuppliers(){
     try {
       const resp = await fetchJSON(SUPPLIERS_URL);
-      allSuppliers = resp.data || [];
+      allSuppliers = Array.isArray(resp)
+  ? resp
+  : (resp.data || []);
       const sel = byId('supplier');
       sel.innerHTML = '';
 
