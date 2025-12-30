@@ -567,17 +567,20 @@
 
     byId('poForm').addEventListener('submit', onSubmit);
 
-    // If not job-linked, show normal behaviour (incident visible only for Reactive etc.)
-    if(!jobLinked.active){
-      // Default: Reactive → incident + site fields visible, vehicle hidden
-      byId('incidentRow').style.display = '';
-      byId('siteTypeRow').style.display = '';
-      byId('siteRow').style.display = '';
-      byId('vehicleRow').classList.add('hidden');
-    } else {
-      // Job-linked behaviour: lock work type, incident, and hydrate site
-      activateJobLinkedMode();
-    }
+ // If not job-linked, show normal behaviour and LOAD sites immediately
+if(!jobLinked.active){
+  byId('incidentRow').style.display = '';
+  byId('siteTypeRow').style.display = '';
+  byId('siteRow').style.display = '';
+  byId('vehicleRow').classList.add('hidden');
+
+  // ✅ IMPORTANT: load sites for initial "All Sites" state
+  await populateSites();
+
+} else {
+  // Job-linked behaviour: lock work type, incident, and hydrate site
+  activateJobLinkedMode();
+}
   }
 
   function activateJobLinkedMode(){
