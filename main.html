@@ -117,12 +117,14 @@ a.button {
 
   <div id="user-display">You are logged in as <span id="userName"></span></div>
 
-  <script>
-  const user =
+<script>
+  const username =
     sessionStorage.getItem("mostlaneUser") ||
     localStorage.getItem("mostlaneUser");
 
-  if (user) document.getElementById("userName").textContent = user;
+  if (username) {
+    document.getElementById("userName").textContent = username;
+  }
 </script>
 
   <div class="menu-grid" id="menuGrid">
@@ -179,20 +181,11 @@ a.button {
   <script>
     document.addEventListener("DOMContentLoaded", async () => {
 
-      // 🔐 Extra safety: enforce device lock on main menu as well
-      if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
-        try {
-          await DeviceAuth.enforceOnPage();
-        } catch (e) {
-          console.error("Device enforcement failed:", e);
-        }
-      }
+  const username =
+    sessionStorage.getItem("mostlaneUser") ||
+    localStorage.getItem("mostlaneUser");
 
-      const username =
-  sessionStorage.getItem("mostlaneUser") ||
-  localStorage.getItem("mostlaneUser");
-
-if (!username) {
+  if (!username) {
   window.location.replace("login.html");
   return;
 }
@@ -203,7 +196,19 @@ if (!username) {
 
       const user = data.user;
       const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
-
+// 🔐 NOW we have a real user object — enforce device safely
+if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
+  try {
+    await DeviceAuth.enforceOnPage({
+      username: user.Username,
+      role: user.Role || "Field",
+      allowAdminOverride: fullAccess
+    });
+  } catch (e) {
+    console.error("Device enforcement failed:", e);
+    return;
+  }
+}
       // Permission mapping
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
