@@ -118,9 +118,12 @@ a.button {
   <div id="user-display">You are logged in as <span id="userName"></span></div>
 
   <script>
-    const user = sessionStorage.getItem("mostlaneUser");
-    if (user) document.getElementById("userName").textContent = user;
-  </script>
+  const user =
+    sessionStorage.getItem("mostlaneUser") ||
+    localStorage.getItem("mostlaneUser");
+
+  if (user) document.getElementById("userName").textContent = user;
+</script>
 
   <div class="menu-grid" id="menuGrid">
 
@@ -159,10 +162,18 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
     <!-- FIXED -->
-    <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
-      <span class="emoji">🚪</span> Logout
-    </a>
-
+   <a class="button visible"
+   href="javascript:void(0)"
+   onclick="
+     localStorage.removeItem('mostlaneLoggedIn');
+     localStorage.removeItem('mostlaneUser');
+     localStorage.removeItem('mostlaneExpiry');
+     localStorage.removeItem('mostlanePermissions');
+     sessionStorage.clear();
+     window.location.replace('login.html');
+   ">
+  <span class="emoji">🚪</span> Logout
+</a>
   </div>
 
   <script>
@@ -177,8 +188,14 @@ a.button {
         }
       }
 
-      const username = sessionStorage.getItem("mostlaneUser");
-      if (!username) return;
+      const username =
+  sessionStorage.getItem("mostlaneUser") ||
+  localStorage.getItem("mostlaneUser");
+
+if (!username) {
+  window.location.replace("login.html");
+  return;
+}
 
       const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
       const data = await res.json();
