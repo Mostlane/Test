@@ -184,6 +184,11 @@ const user = result.user;
         set('roleType', user.EmploymentType || '');
         set('assignedUser', user.Username);
 
+        // ✅ 30-DAY LOGIN BYPASS (PWA SAFE, NO OTHER SIDE EFFECTS)
+localStorage.setItem(
+  "mostlaneBypassUntil",
+  String(Date.now() + 30 * 24 * 60 * 60 * 1000)
+);
         // ⭐ THE ONLY CHANGE: run device check here instead of redirecting
         runDeviceCheckAndContinue(user.Username);
 
