@@ -193,21 +193,29 @@
 <body>
 
   <!-- Top bar -->
-  <div class="topbar">
+<div class="topbar">
+
+  <!-- Main Menu button + title -->
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn btn-outline" onclick="window.location.href='main.html'">
+      ⬅ Main Menu
+    </button>
     <h1>User Administration</h1>
-    <div class="bar-actions">
-      <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
-      <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
-      <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
-
-      <!-- NEW: top-level Manage users button -->
-      <button class="btn btn-outline" id="manageUsersBtn">👥 Manage users</button>
-
-      <!-- Existing button retained exactly -->
-      <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
-    </div>
   </div>
 
+  <div class="bar-actions">
+    <button class="btn btn-outline" id="rescanBtn">🔍 Rescan Portal</button>
+    <button class="btn btn-outline" id="reloadBtn">⟲ Reload Users</button>
+    <button class="btn btn-primary" id="saveBtn">💾 Save Changes</button>
+
+    <!-- NEW: top-level Manage users button -->
+    <button class="btn btn-outline" id="manageUsersBtn">👥 Manage users</button>
+
+    <!-- Existing button retained exactly -->
+    <button class="btn btn-ghost" id="addUserBtn">➕ Add User</button>
+  </div>
+
+</div>
   <!-- Banner -->
   <div id="banner" class="banner">
     <span class="close" id="bannerClose">✖</span>
