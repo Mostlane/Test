@@ -117,15 +117,10 @@ a.button {
 
   <div id="user-display">You are logged in as <span id="userName"></span></div>
 
-<script>
-  const username =
-    sessionStorage.getItem("mostlaneUser") ||
-    localStorage.getItem("mostlaneUser");
-
-  if (username) {
-    document.getElementById("userName").textContent = username;
-  }
-</script>
+  <script>
+    const user = sessionStorage.getItem("mostlaneUser");
+    if (user) document.getElementById("userName").textContent = user;
+  </script>
 
   <div class="menu-grid" id="menuGrid">
 
@@ -134,7 +129,7 @@ a.button {
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
     <a class="button" href="holiday-admin.html" id="HolidayAdmin"><span class="emoji">🗂️</span> Holiday Admin</a>
     <a class="button" href="engineers-hours-menu.html" id="EngineersHoursMenu"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
-    <a class="button" href="po-start.html" id="PurchaseOrders"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
+    <a class="button" href="po.html" id="PurchaseOrders"><span class="emoji">🧾</span> Generate Purchase Order Reference</a>
     <a class="button" href="sites.html" id="Sites"><span class="emoji">📍</span> Manage Sites</a>
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <a class="button" href="po-costing.html" id="POCosting">
@@ -164,31 +159,26 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
     <!-- FIXED -->
-   <a class="button visible"
-   href="javascript:void(0)"
-   onclick="
-     localStorage.removeItem('mostlaneLoggedIn');
-     localStorage.removeItem('mostlaneUser');
-     localStorage.removeItem('mostlaneExpiry');
-     localStorage.removeItem('mostlanePermissions');
-     sessionStorage.clear();
-     window.location.replace('login.html');
-   ">
-  <span class="emoji">🚪</span> Logout
-</a>
+    <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
+      <span class="emoji">🚪</span> Logout
+    </a>
+
   </div>
 
   <script>
     document.addEventListener("DOMContentLoaded", async () => {
 
-  const username =
-    sessionStorage.getItem("mostlaneUser") ||
-    localStorage.getItem("mostlaneUser");
+      // 🔐 Extra safety: enforce device lock on main menu as well
+      if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
+        try {
+          await DeviceAuth.enforceOnPage();
+        } catch (e) {
+          console.error("Device enforcement failed:", e);
+        }
+      }
 
-  if (!username) {
-  window.location.replace("login.html");
-  return;
-}
+      const username = sessionStorage.getItem("mostlaneUser");
+      if (!username) return;
 
       const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
       const data = await res.json();
@@ -196,19 +186,7 @@ a.button {
 
       const user = data.user;
       const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
-// 🔐 NOW we have a real user object — enforce device safely
-if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
-  try {
-    await DeviceAuth.enforceOnPage({
-      username: user.Username,
-      role: user.Role || "Field",
-      allowAdminOverride: fullAccess
-    });
-  } catch (e) {
-    console.error("Device enforcement failed:", e);
-    return;
-  }
-}
+
       // Permission mapping
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
