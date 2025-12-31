@@ -1,56 +1,41 @@
-// auth.js - Mostlane session guard (12h expiry)
-(function(){
+// auth.js – Mostlane PWA session guard (12h expiry) – FINAL
+(function () {
   const EXPIRY_HOURS = 12;
   const now = Date.now();
 
-  // Pages that should be allowed without a session
+  // Pages allowed without auth
   const openPages = ["login.html", "onboard.html"];
-
-  // If we're on login or onboarding, do nothing
   const path = window.location.pathname.toLowerCase();
   if (openPages.some(p => path.endsWith(p))) return;
 
-  // 🔁 Restore session from localStorage if still valid
-  const expiry = localStorage.getItem("mostlaneExpiry");
+  // ---- SOURCE OF TRUTH (localStorage ONLY) ----
+  const loggedIn = localStorage.getItem("mostlaneLoggedIn") === "true";
+  const expiryRaw = localStorage.getItem("mostlaneExpiry");
+  const expiry = expiryRaw ? parseInt(expiryRaw, 10) : null;
+  const user = localStorage.getItem("mostlaneUser");
 
-  if (
-    localStorage.getItem("mostlaneLoggedIn") === "true" &&
-    expiry &&
-    now < parseInt(expiry)
-  ) {
-    // Rehydrate ALL mostlane* keys into sessionStorage
-    if (!sessionStorage.getItem("mostlaneLoggedIn")) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("mostlane")) {
-          sessionStorage.setItem(key, localStorage.getItem(key));
-        }
-      }
-    }
+  const sessionValid = loggedIn && expiry && now < expiry && user;
+
+  // ---- REHYDRATE SESSION EVERY TIME (SAFE) ----
+  if (sessionValid) {
+    sessionStorage.setItem("mostlaneLoggedIn", "true");
+    sessionStorage.setItem("mostlaneUser", user);
+    return; // ✅ IMPORTANT: stop here, do NOT fall through
   }
 
-  // Check expiry or missing login
-  if (
-    localStorage.getItem("mostlaneLoggedIn") !== "true" ||
-    !expiry ||
-    now > parseInt(expiry)
-  ) {
+  // ---- SESSION INVALID → FORCE LOGOUT ----
+  const deviceId = localStorage.getItem("mlDeviceId");
 
-    // 🔒 Preserve device ID
-    const deviceId = localStorage.getItem("mlDeviceId");
+  localStorage.removeItem("mostlaneLoggedIn");
+  localStorage.removeItem("mostlaneUser");
+  localStorage.removeItem("mostlaneExpiry");
 
-    // Clear auth-related keys only
-    localStorage.removeItem("mostlaneLoggedIn");
-    localStorage.removeItem("mostlaneUser");
-    localStorage.removeItem("mostlaneExpiry");
+  sessionStorage.clear();
 
-    sessionStorage.clear();
-
-    // 🔁 Restore device ID
-    if (deviceId) {
-      localStorage.setItem("mlDeviceId", deviceId);
-    }
-
-    window.location.href = "login.html";
+  // Preserve device binding
+  if (deviceId) {
+    localStorage.setItem("mlDeviceId", deviceId);
   }
+
+  window.location.href = "login.html";
 })();
