@@ -51,7 +51,7 @@ async function postToWorker(path, payload) {
 }
 
 // ───────────────────────────────────────────────────────────────
-// DEVICE REGISTER POPUP (simple blocking prompt version)
+// DEVICE REGISTER POPUP
 // ───────────────────────────────────────────────────────────────
 function showRegisterPopup(username, callback) {
   const label = prompt(
@@ -86,11 +86,13 @@ function showBlock(message) {
 }
 
 // ───────────────────────────────────────────────────────────────
-// PUBLIC API: Called by login.html + protected pages
+// PUBLIC API
 // ───────────────────────────────────────────────────────────────
 window.DeviceAuth = {
 
+  // ------------------------------------------------------------
   // Called immediately after successful username/password login
+  // ------------------------------------------------------------
   async checkOnLogin(username, onSuccess) {
     const deviceId = getOrCreateDeviceId();
 
@@ -123,8 +125,13 @@ window.DeviceAuth = {
     showBlock("Device verification failed. Please try again.");
   },
 
+  // ------------------------------------------------------------
   // Call this at top of all protected pages
-  async enforceOnPage() {
+  // NOW ADMIN-AWARE
+  // ------------------------------------------------------------
+  async enforceOnPage(options = {}) {
+    const { allowAdminOverride = false } = options;
+
     const username = sessionStorage.getItem(USERNAME_SESSION_KEY);
     if (!username) {
       window.location.href = "login.html";
@@ -152,6 +159,16 @@ window.DeviceAuth = {
     }
 
     if (body.status === "DEVICE_MISMATCH") {
+
+      // 🔓 ADMIN OVERRIDE (DIRECTOR / FULL ACCESS)
+      if (allowAdminOverride === true) {
+        console.warn(
+          "🔓 Admin override applied — device mismatch ignored for",
+          username
+        );
+        return;
+      }
+
       return showBlock(
         "🔒 This device is registered to a different user.\nAccess denied."
       );
