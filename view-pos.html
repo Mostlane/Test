@@ -448,19 +448,25 @@
         let list = json.data || json || [];
         if (!Array.isArray(list)) list = [];
 
-        ALL_POS = list.map((p) => {
-          const jobKey = getJobKey(p.poNumber);
-          return {
-            ...p,
-            engineer: p.engineer || "",
-            supplierName: p.supplierName || "",
-            workType: p.workType || "",
-            description: p.description || "",
-            incidentNumber: p.incidentNumber || "",
-            date: p.date || (p.createdAt ? new Date(p.createdAt).toLocaleDateString("en-GB") : ""),
-            jobKey,
-          };
-        });
+        const loggedInUser = sessionStorage.getItem("mostlaneUser") || "";
+
+ALL_POS = list
+  .filter(p => (p.engineer || "") === loggedInUser)
+  .map((p) => {
+    const jobKey = getJobKey(p.poNumber);
+    return {
+      ...p,
+      engineer: p.engineer || "",
+      supplierName: p.supplierName || "",
+      workType: p.workType || "",
+      description: p.description || "",
+      incidentNumber: p.incidentNumber || "",
+      date: p.date || (p.createdAt
+        ? new Date(p.createdAt).toLocaleDateString("en-GB")
+        : ""),
+      jobKey,
+    };
+  });
 
         populateDropdownsInitial();
 
