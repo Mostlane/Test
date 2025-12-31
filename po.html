@@ -473,7 +473,27 @@
       if(siteReadonly) siteReadonly.value = jobLinked.siteParam || '';
     }
   }
+async function getFreshLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation not supported"));
+      return;
+    }
 
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        resolve({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          capturedAt: new Date().toISOString()
+        });
+      },
+      err => reject(err),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+}
   // ---------------------------
   // INIT
   // ---------------------------
@@ -623,6 +643,14 @@ if(!jobLinked.active){
     e.preventDefault();
     const submitBtn = byId('submitBtn');
     submitBtn.disabled = true;
+    let freshGeo;
+try {
+  freshGeo = await getFreshLocation();
+} catch (err) {
+  alert('Unable to capture live location. Please try again.');
+  submitBtn.disabled = false;
+  return;
+}
 
     const workType = byId('workType').value;
     const isVehicle = workType === 'Vehicle Maintenance';
@@ -645,12 +673,7 @@ if(!jobLinked.active){
       submitBtn.disabled = false;
       return;
     }
-    if(geo.lat === null || geo.lon === null){
-      alert('Location required. Enable location.');
-      submitBtn.disabled = false;
-      return;
-    }
-
+    
     const typeLetter = workType === 'Reactive' ? 'R' : workType === 'Planned' ? 'P' : 'V';
     const siteSegment = isVehicle
       ? (vehicleReg || '').replace(/\s+/g,'')
@@ -669,8 +692,10 @@ if(!jobLinked.active){
   typeLetter,
 
   description: descVal,
-  latitude: geo.lat,
-  longitude: geo.lon,
+  latitude: freshGeo.lat,
+longitude: freshGeo.lon,
+locationAccuracy: freshGeo.accuracy,
+locationCapturedAt: freshGeo.capturedAt,
   incidentNumber: incidentVal,
   notes: descVal,
   createdAt: new Date().toISOString()
@@ -779,18 +804,7 @@ if (!navigator.onLine) {
 window.addEventListener("offline", showOfflineModal);
 window.addEventListener("online", hideOfflineModal);
 
-// --- Block form submission if offline ---
-document.addEventListener("DOMContentLoaded", () => {
-  const form = document.getElementById("poForm");
-  if (!form) return;
 
-  form.addEventListener("submit", e => {
-    if (!navigator.onLine) {
-      e.preventDefault();
-      showOfflineModal();
-    }
-  });
-});
 </script>
 
 </body>
