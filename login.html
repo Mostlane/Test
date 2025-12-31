@@ -143,13 +143,20 @@ const user = result.user;
           localStorage.setItem(key, value);
         }
 
-        set('mostlaneLoggedIn', 'true');
-        set('mostlaneUser', user.Username);
-        set('mostlaneUsername', user.Username);
+        // ✅ AUTHORITATIVE LOGIN STATE (PWA SAFE)
+localStorage.setItem("mostlaneLoggedIn", "true");
+localStorage.setItem("mostlaneUser", user.Username);
+localStorage.setItem(
+  "mostlaneExpiry",
+  Date.now() + 12 * 60 * 60 * 1000
+);
+
+// Optional: mirror into sessionStorage for same-run convenience
+sessionStorage.setItem("mostlaneLoggedIn", "true");
+sessionStorage.setItem("mostlaneUser", user.Username);
         set('mostlaneFolder', user.SharePointPath || '');
         set('mostlaneVehicle', user.VehicleAssigned || '');
         set('mostlaneEmployment', user.EmploymentType || '');
-        localStorage.setItem('mostlaneExpiry', EXPIRY);
 
        const perms = {
   // 🔐 Admin permissions (THIS IS THE FIX)
