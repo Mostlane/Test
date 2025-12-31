@@ -1,4 +1,4 @@
-// device-auth.js (FINAL PRODUCTION VERSION — FIXED)
+// device-auth.js (FINAL PRODUCTION VERSION)
 // --------------------------------------------------------------
 // MOSTLANE PORTAL - DEVICE AUTH FRONT-END (DEVICE ID ONLY)
 // --------------------------------------------------------------
@@ -13,23 +13,15 @@ if (window.__mlDeviceAuthRan) {
 // ✅ Prompt-once-per-page-load guard
 let devicePromptShown = false;
 
-// Cloudflare Worker endpoint
+// Your Cloudflare Worker endpoint
 const DEVICE_AUTH_BASE = "https://userdevicekv.jamie-def.workers.dev";
 
-// --------------------------------------------------------------
-// CANONICAL USERNAME SOURCE (SINGLE TRUTH)
-// --------------------------------------------------------------
-function getLoggedInUsername() {
-  return (
-    sessionStorage.getItem("mostlaneUser") ||
-    localStorage.getItem("mostlaneUser") ||
-    ""
-  );
-}
+// Session key for username
+const USERNAME_SESSION_KEY = "mostlaneUsername";
 
-// --------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────
 // DEVICE ID (SINGLE SOURCE OF TRUTH)
-// --------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────
 function getOrCreateDeviceId() {
   try {
     let id = localStorage.getItem("deviceID");
@@ -39,14 +31,12 @@ function getOrCreateDeviceId() {
     }
     sessionStorage.setItem("deviceID", id);
     return id;
-  } catch {
+  } catch (e) {
     return "dev-session-" + crypto.randomUUID().slice(0, 7);
   }
 }
 
-// --------------------------------------------------------------
-// Worker POST helper
-// --------------------------------------------------------------
+// Worker POST
 async function postToWorker(path, payload) {
   const res = await fetch(DEVICE_AUTH_BASE + path, {
     method: "POST",
@@ -60,9 +50,9 @@ async function postToWorker(path, payload) {
   };
 }
 
-// --------------------------------------------------------------
-// DEVICE REGISTER POPUP
-// --------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────
+// DEVICE REGISTER POPUP (simple blocking prompt version)
+// ───────────────────────────────────────────────────────────────
 function showRegisterPopup(username, callback) {
   const label = prompt(
     "This appears to be a new device.\n\nPlease give this device a name (e.g. 'Work iPhone'):"
@@ -70,7 +60,7 @@ function showRegisterPopup(username, callback) {
 
   if (!label) {
     alert("Device registration cancelled.");
-    location.replace("login.html");
+    window.location.href = "login.html";
     return;
   }
 
@@ -85,24 +75,22 @@ function showRegisterPopup(username, callback) {
       callback();
     } else {
       alert("Unable to register device. Please contact the office.");
-      location.replace("login.html");
+      window.location.href = "login.html";
     }
   });
 }
 
 function showBlock(message) {
   alert(message);
-  location.replace("login.html");
+  window.location.href = "login.html";
 }
 
-// --------------------------------------------------------------
-// PUBLIC API
-// --------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────
+// PUBLIC API: Called by login.html + protected pages
+// ───────────────────────────────────────────────────────────────
 window.DeviceAuth = {
 
-  // ------------------------------------------------------------
-  // Called immediately after successful login
-  // ------------------------------------------------------------
+  // Called immediately after successful username/password login
   async checkOnLogin(username, onSuccess) {
     const deviceId = getOrCreateDeviceId();
 
@@ -113,10 +101,15 @@ window.DeviceAuth = {
 
     const body = res.body;
 
-    if (body.status === "OK") return onSuccess();
+    if (body.status === "OK") {
+      return onSuccess();
+    }
 
     if (body.status === "NEW_DEVICE_REQUIRED") {
-      if (devicePromptShown) return onSuccess();
+      if (devicePromptShown) {
+        console.warn("Device prompt already shown — retrying silently");
+        return onSuccess();
+      }
       devicePromptShown = true;
       return showRegisterPopup(username, onSuccess);
     }
@@ -127,17 +120,14 @@ window.DeviceAuth = {
       );
     }
 
-    showBlock("Device verification failed.");
+    showBlock("Device verification failed. Please try again.");
   },
 
-  // ------------------------------------------------------------
-  // Enforce device on protected pages (ADMIN-AWARE)
-  // ------------------------------------------------------------
-  async enforceOnPage({ allowAdminOverride = false } = {}) {
-    const username = getLoggedInUsername();
-
+  // Call this at top of all protected pages
+  async enforceOnPage() {
+    const username = sessionStorage.getItem(USERNAME_SESSION_KEY);
     if (!username) {
-      location.replace("login.html");
+      window.location.href = "login.html";
       return;
     }
 
@@ -153,17 +143,15 @@ window.DeviceAuth = {
     if (body.status === "OK") return;
 
     if (body.status === "NEW_DEVICE_REQUIRED") {
-      if (devicePromptShown) return location.reload();
+      if (devicePromptShown) {
+        console.warn("Device prompt already shown — reloading");
+        return location.reload();
+      }
       devicePromptShown = true;
       return showRegisterPopup(username, () => location.reload());
     }
 
     if (body.status === "DEVICE_MISMATCH") {
-      if (allowAdminOverride === true) {
-        console.warn("🔓 Admin override — device mismatch ignored for", username);
-        return;
-      }
-
       return showBlock(
         "🔒 This device is registered to a different user.\nAccess denied."
       );
