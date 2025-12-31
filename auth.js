@@ -2,7 +2,16 @@
 (function(){
   const EXPIRY_HOURS = 12;
   const now = Date.now();
-
+  // ✅ 30-DAY PWA LOGIN BYPASS
+  const bypassUntil = Number(localStorage.getItem("mostlaneBypassUntil") || 0);
+if (
+  bypassUntil &&
+  now < bypassUntil &&
+  localStorage.getItem("mostlaneLoggedIn") === "true"
+) {
+  // Trust existing login during bypass window
+  return;
+}
   // Pages that should be allowed without a session
   const openPages = ["login.html", "onboard.html"];
 
