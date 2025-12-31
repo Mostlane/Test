@@ -1,41 +1,31 @@
-// auth.js – Mostlane PWA session guard (12h expiry) – FINAL
+// auth.js — iOS-safe PWA auth (12h expiry, localStorage only)
 (function () {
   const EXPIRY_HOURS = 12;
   const now = Date.now();
 
-  // Pages allowed without auth
   const openPages = ["login.html", "onboard.html"];
   const path = window.location.pathname.toLowerCase();
   if (openPages.some(p => path.endsWith(p))) return;
 
-  // ---- SOURCE OF TRUTH (localStorage ONLY) ----
   const loggedIn = localStorage.getItem("mostlaneLoggedIn") === "true";
-  const expiryRaw = localStorage.getItem("mostlaneExpiry");
-  const expiry = expiryRaw ? parseInt(expiryRaw, 10) : null;
-  const user = localStorage.getItem("mostlaneUser");
+  const expiry = parseInt(localStorage.getItem("mostlaneExpiry") || "0", 10);
 
-  const sessionValid = loggedIn && expiry && now < expiry && user;
+  // ❌ Not logged in or expired
+  if (!loggedIn || !expiry || now > expiry) {
+    const deviceId = localStorage.getItem("mlDeviceId");
 
-  // ---- REHYDRATE SESSION EVERY TIME (SAFE) ----
-  if (sessionValid) {
-    sessionStorage.setItem("mostlaneLoggedIn", "true");
-    sessionStorage.setItem("mostlaneUser", user);
-    return; // ✅ IMPORTANT: stop here, do NOT fall through
+    // Clear auth only
+    localStorage.removeItem("mostlaneLoggedIn");
+    localStorage.removeItem("mostlaneUser");
+    localStorage.removeItem("mostlaneExpiry");
+
+    if (deviceId) {
+      localStorage.setItem("mlDeviceId", deviceId);
+    }
+
+    window.location.replace("login.html");
+    return;
   }
 
-  // ---- SESSION INVALID → FORCE LOGOUT ----
-  const deviceId = localStorage.getItem("mlDeviceId");
-
-  localStorage.removeItem("mostlaneLoggedIn");
-  localStorage.removeItem("mostlaneUser");
-  localStorage.removeItem("mostlaneExpiry");
-
-  sessionStorage.clear();
-
-  // Preserve device binding
-  if (deviceId) {
-    localStorage.setItem("mlDeviceId", deviceId);
-  }
-
-  window.location.href = "login.html";
+  // ✅ Logged in and valid — allow page
 })();
