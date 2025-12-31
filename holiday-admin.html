@@ -221,16 +221,24 @@
 <body>
   <div class="shell">
     <header>
-      <h1>Holiday Admin</h1>
-      <div class="controls">
-        <button class="btn" onclick="location.href='main.html'">Menu</button>
-        <button id="prevMonth" class="btn">◀</button>
-        <div class="pill"><span id="monthLabel">—</span></div>
-        <button id="nextMonth" class="btn">▶</button>
-        <select id="yearSel"></select>
-        <button id="refreshBtn" class="btn btnPrimary">Refresh</button>
-      </div>
-    </header>
+
+  <!-- Main Menu button + title -->
+  <div style="display:flex; align-items:center; gap:12px;">
+    <button class="btn" onclick="location.href='main.html'">
+      ⬅ Main Menu
+    </button>
+    <h1>Holiday Admin</h1>
+  </div>
+
+  <div class="controls">
+    <button id="prevMonth" class="btn">◀</button>
+    <div class="pill"><span id="monthLabel">—</span></div>
+    <button id="nextMonth" class="btn">▶</button>
+    <select id="yearSel"></select>
+    <button id="refreshBtn" class="btn btnPrimary">Refresh</button>
+  </div>
+
+</header>
 
     <div class="content">
       <div class="row">
