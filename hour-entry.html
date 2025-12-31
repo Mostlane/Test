@@ -199,14 +199,17 @@
     padding:14px;
   }
 
-  /* Rows stack vertically */
+    /* Rows stack vertically */
   .row{
     flex-direction:column;
+    gap:10px;
   }
 
   .row > div{
+    flex: 1 1 auto;   /* ✅ override desktop flex-basis */
     min-width:100%;
   }
+  
 
   /* Force all 12-col grids into 1 column */
   .grid{
