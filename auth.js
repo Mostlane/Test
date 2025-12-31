@@ -10,17 +10,31 @@
   const path = window.location.pathname.toLowerCase();
   if (openPages.some(p => path.endsWith(p))) return;
 
-  // Restore session from localStorage if still valid
+  // 🔁 Restore session from localStorage if still valid
   const expiry = localStorage.getItem("mostlaneExpiry");
-  if (localStorage.getItem("mostlaneLoggedIn") === "true" && expiry && now < parseInt(expiry)) {
+
+  if (
+    localStorage.getItem("mostlaneLoggedIn") === "true" &&
+    expiry &&
+    now < parseInt(expiry)
+  ) {
+    // Rehydrate ALL mostlane* keys into sessionStorage
     if (!sessionStorage.getItem("mostlaneLoggedIn")) {
-      sessionStorage.setItem("mostlaneLoggedIn", "true");
-      sessionStorage.setItem("mostlaneUser", localStorage.getItem("mostlaneUser"));
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("mostlane")) {
+          sessionStorage.setItem(key, localStorage.getItem(key));
+        }
+      }
     }
   }
 
   // Check expiry or missing login
-  if (!localStorage.getItem("mostlaneLoggedIn") || !expiry || now > parseInt(expiry)) {
+  if (
+    localStorage.getItem("mostlaneLoggedIn") !== "true" ||
+    !expiry ||
+    now > parseInt(expiry)
+  ) {
 
     // 🔒 Preserve device ID
     const deviceId = localStorage.getItem("mlDeviceId");
