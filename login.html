@@ -83,15 +83,15 @@
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
           DeviceAuth.checkOnLogin(username, () => {
-            window.location.href = "main.html";
-          });
+  window.location.replace("main.html");
+});
         } else {
           console.warn("DeviceAuth missing — continuing login without device check");
-          window.location.href = "main.html";
+window.location.replace("main.html");
         }
       } catch (e) {
         console.error("DeviceAuth error:", e);
-        window.location.href = "main.html";
+window.location.replace("main.html");
       }
     }
 
