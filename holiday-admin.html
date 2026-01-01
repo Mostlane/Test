@@ -527,7 +527,8 @@ function renderCalendar(){
   }).join("");
   wrap.appendChild(head);
 
-  for (const eng of cal.engineers){
+ for (const eng of cal.engineers){
+  eng.cells = eng.cells || {};
     const row = document.createElement("div");
     row.className = "calRow";
     row.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
