@@ -473,13 +473,14 @@ function renderAllowance(){
 }
 
 function dayIsWeekend(year, month, day){
-  const d = new Date(Date.UTC(year, month-1, day));
+  const d = new Date(`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00Z`);
   const wd = d.getUTCDay();
   return wd === 0 || wd === 6;
 }
 function isoForDay(year, month, day){
-  const d = new Date(Date.UTC(year, month-1, day));
-  return d.toISOString().split("T")[0];
+  const mm = String(month).padStart(2,"0");
+  const dd = String(day).padStart(2,"0");
+  return `${year}-${mm}-${dd}`;
 }
 
 function classForCell(cell){
