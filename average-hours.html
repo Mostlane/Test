@@ -78,6 +78,23 @@
     align-items:end;
   }
 
+  .toggle{
+    display:flex;
+    gap:6px;
+  }
+
+  .toggle button{
+    background:#eef2f9;
+    color:#0f172a;
+    border-radius:10px;
+    padding:10px 14px;
+  }
+
+  .toggle button.active{
+    background:var(--ml-accent);
+    color:#fff;
+  }
+
   label{
     font-size:13px;
     color:#334155;
@@ -104,9 +121,7 @@
     color:#fff;
   }
 
-  .table-wrap{
-    overflow-x:auto;
-  }
+  .table-wrap{overflow-x:auto}
 
   table{
     width:100%;
@@ -122,14 +137,8 @@
     white-space:nowrap;
   }
 
-  th{
-    color:var(--ml-blue);
-    font-weight:600;
-  }
-
-  td:first-child,th:first-child{
-    text-align:left;
-  }
+  th{color:var(--ml-blue);font-weight:600}
+  td:first-child,th:first-child{text-align:left}
 
   tfoot td{
     font-weight:700;
@@ -137,184 +146,169 @@
     border-top:2px solid var(--border);
   }
 
-  .muted{
-    color:var(--muted);
-    font-size:13px;
-  }
-
-  .notice{
-    margin-top:10px;
-    font-size:13px;
-    color:#92400e;
-  }
+  .notice{margin-top:10px;font-size:13px;color:#92400e}
 </style>
 </head>
 
 <body>
 <div class="shell">
-  <header>
-    <h1>Time Analysis</h1>
-    <a href="main.html">Main Menu</a>
-  </header>
+<header>
+  <h1>Time Analysis</h1>
+  <a href="main.html">Main Menu</a>
+</header>
 
-  <div class="content">
+<div class="content">
 
-    <!-- Controls -->
-    <div class="card">
-      <div class="controls">
-        <div>
-          <label>Start date</label>
-          <input type="date" id="startDate">
-        </div>
-        <div>
-          <label>End date</label>
-          <input type="date" id="endDate">
-        </div>
-        <div>
-          <button id="calcBtn">Calculate</button>
-        </div>
-      </div>
-      <div class="muted" style="margin-top:8px;">
-        Overtime starts 10h after leaving home (current policy)
-      </div>
+<div class="card">
+  <div class="controls">
+    <div>
+      <label>Start date</label>
+      <input type="date" id="startDate">
+    </div>
+    <div>
+      <label>End date</label>
+      <input type="date" id="endDate">
     </div>
 
-    <!-- Results -->
-    <div class="card table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Engineer</th>
-            <th>Days</th>
-            <th>Avg (h)</th>
-            <th>Min</th>
-            <th>Max</th>
-            <th class="finance">OT from Travel (h)</th>
-            <th class="finance">OT Cost (£)</th>
-            <th class="finance">Potential Saving (£)</th>
-            <th class="finance">Total Driving Cost (£)</th>
-          </tr>
-        </thead>
-
-        <tbody id="results">
-          <tr>
-            <td colspan="9" class="muted">Select a date range and click Calculate</td>
-          </tr>
-        </tbody>
-
-        <tfoot id="totalsRow" style="display:none;">
-          <tr>
-            <td>Totals</td>
-            <td id="t_days"></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td class="finance" id="t_travelOT"></td>
-            <td class="finance" id="t_travelOTCost"></td>
-            <td class="finance" id="t_saving"></td>
-            <td class="finance" id="t_driveCost"></td>
-          </tr>
-        </tfoot>
-      </table>
-
-      <div class="notice" id="financeNotice" style="display:none">
-        Financial data is restricted to Directors.
-      </div>
+    <!-- 🔁 TOGGLE -->
+    <div class="toggle">
+      <button id="onsiteBtn" class="active">On-Site</button>
+      <button id="travelBtn">Travel</button>
     </div>
 
+    <div>
+      <button id="calcBtn">Calculate</button>
+    </div>
   </div>
+</div>
+
+<div class="card table-wrap">
+<table>
+<thead>
+<tr>
+  <th>Engineer</th>
+  <th>Days</th>
+  <th>Avg (h)</th>
+  <th>Min</th>
+  <th>Max</th>
+  <th class="finance">OT from Travel (h)</th>
+  <th class="finance">OT Cost (£)</th>
+  <th class="finance">Potential Saving (£)</th>
+  <th class="finance">Total Driving Cost (£)</th>
+</tr>
+</thead>
+
+<tbody id="results">
+<tr><td colspan="9">Select dates and calculate</td></tr>
+</tbody>
+
+<tfoot id="totalsRow" style="display:none">
+<tr>
+  <td>Totals</td>
+  <td id="t_days"></td>
+  <td colspan="3"></td>
+  <td class="finance" id="t_travelOT"></td>
+  <td class="finance" id="t_travelOTCost"></td>
+  <td class="finance" id="t_saving"></td>
+  <td class="finance" id="t_driveCost"></td>
+</tr>
+</tfoot>
+</table>
+
+<div class="notice" id="financeNotice" style="display:none">
+  Financial data is restricted to Directors.
+</div>
+</div>
+
+</div>
 </div>
 
 <script>
 const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
 const $ = id => document.getElementById(id);
+let metric = "onsite"; // 🔁
 
 function getUser(){
-  return (
-    sessionStorage.getItem("mostlaneUser") ||
-    localStorage.getItem("mostlaneUser") ||
-    ""
-  );
+  return sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
 }
 
-function todayMinus(days){
-  const d=new Date();
-  d.setDate(d.getDate()-days);
-  return d.toISOString().split("T")[0];
+function todayMinus(d){
+  const x=new Date();x.setDate(x.getDate()-d);
+  return x.toISOString().split("T")[0];
 }
 
 window.addEventListener("DOMContentLoaded",()=>{
-  $("startDate").value = todayMinus(42);
-  $("endDate").value = todayMinus(1);
-  $("calcBtn").onclick = calculate;
+  $("startDate").value=todayMinus(42);
+  $("endDate").value=todayMinus(1);
+
+  $("onsiteBtn").onclick=()=>setMetric("onsite");
+  $("travelBtn").onclick=()=>setMetric("travel");
+  $("calcBtn").onclick=calculate;
 });
 
-async function calculate(){
-  const start=$("startDate").value;
-  const end=$("endDate").value;
-  const tbody=$("results");
+function setMetric(m){
+  metric=m;
+  $("onsiteBtn").classList.toggle("active",m==="onsite");
+  $("travelBtn").classList.toggle("active",m==="travel");
+}
 
+async function calculate(){
+  const tbody=$("results");
   tbody.innerHTML=`<tr><td colspan="9">Loading…</td></tr>`;
   $("totalsRow").style.display="none";
 
-  const res = await fetch(
-    `${WORKER_URL}?start=${start}&end=${end}`,
-    { headers:{ "X-User": getUser() } }
+  const res=await fetch(
+    `${WORKER_URL}?start=${startDate.value}&end=${endDate.value}&metric=${metric}`,
+    {headers:{"X-User":getUser()}}
   );
 
-  const data = await res.json();
+  const data=await res.json();
   tbody.innerHTML="";
 
-  if(!data.engineers || !data.engineers.length){
+  if(!data.engineers?.length){
     tbody.innerHTML=`<tr><td colspan="9">No data</td></tr>`;
     return;
   }
-
-  let totalDays = 0;
-  let totalTravelOT = 0;
-  let totalTravelOTCost = 0;
-  let totalSaving = 0;
-  let totalDriveCost = 0;
 
   if(!data.costsEnabled){
     document.querySelectorAll(".finance").forEach(c=>c.style.display="none");
     $("financeNotice").style.display="block";
   }
 
-  data.engineers.forEach(e=>{
-    totalDays += e.days;
+  let td=0,to=0,toc=0,ts=0,tdc=0;
 
+  data.engineers.forEach(e=>{
+    td+=e.days;
     if(data.costsEnabled){
-      totalTravelOT += e.travelCausedOT;
-      totalTravelOTCost += e.travelOTCost;
-      totalSaving += e.potentialSaving;
-      totalDriveCost += e.totalDrivingCost;
+      to+=e.travelCausedOT;
+      toc+=e.travelOTCost;
+      ts+=e.potentialSaving;
+      tdc+=e.totalDrivingCost;
     }
 
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${e.engineer}</td>
-      <td>${e.days}</td>
-      <td>${e.average.toFixed(2)}</td>
-      <td>${e.min.toFixed(2)}</td>
-      <td>${e.max.toFixed(2)}</td>
-      ${data.costsEnabled ? `
-        <td>${e.travelCausedOT.toFixed(2)}</td>
-        <td>£${e.travelOTCost.toFixed(2)}</td>
-        <td>£${e.potentialSaving.toFixed(2)}</td>
-        <td>£${e.totalDrivingCost.toFixed(2)}</td>
-      ` : ``}
-    `;
-    tbody.appendChild(tr);
+    tbody.insertAdjacentHTML("beforeend",`
+      <tr>
+        <td>${e.engineer}</td>
+        <td>${e.days}</td>
+        <td>${e.average.toFixed(2)}</td>
+        <td>${e.min.toFixed(2)}</td>
+        <td>${e.max.toFixed(2)}</td>
+        ${data.costsEnabled ? `
+          <td>${e.travelCausedOT.toFixed(2)}</td>
+          <td>£${e.travelOTCost.toFixed(2)}</td>
+          <td>£${e.potentialSaving.toFixed(2)}</td>
+          <td>£${e.totalDrivingCost.toFixed(2)}</td>
+        `:""}
+      </tr>
+    `);
   });
 
-  $("t_days").textContent = totalDays;
-
+  $("t_days").textContent=td;
   if(data.costsEnabled){
-    $("t_travelOT").textContent = totalTravelOT.toFixed(2);
-    $("t_travelOTCost").textContent = `£${totalTravelOTCost.toFixed(2)}`;
-    $("t_saving").textContent = `£${totalSaving.toFixed(2)}`;
-    $("t_driveCost").textContent = `£${totalDriveCost.toFixed(2)}`;
+    $("t_travelOT").textContent=to.toFixed(2);
+    $("t_travelOTCost").textContent=`£${toc.toFixed(2)}`;
+    $("t_saving").textContent=`£${ts.toFixed(2)}`;
+    $("t_driveCost").textContent=`£${tdc.toFixed(2)}`;
   }
 
   $("totalsRow").style.display="table-footer-group";
