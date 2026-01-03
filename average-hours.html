@@ -6,52 +6,233 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <style>
-  *,*::before,*::after{box-sizing:border-box}
-  :root{
-    --ml-blue:#003366;
-    --ml-accent:#1a73e8;
-    --ml-bg:#e6e8eb;
-    --ink:#27313a;
-    --card:#ffffffee;
-    --border:#e8edf3;
-    --muted:#6b7280;
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --ml-blue:#003366;
+  --ml-accent:#1a73e8;
+  --ml-bg:#e6e8eb;
+  --ink:#27313a;
+  --card:#ffffffee;
+  --border:#e8edf3;
+  --muted:#6b7280;
+}
+
+body{
+  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+  background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+  background-size:180% auto;
+  margin:0;
+  padding:32px;
+  color:var(--ink);
+}
+
+.shell{
+  max-width:1200px;
+  margin:0 auto;
+  background:rgba(255,255,255,0.94);
+  border-radius:14px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  overflow:hidden;
+}
+
+header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:18px 24px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(90deg,#fff,#f7f9fc);
+}
+
+header h1{
+  margin:0;
+  font-size:22px;
+  color:var(--ml-blue);
+}
+
+header a{
+  background:var(--ml-accent);
+  color:#fff;
+  text-decoration:none;
+  padding:8px 16px;
+  border-radius:8px;
+  font-weight:600;
+  font-size:14px;
+}
+
+.content{padding:22px 24px 28px;}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:16px;
+  margin-bottom:16px;
+}
+
+label{
+  font-size:13px;
+  color:#334155;
+  display:block;
+  margin-bottom:6px;
+}
+
+input{
+  font-size:15px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  padding:10px 12px;
+  height:40px;
+}
+
+button{
+  font-size:15px;
+  font-weight:600;
+  border:0;
+  border-radius:10px;
+  padding:12px 18px;
+  cursor:pointer;
+  background:var(--ml-accent);
+  color:#fff;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:6px;
+}
+
+th,td{
+  padding:10px 8px;
+  border-bottom:1px solid var(--border);
+  text-align:center;
+}
+
+th{
+  color:var(--ml-blue);
+  font-size:14px;
+  text-align:center;
+}
+
+td:first-child,th:first-child{
+  text-align:left;
+}
+
+.muted{
+  color:var(--muted);
+  font-size:13px;
+}
+</style>
+</head>
+
+<body>
+<div class="shell">
+  <header>
+    <h1>On-Site Time Analysis</h1>
+    <a href="main.html">Main Menu</a>
+  </header>
+
+  <div class="content">
+
+    <!-- Date controls -->
+    <div class="card">
+      <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;">
+        <div>
+          <label>Start date</label>
+          <input type="date" id="startDate">
+        </div>
+        <div>
+          <label>End date</label>
+          <input type="date" id="endDate">
+        </div>
+        <div>
+          <button onclick="calculate()">Calculate</button>
+        </div>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        Average is based on on-site time only (arrive first site → leave last site)
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Engineer</th>
+            <th>Days</th>
+            <th>Avg (h)</th>
+            <th>Min</th>
+            <th>Max</th>
+          </tr>
+        </thead>
+        <tbody id="results">
+          <tr>
+            <td colspan="5" class="muted">Select a date range and click Calculate</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
+const $ = id => document.getElementById(id);
+
+function todayMinus(days){
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split("T")[0];
+}
+
+// Default to last 6 weeks
+window.addEventListener("DOMContentLoaded", () => {
+  $("startDate").value = todayMinus(42);
+  $("endDate").value = todayMinus(1);
+});
+
+async function calculate(){
+  const start = $("startDate").value;
+  const end = $("endDate").value;
+  const tbody = $("results");
+
+  if(!start || !end){
+    alert("Please select both dates");
+    return;
   }
 
-  body{
-    font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-    background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size:180% auto;
-    margin:0;
-    padding:32px;
-    color:var(--ink);
-  }
+  tbody.innerHTML = `<tr><td colspan="5">Loading…</td></tr>`;
 
-  .shell{
-    max-width:1200px;
-    margin:0 auto;
-    background:rgba(255,255,255,0.94);
-    border-radius:14px;
-    box-shadow:0 12px 28px rgba(0,0,0,0.12);
-    overflow:hidden;
-  }
+  try{
+    const res = await fetch(`${WORKER_URL}?start=${start}&end=${end}`);
+    const data = await res.json();
 
-  header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:18px 24px;
-    border-bottom:1px solid var(--border);
-    background:linear-gradient(90deg,#fff,#f7f9fc);
-  }
+    if(!data.engineers || data.engineers.length === 0){
+      tbody.innerHTML = `<tr><td colspan="5">No data for selected period</td></tr>`;
+      return;
+    }
 
-  header h1{
-    margin:0;
-    font-size:22px;
-    color:var(--ml-blue);
-  }
+    tbody.innerHTML = "";
 
-  header a{
-    background:var(--ml-accent);
-    color:#fff;
-    text-decoration:none;
-   
+    data.engineers.forEach(e => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${e.engineer}</td>
+        <td>${e.days}</td>
+        <td>${e.average.toFixed(2)}</td>
+        <td>${e.min.toFixed(2)}</td>
+        <td>${e.max.toFixed(2)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+  }catch(err){
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="5">Error loading data</td></tr>`;
+  }
+}
+</script>
+</body>
+</html>
