@@ -38,8 +38,6 @@ body{
 
 header{
   display:flex;
-  flex-wrap:wrap;
-  gap:12px;
   justify-content:space-between;
   align-items:center;
   padding:18px 22px;
@@ -87,7 +85,7 @@ label{
   margin-bottom:6px;
 }
 
-input,select{
+input{
   font-size:15px;
   border:1px solid #cbd5e1;
   border-radius:10px;
@@ -135,32 +133,20 @@ th,td{
   padding:10px 8px;
   border-bottom:1px solid var(--border);
   text-align:center;
-  font-size:14px;
 }
 
 th{
   color:var(--ml-blue);
-  font-weight:600;
 }
 
 td:first-child,th:first-child{
   text-align:left;
 }
 
-.muted{
-  color:var(--muted);
-  font-size:13px;
-}
-
 .notice{
   margin-top:10px;
   font-size:13px;
   color:#92400e;
-}
-
-@media(max-width:720px){
-  header h1{font-size:20px}
-  table{font-size:13px}
 }
 </style>
 </head>
@@ -174,7 +160,6 @@ td:first-child,th:first-child{
 
   <div class="content">
 
-    <!-- Controls -->
     <div class="card">
       <div class="controls">
         <div>
@@ -193,12 +178,8 @@ td:first-child,th:first-child{
           <button onclick="calculate()">Calculate</button>
         </div>
       </div>
-      <div class="muted" id="modeHint" style="margin-top:8px;">
-        Average based on on-site time (arrive first site → leave last site)
-      </div>
     </div>
 
-    <!-- Results -->
     <div class="card table-wrap">
       <table>
         <thead>
@@ -212,7 +193,7 @@ td:first-child,th:first-child{
           </tr>
         </thead>
         <tbody id="results">
-          <tr><td colspan="6" class="muted">Select a date range</td></tr>
+          <tr><td colspan="6">Select a date range</td></tr>
         </tbody>
       </table>
       <div class="notice" id="financeNotice" style="display:none;">
@@ -261,10 +242,6 @@ function setMode(m){
   mode = m;
   $("onsiteBtn").classList.toggle("active",m==="onsite");
   $("travelBtn").classList.toggle("active",m==="travel");
-  $("modeHint").textContent =
-    m==="onsite"
-      ? "Average based on on-site time (arrive first site → leave last site)"
-      : "Average based on travel time (to + from work)";
 }
 
 async function calculate(){
@@ -274,11 +251,10 @@ async function calculate(){
 
   tbody.innerHTML = `<tr><td colspan="6">Loading…</td></tr>`;
 
-  const res = await fetch(`${WORKER_URL}?start=${start}&end=${end}&mode=${mode}`,{
-    headers:{
-      "X-User": getUser()
-    }
-  });
+  const res = await fetch(
+    `${WORKER_URL}?start=${start}&end=${end}&metric=${mode}`,
+    { headers:{ "X-User": getUser() } }
+  );
 
   const data = await res.json();
   tbody.innerHTML = "";
@@ -296,7 +272,7 @@ async function calculate(){
       <td>${e.average.toFixed(2)}</td>
       <td>${e.min.toFixed(2)}</td>
       <td>${e.max.toFixed(2)}</td>
-      ${isDirector() ? `<td>£${e.avgCost.toFixed(2)}</td>` : ``}
+      ${data.costsEnabled ? `<td>£${e.avgCost.toFixed(2)}</td>` : ``}
     `;
     tbody.appendChild(tr);
   });
