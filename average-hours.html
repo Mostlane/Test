@@ -2,221 +2,165 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Working Time Analysis – Mostlane</title>
+<title>On-Site & Travel Time Analysis – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-<!-- 🔐 Mirror portal authentication -->
 <script src="auth.js"></script>
 
 <style>
 *,*::before,*::after{box-sizing:border-box}
-
 :root{
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
-  --bg:#e6e8eb;
-  --ink:#0f172a;
+  --ml-bg:#e6e8eb;
+  --ink:#27313a;
+  --card:#ffffffee;
+  --border:#e8edf3;
   --muted:#6b7280;
-  --glass:rgba(255,255,255,0.75);
-  --border:rgba(15,23,42,0.08);
-  --shadow:0 12px 30px rgba(0,0,0,0.12);
-}
-
-html,body{
-  width:100%;
-  min-height:100%;
 }
 
 body{
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+  background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
   margin:0;
-  padding:24px 16px;
+  padding:20px;
   color:var(--ink);
-  overflow-x:hidden;
 }
 
 .shell{
   max-width:1200px;
   margin:0 auto;
-  backdrop-filter: blur(10px);
-  background:var(--glass);
-  border-radius:18px;
-  box-shadow:var(--shadow);
-  overflow:visible;
+  background:rgba(255,255,255,0.94);
+  border-radius:14px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  overflow:hidden;
 }
 
 header{
   display:flex;
+  flex-wrap:wrap;
+  gap:12px;
   justify-content:space-between;
   align-items:center;
-  padding:20px 24px;
+  padding:18px 22px;
   border-bottom:1px solid var(--border);
-  gap:12px;
+  background:linear-gradient(90deg,#fff,#f7f9fc);
 }
 
 header h1{
   margin:0;
-  font-size:24px;
-  font-weight:700;
+  font-size:22px;
   color:var(--ml-blue);
 }
 
 header a{
+  background:var(--ml-accent);
+  color:#fff;
   text-decoration:none;
+  padding:10px 16px;
+  border-radius:10px;
+  font-weight:600;
   font-size:14px;
-  font-weight:600;
-  padding:10px 18px;
-  border-radius:999px;
-  background:var(--ml-accent);
-  color:#fff;
-  white-space:nowrap;
 }
 
-.mode-toggle{
-  display:flex;
-  gap:6px;
-  padding:6px;
-  background:rgba(255,255,255,0.6);
-  border-radius:999px;
-  width:fit-content;
-  margin:14px auto 0;
-}
-
-.mode-toggle button{
-  padding:8px 18px;
-  border-radius:999px;
-  border:none;
-  background:transparent;
-  font-weight:600;
-  cursor:pointer;
-  color:#334155;
-}
-
-.mode-toggle button.active{
-  background:var(--ml-accent);
-  color:#fff;
-}
-
-.content{
-  padding:22px 20px 30px;
-}
+.content{padding:20px;}
 
 .card{
-  background:#fff;
+  background:var(--card);
   border:1px solid var(--border);
-  border-radius:16px;
-  padding:18px;
-  margin-bottom:18px;
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:16px;
 }
 
 .controls{
-  display:grid;
-  grid-template-columns:1fr 1fr auto;
-  gap:14px;
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
   align-items:end;
 }
 
 label{
-  font-size:12px;
-  font-weight:600;
-  color:var(--muted);
-  margin-bottom:6px;
+  font-size:13px;
+  color:#334155;
   display:block;
+  margin-bottom:6px;
 }
 
-input{
-  width:100%;
-  font-size:16px;
-  padding:10px 14px;
-  border-radius:12px;
-  border:1px solid var(--border);
+input,select{
+  font-size:15px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  padding:10px 12px;
+  height:40px;
 }
 
-button.primary{
+button{
   font-size:15px;
   font-weight:600;
-  padding:12px 22px;
-  border-radius:999px;
-  border:none;
+  border:0;
+  border-radius:10px;
+  padding:12px 18px;
+  cursor:pointer;
   background:var(--ml-accent);
   color:#fff;
-  cursor:pointer;
 }
 
-.restricted{
-  font-size:13px;
-  color:var(--muted);
-  background:#f8fafc;
-  border:1px dashed var(--border);
-  padding:12px;
-  border-radius:12px;
-  text-align:center;
+.toggle{
+  display:flex;
+  gap:8px;
 }
 
-/* ===== TABLE ===== */
+.toggle button{
+  background:#eef2f9;
+  color:#0f172a;
+}
+
+.toggle button.active{
+  background:var(--ml-accent);
+  color:#fff;
+}
+
 .table-wrap{
-  width:100%;
   overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
 }
 
 table{
   width:100%;
-  min-width:720px;
-  border-collapse:separate;
-  border-spacing:0 10px;
+  border-collapse:collapse;
+  min-width:700px;
 }
 
-thead th{
-  font-size:12px;
-  text-transform:uppercase;
-  color:var(--muted);
+th,td{
+  padding:10px 8px;
+  border-bottom:1px solid var(--border);
+  text-align:center;
+  font-size:14px;
+}
+
+th{
+  color:var(--ml-blue);
+  font-weight:600;
+}
+
+td:first-child,th:first-child{
   text-align:left;
-  padding:0 14px 6px;
-  white-space:nowrap;
-}
-
-tbody tr{
-  background:#fff;
-  border-radius:14px;
-  box-shadow:0 4px 10px rgba(0,0,0,0.04);
-}
-
-tbody td{
-  padding:14px;
-  white-space:nowrap;
-}
-
-tbody td:first-child{
-  font-weight:600;
-}
-
-.money{
-  text-align:right;
-  font-weight:600;
 }
 
 .muted{
-  text-align:center;
   color:var(--muted);
+  font-size:13px;
 }
 
-/* ===== MOBILE ===== */
-@media(max-width:800px){
-  header{
-    flex-direction:column;
-    align-items:flex-start;
-  }
+.notice{
+  margin-top:10px;
+  font-size:13px;
+  color:#92400e;
+}
 
-  .controls{
-    grid-template-columns:1fr;
-  }
-
-  table{
-    min-width:640px;
-  }
+@media(max-width:720px){
+  header h1{font-size:20px}
+  table{font-size:13px}
 }
 </style>
 </head>
@@ -224,17 +168,13 @@ tbody td:first-child{
 <body>
 <div class="shell">
   <header>
-    <h1>Working Time Analysis</h1>
+    <h1>Time Analysis</h1>
     <a href="main.html">Main Menu</a>
   </header>
 
-  <div class="mode-toggle">
-    <button id="modeOnsite" class="active" onclick="setMode('onsite')">On-Site Time</button>
-    <button id="modeTravel" onclick="setMode('travel')">Travel Time</button>
-  </div>
-
   <div class="content">
 
+    <!-- Controls -->
     <div class="card">
       <div class="controls">
         <div>
@@ -245,32 +185,38 @@ tbody td:first-child{
           <label>End date</label>
           <input type="date" id="endDate">
         </div>
-        <button class="primary" onclick="calculate()">Calculate</button>
+        <div class="toggle">
+          <button id="onsiteBtn" class="active">On-Site</button>
+          <button id="travelBtn">Travel</button>
+        </div>
+        <div>
+          <button onclick="calculate()">Calculate</button>
+        </div>
+      </div>
+      <div class="muted" id="modeHint" style="margin-top:8px;">
+        Average based on on-site time (arrive first site → leave last site)
       </div>
     </div>
 
-    <div id="restrictedBanner" class="restricted" style="display:none;">
-      Financial data is restricted to Directors.
-    </div>
-
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Engineer</th>
-              <th>Days</th>
-              <th>Avg (h)</th>
-              <th>Min</th>
-              <th>Max</th>
-              <th id="costDayHeader" style="display:none;">£ / Day</th>
-              <th id="costPeriodHeader" style="display:none;">£ / Period</th>
-            </tr>
-          </thead>
-          <tbody id="results">
-            <tr><td colspan="7" class="muted">Select dates and calculate</td></tr>
-          </tbody>
-        </table>
+    <!-- Results -->
+    <div class="card table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Engineer</th>
+            <th>Days</th>
+            <th>Avg (h)</th>
+            <th>Min</th>
+            <th>Max</th>
+            <th class="financeCol">Avg £</th>
+          </tr>
+        </thead>
+        <tbody id="results">
+          <tr><td colspan="6" class="muted">Select a date range</td></tr>
+        </tbody>
+      </table>
+      <div class="notice" id="financeNotice" style="display:none;">
+        Financial data is restricted to Directors.
       </div>
     </div>
 
@@ -278,100 +224,81 @@ tbody td:first-child{
 </div>
 
 <script>
-const WORKER_URL="https://average-hours.jamie-def.workers.dev";
-const $=id=>document.getElementById(id);
-let MODE="onsite";
+const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
+const DIRECTORS = ["Jamie.Line","Joe.Line","Greg.Line"];
+const $ = id => document.getElementById(id);
 
-/* ✅ Mirror how the portal stores the logged-in user */
-function getLoggedInUser(){
-  let user = "";
+let mode = "onsite";
 
-  // Mostlane portal standard (used across your pages)
-  if (typeof USERNAME_SESSION_KEY !== "undefined") {
-    user = sessionStorage.getItem(USERNAME_SESSION_KEY);
-  }
-
-  // Fallbacks (safe)
-  user = user
-    || sessionStorage.getItem("username")
-    || sessionStorage.getItem("user")
-    || sessionStorage.getItem("loggedInUser")
-    || "";
-
-  user = String(user).trim();
-
-  // Normalise "Jamie Line" → "Jamie.Line"
-  if (user.includes(" ")) {
-    user = user.replace(/\s+/g,".");
-  }
-
-  return user;
+function getUser(){
+  return sessionStorage.getItem("mostlaneUser") || "";
 }
 
-function todayMinus(d){
-  const x=new Date();
-  x.setDate(x.getDate()-d);
-  return x.toISOString().split("T")[0];
+function isDirector(){
+  return DIRECTORS.includes(getUser());
+}
+
+function todayMinus(days){
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split("T")[0];
 }
 
 window.addEventListener("DOMContentLoaded",()=>{
-  $("startDate").value=todayMinus(42);
-  $("endDate").value=todayMinus(1);
+  $("startDate").value = todayMinus(42);
+  $("endDate").value = todayMinus(1);
+
+  $("onsiteBtn").onclick=()=>setMode("onsite");
+  $("travelBtn").onclick=()=>setMode("travel");
+
+  if(!isDirector()){
+    document.querySelectorAll(".financeCol").forEach(c=>c.style.display="none");
+    $("financeNotice").style.display="block";
+  }
 });
 
 function setMode(m){
-  MODE=m;
-  $("modeOnsite").classList.toggle("active",m==="onsite");
-  $("modeTravel").classList.toggle("active",m==="travel");
-  calculate();
+  mode = m;
+  $("onsiteBtn").classList.toggle("active",m==="onsite");
+  $("travelBtn").classList.toggle("active",m==="travel");
+  $("modeHint").textContent =
+    m==="onsite"
+      ? "Average based on on-site time (arrive first site → leave last site)"
+      : "Average based on travel time (to + from work)";
 }
 
 async function calculate(){
-  const start=$("startDate").value;
-  const end=$("endDate").value;
-  const tbody=$("results");
+  const start = $("startDate").value;
+  const end = $("endDate").value;
+  const tbody = $("results");
 
-  tbody.innerHTML=`<tr><td colspan="7" class="muted">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6">Loading…</td></tr>`;
 
-  const res=await fetch(
-    `${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`,
-    {
-      headers:{
-        "X-User": getLoggedInUser()
-      }
+  const res = await fetch(`${WORKER_URL}?start=${start}&end=${end}&mode=${mode}`,{
+    headers:{
+      "X-User": getUser()
     }
-  );
+  });
 
-  const data=await res.json();
-  const CAN_SEE_COSTS = data.costsEnabled === true;
-
-  $("restrictedBanner").style.display = CAN_SEE_COSTS ? "none" : "block";
-  $("costDayHeader").style.display = CAN_SEE_COSTS ? "" : "none";
-  $("costPeriodHeader").style.display = CAN_SEE_COSTS ? "" : "none";
+  const data = await res.json();
+  tbody.innerHTML = "";
 
   if(!data.engineers?.length){
-    tbody.innerHTML=`<tr><td colspan="7" class="muted">No data for selected period</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6">No data</td></tr>`;
     return;
   }
 
-  tbody.innerHTML="";
-
   data.engineers.forEach(e=>{
-    tbody.insertAdjacentHTML("beforeend",`
-      <tr>
-        <td>${e.engineer}</td>
-        <td>${e.days}</td>
-        <td>${e.average.toFixed(2)}</td>
-        <td>${e.min.toFixed(2)}</td>
-        <td>${e.max.toFixed(2)}</td>
-        ${
-          CAN_SEE_COSTS
-          ? `<td class="money">£${e.costPerDay?.toFixed(2) ?? "—"}</td>
-             <td class="money">£${e.periodCost?.toFixed(2) ?? "—"}</td>`
-          : ``
-        }
-      </tr>
-    `);
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${e.engineer}</td>
+      <td>${e.days}</td>
+      <td>${e.average.toFixed(2)}</td>
+      <td>${e.min.toFixed(2)}</td>
+      <td>${e.max.toFixed(2)}</td>
+      ${isDirector() ? `<td>£${e.avgCost.toFixed(2)}</td>` : ``}
+    `;
+    tbody.appendChild(tr);
   });
 }
 </script>
