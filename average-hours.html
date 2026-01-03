@@ -7,6 +7,7 @@
 
 <style>
 *,*::before,*::after{box-sizing:border-box}
+
 :root{
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
@@ -15,7 +16,12 @@
   --muted:#6b7280;
   --glass:rgba(255,255,255,0.75);
   --border:rgba(15,23,42,0.08);
-  --shadow:0 10px 30px rgba(0,0,0,0.12);
+  --shadow:0 12px 30px rgba(0,0,0,0.12);
+}
+
+html,body{
+  width:100%;
+  min-height:100%;
 }
 
 body{
@@ -23,8 +29,9 @@ body{
   background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
   margin:0;
-  padding:32px 20px;
+  padding:24px 16px;
   color:var(--ink);
+  overflow-x:hidden;
 }
 
 .shell{
@@ -34,20 +41,21 @@ body{
   background:var(--glass);
   border-radius:18px;
   box-shadow:var(--shadow);
-  overflow:hidden;
+  overflow:visible;
 }
 
 header{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:22px 28px;
+  padding:20px 24px;
   border-bottom:1px solid var(--border);
+  gap:12px;
 }
 
 header h1{
   margin:0;
-  font-size:26px;
+  font-size:24px;
   font-weight:700;
   color:var(--ml-blue);
 }
@@ -60,16 +68,17 @@ header a{
   border-radius:999px;
   background:var(--ml-accent);
   color:#fff;
+  white-space:nowrap;
 }
 
 .mode-toggle{
   display:flex;
   gap:6px;
-  padding:10px;
+  padding:6px;
   background:rgba(255,255,255,0.6);
   border-radius:999px;
   width:fit-content;
-  margin:16px auto 0;
+  margin:14px auto 0;
 }
 
 .mode-toggle button{
@@ -87,20 +96,22 @@ header a{
   color:#fff;
 }
 
-.content{padding:26px 28px 34px;}
+.content{
+  padding:22px 20px 30px;
+}
 
 .card{
   background:#fff;
   border:1px solid var(--border);
   border-radius:16px;
-  padding:20px;
-  margin-bottom:20px;
+  padding:18px;
+  margin-bottom:18px;
 }
 
 .controls{
   display:grid;
   grid-template-columns:1fr 1fr auto;
-  gap:16px;
+  gap:14px;
   align-items:end;
 }
 
@@ -114,13 +125,13 @@ label{
 
 input{
   width:100%;
-  font-size:15px;
+  font-size:16px;
   padding:10px 14px;
   border-radius:12px;
   border:1px solid var(--border);
 }
 
-button{
+button.primary{
   font-size:15px;
   font-weight:600;
   padding:12px 22px;
@@ -141,8 +152,16 @@ button{
   text-align:center;
 }
 
+/* ===== TABLE ===== */
+.table-wrap{
+  width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+}
+
 table{
   width:100%;
+  min-width:720px;
   border-collapse:separate;
   border-spacing:0 10px;
 }
@@ -153,6 +172,7 @@ thead th{
   color:var(--muted);
   text-align:left;
   padding:0 14px 6px;
+  white-space:nowrap;
 }
 
 tbody tr{
@@ -163,6 +183,7 @@ tbody tr{
 
 tbody td{
   padding:14px;
+  white-space:nowrap;
 }
 
 tbody td:first-child{
@@ -179,9 +200,20 @@ tbody td:first-child{
   color:var(--muted);
 }
 
-@media(max-width:720px){
-  header{flex-direction:column;gap:14px;}
-  .controls{grid-template-columns:1fr;}
+/* ===== MOBILE ===== */
+@media(max-width:800px){
+  header{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+
+  .controls{
+    grid-template-columns:1fr;
+  }
+
+  table{
+    min-width:640px;
+  }
 }
 </style>
 </head>
@@ -210,7 +242,7 @@ tbody td:first-child{
           <label>End date</label>
           <input type="date" id="endDate">
         </div>
-        <button onclick="calculate()">Calculate</button>
+        <button class="primary" onclick="calculate()">Calculate</button>
       </div>
     </div>
 
@@ -219,22 +251,24 @@ tbody td:first-child{
     </div>
 
     <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Engineer</th>
-            <th>Days</th>
-            <th>Avg (h)</th>
-            <th>Min</th>
-            <th>Max</th>
-            <th id="costDayHeader" style="display:none;">£ / Day</th>
-            <th id="costPeriodHeader" style="display:none;">£ / Period</th>
-          </tr>
-        </thead>
-        <tbody id="results">
-          <tr><td colspan="7" class="muted">Select dates and calculate</td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Engineer</th>
+              <th>Days</th>
+              <th>Avg (h)</th>
+              <th>Min</th>
+              <th>Max</th>
+              <th id="costDayHeader" style="display:none;">£ / Day</th>
+              <th id="costPeriodHeader" style="display:none;">£ / Period</th>
+            </tr>
+          </thead>
+          <tbody id="results">
+            <tr><td colspan="7" class="muted">Select dates and calculate</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
   </div>
@@ -245,18 +279,26 @@ const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
 let MODE="onsite";
 
-/* ✅ Robust identity resolution */
+/* ✅ Normalise portal user → Worker allow-list format */
 function getLoggedInUser(){
-  return (
+  let raw =
     sessionStorage.getItem("username") ||
     sessionStorage.getItem("user") ||
     sessionStorage.getItem("loggedInUser") ||
-    ""
-  ).trim();
+    "";
+
+  raw = raw.trim();
+
+  if (raw.includes(" ")) {
+    raw = raw.replace(/\s+/g,".");
+  }
+
+  return raw;
 }
 
 function todayMinus(d){
-  const x=new Date();x.setDate(x.getDate()-d);
+  const x=new Date();
+  x.setDate(x.getDate()-d);
   return x.toISOString().split("T")[0];
 }
 
