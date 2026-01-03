@@ -131,26 +131,14 @@ button{
   cursor:pointer;
 }
 
-.summary{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:14px;
-}
-
-.summary-box{
-  border:1px solid var(--border);
-  border-radius:14px;
-  padding:16px;
-}
-
-.summary-title{
-  font-size:12px;
+.restricted{
+  font-size:13px;
   color:var(--muted);
-}
-
-.summary-value{
-  font-size:26px;
-  font-weight:700;
+  background:#f8fafc;
+  border:1px dashed var(--border);
+  padding:12px;
+  border-radius:12px;
+  text-align:center;
 }
 
 table{
@@ -181,7 +169,15 @@ tbody td:first-child{
   font-weight:600;
 }
 
-.muted{text-align:center;color:var(--muted);}
+.money{
+  text-align:right;
+  font-weight:600;
+}
+
+.muted{
+  text-align:center;
+  color:var(--muted);
+}
 
 @media(max-width:720px){
   header{flex-direction:column;gap:14px;}
@@ -218,19 +214,8 @@ tbody td:first-child{
       </div>
     </div>
 
-    <div class="card summary" id="summary" style="display:none;">
-      <div class="summary-box">
-        <div class="summary-title">Engineers</div>
-        <div class="summary-value" id="sumEngineers">–</div>
-      </div>
-      <div class="summary-box">
-        <div class="summary-title" id="sumLabel">Average on-site day</div>
-        <div class="summary-value" id="sumAverage">–</div>
-      </div>
-      <div class="summary-box">
-        <div class="summary-title">Period</div>
-        <div class="summary-value" id="sumPeriod">–</div>
-      </div>
+    <div id="restrictedBanner" class="restricted" style="display:none;">
+      Financial data is restricted to Directors.
     </div>
 
     <div class="card">
@@ -242,10 +227,12 @@ tbody td:first-child{
             <th>Avg (h)</th>
             <th>Min</th>
             <th>Max</th>
+            <th id="costDayHeader" style="display:none;">£ / Day</th>
+            <th id="costPeriodHeader" style="display:none;">£ / Period</th>
           </tr>
         </thead>
         <tbody id="results">
-          <tr><td colspan="5" class="muted">Select dates and calculate</td></tr>
+          <tr><td colspan="7" class="muted">Select dates and calculate</td></tr>
         </tbody>
       </table>
     </div>
@@ -257,6 +244,7 @@ tbody td:first-child{
 const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
 let MODE="onsite";
+let CAN_SEE_COSTS=false;
 
 function todayMinus(d){
   const x=new Date();x.setDate(x.getDate()-d);
@@ -280,21 +268,29 @@ async function calculate(){
   const end=$("endDate").value;
   const tbody=$("results");
 
-  tbody.innerHTML=`<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+  tbody.innerHTML=`<tr><td colspan="7" class="muted">Loading…</td></tr>`;
 
-  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`);
+  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`,{
+    headers:{
+      "X-User":sessionStorage.getItem("username")||""
+    }
+  });
+
   const data=await res.json();
+  CAN_SEE_COSTS = data.costsEnabled === true;
+
+  $("restrictedBanner").style.display = CAN_SEE_COSTS ? "none" : "block";
+  $("costDayHeader").style.display = CAN_SEE_COSTS ? "" : "none";
+  $("costPeriodHeader").style.display = CAN_SEE_COSTS ? "" : "none";
 
   if(!data.engineers?.length){
-    tbody.innerHTML=`<tr><td colspan="5" class="muted">No data for selected period</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="7" class="muted">No data for selected period</td></tr>`;
     return;
   }
 
-  let avgTotal=0;
   tbody.innerHTML="";
 
   data.engineers.forEach(e=>{
-    avgTotal+=e.average;
     tbody.insertAdjacentHTML("beforeend",`
       <tr>
         <td>${e.engineer}</td>
@@ -302,17 +298,15 @@ async function calculate(){
         <td>${e.average.toFixed(2)}</td>
         <td>${e.min.toFixed(2)}</td>
         <td>${e.max.toFixed(2)}</td>
+        ${
+          CAN_SEE_COSTS
+          ? `<td class="money">£${e.costPerDay?.toFixed(2) ?? "—"}</td>
+             <td class="money">£${e.periodCost?.toFixed(2) ?? "—"}</td>`
+          : ``
+        }
       </tr>
     `);
   });
-
-  $("summary").style.display="grid";
-  $("sumEngineers").textContent=data.engineers.length;
-  $("sumAverage").textContent=(avgTotal/data.engineers.length).toFixed(2)+" h";
-  $("sumPeriod").textContent=start+" → "+end;
-  $("sumLabel").textContent=MODE==="travel"
-    ? "Average daily travel time"
-    : "Average on-site day";
 }
 </script>
 </body>
