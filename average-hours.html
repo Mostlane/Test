@@ -7,120 +7,193 @@
 
 <style>
 *,*::before,*::after{box-sizing:border-box}
+
+/* ===== Apple-like palette layered on Mostlane ===== */
 :root{
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
-  --ml-bg:#e6e8eb;
-  --ink:#27313a;
-  --card:#ffffffee;
-  --border:#e8edf3;
+  --bg:#e6e8eb;
+  --ink:#0f172a;
   --muted:#6b7280;
+  --glass:rgba(255,255,255,0.75);
+  --border:rgba(15,23,42,0.08);
+  --shadow:0 10px 30px rgba(0,0,0,0.12);
 }
 
+/* ===== Page ===== */
 body{
-  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-  background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
   margin:0;
-  padding:32px;
+  padding:32px 20px;
   color:var(--ink);
 }
 
+/* ===== Shell ===== */
 .shell{
   max-width:1200px;
   margin:0 auto;
-  background:rgba(255,255,255,0.94);
-  border-radius:14px;
-  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  backdrop-filter: blur(10px);
+  background:var(--glass);
+  border-radius:18px;
+  box-shadow:var(--shadow);
   overflow:hidden;
 }
 
+/* ===== Header ===== */
 header{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:18px 24px;
+  padding:22px 28px;
   border-bottom:1px solid var(--border);
-  background:linear-gradient(90deg,#fff,#f7f9fc);
 }
 
 header h1{
   margin:0;
-  font-size:22px;
+  font-size:26px;
+  font-weight:700;
+  letter-spacing:-0.3px;
   color:var(--ml-blue);
 }
 
 header a{
+  text-decoration:none;
+  font-size:14px;
+  font-weight:600;
+  padding:10px 18px;
+  border-radius:999px;
   background:var(--ml-accent);
   color:#fff;
-  text-decoration:none;
-  padding:8px 16px;
-  border-radius:8px;
-  font-weight:600;
-  font-size:14px;
 }
 
-.content{padding:22px 24px 28px;}
+/* ===== Content ===== */
+.content{
+  padding:26px 28px 34px;
+}
 
+/* ===== Cards ===== */
 .card{
-  background:var(--card);
+  background:rgba(255,255,255,0.85);
   border:1px solid var(--border);
-  border-radius:12px;
-  padding:16px;
-  margin-bottom:16px;
+  border-radius:16px;
+  padding:20px;
+  margin-bottom:20px;
+}
+
+/* ===== Controls ===== */
+.controls{
+  display:grid;
+  grid-template-columns:1fr 1fr auto;
+  gap:16px;
+  align-items:end;
 }
 
 label{
-  font-size:13px;
-  color:#334155;
-  display:block;
+  font-size:12px;
+  font-weight:600;
+  color:var(--muted);
   margin-bottom:6px;
+  display:block;
 }
 
 input{
+  width:100%;
   font-size:15px;
-  border:1px solid #cbd5e1;
-  border-radius:10px;
-  padding:10px 12px;
-  height:40px;
+  padding:10px 14px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:#fff;
 }
 
 button{
   font-size:15px;
   font-weight:600;
-  border:0;
-  border-radius:10px;
-  padding:12px 18px;
-  cursor:pointer;
+  padding:12px 22px;
+  border-radius:999px;
+  border:none;
   background:var(--ml-accent);
   color:#fff;
+  cursor:pointer;
+}
+
+/* ===== Summary strip ===== */
+.summary{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:14px;
+}
+
+.summary-box{
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:16px;
+}
+
+.summary-title{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+
+.summary-value{
+  font-size:26px;
+  font-weight:700;
+}
+
+/* ===== Table ===== */
+.table-wrap{
+  overflow-x:auto;
 }
 
 table{
   width:100%;
-  border-collapse:collapse;
-  margin-top:6px;
+  border-collapse:separate;
+  border-spacing:0 10px;
 }
 
-th,td{
-  padding:10px 8px;
-  border-bottom:1px solid var(--border);
-  text-align:center;
-}
-
-th{
-  color:var(--ml-blue);
-  font-size:14px;
-  text-align:center;
-}
-
-td:first-child,th:first-child{
-  text-align:left;
-}
-
-.muted{
+thead th{
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
   color:var(--muted);
-  font-size:13px;
+  text-align:left;
+  padding:0 14px 6px;
+}
+
+tbody tr{
+  background:#fff;
+  border-radius:14px;
+  box-shadow:0 4px 10px rgba(0,0,0,0.04);
+}
+
+tbody td{
+  padding:14px;
+  font-size:15px;
+}
+
+tbody td:first-child{
+  font-weight:600;
+}
+
+/* ===== Status text ===== */
+.muted{
+  font-size:14px;
+  color:var(--muted);
+  text-align:center;
+}
+
+/* ===== Mobile ===== */
+@media(max-width:720px){
+  header{
+    flex-direction:column;
+    gap:14px;
+  }
+  .controls{
+    grid-template-columns:1fr;
+  }
 }
 </style>
 </head>
@@ -134,9 +207,9 @@ td:first-child,th:first-child{
 
   <div class="content">
 
-    <!-- Date controls -->
+    <!-- Controls -->
     <div class="card">
-      <div style="display:flex;gap:14px;align-items:end;flex-wrap:wrap;">
+      <div class="controls">
         <div>
           <label>Start date</label>
           <input type="date" id="startDate">
@@ -145,17 +218,28 @@ td:first-child,th:first-child{
           <label>End date</label>
           <input type="date" id="endDate">
         </div>
-        <div>
-          <button onclick="calculate()">Calculate</button>
-        </div>
-      </div>
-      <div class="muted" style="margin-top:8px;">
-        Average is based on on-site time only (arrive first site → leave last site)
+        <button onclick="calculate()">Calculate</button>
       </div>
     </div>
 
-    <!-- Results -->
-    <div class="card">
+    <!-- Summary -->
+    <div class="card summary" id="summary" style="display:none;">
+      <div class="summary-box">
+        <div class="summary-title">Engineers</div>
+        <div class="summary-value" id="sumEngineers">–</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-title">Average on-site day</div>
+        <div class="summary-value" id="sumAverage">–</div>
+      </div>
+      <div class="summary-box">
+        <div class="summary-title">Period</div>
+        <div class="summary-value" id="sumPeriod">–</div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card table-wrap">
       <table>
         <thead>
           <tr>
@@ -167,9 +251,7 @@ td:first-child,th:first-child{
           </tr>
         </thead>
         <tbody id="results">
-          <tr>
-            <td colspan="5" class="muted">Select a date range and click Calculate</td>
-          </tr>
+          <tr><td colspan="5" class="muted">Select dates and calculate</td></tr>
         </tbody>
       </table>
     </div>
@@ -178,60 +260,54 @@ td:first-child,th:first-child{
 </div>
 
 <script>
-const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
-const $ = id => document.getElementById(id);
+const WORKER_URL="https://average-hours.jamie-def.workers.dev";
+const $=id=>document.getElementById(id);
 
-function todayMinus(days){
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().split("T")[0];
+function todayMinus(d){
+  const x=new Date();x.setDate(x.getDate()-d);
+  return x.toISOString().split("T")[0];
 }
 
-// Default to last 6 weeks
-window.addEventListener("DOMContentLoaded", () => {
-  $("startDate").value = todayMinus(42);
-  $("endDate").value = todayMinus(1);
+window.addEventListener("DOMContentLoaded",()=>{
+  $("startDate").value=todayMinus(42);
+  $("endDate").value=todayMinus(1);
 });
 
 async function calculate(){
-  const start = $("startDate").value;
-  const end = $("endDate").value;
-  const tbody = $("results");
+  const start=$("startDate").value;
+  const end=$("endDate").value;
+  const tbody=$("results");
 
-  if(!start || !end){
-    alert("Please select both dates");
+  tbody.innerHTML=`<tr><td colspan="5" class="muted">Loading…</td></tr>`;
+
+  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}`);
+  const data=await res.json();
+
+  if(!data.engineers?.length){
+    tbody.innerHTML=`<tr><td colspan="5" class="muted">No data for selected period</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = `<tr><td colspan="5">Loading…</td></tr>`;
+  tbody.innerHTML="";
+  let avgTotal=0;
 
-  try{
-    const res = await fetch(`${WORKER_URL}?start=${start}&end=${end}`);
-    const data = await res.json();
-
-    if(!data.engineers || data.engineers.length === 0){
-      tbody.innerHTML = `<tr><td colspan="5">No data for selected period</td></tr>`;
-      return;
-    }
-
-    tbody.innerHTML = "";
-
-    data.engineers.forEach(e => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
+  data.engineers.forEach(e=>{
+    avgTotal+=e.average;
+    tbody.insertAdjacentHTML("beforeend",`
+      <tr>
         <td>${e.engineer}</td>
         <td>${e.days}</td>
         <td>${e.average.toFixed(2)}</td>
         <td>${e.min.toFixed(2)}</td>
         <td>${e.max.toFixed(2)}</td>
-      `;
-      tbody.appendChild(tr);
-    });
+      </tr>
+    `);
+  });
 
-  }catch(err){
-    console.error(err);
-    tbody.innerHTML = `<tr><td colspan="5">Error loading data</td></tr>`;
-  }
+  $("summary").style.display="grid";
+  $("sumEngineers").textContent=data.engineers.length;
+  $("sumAverage").textContent=(avgTotal/data.engineers.length).toFixed(2)+" h";
+  $("sumPeriod").textContent=start+" → "+end;
 }
 </script>
 </body>
