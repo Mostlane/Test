@@ -5,6 +5,9 @@
 <title>Working Time Analysis – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+<!-- 🔐 Mirror portal authentication -->
+<script src="auth.js"></script>
+
 <style>
 *,*::before,*::after{box-sizing:border-box}
 
@@ -279,21 +282,30 @@ const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
 let MODE="onsite";
 
-/* ✅ Normalise portal user → Worker allow-list format */
+/* ✅ Mirror how the portal stores the logged-in user */
 function getLoggedInUser(){
-  let raw =
-    sessionStorage.getItem("username") ||
-    sessionStorage.getItem("user") ||
-    sessionStorage.getItem("loggedInUser") ||
-    "";
+  let user = "";
 
-  raw = raw.trim();
-
-  if (raw.includes(" ")) {
-    raw = raw.replace(/\s+/g,".");
+  // Mostlane portal standard (used across your pages)
+  if (typeof USERNAME_SESSION_KEY !== "undefined") {
+    user = sessionStorage.getItem(USERNAME_SESSION_KEY);
   }
 
-  return raw;
+  // Fallbacks (safe)
+  user = user
+    || sessionStorage.getItem("username")
+    || sessionStorage.getItem("user")
+    || sessionStorage.getItem("loggedInUser")
+    || "";
+
+  user = String(user).trim();
+
+  // Normalise "Jamie Line" → "Jamie.Line"
+  if (user.includes(" ")) {
+    user = user.replace(/\s+/g,".");
+  }
+
+  return user;
 }
 
 function todayMinus(d){
