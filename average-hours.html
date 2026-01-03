@@ -2,13 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>On-Site Time Analysis – Mostlane</title>
+<title>Working Time Analysis – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <style>
 *,*::before,*::after{box-sizing:border-box}
-
-/* ===== Apple-like palette layered on Mostlane ===== */
 :root{
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
@@ -20,7 +18,6 @@
   --shadow:0 10px 30px rgba(0,0,0,0.12);
 }
 
-/* ===== Page ===== */
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
@@ -30,7 +27,6 @@ body{
   color:var(--ink);
 }
 
-/* ===== Shell ===== */
 .shell{
   max-width:1200px;
   margin:0 auto;
@@ -41,7 +37,6 @@ body{
   overflow:hidden;
 }
 
-/* ===== Header ===== */
 header{
   display:flex;
   justify-content:space-between;
@@ -54,7 +49,6 @@ header h1{
   margin:0;
   font-size:26px;
   font-weight:700;
-  letter-spacing:-0.3px;
   color:var(--ml-blue);
 }
 
@@ -68,21 +62,41 @@ header a{
   color:#fff;
 }
 
-/* ===== Content ===== */
-.content{
-  padding:26px 28px 34px;
+.mode-toggle{
+  display:flex;
+  gap:6px;
+  padding:10px;
+  background:rgba(255,255,255,0.6);
+  border-radius:999px;
+  width:fit-content;
+  margin:16px auto 0;
 }
 
-/* ===== Cards ===== */
+.mode-toggle button{
+  padding:8px 18px;
+  border-radius:999px;
+  border:none;
+  background:transparent;
+  font-weight:600;
+  cursor:pointer;
+  color:#334155;
+}
+
+.mode-toggle button.active{
+  background:var(--ml-accent);
+  color:#fff;
+}
+
+.content{padding:26px 28px 34px;}
+
 .card{
-  background:rgba(255,255,255,0.85);
+  background:#fff;
   border:1px solid var(--border);
   border-radius:16px;
   padding:20px;
   margin-bottom:20px;
 }
 
-/* ===== Controls ===== */
 .controls{
   display:grid;
   grid-template-columns:1fr 1fr auto;
@@ -104,7 +118,6 @@ input{
   padding:10px 14px;
   border-radius:12px;
   border:1px solid var(--border);
-  background:#fff;
 }
 
 button{
@@ -118,7 +131,6 @@ button{
   cursor:pointer;
 }
 
-/* ===== Summary strip ===== */
 .summary{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
@@ -126,7 +138,6 @@ button{
 }
 
 .summary-box{
-  background:#fff;
   border:1px solid var(--border);
   border-radius:14px;
   padding:16px;
@@ -135,17 +146,11 @@ button{
 .summary-title{
   font-size:12px;
   color:var(--muted);
-  margin-bottom:6px;
 }
 
 .summary-value{
   font-size:26px;
   font-weight:700;
-}
-
-/* ===== Table ===== */
-.table-wrap{
-  overflow-x:auto;
 }
 
 table{
@@ -157,7 +162,6 @@ table{
 thead th{
   font-size:12px;
   text-transform:uppercase;
-  letter-spacing:0.06em;
   color:var(--muted);
   text-align:left;
   padding:0 14px 6px;
@@ -171,29 +175,17 @@ tbody tr{
 
 tbody td{
   padding:14px;
-  font-size:15px;
 }
 
 tbody td:first-child{
   font-weight:600;
 }
 
-/* ===== Status text ===== */
-.muted{
-  font-size:14px;
-  color:var(--muted);
-  text-align:center;
-}
+.muted{text-align:center;color:var(--muted);}
 
-/* ===== Mobile ===== */
 @media(max-width:720px){
-  header{
-    flex-direction:column;
-    gap:14px;
-  }
-  .controls{
-    grid-template-columns:1fr;
-  }
+  header{flex-direction:column;gap:14px;}
+  .controls{grid-template-columns:1fr;}
 }
 </style>
 </head>
@@ -201,13 +193,17 @@ tbody td:first-child{
 <body>
 <div class="shell">
   <header>
-    <h1>On-Site Time Analysis</h1>
+    <h1>Working Time Analysis</h1>
     <a href="main.html">Main Menu</a>
   </header>
 
+  <div class="mode-toggle">
+    <button id="modeOnsite" class="active" onclick="setMode('onsite')">On-Site Time</button>
+    <button id="modeTravel" onclick="setMode('travel')">Travel Time</button>
+  </div>
+
   <div class="content">
 
-    <!-- Controls -->
     <div class="card">
       <div class="controls">
         <div>
@@ -222,14 +218,13 @@ tbody td:first-child{
       </div>
     </div>
 
-    <!-- Summary -->
     <div class="card summary" id="summary" style="display:none;">
       <div class="summary-box">
         <div class="summary-title">Engineers</div>
         <div class="summary-value" id="sumEngineers">–</div>
       </div>
       <div class="summary-box">
-        <div class="summary-title">Average on-site day</div>
+        <div class="summary-title" id="sumLabel">Average on-site day</div>
         <div class="summary-value" id="sumAverage">–</div>
       </div>
       <div class="summary-box">
@@ -238,8 +233,7 @@ tbody td:first-child{
       </div>
     </div>
 
-    <!-- Table -->
-    <div class="card table-wrap">
+    <div class="card">
       <table>
         <thead>
           <tr>
@@ -262,6 +256,7 @@ tbody td:first-child{
 <script>
 const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
+let MODE="onsite";
 
 function todayMinus(d){
   const x=new Date();x.setDate(x.getDate()-d);
@@ -273,6 +268,13 @@ window.addEventListener("DOMContentLoaded",()=>{
   $("endDate").value=todayMinus(1);
 });
 
+function setMode(m){
+  MODE=m;
+  $("modeOnsite").classList.toggle("active",m==="onsite");
+  $("modeTravel").classList.toggle("active",m==="travel");
+  calculate();
+}
+
 async function calculate(){
   const start=$("startDate").value;
   const end=$("endDate").value;
@@ -280,7 +282,7 @@ async function calculate(){
 
   tbody.innerHTML=`<tr><td colspan="5" class="muted">Loading…</td></tr>`;
 
-  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}`);
+  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`);
   const data=await res.json();
 
   if(!data.engineers?.length){
@@ -288,8 +290,8 @@ async function calculate(){
     return;
   }
 
-  tbody.innerHTML="";
   let avgTotal=0;
+  tbody.innerHTML="";
 
   data.engineers.forEach(e=>{
     avgTotal+=e.average;
@@ -308,6 +310,9 @@ async function calculate(){
   $("sumEngineers").textContent=data.engineers.length;
   $("sumAverage").textContent=(avgTotal/data.engineers.length).toFixed(2)+" h";
   $("sumPeriod").textContent=start+" → "+end;
+  $("sumLabel").textContent=MODE==="travel"
+    ? "Average daily travel time"
+    : "Average on-site day";
 }
 </script>
 </body>
