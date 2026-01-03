@@ -1,318 +1,206 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<title>Time Analysis – Mostlane</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<script src="auth.js"></script>
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
 
-<style>
-  *,*::before,*::after{box-sizing:border-box}
-  :root{
-    --ml-blue:#003366;
-    --ml-accent:#1a73e8;
-    --ml-bg:#e6e8eb;
-    --ink:#27313a;
-    --card:#ffffffee;
-    --border:#e8edf3;
-    --muted:#6b7280;
-  }
+    const headers = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-User",
+      "Content-Type": "application/json"
+    };
 
-  body{
-    font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-    background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size:180% auto;
-    margin:0;
-    padding:20px;
-    color:var(--ink);
-  }
-
-  .shell{
-    max-width:1200px;
-    margin:0 auto;
-    background:rgba(255,255,255,0.94);
-    border-radius:14px;
-    box-shadow:0 12px 28px rgba(0,0,0,0.12);
-    overflow:hidden;
-  }
-
-  header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:18px 22px;
-    border-bottom:1px solid var(--border);
-    background:linear-gradient(90deg,#fff,#f7f9fc);
-  }
-
-  header h1{
-    margin:0;
-    font-size:22px;
-    color:var(--ml-blue);
-  }
-
-  header a{
-    background:var(--ml-accent);
-    color:#fff;
-    text-decoration:none;
-    padding:10px 16px;
-    border-radius:10px;
-    font-weight:600;
-    font-size:14px;
-  }
-
-  .content{padding:20px}
-
-  .card{
-    background:var(--card);
-    border:1px solid var(--border);
-    border-radius:14px;
-    padding:16px;
-    margin-bottom:16px;
-  }
-
-  .controls{
-    display:flex;
-    gap:12px;
-    flex-wrap:wrap;
-    align-items:end;
-  }
-
-  .toggle{
-    display:flex;
-    gap:6px;
-  }
-
-  .toggle button{
-    background:#eef2f9;
-    color:#0f172a;
-    border-radius:10px;
-    padding:10px 14px;
-  }
-
-  .toggle button.active{
-    background:var(--ml-accent);
-    color:#fff;
-  }
-
-  label{
-    font-size:13px;
-    color:#334155;
-    display:block;
-    margin-bottom:6px;
-  }
-
-  input{
-    font-size:15px;
-    border:1px solid #cbd5e1;
-    border-radius:10px;
-    padding:10px 12px;
-    height:40px;
-  }
-
-  button{
-    font-size:15px;
-    font-weight:600;
-    border:0;
-    border-radius:10px;
-    padding:12px 18px;
-    cursor:pointer;
-    background:var(--ml-accent);
-    color:#fff;
-  }
-
-  .table-wrap{overflow-x:auto}
-
-  table{
-    width:100%;
-    border-collapse:collapse;
-    min-width:950px;
-  }
-
-  th,td{
-    padding:10px 8px;
-    border-bottom:1px solid var(--border);
-    text-align:center;
-    font-size:14px;
-    white-space:nowrap;
-  }
-
-  th{color:var(--ml-blue);font-weight:600}
-  td:first-child,th:first-child{text-align:left}
-
-  tfoot td{
-    font-weight:700;
-    background:#f7f9fc;
-    border-top:2px solid var(--border);
-  }
-
-  .notice{margin-top:10px;font-size:13px;color:#92400e}
-</style>
-</head>
-
-<body>
-<div class="shell">
-<header>
-  <h1>Time Analysis</h1>
-  <a href="main.html">Main Menu</a>
-</header>
-
-<div class="content">
-
-<div class="card">
-  <div class="controls">
-    <div>
-      <label>Start date</label>
-      <input type="date" id="startDate">
-    </div>
-    <div>
-      <label>End date</label>
-      <input type="date" id="endDate">
-    </div>
-
-    <!-- 🔁 TOGGLE -->
-    <div class="toggle">
-      <button id="onsiteBtn" class="active">On-Site</button>
-      <button id="travelBtn">Travel</button>
-    </div>
-
-    <div>
-      <button id="calcBtn">Calculate</button>
-    </div>
-  </div>
-</div>
-
-<div class="card table-wrap">
-<table>
-<thead>
-<tr>
-  <th>Engineer</th>
-  <th>Days</th>
-  <th>Avg (h)</th>
-  <th>Min</th>
-  <th>Max</th>
-  <th class="finance">OT from Travel (h)</th>
-  <th class="finance">OT Cost (£)</th>
-  <th class="finance">Potential Saving (£)</th>
-  <th class="finance">Total Driving Cost (£)</th>
-</tr>
-</thead>
-
-<tbody id="results">
-<tr><td colspan="9">Select dates and calculate</td></tr>
-</tbody>
-
-<tfoot id="totalsRow" style="display:none">
-<tr>
-  <td>Totals</td>
-  <td id="t_days"></td>
-  <td colspan="3"></td>
-  <td class="finance" id="t_travelOT"></td>
-  <td class="finance" id="t_travelOTCost"></td>
-  <td class="finance" id="t_saving"></td>
-  <td class="finance" id="t_driveCost"></td>
-</tr>
-</tfoot>
-</table>
-
-<div class="notice" id="financeNotice" style="display:none">
-  Financial data is restricted to Directors.
-</div>
-</div>
-
-</div>
-</div>
-
-<script>
-const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
-const $ = id => document.getElementById(id);
-let metric = "onsite"; // 🔁
-
-function getUser(){
-  return sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-}
-
-function todayMinus(d){
-  const x=new Date();x.setDate(x.getDate()-d);
-  return x.toISOString().split("T")[0];
-}
-
-window.addEventListener("DOMContentLoaded",()=>{
-  $("startDate").value=todayMinus(42);
-  $("endDate").value=todayMinus(1);
-
-  $("onsiteBtn").onclick=()=>setMetric("onsite");
-  $("travelBtn").onclick=()=>setMetric("travel");
-  $("calcBtn").onclick=calculate;
-});
-
-function setMetric(m){
-  metric=m;
-  $("onsiteBtn").classList.toggle("active",m==="onsite");
-  $("travelBtn").classList.toggle("active",m==="travel");
-}
-
-async function calculate(){
-  const tbody=$("results");
-  tbody.innerHTML=`<tr><td colspan="9">Loading…</td></tr>`;
-  $("totalsRow").style.display="none";
-
-  const res=await fetch(
-    `${WORKER_URL}?start=${startDate.value}&end=${endDate.value}&metric=${metric}`,
-    {headers:{"X-User":getUser()}}
-  );
-
-  const data=await res.json();
-  tbody.innerHTML="";
-
-  if(!data.engineers?.length){
-    tbody.innerHTML=`<tr><td colspan="9">No data</td></tr>`;
-    return;
-  }
-
-  if(!data.costsEnabled){
-    document.querySelectorAll(".finance").forEach(c=>c.style.display="none");
-    $("financeNotice").style.display="block";
-  }
-
-  let td=0,to=0,toc=0,ts=0,tdc=0;
-
-  data.engineers.forEach(e=>{
-    td+=e.days;
-    if(data.costsEnabled){
-      to+=e.travelCausedOT;
-      toc+=e.travelOTCost;
-      ts+=e.potentialSaving;
-      tdc+=e.totalDrivingCost;
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers });
     }
 
-    tbody.insertAdjacentHTML("beforeend",`
-      <tr>
-        <td>${e.engineer}</td>
-        <td>${e.days}</td>
-        <td>${e.average.toFixed(2)}</td>
-        <td>${e.min.toFixed(2)}</td>
-        <td>${e.max.toFixed(2)}</td>
-        ${data.costsEnabled ? `
-          <td>${e.travelCausedOT.toFixed(2)}</td>
-          <td>£${e.travelOTCost.toFixed(2)}</td>
-          <td>£${e.potentialSaving.toFixed(2)}</td>
-          <td>£${e.totalDrivingCost.toFixed(2)}</td>
-        `:""}
-      </tr>
-    `);
-  });
+    if (request.method !== "GET") {
+      return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
+    }
 
-  $("t_days").textContent=td;
-  if(data.costsEnabled){
-    $("t_travelOT").textContent=to.toFixed(2);
-    $("t_travelOTCost").textContent=`£${toc.toFixed(2)}`;
-    $("t_saving").textContent=`£${ts.toFixed(2)}`;
-    $("t_driveCost").textContent=`£${tdc.toFixed(2)}`;
+    // 🔐 Explicit allow-list
+    const ALLOWED_USERS = new Set([
+      "Jamie.Line",
+      "Joe.Line",
+      "Greg.Line"
+    ]);
+
+    // ✅ flexible compare (case/whitespace safe)
+    const requestingUserRaw = request.headers.get("X-User") || "";
+    const requestingUser = requestingUserRaw.trim();
+    const allowCosts = Array.from(ALLOWED_USERS).some(u => u.toLowerCase() === requestingUser.toLowerCase());
+
+    const startParam = url.searchParams.get("start");
+    const endParam = url.searchParams.get("end");
+    const metric = (url.searchParams.get("metric") || "onsite").toLowerCase();
+
+    if (!startParam || !endParam) {
+      return new Response(JSON.stringify({
+        error: "Missing start or end date (YYYY-MM-DD)"
+      }), { status: 400, headers });
+    }
+
+    const start = new Date(startParam + "T00:00:00");
+    const end = new Date(endParam + "T00:00:00");
+
+    if (isNaN(start) || isNaN(end) || start > end) {
+      return new Response(JSON.stringify({ error: "Invalid date range" }), { status: 400, headers });
+    }
+
+    function fmt(d) {
+      return d.toISOString().split("T")[0];
+    }
+
+    function minutes(t) {
+      if (!t || t === "00:00") return null;
+      const [h, m] = t.split(":").map(Number);
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+      return h * 60 + m;
+    }
+
+    // 🔒 Only load rates if user is allowed
+    const rates = allowCosts
+      ? (await env.RATES_KV.get("rates", { type: "json" }) || {})
+      : {};
+
+    // ✅ Travel sanity caps (prevents bogus 16h travel days poisoning stats)
+    // Adjust if you genuinely have very long travel days.
+    const MAX_TRAVEL_TOTAL_HOURS = 6; // total to+from (per day)
+    const MAX_TRAVEL_LEG_HOURS = 4;   // either leg (to or from)
+
+    const days = [];
+    const cursor = new Date(start);
+
+    while (cursor <= end) {
+      days.push(fmt(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const map = {};
+
+    // optional debug counts (won't break anything if ignored)
+    let skippedTravelOutliers = 0;
+    let skippedOnsiteOutliers = 0;
+
+    for (const day of days) {
+      const raw = await env.HOURS_KV.get(`hours:${day}`, { type: "json" });
+      if (!Array.isArray(raw)) continue;
+
+      for (const entry of raw) {
+        const engineer = entry.engineer;
+        if (!engineer) continue;
+
+        // existing filters
+        if (entry.excludeFromPay === true) continue;
+        if (typeof entry.notes === "string" && entry.notes.toLowerCase().includes("holiday")) continue;
+
+        let value = null;
+
+        if (metric === "travel") {
+          const to = Number(entry.travelToHours);
+          const from = Number(entry.travelFromHours);
+
+          // must be finite + non-negative
+          if (!isFinite(to) || !isFinite(from) || to < 0 || from < 0) {
+            skippedTravelOutliers++;
+            continue;
+          }
+
+          // sanity caps
+          if (to > MAX_TRAVEL_LEG_HOURS || from > MAX_TRAVEL_LEG_HOURS || (to + from) > MAX_TRAVEL_TOTAL_HOURS) {
+            skippedTravelOutliers++;
+            continue;
+          }
+
+          value = to + from;
+
+        } else {
+          // onsite time (arrive first -> leave last), with cross-midnight support + sanity cap
+          const a = minutes(entry.arriveFirstSite);
+          const l0 = minutes(entry.leaveLastSite);
+
+          if (a == null || l0 == null) {
+            skippedOnsiteOutliers++;
+            continue;
+          }
+
+          let dur = l0 - a;
+
+          // 🌙 cross-midnight support
+          if (dur < 0) dur += 24 * 60;
+
+          // sanity cap (ignore impossible)
+          if (dur <= 0 || dur > 14 * 60) {
+            skippedOnsiteOutliers++;
+            continue;
+          }
+
+          value = dur / 60;
+        }
+
+        if (value == null) continue;
+
+        map[engineer] ??= {};
+        const prev = map[engineer][day];
+
+        // keep latest submission for the day
+        if (!prev || new Date(entry.submittedAt) > new Date(prev.submittedAt)) {
+          map[engineer][day] = {
+            submittedAt: entry.submittedAt,
+            hours: value
+          };
+        }
+      }
+    }
+
+    const engineers = [];
+
+    for (const [engineer, daysMap] of Object.entries(map)) {
+      const values = Object.values(daysMap).map(d => d.hours);
+      if (!values.length) continue;
+
+      const sum = values.reduce((a, b) => a + b, 0);
+      const average = +(sum / values.length).toFixed(2);
+
+      const row = {
+        engineer,
+        days: values.length,
+        average,
+        min: +Math.min(...values).toFixed(2),
+        max: +Math.max(...values).toFixed(2)
+      };
+
+      // 💷 Cost calculation (ONLY for allowed users)
+      if (allowCosts) {
+        const r = rates[engineer] || {};
+        const rate =
+          metric === "travel"
+            ? Number(r.travelRate)
+            : Number(r.onsiteRate);
+
+        if (isFinite(rate)) {
+          row.costPerDay = +(rate * average).toFixed(2);
+          row.periodCost = +(row.costPerDay * row.days).toFixed(2);
+        }
+      }
+
+      engineers.push(row);
+    }
+
+    engineers.sort((a, b) => b.average - a.average);
+
+    return new Response(JSON.stringify({
+      metric,
+      start: startParam,
+      end: endParam,
+      costsEnabled: allowCosts,
+      generatedAt: new Date().toISOString(),
+      engineers,
+
+      // optional debug fields (safe if ignored by HTML)
+      skipped: {
+        travelOutliers: skippedTravelOutliers,
+        onsiteOutliers: skippedOnsiteOutliers
+      }
+    }), { headers });
   }
-
-  $("totalsRow").style.display="table-footer-group";
-}
-</script>
-</body>
-</html>
+};
