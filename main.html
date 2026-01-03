@@ -284,10 +284,29 @@ LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning"
       applicationServerKey: null
     });
 
-    console.log("🔔 PUSH SUBSCRIPTION JSON ↓↓↓");
-    console.log(JSON.stringify(subscription, null, 2));
+    const subText = JSON.stringify(subscription, null, 2);
 
-    alert("Push enabled. Check the console.");
+// iOS-safe display
+alert("Push enabled!\n\nCopy the subscription from the box below.");
+
+let box = document.getElementById("pushDebugBox");
+if (!box) {
+  box = document.createElement("textarea");
+  box.id = "pushDebugBox";
+  box.style.width = "100%";
+  box.style.height = "220px";
+  box.style.marginTop = "12px";
+  box.style.fontSize = "12px";
+  box.style.fontFamily = "monospace";
+  box.style.padding = "10px";
+  box.style.borderRadius = "10px";
+  box.style.border = "1px solid #ccc";
+  document.querySelector(".menu-grid").prepend(box);
+}
+
+box.value = subText;
+box.focus();
+box.select();
   }
 
   document.getElementById("TestPush")
