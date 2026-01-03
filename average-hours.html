@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>On-Site & Travel Time Analysis – Mostlane</title>
+<title>Time Analysis – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <script src="auth.js"></script>
 
@@ -23,7 +23,7 @@ body{
   background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
   margin:0;
-  padding:20px;
+  padding:16px;
   color:var(--ink);
 }
 
@@ -40,6 +40,7 @@ header{
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:12px;
   padding:18px 22px;
   border-bottom:1px solid var(--border);
   background:linear-gradient(90deg,#fff,#f7f9fc);
@@ -133,10 +134,12 @@ th,td{
   padding:10px 8px;
   border-bottom:1px solid var(--border);
   text-align:center;
+  font-size:14px;
 }
 
 th{
   color:var(--ml-blue);
+  font-weight:600;
 }
 
 td:first-child,th:first-child{
@@ -147,6 +150,16 @@ td:first-child,th:first-child{
   margin-top:10px;
   font-size:13px;
   color:#92400e;
+}
+
+.muted{
+  color:var(--muted);
+  font-size:13px;
+}
+
+@media(max-width:720px){
+  header h1{font-size:20px}
+  table{font-size:13px}
 }
 </style>
 </head>
@@ -160,6 +173,7 @@ td:first-child,th:first-child{
 
   <div class="content">
 
+    <!-- Controls -->
     <div class="card">
       <div class="controls">
         <div>
@@ -175,11 +189,15 @@ td:first-child,th:first-child{
           <button id="travelBtn">Travel</button>
         </div>
         <div>
-          <button onclick="calculate()">Calculate</button>
+          <button id="calcBtn">Calculate</button>
         </div>
+      </div>
+      <div class="muted" id="modeHint" style="margin-top:8px;">
+        Average based on on-site time (arrive first site → leave last site)
       </div>
     </div>
 
+    <!-- Results -->
     <div class="card table-wrap">
       <table>
         <thead>
@@ -193,7 +211,7 @@ td:first-child,th:first-child{
           </tr>
         </thead>
         <tbody id="results">
-          <tr><td colspan="6">Select a date range</td></tr>
+          <tr><td colspan="6" class="muted">Select a date range</td></tr>
         </tbody>
       </table>
       <div class="notice" id="financeNotice" style="display:none;">
@@ -206,76 +224,98 @@ td:first-child,th:first-child{
 
 <script>
 const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
-const DIRECTORS = ["Jamie.Line","Joe.Line","Greg.Line"];
 const $ = id => document.getElementById(id);
 
 let mode = "onsite";
 
+/* ===============================
+   USER (mirrors auth.js exactly)
+   =============================== */
 function getUser(){
   return sessionStorage.getItem("mostlaneUser") || "";
 }
 
-function isDirector(){
-  return DIRECTORS.includes(getUser());
-}
-
+/* ===============================
+   DATE HELPERS
+   =============================== */
 function todayMinus(days){
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString().split("T")[0];
 }
 
+/* ===============================
+   INIT
+   =============================== */
 window.addEventListener("DOMContentLoaded",()=>{
   $("startDate").value = todayMinus(42);
-  $("endDate").value = todayMinus(1);
+  $("endDate").value   = todayMinus(1);
 
-  $("onsiteBtn").onclick=()=>setMode("onsite");
-  $("travelBtn").onclick=()=>setMode("travel");
-
-  if(!isDirector()){
-    document.querySelectorAll(".financeCol").forEach(c=>c.style.display="none");
-    $("financeNotice").style.display="block";
-  }
+  $("onsiteBtn").onclick = () => setMode("onsite");
+  $("travelBtn").onclick = () => setMode("travel");
+  $("calcBtn").onclick   = calculate;
 });
 
 function setMode(m){
   mode = m;
-  $("onsiteBtn").classList.toggle("active",m==="onsite");
-  $("travelBtn").classList.toggle("active",m==="travel");
+  $("onsiteBtn").classList.toggle("active", m==="onsite");
+  $("travelBtn").classList.toggle("active", m==="travel");
+  $("modeHint").textContent =
+    m==="onsite"
+      ? "Average based on on-site time (arrive first site → leave last site)"
+      : "Average based on travel time (to + from work)";
 }
 
+/* ===============================
+   CALCULATE
+   =============================== */
 async function calculate(){
   const start = $("startDate").value;
-  const end = $("endDate").value;
+  const end   = $("endDate").value;
   const tbody = $("results");
 
   tbody.innerHTML = `<tr><td colspan="6">Loading…</td></tr>`;
 
-  const res = await fetch(
-    `${WORKER_URL}?start=${start}&end=${end}&metric=${mode}`,
-    { headers:{ "X-User": getUser() } }
-  );
+  try{
+    const res = await fetch(
+      `${WORKER_URL}?start=${start}&end=${end}&metric=${mode}`,
+      { headers:{ "X-User": getUser() } }
+    );
 
-  const data = await res.json();
-  tbody.innerHTML = "";
+    const data = await res.json();
+    tbody.innerHTML = "";
 
-  if(!data.engineers?.length){
-    tbody.innerHTML = `<tr><td colspan="6">No data</td></tr>`;
-    return;
+    if(!data.engineers || !data.engineers.length){
+      tbody.innerHTML = `<tr><td colspan="6">No data</td></tr>`;
+      return;
+    }
+
+    /* 🔐 FINANCIAL VISIBILITY — TRUST WORKER ONLY */
+    if(!data.costsEnabled){
+      document.querySelectorAll(".financeCol").forEach(c=>c.style.display="none");
+      $("financeNotice").style.display="block";
+    } else {
+      document.querySelectorAll(".financeCol").forEach(c=>c.style.display="table-cell");
+      $("financeNotice").style.display="none";
+    }
+
+    data.engineers.forEach(e=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${e.engineer}</td>
+        <td>${e.days}</td>
+        <td>${e.average.toFixed(2)}</td>
+        <td>${e.min.toFixed(2)}</td>
+        <td>${e.max.toFixed(2)}</td>
+        ${data.costsEnabled ? `<td>£${(e.avgCost ?? 0).toFixed(2)}</td>` : ``}
+      `;
+      tbody.appendChild(tr);
+    });
+
+  }catch(err){
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="6">Error loading data</td></tr>`;
   }
-
-  data.engineers.forEach(e=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${e.engineer}</td>
-      <td>${e.days}</td>
-      <td>${e.average.toFixed(2)}</td>
-      <td>${e.min.toFixed(2)}</td>
-      <td>${e.max.toFixed(2)}</td>
-      ${data.costsEnabled ? `<td>£${e.avgCost.toFixed(2)}</td>` : ``}
-    `;
-    tbody.appendChild(tr);
-  });
 }
 </script>
 </body>
