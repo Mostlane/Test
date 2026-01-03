@@ -123,7 +123,9 @@ a.button {
   </script>
 
   <div class="menu-grid" id="menuGrid">
-
+    <a class="button visible" href="javascript:void(0)" id="TestPush">
+  <span class="emoji">🔔</span> Enable Push (Test)
+</a>
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
@@ -262,5 +264,34 @@ LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning"
         });
     }
   </script>
+  <script>
+  async function enableTestPush() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("Push notifications not supported on this device");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      alert("Notification permission denied");
+      return;
+    }
+
+    const reg = await navigator.serviceWorker.ready;
+
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: null
+    });
+
+    console.log("🔔 PUSH SUBSCRIPTION JSON ↓↓↓");
+    console.log(JSON.stringify(subscription, null, 2));
+
+    alert("Push enabled. Check the console.");
+  }
+
+  document.getElementById("TestPush")
+    ?.addEventListener("click", enableTestPush);
+</script>
 </body>
 </html>
