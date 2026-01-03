@@ -131,6 +131,12 @@
     text-align:left;
   }
 
+  tfoot td{
+    font-weight:700;
+    background:#f7f9fc;
+    border-top:2px solid var(--border);
+  }
+
   .muted{
     color:var(--muted);
     font-size:13px;
@@ -183,19 +189,32 @@
             <th>Avg (h)</th>
             <th>Min</th>
             <th>Max</th>
-
-            <!-- Finance (worker-controlled) -->
             <th class="finance">OT from Travel (h)</th>
             <th class="finance">OT Cost (£)</th>
             <th class="finance">Potential Saving (£)</th>
             <th class="finance">Total Driving Cost (£)</th>
           </tr>
         </thead>
+
         <tbody id="results">
           <tr>
             <td colspan="9" class="muted">Select a date range and click Calculate</td>
           </tr>
         </tbody>
+
+        <tfoot id="totalsRow" style="display:none;">
+          <tr>
+            <td>Totals</td>
+            <td id="t_days"></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td class="finance" id="t_travelOT"></td>
+            <td class="finance" id="t_travelOTCost"></td>
+            <td class="finance" id="t_saving"></td>
+            <td class="finance" id="t_driveCost"></td>
+          </tr>
+        </tfoot>
       </table>
 
       <div class="notice" id="financeNotice" style="display:none">
@@ -236,6 +255,7 @@ async function calculate(){
   const tbody=$("results");
 
   tbody.innerHTML=`<tr><td colspan="9">Loading…</td></tr>`;
+  $("totalsRow").style.display="none";
 
   const res = await fetch(
     `${WORKER_URL}?start=${start}&end=${end}`,
@@ -250,12 +270,27 @@ async function calculate(){
     return;
   }
 
+  let totalDays = 0;
+  let totalTravelOT = 0;
+  let totalTravelOTCost = 0;
+  let totalSaving = 0;
+  let totalDriveCost = 0;
+
   if(!data.costsEnabled){
     document.querySelectorAll(".finance").forEach(c=>c.style.display="none");
     $("financeNotice").style.display="block";
   }
 
   data.engineers.forEach(e=>{
+    totalDays += e.days;
+
+    if(data.costsEnabled){
+      totalTravelOT += e.travelCausedOT;
+      totalTravelOTCost += e.travelOTCost;
+      totalSaving += e.potentialSaving;
+      totalDriveCost += e.totalDrivingCost;
+    }
+
     const tr=document.createElement("tr");
     tr.innerHTML=`
       <td>${e.engineer}</td>
@@ -263,7 +298,6 @@ async function calculate(){
       <td>${e.average.toFixed(2)}</td>
       <td>${e.min.toFixed(2)}</td>
       <td>${e.max.toFixed(2)}</td>
-
       ${data.costsEnabled ? `
         <td>${e.travelCausedOT.toFixed(2)}</td>
         <td>£${e.travelOTCost.toFixed(2)}</td>
@@ -273,6 +307,17 @@ async function calculate(){
     `;
     tbody.appendChild(tr);
   });
+
+  $("t_days").textContent = totalDays;
+
+  if(data.costsEnabled){
+    $("t_travelOT").textContent = totalTravelOT.toFixed(2);
+    $("t_travelOTCost").textContent = `£${totalTravelOTCost.toFixed(2)}`;
+    $("t_saving").textContent = `£${totalSaving.toFixed(2)}`;
+    $("t_driveCost").textContent = `£${totalDriveCost.toFixed(2)}`;
+  }
+
+  $("totalsRow").style.display="table-footer-group";
 }
 </script>
 </body>
