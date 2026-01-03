@@ -244,7 +244,16 @@ tbody td:first-child{
 const WORKER_URL="https://average-hours.jamie-def.workers.dev";
 const $=id=>document.getElementById(id);
 let MODE="onsite";
-let CAN_SEE_COSTS=false;
+
+/* ✅ Robust identity resolution */
+function getLoggedInUser(){
+  return (
+    sessionStorage.getItem("username") ||
+    sessionStorage.getItem("user") ||
+    sessionStorage.getItem("loggedInUser") ||
+    ""
+  ).trim();
+}
 
 function todayMinus(d){
   const x=new Date();x.setDate(x.getDate()-d);
@@ -270,14 +279,17 @@ async function calculate(){
 
   tbody.innerHTML=`<tr><td colspan="7" class="muted">Loading…</td></tr>`;
 
-  const res=await fetch(`${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`,{
-    headers:{
-      "X-User":sessionStorage.getItem("username")||""
+  const res=await fetch(
+    `${WORKER_URL}?start=${start}&end=${end}&metric=${MODE}`,
+    {
+      headers:{
+        "X-User": getLoggedInUser()
+      }
     }
-  });
+  );
 
   const data=await res.json();
-  CAN_SEE_COSTS = data.costsEnabled === true;
+  const CAN_SEE_COSTS = data.costsEnabled === true;
 
   $("restrictedBanner").style.display = CAN_SEE_COSTS ? "none" : "block";
   $("costDayHeader").style.display = CAN_SEE_COSTS ? "" : "none";
