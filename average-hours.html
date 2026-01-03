@@ -38,9 +38,10 @@ body{
 
 header{
   display:flex;
+  flex-wrap:wrap;
+  gap:12px;
   justify-content:space-between;
   align-items:center;
-  gap:12px;
   padding:18px 22px;
   border-bottom:1px solid var(--border);
   background:linear-gradient(90deg,#fff,#f7f9fc);
@@ -127,7 +128,7 @@ button{
 table{
   width:100%;
   border-collapse:collapse;
-  min-width:700px;
+  min-width:720px;
 }
 
 th,td{
@@ -146,20 +147,19 @@ td:first-child,th:first-child{
   text-align:left;
 }
 
+.muted{
+  color:var(--muted);
+  font-size:13px;
+}
+
 .notice{
   margin-top:10px;
   font-size:13px;
   color:#92400e;
 }
 
-.muted{
-  color:var(--muted);
-  font-size:13px;
-}
-
 @media(max-width:720px){
   header h1{font-size:20px}
-  table{font-size:13px}
 }
 </style>
 </head>
@@ -189,7 +189,7 @@ td:first-child,th:first-child{
           <button id="travelBtn">Travel</button>
         </div>
         <div>
-          <button id="calcBtn">Calculate</button>
+          <button onclick="calculate()">Calculate</button>
         </div>
       </div>
       <div class="muted" id="modeHint" style="margin-top:8px;">
@@ -207,11 +207,12 @@ td:first-child,th:first-child{
             <th>Avg (h)</th>
             <th>Min</th>
             <th>Max</th>
-            <th class="financeCol">Avg £</th>
+            <th class="financeCol">Avg £ / Day</th>
+            <th class="financeCol">Period £</th>
           </tr>
         </thead>
         <tbody id="results">
-          <tr><td colspan="6" class="muted">Select a date range</td></tr>
+          <tr><td colspan="7" class="muted">Select a date range</td></tr>
         </tbody>
       </table>
       <div class="notice" id="financeNotice" style="display:none;">
@@ -225,35 +226,24 @@ td:first-child,th:first-child{
 <script>
 const WORKER_URL = "https://average-hours.jamie-def.workers.dev";
 const $ = id => document.getElementById(id);
-
 let mode = "onsite";
 
-/* ===============================
-   USER (mirrors auth.js exactly)
-   =============================== */
 function getUser(){
   return sessionStorage.getItem("mostlaneUser") || "";
 }
 
-/* ===============================
-   DATE HELPERS
-   =============================== */
 function todayMinus(days){
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString().split("T")[0];
 }
 
-/* ===============================
-   INIT
-   =============================== */
 window.addEventListener("DOMContentLoaded",()=>{
   $("startDate").value = todayMinus(42);
-  $("endDate").value   = todayMinus(1);
+  $("endDate").value = todayMinus(1);
 
   $("onsiteBtn").onclick = () => setMode("onsite");
   $("travelBtn").onclick = () => setMode("travel");
-  $("calcBtn").onclick   = calculate;
 });
 
 function setMode(m){
@@ -266,15 +256,12 @@ function setMode(m){
       : "Average based on travel time (to + from work)";
 }
 
-/* ===============================
-   CALCULATE
-   =============================== */
 async function calculate(){
   const start = $("startDate").value;
-  const end   = $("endDate").value;
+  const end = $("endDate").value;
   const tbody = $("results");
 
-  tbody.innerHTML = `<tr><td colspan="6">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="7">Loading…</td></tr>`;
 
   try{
     const res = await fetch(
@@ -285,18 +272,18 @@ async function calculate(){
     const data = await res.json();
     tbody.innerHTML = "";
 
-    if(!data.engineers || !data.engineers.length){
-      tbody.innerHTML = `<tr><td colspan="6">No data</td></tr>`;
-      return;
+    // 🔐 FINANCE VISIBILITY — WORKER IS AUTHORITY
+    if (data.costsEnabled) {
+      document.querySelectorAll(".financeCol").forEach(c => c.style.display = "");
+      $("financeNotice").style.display = "none";
+    } else {
+      document.querySelectorAll(".financeCol").forEach(c => c.style.display = "none");
+      $("financeNotice").style.display = "block";
     }
 
-    /* 🔐 FINANCIAL VISIBILITY — TRUST WORKER ONLY */
-    if(!data.costsEnabled){
-      document.querySelectorAll(".financeCol").forEach(c=>c.style.display="none");
-      $("financeNotice").style.display="block";
-    } else {
-      document.querySelectorAll(".financeCol").forEach(c=>c.style.display="table-cell");
-      $("financeNotice").style.display="none";
+    if (!data.engineers || !data.engineers.length) {
+      tbody.innerHTML = `<tr><td colspan="7">No data</td></tr>`;
+      return;
     }
 
     data.engineers.forEach(e=>{
@@ -307,14 +294,18 @@ async function calculate(){
         <td>${e.average.toFixed(2)}</td>
         <td>${e.min.toFixed(2)}</td>
         <td>${e.max.toFixed(2)}</td>
-        ${data.costsEnabled ? `<td>£${(e.avgCost ?? 0).toFixed(2)}</td>` : ``}
+        ${
+          data.costsEnabled
+            ? `<td>£${(e.costPerDay ?? 0).toFixed(2)}</td><td>£${(e.periodCost ?? 0).toFixed(2)}</td>`
+            : ``
+        }
       `;
       tbody.appendChild(tr);
     });
 
   }catch(err){
     console.error(err);
-    tbody.innerHTML = `<tr><td colspan="6">Error loading data</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7">Error loading data</td></tr>`;
   }
 }
 </script>
