@@ -110,7 +110,7 @@ body{
   font-size:12px;
   color:var(--ml-grey);
 }
-/* ---- PHOTOS (FIXED) ---- */
+
 .photos{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
@@ -156,7 +156,6 @@ body{
   border:1px solid var(--border);
 }
 
-/* ---- TIMELINE ---- */
 .timeline{
   position:relative;
   margin-left:10px;
@@ -283,24 +282,24 @@ async function load(){
 
   <div style="grid-column:1 / -1; margin-top:6px;">
     <span class="label" style="font-size:11px; letter-spacing:0.04em;">
-  JOB DESCRIPTION
-</span>
+      JOB DESCRIPTION
+    </span>
     <div class="value job-description">
-  ${job.description || job.summary || job.title || "—"}
-</div>
+      ${job.description || job.summary || job.title || "—"}
+    </div>
   </div>
 `;
 
   const slaMet = job.sla?.state !== "BREACHED";
 
-document.getElementById("slaBlock").innerHTML = `
-  <div class="sla-pill ${slaMet ? "ok" : "bad"}">
-    ${slaMet ? "SLA Achieved" : "SLA Not Achieved"}
-  </div>
-  <div class="sla-meta">
-    Target response time: ${new Date(job.targetAt).toLocaleString()}
-  </div>
-`;
+  document.getElementById("slaBlock").innerHTML = `
+    <div class="sla-pill ${slaMet ? "ok" : "bad"}">
+      ${slaMet ? "SLA Achieved" : "SLA Not Achieved"}
+    </div>
+    <div class="sla-meta">
+      Target response time: ${new Date(job.targetAt).toLocaleString()}
+    </div>
+  `;
 
   document.getElementById("timeline").innerHTML =
     (job.statusHistory||[]).map(e=>`
@@ -312,23 +311,24 @@ document.getElementById("slaBlock").innerHTML = `
     `).join("");
 
   const realNotes = (job.events || []).filter(e =>
-  e &&
-  e.type === "note" &&
-  typeof e.note === "string" &&
-  e.note.trim().length > 0 &&
-  e.note !== "undefined"
-);
+    e &&
+    e.type === "note" &&
+    typeof e.note === "string" &&
+    e.note.trim().length > 0 &&
+    e.note !== "undefined"
+  );
 
-document.getElementById("notes").innerHTML =
-  realNotes.length
-    ? realNotes.map(n => `
-        <div class="note">
-          <strong>${cleanName(n.by)}</strong>
-          — ${new Date(n.at).toLocaleString()}<br>
-          ${n.note}
-        </div>
-      `).join("")
-    : "<em>No notes recorded.</em>";
+  document.getElementById("notes").innerHTML =
+    realNotes.length
+      ? realNotes.map(n => `
+          <div class="note">
+            <strong>${cleanName(n.by)}</strong>
+            — ${new Date(n.at).toLocaleString()}<br>
+            ${n.note}
+          </div>
+        `).join("")
+      : "<em>No notes recorded.</em>";
+
   document.getElementById("photos").innerHTML =
     (files.files||[]).map(f=>`
       <div class="photo">
@@ -348,12 +348,9 @@ document.getElementById("notes").innerHTML =
     document.getElementById("signature").innerHTML = "<em>Not signed</em>";
   }
 
+  /* ✅ ONLY CHANGE: SAFARI / PWA SAFE DOWNLOAD */
   setTimeout(() => {
-    const blob = new Blob([document.documentElement.outerHTML], {type:"text/html"});
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `Job-${job.helpdeskRef}.html`;
-    a.click();
+    window.location.href = `${API}/jobs/${jobId}/export`;
   }, 800);
 }
 
