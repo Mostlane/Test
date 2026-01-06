@@ -191,11 +191,11 @@
       font-weight:400;
     }
 
-.lane-body{
-  position: relative;
-  padding: 0 4px 6px 4px;
-  height: 560px;
-}
+    .lane-body{
+      position: relative;
+      padding: 0 4px 6px 4px;
+      height: 560px;
+    }
 
     .time-slot-line{
       position:absolute;
@@ -218,6 +218,8 @@
       box-shadow:0 4px 8px rgba(15,23,42,0.25);
       cursor:grab;
       overflow:hidden;
+      touch-action:none; /* ✅ required for pointer dragging on mobile */
+      user-select:none;
     }
     .job-block.dragging{
       opacity:0.7;
@@ -424,6 +426,18 @@
       color:var(--danger);
       font-weight:500;
     }
+
+    /* ✅ NEW: Workever-style ghost preview */
+    .drag-ghost{
+      position:fixed;
+      left:0;
+      top:0;
+      width:200px;
+      pointer-events:none;
+      z-index:999999;
+      opacity:0.75;
+      transform:translate3d(0,0,0);
+    }
   </style>
 </head>
 <body>
@@ -535,7 +549,13 @@ const SLA_API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
 const DAY_START_HOUR = 6;
 const DAY_END_HOUR = 20;
-const HOUR_HEIGHT = 40;
+
+/* ✅ NEW: Workever-style discrete grid */
+const SLOT_MINUTES = 15;
+
+const HOUR_HEIGHT = 40; // unchanged visual scale
+const SLOT_HEIGHT = (HOUR_HEIGHT * SLOT_MINUTES) / 60; // 10px per 15 mins
+const SLOTS_PER_HOUR = 60 / SLOT_MINUTES;
 
 let currentUser=null;
 let engineers=[];
@@ -543,7 +563,18 @@ let jobs=[];
 let viewMode="day";
 let selectedDate=new Date();
 let engineerFilter="all";
-let dragState={ jobId:null };
+
+/* ✅ NEW: pointer-drag state */
+let dragState = {
+  active:false,
+  jobId:null,
+  moved:false,
+  pointerId:null,
+  offsetY:0,
+  ghost:null,
+  targetEngineer:null,
+  targetSlot:null
+};
 
 function setStatus(msg,isError=false){
   const el=document.getElementById("statusMessage");
@@ -703,6 +734,146 @@ function getFilteredEngineers(){
   return engineers.filter(e=>e.username===engineerFilter);
 }
 
+/* ✅ NEW: helpers for discrete slot grid */
+function minutesToSlotIndex(mins, dayStartMins){
+  return Math.round((mins - dayStartMins) / SLOT_MINUTES);
+}
+function slotIndexToMinutes(slotIndex, dayStartMins){
+  return dayStartMins + slotIndex * SLOT_MINUTES;
+}
+function clampSlot(slot, minSlot, maxSlot){
+  return clamp(slot, minSlot, maxSlot);
+}
+
+/* ✅ NEW: Workever-style pointer drag attach */
+function attachPointerDrag(jobEl, job){
+  jobEl.addEventListener("pointerdown", (e) => {
+    // Only left click / primary touch
+    if (e.button !== undefined && e.button !== 0) return;
+
+    dragState.active = true;
+    dragState.jobId = job.id;
+    dragState.moved = false;
+    dragState.pointerId = e.pointerId;
+
+    const rect = jobEl.getBoundingClientRect();
+    dragState.offsetY = e.clientY - rect.top;
+
+    // Create ghost
+    const ghost = jobEl.cloneNode(true);
+    ghost.classList.add("dragging", "drag-ghost");
+    ghost.style.width = rect.width + "px";
+    ghost.style.left = rect.left + "px";
+    ghost.style.top = rect.top + "px";
+    document.body.appendChild(ghost);
+
+    dragState.ghost = ghost;
+
+    jobEl.classList.add("dragging");
+
+    // Capture pointer so we keep receiving move events
+    try { jobEl.setPointerCapture(e.pointerId); } catch {}
+
+    document.addEventListener("pointermove", onPointerMove, {passive:false});
+    document.addEventListener("pointerup", onPointerUp, {passive:false});
+    e.preventDefault();
+  });
+}
+
+function getLaneUnderPointer(clientX, clientY){
+  const el = document.elementFromPoint(clientX, clientY);
+  return el ? el.closest(".lane-body") : null;
+}
+
+function onPointerMove(e){
+  if(!dragState.active || e.pointerId !== dragState.pointerId) return;
+  if(!dragState.ghost) return;
+
+  // Prevent scroll while dragging on touch
+  e.preventDefault();
+
+  const lane = getLaneUnderPointer(e.clientX, e.clientY);
+  if(!lane) return;
+
+  const rect = lane.getBoundingClientRect();
+
+  // y position within lane (account for where user grabbed the block)
+  const y = (e.clientY - rect.top) - dragState.offsetY;
+
+  const dayStartMins = DAY_START_HOUR * 60;
+  const dayEndMins   = DAY_END_HOUR * 60;
+
+  const totalSlots = (dayEndMins - dayStartMins) / SLOT_MINUTES;
+
+  // Convert to discrete slot index
+  let slot = Math.round(y / SLOT_HEIGHT);
+  slot = clampSlot(slot, 0, totalSlots - 2); // keep at least 30 mins inside day (2 slots at 15 mins)
+
+  // Update ghost position
+  dragState.ghost.style.left = rect.left + "px";
+  dragState.ghost.style.top  = (rect.top + slot * SLOT_HEIGHT) + "px";
+  dragState.ghost.style.width = rect.width + "px";
+
+  dragState.targetEngineer = lane.dataset.engineer;
+  dragState.targetSlot = slot;
+
+  dragState.moved = true;
+}
+
+async function onPointerUp(e){
+  if(!dragState.active || e.pointerId !== dragState.pointerId) return;
+
+  document.removeEventListener("pointermove", onPointerMove);
+  document.removeEventListener("pointerup", onPointerUp);
+
+  const ghost = dragState.ghost;
+  if(ghost) ghost.remove();
+
+  const jobId = dragState.jobId;
+  const moved = dragState.moved;
+
+  // Reset state first
+  dragState.active = false;
+  dragState.jobId = null;
+  dragState.pointerId = null;
+  dragState.offsetY = 0;
+  dragState.ghost = null;
+
+  // If it was basically a click (no movement), do nothing here.
+  // Click handler will open modal as before.
+  if(!moved) return;
+
+  const job = jobs.find(j => j.id === jobId);
+  if(!job) return;
+
+  const engineerUsername = dragState.targetEngineer || (job.assignedEngineers[0] || "");
+  const slot = (dragState.targetSlot ?? 0);
+
+  // Convert slot → start time
+  const dayStartMins = DAY_START_HOUR * 60;
+  const mins = slotIndexToMinutes(slot, dayStartMins);
+
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+
+  const startDate = withTime(selectedDate, h, m);
+  job.scheduledStart = startDate.toISOString();
+  job.scheduledAt = job.scheduledStart;
+  job._localStart = startDate;
+
+  if (!job.assignedEngineers.includes(engineerUsername)) {
+    job.assignedEngineers = [engineerUsername];
+  } else {
+    job.assignedEngineers = [engineerUsername]; // keep single lane assignment like your original drop behaviour
+  }
+
+  updateOverridesForJob(job);
+  pushJobUpdate(job);
+
+  render();
+  setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
+}
+
 function renderDayView(container){
   const dayDate=selectedDate;
   const engineerList=getFilteredEngineers();
@@ -761,24 +932,33 @@ function renderDayView(container){
       .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
       .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
 
-jobsForEngineer.forEach(job=>{
-  const dStart = job._localStart
-    ? job._localStart
-    : new Date(job.scheduledStart.replace("Z",""));
+    jobsForEngineer.forEach(job=>{
+      const dStart = job._localStart
+        ? job._localStart
+        : new Date(job.scheduledStart.replace("Z",""));
 
-  let startMins = minsSinceMidnight(dStart);
-  let dur = job.durationMinutes;
+      let startMins = minsSinceMidnight(dStart);
+      let dur = job.durationMinutes;
 
+      // Clamp in minutes (unchanged intent)
       startMins = clamp(startMins,dayStartMins,dayEndMins-30);
       const endMins=clamp(startMins+dur,dayStartMins+30,dayEndMins);
       dur=endMins-startMins;
 
-      const top=((startMins-dayStartMins)/60)*HOUR_HEIGHT;
-      const height=Math.max(24,(dur/60)*HOUR_HEIGHT);
+      /* ✅ CHANGED: position uses discrete slot math (Workever-style) */
+      const startSlot = clampSlot(
+        minutesToSlotIndex(startMins, dayStartMins),
+        0,
+        ((dayEndMins - dayStartMins)/SLOT_MINUTES) - 2
+      );
+
+      const durSlots = Math.max(2, Math.round(dur / SLOT_MINUTES)); // min 30 mins => 2 slots at 15 mins
+
+      const top = startSlot * SLOT_HEIGHT;
+      const height = Math.max(24, durSlots * SLOT_HEIGHT);
 
       const el=document.createElement("div");
       el.className="job-block";
-      el.draggable=true;
       el.dataset.jobId=job.id;
       el.dataset.engineer=engineer.username;
       el.style.top=top+"px";
@@ -792,19 +972,17 @@ jobsForEngineer.forEach(job=>{
           <span>${job.site}</span>
         </div>`;
 
-      el.addEventListener("dragstart",onJobDragStart);
-      el.addEventListener("dragend",onJobDragEnd);
-   el.addEventListener("click", (e) => {
-  if (dragState.jobId) return; // ✅ ignore click if dragging
-  openJobModal(job.id);
-});
+      /* ✅ CHANGED: remove native drag handlers; attach pointer drag */
+      attachPointerDrag(el, job);
 
+      el.addEventListener("click", (e) => {
+        // ✅ ignore click if we were dragging (Workever behaviour)
+        if (dragState.active || dragState.moved) return;
+        openJobModal(job.id);
+      });
 
       body.appendChild(el);
     });
-
-    body.addEventListener("dragover",onLaneDragOver);
-    body.addEventListener("drop",onLaneDrop);
 
     lane.appendChild(body);
     engRow.appendChild(lane);
@@ -882,80 +1060,6 @@ function renderWeekView(container){
   });
 
   container.appendChild(grid);
-}
-
-/* DRAGGING */
-function onJobDragStart(e){
-  dragState.jobId = e.currentTarget.dataset.jobId;
-  e.currentTarget.classList.add("dragging");
-
-  // ✅ REQUIRED for Chrome drag/drop
-  e.dataTransfer.setData("text/plain", dragState.jobId);
-  e.dataTransfer.effectAllowed = "move";
-}
-function onJobDragEnd(e){
-  e.currentTarget.classList.remove("dragging");
-  // ❗ DO NOT clear dragState here
-  // Chrome fires dragend BEFORE drop
-}
-function onLaneDragOver(e){
-  e.preventDefault(); // REQUIRED
-  e.stopPropagation();
-  e.dataTransfer.dropEffect = "move";
-}
-async function onLaneDrop(e){
-  e.preventDefault();
-  if(!dragState.jobId) return;
-
-  const job = jobs.find(j => j.id === dragState.jobId);
-  if(!job) return;
-
-  const laneBody = e.currentTarget;
-  const engineerUsername = laneBody.dataset.engineer;
-  const rect = laneBody.getBoundingClientRect();
-
-  // Distance from top of lane
-  const y = e.clientY - rect.top;
-
-  const dayStart = DAY_START_HOUR * 60;
-  const dayEnd   = DAY_END_HOUR * 60;
-
-  // Convert pixels → minutes from day start
-  let minutesFromDayStart = (y / HOUR_HEIGHT) * 60;
-
-  // Absolute minutes since midnight
-  let newStartMins = dayStart + minutesFromDayStart;
-
-  // Snap to 15-minute grid
-  newStartMins = Math.round(newStartMins / 15) * 15;
-
-  // Clamp inside working hours
-  newStartMins = clamp(newStartMins, dayStart, dayEnd - 30);
-
-  const h = Math.floor(newStartMins / 60);
-  const m = newStartMins % 60;
-
-const startDate = withTime(selectedDate, h, m);
-
-job.scheduledStart = startDate.toISOString();
-job.scheduledAt = job.scheduledStart;
-
-// ✅ ADD THIS LINE (CRITICAL)
-job._localStart = startDate;
-
-  // Move engineer if lane changed
-  if (!job.assignedEngineers.includes(engineerUsername)) {
-    job.assignedEngineers = [engineerUsername];
-  }
-
-  updateOverridesForJob(job);
-  pushJobUpdate(job);
-
-  dragState.jobId = null;
-  job._lastDraggedAt = Date.now(); // force re-render uniqueness
-  render();
-
-  setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
 }
 
 /* MODAL */
@@ -1062,8 +1166,7 @@ async function pushJobUpdate(job){
       return;
     }
 
-await res.json(); // fire & forget response
-
+    await res.json(); // fire & forget response
   }catch(err){
     console.error("Update error:", err);
   }
