@@ -580,12 +580,12 @@ async function loadEngineers(){
   const data=await res.json();
   const arr=data.Users||[];
   engineers = arr
-    .filter(u => (u.Status||"").toLowerCase()==="active")
-    .map(u=>({
-      username:u.Username,
-      name:((u.FirstName||"")+" "+(u.LastName||"")).trim(),
-      engineerNumber:u.EngineerNumber||""
-    }));
+  .filter(u => (u.Status||"").toLowerCase() === "active")
+  .map(u => ({
+    username: (u.Username || "").toLowerCase(),
+    name: ((u.FirstName || "") + " " + (u.LastName || "")).trim(),
+    engineerNumber: u.EngineerNumber || ""
+  }));
   if(!engineers.length) throw new Error("No active engineers");
 }
 
@@ -614,15 +614,16 @@ function normaliseJob(j){
   const priority = j.priority || "";
   const notes = j.notes || "";
 
-// 🔧 FIX: support worker field "scheduledAt"
-let start = j.scheduledAt || j.scheduledStart;
+  // 🔧 Use scheduledAt if present
+  let start = j.scheduledAt || j.scheduledStart;
 
-if (!start) {
-  const base = withTime(selectedDate, 8, 0);
-  start = base.toISOString();
-}
+  if (!start) {
+    const base = withTime(selectedDate, 8, 0);
+    start = base.toISOString();
+  }
 
-const startDate = new Date(start);
+  const startDate = new Date(start);
+  j.scheduledStart = startDate.toISOString(); // force it in
 
   let durationMinutes = j.durationMinutes || 60;
   if(j.scheduledEnd){
@@ -630,14 +631,18 @@ const startDate = new Date(start);
     durationMinutes = (end-startDate)/60000;
   }
 
-  let assigned = j.assignedEngineers || j.assignedTo || [];
-  if(typeof assigned === "string"){
-    assigned = assigned.split(/[;,]+/).map(s=>s.trim());
+  // 🔧 Make sure assignedEngineers is an array
+  let assigned = j.assignedEngineers || (j.assignedTo ? [j.assignedTo] : []);
+  if (typeof assigned === "string") {
+    assigned = [assigned.trim()];
   }
 
   if(!assigned.length && engineers.length){
     assigned=[ engineers[0].username ];
   }
+
+  // 🔧 Normalize to lowercase to match filtering
+  assigned = assigned.map(u => u.toLowerCase());
 
   return {
     id,
@@ -763,7 +768,7 @@ function getFilteredEngineers(){
     }
 
     const jobsForEngineer=jobs
-      .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
+      .filter(j => j.assignedEngineers.includes(engineer.username))
       .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
 
     jobsForEngineer.forEach(job=>{
