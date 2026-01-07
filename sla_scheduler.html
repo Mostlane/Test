@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Mostlane • SLA Scheduler</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --ml-blue:#003b82;
+      --ml-blue-light:#1e66ff;
+      --bg:#e6e8eb;
+      --panel:rgba(255,255,255,0.92);
+      --border:#d1d5db;
+      --muted:#6b7280;
+      --danger:#b91c1c;
+      --success:#15803d;
+      --slot-height:32px;
+    }
+
+    html,body{
+      margin:0;
+      padding:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:#0f172a;
+      background:var(--bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:180%;
+    }
+
+    .shell{
+      max-width:1100px;
+      margin:20px auto 40px;
+      padding:0 12px;
+    }
+
+    .card{
+      background:var(--panel);
+      border-radius:14px;
+      padding:18px 18px 22px;
+      box-shadow:0 12px 28px rgba(0,0,0,0.12);
+      border:1px solid rgba(15,23,42,0.05);
+    }
+
+    header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:10px;
+    }
+    header h1{
+      margin:0;
+      font-size:20px;
+      color:var(--ml-blue);
+    }
+    #userLabel{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
+    }
+
+    .back-btn{
+      text-decoration:none;
+      font-size:14px;
+      padding:8px 12px;
+      border-radius:999px;
+      background:#ffffff;
+      border:1px solid var(--border);
+      color:var(--ml-blue);
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+
+    .controls{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+      margin-bottom:12px;
+      font-size:13px;
+    }
+    .controls-group{
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+    .pill-toggle{
+      display:inline-flex;
+      background:#e5e7eb;
+      border-radius:999px;
+      padding:2px;
+    }
+    .pill-toggle button{
+      border:none;
+      background:transparent;
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      cursor:pointer;
+      color:#374151;
+    }
+    .pill-toggle button.active{
+      background:#ffffff;
+      color:var(--ml-blue);
+      box-shadow:0 1px 3px rgba(0,0,0,0.18);
+    }
+
+    select,input[type="date"]{
+      padding:5px 8px;
+      font-size:13px;
+      border-radius:6px;
+      border:1px solid var(--border);
+      background:#fff;
+    }
+
+    .tag{
+      font-size:11px;
+      padding:3px 7px;
+      border-radius:999px;
+      background:#eef2ff;
+      color:#4338ca;
+    }
+
+    .scheduler-wrapper{
+      overflow-x:auto;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:#f9fafb;
+      position:relative;
+    }
+
+    .scheduler-grid{
+      display:grid;
+      grid-template-columns:80px 1fr;
+      min-height:480px;
+    }
+
+    .time-column{
+      border-right:1px solid var(--border);
+      background:#f3f4f6;
+      font-size:11px;
+      color:var(--muted);
+      padding-top:34px;
+      position:relative;
+    }
+    .time-label{
+      height:40px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:flex-end;
+      padding-right:6px;
+      box-sizing:border-box;
+    }
+
+    .engineers-column-wrapper{
+      overflow-x:auto;
+    }
+
+    .engineers-row{
+      display:flex;
+      align-items:flex-start;
+      min-width:500px;
+      position:relative;
+    }
+
+    .engineer-lane{
+      flex:1 0 160px;
+      border-left:1px solid var(--border);
+      position:relative;
+      background:#ffffff;
+    }
+
+    .engineer-header{
+      position:sticky;
+      top:0;
+      background:#f9fafb;
+      border-bottom:1px solid var(--border);
+      padding:4px 6px;
+      font-size:12px;
+      font-weight:600;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      z-index:3;
+    }
+
+    .engineer-header span.role{
+      font-size:11px;
+      color:var(--muted);
+      font-weight:400;
+    }
+
+    .lane-body{
+      position: relative;
+      padding: 0 4px 6px 4px;
+      height: 560px;
+    }
+
+    .time-slot-line{
+      position:absolute;
+      left:0;
+      right:0;
+      height:1px;
+      background:rgba(148,163,184,0.2);
+    }
+
+    .job-block{
+      position:absolute;
+      left:6px;
+      right:6px;
+      border-radius:8px;
+      padding:4px 6px;
+      font-size:11px;
+      color:#111827;
+      background:linear-gradient(135deg,#e0f2fe,#bfdbfe);
+      border:1px solid #60a5fa;
+      box-shadow:0 4px 8px rgba(15,23,42,0.25);
+      cursor:grab;
+      overflow:hidden;
+    }
+
+    /* FIX: prevent child elements from blocking drag */
+    .job-block * {
+      pointer-events: none;
+    }
+
+    .job-block.dragging{
+      opacity:0.7;
+      box-shadow:0 8px 16px rgba(15,23,42,0.4);
+      cursor:grabbing;
+      z-index: 1000;
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+<!-- Due to size constraints, we'll complete this below -->
