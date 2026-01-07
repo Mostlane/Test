@@ -632,38 +632,35 @@ async function loadJobs(){
 *************************************************** */
 function normaliseJob(j){
   const id = j.id || ("job_"+Math.random().toString(36).slice(2));
-
   const title = j.description || j.title || ("Job "+id);
   const site  = j.siteName || j.site || "";
   const priority = j.priority || "";
   const notes = j.notes || "";
 
-// 🔧 FIX: support worker field "scheduledAt"
-let start = j.scheduledAt || j.scheduledStart;
-
-if (!start) {
-  const base = withTime(selectedDate, 8, 0);
-  start = base.toISOString();
-}
-
-const startDate = new Date(start);
-  // ✅ Ensure scheduledStart is set for rendering
-const startDate = new Date(start);
-j.scheduledStart = startDate.toISOString();
-  let durationMinutes = j.durationMinutes || 60;
-  if(j.scheduledEnd){
-    const end=new Date(j.scheduledEnd);
-    durationMinutes = (end-startDate)/60000;
+  // 🔧 Fix: Support worker field "scheduledAt"
+  let start = j.scheduledAt || j.scheduledStart;
+  if (!start) {
+    const base = withTime(selectedDate, 8, 0);
+    start = base.toISOString();
   }
 
-  // ✅ Force array format
-let assigned = j.assignedEngineers || (j.assignedTo ? [j.assignedTo] : []);
-if (typeof assigned === "string") {
-  assigned = [assigned.trim()];
-}
+  const startDate = new Date(start);
+  j.scheduledStart = startDate.toISOString();
 
-  if(!assigned.length && engineers.length){
-    assigned=[ engineers[0].username ];
+  let durationMinutes = j.durationMinutes || 60;
+  if(j.scheduledEnd){
+    const end = new Date(j.scheduledEnd);
+    durationMinutes = (end - startDate) / 60000;
+  }
+
+  // 🔧 Fix: Handle assignedTo as fallback
+  let assigned = j.assignedEngineers || (j.assignedTo ? [j.assignedTo] : []);
+  if (typeof assigned === "string") {
+    assigned = [assigned.trim()];
+  }
+
+  if (!assigned.length && engineers.length) {
+    assigned = [ engineers[0].username ];
   }
 
   return {
