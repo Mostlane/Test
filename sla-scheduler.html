@@ -647,17 +647,20 @@ if (!start) {
 }
 
 const startDate = new Date(start);
-
+  // ✅ Ensure scheduledStart is set for rendering
+const startDate = new Date(start);
+j.scheduledStart = startDate.toISOString();
   let durationMinutes = j.durationMinutes || 60;
   if(j.scheduledEnd){
     const end=new Date(j.scheduledEnd);
     durationMinutes = (end-startDate)/60000;
   }
 
-  let assigned = j.assignedEngineers || j.assignedTo || [];
-  if(typeof assigned === "string"){
-    assigned = assigned.split(/[;,]+/).map(s=>s.trim());
-  }
+  // ✅ Force array format
+let assigned = j.assignedEngineers || (j.assignedTo ? [j.assignedTo] : []);
+if (typeof assigned === "string") {
+  assigned = [assigned.trim()];
+}
 
   if(!assigned.length && engineers.length){
     assigned=[ engineers[0].username ];
