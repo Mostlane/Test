@@ -592,10 +592,16 @@ function parseDateInput(v){
 function minsSinceMidnight(d){
   return d.getHours()*60 + d.getMinutes();
 }
-function withTime(base,h,m){
-  const d=new Date(base);
-  d.setHours(h,m,0,0);
-  return d;
+function withTime(base, h, m) {
+  return new Date(
+    base.getFullYear(),
+    base.getMonth(),
+    base.getDate(),
+    h,
+    m,
+    0,
+    0
+  );
 }
 function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
 
