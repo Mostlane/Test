@@ -929,7 +929,14 @@ function renderDayView(container){
 
     const jobsForEngineer=jobs
       .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
-      .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
+      .filter(j => {
+  const d = new Date(j.scheduledStart);
+  return (
+    d.getFullYear() === dayDate.getFullYear() &&
+    d.getMonth() === dayDate.getMonth() &&
+    d.getDate() === dayDate.getDate()
+  );
+})
 
     jobsForEngineer.forEach(job=>{
       const dStart = new Date(job.scheduledStart);
@@ -1042,7 +1049,14 @@ function renderWeekView(container){
 
       const jobsForDay=jobs
         .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
-        .filter(j => new Date(j.scheduledStart).toDateString() === dateString);
+        .filter(j => {
+  const d = new Date(j.scheduledStart);
+  return (
+    d.getFullYear() === date.getFullYear() &&
+    d.getMonth() === date.getMonth() &&
+    d.getDate() === date.getDate()
+  );
+})
 
       jobsForDay.forEach(job=>{
         const chip=document.createElement("div");
