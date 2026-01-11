@@ -645,15 +645,16 @@ function normaliseJob(j){
   assigned = assigned.map(u => u.toLowerCase());
 
   return {
-    id,
-    title,
-    site,
-    priority,
-    notes,
-    scheduledStart: startDate.toISOString(),
-    durationMinutes,
-    assignedEngineers: assigned
-  };
+  id,
+  title,
+  site,
+  priority,
+  notes,
+  scheduledStart: startDate.toISOString(),
+  durationMinutes,
+  assignedEngineers: assigned,
+  _localStart: startDate
+};
 }
   function useDemoJobs(){
   const base=selectedDate;
@@ -683,12 +684,15 @@ function applyLocalOverrides(){
   jobs = jobs.map(j=>{
     const x=ov[j.id];
     if(!x) return j;
-    return {
-      ...j,
-      scheduledStart:x.scheduledStart||j.scheduledStart,
-      durationMinutes:x.durationMinutes||j.durationMinutes,
-      assignedEngineers:x.assignedEngineers||j.assignedEngineers
-    };
+    const newStart = x.scheduledStart || j.scheduledStart;
+
+return {
+  ...j,
+  scheduledStart: newStart,
+  durationMinutes:x.durationMinutes||j.durationMinutes,
+  assignedEngineers:x.assignedEngineers||j.assignedEngineers,
+  _localStart: new Date(newStart)
+};
   });
 }
 function updateOverridesForJob(job){
@@ -774,7 +778,7 @@ function getFilteredEngineers(){
     jobsForEngineer.forEach(job=>{
       const dStart = job._localStart
         ? job._localStart
-        : new Date(job.scheduledStart.replace("Z",""));
+        : new Date(job.scheduledStart);
 
       let startMins = minsSinceMidnight(dStart);
       let dur = job.durationMinutes;
@@ -838,10 +842,20 @@ function getFilteredEngineers(){
   container.appendChild(grid);
 }
   function renderWeekView(container){
-  const start=new Date(selectedDate);
-  const day=start.getDay();
-  const diff=start.getDate()-day+(day===0 ? -6:1);
-  const monday=new Date(start.setDate(diff));
+  const base = new Date(
+  selectedDate.getFullYear(),
+  selectedDate.getMonth(),
+  selectedDate.getDate()
+);
+
+const day = base.getDay();
+const diff = base.getDate() - day + (day === 0 ? -6 : 1);
+
+const monday = new Date(
+  base.getFullYear(),
+  base.getMonth(),
+  diff
+);
 
   const engineerList=getFilteredEngineers();
 
@@ -962,10 +976,12 @@ async function onLaneDrop(e){
   pushJobUpdate(job);
 
   dragState.jobId = null;
-  job._lastDraggedAt = Date.now(); // force re-render uniqueness
-  render();
+job._lastDraggedAt = Date.now();
 
+requestAnimationFrame(() => {
+  render();
   setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
+});
 }
   /* MODAL */
 let modalJobId = null;
