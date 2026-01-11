@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Further Works Capture</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial; padding: 16px; background:#f4f4f4; }
+    .card { background:#fff; padding:16px; border-radius:12px; max-width:900px; margin:auto; }
+    h2 { margin-top:0; }
+    label { display:block; margin-top:14px; font-weight:600; }
+    textarea, select, input {
+      width:100%; padding:10px; margin-top:6px;
+      border-radius:8px; border:1px solid #ccc;
+      font-size:14px;
+    }
+    textarea { min-height:90px; }
+    button {
+      margin-top:20px; padding:14px; width:100%;
+      background:#111; color:#fff; border:none;
+      border-radius:10px; font-size:16px;
+      cursor:pointer;
+    }
+    .note { font-size:13px; color:#555; margin-top:6px; }
+    .error { color:#b00020; margin-top:10px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Further Works / Quotation Capture</h2>
+  <p class="note">Capture facts and evidence only. Do not price works.</p>
+
+  <form id="fwForm">
+
+    <label>Reason for Further Works</label>
+    <select name="reason" multiple>
+      <option>Temporary fix only</option>
+      <option>Outside mandate / scope</option>
+      <option>Compliance / safety concern</option>
+      <option>Client requested quotation</option>
+      <option>Asset end-of-life</option>
+    </select>
+
+    <label>Issue Description *</label>
+    <textarea name="issue" required></textarea>
+
+    <label>Nature of Works *</label>
+    <select name="nature" required>
+      <option value="">Select…</option>
+      <option>Repair</option>
+      <option>Replacement</option>
+      <option>Upgrade</option>
+      <option>Compliance</option>
+      <option>Survey required</option>
+    </select>
+
+    <label>Asset / Area Affected *</label>
+    <input name="asset" required />
+
+    <label>Risk / Compliance Notes *</label>
+    <textarea name="risk" required></textarea>
+
+    <label>Client Awareness *</label>
+    <select name="client_awareness" required>
+      <option value="">Select…</option>
+      <option>Client informed – quotation required</option>
+      <option>Client requested quotation</option>
+      <option>Client not on site</option>
+      <option>Follow-up required</option>
+    </select>
+
+    <label>Photo Evidence (minimum 2) *</label>
+    <input type="file" name="photos" accept="image/*" multiple required />
+    <div class="note">Include issue, context, and temporary fix if applicable.</div>
+
+    <button type="submit">Submit Further Works</button>
+    <div id="error" class="error"></div>
+
+  </form>
+</div>
+
+<script src="further-works.js"></script>
+</body>
+</html>
