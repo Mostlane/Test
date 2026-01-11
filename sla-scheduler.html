@@ -859,7 +859,6 @@ async function onPointerUp(e){
   const startDate = withTime(selectedDate, h, m);
   job.scheduledStart = startDate.toISOString();
   job.scheduledAt = job.scheduledStart;
-  job._localStart = startDate;
 
   if (!job.assignedEngineers.includes(engineerUsername)) {
     job.assignedEngineers = [engineerUsername];
@@ -933,9 +932,7 @@ function renderDayView(container){
       .filter(j => new Date(j.scheduledStart).toDateString() === dayDate.toDateString());
 
     jobsForEngineer.forEach(job=>{
-      const dStart = job._localStart
-        ? job._localStart
-        : new Date(job.scheduledStart.replace("Z",""));
+      const dStart = new Date(job.scheduledStart);
 
       let startMins = minsSinceMidnight(dStart);
       let dur = job.durationMinutes;
