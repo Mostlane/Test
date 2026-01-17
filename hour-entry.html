@@ -652,9 +652,24 @@ $("checklistCounts").textContent = `${done} of ${ENGINEERS.length} submitted`;
 /* ====== AUTOSAVE ====== */
 const saveDraftDebounced=debounce(saveDraft,400);
 function saveDraft(){
-  const date=$("date").value;
-  const entries=serializeAllLogs();
-  localStorage.setItem(DRAFT_KEY,JSON.stringify({date,entries,savedAt:new Date().toISOString()}));
+  const date = $("date").value;
+  const entries = serializeAllLogs();
+
+  let pendingSubmit = false;
+  try {
+    const existing = JSON.parse(localStorage.getItem(DRAFT_KEY));
+    pendingSubmit = !!existing?.pendingSubmit;
+  } catch {}
+
+  localStorage.setItem(
+    DRAFT_KEY,
+    JSON.stringify({
+      date,
+      entries,
+      savedAt: new Date().toISOString(),
+      pendingSubmit
+    })
+  );
 }
 function restoreDraftIfAny(){
   const raw=localStorage.getItem(DRAFT_KEY);if(!raw)return;
@@ -680,8 +695,15 @@ function restoreDraftIfAny(){
       if(saved.oneOff)get("btnOneOff").classList.add("active");
       calcTotalsFor(id);
     });
-    $("restoreBanner").style.display="block";
-    $("restoreBanner").innerHTML=`<span style="color:green;">✅ Restored unsent entries from last session.</span>`;
+    $("restoreBanner").style.display = "block";
+
+if (draft.pendingSubmit) {
+  $("restoreBanner").innerHTML =
+    "⚠️ Submission previously failed — entries restored automatically.";
+} else {
+  $("restoreBanner").innerHTML =
+    "<span style='color:green;'>✅ Restored unsent entries from last session.</span>";
+}
     updateDayForAll();
   }catch(e){console.error("Restore error:",e);}
 }
@@ -719,7 +741,7 @@ function serializeAllLogs(){
 }
 async function submitAll() {
   $("statusMsg").style.color = "#475569";
-  $("statusMsg").textContent = "Validating…";
+  $("statusMsg").textContent = "Submitting…";
 
   const entries = serializeAllLogs();
 
@@ -743,21 +765,45 @@ async function submitAll() {
     return;
   }
 
-  // ✅ KV-only system — no network calls
+  // 🔐 HARD SAVE LOCALLY FIRST (never lose data)
+  localStorage.setItem(
+    DRAFT_KEY,
+    JSON.stringify({
+      date: $("date").value,
+      entries,
+      savedAt: new Date().toISOString(),
+      pendingSubmit: true
+    })
+  );
+
+  try {
+    const res = await fetch(HOURS_LOG_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries })
+    });
+
+    if (!res.ok) throw new Error("Server error " + res.status);
+
+    const result = await res.json();
+    if (!result?.ok) throw new Error("Server rejected submission");
+
+  } catch (err) {
+    console.error("SUBMIT FAILED:", err);
+
+    $("statusMsg").style.color = "var(--bad)";
+    $("statusMsg").textContent =
+      "❌ Submission failed — entries saved locally and will retry.";
+
+    return; // 🚨 DO NOT clear draft
+  }
+
+  // ✅ ONLY HERE do we confirm success
   $("statusMsg").style.color = "var(--ok)";
-  $("statusMsg").textContent = "✅ Submitted all logs";
+  $("statusMsg").textContent = "✅ Submitted & saved safely";
 
-  const d = $("date").value;
-  if (!HOURS_LOG_CACHE[d]) HOURS_LOG_CACHE[d] = [];
-
-  entries.forEach(e => {
-    if (!HOURS_LOG_CACHE[d].includes(e.engineer)) {
-      HOURS_LOG_CACHE[d].push(e.engineer);
-    }
-  });
-
-  renderChecklistForDate(d);
   clearDraft();
+  await refreshChecklist(); // reload from server truth
 }
  /* ====== FINAL ====== */
 function toggleMonFriForLog(id){
