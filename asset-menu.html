@@ -56,5 +56,40 @@
 
 <a id="AssetsAdmin" href="assets-admin.html" class="button">All Assets (Admin)</a>
   </div>
+  <script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const username = sessionStorage.getItem("mostlaneUser");
+  if (!username) return;
+
+  const res = await fetch(
+    "https://mostlane-users.jamie-def.workers.dev/user?u=" +
+    encodeURIComponent(username)
+  );
+  const data = await res.json();
+  if (!data.found) return;
+
+  const user = data.user;
+  const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
+
+  const MAP = {
+    MyAssets: ["MyAssets"],
+    SharedAssets: ["SharedAssets"],
+    AssetsAdmin: ["AssetsAdmin"]
+  };
+
+  Object.entries(MAP).forEach(([id, keys]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+
+    let allowed = fullAccess;
+
+    if (!allowed) {
+      allowed = keys.some(k => (user[k] || "").toLowerCase() === "yes");
+    }
+
+    btn.style.display = allowed ? "block" : "none";
+  });
+});
+</script>
 </body>
 </html>
