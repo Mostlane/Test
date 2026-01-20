@@ -434,29 +434,34 @@
    // 🔑 Map DOM id/label/href → stable permission key (SAFE VERSION)
 function mapToPermKey(id, label, href) {
   const mapByExact = {
-    "CheckInOut": "CheckInOut",
-    "Vehicles": "Vehicles",
-    "Holiday": "Holiday",
-    "EngineersHoursMenu": "EngineersHoursMenu",
-    "PurchaseOrders": "PurchaseOrders",
-    "PurchaseOrders2": "PurchaseOrders",
-    "Sites": "Sites",
-    "Assets": "Assets",
-    "MyDocuments": "MyDocuments",
-    "Compliance": "Compliance",
-    "HoursDashboard": "HoursDashboard",
-    "Users": "Users",
-    "Weekly": "Weekly",
-    "Forms": "Forms",
-    "SLA": "SLA",
-    "SLA Menu": "SLA",
-    "HolidayAdmin": "HolidayAdmin",
-    "POCosting": "POCosting",
-"PODirector": "PODirector",
+  "CheckInOut": "CheckInOut",
+  "Vehicles": "Vehicles",
+  "Holiday": "Holiday",
+  "EngineersHoursMenu": "EngineersHoursMenu",
+  "PurchaseOrders": "PurchaseOrders",
+  "PurchaseOrders2": "PurchaseOrders",
+  "PurchaseOrdersMenu": "PurchaseOrders",
+
+  // ✅ Purchase Order sub-menu permissions
+  "POCreate": "POCreate",
+  "MyPOs": "MyPOs",
+  "PODirector": "PODirector",
+  "POCosting": "POCosting",
+  "PO Director": "PODirector",
   "PO Costing": "POCosting",
-    "PurchaseOrdersMenu": "PurchaseOrders",
-  "PO Director": "PODirector"
-  };
+
+  "Sites": "Sites",
+  "Assets": "Assets",
+  "MyDocuments": "MyDocuments",
+  "Compliance": "Compliance",
+  "HoursDashboard": "HoursDashboard",
+  "Users": "Users",
+  "Weekly": "Weekly",
+  "Forms": "Forms",
+  "SLA": "SLA",
+  "SLA Menu": "SLA",
+  "HolidayAdmin": "HolidayAdmin"
+};
 
   // Direct match on ID or label
   if (id && mapByExact[id]) return mapByExact[id];
@@ -749,11 +754,11 @@ if (clean.includes("po-director")) return "PODirector";
           if (!key) return;
           const rows = card.querySelectorAll(`.submenu-row[data-parent="${key}"]`);
           const sync = ()=>{
-            const show = main.checked;
-            rows.forEach(r=>{
-              r.style.display = show ? 'flex' : 'none';
-            });
-          };
+  rows.forEach(r=>{
+    // Only control visibility via parent menu toggle
+    r.style.display = main.checked ? 'flex' : 'none';
+  });
+};
           main.addEventListener('change', sync);
           // initial state
           sync();
