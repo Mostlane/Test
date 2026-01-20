@@ -123,9 +123,7 @@ a.button {
   </script>
 
   <div class="menu-grid" id="menuGrid">
-    <a class="button visible" href="javascript:void(0)" id="TestPush">
-  <span class="emoji">🔔</span> Enable Push (Test)
-</a>
+    
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
@@ -255,53 +253,6 @@ LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning"
         });
     }
   </script>
-  <script>
-  async function enableTestPush() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      alert("Push notifications not supported on this device");
-      return;
-    }
-
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      alert("Notification permission denied");
-      return;
-    }
-
-    const reg = await navigator.serviceWorker.ready;
-
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: null
-    });
-
-    const subText = JSON.stringify(subscription, null, 2);
-
-// iOS-safe display
-alert("Push enabled!\n\nCopy the subscription from the box below.");
-
-let box = document.getElementById("pushDebugBox");
-if (!box) {
-  box = document.createElement("textarea");
-  box.id = "pushDebugBox";
-  box.style.width = "100%";
-  box.style.height = "220px";
-  box.style.marginTop = "12px";
-  box.style.fontSize = "12px";
-  box.style.fontFamily = "monospace";
-  box.style.padding = "10px";
-  box.style.borderRadius = "10px";
-  box.style.border = "1px solid #ccc";
-  document.querySelector(".menu-grid").prepend(box);
-}
-
-box.value = subText;
-box.focus();
-box.select();
-  }
-
-  document.getElementById("TestPush")
-    ?.addEventListener("click", enableTestPush);
-</script>
+  
 </body>
 </html>
