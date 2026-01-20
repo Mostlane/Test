@@ -440,7 +440,6 @@ function mapToPermKey(id, label, href) {
   "EngineersHoursMenu": "EngineersHoursMenu",
   "PurchaseOrders": "PurchaseOrders",
   "PurchaseOrders2": "PurchaseOrders",
-  "PurchaseOrdersMenu": "PurchaseOrders",
 
   // ✅ Purchase Order sub-menu permissions
   "POCreate": "POCreate",
@@ -477,7 +476,7 @@ function mapToPermKey(id, label, href) {
     if (clean.includes("assets")) return "Assets";
     if (clean.includes("forms")) return "Forms";
     if (clean.includes("compliance")) return "Compliance";
-    if (clean.includes("purchase")) return "PurchaseOrders";
+    if (clean.endsWith("po-menu.html")) return "PurchaseOrders";
     if (clean.includes("sites")) return "Sites";
     if (clean.includes("checkin") || clean.includes("checkout")) return "CheckInOut";
     if (clean.includes("po-costing")) return "POCosting";
