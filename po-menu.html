@@ -60,11 +60,52 @@
 </head>
 <body>
   <div class="main-body">
-    <a href="po-start.html" class="button">Create New</a>
-    <a href="my-pos.html" class="button">Previous Generated POs</a>
-    <a href="po-director.html" class="button">PO Director</a>
-    <a href="po-costing.html" class="button">PO Costing</a>
-    <a href="main.html" class="button grey">Back</a>
+    <a href="po-start.html" class="button" id="POCreate">Create New</a>
+<a href="my-pos.html" class="button" id="MyPOs">Previous Generated POs</a>
+<a href="po-director.html" class="button" id="PODirector">PO Director</a>
+<a href="po-costing.html" class="button" id="POCosting">PO Costing</a>
+<a href="main.html" class="button grey">Back</a>
   </div>
+  <script>
+document.addEventListener("DOMContentLoaded", async () => {
+  const username = sessionStorage.getItem("mostlaneUser");
+  if (!username) return;
+
+  const res = await fetch(
+    "https://mostlane-users.jamie-def.workers.dev/user?u=" +
+    encodeURIComponent(username)
+  );
+  const data = await res.json();
+  if (!data.found) return;
+
+  const user = data.user;
+  const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
+
+  const MAP = {
+    POCreate: ["POCreate", "CreatePO", "PurchaseOrders"],
+    MyPOs: ["MyPOs", "PreviousPOs", "PurchaseOrders"],
+    PODirector: ["PODirector", "PO Director"],
+    POCosting: ["POCosting", "PO Costing"]
+  };
+
+  Object.entries(MAP).forEach(([id, keys]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+
+    let allowed = fullAccess;
+
+    if (!allowed) {
+      for (const k of keys) {
+        if ((user[k] || "").toLowerCase() === "yes") {
+          allowed = true;
+          break;
+        }
+      }
+    }
+
+    btn.style.display = allowed ? "block" : "none";
+  });
+});
+</script>
 </body>
 </html>
