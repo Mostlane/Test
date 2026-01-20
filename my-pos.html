@@ -7,20 +7,35 @@
   <title>Previous POs</title>
 
   <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: 180%;
-      margin: 0;
-      padding: 0;
-    }
+    html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #e6e8eb;
+  overflow-y: auto;
+}
+    /* Fixed background layer (never scrolls) */
+.bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center;
+  background-size: 180%;
+  pointer-events: none;
+}
     .main-body {
-      max-width: 750px;
-      margin: 60px auto;
-      background: rgba(255,255,255,0.6);
-      padding: 30px;
-      border-radius: 8px;
-    }
+  position: relative;
+  z-index: 1;
+
+  max-width: 750px;
+  margin: 60px auto;
+  background: rgba(255,255,255,0.6);
+  padding: 30px;
+  border-radius: 8px;
+}
     .button {
       display: block;
       margin: 20px 0;
@@ -84,6 +99,7 @@
 </head>
 
 <body>
+  <div class="bg-layer"></div>
   <div class="main-body">
     <h1>Previous POs</h1>
 
