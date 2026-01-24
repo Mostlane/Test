@@ -13,6 +13,8 @@
   --ml-bg:#e6e8eb;
   --muted:#6b7280;
   --border:#e5e7eb;
+  --ok:#15803d;
+  --warn:#b91c1c;
 }
 
 html,body{margin:0;padding:0;width:100%;overflow-x:hidden;}
@@ -84,9 +86,7 @@ header button{
   text-align:center;
 }
 
-.day-group{
-  margin-bottom:22px;
-}
+.day-group{margin-bottom:22px;}
 
 .day-header{
   font-weight:700;
@@ -119,19 +119,28 @@ header button{
   font-weight:600;
 }
 
-.session-hours span{
-  margin-right:14px;
-}
+.session-hours span{margin-right:14px;}
 
 .location{
   margin-top:8px;
   font-size:13px;
-  color:#374151;
+  display:flex;
+  align-items:center;
+  gap:6px;
 }
 
-.location.unknown{
-  color:#b91c1c;
+.location a{
+  color:var(--ml-accent);
+  text-decoration:none;
+  font-weight:600;
 }
+
+.verified{
+  color:var(--ok);
+  font-weight:700;
+}
+
+.unknown{color:var(--warn);}
 
 .summary{
   margin-top:20px;
@@ -154,7 +163,6 @@ header button{
   font-size:13px;
   color:#6b7280;
 }
-
 </style>
 </head>
 
@@ -167,7 +175,6 @@ header button{
 </header>
 
 <div class="content">
-
 <div class="controls">
   <button id="prevWeek">◀ Previous Week</button>
   <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
@@ -188,12 +195,10 @@ header button{
 </div>
 
 <div id="status" class="note"></div>
-
 </div>
 </div>
 
 <script>
-/* ===== helpers ===== */
 function ordinal(n){
   const s=["th","st","nd","rd"],v=n%100;
   return n+(s[(v-20)%10]||s[v]||s[0]);
@@ -224,7 +229,6 @@ const sumTotal=document.getElementById("sumTotal");
 const statusEl=document.getElementById("status");
 
 let currentWeek=startOfWeek(new Date());
-
 engineerName.textContent=user||"—";
 
 async function loadWeek(){
@@ -255,7 +259,6 @@ async function loadWeek(){
     const list=byDay[dayKey].sort((a,b)=>a.d-b.d);
     const group=document.createElement("div");
     group.className="day-group";
-
     group.innerHTML=`<div class="day-header">${friendlyDate(list[0].d)}</div>`;
 
     let remainingStd=8;
@@ -269,13 +272,17 @@ async function loadWeek(){
 
         total+=h;std+=s;ot+=o;
 
-        let locHTML="";
+        const lat=list[i].lat;
+        const lon=list[i].lon;
+        const mapURL=`https://www.google.com/maps?q=${lat},${lon}`;
+
+        let locationHTML="";
         if(list[i].matchedSite){
-          locHTML=`Site: ${list[i].matchedSite.siteName}`;
+          locationHTML=`📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`;
         }else if(list[i].nearestSite){
-          locHTML=`Near ${list[i].nearestSite.siteName}`;
+          locationHTML=`📍 Near ${list[i].nearestSite.siteName}`;
         }else{
-          locHTML=`Unknown location`;
+          locationHTML=`📍 <span class="unknown">Unknown location</span>`;
         }
 
         group.innerHTML+=`
@@ -286,8 +293,9 @@ async function loadWeek(){
               <span>Std ${s.toFixed(2)}</span>
               <span>OT ${o.toFixed(2)}</span>
             </div>
-            <div class="location ${locHTML.includes("Unknown")?"unknown":""}">
-              ${locHTML}
+            <div class="location">${locationHTML}</div>
+            <div class="location">
+              <a href="${mapURL}" target="_blank">View on map</a>
             </div>
           </div>`;
       }
@@ -301,14 +309,8 @@ async function loadWeek(){
   statusEl.textContent="";
 }
 
-document.getElementById("prevWeek").onclick=()=>{
-  currentWeek.setDate(currentWeek.getDate()-7);
-  loadWeek();
-};
-document.getElementById("nextWeek").onclick=()=>{
-  currentWeek.setDate(currentWeek.getDate()+7);
-  loadWeek();
-};
+document.getElementById("prevWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()-7);loadWeek();};
+document.getElementById("nextWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()+7);loadWeek();};
 
 loadWeek();
 </script>
