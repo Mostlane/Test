@@ -4,10 +4,11 @@
   <meta charset="UTF-8" />
   <title>My Timesheet – Mostlane</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
   <style>
     :root{
       --ml-blue:#003366;--ml-accent:#1a73e8;--ml-ink:#27313a;--ml-bg:#e6e8eb;
-      --card:#ffffffee;--muted:#718096;--border:#e8edf3;--ok:#0c7d27;--bad:#b00020;--warn:#b36b00;
+      --card:#ffffffee;--muted:#718096;--border:#e8edf3;
     }
     html,body{width:100%;max-width:100%;overflow-x:hidden;}
     body{
@@ -26,9 +27,10 @@
     .btn{border:1px solid var(--border);background:#eef2f9;padding:10px 12px;border-radius:8px;cursor:pointer;font-weight:600}
     .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#f8fbff;
       padding:8px 12px;border-radius:999px;font-weight:600;}
-    table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+    table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);
+      border:1px solid var(--border);border-radius:12px;overflow:hidden;}
     th,td{padding:10px 12px;border-bottom:1px solid #eef2f7;text-align:left;font-size:14px}
-    thead th{background:#f7f9fc;color:#0f172a}
+    thead th{background:#f7f9fc}
     tfoot td{background:#fafcff;font-weight:700}
     .muted{color:var(--muted)}
     .summary{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
@@ -56,8 +58,6 @@
     <div class="right pill">Engineer: <span id="engineerName">—</span></div>
   </div>
 
-  <div id="vanCheckBanner" class="muted" style="margin:6px 0 12px 0;"></div>
-
   <table>
     <thead>
       <tr>
@@ -84,7 +84,7 @@
   </div>
 
   <div class="note">
-    Start = <b>leaveHome</b> · Finish = <b>arriveHome</b>
+    Sessions are calculated from <b>check-in → check-out</b>.
   </div>
 
   <div id="status" class="muted" style="margin-top:10px;"></div>
@@ -92,22 +92,18 @@
 </div>
 
 <script>
-/* =========================
-   My Timesheet (pv shard model)
-   Worker: https://ckeck-in-out.jamie-def.workers.dev/
-   KV key format: pv:{Username}:{YYYY-MM}
-   Events: { type: "checkin"|"checkout", username, datetime, ... }
-   ========================= */
+/* =====================================================
+   My Timesheet — FINAL, MATCHES weekly.html
+===================================================== */
 
 const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
-const USERNAME_KEY = "mostlaneUsername";
+const USER_KEY = "mostlaneUser";
 
 const tbody = document.getElementById("tbody");
 const statusEl = document.getElementById("status");
 const weekLabel = document.getElementById("weekLabel");
 const engineerNameEl = document.getElementById("engineerName");
 
-// Totals fields
 const totTotalEl = document.getElementById("totTotal");
 const totStdEl   = document.getElementById("totStd");
 const totOTEl    = document.getElementById("totOT");
@@ -115,297 +111,191 @@ const sumTotalEl = document.getElementById("sumTotal");
 const sumStdEl   = document.getElementById("sumStd");
 const sumOTEl    = document.getElementById("sumOT");
 
-// Buttons
 const prevWeekBtn = document.getElementById("prevWeek");
 const nextWeekBtn = document.getElementById("nextWeek");
 
-// Globals used by your PDF export script
 let currentWeekMon;
 let currentEngineer;
 
-/* -------------------------
-   Helpers
--------------------------- */
-function pad2(n){ return String(n).padStart(2, "0"); }
-
-function yyyymm(d){
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
-}
-
+/* ---------- helpers ---------- */
 function startOfWeek(date){
   const d = new Date(date);
-  const day = d.getDay() || 7; // Sunday=7
-  d.setDate(d.getDate() - day + 1); // Monday
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() - day + 1);
   d.setHours(0,0,0,0);
   return d;
 }
-
 function endOfWeek(mon){
   const d = new Date(mon);
   d.setDate(d.getDate() + 6);
   d.setHours(23,59,59,999);
   return d;
 }
-
 function fmtDate(d){ return d.toISOString().slice(0,10); }
 function fmtTime(d){ return d.toISOString().slice(11,16); }
-function weekdayShort(d){ return d.toLocaleDateString("en-GB",{weekday:"short"}); }
+function dayName(d){ return d.toLocaleDateString("en-GB",{weekday:"short"}); }
+function hoursBetween(a,b){ return (b-a)/36e5; }
 
-function hoursBetween(a,b){ return (b - a) / 36e5; }
-
-function keyFor(user, ym){ return `pv:${user}:${ym}`; }
-
-function parseMaybeJSON(x){
-  if (Array.isArray(x)) return x;
-  if (x && Array.isArray(x.data)) return x.data;
-  if (x && Array.isArray(x.items)) return x.items;
-  if (typeof x === "string"){
-    try { return JSON.parse(x); } catch(e){ return null; }
-  }
-  return null;
+/* ---------- load events (SAME AS WEEKLY) ---------- */
+async function loadAllEvents(user){
+  const res = await fetch(`${WORKER_BASE}/events?user=${encodeURIComponent(user)}`, { cache:"no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
-/* -------------------------
-   Fetch monthly shard
-   (tries a few likely URL shapes; logs what worked)
--------------------------- */
-async function fetchMonthEvents(user, ym){
-  const k = keyFor(user, ym);
-  const candidates = [
-    // These are "best guess" routes — your worker may implement one of them.
-    // The function will try each until it gets an Array back.
-    `${WORKER_BASE}/?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
-    `${WORKER_BASE}/pv?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
-    `${WORKER_BASE}/hours?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
-    `${WORKER_BASE}/get?key=${encodeURIComponent(k)}`,
-    `${WORKER_BASE}/?key=${encodeURIComponent(k)}`,
-  ];
-
-  let lastErr = null;
-
-  for (const url of candidates){
-    try{
-      const res = await fetch(url, { cache: "no-store" });
-      if(!res.ok) { lastErr = new Error(`HTTP ${res.status} for ${url}`); continue; }
-
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      let payload;
-
-      if (ct.includes("application/json")){
-        payload = await res.json();
-      } else {
-        payload = await res.text();
-      }
-
-      const arr = parseMaybeJSON(payload);
-      if (Array.isArray(arr)){
-        console.log("[Timesheet] Loaded shard via:", url, "items:", arr.length);
-        return arr;
-      }
-
-      lastErr = new Error(`Unexpected response shape from ${url}`);
-    } catch(e){
-      lastErr = e;
-    }
-  }
-
-  console.warn("[Timesheet] Could not load month shard", { user, ym, key: k, lastErr });
-  return null;
-}
-
-/* -------------------------
-   Build sessions from events
-   Robust pairing rules:
-   - sort by datetime
-   - latest checkin wins until a checkout appears
-   - checkout without pending checkin is ignored
--------------------------- */
+/* ---------- build sessions ---------- */
 function buildSessions(events){
-  const cleaned = (events || [])
-    .filter(e => e && e.datetime && (e.type === "checkin" || e.type === "checkout"))
-    .map(e => ({...e, d: new Date(e.datetime)}))
-    .filter(e => !isNaN(e.d));
-
-  cleaned.sort((a,b)=>a.d-b.d);
+  const sorted = events
+    .filter(e => e.datetime && (e.type === "checkin" || e.type === "checkout"))
+    .map(e => ({...e, d:new Date(e.datetime)}))
+    .filter(e => !isNaN(e.d))
+    .sort((a,b)=>a.d-b.d);
 
   const sessions = [];
-  let pendingCheckin = null;
+  let pending = null;
 
-  for (const e of cleaned){
-    if (e.type === "checkin"){
-      pendingCheckin = e; // latest wins
-    } else if (e.type === "checkout"){
-      if (pendingCheckin && e.d > pendingCheckin.d){
-        sessions.push({
-          start: pendingCheckin.d,
-          finish: e.d,
-          startEvent: pendingCheckin,
-          finishEvent: e,
-          hours: hoursBetween(pendingCheckin.d, e.d)
-        });
-        pendingCheckin = null;
-      } else {
-        // orphan checkout or invalid ordering
-      }
+  for (const e of sorted){
+    if (e.type === "checkin") pending = e;
+    if (e.type === "checkout" && pending && e.d > pending.d){
+      sessions.push({
+        start: pending.d,
+        finish: e.d,
+        hours: hoursBetween(pending.d, e.d)
+      });
+      pending = null;
     }
   }
-
-  // Ignore trailing checkin without checkout
   return sessions;
 }
 
-/* -------------------------
-   Allocate Std/OT per DAY (8h std cap)
-   For multi-session days:
-   - assign standard time to earliest sessions first
--------------------------- */
-function allocateStdOtByDay(sessions){
-  const byDay = new Map(); // yyyy-mm-dd -> sessions[]
-  for (const s of sessions){
-    const dayKey = fmtDate(s.start);
-    if (!byDay.has(dayKey)) byDay.set(dayKey, []);
-    byDay.get(dayKey).push(s);
+/* ---------- allocate std / ot ---------- */
+function allocateStdOt(sessions){
+  const byDay = {};
+  sessions.forEach(s=>{
+    const k = fmtDate(s.start);
+    (byDay[k] ||= []).push(s);
+  });
+
+  for (const k in byDay){
+    let remaining = 8;
+    byDay[k].sort((a,b)=>a.start-b.start);
+    byDay[k].forEach(s=>{
+      s.std = Math.min(s.hours, Math.max(remaining,0));
+      s.ot  = Math.max(s.hours - s.std, 0);
+      remaining -= s.std;
+    });
   }
-
-  for (const [dayKey, list] of byDay.entries()){
-    list.sort((a,b)=>a.start-b.start);
-    let remainingStd = 8;
-
-    for (const s of list){
-      const std = Math.min(s.hours, Math.max(remainingStd, 0));
-      const ot  = Math.max(s.hours - std, 0);
-      s.std = std;
-      s.ot = ot;
-      remainingStd -= std;
-    }
-  }
-
   return sessions;
 }
 
-/* -------------------------
-   Render (B = one row per session)
--------------------------- */
-function renderSessions(sessions){
+/* ---------- render ---------- */
+function render(sessions){
   tbody.innerHTML = "";
+  let tot=0,std=0,ot=0;
 
-  let tot = 0, std = 0, ot = 0;
-
-  for (const s of sessions){
+  sessions.forEach(s=>{
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${fmtDate(s.start)}</td>
-      <td>${weekdayShort(s.start)}</td>
+      <td>${dayName(s.start)}</td>
       <td>${fmtTime(s.start)}</td>
       <td>${fmtTime(s.finish)}</td>
       <td>${s.hours.toFixed(2)}</td>
-      <td>${(s.std ?? 0).toFixed(2)}</td>
-      <td>${(s.ot ?? 0).toFixed(2)}</td>
+      <td>${s.std.toFixed(2)}</td>
+      <td>${s.ot.toFixed(2)}</td>
       <td class="muted">—</td>
     `;
     tbody.appendChild(tr);
-
-    tot += s.hours;
-    std += (s.std ?? 0);
-    ot  += (s.ot ?? 0);
-  }
+    tot+=s.hours; std+=s.std; ot+=s.ot;
+  });
 
   totTotalEl.textContent = tot.toFixed(2);
   totStdEl.textContent   = std.toFixed(2);
   totOTEl.textContent    = ot.toFixed(2);
-
   sumTotalEl.textContent = tot.toFixed(2);
   sumStdEl.textContent   = std.toFixed(2);
   sumOTEl.textContent    = ot.toFixed(2);
 }
 
-/* -------------------------
-   Load week
--------------------------- */
+/* ---------- load week ---------- */
 async function loadWeek(){
-  const mon = new Date(currentWeekMon);
+  const mon = currentWeekMon;
   const sun = endOfWeek(mon);
-
   weekLabel.textContent = fmtDate(mon);
   statusEl.textContent = "Loading…";
 
-  // Month shards to pull (week may span two months)
-  const months = new Set([yyyymm(mon), yyyymm(sun)]);
-  const allEvents = [];
+  const all = await loadAllEvents(currentEngineer);
+  const weekEvents = all.filter(e=>{
+    const d = new Date(e.datetime);
+    return d >= mon && d <= sun;
+  });
 
-  for (const ym of months){
-    const arr = await fetchMonthEvents(currentEngineer, ym);
-    if (Array.isArray(arr)) allEvents.push(...arr);
-  }
-
-  if (!allEvents.length){
-    statusEl.textContent = "⚠ No events loaded for this week (or worker route not matching). Check Console.";
-    renderSessions([]);
+  if (!weekEvents.length){
+    statusEl.textContent = "No activity this week.";
+    render([]);
     return;
   }
 
-  // Filter to current engineer + current week range
-  const filtered = allEvents
-    .filter(e => e && e.username === currentEngineer && e.datetime)
-    .map(e => ({...e, d:new Date(e.datetime)}))
-    .filter(e => !isNaN(e.d) && e.d >= mon && e.d <= sun);
-
-  if (!filtered.length){
-    statusEl.textContent = "ℹ No check-in/out events found in this week.";
-    renderSessions([]);
-    return;
-  }
-
-  // Build sessions & keep those that start within week
-  let sessions = buildSessions(filtered)
-    .filter(s => s.start >= mon && s.start <= sun);
-
-  if (!sessions.length){
-    statusEl.textContent = "ℹ Events found, but no valid checkin→checkout pairs this week.";
-    renderSessions([]);
-    return;
-  }
-
-  sessions = allocateStdOtByDay(sessions);
+  let sessions = buildSessions(weekEvents);
+  sessions = sessions.filter(s=>s.start>=mon && s.start<=sun);
+  sessions = allocateStdOt(sessions);
 
   statusEl.textContent = "";
-  renderSessions(sessions);
+  render(sessions);
 }
 
-/* -------------------------
-   Init
--------------------------- */
+/* ---------- init ---------- */
 (function init(){
-  const u = sessionStorage.getItem(USERNAME_KEY);
-  if(!u){
+  const u = sessionStorage.getItem(USER_KEY);
+  if (!u){
     alert("Session expired. Please log in again.");
-    location.href = "login.html";
+    location.href="login.html";
     return;
   }
 
   currentEngineer = u;
   engineerNameEl.textContent = currentEngineer;
-
   currentWeekMon = startOfWeek(new Date());
 
-  // expose for your PDF export script
-  window.currentWeekMon = currentWeekMon;
+  window.currentWeekMon = currentWeekMon; // for PDF
   window.currentEngineer = currentEngineer;
 
   prevWeekBtn.onclick = ()=>{
-    currentWeekMon.setDate(currentWeekMon.getDate() - 7);
+    currentWeekMon.setDate(currentWeekMon.getDate()-7);
     window.currentWeekMon = currentWeekMon;
     loadWeek();
   };
-
   nextWeekBtn.onclick = ()=>{
-    currentWeekMon.setDate(currentWeekMon.getDate() + 7);
+    currentWeekMon.setDate(currentWeekMon.getDate()+7);
     window.currentWeekMon = currentWeekMon;
     loadWeek();
   };
 
   loadWeek();
 })();
+</script>
+
+<!-- PDF export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+document.getElementById("exportBtn").addEventListener("click", async () => {
+  const monday = new Date(window.currentWeekMon);
+  const dd = String(monday.getDate()).padStart(2,'0');
+  const mm = String(monday.getMonth()+1).padStart(2,'0');
+  const yyyy = monday.getFullYear();
+  const filename = `${window.currentEngineer} - WC ${dd}-${mm}-${yyyy}.pdf`;
+
+  document.querySelector('.controls').style.display = 'none';
+  const canvas = await html2canvas(document.querySelector('.shell'), {scale:2});
+  const pdf = new jspdf.jsPDF('p','mm','a4');
+  const w = pdf.internal.pageSize.getWidth();
+  const h = canvas.height * w / canvas.width;
+  pdf.addImage(canvas.toDataURL(), 'PNG', 0, 0, w, h);
+  pdf.save(filename);
+  document.querySelector('.controls').style.display = '';
+});
 </script>
 
 </body>
