@@ -37,6 +37,106 @@
     .note{margin-top:8px;color:#64748b;font-size:13px}
     .right{margin-left:auto}
     @media(max-width:900px){body{padding:16px}}
+    /* =========================
+   MOBILE RESPONSIVE TIMESHEET
+========================= */
+@media (max-width: 768px) {
+
+  body {
+    padding: 12px;
+  }
+
+  header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  header h1 {
+    text-align: center;
+  }
+
+  header a,
+  #exportBtn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .controls .btn {
+    width: 100%;
+  }
+
+  .pill {
+    justify-content: center;
+    width: 100%;
+  }
+
+  /* -------- TABLE → CARD MODE -------- */
+  table,
+  thead,
+  tbody,
+  th,
+  td,
+  tr {
+    display: block;
+    width: 100%;
+  }
+
+  thead {
+    display: none; /* hide header row */
+  }
+
+  tbody tr {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    padding: 10px;
+  }
+
+  tbody td {
+    border: none;
+    padding: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+  }
+
+  tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #475569;
+  }
+
+  tfoot {
+    display: block;
+    margin-top: 10px;
+  }
+
+  tfoot tr {
+    display: block;
+  }
+
+  tfoot td {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+  }
+
+  .summary {
+    flex-direction: column;
+  }
+
+  .summary .pill {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
   </style>
 </head>
 
