@@ -16,11 +16,7 @@
       --border:#e8edf3;
     }
 
-    html,body{
-      width:100%;
-      max-width:100%;
-      overflow-x:hidden;
-    }
+    html,body{width:100%;max-width:100%;overflow-x:hidden;}
 
     body{
       font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
@@ -67,9 +63,7 @@
       font-size:14px;
     }
 
-    .content{
-      padding:22px 24px 28px;
-    }
+    .content{padding:22px 24px 28px;}
 
     .controls{
       display:flex;
@@ -99,7 +93,7 @@
       font-weight:600;
     }
 
-    .right{ margin-left:auto; }
+    .right{margin-left:auto;}
 
     table{
       width:100%;
@@ -118,16 +112,9 @@
       font-size:14px;
     }
 
-    thead th{
-      background:#f7f9fc;
-    }
-
-    tfoot td{
-      background:#fafcff;
-      font-weight:700;
-    }
-
-    .muted{ color:var(--muted); }
+    thead th{background:#f7f9fc;}
+    tfoot td{background:#fafcff;font-weight:700;}
+    .muted{color:var(--muted);}
 
     .summary{
       display:flex;
@@ -143,17 +130,13 @@
     }
 
     @media(max-width:900px){
-      body{ padding:16px; }
+      body{padding:16px;}
     }
 
-    /* =================================================
-       POLISHED MOBILE TIMESHEET (HIGH-END)
-    ================================================= */
+    /* ===== POLISHED MOBILE VIEW ===== */
     @media(max-width:768px){
 
-      body{
-        padding:12px;
-      }
+      body{padding:12px;}
 
       header{
         flex-direction:column;
@@ -165,8 +148,7 @@
         font-size:20px;
       }
 
-      header a,
-      #exportBtn{
+      header a,#exportBtn{
         width:100%;
         text-align:center;
       }
@@ -182,16 +164,8 @@
         justify-content:center;
       }
 
-      /* Table becomes card list */
-      table{
-        border:none;
-        background:transparent;
-      }
-
-      thead,
-      tfoot{
-        display:none;
-      }
+      table{border:none;background:transparent;}
+      thead,tfoot{display:none;}
 
       tbody{
         display:flex;
@@ -215,17 +189,12 @@
         display:block;
       }
 
-      /* Hide notes column */
-      tbody td:last-child{
-        display:none;
-      }
+      tbody td:last-child{display:none;}
 
-      /* Date + Day */
       tbody td:nth-child(1),
       tbody td:nth-child(2){
         display:inline-block;
         font-weight:600;
-        color:#1f2937;
         font-size:14px;
       }
 
@@ -234,7 +203,6 @@
         color:#6b7280;
       }
 
-      /* Time range hero */
       tbody td:nth-child(3),
       tbody td:nth-child(4){
         display:inline-block;
@@ -248,10 +216,8 @@
         content:"→";
         margin:0 6px;
         color:#9ca3af;
-        font-weight:400;
       }
 
-      /* Totals row */
       tbody td:nth-child(5),
       tbody td:nth-child(6),
       tbody td:nth-child(7){
@@ -260,35 +226,14 @@
         margin-right:14px;
         font-size:13px;
         font-weight:600;
-        color:#374151;
       }
 
-      tbody td:nth-child(5)::before{
-        content:"Total ";
-        color:#6b7280;
-        font-weight:500;
-      }
+      tbody td:nth-child(5)::before{content:"Total ";color:#6b7280;}
+      tbody td:nth-child(6)::before{content:"Std ";color:#6b7280;}
+      tbody td:nth-child(7)::before{content:"OT ";color:#6b7280;}
 
-      tbody td:nth-child(6)::before{
-        content:"Std ";
-        color:#6b7280;
-        font-weight:500;
-      }
-
-      tbody td:nth-child(7)::before{
-        content:"OT ";
-        color:#6b7280;
-        font-weight:500;
-      }
-
-      .summary{
-        flex-direction:column;
-      }
-
-      .summary .pill{
-        width:100%;
-        justify-content:space-between;
-      }
+      .summary{flex-direction:column;}
+      .summary .pill{width:100%;justify-content:space-between;}
     }
   </style>
 </head>
@@ -344,8 +289,198 @@
 </div>
 </div>
 
-<!-- JS LOGIC + PDF EXPORT REMAINS EXACTLY AS YOU ALREADY HAVE -->
-<!-- (unchanged from your current working version) -->
+<script>
+/* ===== SAFETY BOOTSTRAP ===== */
+window.addEventListener("error", e => {
+  console.error("Timesheet error:", e.message);
+  const s = document.getElementById("status");
+  if (s) s.textContent = "⚠ Error loading timesheet.";
+});
+
+// Normalise user key (Safari-safe)
+if (!sessionStorage.getItem("mostlaneUser")) {
+  const legacy = sessionStorage.getItem("mostlaneUsername");
+  if (legacy) sessionStorage.setItem("mostlaneUser", legacy);
+}
+
+/* ===== CORE LOGIC ===== */
+const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
+const USER_KEY = "mostlaneUser";
+
+const tbody = document.getElementById("tbody");
+const statusEl = document.getElementById("status");
+const weekLabel = document.getElementById("weekLabel");
+const engineerNameEl = document.getElementById("engineerName");
+
+const totTotalEl = document.getElementById("totTotal");
+const totStdEl   = document.getElementById("totStd");
+const totOTEl    = document.getElementById("totOT");
+const sumTotalEl = document.getElementById("sumTotal");
+const sumStdEl   = document.getElementById("sumStd");
+const sumOTEl    = document.getElementById("sumOT");
+
+const prevWeekBtn = document.getElementById("prevWeek");
+const nextWeekBtn = document.getElementById("nextWeek");
+
+let currentWeekMon;
+let currentEngineer;
+
+function startOfWeek(d){
+  d = new Date(d);
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() - day + 1);
+  d.setHours(0,0,0,0);
+  return d;
+}
+
+function endOfWeek(d){
+  d = new Date(d);
+  d.setDate(d.getDate() + 6);
+  d.setHours(23,59,59,999);
+  return d;
+}
+
+function fmtDate(d){return d.toISOString().slice(0,10);}
+function fmtTime(d){return d.toISOString().slice(11,16);}
+function dayName(d){return d.toLocaleDateString("en-GB",{weekday:"short"});}
+function hoursBetween(a,b){return (b-a)/36e5;}
+
+async function loadAllEvents(user){
+  const r = await fetch(`${WORKER_BASE}/events?user=${encodeURIComponent(user)}`,{cache:"no-store"});
+  if(!r.ok) return [];
+  const j = await r.json();
+  return Array.isArray(j)?j:[];
+}
+
+function buildSessions(events){
+  const sorted = events
+    .filter(e=>e.datetime && (e.type==="checkin"||e.type==="checkout"))
+    .map(e=>({...e,d:new Date(e.datetime)}))
+    .filter(e=>!isNaN(e.d))
+    .sort((a,b)=>a.d-b.d);
+
+  const sessions=[];
+  let pending=null;
+
+  for(const e of sorted){
+    if(e.type==="checkin") pending=e;
+    if(e.type==="checkout" && pending && e.d>pending.d){
+      sessions.push({start:pending.d,finish:e.d,hours:hoursBetween(pending.d,e.d)});
+      pending=null;
+    }
+  }
+  return sessions;
+}
+
+function allocateStdOt(sessions){
+  const byDay={};
+  sessions.forEach(s=>{
+    const k=fmtDate(s.start);
+    (byDay[k]??=[]).push(s);
+  });
+  Object.values(byDay).forEach(list=>{
+    let rem=8;
+    list.sort((a,b)=>a.start-b.start);
+    list.forEach(s=>{
+      s.std=Math.min(s.hours,Math.max(rem,0));
+      s.ot=Math.max(s.hours-s.std,0);
+      rem-=s.std;
+    });
+  });
+  return sessions;
+}
+
+function render(sessions){
+  tbody.innerHTML="";
+  let tot=0,std=0,ot=0;
+
+  sessions.forEach(s=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${fmtDate(s.start)}</td>
+      <td>${dayName(s.start)}</td>
+      <td>${fmtTime(s.start)}</td>
+      <td>${fmtTime(s.finish)}</td>
+      <td>${s.hours.toFixed(2)}</td>
+      <td>${s.std.toFixed(2)}</td>
+      <td>${s.ot.toFixed(2)}</td>
+      <td class="muted">—</td>`;
+    tbody.appendChild(tr);
+    tot+=s.hours; std+=s.std; ot+=s.ot;
+  });
+
+  totTotalEl.textContent=tot.toFixed(2);
+  totStdEl.textContent=std.toFixed(2);
+  totOTEl.textContent=ot.toFixed(2);
+  sumTotalEl.textContent=tot.toFixed(2);
+  sumStdEl.textContent=std.toFixed(2);
+  sumOTEl.textContent=ot.toFixed(2);
+}
+
+async function loadWeek(){
+  const mon=currentWeekMon;
+  const sun=endOfWeek(mon);
+  weekLabel.textContent=fmtDate(mon);
+  statusEl.textContent="Loading…";
+
+  const all=await loadAllEvents(currentEngineer);
+  const weekEvents=all.filter(e=>{
+    const d=new Date(e.datetime);
+    return d>=mon && d<=sun;
+  });
+
+  if(!weekEvents.length){
+    statusEl.textContent="No activity this week.";
+    render([]);
+    return;
+  }
+
+  let sessions=allocateStdOt(buildSessions(weekEvents));
+  sessions=sessions.filter(s=>s.start>=mon && s.start<=sun);
+
+  statusEl.textContent="";
+  render(sessions);
+}
+
+(function init(){
+  const u=sessionStorage.getItem(USER_KEY);
+  if(!u){
+    statusEl.textContent="⚠ Please return to Main Menu and log in again.";
+    return;
+  }
+
+  currentEngineer=u;
+  engineerNameEl.textContent=currentEngineer;
+  currentWeekMon=startOfWeek(new Date());
+  weekLabel.textContent=fmtDate(currentWeekMon);
+
+  window.currentWeekMon=currentWeekMon;
+  window.currentEngineer=currentEngineer;
+
+  prevWeekBtn.onclick=()=>{currentWeekMon.setDate(currentWeekMon.getDate()-7);loadWeek();};
+  nextWeekBtn.onclick=()=>{currentWeekMon.setDate(currentWeekMon.getDate()+7);loadWeek();};
+
+  loadWeek();
+})();
+</script>
+
+<!-- PDF EXPORT -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+document.getElementById("exportBtn").addEventListener("click", async () => {
+  const monday=new Date(window.currentWeekMon);
+  const fn=`${window.currentEngineer} - WC ${String(monday.getDate()).padStart(2,"0")}-${String(monday.getMonth()+1).padStart(2,"0")}-${monday.getFullYear()}.pdf`;
+  document.querySelector(".controls").style.display="none";
+  const c=await html2canvas(document.querySelector(".shell"),{scale:2});
+  const p=new jspdf.jsPDF("p","mm","a4");
+  const w=p.internal.pageSize.getWidth();
+  const h=c.height*w/c.width;
+  p.addImage(c.toDataURL(),"PNG",0,0,w,h);
+  p.save(fn);
+  document.querySelector(".controls").style.display="";
+});
+</script>
 
 </body>
 </html>
