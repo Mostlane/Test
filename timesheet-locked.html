@@ -1,241 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>My Timesheet – Mostlane</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="UTF-8" />
+<title>My Timesheet – Mostlane</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-  <style>
-    :root{
-      --ml-blue:#003366;
-      --ml-accent:#1a73e8;
-      --ml-ink:#27313a;
-      --ml-bg:#e6e8eb;
-      --card:#ffffffee;
-      --muted:#718096;
-      --border:#e8edf3;
-    }
+<style>
+:root{
+  --ml-blue:#003366;
+  --ml-accent:#1a73e8;
+  --ml-ink:#27313a;
+  --ml-bg:#e6e8eb;
+  --muted:#6b7280;
+  --border:#e5e7eb;
+}
 
-    html,body{width:100%;max-width:100%;overflow-x:hidden;}
+html,body{margin:0;padding:0;width:100%;overflow-x:hidden;}
 
-    body{
-      font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-      background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size:180% auto;
-      margin:0;
-      padding:40px;
-      color:var(--ml-ink);
-    }
+body{
+  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+  background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+  background-size:180% auto;
+  padding:16px;
+  color:var(--ml-ink);
+}
 
-    .shell{
-      max-width:1200px;
-      margin:0 auto;
-      background:rgba(255,255,255,0.94);
-      border-radius:14px;
-      box-shadow:0 12px 28px rgba(0,0,0,0.12);
-      overflow:hidden;
-    }
+.shell{
+  max-width:900px;
+  margin:0 auto;
+  background:rgba(255,255,255,0.94);
+  border-radius:16px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  overflow:hidden;
+}
 
-    header{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      flex-wrap:wrap;
-      background:linear-gradient(90deg,#fff,#f7f9fc);
-      border-bottom:1px solid var(--border);
-      padding:18px 24px;
-      gap:10px;
-    }
+header{
+  padding:18px;
+  text-align:center;
+}
 
-    header h1{
-      font-size:22px;
-      margin:0;
-      color:var(--ml-blue);
-    }
+header h1{
+  margin:0 0 12px 0;
+  color:var(--ml-blue);
+}
 
-    header a{
-      background:var(--ml-accent);
-      color:#fff;
-      text-decoration:none;
-      padding:8px 16px;
-      border-radius:8px;
-      font-weight:600;
-      font-size:14px;
-    }
+header a, header button{
+  display:block;
+  width:100%;
+  margin-top:8px;
+  padding:10px;
+  border-radius:10px;
+  font-weight:600;
+  border:none;
+}
 
-    .content{padding:22px 24px 28px;}
+header a{
+  background:var(--ml-accent);
+  color:#fff;
+  text-decoration:none;
+}
 
-    .controls{
-      display:flex;
-      gap:12px;
-      flex-wrap:wrap;
-      align-items:center;
-      margin-bottom:16px;
-    }
+header button{
+  background:#003366;
+  color:#fff;
+  cursor:pointer;
+}
 
-    .btn{
-      border:1px solid var(--border);
-      background:#eef2f9;
-      padding:10px 12px;
-      border-radius:8px;
-      cursor:pointer;
-      font-weight:600;
-    }
+.content{padding:18px;}
 
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      border:1px solid var(--border);
-      background:#f8fbff;
-      padding:8px 12px;
-      border-radius:999px;
-      font-weight:600;
-    }
+.controls{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+  margin-bottom:20px;
+}
 
-    .right{margin-left:auto;}
+.controls button,.controls .pill{
+  padding:10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:#f8fafc;
+  font-weight:600;
+  text-align:center;
+}
 
-    table{
-      width:100%;
-      border-collapse:separate;
-      border-spacing:0;
-      background:var(--card);
-      border:1px solid var(--border);
-      border-radius:12px;
-      overflow:hidden;
-    }
+.day-group{
+  margin-bottom:22px;
+}
 
-    th,td{
-      padding:10px 12px;
-      border-bottom:1px solid #eef2f7;
-      text-align:left;
-      font-size:14px;
-    }
+.day-header{
+  font-weight:700;
+  color:#111827;
+  border-bottom:2px solid #e5e7eb;
+  padding-bottom:6px;
+  margin-bottom:12px;
+}
 
-    thead th{background:#f7f9fc;}
-    tfoot td{background:#fafcff;font-weight:700;}
-    .muted{color:var(--muted);}
+.session-card{
+  background:#fff;
+  border-radius:14px;
+  padding:14px 16px;
+  margin-bottom:12px;
+  border:1px solid #eef2f7;
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.04),
+    0 6px 16px rgba(0,0,0,0.06);
+}
 
-    .summary{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:14px;
-    }
+.session-time{
+  font-size:18px;
+  font-weight:700;
+  color:var(--ml-blue);
+}
 
-    .note{
-      margin-top:8px;
-      color:#64748b;
-      font-size:13px;
-    }
+.session-hours{
+  margin-top:6px;
+  font-size:13px;
+  font-weight:600;
+}
 
-    @media(max-width:900px){
-      body{padding:16px;}
-    }
+.session-hours span{
+  margin-right:14px;
+}
 
-    /* ===== POLISHED MOBILE VIEW ===== */
-    @media(max-width:768px){
+.location{
+  margin-top:8px;
+  font-size:13px;
+  color:#374151;
+}
 
-      body{padding:12px;}
+.location.unknown{
+  color:#b91c1c;
+}
 
-      header{
-        flex-direction:column;
-        align-items:stretch;
-      }
+.summary{
+  margin-top:20px;
+  display:grid;
+  gap:10px;
+}
 
-      header h1{
-        text-align:center;
-        font-size:20px;
-      }
+.summary div{
+  padding:10px;
+  border-radius:12px;
+  background:#f8fafc;
+  border:1px solid var(--border);
+  font-weight:600;
+  display:flex;
+  justify-content:space-between;
+}
 
-      header a,#exportBtn{
-        width:100%;
-        text-align:center;
-      }
+.note{
+  margin-top:12px;
+  font-size:13px;
+  color:#6b7280;
+}
 
-      .controls{
-        flex-direction:column;
-        gap:8px;
-      }
-
-      .controls .btn,
-      .controls .pill{
-        width:100%;
-        justify-content:center;
-      }
-
-      table{border:none;background:transparent;}
-      thead,tfoot{display:none;}
-
-      tbody{
-        display:flex;
-        flex-direction:column;
-        gap:14px;
-      }
-
-      tbody tr{
-        background:#fff;
-        border-radius:16px;
-        padding:14px 16px;
-        border:1px solid #eef2f7;
-        box-shadow:
-          0 1px 2px rgba(0,0,0,0.04),
-          0 6px 18px rgba(0,0,0,0.06);
-      }
-
-      tbody td{
-        border:none;
-        padding:0;
-        display:block;
-      }
-
-      tbody td:last-child{display:none;}
-
-      tbody td:nth-child(1),
-      tbody td:nth-child(2){
-        display:inline-block;
-        font-weight:600;
-        font-size:14px;
-      }
-
-      tbody td:nth-child(2){
-        margin-left:6px;
-        color:#6b7280;
-      }
-
-      tbody td:nth-child(3),
-      tbody td:nth-child(4){
-        display:inline-block;
-        font-size:18px;
-        font-weight:700;
-        color:var(--ml-blue);
-        margin-top:6px;
-      }
-
-      tbody td:nth-child(4)::before{
-        content:"→";
-        margin:0 6px;
-        color:#9ca3af;
-      }
-
-      tbody td:nth-child(5),
-      tbody td:nth-child(6),
-      tbody td:nth-child(7){
-        display:inline-block;
-        margin-top:10px;
-        margin-right:14px;
-        font-size:13px;
-        font-weight:600;
-      }
-
-      tbody td:nth-child(5)::before{content:"Total ";color:#6b7280;}
-      tbody td:nth-child(6)::before{content:"Std ";color:#6b7280;}
-      tbody td:nth-child(7)::before{content:"OT ";color:#6b7280;}
-
-      .summary{flex-direction:column;}
-      .summary .pill{width:100%;justify-content:space-between;}
-    }
-  </style>
+</style>
 </head>
 
 <body>
@@ -243,243 +163,154 @@
 <header>
   <h1>My Weekly Timesheet</h1>
   <a href="main.html">Main Menu</a>
-  <button id="exportBtn" class="btn" style="background:#003366;color:#fff;border:none;">
-    📄 Export PDF
-  </button>
+  <button id="exportBtn">📄 Export PDF</button>
 </header>
 
 <div class="content">
-  <div class="controls">
-    <button id="prevWeek" class="btn">◀ Prev Week</button>
-    <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
-    <button id="nextWeek" class="btn">Next Week ▶</button>
-    <div class="right pill">Engineer: <span id="engineerName">—</span></div>
-  </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Date</th><th>Day</th><th>Start</th><th>Finish</th>
-        <th>Total</th><th>Std</th><th>OT</th><th>Notes</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4">Weekly Totals</td>
-        <td id="totTotal">0.00</td>
-        <td id="totStd">0.00</td>
-        <td id="totOT">0.00</td>
-        <td class="muted">—</td>
-      </tr>
-    </tfoot>
-  </table>
+<div class="controls">
+  <button id="prevWeek">◀ Previous Week</button>
+  <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
+  <button id="nextWeek">Next Week ▶</button>
+  <div class="pill">Engineer: <span id="engineerName">—</span></div>
+</div>
 
-  <div class="summary">
-    <div class="pill">Standard: <span id="sumStd">0.00</span> h</div>
-    <div class="pill">Overtime: <span id="sumOT">0.00</span> h</div>
-    <div class="pill">Total: <span id="sumTotal">0.00</span> h</div>
-  </div>
+<div id="sessions"></div>
 
-  <div class="note">
-    Sessions are calculated from <b>check-in → check-out</b>.
-  </div>
+<div class="summary">
+  <div><span>Standard</span><span id="sumStd">0.00 h</span></div>
+  <div><span>Overtime</span><span id="sumOT">0.00 h</span></div>
+  <div><span>Total</span><span id="sumTotal">0.00 h</span></div>
+</div>
 
-  <div id="status" class="muted" style="margin-top:10px;"></div>
+<div class="note">
+  Sessions are calculated from <b>check-in → check-out</b>.
+</div>
+
+<div id="status" class="note"></div>
+
 </div>
 </div>
 
 <script>
-/* ===== SAFETY BOOTSTRAP ===== */
-window.addEventListener("error", e => {
-  console.error("Timesheet error:", e.message);
-  const s = document.getElementById("status");
-  if (s) s.textContent = "⚠ Error loading timesheet.";
-});
-
-// Normalise user key (Safari-safe)
-if (!sessionStorage.getItem("mostlaneUser")) {
-  const legacy = sessionStorage.getItem("mostlaneUsername");
-  if (legacy) sessionStorage.setItem("mostlaneUser", legacy);
+/* ===== helpers ===== */
+function ordinal(n){
+  const s=["th","st","nd","rd"],v=n%100;
+  return n+(s[(v-20)%10]||s[v]||s[0]);
 }
-
-/* ===== CORE LOGIC ===== */
-const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
-const USER_KEY = "mostlaneUser";
-
-const tbody = document.getElementById("tbody");
-const statusEl = document.getElementById("status");
-const weekLabel = document.getElementById("weekLabel");
-const engineerNameEl = document.getElementById("engineerName");
-
-const totTotalEl = document.getElementById("totTotal");
-const totStdEl   = document.getElementById("totStd");
-const totOTEl    = document.getElementById("totOT");
-const sumTotalEl = document.getElementById("sumTotal");
-const sumStdEl   = document.getElementById("sumStd");
-const sumOTEl    = document.getElementById("sumOT");
-
-const prevWeekBtn = document.getElementById("prevWeek");
-const nextWeekBtn = document.getElementById("nextWeek");
-
-let currentWeekMon;
-let currentEngineer;
-
+function friendlyDate(d){
+  return d.toLocaleDateString("en-GB",{weekday:"long",month:"short"})+
+         " "+ordinal(d.getDate());
+}
+function time(d){return d.toISOString().slice(11,16);}
 function startOfWeek(d){
-  d = new Date(d);
-  const day = d.getDay() || 7;
-  d.setDate(d.getDate() - day + 1);
-  d.setHours(0,0,0,0);
-  return d;
+  d=new Date(d);const day=d.getDay()||7;
+  d.setDate(d.getDate()-day+1);d.setHours(0,0,0,0);return d;
 }
-
 function endOfWeek(d){
-  d = new Date(d);
-  d.setDate(d.getDate() + 6);
-  d.setHours(23,59,59,999);
-  return d;
+  d=new Date(d);d.setDate(d.getDate()+6);d.setHours(23,59,59,999);return d;
 }
+function hours(a,b){return (b-a)/36e5;}
 
-function fmtDate(d){return d.toISOString().slice(0,10);}
-function fmtTime(d){return d.toISOString().slice(11,16);}
-function dayName(d){return d.toLocaleDateString("en-GB",{weekday:"short"});}
-function hoursBetween(a,b){return (b-a)/36e5;}
+const WORKER="https://ckeck-in-out.jamie-def.workers.dev";
+const user=sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername");
 
-async function loadAllEvents(user){
-  const r = await fetch(`${WORKER_BASE}/events?user=${encodeURIComponent(user)}`,{cache:"no-store"});
-  if(!r.ok) return [];
-  const j = await r.json();
-  return Array.isArray(j)?j:[];
-}
+const weekLabel=document.getElementById("weekLabel");
+const engineerName=document.getElementById("engineerName");
+const sessionsEl=document.getElementById("sessions");
+const sumStd=document.getElementById("sumStd");
+const sumOT=document.getElementById("sumOT");
+const sumTotal=document.getElementById("sumTotal");
+const statusEl=document.getElementById("status");
 
-function buildSessions(events){
-  const sorted = events
-    .filter(e=>e.datetime && (e.type==="checkin"||e.type==="checkout"))
-    .map(e=>({...e,d:new Date(e.datetime)}))
-    .filter(e=>!isNaN(e.d))
-    .sort((a,b)=>a.d-b.d);
+let currentWeek=startOfWeek(new Date());
 
-  const sessions=[];
-  let pending=null;
-
-  for(const e of sorted){
-    if(e.type==="checkin") pending=e;
-    if(e.type==="checkout" && pending && e.d>pending.d){
-      sessions.push({start:pending.d,finish:e.d,hours:hoursBetween(pending.d,e.d)});
-      pending=null;
-    }
-  }
-  return sessions;
-}
-
-function allocateStdOt(sessions){
-  const byDay={};
-  sessions.forEach(s=>{
-    const k=fmtDate(s.start);
-    (byDay[k]??=[]).push(s);
-  });
-  Object.values(byDay).forEach(list=>{
-    let rem=8;
-    list.sort((a,b)=>a.start-b.start);
-    list.forEach(s=>{
-      s.std=Math.min(s.hours,Math.max(rem,0));
-      s.ot=Math.max(s.hours-s.std,0);
-      rem-=s.std;
-    });
-  });
-  return sessions;
-}
-
-function render(sessions){
-  tbody.innerHTML="";
-  let tot=0,std=0,ot=0;
-
-  sessions.forEach(s=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${fmtDate(s.start)}</td>
-      <td>${dayName(s.start)}</td>
-      <td>${fmtTime(s.start)}</td>
-      <td>${fmtTime(s.finish)}</td>
-      <td>${s.hours.toFixed(2)}</td>
-      <td>${s.std.toFixed(2)}</td>
-      <td>${s.ot.toFixed(2)}</td>
-      <td class="muted">—</td>`;
-    tbody.appendChild(tr);
-    tot+=s.hours; std+=s.std; ot+=s.ot;
-  });
-
-  totTotalEl.textContent=tot.toFixed(2);
-  totStdEl.textContent=std.toFixed(2);
-  totOTEl.textContent=ot.toFixed(2);
-  sumTotalEl.textContent=tot.toFixed(2);
-  sumStdEl.textContent=std.toFixed(2);
-  sumOTEl.textContent=ot.toFixed(2);
-}
+engineerName.textContent=user||"—";
 
 async function loadWeek(){
-  const mon=currentWeekMon;
-  const sun=endOfWeek(mon);
-  weekLabel.textContent=fmtDate(mon);
+  if(!user){statusEl.textContent="Not logged in.";return;}
+
+  weekLabel.textContent=friendlyDate(currentWeek);
+  sessionsEl.innerHTML="";
   statusEl.textContent="Loading…";
 
-  const all=await loadAllEvents(currentEngineer);
+  const res=await fetch(`${WORKER}/events?user=${encodeURIComponent(user)}`);
+  const all=await res.json();
+
   const weekEvents=all.filter(e=>{
     const d=new Date(e.datetime);
-    return d>=mon && d<=sun;
+    return d>=currentWeek && d<=endOfWeek(currentWeek);
   });
 
-  if(!weekEvents.length){
-    statusEl.textContent="No activity this week.";
-    render([]);
-    return;
-  }
+  const byDay={};
+  weekEvents.forEach(e=>{
+    const d=new Date(e.datetime);
+    const k=d.toISOString().slice(0,10);
+    (byDay[k]??=[]).push({...e,d});
+  });
 
-  let sessions=allocateStdOt(buildSessions(weekEvents));
-  sessions=sessions.filter(s=>s.start>=mon && s.start<=sun);
+  let total=0,std=0,ot=0;
 
+  Object.keys(byDay).sort().forEach(dayKey=>{
+    const list=byDay[dayKey].sort((a,b)=>a.d-b.d);
+    const group=document.createElement("div");
+    group.className="day-group";
+
+    group.innerHTML=`<div class="day-header">${friendlyDate(list[0].d)}</div>`;
+
+    let remainingStd=8;
+
+    for(let i=0;i<list.length-1;i++){
+      if(list[i].type==="checkin" && list[i+1].type==="checkout"){
+        const h=hours(list[i].d,list[i+1].d);
+        const s=Math.min(h,remainingStd);
+        const o=Math.max(h-s,0);
+        remainingStd-=s;
+
+        total+=h;std+=s;ot+=o;
+
+        let locHTML="";
+        if(list[i].matchedSite){
+          locHTML=`Site: ${list[i].matchedSite.siteName}`;
+        }else if(list[i].nearestSite){
+          locHTML=`Near ${list[i].nearestSite.siteName}`;
+        }else{
+          locHTML=`Unknown location`;
+        }
+
+        group.innerHTML+=`
+          <div class="session-card">
+            <div class="session-time">${time(list[i].d)} → ${time(list[i+1].d)}</div>
+            <div class="session-hours">
+              <span>Total ${h.toFixed(2)}</span>
+              <span>Std ${s.toFixed(2)}</span>
+              <span>OT ${o.toFixed(2)}</span>
+            </div>
+            <div class="location ${locHTML.includes("Unknown")?"unknown":""}">
+              ${locHTML}
+            </div>
+          </div>`;
+      }
+    }
+    sessionsEl.appendChild(group);
+  });
+
+  sumStd.textContent=std.toFixed(2)+" h";
+  sumOT.textContent=ot.toFixed(2)+" h";
+  sumTotal.textContent=total.toFixed(2)+" h";
   statusEl.textContent="";
-  render(sessions);
 }
 
-(function init(){
-  const u=sessionStorage.getItem(USER_KEY);
-  if(!u){
-    statusEl.textContent="⚠ Please return to Main Menu and log in again.";
-    return;
-  }
-
-  currentEngineer=u;
-  engineerNameEl.textContent=currentEngineer;
-  currentWeekMon=startOfWeek(new Date());
-  weekLabel.textContent=fmtDate(currentWeekMon);
-
-  window.currentWeekMon=currentWeekMon;
-  window.currentEngineer=currentEngineer;
-
-  prevWeekBtn.onclick=()=>{currentWeekMon.setDate(currentWeekMon.getDate()-7);loadWeek();};
-  nextWeekBtn.onclick=()=>{currentWeekMon.setDate(currentWeekMon.getDate()+7);loadWeek();};
-
+document.getElementById("prevWeek").onclick=()=>{
+  currentWeek.setDate(currentWeek.getDate()-7);
   loadWeek();
-})();
-</script>
+};
+document.getElementById("nextWeek").onclick=()=>{
+  currentWeek.setDate(currentWeek.getDate()+7);
+  loadWeek();
+};
 
-<!-- PDF EXPORT -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script>
-document.getElementById("exportBtn").addEventListener("click", async () => {
-  const monday=new Date(window.currentWeekMon);
-  const fn=`${window.currentEngineer} - WC ${String(monday.getDate()).padStart(2,"0")}-${String(monday.getMonth()+1).padStart(2,"0")}-${monday.getFullYear()}.pdf`;
-  document.querySelector(".controls").style.display="none";
-  const c=await html2canvas(document.querySelector(".shell"),{scale:2});
-  const p=new jspdf.jsPDF("p","mm","a4");
-  const w=p.internal.pageSize.getWidth();
-  const h=c.height*w/c.width;
-  p.addImage(c.toDataURL(),"PNG",0,0,w,h);
-  p.save(fn);
-  document.querySelector(".controls").style.display="";
-});
+loadWeek();
 </script>
 
 </body>
