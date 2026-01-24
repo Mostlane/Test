@@ -92,46 +92,320 @@
 </div>
 
 <script>
-const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+/* =========================
+   My Timesheet (pv shard model)
+   Worker: https://ckeck-in-out.jamie-def.workers.dev/
+   KV key format: pv:{Username}:{YYYY-MM}
+   Events: { type: "checkin"|"checkout", username, datetime, ... }
+   ========================= */
+
+const WORKER_BASE = "https://ckeck-in-out.jamie-def.workers.dev";
 const USERNAME_KEY = "mostlaneUsername";
 
-const loggedInEngineer = sessionStorage.getItem(USERNAME_KEY);
-if(!loggedInEngineer){
-  alert("Session expired. Please log in again.");
-  location.href = "login.html";
+const tbody = document.getElementById("tbody");
+const statusEl = document.getElementById("status");
+const weekLabel = document.getElementById("weekLabel");
+const engineerNameEl = document.getElementById("engineerName");
+
+// Totals fields
+const totTotalEl = document.getElementById("totTotal");
+const totStdEl   = document.getElementById("totStd");
+const totOTEl    = document.getElementById("totOT");
+const sumTotalEl = document.getElementById("sumTotal");
+const sumStdEl   = document.getElementById("sumStd");
+const sumOTEl    = document.getElementById("sumOT");
+
+// Buttons
+const prevWeekBtn = document.getElementById("prevWeek");
+const nextWeekBtn = document.getElementById("nextWeek");
+
+// Globals used by your PDF export script
+let currentWeekMon;
+let currentEngineer;
+
+/* -------------------------
+   Helpers
+-------------------------- */
+function pad2(n){ return String(n).padStart(2, "0"); }
+
+function yyyymm(d){
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
 }
 
-document.getElementById("engineerName").textContent = loggedInEngineer;
-let currentEngineer = loggedInEngineer;
-</script>
+function startOfWeek(date){
+  const d = new Date(date);
+  const day = d.getDay() || 7; // Sunday=7
+  d.setDate(d.getDate() - day + 1); // Monday
+  d.setHours(0,0,0,0);
+  return d;
+}
 
-<!-- ✅ ALL REMAINING LOGIC UNCHANGED -->
-<!-- (render(), collectWeekEntries(), export PDF etc still use currentEngineer) -->
+function endOfWeek(mon){
+  const d = new Date(mon);
+  d.setDate(d.getDate() + 6);
+  d.setHours(23,59,59,999);
+  return d;
+}
 
-<!-- html2canvas + jsPDF -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+function fmtDate(d){ return d.toISOString().slice(0,10); }
+function fmtTime(d){ return d.toISOString().slice(11,16); }
+function weekdayShort(d){ return d.toLocaleDateString("en-GB",{weekday:"short"}); }
 
-<script>
-document.getElementById("exportBtn").addEventListener("click", async () => {
-  const monday = new Date(currentWeekMon);
-  const dd = String(monday.getDate()).padStart(2,'0');
-  const mm = String(monday.getMonth()+1).padStart(2,'0');
-  const yyyy = monday.getFullYear();
-  const filename = `${currentEngineer} - WC ${dd}-${mm}-${yyyy}.pdf`;
+function hoursBetween(a,b){ return (b - a) / 36e5; }
 
-  const controls = document.querySelector('.controls');
-  controls.style.display = 'none';
+function keyFor(user, ym){ return `pv:${user}:${ym}`; }
 
-  const canvas = await html2canvas(document.querySelector('.shell'), {scale:2});
-  const pdf = new jspdf.jsPDF('p','mm','a4');
-  const w = pdf.internal.pageSize.getWidth();
-  const h = canvas.height * w / canvas.width;
-  pdf.addImage(canvas.toDataURL(), 'PNG', 0, 0, w, h);
-  pdf.save(filename);
+function parseMaybeJSON(x){
+  if (Array.isArray(x)) return x;
+  if (x && Array.isArray(x.data)) return x.data;
+  if (x && Array.isArray(x.items)) return x.items;
+  if (typeof x === "string"){
+    try { return JSON.parse(x); } catch(e){ return null; }
+  }
+  return null;
+}
 
-  controls.style.display = '';
-});
+/* -------------------------
+   Fetch monthly shard
+   (tries a few likely URL shapes; logs what worked)
+-------------------------- */
+async function fetchMonthEvents(user, ym){
+  const k = keyFor(user, ym);
+  const candidates = [
+    // These are "best guess" routes — your worker may implement one of them.
+    // The function will try each until it gets an Array back.
+    `${WORKER_BASE}/?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
+    `${WORKER_BASE}/pv?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
+    `${WORKER_BASE}/hours?user=${encodeURIComponent(user)}&month=${encodeURIComponent(ym)}`,
+    `${WORKER_BASE}/get?key=${encodeURIComponent(k)}`,
+    `${WORKER_BASE}/?key=${encodeURIComponent(k)}`,
+  ];
+
+  let lastErr = null;
+
+  for (const url of candidates){
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if(!res.ok) { lastErr = new Error(`HTTP ${res.status} for ${url}`); continue; }
+
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      let payload;
+
+      if (ct.includes("application/json")){
+        payload = await res.json();
+      } else {
+        payload = await res.text();
+      }
+
+      const arr = parseMaybeJSON(payload);
+      if (Array.isArray(arr)){
+        console.log("[Timesheet] Loaded shard via:", url, "items:", arr.length);
+        return arr;
+      }
+
+      lastErr = new Error(`Unexpected response shape from ${url}`);
+    } catch(e){
+      lastErr = e;
+    }
+  }
+
+  console.warn("[Timesheet] Could not load month shard", { user, ym, key: k, lastErr });
+  return null;
+}
+
+/* -------------------------
+   Build sessions from events
+   Robust pairing rules:
+   - sort by datetime
+   - latest checkin wins until a checkout appears
+   - checkout without pending checkin is ignored
+-------------------------- */
+function buildSessions(events){
+  const cleaned = (events || [])
+    .filter(e => e && e.datetime && (e.type === "checkin" || e.type === "checkout"))
+    .map(e => ({...e, d: new Date(e.datetime)}))
+    .filter(e => !isNaN(e.d));
+
+  cleaned.sort((a,b)=>a.d-b.d);
+
+  const sessions = [];
+  let pendingCheckin = null;
+
+  for (const e of cleaned){
+    if (e.type === "checkin"){
+      pendingCheckin = e; // latest wins
+    } else if (e.type === "checkout"){
+      if (pendingCheckin && e.d > pendingCheckin.d){
+        sessions.push({
+          start: pendingCheckin.d,
+          finish: e.d,
+          startEvent: pendingCheckin,
+          finishEvent: e,
+          hours: hoursBetween(pendingCheckin.d, e.d)
+        });
+        pendingCheckin = null;
+      } else {
+        // orphan checkout or invalid ordering
+      }
+    }
+  }
+
+  // Ignore trailing checkin without checkout
+  return sessions;
+}
+
+/* -------------------------
+   Allocate Std/OT per DAY (8h std cap)
+   For multi-session days:
+   - assign standard time to earliest sessions first
+-------------------------- */
+function allocateStdOtByDay(sessions){
+  const byDay = new Map(); // yyyy-mm-dd -> sessions[]
+  for (const s of sessions){
+    const dayKey = fmtDate(s.start);
+    if (!byDay.has(dayKey)) byDay.set(dayKey, []);
+    byDay.get(dayKey).push(s);
+  }
+
+  for (const [dayKey, list] of byDay.entries()){
+    list.sort((a,b)=>a.start-b.start);
+    let remainingStd = 8;
+
+    for (const s of list){
+      const std = Math.min(s.hours, Math.max(remainingStd, 0));
+      const ot  = Math.max(s.hours - std, 0);
+      s.std = std;
+      s.ot = ot;
+      remainingStd -= std;
+    }
+  }
+
+  return sessions;
+}
+
+/* -------------------------
+   Render (B = one row per session)
+-------------------------- */
+function renderSessions(sessions){
+  tbody.innerHTML = "";
+
+  let tot = 0, std = 0, ot = 0;
+
+  for (const s of sessions){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${fmtDate(s.start)}</td>
+      <td>${weekdayShort(s.start)}</td>
+      <td>${fmtTime(s.start)}</td>
+      <td>${fmtTime(s.finish)}</td>
+      <td>${s.hours.toFixed(2)}</td>
+      <td>${(s.std ?? 0).toFixed(2)}</td>
+      <td>${(s.ot ?? 0).toFixed(2)}</td>
+      <td class="muted">—</td>
+    `;
+    tbody.appendChild(tr);
+
+    tot += s.hours;
+    std += (s.std ?? 0);
+    ot  += (s.ot ?? 0);
+  }
+
+  totTotalEl.textContent = tot.toFixed(2);
+  totStdEl.textContent   = std.toFixed(2);
+  totOTEl.textContent    = ot.toFixed(2);
+
+  sumTotalEl.textContent = tot.toFixed(2);
+  sumStdEl.textContent   = std.toFixed(2);
+  sumOTEl.textContent    = ot.toFixed(2);
+}
+
+/* -------------------------
+   Load week
+-------------------------- */
+async function loadWeek(){
+  const mon = new Date(currentWeekMon);
+  const sun = endOfWeek(mon);
+
+  weekLabel.textContent = fmtDate(mon);
+  statusEl.textContent = "Loading…";
+
+  // Month shards to pull (week may span two months)
+  const months = new Set([yyyymm(mon), yyyymm(sun)]);
+  const allEvents = [];
+
+  for (const ym of months){
+    const arr = await fetchMonthEvents(currentEngineer, ym);
+    if (Array.isArray(arr)) allEvents.push(...arr);
+  }
+
+  if (!allEvents.length){
+    statusEl.textContent = "⚠ No events loaded for this week (or worker route not matching). Check Console.";
+    renderSessions([]);
+    return;
+  }
+
+  // Filter to current engineer + current week range
+  const filtered = allEvents
+    .filter(e => e && e.username === currentEngineer && e.datetime)
+    .map(e => ({...e, d:new Date(e.datetime)}))
+    .filter(e => !isNaN(e.d) && e.d >= mon && e.d <= sun);
+
+  if (!filtered.length){
+    statusEl.textContent = "ℹ No check-in/out events found in this week.";
+    renderSessions([]);
+    return;
+  }
+
+  // Build sessions & keep those that start within week
+  let sessions = buildSessions(filtered)
+    .filter(s => s.start >= mon && s.start <= sun);
+
+  if (!sessions.length){
+    statusEl.textContent = "ℹ Events found, but no valid checkin→checkout pairs this week.";
+    renderSessions([]);
+    return;
+  }
+
+  sessions = allocateStdOtByDay(sessions);
+
+  statusEl.textContent = "";
+  renderSessions(sessions);
+}
+
+/* -------------------------
+   Init
+-------------------------- */
+(function init(){
+  const u = sessionStorage.getItem(USERNAME_KEY);
+  if(!u){
+    alert("Session expired. Please log in again.");
+    location.href = "login.html";
+    return;
+  }
+
+  currentEngineer = u;
+  engineerNameEl.textContent = currentEngineer;
+
+  currentWeekMon = startOfWeek(new Date());
+
+  // expose for your PDF export script
+  window.currentWeekMon = currentWeekMon;
+  window.currentEngineer = currentEngineer;
+
+  prevWeekBtn.onclick = ()=>{
+    currentWeekMon.setDate(currentWeekMon.getDate() - 7);
+    window.currentWeekMon = currentWeekMon;
+    loadWeek();
+  };
+
+  nextWeekBtn.onclick = ()=>{
+    currentWeekMon.setDate(currentWeekMon.getDate() + 7);
+    window.currentWeekMon = currentWeekMon;
+    loadWeek();
+  };
+
+  loadWeek();
+})();
 </script>
 
 </body>
