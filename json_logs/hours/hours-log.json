@@ -7889,6 +7889,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2026-01-30T11:23:51.276Z"
+    },
+    {
+      "id": "1769772306275-ry0ta3",
+      "receivedAt": "2026-01-30T11:25:06.275Z",
+      "date": "2026-01-20",
+      "day": "Tuesday",
+      "engineer": "Chris Freeman",
+      "vehicle": "HY25 UTM",
+      "leaveHome": "06:26",
+      "arriveFirstSite": "07:38",
+      "leaveLastSite": "15:54",
+      "arriveHome": "17:03",
+      "deductLunch": true,
+      "totalHours": 10.12,
+      "standardHours": 10,
+      "overtimeHours": 0.12,
+      "travelToHours": 1.2,
+      "travelFromHours": 1.15,
+      "totalTravelHours": 2.35,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2026-01-30T11:25:06.275Z"
     }
   ]
 }
