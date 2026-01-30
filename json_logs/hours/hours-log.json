@@ -8369,6 +8369,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2026-01-30T11:34:08.371Z"
+    },
+    {
+      "id": "1769772883147-rdynix",
+      "receivedAt": "2026-01-30T11:34:43.147Z",
+      "date": "2026-01-23",
+      "day": "Friday",
+      "engineer": "David Molloy",
+      "vehicle": "LE73 UHV",
+      "leaveHome": "07:21",
+      "arriveFirstSite": "09:16",
+      "leaveLastSite": "15:11",
+      "arriveHome": "15:51",
+      "deductLunch": true,
+      "totalHours": 8,
+      "standardHours": 8,
+      "overtimeHours": null,
+      "travelToHours": 1.92,
+      "travelFromHours": 0.67,
+      "totalTravelHours": 2.59,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2026-01-30T11:34:43.147Z"
     }
   ]
 }
