@@ -1,260 +1,372 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Mostlane • Locked Timesheet</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8" />
+<title>My Timesheet – Mostlane</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
-  <style>
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      color: #1f2937;
-    }
+<!-- PDF LIBRARY -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
-    .wrap {
-      max-width: 900px;
-      margin: 24px auto;
-      background: rgba(255,255,255,0.7);
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-    }
+<style>
+:root{
+  --ml-blue:#003366;
+  --ml-accent:#1a73e8;
+  --ml-ink:#27313a;
+  --ml-bg:#e6e8eb;
+  --muted:#6b7280;
+  --border:#e5e7eb;
+  --ok:#15803d;
+  --warn:#b91c1c;
+}
 
-    h1 {
-      margin-top: 0;
-      font-size: 22px;
-    }
+html,body{margin:0;padding:0;width:100%;overflow-x:hidden;}
 
-    .day {
-      background: #fff;
-      border-radius: 10px;
-      padding: 14px;
-      margin-bottom: 14px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-    }
+body{
+  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+  background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+  background-size:180% auto;
+  padding:16px;
+  color:var(--ml-ink);
+}
 
-    .day h3 {
-      margin: 0 0 8px 0;
-      font-size: 16px;
-    }
+.shell{
+  max-width:900px;
+  margin:0 auto;
+  background:rgba(255,255,255,0.94);
+  border-radius:16px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  overflow:hidden;
+}
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-    }
+header{
+  padding:18px;
+  text-align:center;
+}
 
-    th, td {
-      padding: 8px;
-      border-bottom: 1px solid #e5e7eb;
-      text-align: left;
-    }
+header h1{
+  margin:0 0 12px 0;
+  color:var(--ml-blue);
+}
 
-    th {
-      color: #6b7280;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
+header a, header button{
+  display:block;
+  width:100%;
+  margin-top:8px;
+  padding:10px;
+  border-radius:10px;
+  font-weight:600;
+  border:none;
+}
 
-    .summary {
-      margin-top: 10px;
-      font-weight: 600;
-      font-size: 14px;
-    }
+header a{
+  background:var(--ml-accent);
+  color:#fff;
+  text-decoration:none;
+}
 
-    .muted {
-      color: #6b7280;
-      font-weight: 500;
-    }
+header button{
+  background:#003366;
+  color:#fff;
+  cursor:pointer;
+}
 
-    .total {
-      font-size: 18px;
-      font-weight: 700;
-      margin-top: 20px;
-      text-align: right;
-    }
+.content{padding:18px;}
 
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 12px;
-      font-weight: 700;
-    }
-  </style>
+.controls{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+  margin-bottom:20px;
+}
+
+.controls button,.controls .pill{
+  padding:10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background:#f8fafc;
+  font-weight:600;
+  text-align:center;
+}
+
+.day-group{margin-bottom:22px;}
+
+.day-header{
+  font-weight:700;
+  color:#111827;
+  border-bottom:2px solid #e5e7eb;
+  padding-bottom:6px;
+  margin-bottom:12px;
+}
+
+.session-card{
+  background:#fff;
+  border-radius:14px;
+  padding:14px 16px;
+  margin-bottom:12px;
+  border:1px solid #eef2f7;
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.04),
+    0 6px 16px rgba(0,0,0,0.06);
+}
+
+.session-time{
+  font-size:18px;
+  font-weight:700;
+  color:var(--ml-blue);
+}
+
+.session-hours{
+  margin-top:6px;
+  font-size:13px;
+  font-weight:600;
+}
+
+.session-hours span{margin-right:14px;}
+
+.location{
+  margin-top:8px;
+  font-size:13px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.location a{
+  color:var(--ml-accent);
+  text-decoration:none;
+  font-weight:600;
+}
+
+.verified{color:var(--ok);font-weight:700;}
+.unknown{color:var(--warn);}
+
+.summary{
+  margin-top:20px;
+  display:grid;
+  gap:10px;
+}
+
+.summary div{
+  padding:10px;
+  border-radius:12px;
+  background:#f8fafc;
+  border:1px solid var(--border);
+  font-weight:600;
+  display:flex;
+  justify-content:space-between;
+}
+
+.note{
+  margin-top:12px;
+  font-size:13px;
+  color:#6b7280;
+}
+</style>
 </head>
 
 <body>
-<div class="wrap">
-  <h1>Weekly Timesheet (Locked)</h1>
-  <div id="timesheet"></div>
-  <div class="total" id="grandTotal"></div>
+<div class="shell" id="pdfRoot">
+<header>
+  <h1>My Weekly Timesheet</h1>
+  <a href="main.html">Main Menu</a>
+  <button id="exportBtn">📄 Export PDF</button>
+</header>
+
+<div class="content">
+<div class="controls">
+  <button id="prevWeek">◀ Previous Week</button>
+  <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
+  <button id="nextWeek">Next Week ▶</button>
+  <div class="pill">Engineer: <span id="engineerName">—</span></div>
+</div>
+
+<div id="sessions"></div>
+
+<div class="summary">
+  <div><span>Standard</span><span id="sumStd">0.00 h</span></div>
+  <div><span>Overtime</span><span id="sumOT">0.00 h</span></div>
+  <div><span>Total</span><span id="sumTotal">0.00 h</span></div>
+</div>
+
+<div class="note">
+  Sessions are calculated from <b>check-in → check-out</b>.
+</div>
+
+<div id="status" class="note"></div>
+</div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-
-const WORKER_BASE = "https://mostlane-sites.jamie-def.workers.dev";
-
-/* ================= HELPERS ================= */
-
-function groupByDay(events) {
-  const out = {};
-  for (const e of events) {
-    const d = e.datetime.split("T")[0];
-    if (!out[d]) out[d] = [];
-    out[d].push(e);
-  }
-  return out;
+/* ---------- helpers ---------- */
+function ordinal(n){
+  const s=["th","st","nd","rd"],v=n%100;
+  return n+(s[(v-20)%10]||s[v]||s[0]);
 }
-
-function minutesToHM(mins) {
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
+function friendlyDate(d){
+  return d.toLocaleDateString("en-GB",{weekday:"long",month:"short"})+
+         " "+ordinal(d.getDate());
 }
-
-function diffHours(start, end) {
-  return (new Date(end) - new Date(start)) / 36e5;
+function time(d){return d.toISOString().slice(11,16);}
+function startOfWeek(d){
+  d=new Date(d);const day=d.getDay()||7;
+  d.setDate(d.getDate()-day+1);d.setHours(0,0,0,0);return d;
 }
+function endOfWeek(d){
+  d=new Date(d);d.setDate(d.getDate()+6);d.setHours(23,59,59,999);return d;
+}
+function hours(a,b){return (b-a)/36e5;}
 
-function nearestSite(lat, lon, sites) {
-  let best = null;
-  let bestDist = Infinity;
+/* ---------- config ---------- */
+const EVENTS_WORKER="https://ckeck-in-out.jamie-def.workers.dev";
+const SITES_WORKER="https://mostlane-sites.jamie-def.workers.dev";
 
-  for (const s of sites) {
-    if (!s.lat || !s.lon) continue;
-    const d =
-      Math.pow(lat - s.lat, 2) +
-      Math.pow(lon - s.lon, 2);
-    if (d < bestDist) {
-      bestDist = d;
-      best = s;
-    }
+const user=sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername");
+
+/* ---------- dom ---------- */
+const weekLabel=document.getElementById("weekLabel");
+const engineerName=document.getElementById("engineerName");
+const sessionsEl=document.getElementById("sessions");
+const sumStd=document.getElementById("sumStd");
+const sumOT=document.getElementById("sumOT");
+const sumTotal=document.getElementById("sumTotal");
+const statusEl=document.getElementById("status");
+
+engineerName.textContent=user||"—";
+
+let currentWeek=startOfWeek(new Date());
+let ALL_SITES=[];
+
+/* ---------- site matching ---------- */
+function findSite(evt){
+  if(evt.matchedSite) return evt.matchedSite;
+  if(!evt.lat||!evt.lon) return null;
+
+  let best=null,bestD=Infinity;
+  for(const s of ALL_SITES){
+    if(!s.lat||!s.lon) continue;
+    const d=(evt.lat-s.lat)**2+(evt.lon-s.lon)**2;
+    if(d<bestD){bestD=d;best=s;}
   }
   return best;
 }
 
-/* ================= LOAD DATA ================= */
+/* ---------- main ---------- */
+async function loadWeek(){
+  if(!user){statusEl.textContent="Not logged in.";return;}
 
-async function loadSites() {
-  const r = await fetch(`${WORKER_BASE}/get-sites?category=all`);
-  return await r.json();
-}
-
-// MOCK: replace with your real activity log source
-async function loadCheckEvents() {
-  return await fetch("activity-log.json").then(r => r.json());
-}
-
-/* ================= MAIN ================= */
-
-(async () => {
-  const sites = await loadSites();
-  const events = await loadCheckEvents();
-
-  // Match each event to nearest site
-  for (const e of events) {
-    if (e.lat && e.lon) {
-      e.matchedSite = nearestSite(e.lat, e.lon, sites);
-    }
+  if(!ALL_SITES.length){
+    const r=await fetch(`${SITES_WORKER}/get-sites?category=all`);
+    ALL_SITES=await r.json();
   }
 
-  const byDay = groupByDay(events);
-  const container = document.getElementById("timesheet");
+  weekLabel.textContent=friendlyDate(currentWeek);
+  sessionsEl.innerHTML="";
+  statusEl.textContent="Loading…";
 
-  let weeklyTotal = 0;
+  const res=await fetch(`${EVENTS_WORKER}/events?user=${encodeURIComponent(user)}`);
+  const all=await res.json();
 
-  Object.keys(byDay).sort().forEach(date => {
-    const dayEvents = byDay[date]
-      .sort((a,b)=>new Date(a.datetime)-new Date(b.datetime));
+  const weekEvents=all.filter(e=>{
+    const d=new Date(e.datetime);
+    return d>=currentWeek && d<=endOfWeek(currentWeek);
+  });
 
-    let dayWorked = 0;
-    let travelMinutes = 0;
+  const byDay={};
+  weekEvents.forEach(e=>{
+    const d=new Date(e.datetime);
+    const k=d.toISOString().slice(0,10);
+    (byDay[k]??=[]).push({...e,d});
+  });
 
-    for (let i = 0; i < dayEvents.length; i += 2) {
-      const checkin = dayEvents[i];
-      const checkout = dayEvents[i + 1];
-      if (!checkout) continue;
+  let total=0,std=0,ot=0;
 
-      const baseHours = diffHours(checkin.datetime, checkout.datetime);
-      dayWorked += baseHours;
+  Object.keys(byDay).sort().forEach(dayKey=>{
+    const list=byDay[dayKey].sort((a,b)=>a.d-b.d);
+    const group=document.createElement("div");
+    group.className="day-group";
+    group.innerHTML=`<div class="day-header">${friendlyDate(list[0].d)}</div>`;
 
-      const isFirst = i === 0;
-      const isLast  = i === dayEvents.length - 2;
+    let remainingStd=8;
 
-      if (
-        isFirst &&
-        checkin.matchedSite &&
-        Number.isFinite(checkin.matchedSite.travelTimeFromHQMinutes)
-      ) {
-        travelMinutes += checkin.matchedSite.travelTimeFromHQMinutes;
-      }
+    for(let i=0;i<list.length-1;i++){
+      if(list[i].type==="checkin" && list[i+1].type==="checkout"){
+        const h=hours(list[i].d,list[i+1].d);
+        const s=Math.min(h,remainingStd);
+        const o=Math.max(h-s,0);
+        remainingStd-=s;
 
-      if (
-        isLast &&
-        checkout.matchedSite &&
-        Number.isFinite(checkout.matchedSite.travelTimeFromHQMinutes)
-      ) {
-        travelMinutes += checkout.matchedSite.travelTimeFromHQMinutes;
+        total+=h;std+=s;ot+=o;
+
+        const mapURL=`https://www.google.com/maps?q=${list[i].lat},${list[i].lon}`;
+
+        let locationHTML=list[i].matchedSite
+          ? `📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`
+          : list[i].nearestSite
+            ? `📍 Near ${list[i].nearestSite.siteName}`
+            : `📍 <span class="unknown">Unknown location</span>`;
+
+        group.innerHTML+=`
+          <div class="session-card">
+            <div class="session-time">${time(list[i].d)} → ${time(list[i+1].d)}</div>
+            <div class="session-hours">
+              <span>Total ${h.toFixed(2)}</span>
+              <span>Std ${s.toFixed(2)}</span>
+              <span>OT ${o.toFixed(2)}</span>
+            </div>
+            <div class="location">${locationHTML}</div>
+            <div class="location"><a href="${mapURL}" target="_blank">View on map</a></div>
+          </div>`;
       }
     }
 
-    const travelHours = travelMinutes / 60;
-    const dayTotal = dayWorked + travelHours;
-    weeklyTotal += dayTotal;
+    /* ----- travel time (first + last) ----- */
+    let travelMin=0;
+    const first=findSite(list[0]);
+    const last=findSite(list[list.length-1]);
 
-    /* ===== RENDER DAY ===== */
+    if(first?.travelTimeFromHQMinutes) travelMin+=first.travelTimeFromHQMinutes;
+    if(last?.travelTimeFromHQMinutes && last!==first) travelMin+=last.travelTimeFromHQMinutes;
 
-    const div = document.createElement("div");
-    div.className = "day";
+    if(travelMin){
+      const h=travelMin/60;
+      total+=h;std+=h;
 
-    div.innerHTML = `
-      <h3>${date}</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Time</th>
-            <th>Site</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${dayEvents.map(e=>`
-            <tr>
-              <td>${e.type}</td>
-              <td>${new Date(e.datetime).toLocaleTimeString()}</td>
-              <td>
-                ${e.matchedSite
-                  ? `<span class="badge">${e.matchedSite.siteName}</span>`
-                  : `<span class="muted">Unknown</span>`}
-              </td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
+      group.innerHTML+=`
+        <div class="session-card">
+          <div class="session-time">🚗 Travel Time</div>
+          <div class="session-hours">
+            <span>${travelMin} min (${h.toFixed(2)} h)</span>
+          </div>
+        </div>`;
+    }
 
-      <div class="summary">
-        Worked: ${dayWorked.toFixed(2)}h<br>
-        Travel: ${travelMinutes
-          ? minutesToHM(travelMinutes)
-          : "0h"}<br>
-        <strong>Total: ${dayTotal.toFixed(2)}h</strong>
-      </div>
-    `;
-
-    container.appendChild(div);
+    sessionsEl.appendChild(group);
   });
 
-  document.getElementById("grandTotal").textContent =
-    `Weekly Total: ${weeklyTotal.toFixed(2)} hours`;
-})();
+  sumStd.textContent=std.toFixed(2)+" h";
+  sumOT.textContent=ot.toFixed(2)+" h";
+  sumTotal.textContent=total.toFixed(2)+" h";
+  statusEl.textContent="";
+}
+
+document.getElementById("prevWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()-7);loadWeek();};
+document.getElementById("nextWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()+7);loadWeek();};
+
+/* ---------- PDF ---------- */
+document.getElementById("exportBtn").onclick=()=>{
+  const wc=friendlyDate(currentWeek).replace(/\s+/g,"_");
+  html2pdf().set({
+    margin:10,
+    filename:`Timesheet_${user||"Engineer"}_${wc}.pdf`,
+    image:{type:"jpeg",quality:0.98},
+    html2canvas:{scale:2,useCORS:true},
+    jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}
+  }).from(document.getElementById("pdfRoot")).save();
+};
+
+loadWeek();
 </script>
+
 </body>
 </html>
