@@ -1,75 +1,288 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Projects</title>
-
-  <!-- Keep portal security -->
   <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Projects – Mostlane</title>
 
   <style>
-    body {
-      margin: 0;
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center;
-      background-size: cover;
+    body{
+      margin:0;
+      font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:cover;
+      color:#1f2937;
     }
 
-    .bar {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      background: rgba(255,255,255,0.85);
-      backdrop-filter: blur(6px);
-      padding: 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    .topbar{
+      position:sticky; top:0; z-index:10;
+      background:rgba(255,255,255,.75);
+      backdrop-filter:blur(6px);
+      box-shadow:0 2px 10px rgba(0,0,0,.08);
+      padding:10px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
     }
 
-    .btn {
-      background: #003468;
-      color: white;
-      border-radius: 8px;
-      padding: 8px 12px;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 14px;
+    .btn{
+      border:none;
+      border-radius:8px;
+      padding:10px 14px;
+      font-size:14px;
+      cursor:pointer;
     }
 
-    .title {
-      font-weight: 600;
-      color: #003468;
+    .btn-outline{
+      background:#fff;
+      border:1px solid #004a99;
+      color:#004a99;
     }
 
-    .hint {
-      padding: 16px;
-      color: #374151;
-      font-size: 14px;
+    .wrap{
+      max-width:1100px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.70);
+      border-radius:12px;
     }
+
+    .grid{
+      display:grid;
+      grid-template-columns:320px 1fr;
+      gap:14px;
+    }
+
+    @media (max-width:900px){
+      .grid{ grid-template-columns:1fr; }
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:12px;
+    }
+
+    .project-row{
+      padding:10px;
+      border:1px solid #e5e7eb;
+      border-radius:10px;
+      margin-top:8px;
+      cursor:pointer;
+      background:#fff;
+    }
+
+    .project-row:hover{
+      background:#f8fafc;
+    }
+
+    .muted{
+      color:#6b7280;
+      font-size:12px;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+    }
+
+    th,td{
+      padding:10px;
+      border-bottom:1px solid #e5e7eb;
+      text-align:left;
+      font-size:14px;
+    }
+
+    th{
+      text-transform:uppercase;
+      font-size:12px;
+      color:#374151;
+      letter-spacing:.04em;
+    }
+
+    .actions button{
+      background:#fff;
+      border:1px solid #004a99;
+      color:#004a99;
+      border-radius:6px;
+      padding:6px 10px;
+      cursor:pointer;
+      font-size:13px;
+    }
+
+    .mask{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:rgba(255,255,255,.55);
+      backdrop-filter:blur(2px);
+      z-index:50;
+    }
+
+    .mask.show{ display:flex; }
+
+    .spinner{
+      width:46px;
+      height:46px;
+      border-radius:50%;
+      border:4px solid #c7d2fe;
+      border-top-color:#004a99;
+      animation:spin 1s linear infinite;
+    }
+
+    @keyframes spin{ to{ transform:rotate(360deg); } }
   </style>
-
-  <script>
-    const SHAREPOINT_URL =
-      "https://mostlane.sharepoint.com/:f:/g/IgDmk-lHVlZNSaIVFhloFRqEAdKOjvt0RubPz0D-Efs47Ng?e=ksaZk6";
-
-    // Delay ensures Safari paints before app handoff
-    setTimeout(() => {
-      window.location.href = SHAREPOINT_URL;
-    }, 300);
-  </script>
 </head>
 
 <body>
-  <div class="bar">
-    <a class="btn" href="main.html">⬅ Back</a>
-    <div class="title">📁 Projects</div>
-  </div>
 
-  <div class="hint">
-    Opening project documents…
+<div class="topbar">
+  <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+  <strong style="color:#004a99">Projects</strong>
+</div>
+
+<div class="wrap">
+  <div class="grid">
+
+    <!-- PROJECT LIST -->
+    <div class="card">
+      <strong>Active Projects</strong>
+      <div class="muted">Select a project to view documents</div>
+      <div id="projectsList" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- FILES -->
+    <div class="card">
+      <strong id="projTitle">Select a project</strong>
+      <div class="muted" id="projMeta"></div>
+
+      <table style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Details</th>
+            <th style="width:120px;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="filesBody">
+          <tr>
+            <td colspan="3" class="muted">No project selected.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
   </div>
+</div>
+
+<div class="mask" id="mask"><div class="spinner"></div></div>
+
+<script>
+  const API = "https://projects-ml-portal.jamie-def.workers.dev";
+  const CURRENT = sessionStorage.getItem("mostlaneUser") || "";
+
+  const mask = document.getElementById("mask");
+  const projectsList = document.getElementById("projectsList");
+  const filesBody = document.getElementById("filesBody");
+  const projTitle = document.getElementById("projTitle");
+  const projMeta = document.getElementById("projMeta");
+
+  function showMask(on){ mask.classList.toggle("show", !!on); }
+
+  async function apiGet(path){
+    const res = await fetch(API + path, {
+      headers:{ "Authorization":"Bearer " + CURRENT }
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+  }
+
+  async function loadProjects(){
+    showMask(true);
+    try{
+      const data = await apiGet("/projects");
+      const projects = (data.projects || []).filter(p => p.status !== "archived");
+
+      projectsList.innerHTML = "";
+
+      if(!projects.length){
+        projectsList.innerHTML = `<div class="muted">No active projects.</div>`;
+        return;
+      }
+
+      projects.forEach(p=>{
+        const div = document.createElement("div");
+        div.className = "project-row";
+        div.innerHTML = `
+          <strong>${p.name || p.id}</strong>
+          <div class="muted">${p.client || ""} ${p.storeNumber ? "· #" + p.storeNumber : ""}</div>
+        `;
+        div.onclick = ()=>selectProject(p.id);
+        projectsList.appendChild(div);
+      });
+
+    }catch(e){
+      console.error(e);
+      projectsList.innerHTML = `<div class="muted">Failed to load projects.</div>`;
+    }finally{
+      showMask(false);
+    }
+  }
+
+  async function selectProject(projectId){
+    showMask(true);
+    try{
+      const data = await apiGet(`/projects/${encodeURIComponent(projectId)}/files`);
+      const project = data.project;
+      const files = (data.files || []).filter(f => !f.hidden);
+
+      projTitle.textContent = project.name || project.id;
+      projMeta.textContent = `Updated: ${project.updatedAt || project.createdAt || ""}`;
+
+      filesBody.innerHTML = "";
+
+      if(!files.length){
+        filesBody.innerHTML = `<tr><td colspan="3" class="muted">No visible files.</td></tr>`;
+        return;
+      }
+
+      files.forEach(f=>{
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>
+            <strong>${f.name}</strong>
+            <div class="muted">${f.title || ""}</div>
+          </td>
+          <td class="muted">
+            ${f.category || ""}<br>
+            ${f.uploadedBy || ""} · ${f.uploadedAt || ""}
+          </td>
+          <td class="actions">
+            <button onclick="window.open('${API}/download/${encodeURIComponent(f.id)}','_blank')">
+              ⬇ Download
+            </button>
+          </td>
+        `;
+
+        filesBody.appendChild(tr);
+      });
+
+    }catch(e){
+      console.error(e);
+      filesBody.innerHTML = `<tr><td colspan="3" class="muted">Failed to load files.</td></tr>`;
+    }finally{
+      showMask(false);
+    }
+  }
+
+  loadProjects();
+</script>
+
 </body>
 </html>
