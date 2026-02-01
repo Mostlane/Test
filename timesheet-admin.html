@@ -10,24 +10,21 @@
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
   --ml-bg:#e6e8eb;
-  --ink:#27313a;
   --border:#e5e7eb;
-  --ok:#15803d;
-  --warn:#b91c1c;
 }
 
-html,body{margin:0;padding:0;background:var(--ml-bg);font-family:"Segoe UI",system-ui,Arial;}
-
 body{
+  margin:0;
+  padding:16px;
+  font-family:"Segoe UI",system-ui,Arial;
   background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
-  padding:16px;
 }
 
 .shell{
   max-width:900px;
-  margin:0 auto;
-  background:rgba(255,255,255,0.96);
+  margin:auto;
+  background:rgba(255,255,255,.96);
   border-radius:16px;
   box-shadow:0 12px 28px rgba(0,0,0,.12);
   overflow:hidden;
@@ -55,14 +52,8 @@ header a{
 
 .content{padding:18px;}
 
-.controls{
-  display:grid;
-  gap:10px;
-  margin-bottom:16px;
-}
-
-.controls select,
-.controls button{
+select,button{
+  width:100%;
   padding:12px;
   border-radius:12px;
   border:1px solid var(--border);
@@ -79,20 +70,19 @@ button{
   display:grid;
   grid-template-columns:1fr auto 1fr;
   gap:10px;
+  margin:10px 0;
 }
 
-.day-card{
+.day{
   background:#fff;
   border:1px solid #eef2f7;
   border-radius:14px;
   padding:14px;
-  margin-bottom:14px;
+  margin-bottom:12px;
 }
 
-.day-title{
-  font-weight:800;
-  color:#111827;
-  margin-bottom:8px;
+.day h3{
+  margin:0 0 6px;
 }
 
 .kv{
@@ -102,30 +92,7 @@ button{
   font-size:14px;
 }
 
-.kv span{
-  min-width:140px;
-}
-
-.badge{
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:800;
-}
-
-.badge.ok{background:#ecfdf3;color:var(--ok);}
-.badge.warn{background:#fef2f2;color:var(--warn);}
-
-.summary{
-  background:#f8fafc;
-  border:1px solid var(--border);
-  border-radius:14px;
-  padding:14px;
-  margin-top:16px;
-}
-
 .note{
-  margin-top:10px;
   font-size:13px;
   color:#6b7280;
 }
@@ -141,17 +108,15 @@ button{
 
 <div class="content">
 
-  <div class="controls">
-    <select id="userSelect"></select>
+  <select id="userSelect"></select>
 
-    <div class="week-nav">
-      <button id="prevWeek">◀</button>
-      <div id="weekLabel" style="text-align:center;font-weight:800;">—</div>
-      <button id="nextWeek">▶</button>
-    </div>
-
-    <button id="loadBtn">Load Timesheet</button>
+  <div class="week-nav">
+    <button id="prevWeek">◀</button>
+    <div id="weekLabel" style="text-align:center;font-weight:800;"></div>
+    <button id="nextWeek">▶</button>
   </div>
+
+  <button id="loadBtn">Load Timesheet</button>
 
   <div id="output"></div>
   <div id="status" class="note"></div>
@@ -160,15 +125,11 @@ button{
 </div>
 
 <script>
-const WORKER = "https://ckeck-in-out.jamie-def.workers.dev";
+/* ================= CONFIG ================= */
+const TIMESHEET_WORKER = "https://timesheet-admin.jamie-def.workers.dev";
+const USERS_WORKER     = "https://mostlane-users.jamie-def.workers.dev";
 
-const output = document.getElementById("output");
-const statusEl = document.getElementById("status");
-const weekLabel = document.getElementById("weekLabel");
-const userSelect = document.getElementById("userSelect");
-
-let currentWeekStart = startOfWeek(new Date());
-
+/* ================= HELPERS ================= */
 function startOfWeek(d){
   d=new Date(d);
   const day=d.getDay()||7;
@@ -176,117 +137,122 @@ function startOfWeek(d){
   d.setHours(0,0,0,0);
   return d;
 }
-
 function endOfWeek(d){
   const x=new Date(d);
   x.setDate(x.getDate()+6);
   x.setHours(23,59,59,999);
   return x;
 }
-
 function iso(d){return d.toISOString().slice(0,10);}
-
-function niceDate(d){
+function nice(d){
   return d.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"short"});
 }
 
+/* ================= STATE ================= */
+let weekStart = startOfWeek(new Date());
+
+const userSelect = document.getElementById("userSelect");
+const output = document.getElementById("output");
+const statusEl = document.getElementById("status");
+const weekLabel = document.getElementById("weekLabel");
+
+/* ================= LOAD USERS ================= */
 async function loadUsers(){
-  // simple static list for now (same as your system behaviour)
-  const me = sessionStorage.getItem("mostlaneUser");
-  userSelect.innerHTML = `<option>${me}</option>`;
+  const r = await fetch(`${USERS_WORKER}/users`);
+  const j = await r.json();
+
+  const users = (j.Users || [])
+    .filter(u => (u.Status || "Active") === "Active")
+    .map(u => u.Username)
+    .sort();
+
+  userSelect.innerHTML = users.map(u=>`<option>${u}</option>`).join("");
 }
 
+/* ================= LOAD WEEK ================= */
 async function loadWeek(){
   const user = userSelect.value;
   if(!user) return;
 
-  const year = currentWeekStart.getFullYear();
-  const month = String(currentWeekStart.getMonth()+1).padStart(2,"0");
+  const year = weekStart.getFullYear();
+  const month = String(weekStart.getMonth()+1).padStart(2,"0");
 
   weekLabel.textContent =
-    niceDate(currentWeekStart) + " → " + niceDate(endOfWeek(currentWeekStart));
+    `${nice(weekStart)} → ${nice(endOfWeek(weekStart))}`;
 
-  output.innerHTML = "";
-  statusEl.textContent = "Loading…";
+  output.innerHTML="";
+  statusEl.textContent="Loading…";
 
-  try{
-    const res = await fetch(
-      `${WORKER}/admin/timesheet?user=${encodeURIComponent(user)}&year=${year}&month=${month}`
-    );
-    const data = await res.json();
+  const r = await fetch(
+    `${TIMESHEET_WORKER}/admin/timesheet?user=${encodeURIComponent(user)}&year=${year}&month=${month}`
+  );
+  const j = await r.json();
 
-    if(!data.days || !data.days.length){
-      statusEl.textContent = "No check-ins or check-outs recorded for this user in this period.";
-      return;
-    }
+  if(!j.days || !j.days.length){
+    statusEl.textContent="No check-ins or check-outs recorded.";
+    return;
+  }
 
-    const weekDays = data.days.filter(d=>{
-      const x=new Date(d.date+"T00:00:00");
-      return x>=currentWeekStart && x<=endOfWeek(currentWeekStart);
-    });
+  const weekDays = j.days.filter(d=>{
+    const x=new Date(d.date+"T00:00:00");
+    return x>=weekStart && x<=endOfWeek(weekStart);
+  });
 
-    if(!weekDays.length){
-      statusEl.textContent = "No check-ins or check-outs recorded for this week.";
-      return;
-    }
+  if(!weekDays.length){
+    statusEl.textContent="No check-ins or check-outs recorded for this week.";
+    return;
+  }
 
-    let totOn=0, totTrav=0, totFuel=0;
+  let totOn=0, totTrav=0, totFuel=0;
 
-    weekDays.forEach(d=>{
-      totOn+=d.onsiteHours;
-      totTrav+=d.travelHours;
-      totFuel+=d.fuelMiles;
+  weekDays.forEach(d=>{
+    totOn+=d.onsiteHours;
+    totTrav+=d.travelHours;
+    totFuel+=d.fuelMiles;
 
-      output.innerHTML += `
-        <div class="day-card">
-          <div class="day-title">${niceDate(new Date(d.date+"T00:00:00"))}</div>
-          <div class="kv">
-            <span><b>On-site:</b> ${d.onsiteHours.toFixed(2)} h</span>
-            <span><b>Travel:</b> ${d.travelHours.toFixed(2)} h</span>
-            <span><b>Fuel:</b> ${d.fuelMiles.toFixed(1)} mi</span>
-            <span class="badge ok">✔ Processed</span>
-          </div>
-          <div class="kv">
-            <span><b>First site:</b> ${d.firstSite||"—"}</span>
-            <span><b>Last site:</b> ${d.lastSite||"—"}</span>
-          </div>
-        </div>
-      `;
-    });
-
-    output.innerHTML += `
-      <div class="summary">
+    output.innerHTML+=`
+      <div class="day">
+        <h3>${nice(new Date(d.date+"T00:00:00"))}</h3>
         <div class="kv">
-          <span><b>Total on-site:</b> ${totOn.toFixed(2)} h</span>
-          <span><b>Total travel:</b> ${totTrav.toFixed(2)} h</span>
-          <span><b>Total fuel:</b> ${totFuel.toFixed(1)} mi</span>
+          <span><b>On-site:</b> ${d.onsiteHours.toFixed(2)} h</span>
+          <span><b>Travel:</b> ${d.travelHours.toFixed(2)} h</span>
+          <span><b>Fuel:</b> ${d.fuelMiles.toFixed(1)} mi</span>
         </div>
-        <div class="note">
-          Travel is paid at standard rate and does not count toward the 10-hour overtime threshold.
+        <div class="kv">
+          <span><b>First site:</b> ${d.firstSite||"—"}</span>
+          <span><b>Last site:</b> ${d.lastSite||"—"}</span>
         </div>
       </div>
     `;
+  });
 
-    statusEl.textContent = "Ready";
+  output.innerHTML+=`
+    <div class="day">
+      <h3>Week totals</h3>
+      <div class="kv">
+        <span><b>On-site:</b> ${totOn.toFixed(2)} h</span>
+        <span><b>Travel:</b> ${totTrav.toFixed(2)} h</span>
+        <span><b>Fuel:</b> ${totFuel.toFixed(1)} mi</span>
+      </div>
+      <div class="note">
+        Travel is paid at standard rate and does not count toward the 10-hour overtime threshold.
+      </div>
+    </div>
+  `;
 
-  }catch(e){
-    statusEl.textContent = "Unable to load data.";
-    console.error(e);
-  }
+  statusEl.textContent="Ready";
 }
 
-document.getElementById("prevWeek").onclick=()=>{
-  currentWeekStart.setDate(currentWeekStart.getDate()-7);
-  loadWeek();
-};
-document.getElementById("nextWeek").onclick=()=>{
-  currentWeekStart.setDate(currentWeekStart.getDate()+7);
-  loadWeek();
-};
+/* ================= EVENTS ================= */
+document.getElementById("prevWeek").onclick=()=>{weekStart.setDate(weekStart.getDate()-7);loadWeek();};
+document.getElementById("nextWeek").onclick=()=>{weekStart.setDate(weekStart.getDate()+7);loadWeek();};
 document.getElementById("loadBtn").onclick=loadWeek;
 
-loadUsers();
-loadWeek();
+/* ================= INIT ================= */
+(async()=>{
+  await loadUsers();
+  loadWeek();
+})();
 </script>
 </body>
 </html>
