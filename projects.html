@@ -16,214 +16,180 @@
     }
     .topbar{
       position:sticky; top:0; z-index:10;
-      background:rgba(255,255,255,.75); backdrop-filter:blur(6px);
+      background:rgba(255,255,255,.75);
+      backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      display:flex; justify-content:space-between;
     }
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .btn{border:none;border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
     .wrap{
-      max-width:1100px;margin:16px auto 70px;padding:14px;
-      background:rgba(255,255,255,.70);border-radius:12px;
+      max-width:1100px;margin:16px auto;padding:14px;
+      background:rgba(255,255,255,.7);border-radius:12px;
     }
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    @media (max-width:900px){.grid{grid-template-columns:1fr}}
-    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;font-size:14px;width:100%}
-    .muted{color:#6b7280;font-size:12px}
-    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
-    .proj-row{
-      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
-      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
-      cursor:pointer; background:#fff;
-    }
-    .proj-row:hover{border-color:#bfd3f2}
-    .file-row{
-      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
-      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
-      background:#fff;
+    .grid{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .card{background:#fff;border-radius:12px;padding:12px}
+    .proj-row,.file-row{
+      border:1px solid #e5e7eb;border-radius:12px;padding:10px;margin-top:10px;
+      display:flex;justify-content:space-between;gap:10px;cursor:pointer;
     }
     .file-name{font-weight:600}
-    .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);backdrop-filter:blur(2px);z-index:50}
+    .file-meta{font-size:12px;color:#6b7280}
+    .actions{display:flex;gap:8px}
+    .mask{
+      position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.45);z-index:50;
+    }
     .mask.show{display:flex}
-    .spinner{width:46px;height:46px;border-radius:50%;border:4px solid #c7d2fe;border-top-color:#004a99;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .banner{display:none;margin:12px 0;padding:10px 12px;border-radius:12px}
-    .banner.show{display:block}
-    .banner.ok{background:#e9f7ef;border:1px solid #c8e6c9;color:#1b5e20}
-    .banner.err{background:#fee2e2;border:1px solid #fecaca;color:#7f1d1d}
+
+    /* 🔥 MODAL */
+    .modal{
+      background:#fff;border-radius:14px;
+      width:min(95vw,900px);height:min(90vh,800px);
+      display:flex;flex-direction:column;
+      overflow:hidden;
+    }
+    .modal-header{
+      padding:10px 14px;
+      display:flex;justify-content:space-between;align-items:center;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .modal-body{
+      flex:1;overflow:auto;background:#f9fafb;
+    }
+    .modal-body iframe,
+    .modal-body img{
+      width:100%;height:100%;border:none;
+    }
   </style>
 </head>
+
 <body>
 
 <div class="topbar">
-  <div class="row">
-    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-    <strong style="color:#004a99">Projects</strong>
-  </div>
-  <div class="row">
-    <button class="btn btn-outline" id="reloadBtn">⟲ Reload</button>
-  </div>
+  <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+  <strong style="color:#004a99">Projects</strong>
 </div>
 
 <div class="wrap">
-  <div class="banner" id="banner"></div>
-
   <div class="grid">
     <div class="card">
-      <strong>Project list</strong>
-      <div class="muted">Only active projects are shown.</div>
-      <input class="input" id="search" placeholder="Search projects…" style="margin-top:10px">
-      <div id="projectsList" style="margin-top:10px;"></div>
+      <strong>Projects</strong>
+      <div id="projectsList"></div>
     </div>
 
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <strong id="selTitle">Select a project</strong>
-          <div class="muted" id="selMeta"></div>
-        </div>
-        <button class="btn btn-primary" id="downloadAllBtn" style="display:none">⬇ Download all</button>
-      </div>
-      <div id="filesList" style="margin-top:10px;"></div>
+      <strong id="selTitle">Select a project</strong>
+      <div id="filesList"></div>
     </div>
   </div>
 </div>
 
-<div class="mask" id="mask"><div class="spinner"></div></div>
+<!-- 🔥 FILE VIEW MODAL -->
+<div class="mask" id="viewerMask">
+  <div class="modal">
+    <div class="modal-header">
+      <strong id="viewerTitle">Viewing file</strong>
+      <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
+    </div>
+    <div class="modal-body" id="viewerBody"></div>
+  </div>
+</div>
 
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
-const CURRENT = sessionStorage.getItem("mostlaneUser");
-if(!CURRENT) location.href="login.html";
+const USER = sessionStorage.getItem("mostlaneUser");
+if(!USER) location.href="login.html";
 
-const mask = document.getElementById("mask");
 const projectsList = document.getElementById("projectsList");
 const filesList = document.getElementById("filesList");
 const selTitle = document.getElementById("selTitle");
-const selMeta = document.getElementById("selMeta");
-const search = document.getElementById("search");
-const downloadAllBtn = document.getElementById("downloadAllBtn");
 
-let ALL_PROJECTS = [];
-let CURRENT_FILES = [];
-let SELECTED = null;
+const viewerMask = document.getElementById("viewerMask");
+const viewerBody = document.getElementById("viewerBody");
+const viewerTitle = document.getElementById("viewerTitle");
 
-function showMask(v){ mask.classList.toggle("show",!!v); }
-
-async function apiGet(p){
-  const r = await fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}});
-  const j = await r.json();
-  if(!r.ok) throw new Error(j.error||"Error");
-  return j;
+function apiGet(path){
+  return fetch(API+path,{
+    headers:{Authorization:"Bearer "+USER},
+    cache:"no-store"
+  }).then(r=>r.json().then(j=>{
+    if(!r.ok) throw new Error(j.error||"Error");
+    return j;
+  }));
 }
 
-function renderProjects(list){
-  projectsList.innerHTML = list.length ? "" : `<div class="muted">No projects</div>`;
-  list.forEach(p=>{
-    const d=document.createElement("div");
-    d.className="proj-row";
-    d.innerHTML=`
-      <div>
-        <div style="font-weight:700">${p.name}</div>
-        <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
+function openViewer(file){
+  viewerTitle.textContent = file.title || file.name;
+  viewerBody.innerHTML = "";
+
+  const ext = (file.name||"").toLowerCase();
+
+  if(ext.endsWith(".pdf")){
+    viewerBody.innerHTML =
+      `<iframe src="${API}/download/${file.id}?inline=1"></iframe>`;
+  }
+  else if(ext.match(/\.(png|jpg|jpeg|webp|gif)$/)){
+    viewerBody.innerHTML =
+      `<img src="${API}/download/${file.id}?inline=1">`;
+  }
+  else{
+    viewerBody.innerHTML = `
+      <div style="padding:20px">
+        <p>This file type can’t be previewed.</p>
+        <a class="btn btn-primary" href="${API}/download/${file.id}">⬇ Download</a>
       </div>
-      <span class="pill">Open</span>
     `;
-    d.onclick=()=>selectProject(p.id);
-    projectsList.appendChild(d);
-  });
-}
-
-function renderFiles(files){
-  filesList.innerHTML="";
-  CURRENT_FILES = files;
-  downloadAllBtn.style.display = files.length ? "inline-block" : "none";
-
-  if(!files.length){
-    filesList.innerHTML=`<div class="muted">No files</div>`;
-    return;
   }
 
-  files.forEach(f=>{
+  viewerMask.classList.add("show");
+}
+
+function closeViewer(){
+  viewerMask.classList.remove("show");
+  viewerBody.innerHTML="";
+}
+
+async function loadProjects(){
+  const d = await apiGet("/projects");
+  projectsList.innerHTML="";
+  d.projects.forEach(p=>{
     const r=document.createElement("div");
-    r.className="file-row";
-    r.innerHTML=`
-      <div style="flex:1">
-        <div class="file-name">${f.title||f.name}</div>
-        <div class="file-meta">${f.category||""} ${f.uploadedAt||""}</div>
-        <div class="file-meta">${f.name}</div>
-      </div>
-      <div class="actions">
-        <button class="btn btn-primary">👁 View</button>
-        <button class="btn btn-outline">⬇ Download</button>
-      </div>
-    `;
-
-    // 👁 VIEW (opens file, passes username)
-    r.querySelector(".btn-primary").onclick = () =>
-      window.open(
-        `${API}/view/${encodeURIComponent(f.id)}?u=${encodeURIComponent(CURRENT)}`,
-        "_blank"
-      );
-
-    // ⬇ DOWNLOAD
-    r.querySelector(".btn-outline").onclick = () =>
-      window.open(
-        `${API}/download/${encodeURIComponent(f.id)}`,
-        "_blank"
-      );
-
-    filesList.appendChild(r);
+    r.className="proj-row";
+    r.innerHTML=`<div><strong>${p.name}</strong><div class="file-meta">${p.client||""}</div></div>`;
+    r.onclick=()=>selectProject(p.id);
+    projectsList.appendChild(r);
   });
 }
 
 async function selectProject(id){
-  showMask(true);
-  try{
-    const d=await apiGet(`/projects/${encodeURIComponent(id)}/files`);
-    SELECTED=d.project;
-    selTitle.textContent=SELECTED.name;
-    selMeta.textContent=`Updated: ${SELECTED.updatedAt||""}`;
-    renderFiles(d.files||[]);
-  }catch(e){ alert(e.message); }
-  finally{ showMask(false); }
-}
+  const d = await apiGet(`/projects/${id}/files`);
+  selTitle.textContent=d.project.name;
+  filesList.innerHTML="";
 
-downloadAllBtn.onclick=()=>{
-  CURRENT_FILES.forEach((f,i)=>{
-    setTimeout(()=>{
-      window.open(`${API}/download/${encodeURIComponent(f.id)}`,"_blank");
-    }, i*350);
+  d.files.forEach(f=>{
+    const r=document.createElement("div");
+    r.className="file-row";
+    r.innerHTML=`
+      <div>
+        <div class="file-name">${f.title||f.name}</div>
+        <div class="file-meta">${f.name}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary">👁 View</button>
+        <button class="btn btn-outline">⬇</button>
+      </div>
+    `;
+    r.querySelector(".btn-primary").onclick=()=>openViewer(f);
+    r.querySelector(".btn-outline").onclick=()=>window.open(`${API}/download/${f.id}`);
+    filesList.appendChild(r);
   });
-};
-
-async function load(){
-  showMask(true);
-  try{
-    const d=await apiGet("/projects");
-    ALL_PROJECTS=d.projects||[];
-    renderProjects(ALL_PROJECTS);
-  }catch(e){ alert(e.message); }
-  finally{ showMask(false); }
 }
 
-search.oninput=()=>{
-  const q=search.value.toLowerCase();
-  renderProjects(
-    ALL_PROJECTS.filter(p =>
-      `${p.name} ${p.storeNumber||""} ${p.client||""}`.toLowerCase().includes(q)
-    )
-  );
-};
-
-document.getElementById("reloadBtn").onclick=load;
-load();
+loadProjects();
 </script>
 
 </body>
