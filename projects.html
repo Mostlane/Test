@@ -103,7 +103,6 @@ const CURRENT = sessionStorage.getItem("mostlaneUser");
 if(!CURRENT) location.href="login.html";
 
 const mask = document.getElementById("mask");
-const banner = document.getElementById("banner");
 const projectsList = document.getElementById("projectsList");
 const filesList = document.getElementById("filesList");
 const selTitle = document.getElementById("selTitle");
@@ -116,9 +115,12 @@ let CURRENT_FILES = [];
 let SELECTED = null;
 
 function showMask(v){ mask.classList.toggle("show",!!v); }
-function apiGet(p){
-  return fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}})
-    .then(r=>r.json().then(j=>{if(!r.ok) throw new Error(j.error||"Error"); return j;}));
+
+async function apiGet(p){
+  const r = await fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}});
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error||"Error");
+  return j;
 }
 
 function renderProjects(list){
@@ -162,8 +164,21 @@ function renderFiles(files){
         <button class="btn btn-outline">⬇ Download</button>
       </div>
     `;
-    r.querySelector(".btn-primary").onclick=()=>window.open(`${API}/view/${f.id}`,"_blank");
-    r.querySelector(".btn-outline").onclick=()=>window.open(`${API}/download/${f.id}`,"_blank");
+
+    // 👁 VIEW (opens file, passes username)
+    r.querySelector(".btn-primary").onclick = () =>
+      window.open(
+        `${API}/view/${encodeURIComponent(f.id)}?u=${encodeURIComponent(CURRENT)}`,
+        "_blank"
+      );
+
+    // ⬇ DOWNLOAD
+    r.querySelector(".btn-outline").onclick = () =>
+      window.open(
+        `${API}/download/${encodeURIComponent(f.id)}`,
+        "_blank"
+      );
+
     filesList.appendChild(r);
   });
 }
@@ -171,7 +186,7 @@ function renderFiles(files){
 async function selectProject(id){
   showMask(true);
   try{
-    const d=await apiGet(`/projects/${id}/files`);
+    const d=await apiGet(`/projects/${encodeURIComponent(id)}/files`);
     SELECTED=d.project;
     selTitle.textContent=SELECTED.name;
     selMeta.textContent=`Updated: ${SELECTED.updatedAt||""}`;
@@ -182,7 +197,9 @@ async function selectProject(id){
 
 downloadAllBtn.onclick=()=>{
   CURRENT_FILES.forEach((f,i)=>{
-    setTimeout(()=>window.open(`${API}/download/${f.id}`,"_blank"),i*300);
+    setTimeout(()=>{
+      window.open(`${API}/download/${encodeURIComponent(f.id)}`,"_blank");
+    }, i*350);
   });
 };
 
@@ -198,9 +215,11 @@ async function load(){
 
 search.oninput=()=>{
   const q=search.value.toLowerCase();
-  renderProjects(ALL_PROJECTS.filter(p=>
-    `${p.name} ${p.storeNumber||""} ${p.client||""}`.toLowerCase().includes(q)
-  ));
+  renderProjects(
+    ALL_PROJECTS.filter(p =>
+      `${p.name} ${p.storeNumber||""} ${p.client||""}`.toLowerCase().includes(q)
+    )
+  );
 };
 
 document.getElementById("reloadBtn").onclick=load;
