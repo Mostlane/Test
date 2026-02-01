@@ -435,6 +435,7 @@
 function mapToPermKey(id, label, href) {
   const mapByExact = {
   "CheckInOut": "CheckInOut",
+    "Projects": "Projects",
   "Vehicles": "Vehicles",
   "Holiday": "Holiday",
   "EngineersHoursMenu": "EngineersHoursMenu",
@@ -486,8 +487,11 @@ function mapToPermKey(id, label, href) {
 if (clean.includes("po-director")) return "PODirector";
   }
 
-  // ❌ Reject all external links, javascript:void(), forms, etc.
-  return null;
+  // Allow explicit external buttons (e.g. SharePoint-backed)
+if (id === 'Projects' || label === 'Projects') return 'Projects';
+
+// ❌ Reject all other external links
+return null;
 }
     // 🔍 Scan main.html + submenus → structure with stable keys
     async function scanPortal(){
