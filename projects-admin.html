@@ -14,85 +14,145 @@
       background-size:cover;
       color:#1f2937;
     }
+
     .topbar{
       position:sticky; top:0; z-index:10;
       background:rgba(255,255,255,.75);
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex; justify-content:space-between; align-items:center;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
     }
-    .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
+
+    .btn{
+      border:none;
+      border-radius:10px;
+      padding:10px 14px;
+      font-size:14px;
+      font-weight:600;
+      cursor:pointer;
+    }
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
+    .btn-warn{background:#8a5a00;color:#fff}
+    .btn-danger{background:#7f1d1d;color:#fff}
+
     .wrap{
-      max-width:1100px;margin:16px auto 70px;padding:14px;
-      background:rgba(255,255,255,.7);border-radius:12px;
+      max-width:1200px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.7);
+      border-radius:12px;
     }
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .input{padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:12px;grid-template-columns:1fr 1fr}
-    @media(max-width:800px){.grid{grid-template-columns:1fr}}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px}
-    th{font-size:12px;text-transform:uppercase;color:#374151}
-    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db}
+
+    .grid{
+      display:grid;
+      gap:12px;
+      grid-template-columns:1fr 1.2fr;
+    }
+    @media(max-width:900px){
+      .grid{grid-template-columns:1fr}
+    }
+
+    .card{
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:14px;
+    }
+
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .input{
+      padding:10px;
+      border:1px solid #d1d5db;
+      border-radius:8px;
+      font-size:14px;
+    }
+
+    .muted{font-size:12px;color:#6b7280}
+
+    .proj-row{
+      padding:12px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      cursor:pointer;
+    }
+    .proj-row.active{border-color:#004a99;background:#f0f6ff}
+
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid #d1d5db;
+    }
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
-    .actions{display:flex;gap:8px}
-    .mask{
-      position:fixed; inset:0;
-      display:none; align-items:center; justify-content:center;
-      background:rgba(255,255,255,.6);
-      backdrop-filter:blur(2px);
-      z-index:50;
+    .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:12px;
     }
-    .mask.show{display:flex}
-    .spinner{
-      width:40px;height:40px;border-radius:50%;
-      border:4px solid #c7d2fe;border-top-color:#004a99;
-      animation:spin 1s linear infinite
+    th,td{
+      padding:10px;
+      border-bottom:1px solid #e5e7eb;
+      font-size:14px;
+      text-align:left;
+      vertical-align:top;
     }
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .banner{display:none;padding:10px;border-radius:10px;margin-bottom:12px}
-    .banner.ok{background:#e9f7ef;color:#1b5e20}
-    .banner.err{background:#fee2e2;color:#7f1d1d}
-    .banner.show{display:block}
+    th{
+      font-size:12px;
+      text-transform:uppercase;
+      color:#374151;
+    }
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
   </style>
 </head>
 
 <body>
 
 <div class="topbar">
-  <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-  <strong style="color:#004a99">Projects Admin</strong>
+  <div class="row">
+    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+    <strong style="color:#004a99">Projects Admin</strong>
+  </div>
   <button class="btn btn-outline" onclick="loadProjects()">⟲ Reload</button>
 </div>
 
 <div class="wrap">
-  <div id="banner" class="banner"></div>
-
-  <div class="card">
-    <div class="row">
-      <input id="p_name" class="input" placeholder="Project name" style="flex:1">
-      <input id="p_store" class="input" placeholder="Store no">
-      <input id="p_client" class="input" placeholder="Client">
-      <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
-    </div>
-  </div>
-
   <div class="grid">
+
+    <!-- LEFT: PROJECTS -->
     <div class="card">
+      <strong>Create project</strong>
+      <div class="row" style="margin-top:10px">
+        <input id="p_name" class="input" placeholder="Project name" style="flex:1">
+        <input id="p_store" class="input" placeholder="Store no">
+        <input id="p_client" class="input" placeholder="Client">
+        <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
+      </div>
+
+      <hr style="margin:16px 0">
+
       <strong>Projects</strong>
       <div id="projectsList"></div>
     </div>
 
+    <!-- RIGHT: FILES -->
     <div class="card">
-      <strong id="selTitle">Select a project</strong>
+      <strong id="projectTitle">Select a project</strong>
+      <div class="row" id="projectActions" style="margin-top:8px;display:none">
+        <button class="btn btn-warn" onclick="archiveProject()">Archive</button>
+        <button class="btn btn-primary" onclick="unarchiveProject()">Unarchive</button>
+        <button class="btn btn-outline" onclick="renameProject()">Rename</button>
+      </div>
 
-      <div id="uploadPanel" style="display:none;margin-top:12px">
+      <div id="filePanel" style="display:none;margin-top:16px">
         <div class="row">
-          <input id="f_title" class="input" placeholder="Title">
+          <input id="f_title" class="input" placeholder="File title">
           <input id="f_category" class="input" placeholder="Category">
           <input id="f_file" type="file" class="input">
           <button class="btn btn-primary" onclick="uploadFile()">⬆ Upload</button>
@@ -111,141 +171,149 @@
         </table>
       </div>
     </div>
+
   </div>
 </div>
-
-<div id="mask" class="mask"><div class="spinner"></div></div>
 
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
 const USER = sessionStorage.getItem("mostlaneUser");
 const ADMIN_TOKEN = "Hbdkwnainj2758";
-
 if(!USER) location.href="login.html";
 
 let CURRENT_PROJECT = null;
 
-const mask = document.getElementById("mask");
-const banner = document.getElementById("banner");
-
-function showMask(v){ mask.classList.toggle("show",v); }
-function showMsg(t,type="ok"){
-  banner.textContent=t;
-  banner.className="banner show "+type;
-  setTimeout(()=>banner.classList.remove("show"),4000);
+function headers(extra={}){
+  return {
+    Authorization:"Bearer "+USER,
+    "X-Admin-Token":ADMIN_TOKEN,
+    ...extra
+  };
 }
 
-/* 🔒 SAFE API WRAPPER */
-async function api(path, opts = {}){
-  const res = await fetch(`${API}/${path.replace(/^\/+/,"")}`,{
-    method: opts.method || "GET",
-    headers:{
-      Authorization: "Bearer " + USER,
-      ...(ADMIN_TOKEN ? { "X-Admin-Token": ADMIN_TOKEN } : {}),
-      ...(opts.headers || {})
-    },
-    body: opts.body
-  });
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error || "Request failed");
-  return data;
-}
-
-async function loadProjects(){
-  showMask(true);
-  try{
-    const d = await api("projects");
-    const list = document.getElementById("projectsList");
-    list.innerHTML="";
-    d.projects.forEach(p=>{
-      const div=document.createElement("div");
-      div.style.cursor="pointer";
-      div.innerHTML=`<strong>${p.name}</strong>`;
-      div.onclick=()=>selectProject(p.id);
-      list.appendChild(div);
+function loadProjects(){
+  fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
+    .then(r=>r.json())
+    .then(d=>{
+      const list=document.getElementById("projectsList");
+      list.innerHTML="";
+      d.projects.forEach(p=>{
+        const div=document.createElement("div");
+        div.className="proj-row"+(CURRENT_PROJECT?.id===p.id?" active":"");
+        div.innerHTML=`
+          <strong>${p.name}</strong><br>
+          <span class="pill ${p.status}">${p.status}</span>
+        `;
+        div.onclick=()=>selectProject(p);
+        list.appendChild(div);
+      });
     });
-  }catch(e){ showMsg(e.message,"err"); }
-  finally{ showMask(false); }
 }
 
-async function selectProject(id){
-  showMask(true);
-  try{
-    const d = await api(`projects/${id}/files`);
-    CURRENT_PROJECT = d.project;
-    document.getElementById("selTitle").textContent = CURRENT_PROJECT.name;
-    document.getElementById("uploadPanel").style.display="block";
-    renderFiles(d.files||[]);
-  }catch(e){ showMsg(e.message,"err"); }
-  finally{ showMask(false); }
+function selectProject(p){
+  CURRENT_PROJECT=p;
+  document.getElementById("projectTitle").textContent=p.name;
+  document.getElementById("projectActions").style.display="flex";
+  document.getElementById("filePanel").style.display="block";
+  loadFiles();
+  loadProjects();
 }
 
-function renderFiles(files){
-  const tb=document.getElementById("filesTbody");
-  tb.innerHTML="";
-  files.forEach(f=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td><strong>${f.name}</strong><div class="muted">${f.title||""}</div></td>
-      <td>${f.category||""}<br>${f.uploadedAt||""}</td>
-      <td><span class="pill active">Active</span></td>
-      <td class="actions">
-        <button class="btn btn-outline" onclick="downloadFile('${f.id}')">⬇ Download</button>
-      </td>
-    `;
-    tb.appendChild(tr);
-  });
+function loadFiles(){
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/files`,{headers:{Authorization:"Bearer "+USER}})
+    .then(r=>r.json())
+    .then(d=>{
+      const tb=document.getElementById("filesTbody");
+      tb.innerHTML="";
+      d.files.forEach(f=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML=`
+          <td>
+            <strong>${f.title||f.name}</strong><br>
+            <span class="muted">${f.name}</span>
+          </td>
+          <td>${f.category||""}</td>
+          <td><span class="pill ${f.hidden?"archived":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
+          <td class="actions">
+            <button class="btn btn-outline" onclick="renameFile('${f.id}')">Rename</button>
+            <button class="btn btn-warn" onclick="toggleHide('${f.id}',${!f.hidden})">${f.hidden?"Unhide":"Hide"}</button>
+            <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
+          </td>
+        `;
+        tb.appendChild(tr);
+      });
+    });
 }
 
-function downloadFile(id){
-  const a=document.createElement("a");
-  a.href=`${API}/download/${id}?u=${encodeURIComponent(USER)}`;
-  a.download="";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+function createProject(){
+  fetch(API+"/projects",{
+    method:"POST",
+    headers:{...headers(), "Content-Type":"application/json"},
+    body:JSON.stringify({
+      name:p_name.value,
+      storeNumber:p_store.value,
+      client:p_client.value
+    })
+  }).then(()=>loadProjects());
 }
 
-async function uploadFile(){
-  if(!CURRENT_PROJECT) return showMsg("Select a project","err");
-  const file=f_file.files[0];
-  if(!file) return showMsg("Choose a file","err");
-
+function uploadFile(){
   const fd=new FormData();
-  fd.append("file",file);
+  fd.append("file",f_file.files[0]);
   fd.append("title",f_title.value);
   fd.append("category",f_category.value);
 
-  showMask(true);
-  try{
-    await api(`projects/${CURRENT_PROJECT.id}/upload`,{
-      method:"POST",
-      body:fd
-    });
-    showMsg("Uploaded");
-    f_file.value="";
-    selectProject(CURRENT_PROJECT.id);
-  }catch(e){ showMsg(e.message,"err"); }
-  finally{ showMask(false); }
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/upload`,{
+    method:"POST",
+    headers:headers(),
+    body:fd
+  }).then(()=>loadFiles());
 }
 
-async function createProject(){
-  if(!p_name.value.trim()) return showMsg("Name required","err");
-  showMask(true);
-  try{
-    await api("projects",{
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body:JSON.stringify({
-        name:p_name.value,
-        storeNumber:p_store.value,
-        client:p_client.value
-      })
-    });
-    p_name.value=p_store.value=p_client.value="";
-    loadProjects();
-  }catch(e){ showMsg(e.message,"err"); }
-  finally{ showMask(false); }
+function renameProject(){
+  const name=prompt("New project name",CURRENT_PROJECT.name);
+  if(!name) return;
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({status:CURRENT_PROJECT.status,name})
+  }).then(()=>loadProjects());
+}
+
+function archiveProject(){
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({status:"archived"})
+  }).then(()=>loadProjects());
+}
+
+function unarchiveProject(){
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({status:"active"})
+  }).then(()=>loadProjects());
+}
+
+function toggleHide(id,hidden){
+  fetch(`${API}/files/${id}/hide`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({hidden})
+  }).then(()=>loadFiles());
+}
+
+function renameFile(id){
+  alert("File rename requires worker support (safe to add next)");
+}
+
+function deleteFile(id){
+  if(!confirm("Permanently delete this file?")) return;
+  fetch(`${API}/files/${id}`,{
+    method:"DELETE",
+    headers:headers()
+  }).then(()=>loadFiles());
 }
 
 loadProjects();
