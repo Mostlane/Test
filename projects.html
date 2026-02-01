@@ -24,234 +24,278 @@
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .btn{border:none;border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
+    .btn-primary{background:#004a99;color:#fff}
+
     .wrap{
-      max-width:1100px;margin:16px auto 70px;padding:14px;
-      background:rgba(255,255,255,.70);border-radius:12px;
+      max-width:1400px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.70);
+      border-radius:12px;
     }
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    @media (max-width:900px){.grid{grid-template-columns:1fr}}
-    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;font-size:14px;width:100%}
+
+    .grid{
+      display:grid;
+      gap:12px;
+      grid-template-columns: 320px 1fr;
+    }
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr}
+    }
+
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px}
+    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;width:100%}
     .muted{color:#6b7280;font-size:12px}
-    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
+    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
+
     .proj-row{
-      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
-      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
-      cursor:pointer; background:#fff;
-    }
-    .proj-row:hover{border-color:#bfd3f2}
-    .file-row{
-      display:flex; justify-content:space-between; align-items:center; gap:12px;
-      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
+      padding:10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      cursor:pointer;
       background:#fff;
     }
+    .proj-row:hover{border-color:#bfd3f2}
+
+    .file-row{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      padding:10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      background:#fff;
+    }
+
     .file-name{font-weight:600}
     .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .btn-primary{background:#004a99;color:#fff}
-    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);backdrop-filter:blur(2px);z-index:50}
+    .actions{display:flex;gap:6px;flex-wrap:wrap}
+
+    /* Viewer */
+    .viewer{
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      background:#fff;
+      height:70vh;
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .viewer-head{
+      padding:8px 10px;
+      border-bottom:1px solid #e5e7eb;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      background:#f9fafb;
+    }
+    .viewer-body{
+      flex:1;
+      overflow:auto;
+    }
+    .viewer iframe,
+    .viewer img{
+      width:100%;
+      height:100%;
+      border:none;
+      display:block;
+    }
+
+    .mask{
+      position:fixed; inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:rgba(255,255,255,.55);
+      backdrop-filter:blur(2px);
+      z-index:50
+    }
     .mask.show{display:flex}
-    .spinner{width:46px;height:46px;border-radius:50%;border:4px solid #c7d2fe;border-top-color:#004a99;animation:spin 1s linear infinite}
+    .spinner{
+      width:46px;height:46px;border-radius:50%;
+      border:4px solid #c7d2fe;
+      border-top-color:#004a99;
+      animation:spin 1s linear infinite
+    }
     @keyframes spin{to{transform:rotate(360deg)}}
-    .banner{display:none;margin:12px 0;padding:10px 12px;border-radius:12px}
-    .banner.show{display:block}
-    .banner.ok{background:#e9f7ef;border:1px solid #c8e6c9;color:#1b5e20}
-    .banner.err{background:#fee2e2;border:1px solid #fecaca;color:#7f1d1d}
   </style>
 </head>
 <body>
 
-  <div class="topbar">
-    <div class="row">
-      <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-      <strong style="color:#004a99">Projects</strong>
-    </div>
-    <div class="row" style="min-width:160px;justify-content:flex-end;">
-      <button class="btn btn-outline" id="reloadBtn">⟲ Reload</button>
-    </div>
+<div class="topbar">
+  <div class="row">
+    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+    <strong style="color:#004a99">Projects</strong>
   </div>
+  <div class="row">
+    <button class="btn btn-outline" id="reloadBtn">⟲ Reload</button>
+  </div>
+</div>
 
-  <div class="wrap">
-    <div class="banner" id="banner"></div>
+<div class="wrap">
+  <div class="grid">
 
-    <div class="grid">
-      <div class="card">
-        <strong>Project list</strong>
-        <div class="muted">Only active projects are shown.</div>
-        <div style="margin-top:10px">
-          <input class="input" id="search" placeholder="Search projects… (store, name, client)" />
-        </div>
-        <div id="projectsList" style="margin-top:10px;"></div>
-      </div>
+    <!-- LEFT: PROJECTS + FILES -->
+    <div class="card">
+      <strong>Projects</strong>
+      <div class="muted">Active projects only</div>
 
-      <div class="card">
+      <input class="input" id="search" placeholder="Search projects…" style="margin-top:10px"/>
+
+      <div id="projectsList"></div>
+
+      <hr style="margin:14px 0">
+
+      <div id="filesPanel">
         <strong id="selTitle">Select a project</strong>
         <div class="muted" id="selMeta"></div>
-        <div id="filesList" style="margin-top:10px;"></div>
+
+        <div class="actions" style="margin-top:8px">
+          <button class="btn btn-primary" id="dlAllBtn" style="display:none">⬇ Download all</button>
+        </div>
+
+        <div id="filesList" style="margin-top:10px"></div>
       </div>
     </div>
-  </div>
 
-  <div class="mask" id="mask"><div class="spinner"></div></div>
+    <!-- RIGHT: VIEWER -->
+    <div class="card">
+      <strong>Preview</strong>
+      <div class="muted">Tap a file to view</div>
+
+      <div class="viewer" style="margin-top:10px">
+        <div class="viewer-head" id="viewerHead">
+          <span class="muted">No file selected</span>
+        </div>
+        <div class="viewer-body" id="viewerBody">
+          <div class="muted" style="padding:20px">Select a file to preview.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="mask" id="mask"><div class="spinner"></div></div>
 
 <script>
-  // ✅ IMPORTANT: no trailing slash
-  const API = "https://projects-ml-portal.jamie-def.workers.dev";
+const API = "https://projects-ml-portal.jamie-def.workers.dev";
+const CURRENT = sessionStorage.getItem("mostlaneUser");
+if(!CURRENT) location.href="login.html";
 
-  const CURRENT = sessionStorage.getItem("mostlaneUser") || "";
-  if (!CURRENT) location.href = "login.html";
+const mask = document.getElementById("mask");
+const projectsList = document.getElementById("projectsList");
+const filesList = document.getElementById("filesList");
+const selTitle = document.getElementById("selTitle");
+const selMeta = document.getElementById("selMeta");
+const viewerBody = document.getElementById("viewerBody");
+const viewerHead = document.getElementById("viewerHead");
+const dlAllBtn = document.getElementById("dlAllBtn");
+const search = document.getElementById("search");
 
-  const mask = document.getElementById("mask");
-  const banner = document.getElementById("banner");
-  const projectsList = document.getElementById("projectsList");
-  const filesList = document.getElementById("filesList");
-  const selTitle = document.getElementById("selTitle");
-  const selMeta = document.getElementById("selMeta");
-  const search = document.getElementById("search");
+let ALL_PROJECTS=[];
+let SELECTED=null;
+let CURRENT_FILES=[];
 
-  let ALL_PROJECTS = [];
-  let SELECTED = null;
+function showMask(v){mask.classList.toggle("show",!!v);}
 
-  function showMask(on){ mask.classList.toggle("show", !!on); }
-  function showMsg(msg, type="ok"){
-    banner.className = "banner show " + (type === "err" ? "err" : "ok");
-    banner.textContent = msg;
-    setTimeout(()=>banner.classList.remove("show"), 4500);
+async function apiGet(p){
+  const r=await fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error||"Failed");
+  return j;
+}
+
+function renderProjects(list){
+  projectsList.innerHTML="";
+  list.forEach(p=>{
+    const d=document.createElement("div");
+    d.className="proj-row";
+    d.innerHTML=`<strong>${p.name}</strong><div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>`;
+    d.onclick=()=>selectProject(p.id);
+    projectsList.appendChild(d);
+  });
+}
+
+function renderFiles(files){
+  filesList.innerHTML="";
+  CURRENT_FILES=files;
+  dlAllBtn.style.display=files.length?"inline-block":"none";
+
+  files.forEach(f=>{
+    const r=document.createElement("div");
+    r.className="file-row";
+    r.innerHTML=`
+      <div>
+        <div class="file-name">${f.title||f.name}</div>
+        <div class="file-meta">${f.name}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-outline">👁 View</button>
+        <button class="btn btn-primary">⬇</button>
+      </div>
+    `;
+    r.querySelectorAll("button")[0].onclick=()=>previewFile(f);
+    r.querySelectorAll("button")[1].onclick=()=>downloadFile(f.id);
+    filesList.appendChild(r);
+  });
+}
+
+function previewFile(f){
+  viewerHead.innerHTML=`<strong>${f.name}</strong>`;
+  const url=`${API}/download/${encodeURIComponent(f.id)}`;
+
+  if(/\.(pdf)$/i.test(f.name)){
+    viewerBody.innerHTML=`<iframe src="${url}"></iframe>`;
+  }else if(/\.(png|jpg|jpeg|gif|webp)$/i.test(f.name)){
+    viewerBody.innerHTML=`<img src="${url}">`;
+  }else{
+    viewerBody.innerHTML=`<iframe src="${url}"></iframe>`;
   }
+}
 
-  async function apiGet(path){
-    const res = await fetch(API + path, {
-      headers: { "Authorization": "Bearer " + CURRENT },
-      cache: "no-store"
-    });
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.error || "Request failed");
-    return data;
-  }
+function downloadFile(id){
+  window.open(`${API}/download/${encodeURIComponent(id)}`,"_blank");
+}
 
-  function renderProjects(list){
-    projectsList.innerHTML = "";
-    if(!list.length){
-      projectsList.innerHTML = `<div class="muted" style="margin-top:10px">No active projects.</div>`;
-      return;
-    }
+dlAllBtn.onclick=()=>{
+  CURRENT_FILES.forEach((f,i)=>{
+    setTimeout(()=>downloadFile(f.id), i*400);
+  });
+};
 
-    list.forEach(p=>{
-      const row = document.createElement("div");
-      row.className = "proj-row";
+async function selectProject(id){
+  showMask(true);
+  try{
+    const d=await apiGet(`/projects/${id}/files`);
+    SELECTED=d.project;
+    selTitle.textContent=SELECTED.name;
+    selMeta.textContent="Updated "+(SELECTED.updatedAt||SELECTED.createdAt||"");
+    renderFiles(d.files||[]);
+  }finally{showMask(false);}
+}
 
-      const left = document.createElement("div");
-      left.innerHTML = `
-        <div style="font-weight:700">${escapeHtml(p.name || p.id)}</div>
-        <div class="muted">#${escapeHtml(p.storeNumber || "-")} · ${escapeHtml(p.client || "")}</div>
-      `;
+async function load(){
+  showMask(true);
+  try{
+    const d=await apiGet("/projects");
+    ALL_PROJECTS=d.projects||[];
+    applySearch();
+  }finally{showMask(false);}
+}
 
-      const right = document.createElement("div");
-      right.innerHTML = `<span class="pill">Open</span>`;
+function applySearch(){
+  const q=(search.value||"").toLowerCase();
+  renderProjects(!q?ALL_PROJECTS:ALL_PROJECTS.filter(p=>
+    `${p.name} ${p.storeNumber} ${p.client}`.toLowerCase().includes(q)
+  ));
+}
 
-      row.appendChild(left);
-      row.appendChild(right);
-      row.addEventListener("click", ()=>selectProject(p.id));
-
-      projectsList.appendChild(row);
-    });
-  }
-
-  function renderFiles(files){
-    filesList.innerHTML = "";
-    if(!SELECTED){
-      filesList.innerHTML = `<div class="muted">No project selected.</div>`;
-      return;
-    }
-    if(!files.length){
-      filesList.innerHTML = `<div class="muted">No files available.</div>`;
-      return;
-    }
-
-    files.forEach(f=>{
-      const row = document.createElement("div");
-      row.className = "file-row";
-
-      const left = document.createElement("div");
-      left.style.flex = "1";
-      left.innerHTML = `
-        <div class="file-name">${escapeHtml(f.title || f.name)}</div>
-        <div class="file-meta">${escapeHtml(f.category || "")}${f.category ? " · " : ""}${escapeHtml(f.uploadedAt || "")}</div>
-        <div class="file-meta">${escapeHtml(f.name)}</div>
-      `;
-
-      const actions = document.createElement("div");
-      actions.className = "actions";
-
-      const dl = document.createElement("button");
-      dl.className = "btn btn-primary";
-      dl.textContent = "⬇ Download";
-      dl.onclick = ()=>window.open(`${API}/download/${encodeURIComponent(f.id)}`, "_blank");
-
-      actions.appendChild(dl);
-
-      row.appendChild(left);
-      row.appendChild(actions);
-      filesList.appendChild(row);
-    });
-  }
-
-  async function loadProjects(){
-    showMask(true);
-    try{
-      SELECTED = null;
-      selTitle.textContent = "Select a project";
-      selMeta.textContent = "";
-      filesList.innerHTML = `<div class="muted">No project selected.</div>`;
-
-      const data = await apiGet("/projects");
-      ALL_PROJECTS = data.projects || [];
-      applySearch();
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
-  }
-
-  async function selectProject(projectId){
-    showMask(true);
-    try{
-      const data = await apiGet(`/projects/${encodeURIComponent(projectId)}/files`);
-      SELECTED = data.project;
-
-      selTitle.textContent = SELECTED.name || SELECTED.id;
-      selMeta.textContent = `Updated: ${SELECTED.updatedAt || SELECTED.createdAt || ""}`;
-      renderFiles(data.files || []);
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
-  }
-
-  function applySearch(){
-    const q = (search.value || "").trim().toLowerCase();
-    const list = !q ? ALL_PROJECTS : ALL_PROJECTS.filter(p=>{
-      const blob = `${p.name||""} ${p.storeNumber||""} ${p.client||""}`.toLowerCase();
-      return blob.includes(q);
-    });
-    renderProjects(list);
-  }
-
-  function escapeHtml(s){
-    return String(s ?? "")
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
-      .replace(/'/g,"&#039;");
-  }
-
-  document.getElementById("reloadBtn").addEventListener("click", loadProjects);
-  search.addEventListener("input", applySearch);
-
-  loadProjects();
+document.getElementById("reloadBtn").onclick=load;
+search.oninput=applySearch;
+load();
 </script>
 
 </body>
