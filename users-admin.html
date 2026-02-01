@@ -436,6 +436,7 @@ function mapToPermKey(id, label, href) {
   const mapByExact = {
   "CheckInOut": "CheckInOut",
     "Projects": "Projects",
+    "ProjectsAdmin": "ProjectsAdmin",
   "Vehicles": "Vehicles",
   "Holiday": "Holiday",
   "EngineersHoursMenu": "EngineersHoursMenu",
@@ -487,8 +488,9 @@ function mapToPermKey(id, label, href) {
 if (clean.includes("po-director")) return "PODirector";
   }
 
-  // Allow explicit external buttons (e.g. SharePoint-backed)
-if (id === 'Projects' || label === 'Projects') return 'Projects';
+  // Allow explicit admin pages
+if (id === 'Projects') return 'Projects';
+if (id === 'ProjectsAdmin') return 'ProjectsAdmin';
 
 // ❌ Reject all other external links
 return null;
