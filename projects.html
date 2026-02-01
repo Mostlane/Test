@@ -24,19 +24,33 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:10px;
     }
 
-    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .row{display:flex;gap:10px;align-items:center}
 
     .btn{
-      border:none;border-radius:10px;
-      padding:10px 14px;
-      font-size:14px;cursor:pointer;
-      font-weight:600;
+      border:none;
+      background:#fff;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:13px;
+      cursor:pointer;
+      border:1px solid #e5e7eb;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
     }
-    .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
-    .btn-primary{background:#004a99;color:#fff}
+    .btn.primary{
+      background:#004a99;
+      color:#fff;
+      border-color:#004a99;
+    }
+    .btn.icon{
+      padding:8px;
+      width:38px;
+      height:38px;
+      justify-content:center;
+    }
 
     .wrap{
       max-width:1100px;
@@ -49,7 +63,7 @@
     .grid{
       display:grid;
       gap:12px;
-      grid-template-columns:repeat(2,minmax(0,1fr));
+      grid-template-columns:1fr 1fr;
     }
     @media (max-width:900px){
       .grid{grid-template-columns:1fr}
@@ -62,68 +76,51 @@
       padding:12px;
     }
 
-    .muted{color:#6b7280;font-size:12px}
-    .h2{font-size:14px;font-weight:800;margin:0 0 2px}
+    .muted{font-size:12px;color:#6b7280}
 
     .proj-row{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:10px;
       padding:12px;
       border:1px solid #e5e7eb;
       border-radius:12px;
       margin-top:10px;
       cursor:pointer;
-      background:#fff;
-    }
-    .proj-row:hover{border-color:#bfd3f2}
-
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding:4px 10px;
-      border-radius:999px;
-      font-size:12px;
-      border:1px solid #d1d5db;
-      background:#f9fafb;
     }
 
-    .section{
-      margin-top:14px;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      overflow:hidden;
-    }
-    .section-head{
+    .file-row{
       display:flex;
       justify-content:space-between;
       align-items:center;
-      padding:10px 12px;
-      background:#f9fafb;
-      border-bottom:1px solid #e5e7eb;
-    }
-    .section-title{font-weight:800;font-size:13px}
-
-    .file-row{
-      display:grid;
-      grid-template-columns:1fr auto;
-      gap:10px;
+      gap:12px;
       padding:12px;
       border-bottom:1px solid #f1f5f9;
     }
-    .file-row:last-child{border-bottom:none}
 
-    .file-name{font-weight:700;font-size:14px}
-    .file-sub{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
-    .tag{font-size:12px;border:1px solid #e5e7eb;padding:3px 8px;border-radius:999px}
-    .tag.lock{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+    .file-info{flex:1;min-width:0}
+    .file-title{
+      font-weight:700;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .file-meta{
+      margin-top:6px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      font-size:12px;
+    }
+    .tag{
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid #e5e7eb;
+    }
+    .tag.lock{
+      background:#fef2f2;
+      color:#991b1b;
+      border-color:#fecaca;
+    }
 
-    .actions{display:flex;gap:8px}
-    .btn-sm{padding:8px 10px;font-size:13px}
-
-    /* ===== Modal Viewer ===== */
+    /* ===== Modal ===== */
     .modal{
       position:fixed; inset:0;
       display:none;
@@ -134,21 +131,20 @@
 
     .modal-box{
       background:#fff;
-      width:92%;
-      height:92%;
+      width:94%;
+      height:94%;
       margin:auto;
-      border-radius:14px;
+      border-radius:16px;
       display:flex;
       flex-direction:column;
-      box-shadow:0 20px 40px rgba(0,0,0,.25);
       overflow:hidden;
     }
 
     .modal-head{
-      padding:12px 14px;
       display:flex;
       justify-content:space-between;
       align-items:center;
+      padding:10px;
       border-bottom:1px solid #e5e7eb;
       gap:10px;
     }
@@ -168,23 +164,19 @@
 <body>
 
 <div class="topbar">
-  <div class="row">
-    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-    <strong style="color:#004a99">Projects</strong>
-  </div>
-  <button class="btn btn-outline" onclick="loadProjects()">⟲ Reload</button>
+  <button class="btn" onclick="location.href='main.html'">⬅</button>
+  <strong style="color:#004a99">Projects</strong>
+  <button class="btn" onclick="loadProjects()">⟲</button>
 </div>
 
 <div class="wrap">
   <div class="grid">
     <div class="card">
-      <div class="h2">Project list</div>
-      <div class="muted">Only active projects are shown.</div>
+      <strong>Projects</strong>
       <div id="projectsList"></div>
     </div>
-
     <div class="card">
-      <div class="h2" id="projectTitle">Select a project</div>
+      <strong id="projectTitle">Select a project</strong>
       <div class="muted" id="projectMeta"></div>
       <div id="filesList"></div>
     </div>
@@ -195,13 +187,19 @@
 <div class="modal" id="viewer">
   <div class="modal-box">
     <div class="modal-head">
-      <div>
-        <div class="h2" id="viewerTitle"></div>
+      <div class="row">
+        <button class="btn icon" onclick="prevFile()">⬅️</button>
+        <button class="btn icon" onclick="nextFile()">➡️</button>
+      </div>
+
+      <div style="flex:1;text-align:center">
+        <strong id="viewerTitle"></strong>
         <div class="muted" id="viewerMeta"></div>
       </div>
+
       <div class="row">
-        <button id="viewerDownload" class="btn btn-outline" style="display:none">⬇ Download</button>
-        <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
+        <button id="viewerDownload" class="btn">⬇</button>
+        <button class="btn icon" onclick="closeViewer()">✕</button>
       </div>
     </div>
     <div class="modal-body" id="viewerBody"></div>
@@ -211,105 +209,80 @@
 <iframe id="downloadFrame"></iframe>
 
 <script>
-const API = "https://projects-ml-portal.jamie-def.workers.dev";
-const USER = sessionStorage.getItem("mostlaneUser");
+const API="https://projects-ml-portal.jamie-def.workers.dev";
+const USER=sessionStorage.getItem("mostlaneUser");
 if(!USER) location.href="login.html";
 
-const projectsList = document.getElementById("projectsList");
-const filesList = document.getElementById("filesList");
-const projectTitle = document.getElementById("projectTitle");
-const projectMeta = document.getElementById("projectMeta");
+let FILES=[], CURRENT_INDEX=0;
 
-const viewer = document.getElementById("viewer");
-const viewerBody = document.getElementById("viewerBody");
-const viewerTitle = document.getElementById("viewerTitle");
-const viewerMeta = document.getElementById("viewerMeta");
-const viewerDownload = document.getElementById("viewerDownload");
-const downloadFrame = document.getElementById("downloadFrame");
-
-function fmtDate(iso){
-  if(!iso) return "";
-  return new Intl.DateTimeFormat("en-GB",{
-    day:"2-digit",month:"short",year:"numeric",
-    hour:"2-digit",minute:"2-digit"
-  }).format(new Date(iso));
-}
+function fmt(d){return new Date(d).toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"})}
 
 function loadProjects(){
-  projectsList.innerHTML="";
   fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
-    .then(r=>r.json())
-    .then(d=>{
+    .then(r=>r.json()).then(d=>{
+      projectsList.innerHTML="";
       d.projects.forEach(p=>{
-        const row=document.createElement("div");
-        row.className="proj-row";
-        row.innerHTML=`
-          <div>
-            <strong>${p.name}</strong>
-            <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
-          </div>
-          <span class="pill">Open</span>
-        `;
-        row.onclick=()=>loadFiles(p);
-        projectsList.appendChild(row);
+        const div=document.createElement("div");
+        div.className="proj-row";
+        div.textContent=p.name;
+        div.onclick=()=>loadFiles(p);
+        projectsList.appendChild(div);
       });
     });
 }
 
-function loadFiles(project){
-  projectTitle.textContent=project.name;
-  projectMeta.textContent=`Updated: ${fmtDate(project.updatedAt||project.createdAt)}`;
+function loadFiles(p){
+  projectTitle.textContent=p.name;
+  projectMeta.textContent="Updated "+fmt(p.updatedAt||p.createdAt);
   filesList.innerHTML="";
-
-  fetch(`${API}/projects/${project.id}/files`,{headers:{Authorization:"Bearer "+USER}})
-    .then(r=>r.json())
-    .then(d=>{
-      d.files.forEach(f=>{
+  fetch(`${API}/projects/${p.id}/files`,{headers:{Authorization:"Bearer "+USER}})
+    .then(r=>r.json()).then(d=>{
+      FILES=d.files;
+      d.files.forEach((f,i)=>{
         const row=document.createElement("div");
         row.className="file-row";
         row.innerHTML=`
-          <div>
-            <div class="file-name">${f.title||f.name}</div>
-            <div class="file-sub">
+          <div class="file-info">
+            <div class="file-title">${f.title||f.name}</div>
+            <div class="file-meta">
               ${f.category?`<span class="tag">${f.category}</span>`:""}
-              <span class="tag muted">${fmtDate(f.uploadedAt)}</span>
-              ${!f.downloadable?`<span class="tag lock">🔒 View only</span>`:""}
+              <span class="tag">${fmt(f.uploadedAt)}</span>
+              ${!f.downloadable?`<span class="tag lock">View only</span>`:""}
             </div>
           </div>
-          <div class="actions">
-            <button class="btn btn-primary btn-sm">👁 View</button>
-          </div>
+          <button class="btn primary">👁</button>
         `;
-        row.querySelector("button").onclick=()=>openViewer(f);
+        row.querySelector("button").onclick=()=>openViewer(i);
         filesList.appendChild(row);
       });
     });
 }
 
-function openViewer(file){
-  viewerTitle.textContent=file.title||file.name;
-  viewerMeta.textContent=`${file.section||""}${file.category?" · "+file.category:""}`;
-
+function openViewer(i){
+  CURRENT_INDEX=i;
+  const f=FILES[i];
+  viewerTitle.textContent=f.title||f.name;
+  viewerMeta.textContent=f.category||"";
   viewerBody.innerHTML=`
-    <object data="${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}" type="application/pdf">
-      <iframe src="${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}"></iframe>
+    <object data="${API}/download/${f.id}?inline=1&u=${USER}">
+      <iframe src="${API}/download/${f.id}?inline=1&u=${USER}"></iframe>
     </object>
   `;
-
-  if(file.downloadable){
-    viewerDownload.style.display="inline-block";
-    viewerDownload.onclick=()=>downloadFrame.src=`${API}/download/${file.id}?u=${encodeURIComponent(USER)}`;
-  }else{
-    viewerDownload.style.display="none";
-  }
-
+  viewerDownload.style.display=f.downloadable?"inline-flex":"none";
+  viewerDownload.onclick=()=>downloadFrame.src=`${API}/download/${f.id}?u=${USER}`;
   viewer.classList.add("show");
 }
 
-function closeViewer(){
-  viewerBody.innerHTML="";
-  viewer.classList.remove("show");
-}
+function closeViewer(){viewer.classList.remove("show");viewerBody.innerHTML=""}
+function prevFile(){if(CURRENT_INDEX>0)openViewer(CURRENT_INDEX-1)}
+function nextFile(){if(CURRENT_INDEX<FILES.length-1)openViewer(CURRENT_INDEX+1)}
+
+document.addEventListener("keydown",e=>{
+  if(!viewer.classList.contains("show"))return;
+  if(e.key==="Escape")closeViewer();
+  if(e.key==="ArrowLeft")prevFile();
+  if(e.key==="ArrowRight")nextFile();
+});
 
 loadProjects();
 </script>
