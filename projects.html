@@ -25,101 +25,38 @@
     .btn{border:none;border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
-
     .wrap{
-      max-width:1400px;
-      margin:16px auto 70px;
-      padding:14px;
-      background:rgba(255,255,255,.70);
-      border-radius:12px;
+      max-width:1100px;margin:16px auto 70px;padding:14px;
+      background:rgba(255,255,255,.70);border-radius:12px;
     }
-
-    .grid{
-      display:grid;
-      gap:12px;
-      grid-template-columns: 320px 1fr;
-    }
-    @media (max-width:900px){
-      .grid{grid-template-columns:1fr}
-    }
-
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px}
-    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;width:100%}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;font-size:14px;width:100%}
     .muted{color:#6b7280;font-size:12px}
-    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
-
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
     .proj-row{
-      padding:10px;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      margin-top:10px;
-      cursor:pointer;
-      background:#fff;
+      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
+      cursor:pointer; background:#fff;
     }
     .proj-row:hover{border-color:#bfd3f2}
-
     .file-row{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      padding:10px;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      margin-top:10px;
+      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
       background:#fff;
     }
-
     .file-name{font-weight:600}
     .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
-    .actions{display:flex;gap:6px;flex-wrap:wrap}
-
-    /* Viewer */
-    .viewer{
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      background:#fff;
-      height:70vh;
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-    }
-    .viewer-head{
-      padding:8px 10px;
-      border-bottom:1px solid #e5e7eb;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      background:#f9fafb;
-    }
-    .viewer-body{
-      flex:1;
-      overflow:auto;
-    }
-    .viewer iframe,
-    .viewer img{
-      width:100%;
-      height:100%;
-      border:none;
-      display:block;
-    }
-
-    .mask{
-      position:fixed; inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      background:rgba(255,255,255,.55);
-      backdrop-filter:blur(2px);
-      z-index:50
-    }
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);backdrop-filter:blur(2px);z-index:50}
     .mask.show{display:flex}
-    .spinner{
-      width:46px;height:46px;border-radius:50%;
-      border:4px solid #c7d2fe;
-      border-top-color:#004a99;
-      animation:spin 1s linear infinite
-    }
+    .spinner{width:46px;height:46px;border-radius:50%;border:4px solid #c7d2fe;border-top-color:#004a99;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+    .banner{display:none;margin:12px 0;padding:10px 12px;border-radius:12px}
+    .banner.show{display:block}
+    .banner.ok{background:#e9f7ef;border:1px solid #c8e6c9;color:#1b5e20}
+    .banner.err{background:#fee2e2;border:1px solid #fecaca;color:#7f1d1d}
   </style>
 </head>
 <body>
@@ -135,46 +72,26 @@
 </div>
 
 <div class="wrap">
+  <div class="banner" id="banner"></div>
+
   <div class="grid">
-
-    <!-- LEFT: PROJECTS + FILES -->
     <div class="card">
-      <strong>Projects</strong>
-      <div class="muted">Active projects only</div>
-
-      <input class="input" id="search" placeholder="Search projects…" style="margin-top:10px"/>
-
-      <div id="projectsList"></div>
-
-      <hr style="margin:14px 0">
-
-      <div id="filesPanel">
-        <strong id="selTitle">Select a project</strong>
-        <div class="muted" id="selMeta"></div>
-
-        <div class="actions" style="margin-top:8px">
-          <button class="btn btn-primary" id="dlAllBtn" style="display:none">⬇ Download all</button>
-        </div>
-
-        <div id="filesList" style="margin-top:10px"></div>
-      </div>
+      <strong>Project list</strong>
+      <div class="muted">Only active projects are shown.</div>
+      <input class="input" id="search" placeholder="Search projects…" style="margin-top:10px">
+      <div id="projectsList" style="margin-top:10px;"></div>
     </div>
 
-    <!-- RIGHT: VIEWER -->
     <div class="card">
-      <strong>Preview</strong>
-      <div class="muted">Tap a file to view</div>
-
-      <div class="viewer" style="margin-top:10px">
-        <div class="viewer-head" id="viewerHead">
-          <span class="muted">No file selected</span>
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <strong id="selTitle">Select a project</strong>
+          <div class="muted" id="selMeta"></div>
         </div>
-        <div class="viewer-body" id="viewerBody">
-          <div class="muted" style="padding:20px">Select a file to preview.</div>
-        </div>
+        <button class="btn btn-primary" id="downloadAllBtn" style="display:none">⬇ Download all</button>
       </div>
+      <div id="filesList" style="margin-top:10px;"></div>
     </div>
-
   </div>
 </div>
 
@@ -186,34 +103,36 @@ const CURRENT = sessionStorage.getItem("mostlaneUser");
 if(!CURRENT) location.href="login.html";
 
 const mask = document.getElementById("mask");
+const banner = document.getElementById("banner");
 const projectsList = document.getElementById("projectsList");
 const filesList = document.getElementById("filesList");
 const selTitle = document.getElementById("selTitle");
 const selMeta = document.getElementById("selMeta");
-const viewerBody = document.getElementById("viewerBody");
-const viewerHead = document.getElementById("viewerHead");
-const dlAllBtn = document.getElementById("dlAllBtn");
 const search = document.getElementById("search");
+const downloadAllBtn = document.getElementById("downloadAllBtn");
 
-let ALL_PROJECTS=[];
-let SELECTED=null;
-let CURRENT_FILES=[];
+let ALL_PROJECTS = [];
+let CURRENT_FILES = [];
+let SELECTED = null;
 
-function showMask(v){mask.classList.toggle("show",!!v);}
-
-async function apiGet(p){
-  const r=await fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}});
-  const j=await r.json();
-  if(!r.ok) throw new Error(j.error||"Failed");
-  return j;
+function showMask(v){ mask.classList.toggle("show",!!v); }
+function apiGet(p){
+  return fetch(API+p,{headers:{Authorization:"Bearer "+CURRENT}})
+    .then(r=>r.json().then(j=>{if(!r.ok) throw new Error(j.error||"Error"); return j;}));
 }
 
 function renderProjects(list){
-  projectsList.innerHTML="";
+  projectsList.innerHTML = list.length ? "" : `<div class="muted">No projects</div>`;
   list.forEach(p=>{
     const d=document.createElement("div");
     d.className="proj-row";
-    d.innerHTML=`<strong>${p.name}</strong><div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>`;
+    d.innerHTML=`
+      <div>
+        <div style="font-weight:700">${p.name}</div>
+        <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
+      </div>
+      <span class="pill">Open</span>
+    `;
     d.onclick=()=>selectProject(p.id);
     projectsList.appendChild(d);
   });
@@ -221,50 +140,33 @@ function renderProjects(list){
 
 function renderFiles(files){
   filesList.innerHTML="";
-  CURRENT_FILES=files;
-  dlAllBtn.style.display=files.length?"inline-block":"none";
+  CURRENT_FILES = files;
+  downloadAllBtn.style.display = files.length ? "inline-block" : "none";
+
+  if(!files.length){
+    filesList.innerHTML=`<div class="muted">No files</div>`;
+    return;
+  }
 
   files.forEach(f=>{
     const r=document.createElement("div");
     r.className="file-row";
     r.innerHTML=`
-      <div>
+      <div style="flex:1">
         <div class="file-name">${f.title||f.name}</div>
+        <div class="file-meta">${f.category||""} ${f.uploadedAt||""}</div>
         <div class="file-meta">${f.name}</div>
       </div>
       <div class="actions">
-        <button class="btn btn-outline">👁 View</button>
-        <button class="btn btn-primary">⬇</button>
+        <button class="btn btn-primary">👁 View</button>
+        <button class="btn btn-outline">⬇ Download</button>
       </div>
     `;
-    r.querySelectorAll("button")[0].onclick=()=>previewFile(f);
-    r.querySelectorAll("button")[1].onclick=()=>downloadFile(f.id);
+    r.querySelector(".btn-primary").onclick=()=>window.open(`${API}/view/${f.id}`,"_blank");
+    r.querySelector(".btn-outline").onclick=()=>window.open(`${API}/download/${f.id}`,"_blank");
     filesList.appendChild(r);
   });
 }
-
-function previewFile(f){
-  viewerHead.innerHTML=`<strong>${f.name}</strong>`;
-  const url=`${API}/download/${encodeURIComponent(f.id)}`;
-
-  if(/\.(pdf)$/i.test(f.name)){
-    viewerBody.innerHTML=`<iframe src="${url}"></iframe>`;
-  }else if(/\.(png|jpg|jpeg|gif|webp)$/i.test(f.name)){
-    viewerBody.innerHTML=`<img src="${url}">`;
-  }else{
-    viewerBody.innerHTML=`<iframe src="${url}"></iframe>`;
-  }
-}
-
-function downloadFile(id){
-  window.open(`${API}/download/${encodeURIComponent(id)}`,"_blank");
-}
-
-dlAllBtn.onclick=()=>{
-  CURRENT_FILES.forEach((f,i)=>{
-    setTimeout(()=>downloadFile(f.id), i*400);
-  });
-};
 
 async function selectProject(id){
   showMask(true);
@@ -272,29 +174,36 @@ async function selectProject(id){
     const d=await apiGet(`/projects/${id}/files`);
     SELECTED=d.project;
     selTitle.textContent=SELECTED.name;
-    selMeta.textContent="Updated "+(SELECTED.updatedAt||SELECTED.createdAt||"");
+    selMeta.textContent=`Updated: ${SELECTED.updatedAt||""}`;
     renderFiles(d.files||[]);
-  }finally{showMask(false);}
+  }catch(e){ alert(e.message); }
+  finally{ showMask(false); }
 }
+
+downloadAllBtn.onclick=()=>{
+  CURRENT_FILES.forEach((f,i)=>{
+    setTimeout(()=>window.open(`${API}/download/${f.id}`,"_blank"),i*300);
+  });
+};
 
 async function load(){
   showMask(true);
   try{
     const d=await apiGet("/projects");
     ALL_PROJECTS=d.projects||[];
-    applySearch();
-  }finally{showMask(false);}
+    renderProjects(ALL_PROJECTS);
+  }catch(e){ alert(e.message); }
+  finally{ showMask(false); }
 }
 
-function applySearch(){
-  const q=(search.value||"").toLowerCase();
-  renderProjects(!q?ALL_PROJECTS:ALL_PROJECTS.filter(p=>
-    `${p.name} ${p.storeNumber} ${p.client}`.toLowerCase().includes(q)
+search.oninput=()=>{
+  const q=search.value.toLowerCase();
+  renderProjects(ALL_PROJECTS.filter(p=>
+    `${p.name} ${p.storeNumber||""} ${p.client||""}`.toLowerCase().includes(q)
   ));
-}
+};
 
 document.getElementById("reloadBtn").onclick=load;
-search.oninput=applySearch;
 load();
 </script>
 
