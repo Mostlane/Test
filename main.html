@@ -133,9 +133,7 @@ a.button {
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <!-- FIXED -->
     <a class="button" href="javascript:void(0)" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
-    <a class="button"
-   href="javascript:void(0)"
-   id="Projects">
+    <a class="button" id="Projects" href="projects.html">
   <span class="emoji">📁</span> Projects
 </a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
@@ -185,8 +183,7 @@ a.button {
       const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
       // Permission mapping
-      const PROJECTS_SHAREPOINT_URL =
-  "https://mostlane.sharepoint.com/:f:/g/IgDmk-lHVlZNSaIVFhloFRqEAdKOjvt0RubPz0D-Efs47Ng?e=ksaZk6";
+     
 
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
@@ -231,12 +228,6 @@ const MAP = {
 
   if (buttonID === "MyDocuments" && user.SharePointPath) {
     btn.href = user.SharePointPath;
-  }
-
-  if (buttonID === "Projects") {
-    btn.onclick = () => {
-      window.open(PROJECTS_SHAREPOINT_URL, "_blank");
-    };
   }
 }
       });
