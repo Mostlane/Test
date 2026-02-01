@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projects</title>
+
+  <!-- Keep portal security -->
+  <script src="auth.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center;
+      background-size: cover;
+    }
+
+    .bar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(6px);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    .btn {
+      background: #003468;
+      color: white;
+      border-radius: 8px;
+      padding: 8px 12px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .title {
+      font-weight: 600;
+      color: #003468;
+    }
+
+    .hint {
+      padding: 16px;
+      color: #374151;
+      font-size: 14px;
+    }
+  </style>
+
+  <script>
+    const SHAREPOINT_URL =
+      "https://mostlane.sharepoint.com/:f:/g/IgDmk-lHVlZNSaIVFhloFRqEAdKOjvt0RubPz0D-Efs47Ng?e=ksaZk6";
+
+    // Delay ensures Safari paints before app handoff
+    setTimeout(() => {
+      window.location.href = SHAREPOINT_URL;
+    }, 300);
+  </script>
+</head>
+
+<body>
+  <div class="bar">
+    <a class="btn" href="main.html">⬅ Back</a>
+    <div class="title">📁 Projects</div>
+  </div>
+
+  <div class="hint">
+    Opening project documents…
+  </div>
+</body>
+</html>
