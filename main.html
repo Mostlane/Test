@@ -133,7 +133,11 @@ a.button {
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <!-- FIXED -->
     <a class="button" href="javascript:void(0)" id="MyDocuments"><span class="emoji">📄</span> My Documents</a>
-
+    <a class="button"
+   href="javascript:void(0)"
+   id="Projects">
+  <span class="emoji">📁</span> Projects
+</a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
@@ -181,6 +185,9 @@ a.button {
       const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
 
       // Permission mapping
+      const PROJECTS_SHAREPOINT_URL =
+  "https://mostlane.sharepoint.com/:f:/g/IgDmk-lHVlZNSaIVFhloFRqEAdKOjvt0RubPz0D-Efs47Ng?e=ksaZk6";
+
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
   Vehicles: ["Vehicles", "vehiclesBtn"],
@@ -191,20 +198,16 @@ const MAP = {
   Sites: ["Sites", "AddSite", "sitesBtn"],
   Assets: ["Assets", "Plant&Equipment", "assetsBtn", "assetmenuhtml", "myassetshtml", "assetsadminhtml"],
   MyDocuments: ["MyDocuments", "my-documents-btn"],
+  Projects: ["Projects", "ProjectsAccess", "projects", "projectsBtn"],
   HolidayAdmin: ["HolidayAdmin", "HolidayAdminAccess", "holidayAdmin", "HolidayAdminBtn"],
   Weekly: ["Weekly"],
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
   Users: ["Users", "usersAdmin", "usersAdminBtn"],
   DeviceAdmin: ["DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
-
-  /* ⭐ NEW LABOUR PLANNING PERMISSION ⭐ */
-LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
-
-  /* ⭐ NEW SLA PERMISSION ⭐ */
+  LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
   SLA: ["SLA", "slaMenu", "slaAccess"]
 };
-
       Object.entries(MAP).forEach(([buttonID, keyList]) => {
 
         const btn = document.getElementById(buttonID);
@@ -224,11 +227,18 @@ LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning"
         }
 
         if (allowed) {
-          btn.classList.add("visible");
-          if (buttonID === "MyDocuments" && user.SharePointPath) {
-            btn.href = user.SharePointPath;
-          }
-        }
+  btn.classList.add("visible");
+
+  if (buttonID === "MyDocuments" && user.SharePointPath) {
+    btn.href = user.SharePointPath;
+  }
+
+  if (buttonID === "Projects") {
+    btn.onclick = () => {
+      window.open(PROJECTS_SHAREPOINT_URL, "_blank");
+    };
+  }
+}
       });
 
       setTimeout(() => {
