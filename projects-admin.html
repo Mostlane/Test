@@ -21,12 +21,18 @@
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex; justify-content:space-between; align-items:center;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
     }
 
     .btn{
-      border:none;border-radius:10px;padding:10px 14px;
-      font-size:14px;font-weight:600;cursor:pointer;
+      border:none;
+      border-radius:10px;
+      padding:10px 14px;
+      font-size:14px;
+      font-weight:600;
+      cursor:pointer;
     }
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
@@ -34,45 +40,110 @@
     .btn-danger{background:#7f1d1d;color:#fff}
 
     .wrap{
-      max-width:1200px;margin:16px auto 70px;padding:14px;
-      background:rgba(255,255,255,.7);border-radius:12px;
+      max-width:1200px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.7);
+      border-radius:12px;
     }
 
-    .grid{display:grid;gap:12px;grid-template-columns:1fr 1.2fr}
-    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+    .grid{
+      display:grid;
+      gap:12px;
+      grid-template-columns:1fr 1.2fr;
+    }
+    @media(max-width:900px){
+      .grid{grid-template-columns:1fr}
+    }
 
-    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+    .card{
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:14px;
+    }
 
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .input{padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
+    .input{
+      padding:10px;
+      border:1px solid #d1d5db;
+      border-radius:8px;
+      font-size:14px;
+    }
 
     .muted{font-size:12px;color:#6b7280}
 
     .proj-row{
-      padding:12px;border:1px solid #e5e7eb;border-radius:12px;
-      margin-top:10px;cursor:pointer;
+      padding:12px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      cursor:pointer;
+      background:#fff;
     }
     .proj-row.active{border-color:#004a99;background:#f0f6ff}
 
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px;vertical-align:top}
-    th{text-transform:uppercase;font-size:12px;color:#374151}
-
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-
     .pill{
-      padding:4px 10px;border-radius:999px;font-size:12px;
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
       border:1px solid #d1d5db;
       display:inline-block;
+      margin-top:6px;
     }
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
+    .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
     .pill.hidden{background:#fef2f2;color:#991b1b;border-color:#fecaca}
 
-    /* Hidden file row styling */
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:12px;
+    }
+    th,td{
+      padding:10px;
+      border-bottom:1px solid #e5e7eb;
+      font-size:14px;
+      text-align:left;
+      vertical-align:top;
+    }
+    th{
+      font-size:12px;
+      text-transform:uppercase;
+      color:#374151;
+    }
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+
     tr.hidden-row{
       opacity:.45;
       background:#fafafa;
     }
+
+    .banner{
+      display:none;
+      margin:0 0 12px 0;
+      padding:10px 12px;
+      border-radius:12px;
+      font-weight:600;
+    }
+    .banner.show{display:block}
+    .banner.ok{background:#e9f7ef;color:#1b5e20;border:1px solid #c8e6c9}
+    .banner.err{background:#fee2e2;color:#7f1d1d;border:1px solid #fecaca}
+
+    .mask{
+      position:fixed; inset:0;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(255,255,255,.55);
+      backdrop-filter:blur(2px);
+      z-index:50;
+    }
+    .mask.show{display:flex}
+    .spinner{
+      width:46px;height:46px;border-radius:50%;
+      border:4px solid #c7d2fe;border-top-color:#004a99;
+      animation:spin 1s linear infinite
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 
@@ -87,6 +158,8 @@
 </div>
 
 <div class="wrap">
+  <div id="banner" class="banner"></div>
+
   <div class="grid">
 
     <!-- LEFT -->
@@ -102,6 +175,7 @@
       <hr style="margin:16px 0">
 
       <strong>Projects</strong>
+      <div class="muted" style="margin-top:6px">Click a project to manage files.</div>
       <div id="projectsList"></div>
     </div>
 
@@ -109,13 +183,21 @@
     <div class="card">
       <strong id="projectTitle">Select a project</strong>
 
+      <div class="row" id="projectActions" style="margin-top:10px;display:none">
+        <button class="btn btn-warn" id="archiveBtn" onclick="archiveProject()">Archive</button>
+        <button class="btn btn-primary" id="unarchiveBtn" onclick="unarchiveProject()">Unarchive</button>
+        <button class="btn btn-outline" onclick="renameProject()">Rename</button>
+      </div>
+
       <div id="filePanel" style="display:none;margin-top:16px">
         <div class="row">
           <input id="f_title" class="input" placeholder="File title">
           <input id="f_category" class="input" placeholder="Category">
-          <input id="f_file" type="file" class="input">
+          <input id="f_file" type="file" class="input" style="flex:1;min-width:220px">
           <button class="btn btn-primary" onclick="uploadFile()">⬆ Upload</button>
         </div>
+
+        <div class="muted" id="fileCounts" style="margin-top:10px"></div>
 
         <table>
           <thead>
@@ -134,102 +216,344 @@
   </div>
 </div>
 
+<div id="mask" class="mask"><div class="spinner"></div></div>
+
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
 const USER = sessionStorage.getItem("mostlaneUser");
 const ADMIN_TOKEN = "Hbdkwnainj2758";
 if(!USER) location.href="login.html";
 
-let CURRENT_PROJECT=null;
-let ALL_FILES=[];
+let CURRENT_PROJECT = null;
+let CURRENT_FILES = [];
 
-function headers(extra={}){
-  return { Authorization:"Bearer "+USER,"X-Admin-Token":ADMIN_TOKEN,...extra };
+const banner = document.getElementById("banner");
+const mask = document.getElementById("mask");
+const projectsList = document.getElementById("projectsList");
+const filesTbody = document.getElementById("filesTbody");
+const projectTitle = document.getElementById("projectTitle");
+const projectActions = document.getElementById("projectActions");
+const filePanel = document.getElementById("filePanel");
+const archiveBtn = document.getElementById("archiveBtn");
+const unarchiveBtn = document.getElementById("unarchiveBtn");
+const fileCounts = document.getElementById("fileCounts");
+
+function showMask(v){ mask.classList.toggle("show", !!v); }
+function showMsg(msg, type="ok"){
+  banner.textContent = msg;
+  banner.className = "banner show " + (type==="err" ? "err" : "ok");
+  setTimeout(()=>banner.classList.remove("show"), 4500);
 }
 
-function loadProjects(){
-  fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
-    .then(r=>r.json())
-    .then(d=>{
-      const list=document.getElementById("projectsList");
-      list.innerHTML="";
-      d.projects.forEach(p=>{
-        const div=document.createElement("div");
-        div.className="proj-row"+(CURRENT_PROJECT?.id===p.id?" active":"");
-        div.innerHTML=`<strong>${p.name}</strong>`;
-        div.onclick=()=>selectProject(p);
-        list.appendChild(div);
-      });
+function adminHeaders(extra={}){
+  // IMPORTANT: for admin listing hidden files, worker needs X-Admin-Token
+  return {
+    "Authorization": "Bearer " + USER,
+    "X-Admin-Token": ADMIN_TOKEN,
+    ...extra
+  };
+}
+
+async function fetchJson(url, opts={}){
+  const res = await fetch(url, opts);
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+async function loadProjects(){
+  showMask(true);
+  try{
+    const d = await fetchJson(API + "/projects", {
+      headers: { "Authorization":"Bearer "+USER },
+      cache: "no-store"
     });
-}
 
-function selectProject(p){
-  CURRENT_PROJECT=p;
-  document.getElementById("projectTitle").textContent=p.name;
-  document.getElementById("filePanel").style.display="block";
-  loadFiles();
-  loadProjects();
-}
-
-function loadFiles(){
-  fetch(`${API}/projects/${CURRENT_PROJECT.id}/files`,{headers:{Authorization:"Bearer "+USER}})
-    .then(r=>r.json())
-    .then(d=>{
-      ALL_FILES=d.files||[];
-      renderFiles();
+    projectsList.innerHTML = "";
+    (d.projects || []).forEach(p=>{
+      const div = document.createElement("div");
+      div.className = "proj-row" + (CURRENT_PROJECT?.id===p.id ? " active" : "");
+      div.innerHTML = `
+        <div style="font-weight:700">${escapeHtml(p.name||p.id)}</div>
+        <div class="muted">#${escapeHtml(p.storeNumber||"-")} · ${escapeHtml(p.client||"")}</div>
+        <span class="pill ${p.status==="archived"?"archived":"active"}">${p.status||"active"}</span>
+      `;
+      div.onclick = ()=>selectProject(p.id);
+      projectsList.appendChild(div);
     });
+
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{
+    showMask(false);
+  }
+}
+
+async function selectProject(projectId){
+  showMask(true);
+  try{
+    const d = await fetchJson(`${API}/projects/${encodeURIComponent(projectId)}/files`, {
+      headers: adminHeaders(), // ✅ admin token so we ALWAYS get hidden + visible
+      cache: "no-store"
+    });
+
+    CURRENT_PROJECT = d.project;
+    CURRENT_FILES = d.files || [];
+
+    projectTitle.textContent = CURRENT_PROJECT.name || CURRENT_PROJECT.id;
+    projectActions.style.display = "flex";
+    filePanel.style.display = "block";
+
+    const st = (CURRENT_PROJECT.status || "active");
+    archiveBtn.style.display = (st === "active") ? "inline-block" : "none";
+    unarchiveBtn.style.display = (st === "archived") ? "inline-block" : "none";
+
+    renderFiles();
+    await loadProjects();
+
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{
+    showMask(false);
+  }
 }
 
 function renderFiles(){
-  const tb=document.getElementById("filesTbody");
-  tb.innerHTML="";
+  filesTbody.innerHTML = "";
 
-  ALL_FILES.forEach(f=>{
-    const tr=document.createElement("tr");
+  const total = CURRENT_FILES.length;
+  const hiddenCount = CURRENT_FILES.filter(f=>!!f.hidden).length;
+  fileCounts.textContent = `Files: ${total} (Hidden: ${hiddenCount})`;
+
+  if(!total){
+    filesTbody.innerHTML = `<tr><td colspan="4" class="muted">No files yet.</td></tr>`;
+    return;
+  }
+
+  CURRENT_FILES.forEach(f=>{
+    const tr = document.createElement("tr");
     if(f.hidden) tr.classList.add("hidden-row");
 
-    tr.innerHTML=`
+    tr.innerHTML = `
       <td>
-        <strong>${f.title||f.name}</strong><br>
-        <span class="muted">${f.name}</span>
+        <strong>${escapeHtml(f.title||f.name)}</strong><br>
+        <span class="muted">${escapeHtml(f.name||"")}</span>
       </td>
-      <td>${f.category||""}</td>
       <td>
-        <span class="pill ${f.hidden?"hidden":"active"}">
-          ${f.hidden?"Hidden":"Active"}
-        </span>
+        <div>${escapeHtml(f.category||"")}</div>
+        <div class="muted">${escapeHtml(f.uploadedBy||"")} · ${formatDate(f.uploadedAt)}</div>
+      </td>
+      <td>
+        <span class="pill ${f.hidden ? "hidden" : "active"}">${f.hidden ? "Hidden" : "Active"}</span>
       </td>
       <td class="actions">
-        <button class="btn btn-warn"
-          onclick="toggleHide('${f.id}',${!f.hidden})">
-          ${f.hidden?"Unhide":"Hide"}
-        </button>
-        <button class="btn btn-danger"
-          onclick="deleteFile('${f.id}')">
-          Delete
-        </button>
+        <button class="btn btn-outline" onclick="renameFile('${f.id}')">Rename</button>
+        <button class="btn btn-warn" onclick="toggleHide('${f.id}', ${!f.hidden})">${f.hidden ? "Unhide" : "Hide"}</button>
+        <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
       </td>
     `;
-    tb.appendChild(tr);
+    filesTbody.appendChild(tr);
   });
 }
 
-/* Existing API helpers (unchanged behaviour) */
-function createProject(){}
-function uploadFile(){}
-function toggleHide(id,hidden){
-  fetch(`${API}/files/${id}/hide`,{
-    method:"POST",
-    headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({hidden})
-  }).then(()=>loadFiles());
+async function createProject(){
+  const name = (p_name.value || "").trim();
+  if(!name) return showMsg("❌ Project name required", "err");
+
+  showMask(true);
+  try{
+    await fetchJson(API + "/projects", {
+      method: "POST",
+      headers: adminHeaders({ "Content-Type":"application/json" }),
+      body: JSON.stringify({
+        name,
+        storeNumber: (p_store.value || "").trim(),
+        client: (p_client.value || "").trim()
+      })
+    });
+
+    p_name.value = "";
+    p_store.value = "";
+    p_client.value = "";
+
+    showMsg("✅ Project created");
+    await loadProjects();
+
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{
+    showMask(false);
+  }
 }
-function deleteFile(id){
-  if(!confirm("Permanently delete this file?")) return;
-  fetch(`${API}/files/${id}`,{
-    method:"DELETE",
-    headers:headers()
-  }).then(()=>loadFiles());
+
+async function uploadFile(){
+  if(!CURRENT_PROJECT) return showMsg("❌ Select a project first", "err");
+
+  const file = f_file.files?.[0];
+  if(!file) return showMsg("❌ Choose a file first", "err");
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("title", (f_title.value || "").trim());
+  fd.append("category", (f_category.value || "").trim());
+
+  showMask(true);
+  try{
+    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/upload`, {
+      method: "POST",
+      headers: adminHeaders(), // ✅ DO NOT set Content-Type manually for FormData
+      body: fd
+    });
+
+    f_file.value = "";
+    f_title.value = "";
+    f_category.value = "";
+
+    showMsg("✅ Uploaded");
+    await selectProject(CURRENT_PROJECT.id);
+
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{
+    showMask(false);
+  }
+}
+
+async function archiveProject(){
+  if(!CURRENT_PROJECT) return;
+  showMask(true);
+  try{
+    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
+      method:"POST",
+      headers: adminHeaders({"Content-Type":"application/json"}),
+      body: JSON.stringify({ status:"archived" })
+    });
+    showMsg("✅ Archived");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+async function unarchiveProject(){
+  if(!CURRENT_PROJECT) return;
+  showMask(true);
+  try{
+    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
+      method:"POST",
+      headers: adminHeaders({"Content-Type":"application/json"}),
+      body: JSON.stringify({ status:"active" })
+    });
+    showMsg("✅ Unarchived");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+async function renameProject(){
+  if(!CURRENT_PROJECT) return;
+  const name = prompt("New project name:", CURRENT_PROJECT.name || "");
+  if(!name || !name.trim()) return;
+
+  showMask(true);
+  try{
+    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/rename`,{
+      method:"POST",
+      headers: adminHeaders({"Content-Type":"application/json"}),
+      body: JSON.stringify({
+        name: name.trim(),
+        storeNumber: CURRENT_PROJECT.storeNumber || "",
+        client: CURRENT_PROJECT.client || ""
+      })
+    });
+    showMsg("✅ Project renamed");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+async function toggleHide(fileId, hidden){
+  showMask(true);
+  try{
+    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}/hide`,{
+      method:"POST",
+      headers: adminHeaders({"Content-Type":"application/json"}),
+      body: JSON.stringify({ hidden })
+    });
+    showMsg(hidden ? "✅ Hidden" : "✅ Unhidden");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+async function renameFile(fileId){
+  const f = CURRENT_FILES.find(x=>x.id===fileId);
+  if(!f) return;
+
+  const newTitle = prompt("New title (shown name):", f.title || "");
+  if(newTitle === null) return;
+
+  const newCategory = prompt("New category:", f.category || "");
+  if(newCategory === null) return;
+
+  const newName = prompt("New filename (optional):", f.name || "");
+  if(newName === null) return;
+
+  showMask(true);
+  try{
+    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}/rename`,{
+      method:"POST",
+      headers: adminHeaders({"Content-Type":"application/json"}),
+      body: JSON.stringify({
+        title: (newTitle || "").trim(),
+        category: (newCategory || "").trim(),
+        name: (newName || "").trim()
+      })
+    });
+
+    showMsg("✅ File updated");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+async function deleteFile(fileId){
+  if(!confirm("Permanently delete this file from R2?")) return;
+
+  showMask(true);
+  try{
+    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}`,{
+      method:"DELETE",
+      headers: adminHeaders()
+    });
+
+    showMsg("✅ File deleted");
+    await selectProject(CURRENT_PROJECT.id);
+  }catch(e){
+    showMsg("❌ " + e.message, "err");
+  }finally{ showMask(false); }
+}
+
+function formatDate(iso){
+  if(!iso) return "";
+  try{
+    const d = new Date(iso);
+    return d.toLocaleString("en-GB", {
+      day:"2-digit", month:"short", year:"numeric",
+      hour:"2-digit", minute:"2-digit"
+    });
+  }catch{ return iso; }
+}
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
 }
 
 loadProjects();
