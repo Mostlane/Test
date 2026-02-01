@@ -20,51 +20,47 @@
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex; align-items:center; justify-content:space-between;
+      display:flex; justify-content:space-between; align-items:center;
     }
     .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
     .warn{background:#8a5a00;color:#fff}
     .danger{background:#7f1d1d;color:#fff}
-    .ok{background:#1b5e20;color:#fff}
     .wrap{
       max-width:1100px;
       margin:16px auto 70px;
       padding:14px;
-      background:rgba(255,255,255,.70);
+      background:rgba(255,255,255,.7);
       border-radius:12px;
     }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:14px}
+    .input{padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
     .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    @media (max-width:800px){.grid{grid-template-columns:1fr}}
-    .muted{color:#6b7280;font-size:12px}
-    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
-    .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
-    .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
-    table{width:100%;border-collapse:collapse}
+    .grid{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+    @media(max-width:800px){.grid{grid-template-columns:1fr}}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px}
-    th{text-transform:uppercase;font-size:12px;color:#374151}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    th{font-size:12px;text-transform:uppercase;color:#374151}
+    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db}
+    .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
+    .pill.hidden{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+    .actions{display:flex;gap:8px}
     .mask{
       position:fixed; inset:0;
       display:none; align-items:center; justify-content:center;
-      background:rgba(255,255,255,.55);
+      background:rgba(255,255,255,.6);
       backdrop-filter:blur(2px);
       z-index:50;
     }
     .mask.show{display:flex}
     .spinner{
-      width:46px;height:46px;
-      border-radius:50%;
-      border:4px solid #c7d2fe;
-      border-top-color:#004a99;
+      width:40px;height:40px;border-radius:50%;
+      border:4px solid #c7d2fe;border-top-color:#004a99;
       animation:spin 1s linear infinite
     }
     @keyframes spin{to{transform:rotate(360deg)}}
-    .banner{display:none;margin-bottom:12px;padding:10px;border-radius:10px}
+    .banner{display:none;padding:10px;border-radius:10px;margin-bottom:12px}
     .banner.ok{background:#e9f7ef;color:#1b5e20}
     .banner.err{background:#fee2e2;color:#7f1d1d}
     .banner.show{display:block}
@@ -74,21 +70,19 @@
 <body>
 
 <div class="topbar">
-  <div class="row">
-    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-    <strong style="color:#004a99">Projects Admin</strong>
-  </div>
+  <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+  <strong style="color:#004a99">Projects Admin</strong>
   <button class="btn btn-outline" onclick="loadProjects()">⟲ Reload</button>
 </div>
 
 <div class="wrap">
-  <div class="banner" id="banner"></div>
+  <div id="banner" class="banner"></div>
 
   <div class="card">
     <div class="row">
-      <input class="input" id="p_name" placeholder="Project name" style="flex:1">
-      <input class="input" id="p_store" placeholder="Store no">
-      <input class="input" id="p_client" placeholder="Client">
+      <input id="p_name" class="input" placeholder="Project name" style="flex:1">
+      <input id="p_store" class="input" placeholder="Store no">
+      <input id="p_client" class="input" placeholder="Client">
       <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
     </div>
   </div>
@@ -100,22 +94,17 @@
     </div>
 
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <strong id="selTitle">Select a project</strong>
-          <div class="muted" id="selMeta"></div>
-        </div>
-      </div>
+      <strong id="selTitle">Select a project</strong>
 
-      <div id="filePanel" style="display:none;margin-top:12px">
+      <div id="uploadPanel" style="display:none;margin-top:12px">
         <div class="row">
-          <input class="input" id="f_title" placeholder="Title">
-          <input class="input" id="f_category" placeholder="Category">
-          <input class="input" id="f_file" type="file">
+          <input id="f_title" class="input" placeholder="Title">
+          <input id="f_category" class="input" placeholder="Category">
+          <input id="f_file" type="file" class="input">
           <button class="btn btn-primary" onclick="uploadFile()">⬆ Upload</button>
         </div>
 
-        <table style="margin-top:12px">
+        <table>
           <thead>
             <tr>
               <th>File</th>
@@ -131,7 +120,7 @@
   </div>
 </div>
 
-<div class="mask" id="mask"><div class="spinner"></div></div>
+<div id="mask" class="mask"><div class="spinner"></div></div>
 
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
@@ -146,8 +135,8 @@ const mask = document.getElementById("mask");
 const banner = document.getElementById("banner");
 
 function showMask(v){ mask.classList.toggle("show",v); }
-function msg(text,type="ok"){
-  banner.textContent=text;
+function showMsg(t,type="ok"){
+  banner.textContent=t;
   banner.className="banner show "+type;
   setTimeout(()=>banner.classList.remove("show"),4000);
 }
@@ -160,9 +149,9 @@ async function api(path, opts={}){
       ...(opts.headers||{})
     }
   });
-  const j = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(j.error||"Error");
-  return j;
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||"Request failed");
+  return data;
 }
 
 async function loadProjects(){
@@ -173,13 +162,12 @@ async function loadProjects(){
     list.innerHTML="";
     d.projects.forEach(p=>{
       const div=document.createElement("div");
-      div.className="row";
       div.style.cursor="pointer";
-      div.innerHTML=`<strong>${p.name}</strong><span class="pill ${p.status}">${p.status}</span>`;
+      div.innerHTML=`<strong>${p.name}</strong>`;
       div.onclick=()=>selectProject(p.id);
       list.appendChild(div);
     });
-  }catch(e){ msg(e.message,"err"); }
+  }catch(e){ showMsg(e.message,"err"); }
   finally{ showMask(false); }
 }
 
@@ -187,11 +175,11 @@ async function selectProject(id){
   showMask(true);
   try{
     const d = await api(`/projects/${id}/files`);
-    CURRENT_PROJECT=d.project;
-    document.getElementById("selTitle").textContent=CURRENT_PROJECT.name;
-    document.getElementById("filePanel").style.display="block";
+    CURRENT_PROJECT = d.project;
+    document.getElementById("selTitle").textContent = CURRENT_PROJECT.name;
+    document.getElementById("uploadPanel").style.display="block";
     renderFiles(d.files||[]);
-  }catch(e){ msg(e.message,"err"); }
+  }catch(e){ showMsg(e.message,"err"); }
   finally{ showMask(false); }
 }
 
@@ -202,8 +190,8 @@ function renderFiles(files){
     const tr=document.createElement("tr");
     tr.innerHTML=`
       <td><strong>${f.name}</strong><div class="muted">${f.title||""}</div></td>
-      <td class="muted">${f.category||""}<br>${f.uploadedAt||""}</td>
-      <td><span class="pill ${f.hidden?"archived":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
+      <td>${f.category||""}<br>${f.uploadedAt||""}</td>
+      <td><span class="pill ${f.hidden?"hidden":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
       <td class="actions">
         <button class="btn btn-outline" onclick="downloadFile('${f.id}')">⬇ Download</button>
       </td>
@@ -222,19 +210,18 @@ function downloadFile(id){
 }
 
 async function uploadFile(){
-  if(!CURRENT_PROJECT) return msg("Select a project first","err");
-  const fileInput=document.getElementById("f_file");
-  const file=fileInput.files[0];
-  if(!file) return msg("Choose a file","err");
+  if(!CURRENT_PROJECT) return showMsg("Select a project","err");
+  const file=document.getElementById("f_file").files[0];
+  if(!file) return showMsg("Choose a file","err");
 
   const fd=new FormData();
   fd.append("file",file);
-  fd.append("title",document.getElementById("f_title").value);
-  fd.append("category",document.getElementById("f_category").value);
+  fd.append("title",f_title.value);
+  fd.append("category",f_category.value);
 
   showMask(true);
   try{
-    await fetch(`${API}/projects/${CURRENT_PROJECT.id}/upload`,{
+    const res = await fetch(`${API}/projects/${CURRENT_PROJECT.id}/upload`,{
       method:"POST",
       headers:{
         Authorization:"Bearer "+USER,
@@ -242,26 +229,40 @@ async function uploadFile(){
       },
       body:fd
     });
-    fileInput.value="";
-    msg("Uploaded");
+
+    const j = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(j.error||"Upload failed");
+
+    showMsg("Uploaded");
+    f_file.value="";
     selectProject(CURRENT_PROJECT.id);
-  }catch(e){ msg(e.message,"err"); }
-  finally{ showMask(false); }
+
+  }catch(e){
+    showMsg(e.message,"err");
+  }finally{
+    showMask(false);
+  }
 }
 
 async function createProject(){
-  const name=p_name.value.trim();
-  if(!name) return msg("Name required","err");
+  if(!p_name.value.trim()) return showMsg("Name required","err");
   showMask(true);
   try{
-    await api("/projects",{method:"POST",headers:{"X-Admin-Token":ADMIN_TOKEN},body:JSON.stringify({
-      name,
-      storeNumber:p_store.value,
-      client:p_client.value
-    })});
+    await api("/projects",{
+      method:"POST",
+      headers:{
+        "X-Admin-Token":ADMIN_TOKEN,
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        name:p_name.value,
+        storeNumber:p_store.value,
+        client:p_client.value
+      })
+    });
     p_name.value=p_store.value=p_client.value="";
     loadProjects();
-  }catch(e){ msg(e.message,"err"); }
+  }catch(e){ showMsg(e.message,"err"); }
   finally{ showMask(false); }
 }
 
