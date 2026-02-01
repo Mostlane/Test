@@ -70,6 +70,7 @@
       border-radius:8px;
       font-size:14px;
     }
+    select.input{background:#fff}
 
     .muted{font-size:12px;color:#6b7280}
 
@@ -84,16 +85,17 @@
     .proj-row.active{border-color:#004a99;background:#f0f6ff}
 
     .pill{
+      display:inline-block;
       padding:4px 10px;
       border-radius:999px;
       font-size:12px;
       border:1px solid #d1d5db;
-      display:inline-block;
-      margin-top:6px;
+      background:#f9fafb;
     }
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
     .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
     .pill.hidden{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+    .pill.section{background:#fff;border-style:dashed}
 
     table{
       width:100%;
@@ -111,39 +113,52 @@
       font-size:12px;
       text-transform:uppercase;
       color:#374151;
+      letter-spacing:.04em;
     }
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
-    tr.hidden-row{
-      opacity:.45;
-      background:#fafafa;
-    }
-
-    .banner{
-      display:none;
-      margin:0 0 12px 0;
-      padding:10px 12px;
-      border-radius:12px;
-      font-weight:600;
-    }
-    .banner.show{display:block}
-    .banner.ok{background:#e9f7ef;color:#1b5e20;border:1px solid #c8e6c9}
-    .banner.err{background:#fee2e2;color:#7f1d1d;border:1px solid #fecaca}
-
-    .mask{
+    /* ===== Modal ===== */
+    .modal{
       position:fixed; inset:0;
-      display:none; align-items:center; justify-content:center;
-      background:rgba(255,255,255,.55);
-      backdrop-filter:blur(2px);
-      z-index:50;
+      display:none;
+      background:rgba(0,0,0,.55);
+      z-index:60;
     }
-    .mask.show{display:flex}
-    .spinner{
-      width:46px;height:46px;border-radius:50%;
-      border:4px solid #c7d2fe;border-top-color:#004a99;
-      animation:spin 1s linear infinite
+    .modal.show{display:flex}
+    .modal-box{
+      background:#fff;
+      width:min(760px, 92%);
+      margin:auto;
+      border-radius:14px;
+      box-shadow:0 20px 40px rgba(0,0,0,.25);
+      overflow:hidden;
     }
-    @keyframes spin{to{transform:rotate(360deg)}}
+    .modal-head{
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .modal-body{padding:14px}
+    .modal-foot{
+      padding:12px 14px;
+      border-top:1px solid #e5e7eb;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+    .field{
+      display:grid;
+      grid-template-columns:160px 1fr;
+      gap:10px;
+      align-items:center;
+      margin:10px 0;
+    }
+    @media(max-width:620px){
+      .field{grid-template-columns:1fr}
+    }
   </style>
 </head>
 
@@ -158,46 +173,52 @@
 </div>
 
 <div class="wrap">
-  <div id="banner" class="banner"></div>
-
   <div class="grid">
 
-    <!-- LEFT -->
+    <!-- LEFT: PROJECTS -->
     <div class="card">
       <strong>Create project</strong>
       <div class="row" style="margin-top:10px">
-        <input id="p_name" class="input" placeholder="Project name" style="flex:1">
-        <input id="p_store" class="input" placeholder="Store no">
-        <input id="p_client" class="input" placeholder="Client">
+        <input id="p_name" class="input" placeholder="Project name" style="flex:1;min-width:240px">
+        <input id="p_store" class="input" placeholder="Store no" style="width:140px">
+        <input id="p_client" class="input" placeholder="Client" style="width:180px">
         <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
       </div>
 
       <hr style="margin:16px 0">
 
       <strong>Projects</strong>
-      <div class="muted" style="margin-top:6px">Click a project to manage files.</div>
+      <div class="muted">Admin sees Active + Archived.</div>
       <div id="projectsList"></div>
     </div>
 
-    <!-- RIGHT -->
+    <!-- RIGHT: FILES -->
     <div class="card">
       <strong id="projectTitle">Select a project</strong>
-
-      <div class="row" id="projectActions" style="margin-top:10px;display:none">
+      <div class="row" id="projectActions" style="margin-top:8px;display:none">
         <button class="btn btn-warn" id="archiveBtn" onclick="archiveProject()">Archive</button>
         <button class="btn btn-primary" id="unarchiveBtn" onclick="unarchiveProject()">Unarchive</button>
         <button class="btn btn-outline" onclick="renameProject()">Rename</button>
       </div>
 
       <div id="filePanel" style="display:none;margin-top:16px">
-        <div class="row">
-          <input id="f_title" class="input" placeholder="File title">
-          <input id="f_category" class="input" placeholder="Category">
-          <input id="f_file" type="file" class="input" style="flex:1;min-width:220px">
+        <div class="row" style="margin-bottom:8px">
+          <input id="f_title" class="input" placeholder="File title (optional)" style="flex:1;min-width:220px">
+          <input id="f_category" class="input" placeholder="Category (optional)" style="width:180px">
+
+          <select id="f_section" class="input" style="width:190px">
+            <option value="drawings">Drawings</option>
+            <option value="health_safety">Health & Safety</option>
+            <option value="documents" selected>Documents</option>
+            <option value="images">Images</option>
+            <option value="other">Other</option>
+          </select>
+
+          <input id="f_file" type="file" class="input" style="flex:1;min-width:240px">
           <button class="btn btn-primary" onclick="uploadFile()">⬆ Upload</button>
         </div>
 
-        <div class="muted" id="fileCounts" style="margin-top:10px"></div>
+        <div class="muted">Tip: “Section” is mandatory for correct sorting in Projects.</div>
 
         <table>
           <thead>
@@ -205,10 +226,12 @@
               <th>File</th>
               <th>Meta</th>
               <th>Status</th>
-              <th>Actions</th>
+              <th style="width:310px">Actions</th>
             </tr>
           </thead>
-          <tbody id="filesTbody"></tbody>
+          <tbody id="filesTbody">
+            <tr><td colspan="4" class="muted">No project selected.</td></tr>
+          </tbody>
         </table>
       </div>
     </div>
@@ -216,7 +239,52 @@
   </div>
 </div>
 
-<div id="mask" class="mask"><div class="spinner"></div></div>
+<!-- Edit File Modal -->
+<div class="modal" id="editModal" aria-hidden="true">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong>Edit file</strong>
+      <button class="btn btn-outline" onclick="closeEdit()">✕ Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="muted" id="editMeta"></div>
+
+      <div class="field">
+        <div><strong>Title</strong></div>
+        <input class="input" id="edit_title" placeholder="(optional)">
+      </div>
+
+      <div class="field">
+        <div><strong>Category</strong></div>
+        <input class="input" id="edit_category" placeholder="(optional)">
+      </div>
+
+      <div class="field">
+        <div><strong>Section</strong></div>
+        <select class="input" id="edit_section">
+          <option value="drawings">Drawings</option>
+          <option value="health_safety">Health & Safety</option>
+          <option value="documents">Documents</option>
+          <option value="images">Images</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div><strong>Display name</strong></div>
+        <input class="input" id="edit_name" placeholder="Filename shown to users">
+      </div>
+
+      <div class="muted" style="margin-top:10px">
+        Note: Changing “Display name” does not move the R2 object — it just changes the filename users see on download.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeEdit()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()">Save changes</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
@@ -226,327 +294,288 @@ if(!USER) location.href="login.html";
 
 let CURRENT_PROJECT = null;
 let CURRENT_FILES = [];
+let EDITING_FILE = null;
 
-const banner = document.getElementById("banner");
-const mask = document.getElementById("mask");
-const projectsList = document.getElementById("projectsList");
-const filesTbody = document.getElementById("filesTbody");
-const projectTitle = document.getElementById("projectTitle");
-const projectActions = document.getElementById("projectActions");
-const filePanel = document.getElementById("filePanel");
-const archiveBtn = document.getElementById("archiveBtn");
-const unarchiveBtn = document.getElementById("unarchiveBtn");
-const fileCounts = document.getElementById("fileCounts");
-
-function showMask(v){ mask.classList.toggle("show", !!v); }
-function showMsg(msg, type="ok"){
-  banner.textContent = msg;
-  banner.className = "banner show " + (type==="err" ? "err" : "ok");
-  setTimeout(()=>banner.classList.remove("show"), 4500);
-}
-
-function adminHeaders(extra={}){
-  // IMPORTANT: for admin listing hidden files, worker needs X-Admin-Token
+function headers(extra={}){
   return {
-    "Authorization": "Bearer " + USER,
+    Authorization:"Bearer "+USER,
     "X-Admin-Token": ADMIN_TOKEN,
     ...extra
   };
 }
 
-async function fetchJson(url, opts={}){
-  const res = await fetch(url, opts);
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error || "Request failed");
-  return data;
+function fmtStatusPill(p){
+  const status = (p.status || "active");
+  return `<span class="pill ${status === "archived" ? "archived" : "active"}">${status.toUpperCase()}</span>`;
 }
 
-async function loadProjects(){
-  showMask(true);
-  try{
-    const d = await fetchJson(API + "/projects", {
-      headers: { "Authorization":"Bearer "+USER },
-      cache: "no-store"
-    });
-
-    projectsList.innerHTML = "";
-    (d.projects || []).forEach(p=>{
-      const div = document.createElement("div");
-      div.className = "proj-row" + (CURRENT_PROJECT?.id===p.id ? " active" : "");
-      div.innerHTML = `
-        <div style="font-weight:700">${escapeHtml(p.name||p.id)}</div>
-        <div class="muted">#${escapeHtml(p.storeNumber||"-")} · ${escapeHtml(p.client||"")}</div>
-        <span class="pill ${p.status==="archived"?"archived":"active"}">${p.status||"active"}</span>
-      `;
-      div.onclick = ()=>selectProject(p.id);
-      projectsList.appendChild(div);
-    });
-
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{
-    showMask(false);
+function sectionLabel(key){
+  switch(String(key||"").toLowerCase()){
+    case "drawings": return "Drawings";
+    case "health_safety": return "Health & Safety";
+    case "documents": return "Documents";
+    case "images": return "Images";
+    default: return "Other";
   }
 }
 
-async function selectProject(projectId){
-  showMask(true);
-  try{
-    const d = await fetchJson(`${API}/projects/${encodeURIComponent(projectId)}/files`, {
-      headers: adminHeaders(), // ✅ admin token so we ALWAYS get hidden + visible
-      cache: "no-store"
-    });
-
-    CURRENT_PROJECT = d.project;
-    CURRENT_FILES = d.files || [];
-
-    projectTitle.textContent = CURRENT_PROJECT.name || CURRENT_PROJECT.id;
-    projectActions.style.display = "flex";
-    filePanel.style.display = "block";
-
-    const st = (CURRENT_PROJECT.status || "active");
-    archiveBtn.style.display = (st === "active") ? "inline-block" : "none";
-    unarchiveBtn.style.display = (st === "archived") ? "inline-block" : "none";
-
-    renderFiles();
-    await loadProjects();
-
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{
-    showMask(false);
-  }
+function loadProjects(){
+  fetch(API+"/projects",{headers: headers()})
+    .then(r=>r.json())
+    .then(d=>{
+      const list=document.getElementById("projectsList");
+      list.innerHTML="";
+      (d.projects||[]).forEach(p=>{
+        const div=document.createElement("div");
+        div.className="proj-row"+(CURRENT_PROJECT?.id===p.id?" active":"");
+        div.innerHTML=`
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <div>
+              <div style="font-weight:800">${escapeHtml(p.name)}</div>
+              <div class="muted">#${escapeHtml(p.storeNumber||"-")} · ${escapeHtml(p.client||"")}</div>
+            </div>
+            <div>${fmtStatusPill(p)}</div>
+          </div>
+        `;
+        div.onclick=()=>selectProject(p);
+        list.appendChild(div);
+      });
+    })
+    .catch(err=>console.error(err));
 }
 
-function renderFiles(){
-  filesTbody.innerHTML = "";
+function selectProject(p){
+  CURRENT_PROJECT=p;
+  document.getElementById("projectTitle").textContent=p.name;
+  document.getElementById("projectActions").style.display="flex";
+  document.getElementById("filePanel").style.display="block";
 
-  const total = CURRENT_FILES.length;
-  const hiddenCount = CURRENT_FILES.filter(f=>!!f.hidden).length;
-  fileCounts.textContent = `Files: ${total} (Hidden: ${hiddenCount})`;
+  const status = (p.status || "active");
+  document.getElementById("archiveBtn").style.display = (status === "active") ? "inline-block" : "none";
+  document.getElementById("unarchiveBtn").style.display = (status === "archived") ? "inline-block" : "none";
 
-  if(!total){
-    filesTbody.innerHTML = `<tr><td colspan="4" class="muted">No files yet.</td></tr>`;
+  loadFiles();
+  loadProjects();
+}
+
+function loadFiles(){
+  if(!CURRENT_PROJECT) return;
+
+  fetch(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/files`,{headers: headers()})
+    .then(r=>r.json())
+    .then(d=>{
+      CURRENT_FILES = d.files || [];
+      renderFiles(CURRENT_FILES);
+    })
+    .catch(err=>console.error(err));
+}
+
+function renderFiles(files){
+  const tb=document.getElementById("filesTbody");
+  tb.innerHTML="";
+
+  if(!files.length){
+    tb.innerHTML = `<tr><td colspan="4" class="muted">No files yet.</td></tr>`;
     return;
   }
 
-  CURRENT_FILES.forEach(f=>{
-    const tr = document.createElement("tr");
-    if(f.hidden) tr.classList.add("hidden-row");
+  files.forEach(f=>{
+    const tr=document.createElement("tr");
 
-    tr.innerHTML = `
+    const title = f.title || f.name;
+    const metaLine = [
+      f.category ? escapeHtml(f.category) : "",
+      f.section ? `Section: ${escapeHtml(sectionLabel(f.section))}` : ""
+    ].filter(Boolean).join(" · ");
+
+    const statusPill = f.hidden
+      ? `<span class="pill hidden">HIDDEN</span>`
+      : `<span class="pill active">VISIBLE</span>`;
+
+    tr.innerHTML=`
       <td>
-        <strong>${escapeHtml(f.title||f.name)}</strong><br>
-        <span class="muted">${escapeHtml(f.name||"")}</span>
+        <div style="font-weight:800">${escapeHtml(title)}</div>
+        <div class="muted">${escapeHtml(f.name || "")}</div>
       </td>
       <td>
-        <div>${escapeHtml(f.category||"")}</div>
-        <div class="muted">${escapeHtml(f.uploadedBy||"")} · ${formatDate(f.uploadedAt)}</div>
+        <div class="muted">${metaLine || ""}</div>
+        <div class="muted">${escapeHtml(f.uploadedBy||"")} · ${escapeHtml(f.uploadedAt||"")}</div>
       </td>
-      <td>
-        <span class="pill ${f.hidden ? "hidden" : "active"}">${f.hidden ? "Hidden" : "Active"}</span>
-      </td>
+      <td>${statusPill}</td>
       <td class="actions">
-        <button class="btn btn-outline" onclick="renameFile('${f.id}')">Rename</button>
-        <button class="btn btn-warn" onclick="toggleHide('${f.id}', ${!f.hidden})">${f.hidden ? "Unhide" : "Hide"}</button>
+        <button class="btn btn-outline" onclick="openEdit('${f.id}')">Edit</button>
+        <button class="btn btn-warn" onclick="toggleHide('${f.id}', ${f.hidden ? "false" : "true"})">${f.hidden ? "Unhide" : "Hide"}</button>
         <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
       </td>
     `;
-    filesTbody.appendChild(tr);
+
+    tb.appendChild(tr);
   });
 }
 
-async function createProject(){
-  const name = (p_name.value || "").trim();
-  if(!name) return showMsg("❌ Project name required", "err");
+function createProject(){
+  const name = (p_name.value||"").trim();
+  if(!name) return alert("Project name required");
 
-  showMask(true);
-  try{
-    await fetchJson(API + "/projects", {
-      method: "POST",
-      headers: adminHeaders({ "Content-Type":"application/json" }),
-      body: JSON.stringify({
-        name,
-        storeNumber: (p_store.value || "").trim(),
-        client: (p_client.value || "").trim()
-      })
-    });
-
-    p_name.value = "";
-    p_store.value = "";
-    p_client.value = "";
-
-    showMsg("✅ Project created");
-    await loadProjects();
-
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{
-    showMask(false);
-  }
+  fetch(API+"/projects",{
+    method:"POST",
+    headers:{...headers(), "Content-Type":"application/json"},
+    body:JSON.stringify({
+      name,
+      storeNumber:(p_store.value||"").trim(),
+      client:(p_client.value||"").trim()
+    })
+  })
+  .then(r=>r.json())
+  .then(()=>{
+    p_name.value=""; p_store.value=""; p_client.value="";
+    loadProjects();
+  })
+  .catch(err=>alert(err.message || "Create failed"));
 }
 
-async function uploadFile(){
-  if(!CURRENT_PROJECT) return showMsg("❌ Select a project first", "err");
+function uploadFile(){
+  if(!CURRENT_PROJECT) return alert("Select a project first");
+  const file = (f_file.files||[])[0];
+  if(!file) return alert("Choose a file");
 
-  const file = f_file.files?.[0];
-  if(!file) return showMsg("❌ Choose a file first", "err");
+  const section = (f_section.value||"").trim();
+  if(!section) return alert("Choose a section");
 
-  const fd = new FormData();
+  const fd=new FormData();
   fd.append("file", file);
-  fd.append("title", (f_title.value || "").trim());
-  fd.append("category", (f_category.value || "").trim());
+  fd.append("title", (f_title.value||"").trim());
+  fd.append("category", (f_category.value||"").trim());
+  fd.append("section", section);
 
-  showMask(true);
-  try{
-    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/upload`, {
-      method: "POST",
-      headers: adminHeaders(), // ✅ DO NOT set Content-Type manually for FormData
-      body: fd
-    });
-
-    f_file.value = "";
-    f_title.value = "";
-    f_category.value = "";
-
-    showMsg("✅ Uploaded");
-    await selectProject(CURRENT_PROJECT.id);
-
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{
-    showMask(false);
-  }
+  fetch(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/upload`,{
+    method:"POST",
+    headers: headers(), // note: no Content-Type here (browser sets boundary)
+    body: fd
+  })
+  .then(r=>r.json().then(j=>({ok:r.ok,j})))
+  .then(({ok,j})=>{
+    if(!ok) throw new Error(j.error || "Upload failed");
+    f_file.value=""; f_title.value=""; f_category.value="";
+    loadFiles();
+  })
+  .catch(err=>alert(err.message || "Upload failed"));
 }
 
-async function archiveProject(){
+function archiveProject(){
   if(!CURRENT_PROJECT) return;
-  showMask(true);
-  try{
-    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
-      method:"POST",
-      headers: adminHeaders({"Content-Type":"application/json"}),
-      body: JSON.stringify({ status:"archived" })
-    });
-    showMsg("✅ Archived");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+  fetch(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({status:"archived"})
+  }).then(()=>{ loadProjects(); loadFiles(); });
 }
 
-async function unarchiveProject(){
+function unarchiveProject(){
   if(!CURRENT_PROJECT) return;
-  showMask(true);
-  try{
-    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
-      method:"POST",
-      headers: adminHeaders({"Content-Type":"application/json"}),
-      body: JSON.stringify({ status:"active" })
-    });
-    showMsg("✅ Unarchived");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+  fetch(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({status:"active"})
+  }).then(()=>{ loadProjects(); loadFiles(); });
 }
 
-async function renameProject(){
+function renameProject(){
   if(!CURRENT_PROJECT) return;
-  const name = prompt("New project name:", CURRENT_PROJECT.name || "");
-  if(!name || !name.trim()) return;
+  const name = prompt("New project name", CURRENT_PROJECT.name);
+  if(!name) return;
 
-  showMask(true);
-  try{
-    await fetchJson(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/rename`,{
-      method:"POST",
-      headers: adminHeaders({"Content-Type":"application/json"}),
-      body: JSON.stringify({
-        name: name.trim(),
-        storeNumber: CURRENT_PROJECT.storeNumber || "",
-        client: CURRENT_PROJECT.client || ""
-      })
-    });
-    showMsg("✅ Project renamed");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+  fetch(`${API}/projects/${encodeURIComponent(CURRENT_PROJECT.id)}/rename`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({name})
+  })
+  .then(r=>r.json())
+  .then(d=>{
+    CURRENT_PROJECT = d.project || CURRENT_PROJECT;
+    document.getElementById("projectTitle").textContent = CURRENT_PROJECT.name;
+    loadProjects();
+  })
+  .catch(err=>alert(err.message || "Rename failed"));
 }
 
-async function toggleHide(fileId, hidden){
-  showMask(true);
-  try{
-    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}/hide`,{
-      method:"POST",
-      headers: adminHeaders({"Content-Type":"application/json"}),
-      body: JSON.stringify({ hidden })
-    });
-    showMsg(hidden ? "✅ Hidden" : "✅ Unhidden");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+function toggleHide(id, hidden){
+  fetch(`${API}/files/${encodeURIComponent(id)}/hide`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({hidden})
+  }).then(r=>r.json().then(j=>({ok:r.ok,j})))
+    .then(({ok,j})=>{
+      if(!ok) throw new Error(j.error||"Hide failed");
+      loadFiles();
+    })
+    .catch(err=>alert(err.message||"Hide failed"));
 }
 
-async function renameFile(fileId){
+function deleteFile(id){
+  if(!confirm("Permanently delete this file?")) return;
+  fetch(`${API}/files/${encodeURIComponent(id)}`,{
+    method:"DELETE",
+    headers: headers()
+  })
+  .then(r=>r.json().then(j=>({ok:r.ok,j})))
+  .then(({ok,j})=>{
+    if(!ok) throw new Error(j.error||"Delete failed");
+    loadFiles();
+  })
+  .catch(err=>alert(err.message||"Delete failed"));
+}
+
+/* ===== Edit modal ===== */
+const editModal = document.getElementById("editModal");
+const editMeta = document.getElementById("editMeta");
+const edit_title = document.getElementById("edit_title");
+const edit_category = document.getElementById("edit_category");
+const edit_section = document.getElementById("edit_section");
+const edit_name = document.getElementById("edit_name");
+
+function openEdit(fileId){
   const f = CURRENT_FILES.find(x=>x.id===fileId);
   if(!f) return;
 
-  const newTitle = prompt("New title (shown name):", f.title || "");
-  if(newTitle === null) return;
+  EDITING_FILE = f;
+  editMeta.textContent = `ID: ${f.id} • Uploaded: ${f.uploadedAt || ""} • By: ${f.uploadedBy || ""}`;
 
-  const newCategory = prompt("New category:", f.category || "");
-  if(newCategory === null) return;
+  edit_title.value = f.title || "";
+  edit_category.value = f.category || "";
+  edit_section.value = (f.section || "documents");
+  edit_name.value = f.name || "";
 
-  const newName = prompt("New filename (optional):", f.name || "");
-  if(newName === null) return;
-
-  showMask(true);
-  try{
-    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}/rename`,{
-      method:"POST",
-      headers: adminHeaders({"Content-Type":"application/json"}),
-      body: JSON.stringify({
-        title: (newTitle || "").trim(),
-        category: (newCategory || "").trim(),
-        name: (newName || "").trim()
-      })
-    });
-
-    showMsg("✅ File updated");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+  editModal.classList.add("show");
 }
 
-async function deleteFile(fileId){
-  if(!confirm("Permanently delete this file from R2?")) return;
-
-  showMask(true);
-  try{
-    await fetchJson(`${API}/files/${encodeURIComponent(fileId)}`,{
-      method:"DELETE",
-      headers: adminHeaders()
-    });
-
-    showMsg("✅ File deleted");
-    await selectProject(CURRENT_PROJECT.id);
-  }catch(e){
-    showMsg("❌ " + e.message, "err");
-  }finally{ showMask(false); }
+function closeEdit(){
+  EDITING_FILE = null;
+  editModal.classList.remove("show");
 }
 
-function formatDate(iso){
-  if(!iso) return "";
-  try{
-    const d = new Date(iso);
-    return d.toLocaleString("en-GB", {
-      day:"2-digit", month:"short", year:"numeric",
-      hour:"2-digit", minute:"2-digit"
-    });
-  }catch{ return iso; }
+function saveEdit(){
+  if(!EDITING_FILE) return;
+
+  const payload = {
+    title: (edit_title.value||"").trim(),
+    category: (edit_category.value||"").trim(),
+    section: (edit_section.value||"").trim(),
+    name: (edit_name.value||"").trim()
+  };
+
+  fetch(`${API}/files/${encodeURIComponent(EDITING_FILE.id)}/rename`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify(payload)
+  })
+  .then(r=>r.json().then(j=>({ok:r.ok,j})))
+  .then(({ok,j})=>{
+    if(!ok) throw new Error(j.error||"Save failed");
+    closeEdit();
+    loadFiles();
+  })
+  .catch(err=>alert(err.message||"Save failed"));
 }
 
 function escapeHtml(s){
