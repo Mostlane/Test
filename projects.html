@@ -88,7 +88,6 @@
       font-size:12px;
       border:1px solid #d1d5db;
       background:#f9fafb;
-      white-space:nowrap;
     }
 
     .section{
@@ -105,57 +104,28 @@
       background:#f9fafb;
       border-bottom:1px solid #e5e7eb;
     }
-    .section-title{
-      font-weight:800;
-      font-size:13px;
-      letter-spacing:.01em;
-    }
+    .section-title{font-weight:800;font-size:13px}
 
     .file-row{
       display:grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns:1fr auto;
       gap:10px;
       padding:12px;
       border-bottom:1px solid #f1f5f9;
-      background:#fff;
     }
     .file-row:last-child{border-bottom:none}
 
-    .file-name{
-      font-weight:700;
-      font-size:14px;
-      line-height:1.2;
-    }
-    .file-sub{
-      margin-top:4px;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      align-items:center;
-    }
-    .tag{
-      font-size:12px;
-      color:#374151;
-      border:1px solid #e5e7eb;
-      background:#fff;
-      padding:3px 8px;
-      border-radius:999px;
-    }
-    .tag.muted{color:#6b7280}
+    .file-name{font-weight:700;font-size:14px}
+    .file-sub{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap}
+    .tag{font-size:12px;border:1px solid #e5e7eb;padding:3px 8px;border-radius:999px}
+    .tag.lock{background:#fef2f2;color:#991b1b;border-color:#fecaca}
 
-    .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-    .btn-sm{padding:8px 10px;border-radius:10px;font-size:13px}
-
-    .lock{
-      border-color:#fecaca;
-      background:#fef2f2;
-      color:#991b1b;
-    }
+    .actions{display:flex;gap:8px}
+    .btn-sm{padding:8px 10px;font-size:13px}
 
     /* ===== Modal Viewer ===== */
     .modal{
-      position:fixed;
-      inset:0;
+      position:fixed; inset:0;
       display:none;
       background:rgba(0,0,0,.55);
       z-index:50;
@@ -183,10 +153,15 @@
       gap:10px;
     }
 
-    .modal-body{flex:1;overflow:hidden}
-    .modal-body iframe{width:100%;height:100%;border:none}
+    .modal-body{flex:1;overflow:auto}
 
-    #downloadFrame{display:none;width:0;height:0;border:0}
+    object, iframe{
+      width:100%;
+      height:100%;
+      border:none;
+    }
+
+    #downloadFrame{display:none}
   </style>
 </head>
 
@@ -216,19 +191,20 @@
   </div>
 </div>
 
-<!-- Modal Viewer -->
+<!-- Modal -->
 <div class="modal" id="viewer">
   <div class="modal-box">
     <div class="modal-head">
       <div>
-        <div class="h2" id="viewerTitle" style="margin:0"></div>
+        <div class="h2" id="viewerTitle"></div>
         <div class="muted" id="viewerMeta"></div>
       </div>
-      <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
+      <div class="row">
+        <button id="viewerDownload" class="btn btn-outline" style="display:none">⬇ Download</button>
+        <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
+      </div>
     </div>
-    <div class="modal-body">
-      <iframe id="viewerFrame"></iframe>
-    </div>
+    <div class="modal-body" id="viewerBody"></div>
   </div>
 </div>
 
@@ -245,47 +221,32 @@ const projectTitle = document.getElementById("projectTitle");
 const projectMeta = document.getElementById("projectMeta");
 
 const viewer = document.getElementById("viewer");
-const viewerFrame = document.getElementById("viewerFrame");
+const viewerBody = document.getElementById("viewerBody");
 const viewerTitle = document.getElementById("viewerTitle");
 const viewerMeta = document.getElementById("viewerMeta");
+const viewerDownload = document.getElementById("viewerDownload");
 const downloadFrame = document.getElementById("downloadFrame");
-
-const SECTION_ORDER = ["Documents","Drawings","Images","H&S","Other"];
 
 function fmtDate(iso){
   if(!iso) return "";
-  try{
-    const d = new Date(iso);
-    return new Intl.DateTimeFormat("en-GB", {
-      day:"2-digit", month:"short", year:"numeric",
-      hour:"2-digit", minute:"2-digit"
-    }).format(d);
-  }catch{ return iso; }
-}
-
-function esc(s){
-  return String(s ?? "")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
+  return new Intl.DateTimeFormat("en-GB",{
+    day:"2-digit",month:"short",year:"numeric",
+    hour:"2-digit",minute:"2-digit"
+  }).format(new Date(iso));
 }
 
 function loadProjects(){
   projectsList.innerHTML="";
-  filesList.innerHTML="";
-  projectTitle.textContent="Select a project";
-  projectMeta.textContent="";
-
   fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
     .then(d=>{
-      (d.projects||[]).forEach(p=>{
+      d.projects.forEach(p=>{
         const row=document.createElement("div");
         row.className="proj-row";
         row.innerHTML=`
           <div>
-            <div style="font-weight:800">${esc(p.name)}</div>
-            <div class="muted">#${esc(p.storeNumber||"-")} · ${esc(p.client||"")}</div>
+            <strong>${p.name}</strong>
+            <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
           </div>
           <span class="pill">Open</span>
         `;
@@ -295,113 +256,59 @@ function loadProjects(){
     });
 }
 
-function groupBySection(files){
-  const map = new Map();
-  files.forEach(f=>{
-    const sec = (f.section || "Documents").trim() || "Documents";
-    if(!map.has(sec)) map.set(sec, []);
-    map.get(sec).push(f);
-  });
-
-  // ensure stable order: known sections first, then others A-Z
-  const others = [...map.keys()].filter(k=>!SECTION_ORDER.includes(k)).sort((a,b)=>a.localeCompare(b));
-  const ordered = [...SECTION_ORDER.filter(k=>map.has(k)), ...others];
-
-  return ordered.map(sec => [sec, map.get(sec)]);
-}
-
 function loadFiles(project){
-  projectTitle.textContent = project.name;
-  projectMeta.textContent = `Updated: ${fmtDate(project.updatedAt || project.createdAt || "")}`;
+  projectTitle.textContent=project.name;
+  projectMeta.textContent=`Updated: ${fmtDate(project.updatedAt||project.createdAt)}`;
   filesList.innerHTML="";
 
   fetch(`${API}/projects/${project.id}/files`,{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
     .then(d=>{
-      const files = d.files || [];
-      if(!files.length){
-        filesList.innerHTML=`<div class="muted" style="margin-top:10px">No files available.</div>`;
-        return;
-      }
-
-      const groups = groupBySection(files);
-
-      groups.forEach(([sectionName, list])=>{
-        const sec = document.createElement("div");
-        sec.className = "section";
-
-        sec.innerHTML = `
-          <div class="section-head">
-            <div class="section-title">${esc(sectionName)}</div>
-            <div class="muted">${list.length} item${list.length===1?"":"s"}</div>
+      d.files.forEach(f=>{
+        const row=document.createElement("div");
+        row.className="file-row";
+        row.innerHTML=`
+          <div>
+            <div class="file-name">${f.title||f.name}</div>
+            <div class="file-sub">
+              ${f.category?`<span class="tag">${f.category}</span>`:""}
+              <span class="tag muted">${fmtDate(f.uploadedAt)}</span>
+              ${!f.downloadable?`<span class="tag lock">🔒 View only</span>`:""}
+            </div>
           </div>
-          <div class="section-body"></div>
+          <div class="actions">
+            <button class="btn btn-primary btn-sm">👁 View</button>
+          </div>
         `;
-
-        const body = sec.querySelector(".section-body");
-
-        list.forEach(f=>{
-          const downloadable = (typeof f.downloadable === "undefined") ? true : !!f.downloadable;
-
-          const row=document.createElement("div");
-          row.className="file-row";
-
-          const title = f.title || f.name;
-          const niceDate = fmtDate(f.uploadedAt);
-          const cat = (f.category || "").trim();
-
-          row.innerHTML=`
-            <div>
-              <div class="file-name">${esc(title)}</div>
-              <div class="file-sub">
-                ${cat ? `<span class="tag">${esc(cat)}</span>` : ``}
-                ${niceDate ? `<span class="tag muted">${esc(niceDate)}</span>` : ``}
-                ${downloadable ? `` : `<span class="tag lock">🔒 View only</span>`}
-              </div>
-              <div class="muted" style="margin-top:6px">${esc(f.name || "")}</div>
-            </div>
-            <div class="actions">
-              <button class="btn btn-primary btn-sm">👁 View</button>
-              ${downloadable ? `<button class="btn btn-outline btn-sm">⬇ Download</button>` : ``}
-            </div>
-          `;
-
-          row.querySelector(".btn-primary").onclick=()=>openViewer(f);
-
-          const dlBtn = row.querySelector(".btn-outline");
-          if(dlBtn){
-            dlBtn.onclick=()=>downloadFile(f);
-          }
-
-          body.appendChild(row);
-        });
-
-        filesList.appendChild(sec);
+        row.querySelector("button").onclick=()=>openViewer(f);
+        filesList.appendChild(row);
       });
     });
 }
 
 function openViewer(file){
-  viewerTitle.textContent = file.title || file.name;
-  const bits = [];
-  if(file.section) bits.push(file.section);
-  if(file.category) bits.push(file.category);
-  if(file.uploadedAt) bits.push(fmtDate(file.uploadedAt));
-  viewerMeta.textContent = bits.join(" · ");
+  viewerTitle.textContent=file.title||file.name;
+  viewerMeta.textContent=`${file.section||""}${file.category?" · "+file.category:""}`;
 
-  // inline view always
-  viewerFrame.src = `${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}`;
+  viewerBody.innerHTML=`
+    <object data="${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}" type="application/pdf">
+      <iframe src="${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}"></iframe>
+    </object>
+  `;
+
+  if(file.downloadable){
+    viewerDownload.style.display="inline-block";
+    viewerDownload.onclick=()=>downloadFrame.src=`${API}/download/${file.id}?u=${encodeURIComponent(USER)}`;
+  }else{
+    viewerDownload.style.display="none";
+  }
+
   viewer.classList.add("show");
 }
 
 function closeViewer(){
-  viewerFrame.src="";
+  viewerBody.innerHTML="";
   viewer.classList.remove("show");
-}
-
-function downloadFile(file){
-  // Download in same window context using hidden iframe (no new blank tab)
-  downloadFrame.src = `${API}/download/${file.id}?u=${encodeURIComponent(USER)}`;
 }
 
 loadProjects();
