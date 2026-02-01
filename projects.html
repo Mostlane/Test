@@ -2,116 +2,289 @@
 <html lang="en">
 <head>
   <script src="auth.js"></script>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Projects – Mostlane</title>
 
   <style>
-    body{margin:0;font-family:Segoe UI;background:#e6e8eb url('Mostlane_Embossed.png') fixed center/cover}
-    .topbar{position:sticky;top:0;background:rgba(255,255,255,.8);padding:10px;display:flex;justify-content:space-between}
-    .wrap{max-width:1100px;margin:16px auto;padding:14px;background:rgba(255,255,255,.7);border-radius:12px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    @media(max-width:900px){.grid{grid-template-columns:1fr}}
-    .card{background:#fff;border-radius:12px;padding:12px}
-    .proj,.file{border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-top:8px;cursor:pointer}
-    .file{display:flex;justify-content:space-between}
-    .btn{padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
-    .primary{background:#004a99;color:#fff}
-    .outline{border:1px solid #004a99;background:#fff;color:#004a99}
+    body{
+      margin:0;
+      font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background-size:cover;
+      color:#1f2937;
+    }
 
-    /* Modal */
-    .modal{position:fixed;inset:0;display:none;background:rgba(0,0,0,.6);z-index:50}
+    /* ===== Top bar ===== */
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:10;
+      background:rgba(255,255,255,.75);
+      backdrop-filter:blur(6px);
+      box-shadow:0 2px 10px rgba(0,0,0,.08);
+      padding:10px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .row{display:flex;gap:10px;align-items:center}
+
+    /* ===== Buttons ===== */
+    .btn{
+      border:none;
+      border-radius:10px;
+      padding:10px 14px;
+      font-size:14px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .btn-outline{
+      background:#fff;
+      border:1px solid #004a99;
+      color:#004a99;
+    }
+    .btn-primary{
+      background:#004a99;
+      color:#fff;
+    }
+
+    /* ===== Layout ===== */
+    .wrap{
+      max-width:1100px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.70);
+      border-radius:12px;
+    }
+    .grid{
+      display:grid;
+      gap:12px;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr}
+    }
+    .card{
+      background:#fff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:12px;
+    }
+
+    .muted{color:#6b7280;font-size:12px}
+
+    /* ===== Project list ===== */
+    .proj-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      padding:10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      cursor:pointer;
+      background:#fff;
+    }
+    .proj-row:hover{border-color:#bfd3f2}
+    .pill{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid #d1d5db;
+      background:#f9fafb;
+    }
+
+    /* ===== Files ===== */
+    .file-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      padding:10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      margin-top:10px;
+      background:#fff;
+    }
+    .file-name{font-weight:600}
+    .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+
+    /* ===== Modal viewer ===== */
+    .modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      background:rgba(0,0,0,.55);
+      z-index:50;
+    }
     .modal.show{display:flex}
-    .modal-box{background:#fff;width:90%;height:90%;margin:auto;border-radius:12px;display:flex;flex-direction:column}
-    .modal-head{padding:10px;display:flex;justify-content:space-between}
-    .modal-body{flex:1}
-    iframe{width:100%;height:100%;border:none}
+    .modal-box{
+      background:#fff;
+      width:92%;
+      height:92%;
+      margin:auto;
+      border-radius:14px;
+      display:flex;
+      flex-direction:column;
+      box-shadow:0 20px 40px rgba(0,0,0,.25);
+    }
+    .modal-head{
+      padding:12px 14px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .modal-body{
+      flex:1;
+      overflow:hidden;
+    }
+    .modal-body iframe{
+      width:100%;
+      height:100%;
+      border:none;
+    }
   </style>
 </head>
+
 <body>
 
+<!-- ===== Top bar ===== -->
 <div class="topbar">
-  <button class="btn outline" onclick="location.href='main.html'">⬅ Main</button>
-  <strong>Projects</strong>
+  <div class="row">
+    <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+    <strong style="color:#004a99">Projects</strong>
+  </div>
+  <button class="btn btn-outline" onclick="loadProjects()">⟲ Reload</button>
 </div>
 
+<!-- ===== Content ===== -->
 <div class="wrap">
   <div class="grid">
+
+    <!-- Projects -->
     <div class="card">
-      <strong>Projects</strong>
-      <div id="projects"></div>
+      <strong>Project list</strong>
+      <div class="muted">Only active projects are shown.</div>
+      <div id="projectsList"></div>
     </div>
+
+    <!-- Files -->
     <div class="card">
-      <strong id="ptitle">Select project</strong>
-      <div id="files"></div>
+      <strong id="projectTitle">Select a project</strong>
+      <div class="muted" id="projectMeta"></div>
+      <div id="filesList"></div>
     </div>
+
   </div>
 </div>
 
+<!-- ===== Modal Viewer ===== -->
 <div class="modal" id="viewer">
   <div class="modal-box">
     <div class="modal-head">
-      <strong id="vtitle"></strong>
-      <button class="btn outline" onclick="closeView()">✕</button>
+      <strong id="viewerTitle"></strong>
+      <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
     </div>
     <div class="modal-body">
-      <iframe id="frame"></iframe>
+      <iframe id="viewerFrame"></iframe>
     </div>
   </div>
 </div>
 
 <script>
-const API="https://projects-ml-portal.jamie-def.workers.dev";
-const USER=sessionStorage.getItem("mostlaneUser");
+const API = "https://projects-ml-portal.jamie-def.workers.dev";
+const USER = sessionStorage.getItem("mostlaneUser");
 if(!USER) location.href="login.html";
 
-const projDiv=document.getElementById("projects");
-const filesDiv=document.getElementById("files");
-const frame=document.getElementById("frame");
-const viewer=document.getElementById("viewer");
-const vtitle=document.getElementById("vtitle");
+const projectsList = document.getElementById("projectsList");
+const filesList = document.getElementById("filesList");
+const projectTitle = document.getElementById("projectTitle");
+const projectMeta = document.getElementById("projectMeta");
 
-fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
-.then(r=>r.json()).then(d=>{
-  d.projects.forEach(p=>{
-    const div=document.createElement("div");
-    div.className="proj";
-    div.textContent=p.name;
-    div.onclick=()=>loadFiles(p.id,p.name);
-    projDiv.appendChild(div);
-  });
-});
+const viewer = document.getElementById("viewer");
+const viewerFrame = document.getElementById("viewerFrame");
+const viewerTitle = document.getElementById("viewerTitle");
 
-function loadFiles(id,name){
-  fetch(`${API}/projects/${id}/files`,{headers:{Authorization:"Bearer "+USER}})
-  .then(r=>r.json()).then(d=>{
-    filesDiv.innerHTML="";
-    document.getElementById("ptitle").textContent=name;
-    d.files.forEach(f=>{
-      const row=document.createElement("div");
-      row.className="file";
-      row.innerHTML=`<div>${f.title||f.name}</div>
-        <div>
-          <button class="btn primary">View</button>
-          <button class="btn outline">Download</button>
-        </div>`;
-      row.querySelector(".primary").onclick=()=>viewFile(f);
-      row.querySelector(".outline").onclick=()=>window.open(`${API}/download/${f.id}?u=${USER}`,"_blank");
-      filesDiv.appendChild(row);
+function loadProjects(){
+  projectsList.innerHTML="";
+  filesList.innerHTML="";
+  projectTitle.textContent="Select a project";
+  projectMeta.textContent="";
+
+  fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
+    .then(r=>r.json())
+    .then(d=>{
+      d.projects.forEach(p=>{
+        const row=document.createElement("div");
+        row.className="proj-row";
+        row.innerHTML=`
+          <div>
+            <div style="font-weight:700">${p.name}</div>
+            <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
+          </div>
+          <span class="pill">Open</span>
+        `;
+        row.onclick=()=>loadFiles(p);
+        projectsList.appendChild(row);
+      });
     });
-  });
 }
 
-function viewFile(f){
-  vtitle.textContent=f.title||f.name;
-  frame.src=`${API}/download/${f.id}?inline=1&u=${encodeURIComponent(USER)}`;
+function loadFiles(project){
+  projectTitle.textContent = project.name;
+  projectMeta.textContent = `Updated: ${project.updatedAt || project.createdAt || ""}`;
+  filesList.innerHTML="";
+
+  fetch(`${API}/projects/${project.id}/files`,{headers:{Authorization:"Bearer "+USER}})
+    .then(r=>r.json())
+    .then(d=>{
+      if(!d.files.length){
+        filesList.innerHTML=`<div class="muted">No files available.</div>`;
+        return;
+      }
+
+      d.files.forEach(f=>{
+        const row=document.createElement("div");
+        row.className="file-row";
+        row.innerHTML=`
+          <div style="flex:1">
+            <div class="file-name">${f.title || f.name}</div>
+            <div class="file-meta">${f.category||""} ${f.category?"·":""} ${f.uploadedAt||""}</div>
+            <div class="file-meta">${f.name}</div>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary">👁 View</button>
+            <button class="btn btn-outline">⬇ Download</button>
+          </div>
+        `;
+        row.querySelector(".btn-primary").onclick=()=>openViewer(f);
+        row.querySelector(".btn-outline").onclick=()=>window.open(
+          `${API}/download/${f.id}?u=${encodeURIComponent(USER)}`,
+          "_blank"
+        );
+        filesList.appendChild(row);
+      });
+    });
+}
+
+function openViewer(file){
+  viewerTitle.textContent = file.title || file.name;
+  viewerFrame.src = `${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}`;
   viewer.classList.add("show");
 }
 
-function closeView(){
-  frame.src="";
+function closeViewer(){
+  viewerFrame.src="";
   viewer.classList.remove("show");
 }
+
+loadProjects();
 </script>
 
 </body>
