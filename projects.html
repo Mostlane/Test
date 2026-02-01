@@ -14,221 +14,202 @@
       background-size:cover;
       color:#1f2937;
     }
-
     .topbar{
       position:sticky; top:0; z-index:10;
-      background:rgba(255,255,255,.75);
-      backdrop-filter:blur(6px);
+      background:rgba(255,255,255,.75); backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
-
-    .btn{
-      border:none;
-      border-radius:8px;
-      padding:10px 14px;
-      font-size:14px;
-      cursor:pointer;
-    }
-
-    .btn-outline{
-      background:#fff;
-      border:1px solid #004a99;
-      color:#004a99;
-    }
-
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .btn{border:none;border-radius:10px;padding:10px 14px;font-size:14px;cursor:pointer}
+    .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .wrap{
-      max-width:1100px;
-      margin:16px auto 70px;
-      padding:14px;
-      background:rgba(255,255,255,.70);
-      border-radius:12px;
+      max-width:1100px;margin:16px auto 70px;padding:14px;
+      background:rgba(255,255,255,.70);border-radius:12px;
     }
-
-    .grid{
-      display:grid;
-      grid-template-columns:320px 1fr;
-      gap:14px;
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+    .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;font-size:14px;width:100%}
+    .muted{color:#6b7280;font-size:12px}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
+    .proj-row{
+      display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
+      cursor:pointer; background:#fff;
     }
-
-    @media (max-width:900px){
-      .grid{ grid-template-columns:1fr; }
-    }
-
-    .card{
-      background:#fff;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      padding:12px;
-    }
-
-    .project-row{
-      padding:10px;
-      border:1px solid #e5e7eb;
-      border-radius:10px;
-      margin-top:8px;
-      cursor:pointer;
+    .proj-row:hover{border-color:#bfd3f2}
+    .file-row{
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+      padding:10px; border:1px solid #e5e7eb; border-radius:12px; margin-top:10px;
       background:#fff;
     }
-
-    .project-row:hover{
-      background:#f8fafc;
-    }
-
-    .muted{
-      color:#6b7280;
-      font-size:12px;
-    }
-
-    table{
-      width:100%;
-      border-collapse:collapse;
-    }
-
-    th,td{
-      padding:10px;
-      border-bottom:1px solid #e5e7eb;
-      text-align:left;
-      font-size:14px;
-    }
-
-    th{
-      text-transform:uppercase;
-      font-size:12px;
-      color:#374151;
-      letter-spacing:.04em;
-    }
-
-    .actions button{
-      background:#fff;
-      border:1px solid #004a99;
-      color:#004a99;
-      border-radius:6px;
-      padding:6px 10px;
-      cursor:pointer;
-      font-size:13px;
-    }
-
-    .mask{
-      position:fixed;
-      inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      background:rgba(255,255,255,.55);
-      backdrop-filter:blur(2px);
-      z-index:50;
-    }
-
-    .mask.show{ display:flex; }
-
-    .spinner{
-      width:46px;
-      height:46px;
-      border-radius:50%;
-      border:4px solid #c7d2fe;
-      border-top-color:#004a99;
-      animation:spin 1s linear infinite;
-    }
-
-    @keyframes spin{ to{ transform:rotate(360deg); } }
+    .file-name{font-weight:600}
+    .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .btn-primary{background:#004a99;color:#fff}
+    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);backdrop-filter:blur(2px);z-index:50}
+    .mask.show{display:flex}
+    .spinner{width:46px;height:46px;border-radius:50%;border:4px solid #c7d2fe;border-top-color:#004a99;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .banner{display:none;margin:12px 0;padding:10px 12px;border-radius:12px}
+    .banner.show{display:block}
+    .banner.ok{background:#e9f7ef;border:1px solid #c8e6c9;color:#1b5e20}
+    .banner.err{background:#fee2e2;border:1px solid #fecaca;color:#7f1d1d}
   </style>
 </head>
-
 <body>
 
-<div class="topbar">
-  <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-  <strong style="color:#004a99">Projects</strong>
-</div>
-
-<div class="wrap">
-  <div class="grid">
-
-    <!-- PROJECT LIST -->
-    <div class="card">
-      <strong>Active Projects</strong>
-      <div class="muted">Select a project to view documents</div>
-      <div id="projectsList" style="margin-top:10px;"></div>
+  <div class="topbar">
+    <div class="row">
+      <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
+      <strong style="color:#004a99">Projects</strong>
     </div>
-
-    <!-- FILES -->
-    <div class="card">
-      <strong id="projTitle">Select a project</strong>
-      <div class="muted" id="projMeta"></div>
-
-      <table style="margin-top:12px;">
-        <thead>
-          <tr>
-            <th>File</th>
-            <th>Details</th>
-            <th style="width:120px;">Action</th>
-          </tr>
-        </thead>
-        <tbody id="filesBody">
-          <tr>
-            <td colspan="3" class="muted">No project selected.</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="row" style="min-width:160px;justify-content:flex-end;">
+      <button class="btn btn-outline" id="reloadBtn">⟲ Reload</button>
     </div>
-
   </div>
-</div>
 
-<div class="mask" id="mask"><div class="spinner"></div></div>
+  <div class="wrap">
+    <div class="banner" id="banner"></div>
+
+    <div class="grid">
+      <div class="card">
+        <strong>Project list</strong>
+        <div class="muted">Only active projects are shown.</div>
+        <div style="margin-top:10px">
+          <input class="input" id="search" placeholder="Search projects… (store, name, client)" />
+        </div>
+        <div id="projectsList" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card">
+        <strong id="selTitle">Select a project</strong>
+        <div class="muted" id="selMeta"></div>
+        <div id="filesList" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mask" id="mask"><div class="spinner"></div></div>
 
 <script>
+  // ✅ IMPORTANT: no trailing slash
   const API = "https://projects-ml-portal.jamie-def.workers.dev";
+
   const CURRENT = sessionStorage.getItem("mostlaneUser") || "";
+  if (!CURRENT) location.href = "login.html";
 
   const mask = document.getElementById("mask");
+  const banner = document.getElementById("banner");
   const projectsList = document.getElementById("projectsList");
-  const filesBody = document.getElementById("filesBody");
-  const projTitle = document.getElementById("projTitle");
-  const projMeta = document.getElementById("projMeta");
+  const filesList = document.getElementById("filesList");
+  const selTitle = document.getElementById("selTitle");
+  const selMeta = document.getElementById("selMeta");
+  const search = document.getElementById("search");
+
+  let ALL_PROJECTS = [];
+  let SELECTED = null;
 
   function showMask(on){ mask.classList.toggle("show", !!on); }
+  function showMsg(msg, type="ok"){
+    banner.className = "banner show " + (type === "err" ? "err" : "ok");
+    banner.textContent = msg;
+    setTimeout(()=>banner.classList.remove("show"), 4500);
+  }
 
   async function apiGet(path){
     const res = await fetch(API + path, {
-      headers:{ "Authorization":"Bearer " + CURRENT }
+      headers: { "Authorization": "Bearer " + CURRENT },
+      cache: "no-store"
     });
     const data = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error || "Request failed");
     return data;
   }
 
+  function renderProjects(list){
+    projectsList.innerHTML = "";
+    if(!list.length){
+      projectsList.innerHTML = `<div class="muted" style="margin-top:10px">No active projects.</div>`;
+      return;
+    }
+
+    list.forEach(p=>{
+      const row = document.createElement("div");
+      row.className = "proj-row";
+
+      const left = document.createElement("div");
+      left.innerHTML = `
+        <div style="font-weight:700">${escapeHtml(p.name || p.id)}</div>
+        <div class="muted">#${escapeHtml(p.storeNumber || "-")} · ${escapeHtml(p.client || "")}</div>
+      `;
+
+      const right = document.createElement("div");
+      right.innerHTML = `<span class="pill">Open</span>`;
+
+      row.appendChild(left);
+      row.appendChild(right);
+      row.addEventListener("click", ()=>selectProject(p.id));
+
+      projectsList.appendChild(row);
+    });
+  }
+
+  function renderFiles(files){
+    filesList.innerHTML = "";
+    if(!SELECTED){
+      filesList.innerHTML = `<div class="muted">No project selected.</div>`;
+      return;
+    }
+    if(!files.length){
+      filesList.innerHTML = `<div class="muted">No files available.</div>`;
+      return;
+    }
+
+    files.forEach(f=>{
+      const row = document.createElement("div");
+      row.className = "file-row";
+
+      const left = document.createElement("div");
+      left.style.flex = "1";
+      left.innerHTML = `
+        <div class="file-name">${escapeHtml(f.title || f.name)}</div>
+        <div class="file-meta">${escapeHtml(f.category || "")}${f.category ? " · " : ""}${escapeHtml(f.uploadedAt || "")}</div>
+        <div class="file-meta">${escapeHtml(f.name)}</div>
+      `;
+
+      const actions = document.createElement("div");
+      actions.className = "actions";
+
+      const dl = document.createElement("button");
+      dl.className = "btn btn-primary";
+      dl.textContent = "⬇ Download";
+      dl.onclick = ()=>window.open(`${API}/download/${encodeURIComponent(f.id)}`, "_blank");
+
+      actions.appendChild(dl);
+
+      row.appendChild(left);
+      row.appendChild(actions);
+      filesList.appendChild(row);
+    });
+  }
+
   async function loadProjects(){
     showMask(true);
     try{
+      SELECTED = null;
+      selTitle.textContent = "Select a project";
+      selMeta.textContent = "";
+      filesList.innerHTML = `<div class="muted">No project selected.</div>`;
+
       const data = await apiGet("/projects");
-      const projects = (data.projects || []).filter(p => p.status !== "archived");
-
-      projectsList.innerHTML = "";
-
-      if(!projects.length){
-        projectsList.innerHTML = `<div class="muted">No active projects.</div>`;
-        return;
-      }
-
-      projects.forEach(p=>{
-        const div = document.createElement("div");
-        div.className = "project-row";
-        div.innerHTML = `
-          <strong>${p.name || p.id}</strong>
-          <div class="muted">${p.client || ""} ${p.storeNumber ? "· #" + p.storeNumber : ""}</div>
-        `;
-        div.onclick = ()=>selectProject(p.id);
-        projectsList.appendChild(div);
-      });
-
+      ALL_PROJECTS = data.projects || [];
+      applySearch();
     }catch(e){
       console.error(e);
-      projectsList.innerHTML = `<div class="muted">Failed to load projects.</div>`;
+      showMsg("❌ " + e.message, "err");
     }finally{
       showMask(false);
     }
@@ -238,48 +219,37 @@
     showMask(true);
     try{
       const data = await apiGet(`/projects/${encodeURIComponent(projectId)}/files`);
-      const project = data.project;
-      const files = (data.files || []).filter(f => !f.hidden);
+      SELECTED = data.project;
 
-      projTitle.textContent = project.name || project.id;
-      projMeta.textContent = `Updated: ${project.updatedAt || project.createdAt || ""}`;
-
-      filesBody.innerHTML = "";
-
-      if(!files.length){
-        filesBody.innerHTML = `<tr><td colspan="3" class="muted">No visible files.</td></tr>`;
-        return;
-      }
-
-      files.forEach(f=>{
-        const tr = document.createElement("tr");
-
-        tr.innerHTML = `
-          <td>
-            <strong>${f.name}</strong>
-            <div class="muted">${f.title || ""}</div>
-          </td>
-          <td class="muted">
-            ${f.category || ""}<br>
-            ${f.uploadedBy || ""} · ${f.uploadedAt || ""}
-          </td>
-          <td class="actions">
-            <button onclick="window.open('${API}/download/${encodeURIComponent(f.id)}','_blank')">
-              ⬇ Download
-            </button>
-          </td>
-        `;
-
-        filesBody.appendChild(tr);
-      });
-
+      selTitle.textContent = SELECTED.name || SELECTED.id;
+      selMeta.textContent = `Updated: ${SELECTED.updatedAt || SELECTED.createdAt || ""}`;
+      renderFiles(data.files || []);
     }catch(e){
       console.error(e);
-      filesBody.innerHTML = `<tr><td colspan="3" class="muted">Failed to load files.</td></tr>`;
+      showMsg("❌ " + e.message, "err");
     }finally{
       showMask(false);
     }
   }
+
+  function applySearch(){
+    const q = (search.value || "").trim().toLowerCase();
+    const list = !q ? ALL_PROJECTS : ALL_PROJECTS.filter(p=>{
+      const blob = `${p.name||""} ${p.storeNumber||""} ${p.client||""}`.toLowerCase();
+      return blob.includes(q);
+    });
+    renderProjects(list);
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+      .replace(/'/g,"&#039;");
+  }
+
+  document.getElementById("reloadBtn").addEventListener("click", loadProjects);
+  search.addEventListener("input", applySearch);
 
   loadProjects();
 </script>
