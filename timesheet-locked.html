@@ -163,6 +163,36 @@ header button{
   font-size:13px;
   color:#6b7280;
 }
+
+/* ===== PRINT / PDF EXPORT ===== */
+@media print{
+  body{
+    background:#fff !important;
+    padding:0;
+  }
+
+  header a,
+  header button,
+  .controls button,
+  .controls .pill{
+    display:none !important;
+  }
+
+  .shell{
+    box-shadow:none;
+    border-radius:0;
+    max-width:100%;
+  }
+
+  .session-card{
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .day-group{
+    break-after:page;
+  }
+}
 </style>
 </head>
 
@@ -311,6 +341,11 @@ async function loadWeek(){
 
 document.getElementById("prevWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()-7);loadWeek();};
 document.getElementById("nextWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()+7);loadWeek();};
+
+/* ===== EXPORT PDF BUTTON ===== */
+document.getElementById("exportBtn").onclick=()=>{
+  setTimeout(()=>window.print(),100);
+};
 
 loadWeek();
 </script>
