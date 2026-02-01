@@ -5,6 +5,9 @@
 <title>My Timesheet – Mostlane</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 
+<!-- PDF LIBRARY -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
 <style>
 :root{
   --ml-blue:#003366;
@@ -135,11 +138,7 @@ header button{
   font-weight:600;
 }
 
-.verified{
-  color:var(--ok);
-  font-weight:700;
-}
-
+.verified{color:var(--ok);font-weight:700;}
 .unknown{color:var(--warn);}
 
 .summary{
@@ -163,41 +162,11 @@ header button{
   font-size:13px;
   color:#6b7280;
 }
-
-/* ===== PRINT / PDF EXPORT ===== */
-@media print{
-  body{
-    background:#fff !important;
-    padding:0;
-  }
-
-  header a,
-  header button,
-  .controls button,
-  .controls .pill{
-    display:none !important;
-  }
-
-  .shell{
-    box-shadow:none;
-    border-radius:0;
-    max-width:100%;
-  }
-
-  .session-card{
-    break-inside:avoid;
-    page-break-inside:avoid;
-  }
-
-  .day-group{
-    break-after:page;
-  }
-}
 </style>
 </head>
 
 <body>
-<div class="shell">
+<div class="shell" id="pdfRoot">
 <header>
   <h1>My Weekly Timesheet</h1>
   <a href="main.html">Main Menu</a>
@@ -302,18 +271,13 @@ async function loadWeek(){
 
         total+=h;std+=s;ot+=o;
 
-        const lat=list[i].lat;
-        const lon=list[i].lon;
-        const mapURL=`https://www.google.com/maps?q=${lat},${lon}`;
+        const mapURL=`https://www.google.com/maps?q=${list[i].lat},${list[i].lon}`;
 
-        let locationHTML="";
-        if(list[i].matchedSite){
-          locationHTML=`📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`;
-        }else if(list[i].nearestSite){
-          locationHTML=`📍 Near ${list[i].nearestSite.siteName}`;
-        }else{
-          locationHTML=`📍 <span class="unknown">Unknown location</span>`;
-        }
+        let locationHTML=list[i].matchedSite
+          ? `📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`
+          : list[i].nearestSite
+            ? `📍 Near ${list[i].nearestSite.siteName}`
+            : `📍 <span class="unknown">Unknown location</span>`;
 
         group.innerHTML+=`
           <div class="session-card">
@@ -324,9 +288,7 @@ async function loadWeek(){
               <span>OT ${o.toFixed(2)}</span>
             </div>
             <div class="location">${locationHTML}</div>
-            <div class="location">
-              <a href="${mapURL}" target="_blank">View on map</a>
-            </div>
+            <div class="location"><a href="${mapURL}" target="_blank">View on map</a></div>
           </div>`;
       }
     }
@@ -342,9 +304,21 @@ async function loadWeek(){
 document.getElementById("prevWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()-7);loadWeek();};
 document.getElementById("nextWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()+7);loadWeek();};
 
-/* ===== EXPORT PDF BUTTON ===== */
+/* ===== REAL PDF DOWNLOAD ===== */
 document.getElementById("exportBtn").onclick=()=>{
-  setTimeout(()=>window.print(),100);
+  const wc = friendlyDate(currentWeek).replace(/\s+/g,"_");
+  const filename = `Timesheet_${user||"Engineer"}_${wc}.pdf`;
+
+  html2pdf()
+    .set({
+      margin:10,
+      filename,
+      image:{type:"jpeg",quality:0.98},
+      html2canvas:{scale:2,useCORS:true},
+      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}
+    })
+    .from(document.getElementById("pdfRoot"))
+    .save();
 };
 
 loadWeek();
