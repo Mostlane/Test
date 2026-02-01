@@ -16,9 +16,7 @@
     }
 
     .topbar{
-      position:sticky;
-      top:0;
-      z-index:10;
+      position:sticky; top:0; z-index:10;
       background:rgba(255,255,255,.75);
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
@@ -26,27 +24,19 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
+      gap:10px;
     }
 
-    .row{display:flex;gap:10px;align-items:center}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 
     .btn{
-      border:none;
-      border-radius:10px;
+      border:none;border-radius:10px;
       padding:10px 14px;
-      font-size:14px;
-      cursor:pointer;
+      font-size:14px;cursor:pointer;
       font-weight:600;
     }
-    .btn-outline{
-      background:#fff;
-      border:1px solid #004a99;
-      color:#004a99;
-    }
-    .btn-primary{
-      background:#004a99;
-      color:#fff;
-    }
+    .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
+    .btn-primary{background:#004a99;color:#fff}
 
     .wrap{
       max-width:1100px;
@@ -73,12 +63,14 @@
     }
 
     .muted{color:#6b7280;font-size:12px}
+    .h2{font-size:14px;font-weight:800;margin:0 0 2px}
 
     .proj-row{
       display:flex;
       justify-content:space-between;
+      align-items:flex-start;
       gap:10px;
-      padding:10px;
+      padding:12px;
       border:1px solid #e5e7eb;
       border-radius:12px;
       margin-top:10px;
@@ -88,50 +80,77 @@
     .proj-row:hover{border-color:#bfd3f2}
 
     .pill{
-      padding:4px 8px;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 10px;
       border-radius:999px;
       font-size:12px;
       border:1px solid #d1d5db;
       background:#f9fafb;
+      white-space:nowrap;
     }
 
     .section{
-      margin-top:12px;
+      margin-top:14px;
       border:1px solid #e5e7eb;
       border-radius:12px;
       overflow:hidden;
-      background:#fff;
     }
     .section-head{
-      padding:10px 12px;
-      background:#f8fafc;
-      border-bottom:1px solid #e5e7eb;
       display:flex;
       justify-content:space-between;
       align-items:center;
-      gap:10px;
+      padding:10px 12px;
+      background:#f9fafb;
+      border-bottom:1px solid #e5e7eb;
     }
     .section-title{
       font-weight:800;
-      color:#004a99;
-    }
-    .section-count{
-      font-size:12px;
-      color:#6b7280;
+      font-size:13px;
+      letter-spacing:.01em;
     }
 
     .file-row{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      padding:10px 12px;
-      border-top:1px solid #eef2f7;
+      display:grid;
+      grid-template-columns: 1fr auto;
+      gap:10px;
+      padding:12px;
+      border-bottom:1px solid #f1f5f9;
       background:#fff;
     }
+    .file-row:last-child{border-bottom:none}
 
-    .file-name{font-weight:700}
-    .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .file-name{
+      font-weight:700;
+      font-size:14px;
+      line-height:1.2;
+    }
+    .file-sub{
+      margin-top:4px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .tag{
+      font-size:12px;
+      color:#374151;
+      border:1px solid #e5e7eb;
+      background:#fff;
+      padding:3px 8px;
+      border-radius:999px;
+    }
+    .tag.muted{color:#6b7280}
+
+    .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .btn-sm{padding:8px 10px;border-radius:10px;font-size:13px}
+
+    .lock{
+      border-color:#fecaca;
+      background:#fef2f2;
+      color:#991b1b;
+    }
 
     /* ===== Modal Viewer ===== */
     .modal{
@@ -152,6 +171,7 @@
       display:flex;
       flex-direction:column;
       box-shadow:0 20px 40px rgba(0,0,0,.25);
+      overflow:hidden;
     }
 
     .modal-head{
@@ -160,26 +180,13 @@
       justify-content:space-between;
       align-items:center;
       border-bottom:1px solid #e5e7eb;
+      gap:10px;
     }
 
-    .modal-body{
-      flex:1;
-      overflow:hidden;
-    }
+    .modal-body{flex:1;overflow:hidden}
+    .modal-body iframe{width:100%;height:100%;border:none}
 
-    .modal-body iframe{
-      width:100%;
-      height:100%;
-      border:none;
-    }
-
-    /* Hidden iframe for downloads */
-    #downloadFrame{
-      display:none;
-      width:0;
-      height:0;
-      border:0;
-    }
+    #downloadFrame{display:none;width:0;height:0;border:0}
   </style>
 </head>
 
@@ -195,19 +202,17 @@
 
 <div class="wrap">
   <div class="grid">
-
     <div class="card">
-      <strong>Project list</strong>
+      <div class="h2">Project list</div>
       <div class="muted">Only active projects are shown.</div>
       <div id="projectsList"></div>
     </div>
 
     <div class="card">
-      <strong id="projectTitle">Select a project</strong>
+      <div class="h2" id="projectTitle">Select a project</div>
       <div class="muted" id="projectMeta"></div>
       <div id="filesList"></div>
     </div>
-
   </div>
 </div>
 
@@ -215,7 +220,10 @@
 <div class="modal" id="viewer">
   <div class="modal-box">
     <div class="modal-head">
-      <strong id="viewerTitle"></strong>
+      <div>
+        <div class="h2" id="viewerTitle" style="margin:0"></div>
+        <div class="muted" id="viewerMeta"></div>
+      </div>
       <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
     </div>
     <div class="modal-body">
@@ -224,7 +232,6 @@
   </div>
 </div>
 
-<!-- Hidden iframe used for downloads -->
 <iframe id="downloadFrame"></iframe>
 
 <script>
@@ -240,48 +247,27 @@ const projectMeta = document.getElementById("projectMeta");
 const viewer = document.getElementById("viewer");
 const viewerFrame = document.getElementById("viewerFrame");
 const viewerTitle = document.getElementById("viewerTitle");
+const viewerMeta = document.getElementById("viewerMeta");
 const downloadFrame = document.getElementById("downloadFrame");
 
-const DEFAULT_SECTIONS = [
-  { key:"drawings", label:"Drawings", order:10 },
-  { key:"health_safety", label:"Health & Safety", order:20 },
-  { key:"documents", label:"Documents", order:30 },
-  { key:"images", label:"Images", order:40 },
-  { key:"other", label:"Other", order:50 }
-];
+const SECTION_ORDER = ["Documents","Drawings","Images","H&S","Other"];
 
 function fmtDate(iso){
   if(!iso) return "";
-  const d = new Date(iso);
-  if(isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    year:"numeric", month:"short", day:"2-digit",
-    hour:"2-digit", minute:"2-digit"
-  });
+  try{
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat("en-GB", {
+      day:"2-digit", month:"short", year:"numeric",
+      hour:"2-digit", minute:"2-digit"
+    }).format(d);
+  }catch{ return iso; }
 }
 
-function ext(name){
-  const s = String(name||"").toLowerCase();
-  const i = s.lastIndexOf(".");
-  return i>=0 ? s.slice(i+1) : "";
-}
-
-function inferSection(file){
-  // Use explicit section if present
-  const explicit = String(file.section||"").trim().toLowerCase();
-  if(explicit) return explicit;
-
-  // Backwards-compatible fallback:
-  const e = ext(file.name||"");
-  const ct = String(file.contentType||"").toLowerCase();
-  const cat = String(file.category||"").toLowerCase();
-
-  // if older uploads used category like "Drawings"
-  if(cat.includes("draw")) return "drawings";
-  if(cat.includes("h&s") || cat.includes("health") || cat.includes("rams") || cat.includes("risk") || cat.includes("cpp")) return "health_safety";
-  if(ct.startsWith("image/") || ["jpg","jpeg","png","gif","webp","heic"].includes(e)) return "images";
-  if(["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","csv"].includes(e)) return "documents";
-  return "other";
+function esc(s){
+  return String(s ?? "")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
 }
 
 function loadProjects(){
@@ -298,16 +284,30 @@ function loadProjects(){
         row.className="proj-row";
         row.innerHTML=`
           <div>
-            <div style="font-weight:800">${escapeHtml(p.name)}</div>
-            <div class="muted">#${escapeHtml(p.storeNumber||"-")} · ${escapeHtml(p.client||"")}</div>
+            <div style="font-weight:800">${esc(p.name)}</div>
+            <div class="muted">#${esc(p.storeNumber||"-")} · ${esc(p.client||"")}</div>
           </div>
           <span class="pill">Open</span>
         `;
         row.onclick=()=>loadFiles(p);
         projectsList.appendChild(row);
       });
-    })
-    .catch(err=>console.error(err));
+    });
+}
+
+function groupBySection(files){
+  const map = new Map();
+  files.forEach(f=>{
+    const sec = (f.section || "Documents").trim() || "Documents";
+    if(!map.has(sec)) map.set(sec, []);
+    map.get(sec).push(f);
+  });
+
+  // ensure stable order: known sections first, then others A-Z
+  const others = [...map.keys()].filter(k=>!SECTION_ORDER.includes(k)).sort((a,b)=>a.localeCompare(b));
+  const ordered = [...SECTION_ORDER.filter(k=>map.has(k)), ...others];
+
+  return ordered.map(sec => [sec, map.get(sec)]);
 }
 
 function loadFiles(project){
@@ -315,80 +315,82 @@ function loadFiles(project){
   projectMeta.textContent = `Updated: ${fmtDate(project.updatedAt || project.createdAt || "")}`;
   filesList.innerHTML="";
 
-  fetch(`${API}/projects/${encodeURIComponent(project.id)}/files`,{headers:{Authorization:"Bearer "+USER}})
+  fetch(`${API}/projects/${project.id}/files`,{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
     .then(d=>{
       const files = d.files || [];
       if(!files.length){
-        filesList.innerHTML=`<div class="muted">No files available.</div>`;
+        filesList.innerHTML=`<div class="muted" style="margin-top:10px">No files available.</div>`;
         return;
       }
 
-      // Use project sections if provided, else defaults
-      const sections = Array.isArray(d.project?.sections) && d.project.sections.length
-        ? d.project.sections.slice().sort((a,b)=>(a.order-b.order))
-        : DEFAULT_SECTIONS;
+      const groups = groupBySection(files);
 
-      const by = new Map();
-      for(const s of sections) by.set(s.key, []);
+      groups.forEach(([sectionName, list])=>{
+        const sec = document.createElement("div");
+        sec.className = "section";
 
-      // put files into buckets (unknown -> other)
-      for(const f of files){
-        const k = inferSection(f);
-        if(!by.has(k)) by.set(k, []);
-        by.get(k).push(f);
-      }
-
-      // render in section order, but only show sections with items
-      const orderedKeys = sections.map(s=>s.key);
-      for(const k of Array.from(by.keys())){
-        if(!orderedKeys.includes(k)) orderedKeys.push(k);
-      }
-
-      orderedKeys.forEach(key=>{
-        const arr = by.get(key) || [];
-        if(!arr.length) return;
-
-        const label = (sections.find(s=>s.key===key)?.label) || key;
-        const sectionEl = document.createElement("div");
-        sectionEl.className = "section";
-        sectionEl.innerHTML = `
+        sec.innerHTML = `
           <div class="section-head">
-            <div class="section-title">${escapeHtml(label)}</div>
-            <div class="section-count">${arr.length} item${arr.length===1?"":"s"}</div>
+            <div class="section-title">${esc(sectionName)}</div>
+            <div class="muted">${list.length} item${list.length===1?"":"s"}</div>
           </div>
           <div class="section-body"></div>
         `;
 
-        const body = sectionEl.querySelector(".section-body");
-        arr.forEach(f=>{
+        const body = sec.querySelector(".section-body");
+
+        list.forEach(f=>{
+          const downloadable = (typeof f.downloadable === "undefined") ? true : !!f.downloadable;
+
           const row=document.createElement("div");
           row.className="file-row";
+
+          const title = f.title || f.name;
+          const niceDate = fmtDate(f.uploadedAt);
+          const cat = (f.category || "").trim();
+
           row.innerHTML=`
-            <div style="flex:1;min-width:0">
-              <div class="file-name">${escapeHtml(f.title || f.name)}</div>
-              <div class="file-meta">${escapeHtml(f.category||"")}${f.category ? " · " : ""}${escapeHtml(fmtDate(f.uploadedAt||""))}</div>
-              <div class="file-meta">${escapeHtml(f.name||"")}</div>
+            <div>
+              <div class="file-name">${esc(title)}</div>
+              <div class="file-sub">
+                ${cat ? `<span class="tag">${esc(cat)}</span>` : ``}
+                ${niceDate ? `<span class="tag muted">${esc(niceDate)}</span>` : ``}
+                ${downloadable ? `` : `<span class="tag lock">🔒 View only</span>`}
+              </div>
+              <div class="muted" style="margin-top:6px">${esc(f.name || "")}</div>
             </div>
             <div class="actions">
-              <button class="btn btn-primary">👁 View</button>
-              <button class="btn btn-outline">⬇ Download</button>
+              <button class="btn btn-primary btn-sm">👁 View</button>
+              ${downloadable ? `<button class="btn btn-outline btn-sm">⬇ Download</button>` : ``}
             </div>
           `;
+
           row.querySelector(".btn-primary").onclick=()=>openViewer(f);
-          row.querySelector(".btn-outline").onclick=()=>downloadFile(f);
+
+          const dlBtn = row.querySelector(".btn-outline");
+          if(dlBtn){
+            dlBtn.onclick=()=>downloadFile(f);
+          }
+
           body.appendChild(row);
         });
 
-        filesList.appendChild(sectionEl);
+        filesList.appendChild(sec);
       });
-    })
-    .catch(err=>console.error(err));
+    });
 }
 
 function openViewer(file){
-  viewerTitle.textContent = file.title || file.name || "View file";
-  viewerFrame.src = `${API}/download/${encodeURIComponent(file.id)}?inline=1&u=${encodeURIComponent(USER)}`;
+  viewerTitle.textContent = file.title || file.name;
+  const bits = [];
+  if(file.section) bits.push(file.section);
+  if(file.category) bits.push(file.category);
+  if(file.uploadedAt) bits.push(fmtDate(file.uploadedAt));
+  viewerMeta.textContent = bits.join(" · ");
+
+  // inline view always
+  viewerFrame.src = `${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}`;
   viewer.classList.add("show");
 }
 
@@ -398,14 +400,8 @@ function closeViewer(){
 }
 
 function downloadFile(file){
-  downloadFrame.src = `${API}/download/${encodeURIComponent(file.id)}?u=${encodeURIComponent(USER)}`;
-}
-
-function escapeHtml(s){
-  return String(s ?? "")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
-    .replace(/'/g,"&#039;");
+  // Download in same window context using hidden iframe (no new blank tab)
+  downloadFrame.src = `${API}/download/${file.id}?u=${encodeURIComponent(USER)}`;
 }
 
 loadProjects();
