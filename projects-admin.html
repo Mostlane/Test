@@ -25,14 +25,9 @@
     .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
-    .warn{background:#8a5a00;color:#fff}
-    .danger{background:#7f1d1d;color:#fff}
     .wrap{
-      max-width:1100px;
-      margin:16px auto 70px;
-      padding:14px;
-      background:rgba(255,255,255,.7);
-      border-radius:12px;
+      max-width:1100px;margin:16px auto 70px;padding:14px;
+      background:rgba(255,255,255,.7);border-radius:12px;
     }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .input{padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
@@ -44,7 +39,6 @@
     th{font-size:12px;text-transform:uppercase;color:#374151}
     .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db}
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
-    .pill.hidden{background:#fef2f2;color:#991b1b;border-color:#fecaca}
     .actions{display:flex;gap:8px}
     .mask{
       position:fixed; inset:0;
@@ -141,23 +135,26 @@ function showMsg(t,type="ok"){
   setTimeout(()=>banner.classList.remove("show"),4000);
 }
 
-async function api(path, opts={}){
-  const res = await fetch(API+path,{
-    ...opts,
+/* 🔒 SAFE API WRAPPER */
+async function api(path, opts = {}){
+  const res = await fetch(`${API}/${path.replace(/^\/+/,"")}`,{
+    method: opts.method || "GET",
     headers:{
-      Authorization:"Bearer "+USER,
-      ...(opts.headers||{})
-    }
+      Authorization: "Bearer " + USER,
+      ...(ADMIN_TOKEN ? { "X-Admin-Token": ADMIN_TOKEN } : {}),
+      ...(opts.headers || {})
+    },
+    body: opts.body
   });
   const data = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error||"Request failed");
+  if(!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }
 
 async function loadProjects(){
   showMask(true);
   try{
-    const d = await api("/projects");
+    const d = await api("projects");
     const list = document.getElementById("projectsList");
     list.innerHTML="";
     d.projects.forEach(p=>{
@@ -174,7 +171,7 @@ async function loadProjects(){
 async function selectProject(id){
   showMask(true);
   try{
-    const d = await api(`/projects/${id}/files`);
+    const d = await api(`projects/${id}/files`);
     CURRENT_PROJECT = d.project;
     document.getElementById("selTitle").textContent = CURRENT_PROJECT.name;
     document.getElementById("uploadPanel").style.display="block";
@@ -191,7 +188,7 @@ function renderFiles(files){
     tr.innerHTML=`
       <td><strong>${f.name}</strong><div class="muted">${f.title||""}</div></td>
       <td>${f.category||""}<br>${f.uploadedAt||""}</td>
-      <td><span class="pill ${f.hidden?"hidden":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
+      <td><span class="pill active">Active</span></td>
       <td class="actions">
         <button class="btn btn-outline" onclick="downloadFile('${f.id}')">⬇ Download</button>
       </td>
@@ -211,7 +208,7 @@ function downloadFile(id){
 
 async function uploadFile(){
   if(!CURRENT_PROJECT) return showMsg("Select a project","err");
-  const file=document.getElementById("f_file").files[0];
+  const file=f_file.files[0];
   if(!file) return showMsg("Choose a file","err");
 
   const fd=new FormData();
@@ -221,39 +218,24 @@ async function uploadFile(){
 
   showMask(true);
   try{
-    const res = await fetch(`${API}/projects/${CURRENT_PROJECT.id}/upload`,{
+    await api(`projects/${CURRENT_PROJECT.id}/upload`,{
       method:"POST",
-      headers:{
-        Authorization:"Bearer "+USER,
-        "X-Admin-Token":ADMIN_TOKEN
-      },
       body:fd
     });
-
-    const j = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(j.error||"Upload failed");
-
     showMsg("Uploaded");
     f_file.value="";
     selectProject(CURRENT_PROJECT.id);
-
-  }catch(e){
-    showMsg(e.message,"err");
-  }finally{
-    showMask(false);
-  }
+  }catch(e){ showMsg(e.message,"err"); }
+  finally{ showMask(false); }
 }
 
 async function createProject(){
   if(!p_name.value.trim()) return showMsg("Name required","err");
   showMask(true);
   try{
-    await api("/projects",{
+    await api("projects",{
       method:"POST",
-      headers:{
-        "X-Admin-Token":ADMIN_TOKEN,
-        "Content-Type":"application/json"
-      },
+      headers:{ "Content-Type":"application/json" },
       body:JSON.stringify({
         name:p_name.value,
         storeNumber:p_store.value,
