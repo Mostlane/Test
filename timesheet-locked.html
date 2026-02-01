@@ -99,6 +99,26 @@ header button{
   margin-bottom:12px;
 }
 
+.day-meta{
+  margin:-6px 0 12px 0;
+  color:var(--muted);
+  font-size:13px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+
+.day-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:#f8fafc;
+  font-weight:600;
+}
+
 .session-card{
   background:#fff;
   border-radius:14px;
@@ -130,6 +150,7 @@ header button{
   display:flex;
   align-items:center;
   gap:6px;
+  flex-wrap:wrap;
 }
 
 .location a{
@@ -139,7 +160,7 @@ header button{
 }
 
 .verified{color:var(--ok);font-weight:700;}
-.unknown{color:var(--warn);}
+.unknown{color:var(--warn);font-weight:700;}
 
 .summary{
   margin-top:20px;
@@ -190,7 +211,8 @@ header button{
 </div>
 
 <div class="note">
-  Sessions are calculated from <b>check-in → check-out</b>.
+  Sessions are calculated from <b>check-in → check-out</b>. <br/>
+  If the first check-in and last check-out match a known site, <b>travel time from HQ</b> is added for that day.
 </div>
 
 <div id="status" class="note"></div>
@@ -198,7 +220,9 @@ header button{
 </div>
 
 <script>
-/* ---------- helpers ---------- */
+/* =========================
+   Utilities (unchanged feel)
+========================= */
 function ordinal(n){
   const s=["th","st","nd","rd"],v=n%100;
   return n+(s[(v-20)%10]||s[v]||s[0]);
@@ -207,162 +231,438 @@ function friendlyDate(d){
   return d.toLocaleDateString("en-GB",{weekday:"long",month:"short"})+
          " "+ordinal(d.getDate());
 }
-function time(d){return d.toISOString().slice(11,16);}
+function time(d){ return d.toISOString().slice(11,16); }
 function startOfWeek(d){
-  d=new Date(d);const day=d.getDay()||7;
-  d.setDate(d.getDate()-day+1);d.setHours(0,0,0,0);return d;
+  d=new Date(d); const day=d.getDay()||7;
+  d.setDate(d.getDate()-day+1); d.setHours(0,0,0,0); return d;
 }
 function endOfWeek(d){
-  d=new Date(d);d.setDate(d.getDate()+6);d.setHours(23,59,59,999);return d;
+  d=new Date(d); d.setDate(d.getDate()+6); d.setHours(23,59,59,999); return d;
 }
-function hours(a,b){return (b-a)/36e5;}
+function hours(a,b){ return (b-a)/36e5; }
+function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
 
-/* ---------- config ---------- */
-const EVENTS_WORKER="https://ckeck-in-out.jamie-def.workers.dev";
-const SITES_WORKER="https://mostlane-sites.jamie-def.workers.dev";
+/* =========================
+   Endpoints
+========================= */
+const EVENTS_WORKER = "https://ckeck-in-out.jamie-def.workers.dev";
+const SITES_WORKER  = "https://mostlane-sites.jamie-def.workers.dev";
 
-const user=sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername");
+/* =========================
+   DOM
+========================= */
+const weekLabel    = document.getElementById("weekLabel");
+const engineerName = document.getElementById("engineerName");
+const sessionsEl   = document.getElementById("sessions");
+const sumStd       = document.getElementById("sumStd");
+const sumOT        = document.getElementById("sumOT");
+const sumTotal     = document.getElementById("sumTotal");
+const statusEl     = document.getElementById("status");
 
-/* ---------- dom ---------- */
-const weekLabel=document.getElementById("weekLabel");
-const engineerName=document.getElementById("engineerName");
-const sessionsEl=document.getElementById("sessions");
-const sumStd=document.getElementById("sumStd");
-const sumOT=document.getElementById("sumOT");
-const sumTotal=document.getElementById("sumTotal");
-const statusEl=document.getElementById("status");
+/* =========================
+   Session / user
+========================= */
+const user =
+  sessionStorage.getItem("mostlaneUser") ||
+  sessionStorage.getItem("mostlaneUsername") ||
+  sessionStorage.getItem("mostlaneLoggedInUser") ||
+  sessionStorage.getItem("username");
 
-engineerName.textContent=user||"—";
+let currentWeek = startOfWeek(new Date());
+engineerName.textContent = user || "—";
 
-let currentWeek=startOfWeek(new Date());
-let ALL_SITES=[];
+/* =========================
+   Sites cache + matching
+========================= */
+let ALL_SITES = null; // array
 
-/* ---------- site matching ---------- */
-function findSite(evt){
-  if(evt.matchedSite) return evt.matchedSite;
-  if(!evt.lat||!evt.lon) return null;
+function toRad(x){ return x*Math.PI/180; }
+function haversineMeters(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const dLat = toRad(lat2-lat1);
+  const dLon = toRad(lon2-lon1);
+  const a =
+    Math.sin(dLat/2)*Math.sin(dLat/2) +
+    Math.cos(toRad(lat1))*Math.cos(toRad(lat2)) *
+    Math.sin(dLon/2)*Math.sin(dLon/2);
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R*c;
+}
 
-  let best=null,bestD=Infinity;
-  for(const s of ALL_SITES){
-    if(!s.lat||!s.lon) continue;
-    const d=(evt.lat-s.lat)**2+(evt.lon-s.lon)**2;
-    if(d<bestD){bestD=d;best=s;}
+function getLatLon(e){
+  // Common formats you’ve used across logs
+  if (typeof e.lat === "number" && typeof e.lon === "number") return {lat:e.lat, lon:e.lon};
+  if (typeof e.lat === "string" && typeof e.lon === "string" && e.lat && e.lon) {
+    const la = parseFloat(e.lat), lo = parseFloat(e.lon);
+    if (!isNaN(la) && !isNaN(lo)) return {lat:la, lon:lo};
   }
-  return best;
+
+  // Sometimes coords are nested
+  if (e.location_coords && typeof e.location_coords === "object") {
+    if (typeof e.location_coords.lat === "number" && typeof e.location_coords.lon === "number") {
+      return {lat:e.location_coords.lat, lon:e.location_coords.lon};
+    }
+    if (Array.isArray(e.location_coords) && e.location_coords.length >= 2) {
+      const la = parseFloat(e.location_coords[0]);
+      const lo = parseFloat(e.location_coords[1]);
+      if (!isNaN(la) && !isNaN(lo)) return {lat:la, lon:lo};
+    }
+    if (typeof e.location_coords === "string" && e.location_coords.includes(",")) {
+      const parts = e.location_coords.split(",").map(s=>s.trim());
+      const la = parseFloat(parts[0]), lo = parseFloat(parts[1]);
+      if (!isNaN(la) && !isNaN(lo)) return {lat:la, lon:lo};
+    }
+  }
+
+  // Fallback: some logs use lng not lon
+  if (typeof e.lat === "number" && typeof e.lng === "number") return {lat:e.lat, lon:e.lng};
+  if (typeof e.latitude === "number" && typeof e.longitude === "number") return {lat:e.latitude, lon:e.longitude};
+
+  return null;
 }
 
-/* ---------- main ---------- */
+function normaliseSitesPayload(payload){
+  // Accept: array OR {sites:[]} OR {data:[]} etc.
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.sites)) return payload.sites;
+  if (payload && Array.isArray(payload.data)) return payload.data;
+  if (payload && Array.isArray(payload.items)) return payload.items;
+  if (payload && Array.isArray(payload.result)) return payload.result;
+  return [];
+}
+
+async function loadSitesOnce(){
+  if (ALL_SITES) return ALL_SITES;
+  try{
+    const res = await fetch(`${SITES_WORKER}/get-sites?category=all`, { cache: "no-store" });
+    const j = await res.json();
+    ALL_SITES = normaliseSitesPayload(j).filter(s => s && s.lat && s.lon);
+  }catch(e){
+    console.warn("Sites load failed:", e);
+    ALL_SITES = [];
+  }
+  return ALL_SITES;
+}
+
+function matchSiteByCoords(lat, lon){
+  if (!ALL_SITES || !ALL_SITES.length) return null;
+  let best = null;
+  let bestM = Infinity;
+  for (const s of ALL_SITES){
+    const la = parseFloat(s.lat), lo = parseFloat(s.lon);
+    if (isNaN(la) || isNaN(lo)) continue;
+    const m = haversineMeters(lat, lon, la, lo);
+    if (m < bestM){ bestM = m; best = s; }
+  }
+  return { site: best, meters: bestM };
+}
+
+/* =========================
+   Events payload normaliser
+========================= */
+function normaliseEventsPayload(payload){
+  // Robust: supports array OR wrapped
+  if (Array.isArray(payload)) return payload;
+
+  if (payload && Array.isArray(payload.events)) return payload.events;
+  if (payload && Array.isArray(payload.data)) return payload.data;
+  if (payload && Array.isArray(payload.items)) return payload.items;
+  if (payload && Array.isArray(payload.result)) return payload.result;
+
+  // Some workers return { user: {events:[...] } } or similar
+  if (payload && typeof payload === "object") {
+    for (const k of Object.keys(payload)) {
+      if (payload[k] && Array.isArray(payload[k].events)) return payload[k].events;
+      if (payload[k] && Array.isArray(payload[k])) return payload[k];
+    }
+  }
+  return [];
+}
+
+/* =========================
+   Build sessions + travel time logic
+   - first check-in + last check-out per day
+   - if matched to known site (<= 500m), add travel mins
+========================= */
+function siteLabel(site){
+  if (!site) return "Unknown site";
+  const num = site.siteNumber ? `#${site.siteNumber}` : "";
+  const client = site.client ? `(${String(site.client).toUpperCase()})` : "";
+  return `${site.siteName || "Site"} ${num} ${client}`.trim();
+}
+
+function minsToHours(mins){
+  const m = parseInt(mins, 10);
+  if (isNaN(m) || m <= 0) return 0;
+  return m / 60;
+}
+
 async function loadWeek(){
-  if(!user){statusEl.textContent="Not logged in.";return;}
+  try{
+    if(!user){
+      statusEl.textContent="Not logged in.";
+      sessionsEl.innerHTML="";
+      sumStd.textContent="0.00 h";
+      sumOT.textContent="0.00 h";
+      sumTotal.textContent="0.00 h";
+      return;
+    }
 
-  if(!ALL_SITES.length){
-    const r=await fetch(`${SITES_WORKER}/get-sites?category=all`);
-    ALL_SITES=await r.json();
-  }
+    weekLabel.textContent = friendlyDate(currentWeek);
+    sessionsEl.innerHTML = "";
+    statusEl.textContent = "Loading…";
 
-  weekLabel.textContent=friendlyDate(currentWeek);
-  sessionsEl.innerHTML="";
-  statusEl.textContent="Loading…";
+    await loadSitesOnce();
 
-  const res=await fetch(`${EVENTS_WORKER}/events?user=${encodeURIComponent(user)}`);
-  const all=await res.json();
+    const res = await fetch(`${EVENTS_WORKER}/events?user=${encodeURIComponent(user)}`, { cache: "no-store" });
+    const raw = await res.json();
+    const all = normaliseEventsPayload(raw);
 
-  const weekEvents=all.filter(e=>{
-    const d=new Date(e.datetime);
-    return d>=currentWeek && d<=endOfWeek(currentWeek);
-  });
+    if (!Array.isArray(all) || !all.length){
+      statusEl.textContent = "No events found for this user.";
+      sumStd.textContent="0.00 h";
+      sumOT.textContent="0.00 h";
+      sumTotal.textContent="0.00 h";
+      return;
+    }
 
-  const byDay={};
-  weekEvents.forEach(e=>{
-    const d=new Date(e.datetime);
-    const k=d.toISOString().slice(0,10);
-    (byDay[k]??=[]).push({...e,d});
-  });
+    // Filter to week
+    const weekEvents = all
+      .map(e => ({...e}))
+      .filter(e => e && e.datetime)
+      .map(e => {
+        const d = new Date(e.datetime);
+        return {...e, d};
+      })
+      .filter(e => !isNaN(e.d))
+      .filter(e => e.d >= currentWeek && e.d <= endOfWeek(currentWeek));
 
-  let total=0,std=0,ot=0;
+    if (!weekEvents.length){
+      statusEl.textContent = "No check-ins / check-outs in this week.";
+      sumStd.textContent="0.00 h";
+      sumOT.textContent="0.00 h";
+      sumTotal.textContent="0.00 h";
+      return;
+    }
 
-  Object.keys(byDay).sort().forEach(dayKey=>{
-    const list=byDay[dayKey].sort((a,b)=>a.d-b.d);
-    const group=document.createElement("div");
-    group.className="day-group";
-    group.innerHTML=`<div class="day-header">${friendlyDate(list[0].d)}</div>`;
+    // Group by day
+    const byDay = {};
+    weekEvents.forEach(e=>{
+      const k = e.d.toISOString().slice(0,10);
+      (byDay[k] ??= []).push(e);
+    });
 
-    let remainingStd=8;
+    let total = 0, std = 0, ot = 0;
 
-    for(let i=0;i<list.length-1;i++){
-      if(list[i].type==="checkin" && list[i+1].type==="checkout"){
-        const h=hours(list[i].d,list[i+1].d);
-        const s=Math.min(h,remainingStd);
-        const o=Math.max(h-s,0);
-        remainingStd-=s;
+    // Render days
+    Object.keys(byDay).sort().forEach(dayKey=>{
+      const list = byDay[dayKey].sort((a,b)=>a.d-b.d);
 
-        total+=h;std+=s;ot+=o;
+      const group = document.createElement("div");
+      group.className = "day-group";
+      group.innerHTML = `<div class="day-header">${friendlyDate(list[0].d)}</div>`;
 
-        const mapURL=`https://www.google.com/maps?q=${list[i].lat},${list[i].lon}`;
+      // Build sessions from consecutive checkin->checkout (your original behaviour)
+      const sessions = [];
+      for (let i=0; i<list.length-1; i++){
+        if (String(list[i].type).toLowerCase()==="checkin" && String(list[i+1].type).toLowerCase()==="checkout"){
+          sessions.push({ inEv: list[i], outEv: list[i+1] });
+        }
+      }
 
-        let locationHTML=list[i].matchedSite
-          ? `📍 ${list[i].matchedSite.siteName} <span class="verified">✔ Verified</span>`
-          : list[i].nearestSite
-            ? `📍 Near ${list[i].nearestSite.siteName}`
-            : `📍 <span class="unknown">Unknown location</span>`;
+      if (!sessions.length){
+        // Still show something for the day (so it doesn't look blank)
+        group.innerHTML += `<div class="note">No complete check-in → check-out sessions found for this day.</div>`;
+        sessionsEl.appendChild(group);
+        return;
+      }
 
-        group.innerHTML+=`
+      // Determine first check-in & last check-out of the day (from sessions)
+      const firstIn  = sessions[0].inEv;
+      const lastOut  = sessions[sessions.length-1].outEv;
+
+      // Match sites for first/last if possible
+      const firstCoords = getLatLon(firstIn);
+      const lastCoords  = getLatLon(lastOut);
+
+      const MAX_MATCH_METERS = 500;
+
+      let firstSite = null, firstDistM = null;
+      if (firstCoords && ALL_SITES && ALL_SITES.length){
+        const m = matchSiteByCoords(firstCoords.lat, firstCoords.lon);
+        if (m && m.site && m.meters <= MAX_MATCH_METERS){
+          firstSite = m.site; firstDistM = m.meters;
+        }
+      }
+
+      let lastSite = null, lastDistM = null;
+      if (lastCoords && ALL_SITES && ALL_SITES.length){
+        const m = matchSiteByCoords(lastCoords.lat, lastCoords.lon);
+        if (m && m.site && m.meters <= MAX_MATCH_METERS){
+          lastSite = m.site; lastDistM = m.meters;
+        }
+      }
+
+      // Pull travel mins from KV (site.travelTimeFromHQMinutes)
+      const firstTravelMins = firstSite && firstSite.travelTimeFromHQMinutes !== undefined
+        ? parseInt(firstSite.travelTimeFromHQMinutes, 10) : 0;
+
+      const lastTravelMins = lastSite && lastSite.travelTimeFromHQMinutes !== undefined
+        ? parseInt(lastSite.travelTimeFromHQMinutes, 10) : 0;
+
+      const travelAddHours = minsToHours(firstTravelMins) + minsToHours(lastTravelMins);
+
+      // Day meta pills (only show travel if we actually matched a known site)
+      const pills = [];
+      if (firstSite){
+        pills.push(
+          `<span class="day-pill">🚗 Start: ${siteLabel(firstSite)} • ${firstTravelMins || 0} min</span>`
+        );
+      } else {
+        pills.push(`<span class="day-pill">🚗 Start: <span class="unknown">Unknown</span></span>`);
+      }
+      if (lastSite){
+        pills.push(
+          `<span class="day-pill">🏁 Finish: ${siteLabel(lastSite)} • ${lastTravelMins || 0} min</span>`
+        );
+      } else {
+        pills.push(`<span class="day-pill">🏁 Finish: <span class="unknown">Unknown</span></span>`);
+      }
+      if (travelAddHours > 0){
+        pills.push(`<span class="day-pill">➕ Travel added: ${(travelAddHours).toFixed(2)} h</span>`);
+      }
+
+      group.innerHTML += `<div class="day-meta">${pills.join("")}</div>`;
+
+      // Hours breakdown (your original logic)
+      let remainingStd = 8;
+
+      // Render each session
+      sessions.forEach((sess, idx)=>{
+        const h = hours(sess.inEv.d, sess.outEv.d);
+
+        const sHrs = Math.min(h, remainingStd);
+        const oHrs = Math.max(h - sHrs, 0);
+        remainingStd -= sHrs;
+
+        total += h;
+        std   += sHrs;
+        ot    += oHrs;
+
+        const inCoords = getLatLon(sess.inEv);
+        const mapURL = inCoords
+          ? `https://www.google.com/maps?q=${encodeURIComponent(inCoords.lat)},${encodeURIComponent(inCoords.lon)}`
+          : `https://www.google.com/maps`;
+
+        // Location display:
+        // - Prefer existing matchedSite/nearestSite if present in event payload (so it remains “as you had it”)
+        // - Otherwise, show our computed best match (but only if within 500m)
+        let locationHTML = "";
+
+        const payloadMatched = sess.inEv.matchedSite && sess.inEv.matchedSite.siteName;
+        const payloadNearest = sess.inEv.nearestSite && sess.inEv.nearestSite.siteName;
+
+        if (payloadMatched){
+          locationHTML = `📍 ${sess.inEv.matchedSite.siteName} <span class="verified">✔ Verified</span>`;
+        } else if (payloadNearest){
+          locationHTML = `📍 Near ${sess.inEv.nearestSite.siteName}`;
+        } else if (inCoords && ALL_SITES && ALL_SITES.length){
+          const m = matchSiteByCoords(inCoords.lat, inCoords.lon);
+          if (m && m.site && m.meters <= MAX_MATCH_METERS){
+            locationHTML = `📍 ${m.site.siteName} <span class="verified">✔ Verified</span>`;
+          } else {
+            locationHTML = `📍 <span class="unknown">Unknown location</span>`;
+          }
+        } else {
+          locationHTML = `📍 <span class="unknown">Unknown location</span>`;
+        }
+
+        group.innerHTML += `
           <div class="session-card">
-            <div class="session-time">${time(list[i].d)} → ${time(list[i+1].d)}</div>
+            <div class="session-time">${time(sess.inEv.d)} → ${time(sess.outEv.d)}</div>
             <div class="session-hours">
               <span>Total ${h.toFixed(2)}</span>
-              <span>Std ${s.toFixed(2)}</span>
-              <span>OT ${o.toFixed(2)}</span>
+              <span>Std ${sHrs.toFixed(2)}</span>
+              <span>OT ${oHrs.toFixed(2)}</span>
             </div>
             <div class="location">${locationHTML}</div>
-            <div class="location"><a href="${mapURL}" target="_blank">View on map</a></div>
+            <div class="location"><a href="${mapURL}" target="_blank" rel="noopener">View on map</a></div>
+          </div>`;
+      });
+
+      // Add travel time AFTER sessions (and include it in totals)
+      if (travelAddHours > 0){
+        total += travelAddHours;
+
+        // Standard vs OT treatment:
+        // - Keep your “8 hours standard per day” rule.
+        // - Travel time should count toward the day as paid time, so apply it into remainingStd first.
+        // We already decremented remainingStd across sessions; now consume what’s left with travel.
+        const sTravel = Math.min(travelAddHours, Math.max(remainingStd, 0));
+        const oTravel = Math.max(travelAddHours - sTravel, 0);
+
+        std += sTravel;
+        ot  += oTravel;
+
+        group.innerHTML += `
+          <div class="session-card">
+            <div class="session-time">🚗 Travel Time (HQ)</div>
+            <div class="session-hours">
+              <span>Total ${travelAddHours.toFixed(2)}</span>
+              <span>Std ${sTravel.toFixed(2)}</span>
+              <span>OT ${oTravel.toFixed(2)}</span>
+            </div>
+            <div class="location">
+              <span class="muted">Added from first check-in + last check-out when site is known.</span>
+            </div>
           </div>`;
       }
-    }
 
-    /* ----- travel time (first + last) ----- */
-    let travelMin=0;
-    const first=findSite(list[0]);
-    const last=findSite(list[list.length-1]);
+      sessionsEl.appendChild(group);
+    });
 
-    if(first?.travelTimeFromHQMinutes) travelMin+=first.travelTimeFromHQMinutes;
-    if(last?.travelTimeFromHQMinutes && last!==first) travelMin+=last.travelTimeFromHQMinutes;
+    sumStd.textContent   = std.toFixed(2) + " h";
+    sumOT.textContent    = ot.toFixed(2) + " h";
+    sumTotal.textContent = total.toFixed(2) + " h";
+    statusEl.textContent = "";
 
-    if(travelMin){
-      const h=travelMin/60;
-      total+=h;std+=h;
-
-      group.innerHTML+=`
-        <div class="session-card">
-          <div class="session-time">🚗 Travel Time</div>
-          <div class="session-hours">
-            <span>${travelMin} min (${h.toFixed(2)} h)</span>
-          </div>
-        </div>`;
-    }
-
-    sessionsEl.appendChild(group);
-  });
-
-  sumStd.textContent=std.toFixed(2)+" h";
-  sumOT.textContent=ot.toFixed(2)+" h";
-  sumTotal.textContent=total.toFixed(2)+" h";
-  statusEl.textContent="";
+  }catch(err){
+    console.error(err);
+    statusEl.textContent = "Error loading timesheet. Check console for details.";
+    sessionsEl.innerHTML = "";
+    sumStd.textContent="0.00 h";
+    sumOT.textContent="0.00 h";
+    sumTotal.textContent="0.00 h";
+  }
 }
 
-document.getElementById("prevWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()-7);loadWeek();};
-document.getElementById("nextWeek").onclick=()=>{currentWeek.setDate(currentWeek.getDate()+7);loadWeek();};
+/* Navigation */
+document.getElementById("prevWeek").onclick=()=>{
+  currentWeek.setDate(currentWeek.getDate()-7);
+  currentWeek = startOfWeek(currentWeek);
+  loadWeek();
+};
+document.getElementById("nextWeek").onclick=()=>{
+  currentWeek.setDate(currentWeek.getDate()+7);
+  currentWeek = startOfWeek(currentWeek);
+  loadWeek();
+};
 
-/* ---------- PDF ---------- */
+/* PDF */
 document.getElementById("exportBtn").onclick=()=>{
-  const wc=friendlyDate(currentWeek).replace(/\s+/g,"_");
-  html2pdf().set({
-    margin:10,
-    filename:`Timesheet_${user||"Engineer"}_${wc}.pdf`,
-    image:{type:"jpeg",quality:0.98},
-    html2canvas:{scale:2,useCORS:true},
-    jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}
-  }).from(document.getElementById("pdfRoot")).save();
+  const wc = friendlyDate(currentWeek).replace(/\s+/g,"_");
+  const filename = `Timesheet_${user||"Engineer"}_${wc}.pdf`;
+
+  html2pdf()
+    .set({
+      margin:10,
+      filename,
+      image:{type:"jpeg",quality:0.98},
+      html2canvas:{scale:2,useCORS:true},
+      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"}
+    })
+    .from(document.getElementById("pdfRoot"))
+    .save();
 };
 
 loadWeek();
