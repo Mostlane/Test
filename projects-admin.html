@@ -21,18 +21,12 @@
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
+      display:flex; justify-content:space-between; align-items:center;
     }
 
     .btn{
-      border:none;
-      border-radius:10px;
-      padding:10px 14px;
-      font-size:14px;
-      font-weight:600;
-      cursor:pointer;
+      border:none;border-radius:10px;padding:10px 14px;
+      font-size:14px;font-weight:600;cursor:pointer;
     }
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
@@ -40,80 +34,40 @@
     .btn-danger{background:#7f1d1d;color:#fff}
 
     .wrap{
-      max-width:1200px;
-      margin:16px auto 70px;
-      padding:14px;
-      background:rgba(255,255,255,.7);
-      border-radius:12px;
+      max-width:1200px;margin:16px auto 70px;padding:14px;
+      background:rgba(255,255,255,.7);border-radius:12px;
     }
 
-    .grid{
-      display:grid;
-      gap:12px;
-      grid-template-columns:1fr 1.2fr;
-    }
-    @media(max-width:900px){
-      .grid{grid-template-columns:1fr}
-    }
+    .grid{display:grid;gap:12px;grid-template-columns:1fr 1.2fr}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
 
-    .card{
-      background:#fff;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      padding:14px;
-    }
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
 
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .input{
-      padding:10px;
-      border:1px solid #d1d5db;
-      border-radius:8px;
-      font-size:14px;
-    }
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .input{padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px}
 
     .muted{font-size:12px;color:#6b7280}
 
     .proj-row{
-      padding:12px;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      margin-top:10px;
-      cursor:pointer;
+      padding:12px;border:1px solid #e5e7eb;border-radius:12px;
+      margin-top:10px;cursor:pointer;
     }
     .proj-row.active{border-color:#004a99;background:#f0f6ff}
 
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px;vertical-align:top}
+    th{text-transform:uppercase;font-size:12px;color:#374151}
+
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+
     .pill{
-      padding:4px 10px;
-      border-radius:999px;
-      font-size:12px;
+      padding:4px 10px;border-radius:999px;font-size:12px;
       border:1px solid #d1d5db;
     }
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
     .pill.hidden{background:#fef2f2;color:#991b1b;border-color:#fecaca}
 
-    table{
-      width:100%;
-      border-collapse:collapse;
-      margin-top:12px;
-    }
-    th,td{
-      padding:10px;
-      border-bottom:1px solid #e5e7eb;
-      font-size:14px;
-      text-align:left;
-      vertical-align:top;
-    }
-    th{
-      font-size:12px;
-      text-transform:uppercase;
-      color:#374151;
-    }
-
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
-
-    tr.hidden-row{
-      opacity:0.55;
-    }
+    tr.hidden-row{opacity:.45}
   </style>
 </head>
 
@@ -152,7 +106,7 @@
 
       <div class="row" style="margin-top:10px">
         <label class="muted">
-          <input type="checkbox" id="showHidden" onchange="loadFiles()"> Show hidden files
+          <input type="checkbox" id="showHidden" onchange="renderFiles()"> Show hidden files
         </label>
       </div>
 
@@ -188,13 +142,10 @@ const ADMIN_TOKEN = "Hbdkwnainj2758";
 if(!USER) location.href="login.html";
 
 let CURRENT_PROJECT = null;
+let ALL_FILES = [];
 
 function headers(extra={}){
-  return {
-    Authorization:"Bearer "+USER,
-    "X-Admin-Token":ADMIN_TOKEN,
-    ...extra
-  };
+  return { Authorization:"Bearer "+USER, "X-Admin-Token":ADMIN_TOKEN, ...extra };
 }
 
 function loadProjects(){
@@ -222,41 +173,44 @@ function selectProject(p){
 }
 
 function loadFiles(){
-  if(!CURRENT_PROJECT) return;
-
-  const showHidden=document.getElementById("showHidden").checked;
-
   fetch(`${API}/projects/${CURRENT_PROJECT.id}/files`,{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
     .then(d=>{
-      const tb=document.getElementById("filesTbody");
-      tb.innerHTML="";
-      d.files
-        .filter(f=>showHidden || !f.hidden)
-        .forEach(f=>{
-          const tr=document.createElement("tr");
-          if(f.hidden) tr.className="hidden-row";
-          tr.innerHTML=`
-            <td><strong>${f.title||f.name}</strong><br><span class="muted">${f.name}</span></td>
-            <td>${f.category||""}</td>
-            <td><span class="pill ${f.hidden?"hidden":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
-            <td class="actions">
-              <button class="btn btn-outline" onclick="renameFile('${f.id}','${(f.title||"").replace(/'/g,"")}')">Rename</button>
-              <button class="btn btn-warn" onclick="toggleHide('${f.id}',${!f.hidden})">${f.hidden?"Unhide":"Hide"}</button>
-              <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
-            </td>
-          `;
-          tb.appendChild(tr);
-        });
+      ALL_FILES = d.files || [];
+      renderFiles();
+    });
+}
+
+function renderFiles(){
+  const showHidden=document.getElementById("showHidden").checked;
+  const tb=document.getElementById("filesTbody");
+  tb.innerHTML="";
+
+  ALL_FILES
+    .filter(f=>showHidden || !f.hidden)
+    .forEach(f=>{
+      const tr=document.createElement("tr");
+      if(f.hidden) tr.className="hidden-row";
+      tr.innerHTML=`
+        <td><strong>${f.title||f.name}</strong><br><span class="muted">${f.name}</span></td>
+        <td>${f.category||""}</td>
+        <td><span class="pill ${f.hidden?"hidden":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
+        <td class="actions">
+          <button class="btn btn-outline" onclick="renameFile('${f.id}')">Rename</button>
+          <button class="btn btn-warn" onclick="toggleHide('${f.id}',${!f.hidden})">${f.hidden?"Unhide":"Hide"}</button>
+          <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
+        </td>
+      `;
+      tb.appendChild(tr);
     });
 }
 
 /* existing helpers unchanged */
-function createProject(){/* unchanged */}
-function uploadFile(){/* unchanged */}
-function renameFile(id,current){/* unchanged */}
-function toggleHide(id,hidden){/* unchanged */}
-function deleteFile(id){/* unchanged */}
+function createProject(){}
+function uploadFile(){}
+function renameFile(){}
+function toggleHide(id,hidden){}
+function deleteFile(){}
 
 loadProjects();
 </script>
