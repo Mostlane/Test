@@ -341,6 +341,10 @@
           <input id="editSharepoint" placeholder="https://mostlane.sharepoint.com/...">
         </div>
       </div>
+
+      <label>Travel time from HQ (minutes)</label>
+      <input id="editTravelMins" placeholder="">
+
 <!-- FBC Extra Fields -->
 <div id="fbcExtraFields" style="display:none; margin-top:20px;">
   <h4 style="margin-top:0; font-size:16px; font-weight:700;">Fareham Borough Council – Extra Details</h4>
@@ -434,6 +438,7 @@ Fob – Main Gate
   const editLon = document.getElementById("editLon");
   const editMileage = document.getElementById("editMileage");
   const editSharepoint = document.getElementById("editSharepoint");
+  const editTravelMins = document.getElementById("editTravelMins");
 
   const btnLocate = document.getElementById("btnLocate");
   const btnSave = document.getElementById("btnSave");
@@ -563,6 +568,39 @@ Fob – Main Gate
     return "";
   }
 }
+
+ async function calcTravelTimeMinutes(lat, lon) {
+  try {
+    await ensureMapsLoaded();
+    const service = new google.maps.DistanceMatrixService();
+
+    return await new Promise((resolve) => {
+      service.getDistanceMatrix(
+        {
+          origins: [HQ_POSTCODE],
+          destinations: [{ lat: parseFloat(lat), lng: parseFloat(lon) }],
+          travelMode: google.maps.TravelMode.DRIVING,
+          unitSystem: google.maps.UnitSystem.IMPERIAL,
+        },
+        (result, status) => {
+          if (status !== "OK") return resolve("");
+
+          const row = result.rows[0];
+          if (!row || !row.elements || !row.elements[0]) return resolve("");
+
+          const dur = row.elements[0].duration?.value; // seconds
+          if (!dur) return resolve("");
+
+          const mins = Math.round(dur / 60);
+          resolve(String(mins));
+        }
+      );
+    });
+  } catch (err) {
+    console.error("Travel time error:", err);
+    return "";
+  }
+}
   // Helpers
   function ucClient(k){
     const v = (k||"").toLowerCase();
@@ -677,6 +715,7 @@ cleanPostcode(s).toLowerCase().includes(q) ||
     for (const s of filtered) {
       const mileageTxt = (s.mileageFromHQ ?? "-");
       const rt = roundTrip(s.mileageFromHQ);
+      const tt = (s.travelTimeFromHQMinutes ?? "");
 
       // TABLE ROW (desktop)
 const tr = document.createElement("tr");
@@ -697,7 +736,7 @@ tr.innerHTML = `
             <span>${s.active!==false?'Active':'Inactive'}</span>
           </label>
         </td>
-        <td>${mileageTxt} mi <span class="muted">(round trip ${rt} mi)</span></td>
+        <td>${mileageTxt} mi <span class="muted">(round trip ${rt} mi${tt!==""?`, ${tt} min`:``})</span></td>
         <td><button class="btn outline" data-action="edit">Edit</button></td>
       `;
       tr.querySelector('[data-action="details"]').onclick = ()=>openDetails(s);
@@ -736,7 +775,7 @@ card.innerHTML = `
   <div class="card-footer">
     <div class="card-footer-left">
       <span>${mileageTxt} mi</span>
-      <span class="muted">(RT ${rt} mi)</span>
+      <span class="muted">(RT ${rt} mi${tt!==""?` • ${tt} min`:``})</span>
     </div>
     <div class="card-footer-right">
       <button class="btn outline btn-small" data-action="edit">Edit</button>
@@ -793,7 +832,7 @@ detailsTitle.textContent =
       "area","areaManager","areaManagerPhone","areaClientExperienceManager","areaClientExperienceManagerPhone",
       "street","address1","address2","town","county","carPark",
       "mondayHours","tuesdayHours","wednesdayHours","thursdayHours","fridayHours","saturdayHours","sundayHours",
-      "mileageFromHQ","lat","lon","openDate","closedDate","storeType","fbcContactName",
+      "mileageFromHQ","travelTimeFromHQMinutes","lat","lon","openDate","closedDate","storeType","fbcContactName",
 "fbcContactNumber",
 "fbcContactEmail",
 "fbcKeys",
@@ -817,7 +856,7 @@ fbcWhat3Words: "What3Words Location",
         street:"Street", address1:"Address 1", address2:"Address 2", town:"Town", county:"County",
         carPark:"Parking", mondayHours:"Monday Hours", tuesdayHours:"Tuesday Hours", wednesdayHours:"Wednesday Hours",
         thursdayHours:"Thursday Hours", fridayHours:"Friday Hours", saturdayHours:"Saturday Hours", sundayHours:"Sunday Hours",
-        mileageFromHQ:"Mileage (one way, mi)", lat:"Latitude", lon:"Longitude",
+        mileageFromHQ:"Mileage (one way, mi)", travelTimeFromHQMinutes:"Travel Time (minutes)", lat:"Latitude", lon:"Longitude",
         openDate:"Open Date", closedDate:"Closed Date", storeType:"Store Type",
         sharepointURL:"SharePoint URL", imageURL:"Image URL", lastUpdated:"Last Updated", active:"Active"
       };
@@ -888,6 +927,7 @@ editPostcode.value = cleanPostcode(currentEditing) || "";
     editLon.value = currentEditing.lon ?? "";
     editMileage.value = currentEditing.mileageFromHQ ?? "";
     editSharepoint.value = currentEditing.sharepointURL || "";
+    editTravelMins.value = currentEditing.travelTimeFromHQMinutes ?? "";
       // ---- FBC Custom Fields ----
   const isFBC = (currentEditing.client || "").toLowerCase() === "fbc";
 document.getElementById("fbcExtraFields").style.display = isFBC ? "block" : "none";
@@ -927,6 +967,9 @@ if (marker && marker.setPosition) {
     editLon.value = Number(loc.lng).toFixed(6);
     const miles = await calcMileage(loc.lat, loc.lng);
     if (miles!=="") editMileage.value = miles;
+
+    const mins = await calcTravelTimeMinutes(loc.lat, loc.lng);
+    if (mins!=="") editTravelMins.value = mins;
   };
 
   btnSave.onclick = async ()=>{
@@ -956,6 +999,10 @@ currentEditing.postcode = currentEditing.postcode.replace(/\*+$/, "").trim();
       currentEditing.lon = editLon.value ? parseFloat(editLon.value) : "";
       currentEditing.mileageFromHQ = editMileage.value ? parseFloat(editMileage.value) : "";
       currentEditing.sharepointURL = editSharepoint.value.trim() || undefined;
+
+      const tmins = editTravelMins.value.trim();
+      currentEditing.travelTimeFromHQMinutes = tmins !== "" ? parseInt(tmins, 10) : "";
+
             // ---- Save FBC extra fields ----
       const isFBCSave = (currentEditing.client || "").toLowerCase() === "fbc";
 
@@ -1064,7 +1111,11 @@ btnRecalc.onclick = async () => {
     const miles = await calcMileage(s.lat, s.lon);
     if (!miles) continue;
 
+    const mins = await calcTravelTimeMinutes(s.lat, s.lon);
+
     s.mileageFromHQ = parseFloat(miles);
+    if (mins !== "") s.travelTimeFromHQMinutes = parseInt(mins, 10);
+
     try {
       await saveSiteChanges(s);
       updatedCount++;
@@ -1095,5 +1146,3 @@ btnRecalc.onclick = async () => {
 
 </body>
 </html>
-
- 
