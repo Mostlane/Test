@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Projects Admin – Mostlane</title>
+
   <style>
     body{
       margin:0;
@@ -14,407 +15,288 @@
       color:#1f2937;
     }
     .topbar{
-      position:sticky; top:0; z-index:10;
-      background:rgba(255,255,255,.75); backdrop-filter:blur(6px);
+      position:sticky;top:0;z-index:10;
+      background:rgba(255,255,255,.75);
+      backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      display:flex;justify-content:space-between;align-items:center;
     }
-    .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
+    .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer;font-weight:600}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
+    .warn{background:#8a5a00;color:#fff}
+    .danger{background:#7f1d1d;color:#fff}
+    .ok{background:#1b5e20;color:#fff}
+
     .wrap{
-      max-width:1100px;margin:16px auto 70px;padding:14px;
-      background:rgba(255,255,255,.70);border-radius:12px;
+      max-width:1100px;
+      margin:16px auto 70px;
+      padding:14px;
+      background:rgba(255,255,255,.70);
+      border-radius:12px;
     }
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:14px}
     .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    @media (max-width:800px){.grid{grid-template-columns:1fr}}
+    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
+
     .muted{color:#6b7280;font-size:12px}
-    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
-    .pill.active{border-color:#86efac;background:#ecfdf5;color:#166534}
-    .pill.archived{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db}
+    .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
+    .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+
     table{width:100%;border-collapse:collapse}
-    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px;text-align:left;vertical-align:top}
-    th{color:#374151;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px;text-align:left}
+    th{font-size:12px;text-transform:uppercase;color:#374151}
+
     .actions{display:flex;gap:8px;flex-wrap:wrap}
-    .danger{background:#7f1d1d;color:#fff}
-    .warn{background:#8a5a00;color:#fff}
-    .ok{background:#1b5e20;color:#fff}
-    .mask{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.55);backdrop-filter:blur(2px);z-index:50}
-    .mask.show{display:flex}
-    .spinner{width:46px;height:46px;border-radius:50%;border:4px solid #c7d2fe;border-top-color:#004a99;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .banner{display:none;margin:12px 0;padding:10px 12px;border-radius:10px}
-    .banner.show{display:block}
-    .banner.ok{background:#e9f7ef;border:1px solid #c8e6c9;color:#1b5e20}
-    .banner.err{background:#fee2e2;border:1px solid #fecaca;color:#7f1d1d}
+
+    /* Viewer modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:50}
+    .modal.show{display:flex}
+    .modal-box{
+      background:#fff;
+      width:92%;
+      height:92%;
+      margin:auto;
+      border-radius:14px;
+      display:flex;
+      flex-direction:column;
+      box-shadow:0 20px 40px rgba(0,0,0,.3);
+    }
+    .modal-head{
+      padding:12px 14px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .modal-body{flex:1;overflow:hidden}
+    .modal-body iframe{width:100%;height:100%;border:none}
+
+    #downloadFrame{display:none;width:0;height:0;border:0}
   </style>
 </head>
+
 <body>
 
 <div class="topbar">
   <div class="row">
     <button class="btn btn-outline" onclick="location.href='main.html'">⬅ Main Menu</button>
-    <strong style="color:#004a99">Projects Admin (R2)</strong>
+    <strong style="color:#004a99">Projects Admin</strong>
   </div>
-  <div class="row">
-    <button class="btn btn-outline" id="reloadBtn">⟲ Reload</button>
-  </div>
+  <button class="btn btn-outline" onclick="loadProjects()">⟲ Reload</button>
 </div>
 
 <div class="wrap">
-  <div class="banner" id="banner"></div>
 
+  <!-- Create project -->
   <div class="card">
     <div class="row">
-      <input class="input" id="p_name" placeholder="Project name (e.g. 006 Portsmouth Elm Grove)" style="flex:1;min-width:220px">
-      <input class="input" id="p_store" placeholder="Store no (optional)" style="width:160px">
-      <input class="input" id="p_client" placeholder="Client (optional)" style="width:180px">
-      <button class="btn btn-primary" id="createBtn">➕ Create project</button>
-    </div>
-    <div class="muted" style="margin-top:8px;">
-      Projects are “virtual folders” stored as metadata; files live in R2.
+      <input class="input" id="p_name" placeholder="Project name" style="flex:1">
+      <input class="input" id="p_store" placeholder="Store no" style="width:140px">
+      <input class="input" id="p_client" placeholder="Client" style="width:180px">
+      <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
     </div>
   </div>
 
   <div class="grid">
+
+    <!-- Project list -->
     <div class="card">
       <strong>Projects</strong>
-      <div class="muted">Click a project to manage files.</div>
-      <div id="projectsList" style="margin-top:10px;"></div>
+      <div id="projectsList"></div>
     </div>
 
+    <!-- File manager -->
     <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <strong id="selTitle">Select a project</strong>
-          <div class="muted" id="selMeta"></div>
-        </div>
-        <div class="actions" id="projActions" style="display:none">
-          <button class="btn warn" id="archiveBtn">Archive</button>
-          <button class="btn ok" id="unarchiveBtn" style="display:none">Unarchive</button>
-        </div>
-      </div>
+      <strong id="selTitle">Select a project</strong>
+      <div class="muted" id="selMeta"></div>
 
-      <div style="margin-top:12px" id="filePanel" style="display:none">
-        <div class="row" style="margin-bottom:10px;">
-          <input class="input" id="f_title" placeholder="Title (optional)" style="flex:1;min-width:200px">
-          <input class="input" id="f_category" placeholder="Category (optional)" style="width:180px">
-          <input class="input" id="f_file" type="file" style="flex:1;min-width:220px">
-          <button class="btn btn-primary" id="uploadBtn">⬆ Upload</button>
+      <div id="filePanel" style="display:none;margin-top:10px">
+        <div class="row">
+          <input class="input" id="f_title" placeholder="Title">
+          <input class="input" id="f_category" placeholder="Category">
+          <input class="input" id="f_file" type="file">
+          <button class="btn btn-primary" onclick="uploadFile()">⬆ Upload</button>
         </div>
 
-        <table>
+        <table style="margin-top:12px">
           <thead>
             <tr>
               <th>File</th>
               <th>Meta</th>
               <th>Status</th>
-              <th style="width:220px;">Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="filesTbody">
-            <tr><td colspan="4" class="muted">No project selected.</td></tr>
-          </tbody>
+          <tbody id="filesTbody"></tbody>
         </table>
       </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Viewer -->
+<div class="modal" id="viewer">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong id="viewerTitle"></strong>
+      <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
+    </div>
+    <div class="modal-body">
+      <iframe id="viewerFrame"></iframe>
     </div>
   </div>
 </div>
 
-<div class="mask" id="mask"><div class="spinner"></div></div>
+<iframe id="downloadFrame"></iframe>
 
 <script>
-  const API = "https://projects-ml-portal.jamie-def.workers.dev/"; // <-- CHANGE THIS
-  const CURRENT = sessionStorage.getItem("mostlaneUser") || "";
-  const TOKEN = sessionStorage.getItem("mostlaneToken") || "";
-  const ADMIN_TOKEN = "Hbdkwnainj2758"; // optional: if you set PROJECTS_ADMIN_TOKEN, put it here (or store in sessionStorage)
+const API = "https://projects-ml-portal.jamie-def.workers.dev";
+const USER = sessionStorage.getItem("mostlaneUser");
+const ADMIN_TOKEN = "Hbdkwnainj2758"; // must match worker
 
-  const mask = document.getElementById("mask");
-  const banner = document.getElementById("banner");
-  const projectsList = document.getElementById("projectsList");
-  const filesTbody = document.getElementById("filesTbody");
+if(!USER) location.href="login.html";
 
-  const selTitle = document.getElementById("selTitle");
-  const selMeta = document.getElementById("selMeta");
-  const projActions = document.getElementById("projActions");
-  const archiveBtn = document.getElementById("archiveBtn");
-  const unarchiveBtn = document.getElementById("unarchiveBtn");
+let SELECTED = null;
 
-  let selectedProject = null;
+const projectsList = document.getElementById("projectsList");
+const filesTbody = document.getElementById("filesTbody");
+const selTitle = document.getElementById("selTitle");
+const selMeta = document.getElementById("selMeta");
+const filePanel = document.getElementById("filePanel");
 
-  function showMask(on){ mask.classList.toggle("show", !!on); }
-  function showMsg(msg, type="ok"){
-    banner.className = "banner show " + (type === "err" ? "err" : "ok");
-    banner.textContent = msg;
-    setTimeout(()=>banner.classList.remove("show"), 4500);
-  }
+const viewer = document.getElementById("viewer");
+const viewerFrame = document.getElementById("viewerFrame");
+const viewerTitle = document.getElementById("viewerTitle");
+const downloadFrame = document.getElementById("downloadFrame");
 
-  function headers(extra={}){
-    return {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer " + CURRENT, // worker uses username as bearer (consistent with your current pattern)
-      ...(ADMIN_TOKEN ? {"X-Admin-Token": ADMIN_TOKEN} : {}),
-      ...extra
-    };
-  }
+function headers(extra={}){
+  return {
+    "Authorization":"Bearer "+USER,
+    "X-Admin-Token":ADMIN_TOKEN,
+    ...extra
+  };
+}
 
-  async function apiGet(path){
-    const res = await fetch(API + path, { headers: { "Authorization": "Bearer " + CURRENT }});
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.error || "Request failed");
-    return data;
-  }
-  async function apiPost(path, body){
-    const res = await fetch(API + path, { method:"POST", headers: headers(), body: JSON.stringify(body||{}) });
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.error || "Request failed");
-    return data;
-  }
-
-  function pill(status){
-    const span = document.createElement("span");
-    span.className = "pill " + (status === "archived" ? "archived" : "active");
-    span.textContent = status === "archived" ? "Archived" : "Active";
-    return span;
-  }
-
-  async function loadProjects(){
-    showMask(true);
-    try{
-      selectedProject = null;
-      selTitle.textContent = "Select a project";
-      selMeta.textContent = "";
-      projActions.style.display = "none";
-      document.getElementById("filePanel").style.display = "none";
-      filesTbody.innerHTML = `<tr><td colspan="4" class="muted">No project selected.</td></tr>`;
-
-      const data = await apiGet("/projects");
-      const projects = data.projects || [];
-      projectsList.innerHTML = "";
-
-      if(!projects.length){
-        projectsList.innerHTML = `<div class="muted" style="margin-top:10px">No projects yet.</div>`;
-        return;
-      }
-
-      projects.forEach(p=>{
-        const row = document.createElement("div");
-        row.className = "row";
-        row.style.justifyContent = "space-between";
-        row.style.padding = "10px";
-        row.style.border = "1px solid #e5e7eb";
-        row.style.borderRadius = "10px";
-        row.style.marginTop = "8px";
-        row.style.cursor = "pointer";
-        row.style.background = "#fff";
-
-        const left = document.createElement("div");
-        left.innerHTML = `<strong>${p.name || p.id}</strong><div class="muted">#${p.storeNumber || "-"} · ${p.client || ""}</div>`;
-
-        const right = document.createElement("div");
-        right.appendChild(pill(p.status || "active"));
-
-        row.appendChild(left);
-        row.appendChild(right);
-
-        row.addEventListener("click", ()=>selectProject(p.id));
-        projectsList.appendChild(row);
+function loadProjects(){
+  projectsList.innerHTML="";
+  fetch(API+"/projects",{headers:headers()})
+    .then(r=>r.json())
+    .then(d=>{
+      d.projects.forEach(p=>{
+        const div=document.createElement("div");
+        div.className="row";
+        div.style.justifyContent="space-between";
+        div.style.padding="10px";
+        div.style.border="1px solid #e5e7eb";
+        div.style.borderRadius="10px";
+        div.style.marginTop="8px";
+        div.style.cursor="pointer";
+        div.innerHTML=`
+          <div><strong>${p.name}</strong><div class="muted">${p.client||""}</div></div>
+          <span class="pill ${p.status==="archived"?"archived":"active"}">${p.status||"active"}</span>
+        `;
+        div.onclick=()=>selectProject(p.id);
+        projectsList.appendChild(div);
       });
-
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
-  }
-
-  async function selectProject(projectId){
-    showMask(true);
-    try{
-      const data = await apiGet(`/projects/${encodeURIComponent(projectId)}/files`);
-      selectedProject = data.project;
-      const files = data.files || [];
-
-      selTitle.textContent = selectedProject.name || selectedProject.id;
-      selMeta.textContent = `ID: ${selectedProject.id} · Updated: ${selectedProject.updatedAt || selectedProject.createdAt || ""}`;
-      projActions.style.display = "flex";
-      document.getElementById("filePanel").style.display = "block";
-
-      const status = (selectedProject.status || "active");
-      archiveBtn.style.display = status === "active" ? "inline-block" : "none";
-      unarchiveBtn.style.display = status === "archived" ? "inline-block" : "none";
-
-      renderFiles(files);
-
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
-  }
-
-  function renderFiles(files){
-    filesTbody.innerHTML = "";
-    if(!files.length){
-      filesTbody.innerHTML = `<tr><td colspan="4" class="muted">No files yet.</td></tr>`;
-      return;
-    }
-
-    files.forEach(f=>{
-      const tr = document.createElement("tr");
-
-      const name = document.createElement("td");
-      name.innerHTML = `<strong>${f.name}</strong><div class="muted">${f.title || ""}</div>`;
-
-      const meta = document.createElement("td");
-      meta.innerHTML = `<div class="muted">${(f.category || "")}</div><div class="muted">${(f.uploadedBy || "")} · ${(f.uploadedAt || "")}</div>`;
-
-      const st = document.createElement("td");
-      st.appendChild(f.hidden ? pill("archived") : pill("active"));
-      if(f.hidden) st.querySelector(".pill").textContent = "Hidden";
-
-      const act = document.createElement("td");
-      act.className = "actions";
-
-      const dl = document.createElement("button");
-      dl.className = "btn btn-outline";
-      dl.textContent = "⬇ Download";
-      dl.onclick = ()=>window.open(`${API}/download/${encodeURIComponent(f.id)}`, "_blank");
-
-      const hide = document.createElement("button");
-      hide.className = "btn warn";
-      hide.textContent = f.hidden ? "Unhide" : "Hide";
-      hide.onclick = async ()=>{
-        await apiPost(`/files/${encodeURIComponent(f.id)}/hide`, { hidden: !f.hidden });
-        await selectProject(selectedProject.id);
-      };
-
-      const hard = document.createElement("button");
-      hard.className = "btn danger";
-      hard.textContent = "Delete";
-      hard.onclick = async ()=>{
-        if(!confirm("Hard delete this file permanently?")) return;
-        const res = await fetch(`${API}/files/${encodeURIComponent(f.id)}`, {
-          method:"DELETE",
-          headers: {
-            "Authorization": "Bearer " + CURRENT,
-            ...(ADMIN_TOKEN ? {"X-Admin-Token": ADMIN_TOKEN} : {})
-          }
-        });
-        const data = await res.json().catch(()=>({}));
-        if(!res.ok) throw new Error(data.error || "Delete failed");
-        await selectProject(selectedProject.id);
-      };
-
-      act.appendChild(dl);
-      act.appendChild(hide);
-      act.appendChild(hard);
-
-      tr.appendChild(name);
-      tr.appendChild(meta);
-      tr.appendChild(st);
-      tr.appendChild(act);
-
-      filesTbody.appendChild(tr);
     });
+}
+
+function selectProject(id){
+  fetch(`${API}/projects/${id}/files`,{headers:headers()})
+    .then(r=>r.json())
+    .then(d=>{
+      SELECTED=d.project;
+      selTitle.textContent=SELECTED.name;
+      selMeta.textContent=`Updated: ${SELECTED.updatedAt}`;
+      filePanel.style.display="block";
+      renderFiles(d.files||[]);
+    });
+}
+
+function renderFiles(files){
+  filesTbody.innerHTML="";
+  if(!files.length){
+    filesTbody.innerHTML=`<tr><td colspan="4" class="muted">No files</td></tr>`;
+    return;
   }
 
-  document.getElementById("createBtn").addEventListener("click", async ()=>{
-    const name = document.getElementById("p_name").value.trim();
-    const storeNumber = document.getElementById("p_store").value.trim();
-    const client = document.getElementById("p_client").value.trim();
-    if(!name) return showMsg("❌ Project name required", "err");
-
-    showMask(true);
-    try{
-      await apiPost("/projects", { name, storeNumber, client });
-      document.getElementById("p_name").value = "";
-      document.getElementById("p_store").value = "";
-      document.getElementById("p_client").value = "";
-      showMsg("✅ Project created");
-      await loadProjects();
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
+  files.forEach(f=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td><strong>${f.name}</strong><div class="muted">${f.title||""}</div></td>
+      <td class="muted">${f.category||""}<br>${f.uploadedAt||""}</td>
+      <td><span class="pill ${f.hidden?"archived":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
+      <td class="actions">
+        <button class="btn btn-outline">👁 View</button>
+        <button class="btn btn-outline">⬇ Download</button>
+        <button class="btn warn">${f.hidden?"Unhide":"Hide"}</button>
+        <button class="btn danger">Delete</button>
+      </td>
+    `;
+    tr.querySelector(".btn-outline").onclick=()=>downloadFrame.src=`${API}/download/${f.id}?u=${encodeURIComponent(USER)}`;
+    tr.querySelectorAll(".btn-outline")[0].onclick=()=>openViewer(f);
+    tr.querySelector(".warn").onclick=()=>toggleHide(f);
+    tr.querySelector(".danger").onclick=()=>deleteFile(f.id);
+    filesTbody.appendChild(tr);
   });
+}
 
-  document.getElementById("uploadBtn").addEventListener("click", async ()=>{
-    if(!selectedProject) return showMsg("❌ Select a project first", "err");
-    const fileInput = document.getElementById("f_file");
-    const file = fileInput.files?.[0];
-    if(!file) return showMsg("❌ Pick a file", "err");
+function openViewer(f){
+  viewerTitle.textContent=f.name;
+  viewerFrame.src=`${API}/download/${f.id}?inline=1&u=${encodeURIComponent(USER)}`;
+  viewer.classList.add("show");
+}
+function closeViewer(){
+  viewerFrame.src="";
+  viewer.classList.remove("show");
+}
 
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("title", document.getElementById("f_title").value.trim());
-    fd.append("category", document.getElementById("f_category").value.trim());
+function createProject(){
+  fetch(API+"/projects",{
+    method:"POST",
+    headers:{...headers(), "Content-Type":"application/json"},
+    body:JSON.stringify({
+      name:p_name.value,
+      storeNumber:p_store.value,
+      client:p_client.value
+    })
+  }).then(()=>loadProjects());
+}
 
-    showMask(true);
-    try{
-      const res = await fetch(`${API}/projects/${encodeURIComponent(selectedProject.id)}/upload`, {
-        method:"POST",
-        headers: {
-          "Authorization": "Bearer " + CURRENT,
-          ...(ADMIN_TOKEN ? {"X-Admin-Token": ADMIN_TOKEN} : {})
-        },
-        body: fd
-      });
-      const data = await res.json().catch(()=>({}));
-      if(!res.ok) throw new Error(data.error || "Upload failed");
-      fileInput.value = "";
-      document.getElementById("f_title").value = "";
-      document.getElementById("f_category").value = "";
-      showMsg("✅ Uploaded");
-      await selectProject(selectedProject.id);
-    }catch(e){
-      console.error(e);
-      showMsg("❌ " + e.message, "err");
-    }finally{
-      showMask(false);
-    }
-  });
+function uploadFile(){
+  const fd=new FormData();
+  fd.append("file",f_file.files[0]);
+  fd.append("title",f_title.value);
+  fd.append("category",f_category.value);
 
-  archiveBtn.addEventListener("click", async ()=>{
-    if(!selectedProject) return;
-    showMask(true);
-    try{
-      await apiPost(`/projects/${encodeURIComponent(selectedProject.id)}/archive`, { status:"archived" });
-      showMsg("✅ Project archived");
-      await loadProjects();
-      await selectProject(selectedProject.id);
-    }catch(e){
-      showMsg("❌ " + e.message, "err");
-    }finally{ showMask(false); }
-  });
+  fetch(`${API}/projects/${SELECTED.id}/upload`,{
+    method:"POST",
+    headers:headers(),
+    body:fd
+  }).then(()=>selectProject(SELECTED.id));
+}
 
-  unarchiveBtn.addEventListener("click", async ()=>{
-    if(!selectedProject) return;
-    showMask(true);
-    try{
-      await apiPost(`/projects/${encodeURIComponent(selectedProject.id)}/archive`, { status:"active" });
-      showMsg("✅ Project re-activated");
-      await loadProjects();
-      await selectProject(selectedProject.id);
-    }catch(e){
-      showMsg("❌ " + e.message, "err");
-    }finally{ showMask(false); }
-  });
+function toggleHide(f){
+  fetch(`${API}/files/${f.id}/hide`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({hidden:!f.hidden})
+  }).then(()=>selectProject(SELECTED.id));
+}
 
-  document.getElementById("reloadBtn").addEventListener("click", loadProjects);
+function deleteFile(id){
+  if(!confirm("Delete permanently?"))return;
+  fetch(`${API}/files/${id}`,{method:"DELETE",headers:headers()})
+    .then(()=>selectProject(SELECTED.id));
+}
 
-  // Office-only guard (soft)
-  (async ()=>{
-    await loadProjects();
-  })();
+loadProjects();
 </script>
 
 </body>
