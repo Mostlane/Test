@@ -110,7 +110,7 @@
     .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
-    /* ===== Modal Viewer ===== */
+    /* ===== Modal Viewer (FIXED) ===== */
     .modal{
       position:fixed;
       inset:0;
@@ -129,6 +129,7 @@
       display:flex;
       flex-direction:column;
       box-shadow:0 20px 40px rgba(0,0,0,.25);
+      overflow:hidden;
     }
 
     .modal-head{
@@ -137,14 +138,16 @@
       justify-content:space-between;
       align-items:center;
       border-bottom:1px solid #e5e7eb;
+      flex-shrink:0;
     }
 
     .modal-body{
       flex:1;
-      overflow:hidden;
+      overflow:auto;
+      background:#f8fafc;
     }
 
-    .modal-body iframe{
+    .modal-body embed{
       width:100%;
       height:100%;
       border:none;
@@ -196,7 +199,7 @@
       <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
     </div>
     <div class="modal-body">
-      <iframe id="viewerFrame"></iframe>
+      <embed id="viewerEmbed" type="application/pdf" />
     </div>
   </div>
 </div>
@@ -215,7 +218,7 @@ const projectTitle = document.getElementById("projectTitle");
 const projectMeta = document.getElementById("projectMeta");
 
 const viewer = document.getElementById("viewer");
-const viewerFrame = document.getElementById("viewerFrame");
+const viewerEmbed = document.getElementById("viewerEmbed");
 const viewerTitle = document.getElementById("viewerTitle");
 const downloadFrame = document.getElementById("downloadFrame");
 
@@ -280,12 +283,12 @@ function loadFiles(project){
 
 function openViewer(file){
   viewerTitle.textContent = file.title || file.name;
-  viewerFrame.src = `${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}`;
+  viewerEmbed.src = `${API}/download/${file.id}?inline=1&u=${encodeURIComponent(USER)}`;
   viewer.classList.add("show");
 }
 
 function closeViewer(){
-  viewerFrame.src="";
+  viewerEmbed.src = "";
   viewer.classList.remove("show");
 }
 
