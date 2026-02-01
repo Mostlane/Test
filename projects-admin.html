@@ -15,20 +15,19 @@
       color:#1f2937;
     }
     .topbar{
-      position:sticky;top:0;z-index:10;
+      position:sticky; top:0; z-index:10;
       background:rgba(255,255,255,.75);
       backdrop-filter:blur(6px);
       box-shadow:0 2px 10px rgba(0,0,0,.08);
       padding:10px 14px;
-      display:flex;justify-content:space-between;align-items:center;
+      display:flex; align-items:center; justify-content:space-between;
     }
-    .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer;font-weight:600}
+    .btn{border:none;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
     .btn-outline{background:#fff;border:1px solid #004a99;color:#004a99}
     .btn-primary{background:#004a99;color:#fff}
     .warn{background:#8a5a00;color:#fff}
     .danger{background:#7f1d1d;color:#fff}
     .ok{background:#1b5e20;color:#fff}
-
     .wrap{
       max-width:1100px;
       margin:16px auto 70px;
@@ -39,44 +38,36 @@
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .input{padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:14px}
     .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-top:12px}
-    .grid{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-    @media(max-width:900px){.grid{grid-template-columns:1fr}}
-
+    .grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+    @media (max-width:800px){.grid{grid-template-columns:1fr}}
     .muted{color:#6b7280;font-size:12px}
-    .pill{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #d1d5db;background:#f9fafb}
     .pill.active{background:#ecfdf5;color:#166534;border-color:#86efac}
     .pill.archived{background:#fef2f2;color:#991b1b;border-color:#fecaca}
-
     table{width:100%;border-collapse:collapse}
-    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px;text-align:left}
-    th{font-size:12px;text-transform:uppercase;color:#374151}
-
+    th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px}
+    th{text-transform:uppercase;font-size:12px;color:#374151}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
-
-    /* Viewer modal */
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:50}
-    .modal.show{display:flex}
-    .modal-box{
-      background:#fff;
-      width:92%;
-      height:92%;
-      margin:auto;
-      border-radius:14px;
-      display:flex;
-      flex-direction:column;
-      box-shadow:0 20px 40px rgba(0,0,0,.3);
+    .mask{
+      position:fixed; inset:0;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(255,255,255,.55);
+      backdrop-filter:blur(2px);
+      z-index:50;
     }
-    .modal-head{
-      padding:12px 14px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      border-bottom:1px solid #e5e7eb;
+    .mask.show{display:flex}
+    .spinner{
+      width:46px;height:46px;
+      border-radius:50%;
+      border:4px solid #c7d2fe;
+      border-top-color:#004a99;
+      animation:spin 1s linear infinite
     }
-    .modal-body{flex:1;overflow:hidden}
-    .modal-body iframe{width:100%;height:100%;border:none}
-
-    #downloadFrame{display:none;width:0;height:0;border:0}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .banner{display:none;margin-bottom:12px;padding:10px;border-radius:10px}
+    .banner.ok{background:#e9f7ef;color:#1b5e20}
+    .banner.err{background:#fee2e2;color:#7f1d1d}
+    .banner.show{display:block}
   </style>
 </head>
 
@@ -91,31 +82,32 @@
 </div>
 
 <div class="wrap">
+  <div class="banner" id="banner"></div>
 
-  <!-- Create project -->
   <div class="card">
     <div class="row">
       <input class="input" id="p_name" placeholder="Project name" style="flex:1">
-      <input class="input" id="p_store" placeholder="Store no" style="width:140px">
-      <input class="input" id="p_client" placeholder="Client" style="width:180px">
+      <input class="input" id="p_store" placeholder="Store no">
+      <input class="input" id="p_client" placeholder="Client">
       <button class="btn btn-primary" onclick="createProject()">➕ Create</button>
     </div>
   </div>
 
   <div class="grid">
-
-    <!-- Project list -->
     <div class="card">
       <strong>Projects</strong>
       <div id="projectsList"></div>
     </div>
 
-    <!-- File manager -->
     <div class="card">
-      <strong id="selTitle">Select a project</strong>
-      <div class="muted" id="selMeta"></div>
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <strong id="selTitle">Select a project</strong>
+          <div class="muted" id="selMeta"></div>
+        </div>
+      </div>
 
-      <div id="filePanel" style="display:none;margin-top:10px">
+      <div id="filePanel" style="display:none;margin-top:12px">
         <div class="row">
           <input class="input" id="f_title" placeholder="Title">
           <input class="input" id="f_category" placeholder="Category">
@@ -136,96 +128,76 @@
         </table>
       </div>
     </div>
-
   </div>
 </div>
 
-<!-- Viewer -->
-<div class="modal" id="viewer">
-  <div class="modal-box">
-    <div class="modal-head">
-      <strong id="viewerTitle"></strong>
-      <button class="btn btn-outline" onclick="closeViewer()">✕ Close</button>
-    </div>
-    <div class="modal-body">
-      <iframe id="viewerFrame"></iframe>
-    </div>
-  </div>
-</div>
-
-<iframe id="downloadFrame"></iframe>
+<div class="mask" id="mask"><div class="spinner"></div></div>
 
 <script>
 const API = "https://projects-ml-portal.jamie-def.workers.dev";
 const USER = sessionStorage.getItem("mostlaneUser");
-const ADMIN_TOKEN = "Hbdkwnainj2758"; // must match worker
+const ADMIN_TOKEN = "Hbdkwnainj2758";
 
 if(!USER) location.href="login.html";
 
-let SELECTED = null;
+let CURRENT_PROJECT = null;
 
-const projectsList = document.getElementById("projectsList");
-const filesTbody = document.getElementById("filesTbody");
-const selTitle = document.getElementById("selTitle");
-const selMeta = document.getElementById("selMeta");
-const filePanel = document.getElementById("filePanel");
+const mask = document.getElementById("mask");
+const banner = document.getElementById("banner");
 
-const viewer = document.getElementById("viewer");
-const viewerFrame = document.getElementById("viewerFrame");
-const viewerTitle = document.getElementById("viewerTitle");
-const downloadFrame = document.getElementById("downloadFrame");
-
-function headers(extra={}){
-  return {
-    "Authorization":"Bearer "+USER,
-    "X-Admin-Token":ADMIN_TOKEN,
-    ...extra
-  };
+function showMask(v){ mask.classList.toggle("show",v); }
+function msg(text,type="ok"){
+  banner.textContent=text;
+  banner.className="banner show "+type;
+  setTimeout(()=>banner.classList.remove("show"),4000);
 }
 
-function loadProjects(){
-  projectsList.innerHTML="";
-  fetch(API+"/projects",{headers:headers()})
-    .then(r=>r.json())
-    .then(d=>{
-      d.projects.forEach(p=>{
-        const div=document.createElement("div");
-        div.className="row";
-        div.style.justifyContent="space-between";
-        div.style.padding="10px";
-        div.style.border="1px solid #e5e7eb";
-        div.style.borderRadius="10px";
-        div.style.marginTop="8px";
-        div.style.cursor="pointer";
-        div.innerHTML=`
-          <div><strong>${p.name}</strong><div class="muted">${p.client||""}</div></div>
-          <span class="pill ${p.status==="archived"?"archived":"active"}">${p.status||"active"}</span>
-        `;
-        div.onclick=()=>selectProject(p.id);
-        projectsList.appendChild(div);
-      });
-    });
+async function api(path, opts={}){
+  const res = await fetch(API+path,{
+    ...opts,
+    headers:{
+      Authorization:"Bearer "+USER,
+      ...(opts.headers||{})
+    }
+  });
+  const j = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(j.error||"Error");
+  return j;
 }
 
-function selectProject(id){
-  fetch(`${API}/projects/${id}/files`,{headers:headers()})
-    .then(r=>r.json())
-    .then(d=>{
-      SELECTED=d.project;
-      selTitle.textContent=SELECTED.name;
-      selMeta.textContent=`Updated: ${SELECTED.updatedAt}`;
-      filePanel.style.display="block";
-      renderFiles(d.files||[]);
+async function loadProjects(){
+  showMask(true);
+  try{
+    const d = await api("/projects");
+    const list = document.getElementById("projectsList");
+    list.innerHTML="";
+    d.projects.forEach(p=>{
+      const div=document.createElement("div");
+      div.className="row";
+      div.style.cursor="pointer";
+      div.innerHTML=`<strong>${p.name}</strong><span class="pill ${p.status}">${p.status}</span>`;
+      div.onclick=()=>selectProject(p.id);
+      list.appendChild(div);
     });
+  }catch(e){ msg(e.message,"err"); }
+  finally{ showMask(false); }
+}
+
+async function selectProject(id){
+  showMask(true);
+  try{
+    const d = await api(`/projects/${id}/files`);
+    CURRENT_PROJECT=d.project;
+    document.getElementById("selTitle").textContent=CURRENT_PROJECT.name;
+    document.getElementById("filePanel").style.display="block";
+    renderFiles(d.files||[]);
+  }catch(e){ msg(e.message,"err"); }
+  finally{ showMask(false); }
 }
 
 function renderFiles(files){
-  filesTbody.innerHTML="";
-  if(!files.length){
-    filesTbody.innerHTML=`<tr><td colspan="4" class="muted">No files</td></tr>`;
-    return;
-  }
-
+  const tb=document.getElementById("filesTbody");
+  tb.innerHTML="";
   files.forEach(f=>{
     const tr=document.createElement("tr");
     tr.innerHTML=`
@@ -233,67 +205,64 @@ function renderFiles(files){
       <td class="muted">${f.category||""}<br>${f.uploadedAt||""}</td>
       <td><span class="pill ${f.hidden?"archived":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
       <td class="actions">
-        <button class="btn btn-outline">👁 View</button>
-        <button class="btn btn-outline">⬇ Download</button>
-        <button class="btn warn">${f.hidden?"Unhide":"Hide"}</button>
-        <button class="btn danger">Delete</button>
+        <button class="btn btn-outline" onclick="downloadFile('${f.id}')">⬇ Download</button>
       </td>
     `;
-    tr.querySelector(".btn-outline").onclick=()=>downloadFrame.src=`${API}/download/${f.id}?u=${encodeURIComponent(USER)}`;
-    tr.querySelectorAll(".btn-outline")[0].onclick=()=>openViewer(f);
-    tr.querySelector(".warn").onclick=()=>toggleHide(f);
-    tr.querySelector(".danger").onclick=()=>deleteFile(f.id);
-    filesTbody.appendChild(tr);
+    tb.appendChild(tr);
   });
 }
 
-function openViewer(f){
-  viewerTitle.textContent=f.name;
-  viewerFrame.src=`${API}/download/${f.id}?inline=1&u=${encodeURIComponent(USER)}`;
-  viewer.classList.add("show");
-}
-function closeViewer(){
-  viewerFrame.src="";
-  viewer.classList.remove("show");
+function downloadFile(id){
+  const a=document.createElement("a");
+  a.href=`${API}/download/${id}?u=${encodeURIComponent(USER)}`;
+  a.download="";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
-function createProject(){
-  fetch(API+"/projects",{
-    method:"POST",
-    headers:{...headers(), "Content-Type":"application/json"},
-    body:JSON.stringify({
-      name:p_name.value,
+async function uploadFile(){
+  if(!CURRENT_PROJECT) return msg("Select a project first","err");
+  const fileInput=document.getElementById("f_file");
+  const file=fileInput.files[0];
+  if(!file) return msg("Choose a file","err");
+
+  const fd=new FormData();
+  fd.append("file",file);
+  fd.append("title",document.getElementById("f_title").value);
+  fd.append("category",document.getElementById("f_category").value);
+
+  showMask(true);
+  try{
+    await fetch(`${API}/projects/${CURRENT_PROJECT.id}/upload`,{
+      method:"POST",
+      headers:{
+        Authorization:"Bearer "+USER,
+        "X-Admin-Token":ADMIN_TOKEN
+      },
+      body:fd
+    });
+    fileInput.value="";
+    msg("Uploaded");
+    selectProject(CURRENT_PROJECT.id);
+  }catch(e){ msg(e.message,"err"); }
+  finally{ showMask(false); }
+}
+
+async function createProject(){
+  const name=p_name.value.trim();
+  if(!name) return msg("Name required","err");
+  showMask(true);
+  try{
+    await api("/projects",{method:"POST",headers:{"X-Admin-Token":ADMIN_TOKEN},body:JSON.stringify({
+      name,
       storeNumber:p_store.value,
       client:p_client.value
-    })
-  }).then(()=>loadProjects());
-}
-
-function uploadFile(){
-  const fd=new FormData();
-  fd.append("file",f_file.files[0]);
-  fd.append("title",f_title.value);
-  fd.append("category",f_category.value);
-
-  fetch(`${API}/projects/${SELECTED.id}/upload`,{
-    method:"POST",
-    headers:headers(),
-    body:fd
-  }).then(()=>selectProject(SELECTED.id));
-}
-
-function toggleHide(f){
-  fetch(`${API}/files/${f.id}/hide`,{
-    method:"POST",
-    headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({hidden:!f.hidden})
-  }).then(()=>selectProject(SELECTED.id));
-}
-
-function deleteFile(id){
-  if(!confirm("Delete permanently?"))return;
-  fetch(`${API}/files/${id}`,{method:"DELETE",headers:headers()})
-    .then(()=>selectProject(SELECTED.id));
+    })});
+    p_name.value=p_store.value=p_client.value="";
+    loadProjects();
+  }catch(e){ msg(e.message,"err"); }
+  finally{ showMask(false); }
 }
 
 loadProjects();
