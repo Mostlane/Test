@@ -33,10 +33,11 @@
     .btn{
       border:none;
       border-radius:10px;
-      padding:10px 14px;
+      padding:10px 16px;
       font-size:14px;
       cursor:pointer;
       font-weight:600;
+      white-space:nowrap;
     }
     .btn-outline{
       background:#fff;
@@ -69,7 +70,7 @@
       background:#fff;
       border:1px solid #e5e7eb;
       border-radius:12px;
-      padding:12px;
+      padding:14px;
     }
 
     .muted{color:#6b7280;font-size:12px}
@@ -77,8 +78,9 @@
     .proj-row{
       display:flex;
       justify-content:space-between;
+      align-items:center;
       gap:10px;
-      padding:10px;
+      padding:12px;
       border:1px solid #e5e7eb;
       border-radius:12px;
       margin-top:10px;
@@ -88,27 +90,67 @@
     .proj-row:hover{border-color:#bfd3f2}
 
     .pill{
-      padding:4px 8px;
+      padding:4px 10px;
       border-radius:999px;
       font-size:12px;
       border:1px solid #d1d5db;
       background:#f9fafb;
     }
 
+    /* ===== File cards ===== */
     .file-row{
       display:flex;
       justify-content:space-between;
-      gap:12px;
-      padding:10px;
+      gap:14px;
+      padding:14px;
       border:1px solid #e5e7eb;
-      border-radius:12px;
-      margin-top:10px;
+      border-radius:14px;
+      margin-top:12px;
       background:#fff;
     }
 
-    .file-name{font-weight:600}
-    .file-meta{font-size:12px;color:#6b7280;margin-top:2px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .file-info{
+      flex:1;
+      min-width:0;
+    }
+
+    .file-title{
+      font-weight:700;
+      font-size:15px;
+      line-height:1.25;
+    }
+
+    .file-meta{
+      margin-top:4px;
+      font-size:12px;
+      color:#6b7280;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .tag{
+      background:#eef2ff;
+      color:#3730a3;
+      border:1px solid #c7d2fe;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:600;
+    }
+
+    .filename{
+      font-size:12px;
+      color:#9ca3af;
+      margin-top:4px;
+      word-break:break-all;
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
 
     /* ===== Modal Viewer ===== */
     .modal{
@@ -133,7 +175,7 @@
     }
 
     .modal-head{
-      padding:12px 14px;
+      padding:12px 16px;
       display:flex;
       justify-content:space-between;
       align-items:center;
@@ -157,7 +199,6 @@
       object-fit:contain;
     }
 
-    /* Hidden iframe for downloads */
     #downloadFrame{
       display:none;
       width:0;
@@ -223,6 +264,19 @@ const viewerBody = document.getElementById("viewerBody");
 const viewerTitle = document.getElementById("viewerTitle");
 const downloadFrame = document.getElementById("downloadFrame");
 
+/* ===== Helpers ===== */
+function formatDate(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString("en-GB",{
+    day:"numeric",
+    month:"short",
+    year:"numeric",
+    hour:"2-digit",
+    minute:"2-digit"
+  });
+}
+
 function loadProjects(){
   projectsList.innerHTML="";
   filesList.innerHTML="";
@@ -238,7 +292,7 @@ function loadProjects(){
         row.innerHTML=`
           <div>
             <div style="font-weight:700">${p.name}</div>
-            <div class="muted">#${p.storeNumber||"-"} · ${p.client||""}</div>
+            <div class="muted">Updated ${formatDate(p.updatedAt || p.createdAt)}</div>
           </div>
           <span class="pill">Open</span>
         `;
@@ -250,7 +304,7 @@ function loadProjects(){
 
 function loadFiles(project){
   projectTitle.textContent = project.name;
-  projectMeta.textContent = `Updated: ${project.updatedAt || project.createdAt || ""}`;
+  projectMeta.textContent = `Last updated ${formatDate(project.updatedAt || project.createdAt)}`;
   filesList.innerHTML="";
 
   fetch(`${API}/projects/${project.id}/files`,{headers:{Authorization:"Bearer "+USER}})
@@ -265,10 +319,13 @@ function loadFiles(project){
         const row=document.createElement("div");
         row.className="file-row";
         row.innerHTML=`
-          <div style="flex:1">
-            <div class="file-name">${f.title || f.name}</div>
-            <div class="file-meta">${f.category||""} ${f.category?"·":""} ${f.uploadedAt||""}</div>
-            <div class="file-meta">${f.name}</div>
+          <div class="file-info">
+            <div class="file-title">${f.title || f.name}</div>
+            <div class="file-meta">
+              ${f.category ? `<span class="tag">${f.category}</span>` : ""}
+              <span>${formatDate(f.uploadedAt)}</span>
+            </div>
+            <div class="filename">${f.name}</div>
           </div>
           <div class="actions">
             <button class="btn btn-primary">👁 View</button>
