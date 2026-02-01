@@ -9,30 +9,27 @@
 :root{
   --ml-blue:#003366;
   --ml-accent:#1a73e8;
-  --ml-ink:#27313a;
   --ml-bg:#e6e8eb;
-  --muted:#6b7280;
+  --ink:#27313a;
   --border:#e5e7eb;
-  --ok:#15803d;
-  --warn:#b91c1c;
+  --muted:#6b7280;
 }
 
-html,body{margin:0;padding:0;width:100%;overflow-x:hidden;}
-
 body{
-  font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
+  margin:0;
+  font-family:"Segoe UI",system-ui,Arial,sans-serif;
   background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
   background-size:180% auto;
   padding:16px;
-  color:var(--ml-ink);
+  color:var(--ink);
 }
 
 .shell{
-  max-width:1100px;
+  max-width:1000px;
   margin:0 auto;
-  background:rgba(255,255,255,0.94);
+  background:rgba(255,255,255,.95);
   border-radius:16px;
-  box-shadow:0 12px 28px rgba(0,0,0,0.12);
+  box-shadow:0 12px 28px rgba(0,0,0,.12);
   overflow:hidden;
 }
 
@@ -42,20 +39,17 @@ header{
 }
 
 header h1{
-  margin:0 0 12px 0;
+  margin:0 0 10px;
   color:var(--ml-blue);
 }
 
 header a{
   display:block;
-  width:100%;
-  margin-top:8px;
   padding:10px;
   border-radius:10px;
-  font-weight:600;
-  border:none;
   background:var(--ml-accent);
   color:#fff;
+  font-weight:700;
   text-decoration:none;
 }
 
@@ -63,136 +57,70 @@ header a{
 
 .controls{
   display:grid;
-  grid-template-columns:1fr;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
   gap:10px;
-  margin-bottom:14px;
+  margin-bottom:18px;
 }
 
-.controls button,.controls .pill, .controls select, .controls input{
+.controls select,
+.controls input,
+.controls button{
   padding:10px;
   border-radius:12px;
   border:1px solid var(--border);
-  background:#f8fafc;
   font-weight:600;
-  text-align:center;
-  box-sizing:border-box;
-}
-
-.row{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-bottom:12px;
-}
-
-.row > *{
-  flex:1;
-  min-width:160px;
-}
-
-.table{
-  width:100%;
-  border-collapse:separate;
-  border-spacing:0 10px;
-}
-
-.table th{
-  text-align:left;
-  font-size:12px;
-  color:var(--muted);
-  text-transform:uppercase;
-  letter-spacing:.06em;
-  padding:0 10px;
-}
-
-.table td{
-  background:#fff;
-  border-top:1px solid #eef2f7;
-  border-bottom:1px solid #eef2f7;
-  padding:12px 10px;
-  vertical-align:top;
-}
-
-.table tr td:first-child{
-  border-left:1px solid #eef2f7;
-  border-top-left-radius:12px;
-  border-bottom-left-radius:12px;
-}
-
-.table tr td:last-child{
-  border-right:1px solid #eef2f7;
-  border-top-right-radius:12px;
-  border-bottom-right-radius:12px;
-}
-
-.badge{
-  display:inline-block;
-  padding:4px 10px;
-  border-radius:999px;
-  font-size:12px;
-  font-weight:700;
-  border:1px solid var(--border);
   background:#f8fafc;
-  color:var(--ml-blue);
 }
 
-.badge.ok{color:var(--ok); border-color:#b7e3c3; background:#ecfdf3;}
-.badge.warn{color:var(--warn); border-color:#f7c2c2; background:#fef2f2;}
-
-.btn{
+.controls button{
   background:#003366;
   color:#fff;
-  border:none;
-  border-radius:10px;
-  padding:10px 12px;
-  font-weight:700;
   cursor:pointer;
-}
-
-.btn.secondary{
-  background:#fff;
-  color:var(--ml-blue);
-  border:1px solid var(--ml-blue);
-}
-
-.small{
-  font-size:12px;
-  color:var(--muted);
-  margin-top:6px;
 }
 
 .card{
   background:#fff;
   border:1px solid #eef2f7;
   border-radius:14px;
-  padding:12px 14px;
-  margin:10px 0;
+  padding:14px;
+  margin-bottom:12px;
 }
 
 .day-title{
   font-weight:800;
-  color:#111827;
-  margin-bottom:6px;
+  margin-bottom:8px;
 }
 
 .kv{
   display:flex;
-  justify-content:space-between;
-  gap:10px;
   flex-wrap:wrap;
-  font-size:13px;
+  gap:12px;
+  font-size:14px;
 }
 
-.kv span{min-width:140px;}
-.kv b{color:#111827;}
-
-.note{
-  margin-top:12px;
-  font-size:13px;
-  color:#6b7280;
+.kv span{
+  min-width:160px;
 }
 
-hr{border:none;border-top:1px solid #eef2f7;margin:12px 0;}
+.total{
+  background:#f8fafc;
+  border:1px solid var(--border);
+}
+
+.small{
+  font-size:12px;
+  color:var(--muted);
+}
+
+.badge{
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:700;
+  border:1px solid var(--border);
+  background:#f8fafc;
+}
+
 </style>
 </head>
 
@@ -204,532 +132,139 @@ hr{border:none;border-top:1px solid #eef2f7;margin:12px 0;}
   </header>
 
   <div class="content">
-    <div class="row">
-      <button class="btn secondary" id="prevWeek">◀ Previous Week</button>
-      <div class="pill">Week Commencing: <span id="weekLabel">—</span></div>
-      <button class="btn secondary" id="nextWeek">Next Week ▶</button>
-    </div>
 
-    <div class="row">
+    <!-- CONTROLS -->
+    <div class="controls">
       <select id="userSelect"></select>
-      <button class="btn" id="btnReload">Reload</button>
-      <button class="btn secondary" id="btnApprove">Approve Week</button>
-      <button class="btn secondary" id="btnLock">Lock Week</button>
+      <input id="yearInput" type="number" min="2024" value="2026">
+      <select id="monthInput">
+        <option value="01">January</option><option value="02">February</option>
+        <option value="03">March</option><option value="04">April</option>
+        <option value="05">May</option><option value="06">June</option>
+        <option value="07">July</option><option value="08">August</option>
+        <option value="09">September</option><option value="10">October</option>
+        <option value="11">November</option><option value="12">December</option>
+      </select>
+      <button id="loadBtn">Load Timesheet</button>
     </div>
 
-    <div class="card">
-      <div class="day-title">User Settings</div>
-      <div class="kv">
-        <span><b>Travel Paid:</b> <select id="cfgTravelPaid"><option value="true">Yes</option><option value="false">No</option></select></span>
-        <span><b>Fuel Paid:</b> <select id="cfgFuelPaid"><option value="true">Yes</option><option value="false">No</option></select></span>
-        <span><b>Fuel Rate (£/mile):</b> <input id="cfgFuelRate" type="number" step="0.01" value="0.25"></span>
-        <span><b>Travel Rate (£/hour):</b> <input id="cfgTravelRate" type="number" step="0.01" value="0"></span>
-        <span><b>Pay Home Leg:</b> <select id="cfgHomeLeg"><option value="true">Yes</option><option value="false">No</option></select></span>
-        <span><b>Tracking Type:</b> <select id="cfgTracking"><option>Tracked</option><option>Untracked</option></select></span>
-      </div>
-      <div class="small">Travel is always paid at standard rate and does not count toward the 10 hours overtime threshold.</div>
-      <div class="row" style="margin-top:10px;">
-        <button class="btn" id="btnSaveConfig">Save User Config</button>
-        <div class="pill">Status: <span id="approvalStatus">—</span></div>
-      </div>
-    </div>
-
+    <!-- OUTPUT -->
     <div id="output"></div>
+    <div id="status" class="small"></div>
 
-    <div class="note" id="status">Ready</div>
   </div>
 </div>
 
 <script>
-// ------------------------------
-// CONFIG: set these to your workers
-// ------------------------------
-const TIMESHEET_WORKER = "https://timesheet-admin.jamie-def.workers.dev/";  // << deploy worker above, paste URL
-const EVENTS_WORKER    = "https://ckeck-in-out.jamie-def.workers.dev"; // (kept here in case you still need it later)
-const SITES_WORKER     = "https://mostlane-sites.jamie-def.workers.dev";
+/* ===============================
+   CONFIG
+=============================== */
+const WORKER = "https://timesheet-admin.jamie-def.workers.dev";
 
-// ------------------------------
-// Minimal admin guard (don’t overcomplicate until you wire proper RBAC)
-// ------------------------------
-const me = sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || "";
-if(!me){
-  alert("Not logged in.");
-}
-
-// ------------------------------
-// Date helpers (same approach as your working timesheet page)
-// ------------------------------
-function ordinal(n){
-  const s=["th","st","nd","rd"],v=n%100;
-  return n+(s[(v-20)%10]||s[v]||s[0]);
-}
-function friendlyDate(d){
-  return d.toLocaleDateString("en-GB",{weekday:"long",month:"short"})+
-         " "+ordinal(d.getDate());
-}
-function startOfWeek(d){
-  d=new Date(d);const day=d.getDay()||7;
-  d.setDate(d.getDate()-day+1);d.setHours(0,0,0,0);return d;
-}
-function endOfWeek(d){
-  d=new Date(d);d.setDate(d.getDate()+6);d.setHours(23,59,59,999);return d;
-}
-function isoDate(d){ return new Date(d).toISOString().slice(0,10); }
-function isoMonth(d){ return new Date(d).toISOString().slice(0,7); }
-function time(d){ return new Date(d).toISOString().slice(11,16); }
-function hours(a,b){ return (b-a)/36e5; }
-function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
-
-// ------------------------------
-// DOM
-// ------------------------------
-const weekLabel = document.getElementById("weekLabel");
-const statusEl = document.getElementById("status");
+/* ===============================
+   DOM
+=============================== */
 const userSelect = document.getElementById("userSelect");
+const yearInput = document.getElementById("yearInput");
+const monthInput = document.getElementById("monthInput");
 const output = document.getElementById("output");
+const statusEl = document.getElementById("status");
 
-const cfgTravelPaid = document.getElementById("cfgTravelPaid");
-const cfgFuelPaid = document.getElementById("cfgFuelPaid");
-const cfgFuelRate = document.getElementById("cfgFuelRate");
-const cfgTravelRate = document.getElementById("cfgTravelRate");
-const cfgHomeLeg = document.getElementById("cfgHomeLeg");
-const cfgTracking = document.getElementById("cfgTracking");
-const approvalStatus = document.getElementById("approvalStatus");
-
-let currentWeek = startOfWeek(new Date());
-let ALL_SITES = [];   // flattened list from all categories
-let EVENTS_BY_USER = {}; // month->data loaded
-let WEEK_APPROVALS = {}; // from worker
-let USER_CONFIGS = {};   // from worker
-
-// ------------------------------
-// Geo helpers + site matching
-// ------------------------------
-function haversineMeters(lat1, lon1, lat2, lon2){
-  const R=6371000;
-  const toRad=(x)=>x*Math.PI/180;
-  const dLat=toRad(lat2-lat1);
-  const dLon=toRad(lon2-lon1);
-  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-  return 2*R*Math.asin(Math.sqrt(a));
+/* ===============================
+   HELPERS
+=============================== */
+async function getJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error("Fetch failed");
+  return r.json();
 }
 
-function findNearestSite(lat, lon, maxMeters=500){
-  if(!lat || !lon) return null;
-  let best=null, bestM=Infinity;
-  for(const s of ALL_SITES){
-    if(typeof s.lat !== "number" || typeof s.lon !== "number") continue;
-    const m = haversineMeters(lat, lon, s.lat, s.lon);
-    if(m < bestM){
-      bestM = m;
-      best = s;
-    }
-  }
-  if(!best || bestM > maxMeters) return null;
-  return { ...best, distanceMeters: Math.round(bestM) };
+/* ===============================
+   LOAD USERS (simple heuristic)
+   Uses existing users from main portal
+=============================== */
+async function loadUsers(){
+  const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
+  const data = await res.json();
+  const users = data.Users || [];
+  userSelect.innerHTML = users.map(u =>
+    `<option value="${u.Username}">${u.Username}</option>`
+  ).join("");
 }
 
-// ------------------------------
-// Worker calls
-// ------------------------------
-async function getJSON(u){
-  const r = await fetch(u);
-  if(!r.ok) throw new Error("Request failed: " + r.status);
-  return await r.json();
-}
-async function postJSON(u, body){
-  const r = await fetch(u, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-  const j = await r.json().catch(()=> ({}));
-  if(!r.ok || j.success === false) throw new Error(j.error || "Save failed");
-  return j;
-}
-
-async function loadSites(){
-  // Pull all categories and merge (same data structure as you showed)
-  const cats = ["retail","els","els_private","cobra","wenzels","projects","fbc"];
-  const out = [];
-  for(const c of cats){
-    try{
-      const arr = await getJSON(`${SITES_WORKER}/get-sites?category=${c}`);
-      if(Array.isArray(arr)) out.push(...arr.map(s=>({ ...s, client:(s.client||c) })));
-    }catch(e){
-      console.warn("Sites load failed:", c, e);
-    }
-  }
-  // keep only active sites + those with coords
-  ALL_SITES = out.filter(s => s && typeof s.lat === "number" && typeof s.lon === "number");
-}
-
-async function loadWeekMeta(){
-  const weekISO = isoDate(currentWeek);
-  const j = await getJSON(`${TIMESHEET_WORKER}/admin/week?week=${weekISO}`);
-  USER_CONFIGS = j.configs || {};
-  WEEK_APPROVALS = j.approvals || {};
-
-  const users = j.users || [];
-  userSelect.innerHTML = users.map(u => `<option value="${u}">${u}</option>`).join("");
-  if(users.length){
-    // keep current selection if possible
-    const cur = userSelect.value;
-    if(cur && users.includes(cur)) userSelect.value = cur;
-  }
-}
-
-async function loadMonthEvents(){
-  const month = isoMonth(currentWeek);
-  const j = await getJSON(`${TIMESHEET_WORKER}/admin/events?month=${month}`);
-  EVENTS_BY_USER = j.data || {};
-}
-
-async function travelMinutesBetweenSites(a, b){
-  // Worker caches for you
-  const u = `${TIMESHEET_WORKER}/travel/minutes?fromLat=${encodeURIComponent(a.lat)}&fromLon=${encodeURIComponent(a.lon)}&toLat=${encodeURIComponent(b.lat)}&toLon=${encodeURIComponent(b.lon)}`;
-  const j = await getJSON(u);
-  return Number(j.minutes || 0);
-}
-
-// ------------------------------
-// Calculation engine (key part)
-// ------------------------------
-function normalizeEvents(arr){
-  // keep shape compatible with your existing page
-  const out = (Array.isArray(arr)?arr:[])
-    .map(e => ({
-      ...e,
-      d: new Date(e.datetime),
-      lat: e.lat,
-      lon: e.lon
-    }))
-    .filter(e => e.d.toString() !== "Invalid Date")
-    .sort((a,b)=>a.d-b.d);
-
-  // attach nearest site + "matchedSite" if within 500m
-  for(const e of out){
-    const nearest = findNearestSite(e.lat, e.lon, 500);
-    if(nearest){
-      e.matchedSite = { siteNumber: nearest.siteNumber, siteName: nearest.siteName, client: nearest.client };
-      e._site = nearest; // full site object for travel mins/miles
-      e.recognised = true;
-    }else{
-      e.matchedSite = null;
-      e._site = null;
-      e.recognised = false;
-    }
-  }
-  return out;
-}
-
-function groupByDay(events, weekStart){
-  const byDay = {};
-  const we = events.filter(e => e.d >= weekStart && e.d <= endOfWeek(weekStart));
-  for(const e of we){
-    const k = e.d.toISOString().slice(0,10);
-    (byDay[k] ??= []).push(e);
-  }
-  return byDay;
-}
-
-async function buildDaySummary(dayEvents, userCfg){
-  // dayEvents sorted
-  const list = dayEvents.slice().sort((a,b)=>a.d-b.d);
-
-  // On-site: pair checkin -> checkout sequentially
-  const sessions = [];
-  for(let i=0;i<list.length-1;i++){
-    if(list[i].type==="checkin" && list[i+1].type==="checkout"){
-      sessions.push({ in:list[i], out:list[i+1] });
-    }
-  }
-
-  // If nothing usable, return flags
-  if(!sessions.length){
-    return {
-      sessions: [],
-      onsiteHours: 0,
-      standardHours: 0,
-      overtimeHours: 0,
-      travelMinutes: 0,
-      travelMinutesBreakdown: [],
-      fuelMiles: 0,
-      flags: ["No valid checkin→checkout pairs"]
-    };
-  }
-
-  // On-site totals
-  let onsiteHours = 0;
-  for(const s of sessions){
-    onsiteHours += hours(s.in.d, s.out.d);
-  }
-
-  // Standard vs OT: OT threshold applies ONLY to on-site time
-  const standardHours = clamp(onsiteHours, 0, 10);
-  const overtimeHours = clamp(onsiteHours - 10, 0, 24);
-
-  // Travel calc (preset logic):
-  // - home->first site uses travelTimeFromHQMinutes (if site known)
-  // - between sessions if site changes: use cached Distance Matrix (then "preset")
-  // - last->home uses travelTimeFromHQMinutes (if enabled)
-  let travelMinutes = 0;
-  const travelBreak = [];
-
-  const firstSite = sessions[0].in._site;
-  const lastSite  = sessions[sessions.length-1].out._site;
-
-  if(userCfg.travelPaid){
-    if(userCfg.payHomeLeg && firstSite && Number.isFinite(firstSite.travelTimeFromHQMinutes)){
-      travelMinutes += Number(firstSite.travelTimeFromHQMinutes);
-      travelBreak.push(`Home → ${firstSite.siteName}: ${firstSite.travelTimeFromHQMinutes} min`);
-    }
-
-    // between sites
-    let prevSite = sessions[0].out._site;
-    for(let i=1;i<sessions.length;i++){
-      const nextSite = sessions[i].in._site;
-      if(prevSite && nextSite && (prevSite.siteNumber !== nextSite.siteNumber || prevSite.client !== nextSite.client)){
-        const mins = await travelMinutesBetweenSites(prevSite, nextSite);
-        travelMinutes += mins;
-        travelBreak.push(`${prevSite.siteName} → ${nextSite.siteName}: ${mins} min`);
-      }
-      prevSite = sessions[i].out._site;
-    }
-
-    if(userCfg.payHomeLeg && lastSite && Number.isFinite(lastSite.travelTimeFromHQMinutes)){
-      travelMinutes += Number(lastSite.travelTimeFromHQMinutes);
-      travelBreak.push(`${lastSite.siteName} → Home: ${lastSite.travelTimeFromHQMinutes} min`);
-    }
-  }
-
-  // Fuel miles (simple first pass):
-  // - if fuelPaid: sum mileageFromHQ for first and last known site (one-way), plus between-site mileage not implemented here
-  // You can expand this later (or use distance matrix meters->miles similar to your site manager page)
-  let fuelMiles = 0;
-  const flags = [];
-
-  if(userCfg.fuelPaid){
-    if(firstSite && Number.isFinite(firstSite.mileageFromHQ)) fuelMiles += Number(firstSite.mileageFromHQ);
-    if(lastSite && Number.isFinite(lastSite.mileageFromHQ) && lastSite.siteNumber !== firstSite?.siteNumber) fuelMiles += Number(lastSite.mileageFromHQ);
-    if(!firstSite) flags.push("Fuel enabled but first site unknown");
-  }
-
-  // Missing checkout guard (common issue)
-  const lastEvent = list[list.length-1];
-  if(lastEvent?.type !== "checkout") flags.push("Last event is not a checkout");
-
-  return {
-    sessions,
-    onsiteHours,
-    standardHours,
-    overtimeHours,
-    travelMinutes,
-    travelMinutesBreakdown: travelBreak,
-    fuelMiles,
-    flags
-  };
-}
-
-// ------------------------------
-// Render
-// ------------------------------
-function setConfigUI(user){
-  const cfg = USER_CONFIGS[user] || {};
-  cfgTravelPaid.value = String(cfg.travelPaid !== false);
-  cfgFuelPaid.value = String(!!cfg.fuelPaid);
-  cfgFuelRate.value = Number(cfg.fuelRatePerMile ?? 0.25);
-  cfgTravelRate.value = Number(cfg.travelRatePerHour ?? 0);
-  cfgHomeLeg.value = String(cfg.payHomeLeg !== false);
-  cfgTracking.value = (cfg.trackingType === "Untracked") ? "Untracked" : "Tracked";
-
-  const appr = WEEK_APPROVALS[user];
-  approvalStatus.textContent = appr?.status || "Draft";
-}
-
-async function render(){
-  const weekISO = isoDate(currentWeek);
-  weekLabel.textContent = friendlyDate(currentWeek);
-  statusEl.textContent = "Loading…";
-
-  // Ensure sites loaded
-  if(!ALL_SITES.length) await loadSites();
-
-  await loadWeekMeta();
-  await loadMonthEvents();
-
+/* ===============================
+   LOAD TIMESHEET
+=============================== */
+async function loadTimesheet(){
   const user = userSelect.value;
-  if(!user){
-    output.innerHTML = "";
-    statusEl.textContent = "No users found for this month.";
-    return;
-  }
+  const year = yearInput.value;
+  const month = monthInput.value;
 
-  setConfigUI(user);
+  if(!user) return;
 
-  const cfg = USER_CONFIGS[user] || { travelPaid:true, fuelPaid:false, payHomeLeg:true, trackingType:"Tracked" };
-
-  const month = isoMonth(currentWeek);
-  const all = normalizeEvents(EVENTS_BY_USER[user] || []);
-
-  const byDay = groupByDay(all, currentWeek);
-  const days = Object.keys(byDay).sort();
-
-  if(!days.length){
-    output.innerHTML = `<div class="card"><div class="day-title">No events in this week</div></div>`;
-    statusEl.textContent = "Ready";
-    return;
-  }
-
-  let weekOnsite=0, weekStd=0, weekOT=0, weekTravel=0, weekFuel=0;
-
+  statusEl.textContent = "Loading…";
   output.innerHTML = "";
 
-  for(const d of days){
-    const summary = await buildDaySummary(byDay[d], cfg);
+  try{
+    const url = `${WORKER}/admin/timesheet?user=${encodeURIComponent(user)}&year=${year}&month=${month}`;
+    const data = await getJSON(url);
 
-    weekOnsite += summary.onsiteHours;
-    weekStd += summary.standardHours;
-    weekOT += summary.overtimeHours;
-    weekTravel += summary.travelMinutes;
-    weekFuel += summary.fuelMiles;
+    if(!data.days || !data.days.length){
+      output.innerHTML = `<div class="card">No data for this period.</div>`;
+      statusEl.textContent = "Ready";
+      return;
+    }
 
-    const flagsBadge = summary.flags.length
-      ? `<span class="badge warn">⚠ ${summary.flags.join(" • ")}</span>`
-      : `<span class="badge ok">✔ OK</span>`;
+    let totOn=0, totTravel=0, totFuel=0;
 
-    const sessionsHtml = summary.sessions.map(s=>{
-      const siteName = s.in._site?.siteName || "Unknown";
-      const verified = s.in._site ? `<span class="badge ok">Known site</span>` : `<span class="badge warn">Unknown site</span>`;
-      const mapURL = (s.in.lat && s.in.lon) ? `https://www.google.com/maps?q=${s.in.lat},${s.in.lon}` : "#";
-      return `
+    data.days.forEach(d=>{
+      totOn += d.onsiteHours;
+      totTravel += d.travelHours;
+      totFuel += d.fuelMiles;
+
+      output.innerHTML += `
         <div class="card">
+          <div class="day-title">${d.date}</div>
           <div class="kv">
-            <span><b>${time(s.in.d)} → ${time(s.out.d)}</b></span>
-            <span>${verified}</span>
-          </div>
-          <div class="kv">
-            <span><b>Site:</b> ${siteName}</span>
-            <span><b>On-site:</b> ${hours(s.in.d, s.out.d).toFixed(2)} h</span>
-          </div>
-          <div class="kv">
-            <span><a href="${mapURL}" target="_blank" style="color:var(--ml-accent);text-decoration:none;font-weight:700;">View on map</a></span>
+            <span><b>On-site:</b> ${d.onsiteHours.toFixed(2)} h</span>
+            <span><b>Travel:</b> ${d.travelHours.toFixed(2)} h</span>
+            <span><b>Fuel:</b> ${d.fuelMiles.toFixed(2)} mi</span>
+            <span><b>First site:</b> ${d.firstSite || "—"}</span>
+            <span><b>Last site:</b> ${d.lastSite || "—"}</span>
           </div>
         </div>
       `;
-    }).join("");
+    });
 
-    const travelHtml = summary.travelMinutesBreakdown.length
-      ? `<div class="small">${summary.travelMinutesBreakdown.join("<br>")}</div>`
-      : `<div class="small">No travel breakdown</div>`;
-
-    output.innerHTML += `
-      <div class="card">
-        <div class="day-title">${friendlyDate(new Date(d+"T00:00:00Z"))}</div>
+    output.innerHTML =
+      `<div class="card total">
+        <div class="day-title">Totals</div>
         <div class="kv">
-          <span><b>On-site:</b> ${summary.onsiteHours.toFixed(2)} h</span>
-          <span><b>Std:</b> ${summary.standardHours.toFixed(2)} h</span>
-          <span><b>OT:</b> ${summary.overtimeHours.toFixed(2)} h</span>
-          <span><b>Travel:</b> ${(summary.travelMinutes/60).toFixed(2)} h</span>
-          <span><b>Fuel miles:</b> ${summary.fuelMiles.toFixed(1)} mi</span>
-          <span>${flagsBadge}</span>
+          <span><b>On-site:</b> ${totOn.toFixed(2)} h</span>
+          <span><b>Travel:</b> ${totTravel.toFixed(2)} h</span>
+          <span><b>Fuel:</b> ${totFuel.toFixed(2)} mi</span>
         </div>
-        ${travelHtml}
-        <hr>
-        ${sessionsHtml}
-      </div>
-    `;
+        <div class="small">Travel time does not count toward overtime.</div>
+      </div>` + output.innerHTML;
+
+    statusEl.textContent = "Ready";
   }
-
-  output.innerHTML = `
-    <div class="card">
-      <div class="day-title">Week Totals</div>
-      <div class="kv">
-        <span><b>On-site:</b> ${weekOnsite.toFixed(2)} h</span>
-        <span><b>Std:</b> ${weekStd.toFixed(2)} h</span>
-        <span><b>OT:</b> ${weekOT.toFixed(2)} h</span>
-        <span><b>Travel:</b> ${(weekTravel/60).toFixed(2)} h</span>
-        <span><b>Fuel miles:</b> ${weekFuel.toFixed(1)} mi</span>
-      </div>
-      <div class="small">Travel never contributes toward the 10 hour overtime threshold.</div>
-    </div>
-  ` + output.innerHTML;
-
-  statusEl.textContent = "Ready";
+  catch(e){
+    console.error(e);
+    output.innerHTML = `<div class="card">Failed to load data.</div>`;
+    statusEl.textContent = "Error";
+  }
 }
 
-// ------------------------------
-// Save Config / Approve / Lock
-// ------------------------------
-document.getElementById("btnSaveConfig").onclick = async ()=>{
-  const user = userSelect.value;
-  try{
-    statusEl.textContent = "Saving config…";
-    const body = {
-      user,
-      travelPaid: cfgTravelPaid.value === "true",
-      fuelPaid: cfgFuelPaid.value === "true",
-      fuelRatePerMile: Number(cfgFuelRate.value || 0.25),
-      travelRatePerHour: Number(cfgTravelRate.value || 0),
-      payHomeLeg: cfgHomeLeg.value === "true",
-      trackingType: cfgTracking.value
-    };
-    await postJSON(`${TIMESHEET_WORKER}/admin/user-config`, body);
-    statusEl.textContent = "Config saved";
-    await render();
-  }catch(e){
-    console.error(e);
-    alert("Config save failed");
-    statusEl.textContent = "Ready";
-  }
-};
+/* ===============================
+   INIT
+=============================== */
+document.getElementById("loadBtn").onclick = loadTimesheet;
 
-async function saveWeekStatus(newStatus){
-  const user = userSelect.value;
-  const weekISO = isoDate(currentWeek);
-
-  // We store an approval record even if you don't override days yet.
-  // This keeps the audit line: "approved at X".
-  const payload = {
-    week: weekISO,
-    user,
-    status: newStatus,
-    days: [], // extend later if you want per-day overrides/notes
-    notes: ""
-  };
-
-  statusEl.textContent = "Saving week status…";
-  await postJSON(`${TIMESHEET_WORKER}/admin/save-week`, payload);
-  statusEl.textContent = "Saved";
-  await render();
-}
-
-document.getElementById("btnApprove").onclick = async ()=>{
-  try{
-    await saveWeekStatus("Approved");
-  }catch(e){
-    console.error(e);
-    alert("Approve failed");
-    statusEl.textContent = "Ready";
-  }
-};
-
-document.getElementById("btnLock").onclick = async ()=>{
-  try{
-    await saveWeekStatus("Locked");
-  }catch(e){
-    console.error(e);
-    alert("Lock failed");
-    statusEl.textContent = "Ready";
-  }
-};
-
-// ------------------------------
-// Week nav + load
-// ------------------------------
-document.getElementById("prevWeek").onclick = ()=>{ currentWeek.setDate(currentWeek.getDate()-7); render(); };
-document.getElementById("nextWeek").onclick = ()=>{ currentWeek.setDate(currentWeek.getDate()+7); render(); };
-document.getElementById("btnReload").onclick = ()=>render();
-userSelect.onchange = ()=>render();
-
-// Init
-render();
+(async()=>{
+  await loadUsers();
+  loadTimesheet();
+})();
 </script>
 </body>
 </html>
