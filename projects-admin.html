@@ -125,7 +125,7 @@
 <div class="wrap">
   <div class="grid">
 
-    <!-- LEFT: PROJECTS -->
+    <!-- LEFT -->
     <div class="card">
       <strong>Create project</strong>
       <div class="row" style="margin-top:10px">
@@ -141,7 +141,7 @@
       <div id="projectsList"></div>
     </div>
 
-    <!-- RIGHT: FILES -->
+    <!-- RIGHT -->
     <div class="card">
       <strong id="projectTitle">Select a project</strong>
       <div class="row" id="projectActions" style="margin-top:8px;display:none">
@@ -191,6 +191,8 @@ function headers(extra={}){
   };
 }
 
+/* ---------- PROJECTS ---------- */
+
 function loadProjects(){
   fetch(API+"/projects",{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
@@ -219,6 +221,47 @@ function selectProject(p){
   loadProjects();
 }
 
+function createProject(){
+  fetch(API+"/projects",{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({
+      name:p_name.value,
+      storeNumber:p_store.value,
+      client:p_client.value
+    })
+  }).then(()=>{ p_name.value=p_store.value=p_client.value=""; loadProjects(); });
+}
+
+function renameProject(){
+  const name=prompt("New project name",CURRENT_PROJECT.name);
+  if(!name) return;
+
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/rename`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({ name })
+  }).then(()=>loadProjects());
+}
+
+function archiveProject(){
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({ status:"archived" })
+  }).then(()=>loadProjects());
+}
+
+function unarchiveProject(){
+  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({ status:"active" })
+  }).then(()=>loadProjects());
+}
+
+/* ---------- FILES ---------- */
+
 function loadFiles(){
   fetch(`${API}/projects/${CURRENT_PROJECT.id}/files`,{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json())
@@ -235,7 +278,7 @@ function loadFiles(){
           <td>${f.category||""}</td>
           <td><span class="pill ${f.hidden?"archived":"active"}">${f.hidden?"Hidden":"Active"}</span></td>
           <td class="actions">
-            <button class="btn btn-outline" onclick="renameFile('${f.id}')">Rename</button>
+            <button class="btn btn-outline" onclick="renameFile('${f.id}','${(f.title||"").replace(/'/g,"")}')">Rename</button>
             <button class="btn btn-warn" onclick="toggleHide('${f.id}',${!f.hidden})">${f.hidden?"Unhide":"Hide"}</button>
             <button class="btn btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
           </td>
@@ -243,18 +286,6 @@ function loadFiles(){
         tb.appendChild(tr);
       });
     });
-}
-
-function createProject(){
-  fetch(API+"/projects",{
-    method:"POST",
-    headers:{...headers(), "Content-Type":"application/json"},
-    body:JSON.stringify({
-      name:p_name.value,
-      storeNumber:p_store.value,
-      client:p_client.value
-    })
-  }).then(()=>loadProjects());
 }
 
 function uploadFile(){
@@ -267,45 +298,26 @@ function uploadFile(){
     method:"POST",
     headers:headers(),
     body:fd
+  }).then(()=>{ f_file.value=f_title.value=f_category.value=""; loadFiles(); });
+}
+
+function renameFile(id,current){
+  const title=prompt("New file title",current);
+  if(title===null) return;
+
+  fetch(`${API}/files/${id}/rename`,{
+    method:"POST",
+    headers:{...headers(),"Content-Type":"application/json"},
+    body:JSON.stringify({ title })
   }).then(()=>loadFiles());
-}
-
-function renameProject(){
-  const name=prompt("New project name",CURRENT_PROJECT.name);
-  if(!name) return;
-  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
-    method:"POST",
-    headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({status:CURRENT_PROJECT.status,name})
-  }).then(()=>loadProjects());
-}
-
-function archiveProject(){
-  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
-    method:"POST",
-    headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({status:"archived"})
-  }).then(()=>loadProjects());
-}
-
-function unarchiveProject(){
-  fetch(`${API}/projects/${CURRENT_PROJECT.id}/archive`,{
-    method:"POST",
-    headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({status:"active"})
-  }).then(()=>loadProjects());
 }
 
 function toggleHide(id,hidden){
   fetch(`${API}/files/${id}/hide`,{
     method:"POST",
     headers:{...headers(),"Content-Type":"application/json"},
-    body:JSON.stringify({hidden})
+    body:JSON.stringify({ hidden })
   }).then(()=>loadFiles());
-}
-
-function renameFile(id){
-  alert("File rename requires worker support (safe to add next)");
 }
 
 function deleteFile(id){
