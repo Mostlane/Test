@@ -1245,8 +1245,7 @@ function renderKPIs(){
   const from = fromDate.value;
   const to = toDate.value;
   const rangeTotal = sum(entries, e=>Number(e.totalCost||0));
-  kpiRange.textContent = gbp(rangeTotal);
-  kpiRangeS.textContent = `${entries.length} entries (${from} → ${to})`;
+  kpiRange.textContent = gbp(rangeTotal);kpiRangeS.textContent = `${entries.length} entries (${from} to ${to})`;
 
   const t = todayISO();
   const ws = startOfWeekISO(t);
