@@ -166,6 +166,8 @@
       min-height:40px;
     }
     .smallbtn.danger{background:rgba(220,38,38,0.14); border-color:rgba(220,38,38,0.25);}
+    .smallbtn.ok{background:rgba(22,163,74,0.14); border-color:rgba(22,163,74,0.25);}
+    .smallbtn.warn{background:rgba(245,158,11,0.14); border-color:rgba(245,158,11,0.25);}
 
     .notice{
       background:rgba(245,158,11,0.12);
@@ -205,7 +207,7 @@
       z-index:9999;
     }
     .modal{
-      width:min(940px, 100%);
+      width:min(960px, 100%);
       background:rgba(255,255,255,0.94);
       border:1px solid rgba(255,255,255,0.5);
       border-radius:16px;
@@ -265,7 +267,7 @@
 
     .report-kpis{
       display:grid;
-      grid-template-columns:repeat(3, 1fr);
+      grid-template-columns:repeat(4, 1fr);
       gap:10px;
       margin-top:10px;
     }
@@ -287,8 +289,29 @@
     }
     @media(max-width:980px){ .scrollbox{max-height:260px;} }
 
-    /* Make tables easier on mobile */
     .mobile-table-wrap{overflow:auto; -webkit-overflow-scrolling:touch;}
+
+    /* Map */
+    #mapCanvas{
+      width:100%;
+      height:320px;
+      border-radius:14px;
+      border:1px solid rgba(15,23,42,0.12);
+      background:#f3f4f6;
+    }
+    @media(max-width:520px){ #mapCanvas{height:260px;} }
+
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,0.9);
+      border:1px solid rgba(15,23,42,0.12);
+      font-weight:1000;
+      font-size:12px;
+    }
   </style>
 </head>
 
@@ -326,6 +349,7 @@
           <div class="field">
             <label>Job</label>
             <select id="entryJob"></select>
+            <div class="hint" id="jobMilesHint"></div>
           </div>
         </div>
 
@@ -377,9 +401,19 @@
             </div>
           </div>
 
-          <div class="toggle" style="justify-content:space-between;">
+          <div class="toggle" id="fuelWrap">
+            <input type="checkbox" id="entryFuel"/>
             <div>
-              <span>Calculated Total</span>
+              <span>Claim Fuel</span>
+              <small id="fuelSmall">£0.25/mile • needs job mileage</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="toggle" style="justify-content:space-between; flex:1;">
+            <div>
+              <span>Total (Labour + Fuel)</span>
               <small>Preview before submit</small>
             </div>
             <div style="font-weight:1200; font-size:15px;" id="previewTotal">£0.00</div>
@@ -387,20 +421,21 @@
         </div>
 
         <div class="calcbox">
-          <div class="calcrow"><span>Normal Hours</span><b id="pNormHrs">0.00</b></div>
-          <div class="calcrow"><span>Overtime Hours</span><b id="pOtHrs">0.00</b></div>
-          <div class="calcrow"><span>Normal Cost</span><b id="pNormCost">£0.00</b></div>
-          <div class="calcrow"><span>Overtime Cost</span><b id="pOtCost">£0.00</b></div>
+          <div class="calcrow"><span>Labour (Normal Cost)</span><b id="pNormCost">£0.00</b></div>
+          <div class="calcrow"><span>Labour (OT Cost)</span><b id="pOtCost">£0.00</b></div>
+          <div class="calcrow"><span>Fuel Cost</span><b id="pFuelCost">£0.00</b></div>
           <div class="calcTotal calcrow"><span>Total</span><b id="pTotal">£0.00</b></div>
+          <div class="hint muted" id="previewBreakdown"></div>
         </div>
 
         <div class="stickybar">
-          <div class="muted" style="font-weight:1000;">Tip: set defaults in Manage, then just enter hours.</div>
+          <div class="muted" style="font-weight:1000;">Tip: inactive jobs/engineers are hidden from dropdowns.</div>
           <button class="btn" id="btnSubmit" style="min-width:160px;">Submit Entry</button>
         </div>
 
         <div class="notice">
           Day-rate entries are stored accurately by converting: <b>hours = days × 10</b> and <b>rate = dayRate ÷ 10</b>.
+          Fuel is calculated from the saved job round-trip mileage × £0.25.
         </div>
       </div>
 
@@ -447,7 +482,8 @@
                 <th style="min-width:92px;">Date</th>
                 <th style="min-width:150px;">Job</th>
                 <th style="min-width:140px;">Engineer</th>
-                <th style="min-width:90px;" class="right">Hours</th>
+                <th style="min-width:110px;" class="right">Labour</th>
+                <th style="min-width:90px;" class="right">Fuel</th>
                 <th style="min-width:120px;" class="right">Total</th>
                 <th style="min-width:110px;" class="right">Action</th>
               </tr>
@@ -460,18 +496,18 @@
 
         <div class="two">
           <div>
-            <div class="muted" style="font-weight:1200; margin-bottom:8px;">By Job</div>
+            <div class="muted" style="font-weight:1200; margin-bottom:8px;">By Job (Total)</div>
             <div id="byJob"></div>
           </div>
           <div>
-            <div class="muted" style="font-weight:1200; margin-bottom:8px;">By Engineer</div>
+            <div class="muted" style="font-weight:1200; margin-bottom:8px;">By Engineer (Total)</div>
             <div id="byEng"></div>
           </div>
         </div>
 
         <div class="hr"></div>
 
-        <div class="muted" style="font-weight:1200; margin-bottom:8px;">Engineer × Job Matrix</div>
+        <div class="muted" style="font-weight:1200; margin-bottom:8px;">Engineer × Job Matrix (Total)</div>
         <div class="mobile-table-wrap" id="matrix"></div>
       </div>
     </div>
@@ -484,31 +520,50 @@
       <h3>Manage Jobs & Engineers</h3>
 
       <div class="two">
+        <!-- JOBS -->
         <div class="panel" style="background:rgba(255,255,255,0.74); box-shadow:none;">
           <h2>🏗️ Jobs</h2>
+
           <div class="row">
             <div class="field">
-              <label>Add Job</label>
-              <input type="text" id="newJobName" placeholder="e.g. Lamborghini Poole"/>
+              <label>Job Name</label>
+              <input type="text" id="jobNameInput" placeholder="e.g. Lamborghini Poole"/>
             </div>
           </div>
-          <div class="row" style="justify-content:flex-end;">
-            <button class="btn" id="btnAddJob">Add Job</button>
+
+          <div class="row">
+            <div class="field">
+              <label>Round Trip Miles (auto)</label>
+              <input type="number" id="jobMilesInput" min="0" step="0.1" placeholder="Use Set Location on map"/>
+              <div class="hint">Office origin: <b>PO15 5RQ</b> (round trip).</div>
+            </div>
           </div>
+
+          <div class="row" style="align-items:center; justify-content:space-between;">
+            <button class="btn light" id="btnSetLocation">📍 Set Location on Map</button>
+            <div class="chip" id="locChip">No location set</div>
+          </div>
+
+          <div class="row" style="justify-content:flex-end;">
+            <button class="btn" id="btnSaveJob">Save Job</button>
+          </div>
+
           <div class="hr"></div>
           <div id="jobsList"></div>
         </div>
 
+        <!-- ENGINEERS -->
         <div class="panel" style="background:rgba(255,255,255,0.74); box-shadow:none;">
           <h2>🧑‍🔧 Engineers</h2>
+
           <div class="row">
             <div class="field">
               <label>Name</label>
-              <input type="text" id="newEngName" placeholder="e.g. Connor"/>
+              <input type="text" id="engNameInput" placeholder="e.g. Connor"/>
             </div>
             <div class="field">
               <label>Type</label>
-              <select id="newEngType">
+              <select id="engTypeInput">
                 <option value="core">Core</option>
                 <option value="adHoc">Ad-hoc</option>
               </select>
@@ -518,16 +573,16 @@
           <div class="row">
             <div class="field">
               <label>Default Day Rate (£)</label>
-              <input type="number" id="newEngDay" min="0" step="0.01" placeholder="e.g. 225"/>
+              <input type="number" id="engDayInput" min="0" step="0.01" placeholder="e.g. 225"/>
             </div>
             <div class="field">
               <label>Default Hourly Rate (£)</label>
-              <input type="number" id="newEngHour" min="0" step="0.01" placeholder="e.g. 25"/>
+              <input type="number" id="engHourInput" min="0" step="0.01" placeholder="e.g. 25"/>
             </div>
           </div>
 
           <div class="row" style="justify-content:flex-end;">
-            <button class="btn" id="btnAddEng">Add Engineer</button>
+            <button class="btn" id="btnSaveEng">Save Engineer</button>
           </div>
 
           <div class="hr"></div>
@@ -538,6 +593,35 @@
       <div class="hr"></div>
       <div class="row" style="justify-content:flex-end;">
         <button class="btn secondary" id="manageCloseBottom">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map modal -->
+  <div class="modal-backdrop" id="mapBg" role="dialog" aria-modal="true">
+    <div class="modal">
+      <button class="close" id="mapClose" aria-label="Close">✕</button>
+      <h3>Set Job Location (Round Trip Mileage from PO15 5RQ)</h3>
+
+      <div class="hint" style="margin-bottom:10px;">
+        Click on the map to drop/move the pin. We’ll calculate mileage using Google Distance Matrix (driving).
+      </div>
+
+      <div id="mapCanvas"></div>
+
+      <div class="row" style="margin-top:10px;">
+        <div class="field">
+          <label>Selected Round Trip Miles</label>
+          <input type="number" id="mapMilesOut" readonly />
+        </div>
+        <div class="field">
+          <label>Selected Lat/Lng</label>
+          <input type="text" id="mapLatLngOut" readonly />
+        </div>
+      </div>
+
+      <div class="row" style="justify-content:flex-end; margin-top:10px;">
+        <button class="btn light" id="btnUseLocation">Use This Location</button>
       </div>
     </div>
   </div>
@@ -602,13 +686,12 @@
         </div>
 
         <div class="hint">
-          Automatic weekly export: we can add Cloudflare Cron later to generate the PDFs + email them (or push to SharePoint) without touching this UI.
+          Report totals include <b>Labour + Fuel</b>, and show a split.
         </div>
       </div>
 
       <div class="hr"></div>
 
-      <!-- On-screen report preview (this becomes the PDF) -->
       <div id="reportPreview" class="report-shell">
         <div class="muted">Build a report to preview it here.</div>
       </div>
@@ -617,9 +700,41 @@
 
 <script>
 /* =========================
-   Config
+   CONFIG
 ========================= */
 const API_BASE = "https://labourhours.jamie-def.workers.dev";
+
+// Put your Maps key here:
+const MAPS_API_KEY = "PASTE_YOUR_GOOGLE_MAPS_KEY_HERE";
+
+// Office origin for mileage:
+const OFFICE_POSTCODE = "PO15 5RQ";
+const FUEL_RATE = 0.25;
+
+/* =========================
+   Maps loader (on-demand)
+========================= */
+let mapsLoaded = false;
+function loadGoogleMapsOnce() {
+  return new Promise((resolve, reject) => {
+    if (mapsLoaded && window.google && google.maps) return resolve();
+    if (!MAPS_API_KEY || MAPS_API_KEY.includes("PASTE_")) {
+      return reject(new Error("Google Maps API key not set in MAPS_API_KEY."));
+    }
+    const existing = document.querySelector('script[data-maps="1"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google Maps script.")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.dataset.maps = "1";
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(MAPS_API_KEY)}&libraries=places`;
+    s.onload = () => { mapsLoaded = true; resolve(); };
+    s.onerror = () => reject(new Error("Failed to load Google Maps script."));
+    document.head.appendChild(s);
+  });
+}
 
 /* =========================
    Auth headers
@@ -717,6 +832,18 @@ async function apiPost(path, body){
   }
   return await res.json();
 }
+async function apiPatch(path, body){
+  const res = await fetch(`${API_BASE}${path}`, {
+    method:"PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    const t = await res.text().catch(()=> "");
+    throw new Error(`PATCH ${path} failed (${res.status}): ${t}`);
+  }
+  return await res.json();
+}
 async function apiDelete(path){
   const res = await fetch(`${API_BASE}${path}`, {
     method:"DELETE",
@@ -734,7 +861,16 @@ async function apiDelete(path){
 ========================= */
 let jobs = [];
 let engineers = [];
-let entries = []; // dashboard range entries
+let entries = [];
+
+let editingJobId = null;
+let editingEngId = null;
+
+let currentJobLocation = null; // { lat, lng }
+let currentJobMiles = 0;
+
+let map, marker, distanceSvc;
+let mapSelected = { lat: null, lng: null, roundTripMiles: 0 };
 
 /* =========================
    DOM
@@ -755,14 +891,17 @@ const entryDays = document.getElementById("entryDays");
 const entryDayRate = document.getElementById("entryDayRate");
 
 const entryOT = document.getElementById("entryOT");
+const entryFuel = document.getElementById("entryFuel");
 const otWrap = document.getElementById("otWrap");
+const fuelSmall = document.getElementById("fuelSmall");
+const jobMilesHint = document.getElementById("jobMilesHint");
 
 const previewTotal = document.getElementById("previewTotal");
-const pNormHrs = document.getElementById("pNormHrs");
-const pOtHrs = document.getElementById("pOtHrs");
 const pNormCost = document.getElementById("pNormCost");
 const pOtCost = document.getElementById("pOtCost");
+const pFuelCost = document.getElementById("pFuelCost");
 const pTotal = document.getElementById("pTotal");
+const previewBreakdown = document.getElementById("previewBreakdown");
 
 const btnSubmit = document.getElementById("btnSubmit");
 
@@ -791,16 +930,27 @@ const manageBg = document.getElementById("manageBg");
 const manageClose = document.getElementById("manageClose");
 const manageCloseBottom = document.getElementById("manageCloseBottom");
 
-const newJobName = document.getElementById("newJobName");
-const btnAddJob = document.getElementById("btnAddJob");
+const jobNameInput = document.getElementById("jobNameInput");
+const jobMilesInput = document.getElementById("jobMilesInput");
+const btnSetLocation = document.getElementById("btnSetLocation");
+const btnSaveJob = document.getElementById("btnSaveJob");
+const locChip = document.getElementById("locChip");
 const jobsList = document.getElementById("jobsList");
 
-const newEngName = document.getElementById("newEngName");
-const newEngType = document.getElementById("newEngType");
-const newEngDay = document.getElementById("newEngDay");
-const newEngHour = document.getElementById("newEngHour");
-const btnAddEng = document.getElementById("btnAddEng");
+const engNameInput = document.getElementById("engNameInput");
+const engTypeInput = document.getElementById("engTypeInput");
+const engDayInput = document.getElementById("engDayInput");
+const engHourInput = document.getElementById("engHourInput");
+const btnSaveEng = document.getElementById("btnSaveEng");
 const engList = document.getElementById("engList");
+
+/* Map modal */
+const mapBg = document.getElementById("mapBg");
+const mapClose = document.getElementById("mapClose");
+const mapCanvas = document.getElementById("mapCanvas");
+const mapMilesOut = document.getElementById("mapMilesOut");
+const mapLatLngOut = document.getElementById("mapLatLngOut");
+const btnUseLocation = document.getElementById("btnUseLocation");
 
 /* Reports modal */
 const reportsBg = document.getElementById("reportsBg");
@@ -841,9 +991,11 @@ function fillSelect(sel, items, includeEmpty=false, emptyLabel="(Select)"){
     sel.appendChild(o);
   }
 }
-function jobName(id){ return jobs.find(j=>j.id===id)?.name || "Unknown job"; }
-function engName(id){ return engineers.find(e=>e.id===id)?.name || "Unknown"; }
+
+function jobById(id){ return jobs.find(j=>j.id===id) || null; }
 function engById(id){ return engineers.find(e=>e.id===id) || null; }
+function jobName(id){ return jobById(id)?.name || "Unknown job"; }
+function engName(id){ return engById(id)?.name || "Unknown"; }
 
 function setUserLine(){
   const { username } = getAuthContext();
@@ -851,7 +1003,40 @@ function setUserLine(){
 }
 
 /* =========================
-   Live calculation
+   Filtering active items
+========================= */
+function activeJobs(){ return jobs.filter(j => j.active !== false); }
+function activeEngineers(){ return engineers.filter(e => e.active !== false); }
+
+/* =========================
+   Fuel / miles in UI
+========================= */
+function getSelectedJobMiles(){
+  const j = jobById(entryJob.value);
+  const miles = Number(j?.roundTripMiles || 0);
+  return miles;
+}
+function updateJobMilesHint(){
+  const miles = getSelectedJobMiles();
+  if(entryJob.value && miles > 0){
+    jobMilesHint.innerHTML = `Saved round trip mileage: <b>${miles.toFixed(1)} miles</b>`;
+    fuelSmall.textContent = `£0.25/mile • ${miles.toFixed(1)} miles round trip`;
+    entryFuel.disabled = false;
+  }else if(entryJob.value){
+    jobMilesHint.innerHTML = `<span class="muted">No mileage saved for this job yet (set it in Manage).</span>`;
+    fuelSmall.textContent = `£0.25/mile • needs job mileage`;
+    entryFuel.checked = false;
+    entryFuel.disabled = true;
+  }else{
+    jobMilesHint.innerHTML = ``;
+    fuelSmall.textContent = `£0.25/mile • needs job mileage`;
+    entryFuel.checked = false;
+    entryFuel.disabled = true;
+  }
+}
+
+/* =========================
+   Live calculation (Labour + Fuel)
 ========================= */
 function calcPreview(){
   const mode = entryMode.value;
@@ -883,16 +1068,23 @@ function calcPreview(){
 
   const normalCost = normalHours * rate;
   const overtimeCost = overtimeHours * (rate * 1.5);
-  const total = normalCost + overtimeCost;
+  const labourCost = normalCost + overtimeCost;
 
-  pNormHrs.textContent = normalHours.toFixed(2);
-  pOtHrs.textContent = overtimeHours.toFixed(2);
+  const miles = (entryFuel.checked ? getSelectedJobMiles() : 0);
+  const fuelCost = miles * FUEL_RATE;
+
+  const total = labourCost + fuelCost;
+
   pNormCost.textContent = gbp(normalCost);
   pOtCost.textContent = gbp(overtimeCost);
+  pFuelCost.textContent = gbp(fuelCost);
   pTotal.textContent = gbp(total);
   previewTotal.textContent = gbp(total);
 
-  return { hours, rate, overtimeApplied, total };
+  previewBreakdown.textContent =
+    `Labour: ${gbp(labourCost)} • Fuel: ${gbp(fuelCost)} (${miles ? miles.toFixed(1) : "0.0"} miles)`;
+
+  return { hours, rate, overtimeApplied, labourCost, fuelApplied: !!entryFuel.checked, miles, fuelCost, total };
 }
 
 function fillRatesFromEngineer(){
@@ -933,18 +1125,18 @@ async function loadJobsEngineers(){
   jobs.sort((a,b)=> a.name.localeCompare(b.name));
   engineers.sort((a,b)=> a.name.localeCompare(b.name));
 
-  fillSelect(entryJob, jobs, true, "(Select job)");
-  fillSelect(entryEng, engineers, true, "(Select engineer)");
+  // Only active show in dropdowns
+  fillSelect(entryJob, activeJobs(), true, "(Select job)");
+  fillSelect(entryEng, activeEngineers(), true, "(Select engineer)");
 
-  // Reports dropdowns
-  fillSelect(repJob, jobs, true, "(Select job)");
-  fillSelect(repEngineer, engineers, true, "(Select engineer)");
+  // Reports dropdowns also only active by default
+  fillSelect(repJob, activeJobs(), true, "(Select job)");
+  fillSelect(repEngineer, activeEngineers(), true, "(Select engineer)");
 }
 
 async function loadEntriesRange(from, to){
   const qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   const list = await apiGet(`/labour/entries${qs}`);
-  // Sort newest first
   list.sort((a,b)=> (a.date===b.date ? String(b.createdAt||"").localeCompare(String(a.createdAt||"")) : (a.date<b.date?1:-1)));
   return list;
 }
@@ -956,18 +1148,22 @@ function renderEntries(){
   entriesBody.innerHTML = "";
   if(entries.length === 0){
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="6" class="muted">No entries in this date range.</td>`;
+    tr.innerHTML = `<td colspan="7" class="muted">No entries in this date range.</td>`;
     entriesBody.appendChild(tr);
     return;
   }
   for(const x of entries){
+    const labour = Number(x.labourCost ?? (Number(x.totalCost||0) - Number(x.fuelCost||0)) || 0);
+    const fuel = Number(x.fuelCost||0);
+    const total = Number(x.totalCost||0);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><span class="pill">${escapeHtml(x.date)}</span></td>
       <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
       <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
-      <td class="right">${Number(x.hours||0).toFixed(2)}</td>
-      <td class="right" style="font-weight:1200;">${gbp(x.totalCost)}</td>
+      <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
+      <td class="right">${gbp(fuel)}</td>
+      <td class="right" style="font-weight:1200;">${gbp(total)}</td>
       <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
     `;
     entriesBody.appendChild(tr);
@@ -1025,7 +1221,7 @@ function renderMatrix(byEngJob){
   html += `<th class="right">Total</th></tr></thead><tbody>`;
 
   for(const eng of engineers){
-    html += `<tr><td style="font-weight:1200;">${escapeHtml(eng.name)}</td>`;
+    html += `<tr><td style="font-weight:1200;">${escapeHtml(eng.name)}${eng.active===false ? " (Inactive)" : ""}</td>`;
     for(const job of jobs){
       const key = `${eng.id}__${job.id}`;
       const val = byEngJob.get(key) || 0;
@@ -1068,12 +1264,32 @@ function renderKPIs(){
 }
 
 /* =========================
-   Manage modal logic
+   Manage modal logic (Jobs)
 ========================= */
 function openManage(){ manageBg.style.display="flex"; renderManageLists(); }
 function closeManage(){ manageBg.style.display="none"; }
 
+function resetJobForm(){
+  editingJobId = null;
+  currentJobLocation = null;
+  currentJobMiles = 0;
+  jobNameInput.value = "";
+  jobMilesInput.value = "";
+  locChip.textContent = "No location set";
+  btnSaveJob.textContent = "Save Job";
+}
+
+function resetEngForm(){
+  editingEngId = null;
+  engNameInput.value = "";
+  engTypeInput.value = "core";
+  engDayInput.value = "";
+  engHourInput.value = "";
+  btnSaveEng.textContent = "Save Engineer";
+}
+
 function renderManageLists(){
+  // Jobs list (active + inactive)
   jobsList.innerHTML = "";
   if(jobs.length === 0){
     jobsList.innerHTML = `<div class="muted">No jobs yet.</div>`;
@@ -1084,14 +1300,31 @@ function renderManageLists(){
       row.style.alignItems="center";
       row.style.justifyContent="space-between";
       row.style.marginBottom="8px";
+
+      const miles = Number(j.roundTripMiles||0);
+      const loc = j.location?.lat != null ? `${Number(j.location.lat).toFixed(5)}, ${Number(j.location.lng).toFixed(5)}` : "—";
+
       row.innerHTML = `
-        <div style="font-weight:1200;">${escapeHtml(j.name)}</div>
-        <div class="actions"><button class="smallbtn danger" data-deljob="${j.id}">Delete</button></div>
+        <div>
+          <div style="font-weight:1200;">
+            ${escapeHtml(j.name)}
+            <span class="pill" style="margin-left:6px;">${j.active===false ? "Inactive" : "Active"}</span>
+          </div>
+          <div class="muted" style="font-size:12px;">Miles (RT): ${miles ? miles.toFixed(1) : "—"} • Location: ${escapeHtml(loc)}</div>
+        </div>
+        <div class="actions">
+          <button class="smallbtn warn" data-editjob="${j.id}">Edit</button>
+          <button class="smallbtn ${j.active===false ? "ok" : "warn"}" data-togglejob="${j.id}">
+            ${j.active===false ? "Set Active" : "Set Inactive"}
+          </button>
+          <button class="smallbtn danger" data-deljob="${j.id}">Delete</button>
+        </div>
       `;
       jobsList.appendChild(row);
     }
   }
 
+  // Engineers list
   engList.innerHTML = "";
   if(engineers.length === 0){
     engList.innerHTML = `<div class="muted">No engineers yet.</div>`;
@@ -1104,55 +1337,325 @@ function renderManageLists(){
       row.style.marginBottom="8px";
       row.innerHTML = `
         <div>
-          <div style="font-weight:1200;">${escapeHtml(e.name)} <span class="pill" style="margin-left:6px;">${escapeHtml(e.type||"core")}</span></div>
+          <div style="font-weight:1200;">
+            ${escapeHtml(e.name)}
+            <span class="pill" style="margin-left:6px;">${escapeHtml(e.type||"core")}</span>
+            <span class="pill" style="margin-left:6px;">${e.active===false ? "Inactive" : "Active"}</span>
+          </div>
           <div class="muted" style="font-size:12px;">Day: ${gbp(e.defaultDayRate)} • Hour: ${gbp(e.defaultHourRate)}</div>
         </div>
-        <div class="actions"><button class="smallbtn danger" data-deleng="${e.id}">Delete</button></div>
+        <div class="actions">
+          <button class="smallbtn warn" data-editeng="${e.id}">Edit</button>
+          <button class="smallbtn ${e.active===false ? "ok" : "warn"}" data-toggleeng="${e.id}">
+            ${e.active===false ? "Set Active" : "Set Inactive"}
+          </button>
+          <button class="smallbtn danger" data-deleng="${e.id}">Delete</button>
+        </div>
       `;
       engList.appendChild(row);
     }
   }
 }
 
-async function addJob(){
-  const name = (newJobName.value||"").trim();
+async function saveJob(){
+  const name = (jobNameInput.value||"").trim();
+  const miles = Number(jobMilesInput.value||0);
+
   if(!name) return alert("Enter a job name.");
-  await apiPost("/labour/jobs",{name});
-  newJobName.value="";
+
+  btnSaveJob.disabled = true;
+  try{
+    if(!editingJobId){
+      await apiPost("/labour/jobs", {
+        name,
+        roundTripMiles: miles,
+        location: currentJobLocation
+      });
+    }else{
+      await apiPatch("/labour/jobs", {
+        id: editingJobId,
+        name,
+        roundTripMiles: miles,
+        location: currentJobLocation
+      });
+    }
+
+    resetJobForm();
+    await refreshAll();
+  }catch(err){
+    alert(String(err.message || err));
+  }finally{
+    btnSaveJob.disabled = false;
+  }
+}
+
+async function toggleJobActive(id){
+  const j = jobById(id);
+  if(!j) return;
+  await apiPatch("/labour/jobs", { id, active: !(j.active !== false) ? true : false });
   await refreshAll();
+}
+
+async function editJob(id){
+  const j = jobById(id);
+  if(!j) return;
+  editingJobId = j.id;
+  jobNameInput.value = j.name || "";
+  jobMilesInput.value = Number(j.roundTripMiles||0) || "";
+  currentJobLocation = j.location || null;
+  currentJobMiles = Number(j.roundTripMiles||0) || 0;
+  locChip.textContent = currentJobLocation ? `Location set • ${currentJobMiles.toFixed(1)}mi RT` : "No location set";
+  btnSaveJob.textContent = "Save Changes";
 }
 
 async function delJob(id){
-  if(!confirm("Delete this job?")) return;
+  if(!confirm("Delete this job? This cannot be undone.")) return;
   await apiDelete(`/labour/jobs?id=${encodeURIComponent(id)}`);
-  await refreshAll();
-}
-
-async function addEngineer(){
-  const name = (newEngName.value||"").trim();
-  const type = newEngType.value || "core";
-  const day = Number(newEngDay.value||0);
-  const hour = Number(newEngHour.value||0);
-  if(!name) return alert("Enter engineer name.");
-  if(!(day>0) && !(hour>0)) return alert("Enter a day rate and/or hourly rate.");
-  await apiPost("/labour/engineers",{name,type,defaultDayRate:day,defaultHourRate:hour});
-  newEngName.value=""; newEngDay.value=""; newEngHour.value=""; newEngType.value="core";
-  await refreshAll();
-}
-
-async function delEngineer(id){
-  if(!confirm("Delete this engineer? (Existing entries will show as Unknown.)")) return;
-  await apiDelete(`/labour/engineers?id=${encodeURIComponent(id)}`);
+  if(editingJobId === id) resetJobForm();
   await refreshAll();
 }
 
 /* =========================
-   Reports modal logic
+   Manage modal logic (Engineers)
+========================= */
+async function saveEngineer(){
+  const name = (engNameInput.value||"").trim();
+  const type = engTypeInput.value || "core";
+  const day = Number(engDayInput.value||0);
+  const hour = Number(engHourInput.value||0);
+
+  if(!name) return alert("Enter engineer name.");
+  if(!(day>0) && !(hour>0)) return alert("Enter a day rate and/or hourly rate.");
+
+  btnSaveEng.disabled = true;
+  try{
+    if(!editingEngId){
+      await apiPost("/labour/engineers", { name, type, defaultDayRate: day, defaultHourRate: hour });
+    }else{
+      await apiPatch("/labour/engineers", { id: editingEngId, name, defaultDayRate: day, defaultHourRate: hour });
+    }
+    resetEngForm();
+    await refreshAll();
+  }catch(err){
+    alert(String(err.message || err));
+  }finally{
+    btnSaveEng.disabled = false;
+  }
+}
+
+async function toggleEngActive(id){
+  const e = engById(id);
+  if(!e) return;
+  await apiPatch("/labour/engineers", { id, active: !(e.active !== false) ? true : false });
+  await refreshAll();
+}
+
+async function editEng(id){
+  const e = engById(id);
+  if(!e) return;
+  editingEngId = e.id;
+  engNameInput.value = e.name || "";
+  engTypeInput.value = e.type || "core";
+  engDayInput.value = Number(e.defaultDayRate||0) || "";
+  engHourInput.value = Number(e.defaultHourRate||0) || "";
+  btnSaveEng.textContent = "Save Changes";
+}
+
+async function delEng(id){
+  if(!confirm("Delete this engineer? Existing entries will show as Unknown.")) return;
+  await apiDelete(`/labour/engineers?id=${encodeURIComponent(id)}`);
+  if(editingEngId === id) resetEngForm();
+  await refreshAll();
+}
+
+/* =========================
+   Map modal logic
+========================= */
+function openMap(){
+  mapBg.style.display = "flex";
+}
+function closeMap(){
+  mapBg.style.display = "none";
+}
+
+async function initMapUI(){
+  await loadGoogleMapsOnce();
+
+  distanceSvc = new google.maps.DistanceMatrixService();
+
+  const defaultCenter = { lat: 50.853, lng: -1.205 }; // near Fareham
+  const start = currentJobLocation || defaultCenter;
+
+  map = new google.maps.Map(mapCanvas, {
+    center: start,
+    zoom: currentJobLocation ? 13 : 11,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false
+  });
+
+  marker = new google.maps.Marker({
+    position: start,
+    map: map,
+    draggable: true
+  });
+
+  const setPos = async (latLng) => {
+    marker.setPosition(latLng);
+    map.panTo(latLng);
+    const lat = latLng.lat();
+    const lng = latLng.lng();
+    mapLatLngOut.value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    const miles = await calcRoundTripMiles(lat, lng).catch(()=>0);
+    mapMilesOut.value = miles ? miles.toFixed(1) : "";
+    mapSelected = { lat, lng, roundTripMiles: miles || 0 };
+  };
+
+  // Click map sets marker
+  map.addListener("click", (e) => setPos(e.latLng));
+  marker.addListener("dragend", (e) => setPos(e.latLng));
+
+  // Set initial
+  await setPos(marker.getPosition());
+}
+
+function calcRoundTripMiles(lat, lng){
+  return new Promise((resolve, reject) => {
+    distanceSvc.getDistanceMatrix({
+      origins: [OFFICE_POSTCODE],
+      destinations: [{ lat, lng }],
+      travelMode: google.maps.TravelMode.DRIVING,
+      unitSystem: google.maps.UnitSystem.IMPERIAL
+    }, (res, status) => {
+      if(status !== "OK") return reject(new Error("DistanceMatrix failed: " + status));
+      const el = res?.rows?.[0]?.elements?.[0];
+      if(!el || el.status !== "OK") return resolve(0);
+      const meters = el.distance.value;
+      const oneWayMiles = meters / 1609.344;
+      resolve(oneWayMiles * 2);
+    });
+  });
+}
+
+function applySelectedLocation(){
+  if(mapSelected.lat == null) return;
+  currentJobLocation = { lat: mapSelected.lat, lng: mapSelected.lng };
+  currentJobMiles = Number(mapSelected.roundTripMiles || 0);
+  jobMilesInput.value = currentJobMiles ? currentJobMiles.toFixed(1) : "";
+  locChip.textContent = currentJobLocation ? `Location set • ${currentJobMiles.toFixed(1)}mi RT` : "No location set";
+  closeMap();
+}
+
+/* =========================
+   Submit entry
+========================= */
+async function submitEntry(){
+  const date = entryDate.value;
+  const jobId = entryJob.value;
+  const engineerId = entryEng.value;
+
+  if(!date) return alert("Pick a date.");
+  if(!jobId) return alert("Select a job.");
+  if(!engineerId) return alert("Select an engineer.");
+
+  const mode = entryMode.value;
+  const preview = calcPreview();
+
+  if(mode === "hourly"){
+    const hrs = Number(entryHours.value || 0);
+    const rate = Number(entryHourRate.value || 0);
+    if(!(hrs > 0)) return alert("Enter hours.");
+    if(!(rate > 0)) return alert("Enter hourly rate.");
+  }else{
+    const days = Number(entryDays.value || 0);
+    const dayRate = Number(entryDayRate.value || 0);
+    if(!(days > 0)) return alert("Enter days.");
+    if(!(dayRate > 0)) return alert("Enter day rate.");
+  }
+
+  // Fuel requires mileage
+  const miles = getSelectedJobMiles();
+  if(entryFuel.checked && !(miles > 0)){
+    return alert("This job has no saved mileage yet. Set it in Manage → Set Location on Map.");
+  }
+
+  btnSubmit.disabled = true;
+  try{
+    await apiPost("/labour/entries", {
+      date,
+      jobId,
+      engineerId,
+      hours: preview.hours,
+      rateUsed: preview.rate,
+      overtimeApplied: preview.overtimeApplied,
+      fuelApplied: preview.fuelApplied,
+      jobRoundTripMiles: miles
+    });
+
+    entryHours.value = "";
+    entryDays.value = "";
+    entryFuel.checked = false;
+    calcPreview();
+
+    await refreshAll();
+  }catch(err){
+    alert(String(err.message || err));
+  }finally{
+    btnSubmit.disabled = false;
+  }
+}
+
+/* =========================
+   Refresh all
+========================= */
+async function refreshAll(){
+  btnRefresh.disabled = true;
+  btnSubmit.disabled = true;
+  try{
+    await loadJobsEngineers();
+
+    if(!entryDate.value) entryDate.value = todayISO();
+
+    fillRatesFromEngineer();
+    applyModeUI();
+    updateJobMilesHint();
+
+    const from = fromDate.value;
+    const to = toDate.value;
+    entries = await loadEntriesRange(from, to);
+
+    renderEntries();
+    renderKPIs();
+
+    const sums = summarise(entries);
+    byJob.innerHTML = renderMapTable(sums.byJob, "Job", jobName);
+    byEng.innerHTML = renderMapTable(sums.byEng, "Engineer", engName);
+    matrix.innerHTML = renderMatrix(sums.byEngJob);
+
+    renderManageLists();
+  }catch(err){
+    alert(String(err.message || err));
+  }finally{
+    btnRefresh.disabled = false;
+    btnSubmit.disabled = false;
+  }
+}
+
+/* =========================
+   Delete entry
+========================= */
+async function deleteEntry(id){
+  if(!confirm("Delete this labour entry?")) return;
+  await apiDelete(`/labour/entries?id=${encodeURIComponent(id)}`);
+  await refreshAll();
+}
+
+/* =========================
+   Reports
 ========================= */
 function openReports(){
   reportsBg.style.display="flex";
   btnDownloadPDF.disabled = true;
-  // defaults
   repWeekDate.value = todayISO();
   repMonth.value = monthKey(todayISO());
   repFrom.value = fromDate.value || startOfWeekISO(todayISO());
@@ -1163,22 +1666,16 @@ function closeReports(){ reportsBg.style.display="none"; }
 
 function updateReportUI(){
   const t = repType.value;
-
-  // Show/hide controls
-  const needsEng = (t.startsWith("eng_"));
-  const needsJob = (t.includes("job"));
-  const needsWeek = (t.endsWith("_week"));
-  const needsMonth = (t.endsWith("_month"));
-  const needsRange = (t.endsWith("_range") || t.endsWith("_range") || t.includes("_range"));
+  const needsEng = t.startsWith("eng_");
+  const needsWeek = t.endsWith("_week");
+  const needsMonth = t.endsWith("_month");
+  const needsRange = t.includes("range");
 
   repEngWrap.style.display = needsEng ? "" : "none";
   repJobWrap.style.display = (t === "eng_job_range" || t.startsWith("job_")) ? "" : "none";
-
   repWeekWrap.style.display = needsWeek ? "" : "none";
   repMonthWrap.style.display = needsMonth ? "" : "none";
-  repRangeWrap.style.display = (t.includes("range")) ? "" : "none";
-
-  // For job_week/month, job is required; for eng_week/month, engineer required.
+  repRangeWrap.style.display = needsRange ? "" : "none";
 }
 
 function computeReportRange(){
@@ -1191,29 +1688,27 @@ function computeReportRange(){
     const ym = repMonth.value || monthKey(todayISO());
     const [y,m] = ym.split("-").map(Number);
     const first = `${y}-${String(m).padStart(2,"0")}-01`;
-    const d = new Date(y, m, 0); // last day of month
+    const d = new Date(y, m, 0);
     const last = `${y}-${String(m).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
     return { from: first, to: last };
   }
-  // range types
   return {
     from: repFrom.value || startOfWeekISO(todayISO()),
     to: repTo.value || endOfWeekISO(todayISO())
   };
 }
 
-function breakdownHoursCosts(list){
-  // Worker already returns normalHours, overtimeHours, normalCost, overtimeCost, totalCost.
+function breakdownTotals(list){
+  const labour = sum(list, e=>Number(e.labourCost ?? (Number(e.totalCost||0)-Number(e.fuelCost||0)) || 0));
+  const fuel = sum(list, e=>Number(e.fuelCost||0));
+  const total = sum(list, e=>Number(e.totalCost||0));
+  const hours = sum(list, e=>Number(e.hours||0));
   const normalHours = sum(list, e=>Number(e.normalHours||0));
   const overtimeHours = sum(list, e=>Number(e.overtimeHours||0));
-  const hours = sum(list, e=>Number(e.hours||0));
-  const normalCost = sum(list, e=>Number(e.normalCost||0));
-  const overtimeCost = sum(list, e=>Number(e.overtimeCost||0));
-  const totalCost = sum(list, e=>Number(e.totalCost||0));
-  return { hours, normalHours, overtimeHours, normalCost, overtimeCost, totalCost };
+  return { labour, fuel, total, hours, normalHours, overtimeHours };
 }
 
-function groupBy(list, keyFn){
+function groupByCost(list, keyFn){
   const map = new Map();
   for(const x of list){
     const k = keyFn(x);
@@ -1246,7 +1741,6 @@ async function buildReport(){
   try{
     const type = repType.value;
     const { from, to } = computeReportRange();
-
     const all = await loadEntriesRange(from, to);
 
     const engId = repEngineer.value;
@@ -1268,25 +1762,16 @@ async function buildReport(){
       filtered = filtered.filter(e => e.engineerId === engId && e.jobId === jobId);
     }
 
-    const totals = breakdownHoursCosts(filtered);
+    const totals = breakdownTotals(filtered);
 
-    // Headline title
     let title = "Labour Report";
     if(type === "eng_week" || type === "eng_month") title = `Engineer Labour Report – ${engName(engId)}`;
     if(type === "eng_job_range") title = `Engineer × Job Labour Report – ${engName(engId)} – ${jobName(jobId)}`;
     if(type === "job_week" || type === "job_month" || type === "job_range") title = `Job Labour Report – ${jobName(jobId)}`;
     if(type === "job_engineers_range") title = `Job Engineers Breakdown – ${jobName(jobId)}`;
 
-    // Breakdown sections
-    const byJobMap = groupBy(filtered, e=>e.jobId);
-    const byEngMap = groupBy(filtered, e=>e.engineerId);
-
-    // Engineer x Job matrix for the report (only if relevant)
-    const byEngJob = new Map();
-    for(const e of filtered){
-      const key = `${e.engineerId}__${e.jobId}`;
-      byEngJob.set(key, (byEngJob.get(key)||0) + Number(e.totalCost||0));
-    }
+    const byJobMap = groupByCost(filtered, e=>e.jobId);
+    const byEngMap = groupByCost(filtered, e=>e.engineerId);
 
     const metaLine = `
       <div class="report-meta">
@@ -1299,11 +1784,9 @@ async function buildReport(){
     if(type.startsWith("job_") || type === "eng_job_range") headerBadges.push(`<span class="badge">Job: ${escapeHtml(jobName(jobId))}</span>`);
     headerBadges.push(`<span class="badge">Generated: ${escapeHtml(new Date().toLocaleString("en-GB"))}</span>`);
 
-    // Use absolute logo URL for PDF reliability (same origin is fine too; this is more robust)
     const logoUrl = (location.origin + location.pathname.replace(/\/[^\/]*$/, "") + "/mostlane-logo.jpg");
 
-    // Build report HTML
-    let html = `
+    const html = `
       <div id="pdfRoot">
         <div class="report-header">
           <div style="display:flex; align-items:center; gap:10px;">
@@ -1319,49 +1802,25 @@ async function buildReport(){
         </div>
 
         <div class="report-kpis">
-          <div class="report-kpi">
-            <div class="k">Total Cost</div>
-            <div class="v">${gbp(totals.totalCost)}</div>
-          </div>
-          <div class="report-kpi">
-            <div class="k">Total Hours</div>
-            <div class="v">${totals.hours.toFixed(2)}</div>
-          </div>
-          <div class="report-kpi">
-            <div class="k">OT Hours</div>
-            <div class="v">${totals.overtimeHours.toFixed(2)} <span style="font-size:12px; color:rgba(15,23,42,0.65); font-weight:1000;">(normal ${totals.normalHours.toFixed(2)})</span></div>
-          </div>
+          <div class="report-kpi"><div class="k">Total</div><div class="v">${gbp(totals.total)}</div></div>
+          <div class="report-kpi"><div class="k">Labour</div><div class="v">${gbp(totals.labour)}</div></div>
+          <div class="report-kpi"><div class="k">Fuel</div><div class="v">${gbp(totals.fuel)}</div></div>
+          <div class="report-kpi"><div class="k">Hours (OT)</div><div class="v">${totals.hours.toFixed(2)} <span style="font-size:12px; color:rgba(15,23,42,0.65); font-weight:1000;">(${totals.overtimeHours.toFixed(2)} OT)</span></div></div>
         </div>
 
         <div style="display:grid; gap:10px; margin-top:12px;">
-          <div class="report-shell" style="border:none; padding:0;">
-            <div class="two">
-              <div>
-                <div style="font-weight:1200; margin:8px 0;">Cost Breakdown by Job</div>
-                ${renderSimpleTable(byJobMap, "Job", jobName)}
-              </div>
-              <div>
-                <div style="font-weight:1200; margin:8px 0;">Cost Breakdown by Engineer</div>
-                ${renderSimpleTable(byEngMap, "Engineer", engName)}
-              </div>
+          <div class="two">
+            <div>
+              <div style="font-weight:1200; margin:8px 0;">Cost Breakdown by Job (Total)</div>
+              ${renderSimpleTable(byJobMap, "Job", jobName)}
+            </div>
+            <div>
+              <div style="font-weight:1200; margin:8px 0;">Cost Breakdown by Engineer (Total)</div>
+              ${renderSimpleTable(byEngMap, "Engineer", engName)}
             </div>
           </div>
 
           <div style="margin-top:8px;">
-            <div style="font-weight:1200; margin-bottom:8px;">Hours & Cost Breakdown</div>
-            <table>
-              <thead><tr><th>Metric</th><th class="right">Value</th></tr></thead>
-              <tbody>
-                <tr><td style="font-weight:1100;">Normal Hours</td><td class="right">${totals.normalHours.toFixed(2)}</td></tr>
-                <tr><td style="font-weight:1100;">Overtime Hours</td><td class="right">${totals.overtimeHours.toFixed(2)}</td></tr>
-                <tr><td style="font-weight:1100;">Normal Cost</td><td class="right">${gbp(totals.normalCost)}</td></tr>
-                <tr><td style="font-weight:1100;">Overtime Cost</td><td class="right">${gbp(totals.overtimeCost)}</td></tr>
-                <tr><td style="font-weight:1200;">Total</td><td class="right" style="font-weight:1200;">${gbp(totals.totalCost)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div style="margin-top:10px;">
             <div style="font-weight:1200; margin-bottom:8px;">Entries</div>
             <table>
               <thead>
@@ -1369,24 +1828,26 @@ async function buildReport(){
                   <th style="min-width:90px;">Date</th>
                   <th>Job</th>
                   <th>Engineer</th>
-                  <th class="right">Hours</th>
-                  <th class="right">Normal</th>
-                  <th class="right">OT</th>
+                  <th class="right">Labour</th>
+                  <th class="right">Fuel</th>
                   <th class="right">Total</th>
                 </tr>
               </thead>
               <tbody>
-                ${filtered.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1)).map(e=>`
-                  <tr>
-                    <td><span class="pill">${escapeHtml(e.date)}</span></td>
-                    <td style="font-weight:1100;">${escapeHtml(jobName(e.jobId))}</td>
-                    <td style="font-weight:1100;">${escapeHtml(engName(e.engineerId))}</td>
-                    <td class="right">${Number(e.hours||0).toFixed(2)}</td>
-                    <td class="right">${Number(e.normalHours||0).toFixed(2)}</td>
-                    <td class="right">${Number(e.overtimeHours||0).toFixed(2)}</td>
-                    <td class="right" style="font-weight:1200;">${gbp(e.totalCost)}</td>
-                  </tr>
-                `).join("")}
+                ${filtered.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1)).map(e=>{
+                  const labour = Number(e.labourCost ?? (Number(e.totalCost||0)-Number(e.fuelCost||0)) || 0);
+                  const fuel = Number(e.fuelCost||0);
+                  return `
+                    <tr>
+                      <td><span class="pill">${escapeHtml(e.date)}</span></td>
+                      <td style="font-weight:1100;">${escapeHtml(jobName(e.jobId))}</td>
+                      <td style="font-weight:1100;">${escapeHtml(engName(e.engineerId))}</td>
+                      <td class="right">${gbp(labour)}</td>
+                      <td class="right">${gbp(fuel)}</td>
+                      <td class="right" style="font-weight:1200;">${gbp(Number(e.totalCost||0))}</td>
+                    </tr>
+                  `;
+                }).join("")}
               </tbody>
             </table>
           </div>
@@ -1396,7 +1857,6 @@ async function buildReport(){
 
     reportPreview.innerHTML = html;
 
-    // Enable PDF
     const filename = reportFilename(title, from, to);
     btnDownloadPDF.onclick = () => downloadReportPDF(filename);
     btnDownloadPDF.disabled = false;
@@ -1433,99 +1893,6 @@ async function downloadReportPDF(filename){
 }
 
 /* =========================
-   Submit entry
-========================= */
-async function submitEntry(){
-  const date = entryDate.value;
-  const jobId = entryJob.value;
-  const engineerId = entryEng.value;
-
-  if(!date) return alert("Pick a date.");
-  if(!jobId) return alert("Select a job.");
-  if(!engineerId) return alert("Select an engineer.");
-
-  const mode = entryMode.value;
-  const preview = calcPreview();
-
-  if(mode === "hourly"){
-    const hrs = Number(entryHours.value || 0);
-    const rate = Number(entryHourRate.value || 0);
-    if(!(hrs > 0)) return alert("Enter hours.");
-    if(!(rate > 0)) return alert("Enter hourly rate.");
-  }else{
-    const days = Number(entryDays.value || 0);
-    const dayRate = Number(entryDayRate.value || 0);
-    if(!(days > 0)) return alert("Enter days.");
-    if(!(dayRate > 0)) return alert("Enter day rate.");
-  }
-
-  btnSubmit.disabled = true;
-  try{
-    await apiPost("/labour/entries", {
-      date,
-      jobId,
-      engineerId,
-      hours: preview.hours,
-      rateUsed: preview.rate,
-      overtimeApplied: preview.overtimeApplied
-    });
-
-    entryHours.value = "";
-    entryDays.value = "";
-    calcPreview();
-
-    await refreshAll();
-  }catch(err){
-    alert(String(err.message || err));
-  }finally{
-    btnSubmit.disabled = false;
-  }
-}
-
-/* =========================
-   Refresh all
-========================= */
-async function refreshAll(){
-  btnRefresh.disabled = true;
-  btnSubmit.disabled = true;
-  try{
-    await loadJobsEngineers();
-
-    if(!entryDate.value) entryDate.value = todayISO();
-    fillRatesFromEngineer();
-    applyModeUI();
-
-    const from = fromDate.value;
-    const to = toDate.value;
-    entries = await loadEntriesRange(from, to);
-
-    renderEntries();
-    renderKPIs();
-
-    const sums = summarise(entries);
-    byJob.innerHTML = renderMapTable(sums.byJob, "Job", jobName);
-    byEng.innerHTML = renderMapTable(sums.byEng, "Engineer", engName);
-    matrix.innerHTML = renderMatrix(sums.byEngJob);
-
-    renderManageLists();
-  }catch(err){
-    alert(String(err.message || err));
-  }finally{
-    btnRefresh.disabled = false;
-    btnSubmit.disabled = false;
-  }
-}
-
-/* =========================
-   Delete entry
-========================= */
-async function deleteEntry(id){
-  if(!confirm("Delete this labour entry?")) return;
-  await apiDelete(`/labour/entries?id=${encodeURIComponent(id)}`);
-  await refreshAll();
-}
-
-/* =========================
    Boot
 ========================= */
 (function init(){
@@ -1538,9 +1905,9 @@ async function deleteEntry(id){
   fromDate.value = startOfWeekISO(t);
   toDate.value = endOfWeekISO(t);
 
-  // Events
+  // events
   btnMainMenu.addEventListener("click", ()=> window.location.href = "main.html");
-  btnManage.addEventListener("click", openManage);
+  btnManage.addEventListener("click", ()=>{ openManage(); });
   btnReports.addEventListener("click", openReports);
   btnRefresh.addEventListener("click", refreshAll);
 
@@ -1548,15 +1915,8 @@ async function deleteEntry(id){
   manageCloseBottom.addEventListener("click", closeManage);
   manageBg.addEventListener("click", (e)=>{ if(e.target===manageBg) closeManage(); });
 
-  btnAddJob.addEventListener("click", async ()=>{ try{ await addJob(); }catch(e){ alert(e.message||e);} });
-  btnAddEng.addEventListener("click", async ()=>{ try{ await addEngineer(); }catch(e){ alert(e.message||e);} });
-
-  manageBg.addEventListener("click", async (e)=>{
-    const b = e.target.closest("button");
-    if(!b) return;
-    if(b.dataset.deljob){ try{ await delJob(b.dataset.deljob);}catch(err){alert(err.message||err);} }
-    if(b.dataset.deleng){ try{ await delEngineer(b.dataset.deleng);}catch(err){alert(err.message||err);} }
-  });
+  btnSaveJob.addEventListener("click", saveJob);
+  btnSaveEng.addEventListener("click", saveEngineer);
 
   entryMode.addEventListener("change", ()=>{
     entryHours.value=""; entryDays.value="";
@@ -1564,10 +1924,14 @@ async function deleteEntry(id){
     applyModeUI();
   });
   entryEng.addEventListener("change", ()=>{
-    // refresh rate fields only if user hasn't typed
     if(entryMode.value==="hourly") entryHourRate.value="";
     else entryDayRate.value="";
     fillRatesFromEngineer();
+    calcPreview();
+  });
+
+  entryJob.addEventListener("change", ()=>{
+    updateJobMilesHint();
     calcPreview();
   });
 
@@ -1576,6 +1940,7 @@ async function deleteEntry(id){
   entryDays.addEventListener("input", calcPreview);
   entryDayRate.addEventListener("input", calcPreview);
   entryOT.addEventListener("change", calcPreview);
+  entryFuel.addEventListener("change", calcPreview);
 
   btnSubmit.addEventListener("click", submitEntry);
 
@@ -1589,21 +1954,53 @@ async function deleteEntry(id){
     if(id){ try{ await deleteEntry(id);}catch(err){alert(err.message||err);} }
   });
 
-  // Reports modal events
+  // Manage list buttons (event delegation)
+  manageBg.addEventListener("click", async (e)=>{
+    const b = e.target.closest("button");
+    if(!b) return;
+
+    if(b.dataset.editjob){ await editJob(b.dataset.editjob); }
+    if(b.dataset.togglejob){ await toggleJobActive(b.dataset.togglejob); }
+    if(b.dataset.deljob){ await delJob(b.dataset.deljob); }
+
+    if(b.dataset.editeng){ await editEng(b.dataset.editeng); }
+    if(b.dataset.toggleeng){ await toggleEngActive(b.dataset.toggleeng); }
+    if(b.dataset.deleng){ await delEng(b.dataset.deleng); }
+  });
+
+  // Map modal
+  mapClose.addEventListener("click", closeMap);
+  mapBg.addEventListener("click", (e)=>{ if(e.target===mapBg) closeMap(); });
+
+  btnSetLocation.addEventListener("click", async ()=>{
+    try{
+      openMap();
+      await initMapUI();
+    }catch(err){
+      alert(String(err.message||err));
+      closeMap();
+    }
+  });
+
+  btnUseLocation.addEventListener("click", applySelectedLocation);
+
+  // Reports modal
   reportsClose.addEventListener("click", closeReports);
   reportsBg.addEventListener("click", (e)=>{ if(e.target===reportsBg) closeReports(); });
 
   repType.addEventListener("change", updateReportUI);
   btnBuildReport.addEventListener("click", buildReport);
 
-  // default report date inputs
+  // Defaults
   repWeekDate.value = todayISO();
   repMonth.value = monthKey(todayISO());
   repFrom.value = fromDate.value;
   repTo.value = toDate.value;
 
-  // First load
+  // Initial load
   refreshAll();
+  resetJobForm();
+  resetEngForm();
 })();
 </script>
 </body>
