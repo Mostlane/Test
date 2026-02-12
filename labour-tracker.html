@@ -1698,14 +1698,19 @@ function computeReportRange(){
 }
 
 function breakdownTotals(list){
-  const labour = sum(list, e=>Number(e.labourCost ?? (Number(e.totalCost||0)-Number(e.fuelCost||0)) || 0));
-  const fuel = sum(list, e=>Number(e.fuelCost||0));
-  const total = sum(list, e=>Number(e.totalCost||0));
-  const hours = sum(list, e=>Number(e.hours||0));
-  const normalHours = sum(list, e=>Number(e.normalHours||0));
-  const overtimeHours = sum(list, e=>Number(e.overtimeHours||0));
+  const labour = sum(list, e => {
+    const base = (e.labourCost ?? (Number(e.totalCost || 0) - Number(e.fuelCost || 0)));
+    return Number(base || 0);
+  });
+
+  const fuel = sum(list, e => Number(e.fuelCost || 0));
+  const total = sum(list, e => Number(e.totalCost || 0));
+  const hours = sum(list, e => Number(e.hours || 0));
+  const normalHours = sum(list, e => Number(e.normalHours || 0));
+  const overtimeHours = sum(list, e => Number(e.overtimeHours || 0));
   return { labour, fuel, total, hours, normalHours, overtimeHours };
 }
+
 
 function groupByCost(list, keyFn){
   const map = new Map();
@@ -1834,7 +1839,7 @@ async function buildReport(){
               </thead>
               <tbody>
                 ${filtered.sort((a,b)=> a.date===b.date ? 0 : (a.date<b.date?-1:1)).map(e=>{
-                  const labour = Number(e.labourCost ?? (Number(e.totalCost||0)-Number(e.fuelCost||0)) || 0);
+                  const labour = Number((e.labourCost ?? (Number(e.totalCost || 0) - Number(e.fuelCost || 0))) || 0);
                   const fuel = Number(e.fuelCost||0);
                   return `
                     <tr>
