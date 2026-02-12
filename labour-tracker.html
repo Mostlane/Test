@@ -453,6 +453,16 @@
             <input type="date" id="toDate"/>
           </div>
         </div>
+<div class="row" style="margin-top:10px;">
+  <div class="field">
+    <label>Filter by Job</label>
+    <select id="filterJob">
+      <option value="">(All Jobs)</option>
+    </select>
+  </div>
+</div>
+
+<div id="filterEngineersWrap" style="margin-top:10px;"></div>
 
         <div class="kpis">
           <div class="kpi">
@@ -871,6 +881,7 @@ async function apiDelete(path){
 let jobs = [];
 let engineers = [];
 let entries = [];
+let selectedEngineerFilters = [];
 
 let editingJobId = null;
 let editingEngId = null;
@@ -916,6 +927,8 @@ const btnSubmit = document.getElementById("btnSubmit");
 
 const fromDate = document.getElementById("fromDate");
 const toDate = document.getElementById("toDate");
+const filterJob = document.getElementById("filterJob");
+const filterEngineersWrap = document.getElementById("filterEngineersWrap");
 
 const kpiRange = document.getElementById("kpiRange");
 const kpiRangeS = document.getElementById("kpiRangeS");
@@ -1136,6 +1149,7 @@ async function loadJobsEngineers(){
 
   // Only active show in dropdowns
   fillSelect(entryJob, activeJobs(), true, "(Select job)");
+  fillSelect(filterJob, activeJobs(), true, "(All Jobs)");
   fillSelect(entryEng, activeEngineers(), true, "(Select engineer)");
 
   // Reports dropdowns also only active by default
@@ -1199,6 +1213,22 @@ function summarise(list){
   }
   return { byJob, byEng, byEngJob };
 }
+  function getFilteredEntries(){
+  let list = entries.slice();
+
+  // Filter by job
+  if(filterJob.value){
+    list = list.filter(e => e.jobId === filterJob.value);
+  }
+
+  // Filter by selected engineers
+  if(selectedEngineerFilters.length > 0){
+    list = list.filter(e => selectedEngineerFilters.includes(e.engineerId));
+  }
+
+  return list;
+}
+
 
 function renderMapTable(map, labelLeft, nameFn){
   const rows = Array.from(map.entries()).map(([id,total])=>({id,total})).sort((a,b)=>b.total-a.total);
@@ -1252,6 +1282,61 @@ function renderMatrix(byEngJob){
   }
   html += `<th class="right">${gbp(grand)}</th></tr></tfoot></table></div>`;
   return html;
+}
+function renderEngineerFilters(){
+  filterEngineersWrap.innerHTML = "";
+  selectedEngineerFilters = [];
+
+  if(!filterJob.value) return;
+
+  const jobId = filterJob.value;
+
+  const relevant = entries
+    .filter(e => e.jobId === jobId)
+    .map(e => e.engineerId);
+
+  const uniqueIds = [...new Set(relevant)];
+
+  if(uniqueIds.length === 0){
+    filterEngineersWrap.innerHTML =
+      `<div class="muted">No engineers logged against this job in selected range.</div>`;
+    return;
+  }
+
+  const container = document.createElement("div");
+  container.className = "row";
+
+  for(const id of uniqueIds){
+    const e = engById(id);
+    if(!e) continue;
+
+    const wrap = document.createElement("div");
+    wrap.className = "toggle";
+    wrap.innerHTML = `
+      <input type="checkbox" value="${id}" checked />
+      <div>
+        <span>${e.name}</span>
+      </div>
+    `;
+
+    container.appendChild(wrap);
+  }
+
+  filterEngineersWrap.appendChild(container);
+
+  selectedEngineerFilters = uniqueIds.slice();
+
+  filterEngineersWrap
+    .querySelectorAll("input[type='checkbox']")
+    .forEach(cb=>{
+      cb.addEventListener("change", ()=>{
+        selectedEngineerFilters = Array.from(
+          filterEngineersWrap.querySelectorAll("input:checked")
+        ).map(x=>x.value);
+
+        renderDashboardWithFilters();
+      });
+    });
 }
 
 function renderKPIs(){
@@ -1636,13 +1721,8 @@ async function refreshAll(){
     const to = toDate.value;
     entries = await loadEntriesRange(from, to);
 
-    renderEntries();
-    renderKPIs();
-
-    const sums = summarise(entries);
-    byJob.innerHTML = renderMapTable(sums.byJob, "Job", jobName);
-    byEng.innerHTML = renderMapTable(sums.byEng, "Engineer", engName);
-    matrix.innerHTML = renderMatrix(sums.byEngJob);
+    renderEngineerFilters();
+renderDashboardWithFilters();
 
     renderManageLists();
   }catch(err){
@@ -1651,6 +1731,65 @@ async function refreshAll(){
     btnRefresh.disabled = false;
     btnSubmit.disabled = false;
   }
+}
+function renderDashboardWithFilters(){
+  const visible = getFilteredEntries();
+
+  entriesBody.innerHTML = "";
+
+  if(visible.length === 0){
+    entriesBody.innerHTML =
+      `<tr><td colspan="9" class="muted">No entries in this filter.</td></tr>`;
+  } else {
+    for(const x of visible){
+      const labour = Number(
+        x.labourCost ?? (Number(x.totalCost||0) - Number(x.fuelCost||0))
+      ) || 0;
+
+      const fuel = Number(x.fuelCost||0);
+      const total = Number(x.totalCost||0);
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><span class="pill">${formatDateDisplay(x.date)}</span></td>
+        <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
+        <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
+        <td class="right">${Number(x.normalHours || 0).toFixed(2)}</td>
+        <td class="right">${Number(x.overtimeHours || 0).toFixed(2)}</td>
+        <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
+        <td class="right">${gbp(fuel)}</td>
+        <td class="right" style="font-weight:1200;">${gbp(total)}</td>
+        <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
+      `;
+      entriesBody.appendChild(tr);
+    }
+  }
+
+ // KPIs (filter-aware)
+const rangeTotal = sum(visible, e=>Number(e.totalCost||0));
+kpiRange.textContent = gbp(rangeTotal);
+kpiRangeS.textContent = `${visible.length} entries (${fromDate.value} to ${toDate.value})`;
+
+const today = todayISO();
+const ws = startOfWeekISO(today);
+const we = endOfWeekISO(today);
+const mk = monthKey(today);
+
+const weekVisible = visible.filter(e => e.date >= ws && e.date <= we);
+const monthVisible = visible.filter(e => monthKey(e.date) === mk);
+
+kpiWeek.textContent = gbp(sum(weekVisible, e=>Number(e.totalCost||0)));
+kpiWeekS.textContent = `${weekVisible.length} entries`;
+
+kpiMonth.textContent = gbp(sum(monthVisible, e=>Number(e.totalCost||0)));
+kpiMonthS.textContent = `${monthVisible.length} entries`;
+
+
+  const sums = summarise(visible);
+
+  byJob.innerHTML = renderMapTable(sums.byJob, "Job", jobName);
+  byEng.innerHTML = renderMapTable(sums.byEng, "Engineer", engName);
+  matrix.innerHTML = renderMatrix(sums.byEngJob);
 }
 
 /* =========================
@@ -1921,6 +2060,10 @@ async function downloadReportPDF(filename){
   const t = todayISO();
   fromDate.value = startOfWeekISO(t);
   toDate.value = endOfWeekISO(t);
+  filterJob.addEventListener("change", ()=>{
+  renderEngineerFilters();
+  renderDashboardWithFilters();
+});
 
   // events
   btnMainMenu.addEventListener("click", ()=> window.location.href = "main.html");
