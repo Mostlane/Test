@@ -1153,7 +1153,7 @@ function renderEntries(){
     return;
   }
   for(const x of entries){
-    const labour = Number(x.labourCost ?? (Number(x.totalCost||0) - Number(x.fuelCost||0))) || 0);
+    const labour = Number(x.labourCost ?? (Number(x.totalCost||0) - Number(x.fuelCost||0))) || 0;
     const fuel = Number(x.fuelCost||0);
     const total = Number(x.totalCost||0);
     const tr = document.createElement("tr");
