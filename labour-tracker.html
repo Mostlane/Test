@@ -479,14 +479,18 @@
           <table>
             <thead>
               <tr>
-                <th style="min-width:92px;">Date</th>
-                <th style="min-width:150px;">Job</th>
-                <th style="min-width:140px;">Engineer</th>
-                <th style="min-width:110px;" class="right">Labour</th>
-                <th style="min-width:90px;" class="right">Fuel</th>
-                <th style="min-width:120px;" class="right">Total</th>
-                <th style="min-width:110px;" class="right">Action</th>
-              </tr>
+  <th style="min-width:92px;">Date</th>
+  <th style="min-width:150px;">Job</th>
+  <th style="min-width:140px;">Engineer</th>
+
+  <th style="min-width:95px;" class="right">Normal Hrs</th>
+  <th style="min-width:80px;" class="right">OT Hrs</th>
+
+  <th style="min-width:110px;" class="right">Labour</th>
+  <th style="min-width:90px;" class="right">Fuel</th>
+  <th style="min-width:120px;" class="right">Total</th>
+  <th style="min-width:110px;" class="right">Action</th>
+</tr>
             </thead>
             <tbody id="entriesBody"></tbody>
           </table>
@@ -783,6 +787,11 @@ function escapeHtml(s){
     .replaceAll(">","&gt;")
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#039;");
+}
+  function formatDateDisplay(iso){
+  if(!iso) return "";
+  const [y,m,d] = iso.split("-");
+  return `${d}-${m}-${y.slice(2)}`; // DD-MM-YY
 }
 function todayISO(){
   const d = new Date();
@@ -1148,7 +1157,7 @@ function renderEntries(){
   entriesBody.innerHTML = "";
   if(entries.length === 0){
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="7" class="muted">No entries in this date range.</td>`;
+    tr.innerHTML = `<td colspan="9" class="muted">No entries in this date range.</td>`;
     entriesBody.appendChild(tr);
     return;
   }
@@ -1158,14 +1167,18 @@ function renderEntries(){
     const total = Number(x.totalCost||0);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><span class="pill">${escapeHtml(x.date)}</span></td>
-      <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
-      <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
-      <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
-      <td class="right">${gbp(fuel)}</td>
-      <td class="right" style="font-weight:1200;">${gbp(total)}</td>
-      <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
-    `;
+  <td><span class="pill">${formatDateDisplay(x.date)}</span></td>
+  <td style="font-weight:1100;">${escapeHtml(jobName(x.jobId))}</td>
+  <td style="font-weight:1100;">${escapeHtml(engName(x.engineerId))}</td>
+
+  <td class="right">${Number(x.normalHours || 0).toFixed(2)}</td>
+  <td class="right">${Number(x.overtimeHours || 0).toFixed(2)}</td>
+
+  <td class="right" style="font-weight:1100;">${gbp(labour)}</td>
+  <td class="right">${gbp(fuel)}</td>
+  <td class="right" style="font-weight:1200;">${gbp(total)}</td>
+  <td class="right"><button class="smallbtn danger" data-del="${x.id}">Delete</button></td>
+`;
     entriesBody.appendChild(tr);
   }
 }
@@ -1843,7 +1856,7 @@ async function buildReport(){
                   const fuel = Number(e.fuelCost||0);
                   return `
                     <tr>
-                      <td><span class="pill">${escapeHtml(e.date)}</span></td>
+                      <td><span class="pill">${formatDateDisplay(e.date)}</span></td>
                       <td style="font-weight:1100;">${escapeHtml(jobName(e.jobId))}</td>
                       <td style="font-weight:1100;">${escapeHtml(engName(e.engineerId))}</td>
                       <td class="right">${gbp(labour)}</td>
