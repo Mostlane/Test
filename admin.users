@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mostlane | User Management</title>
+  <style>
+    /* ── Reset & base ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+```
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-height: 100vh;
+  background-color: #e6e8eb;
+  background-image: url("Mostlane_Embossed.png");
+  background-size: 180%;
+  background-position: center;
+  background-repeat: repeat;
+  color: #1a1a2e;
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────── */
+.topbar {
+  background: rgba(10, 36, 99, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.topbar-logo { height: 32px; }
+.topbar-title { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+.topbar-back {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s;
+}
+.topbar-back:hover { background: rgba(255,255,255,0.25); }
+
+/* ── Page container ────────────────────────────────────────────────── */
+.page-wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+/* ── Stats bar ─────────────────────────────────────────────────────── */
+.stats-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.stat-card {
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(6px);
+  border-radius: 12px;
+  padding: 14px 20px;
+  min-width: 110px;
+  flex: 1;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.stat-card .stat-num { font-size: 28px; font-weight: 800; color: #0a2463; }
+.stat-card .stat-label { font-size: 12px; color: #555; margin-top: 2px; }
+
+/* ── Controls bar ──────────────────────────────────────────────────── */
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.search-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255,255,255,0.85);
+  font-size: 15px;
+  outline: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.filter-select {
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255,255,255,0.85);
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.btn-primary {
+  background: #0a2463;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, transform 0.1s;
+  box-shadow: 0 2px 8px rgba(10,36,99,0.25);
+}
+.btn-primary:hover { background: #0d2d7a; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+/* ── User grid ─────────────────────────────────────────────────────── */
+.user-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.user-card {
+  background: rgba(255,255,255,0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.09);
+  transition: box-shadow 0.2s, transform 0.15s;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+.user-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.14); transform: translateY(-2px); }
+.user-card.inactive { opacity: 0.55; }
+
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.card-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #0a2463;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.card-name { font-size: 16px; font-weight: 700; margin-left: 10px; flex: 1; }
+.card-username { font-size: 12px; color: #666; margin-left: 10px; }
+
+.badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.badge-role-field     { background: #dbeafe; color: #1d4ed8; }
+.badge-role-office    { background: #dcfce7; color: #166534; }
+.badge-role-admin     { background: #fef3c7; color: #92400e; }
+.badge-role-director  { background: #fce7f3; color: #9d174d; }
+.badge-emp-employed      { background: #f0fdf4; color: #166534; }
+.badge-emp-selfemployed  { background: #fff7ed; color: #9a3412; }
+.badge-active   { background: #d1fae5; color: #065f46; }
+.badge-inactive { background: #fee2e2; color: #991b1b; }
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+.card-info {
+  font-size: 12px;
+  color: #555;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.card-info svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.btn-card {
+  flex: 1;
+  min-width: 70px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  text-align: center;
+}
+.btn-card:hover { opacity: 0.85; }
+.btn-edit { background: #e0e7ff; color: #3730a3; }
+.btn-perms { background: #fef3c7; color: #92400e; }
+.btn-pw { background: #f3f4f6; color: #374151; }
+.btn-toggle-active { background: #fee2e2; color: #991b1b; }
+.btn-toggle-inactive { background: #d1fae5; color: #065f46; }
+
+/* ── Modal overlay ─────────────────────────────────────────────────── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  overflow-y: auto;
+  padding: 20px;
+}
+.modal-overlay.open { display: flex; align-items: flex-start; justify-content: center; }
+
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 680px;
+  padding: 28px;
+  position: relative;
+  margin: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  animation: modalIn 0.2s ease;
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px; right: 16px;
+  background: #f3f4f6;
+  border: none;
+  border-radius: 50%;
+  width: 32px; height: 32px;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #666;
+  transition: background 0.15s;
+}
+.modal-close:hover { background: #e5e7eb; }
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0a2463;
+  margin-bottom: 22px;
+  padding-right: 36px;
+}
+
+/* ── Form styles ───────────────────────────────────────────────────── */
+.form-section {
+  margin-bottom: 22px;
+}
+.form-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #0a2463;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e0e7ff;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.form-field.full { grid-column: 1 / -1; }
+.form-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+.form-field input,
+.form-field select,
+.form-field textarea {
+  padding: 10px 12px;
+  border: 1.5px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+  background: #fff;
+  width: 100%;
+}
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus { border-color: #0a2463; }
+.form-field textarea { resize: vertical; min-height: 70px; }
+.form-hint { font-size: 11px; color: #9ca3af; }
+
+/* ── Permissions grid ──────────────────────────────────────────────── */
+.perms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+.perm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #f9fafb;
+  border: 1.5px solid #e5e7eb;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+.perm-item:hover { border-color: #0a2463; background: #eff6ff; }
+.perm-item input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #0a2463; }
+.perm-item.perm-on { border-color: #059669; background: #f0fdf4; }
+
+/* ── Modal footer ──────────────────────────────────────────────────── */
+.modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+}
+.btn-cancel {
+  background: #f3f4f6;
+  color: #374151;
+  border: none;
+  border-radius: 9px;
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-save {
+  background: #0a2463;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 11px 28px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-save:hover { background: #0d2d7a; }
+.btn-danger {
+  background: #fee2e2;
+  color: #991b1b;
+  border: none;
+  border-radius: 9px;
+  padding: 11px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #fff;
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-size: 14px;
+  z-index: 999;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  max-width: 90vw;
+  text-align: center;
+}
+#toast.show { opacity: 1; }
+#toast.toast-ok  { background: #065f46; }
+#toast.toast-err { background: #991b1b; }
+
+/* ── Loading / empty states ────────────────────────────────────────── */
+.loading-state, .empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+}
+.loading-spinner {
+  width: 40px; height: 40px;
+  border: 4px solid #e0e7ff;
+  border-top-color: #0a2463;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 14px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Password change in modal ─────────────────────────────────────── */
+.pw-modal-body { padding: 10px 0; }
+.pw-note { font-size: 13px; color: #6b7280; margin-bottom: 16px; }
+
+/* ── Mobile tweaks ─────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .modal { padding: 20px; }
+  .form-grid { grid-template-columns: 1fr; }
+  .stats-row { gap: 8px; }
+  .stat-card { min-width: 80px; }
+}
+```
+
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ─────────────────────────────────────────────────────────────── -->
+
+<div class="topbar">
+  <div class="topbar-left">
+    <img src="Mostlane_Logo.png" alt="Mostlane" class="topbar-logo" onerror="this.style.display='none'">
+    <span class="topbar-title">User Management</span>
+  </div>
+  <a href="main.html" class="topbar-back">← Main Menu</a>
+</div>
+
+<!-- ── Page content ───────────────────────────────────────────────────────── -->
+
+<div class="page-wrap">
+
+  <!-- Stats -->
+
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-num" id="statTotal">–</div><div class="stat-label">Total Users</div></div>
+    <div class="stat-card"><div class="stat-num" id="statActive">–</div><div class="stat-label">Active</div></div>
+    <div class="stat-card"><div class="stat-num" id="statField">–</div><div class="stat-label">Field</div></div>
+    <div class="stat-card"><div class="stat-num" id="statOffice">–</div><div class="stat-label">Office / Admin</div></div>
+    <div class="stat-card"><div class="stat-num" id="statSE">–</div><div class="stat-label">Self-Employed</div></div>
+  </div>
+
+  <!-- Controls -->
+
+  <div class="controls">
+    <input class="search-input" id="searchInput" type="text" placeholder="🔍  Search by name, username, email…" oninput="renderGrid()" />
+    <select class="filter-select" id="filterRole" onchange="renderGrid()">
+      <option value="">All Roles</option>
+      <option value="Field">Field</option>
+      <option value="Office">Office</option>
+      <option value="Admin">Admin</option>
+      <option value="Director">Director</option>
+    </select>
+    <select class="filter-select" id="filterEmp" onchange="renderGrid()">
+      <option value="">All Employment</option>
+      <option value="Employed">Employed</option>
+      <option value="SelfEmployed">Self-Employed</option>
+    </select>
+    <select class="filter-select" id="filterStatus" onchange="renderGrid()">
+      <option value="">Active &amp; Inactive</option>
+      <option value="active">Active Only</option>
+      <option value="inactive">Inactive Only</option>
+    </select>
+    <button class="btn-primary" onclick="openCreateModal()">+ Add User</button>
+  </div>
+
+  <!-- User grid -->
+
+  <div class="user-grid" id="userGrid">
+    <div class="loading-state">
+      <div class="loading-spinner"></div>
+      <div>Loading users…</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     EDIT / CREATE USER MODAL
+═══════════════════════════════════════════════════════════════════════════════ -->
+
+<div class="modal-overlay" id="editModal">
+<div class="modal">
+  <button class="modal-close" onclick="closeModal('editModal')">✕</button>
+  <div class="modal-title" id="editModalTitle">Edit User</div>
+
+  <!-- ── Identity ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">Identity</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>First Name *</label>
+        <input type="text" id="ef_firstName" placeholder="Jamie" />
+      </div>
+      <div class="form-field">
+        <label>Last Name *</label>
+        <input type="text" id="ef_lastName" placeholder="Line" />
+      </div>
+      <div class="form-field">
+        <label>Username (auto-generated)</label>
+        <input type="text" id="ef_username" placeholder="Jamie.Line" disabled />
+        <span class="form-hint">Set automatically from first + last name</span>
+      </div>
+      <div class="form-field">
+        <label>Email Address</label>
+        <input type="email" id="ef_email" placeholder="jamie@mostlane.co.uk" />
+      </div>
+      <div class="form-field">
+        <label>Phone Number</label>
+        <input type="tel" id="ef_phone" placeholder="07700 000000" />
+      </div>
+      <div class="form-field">
+        <label>Home Postcode</label>
+        <input type="text" id="ef_postcode" placeholder="PO15 5RQ" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Role & Employment ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">Role &amp; Employment</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Role *</label>
+        <select id="ef_role">
+          <option value="Field">Field</option>
+          <option value="Office">Office</option>
+          <option value="Admin">Admin</option>
+          <option value="Director">Director</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Employment Type *</label>
+        <select id="ef_employmentType">
+          <option value="Employed">Employed</option>
+          <option value="SelfEmployed">Self-Employed</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>Active Status</label>
+        <select id="ef_active">
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pay & Travel ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">Pay &amp; Travel</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Rate of Pay (£/hr)</label>
+        <input type="number" step="0.01" id="ef_rateOfPay" placeholder="14.50" />
+      </div>
+      <div class="form-field">
+        <label>Overtime Rate (£/hr)</label>
+        <input type="number" step="0.01" id="ef_overtimeRate" placeholder="21.75" />
+      </div>
+      <div class="form-field">
+        <label>Overtime Threshold (hrs/day)</label>
+        <input type="number" step="0.5" id="ef_overtimeThreshold" placeholder="10" />
+      </div>
+      <div class="form-field">
+        <label>Fuel Allowance (£/mile)</label>
+        <input type="number" step="0.001" id="ef_fuelAllowancePerMile" placeholder="0.45" />
+      </div>
+      <div class="form-field">
+        <label>Travel Time Eligible</label>
+        <select id="ef_travelTimeEligible">
+          <option value="false">No</option>
+          <option value="true">Yes</option>
+        </select>
+        <span class="form-hint">Yes = paid travel; No = mileage/fuel instead</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Assets & Equipment ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">Assets &amp; Equipment</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Vehicle Registration</label>
+        <input type="text" id="ef_vehicleRegistration" placeholder="AB21 XYZ" />
+      </div>
+      <div class="form-field">
+        <label>Device ID</label>
+        <input type="text" id="ef_deviceId" placeholder="dev-a3f9c12" />
+        <span class="form-hint">Persistent short device ID from onboarding</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SharePoint ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">SharePoint / Storage</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>SharePoint Folder Name</label>
+        <input type="text" id="ef_sharePointFolder" placeholder="Jamie Line" />
+        <span class="form-hint">Spaces not dots. Auto-set from name if blank.</span>
+      </div>
+      <div class="form-field full">
+        <label>SharePoint Full Path</label>
+        <input type="text" id="ef_sharePointPath" placeholder="Mostlane Shared Documents/…/Jamie Line" />
+        <span class="form-hint">Auto-generated. Override only if needed.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Notes ── -->
+
+  <div class="form-section">
+    <div class="form-section-title">Notes</div>
+    <div class="form-field">
+      <textarea id="ef_notes" placeholder="Internal admin notes about this user…"></textarea>
+    </div>
+  </div>
+
+  <!-- ── Password (create only) ── -->
+
+  <div class="form-section" id="pwSection">
+    <div class="form-section-title">Initial Password</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>Password</label>
+        <input type="password" id="ef_password" placeholder="Leave blank for default: Mostlane2024!" />
+        <span class="form-hint">Will be SHA-256 hashed before storage</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-footer">
+    <button class="btn-cancel" onclick="closeModal('editModal')">Cancel</button>
+    <button class="btn-save" id="editModalSaveBtn" onclick="saveUser()">Save User</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PERMISSIONS MODAL
+═══════════════════════════════════════════════════════════════════════════════ -->
+
+<div class="modal-overlay" id="permsModal">
+<div class="modal">
+  <button class="modal-close" onclick="closeModal('permsModal')">✕</button>
+  <div class="modal-title" id="permsModalTitle">Page Permissions</div>
+  <p style="font-size:13px;color:#555;margin-bottom:18px;">Tick each page this user is permitted to access. Unticked pages are hidden from their navigation.</p>
+
+  <div class="perms-grid" id="permsGrid"></div>
+
+  <div class="modal-footer">
+    <button class="btn-cancel" onclick="closeModal('permsModal')">Cancel</button>
+    <button class="btn-save" onclick="savePermissions()">Save Permissions</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     CHANGE PASSWORD MODAL
+═══════════════════════════════════════════════════════════════════════════════ -->
+
+<div class="modal-overlay" id="pwModal">
+<div class="modal" style="max-width:420px;">
+  <button class="modal-close" onclick="closeModal('pwModal')">✕</button>
+  <div class="modal-title" id="pwModalTitle">Change Password</div>
+  <p class="pw-note" id="pwModalNote">Set a new password for this user. It will be SHA-256 hashed before storage.</p>
+  <div class="form-field" style="margin-bottom:12px;">
+    <label>New Password *</label>
+    <input type="password" id="pw_new" placeholder="Enter new password…" />
+  </div>
+  <div class="form-field">
+    <label>Confirm Password *</label>
+    <input type="password" id="pw_confirm" placeholder="Confirm new password…" />
+  </div>
+  <div class="modal-footer">
+    <button class="btn-cancel" onclick="closeModal('pwModal')">Cancel</button>
+    <button class="btn-save" onclick="savePassword()">Update Password</button>
+  </div>
+</div>
+</div>
+
+<!-- Toast -->
+
+<div id="toast"></div>
+
+<!-- ─────────────────────────────────────────────────────────────────────────── -->
+
+<script>
+// ── Config ───────────────────────────────────────────────────────────────────
+const USERS_WORKER_URL = "https://mostlane-users.YOUR_ACCOUNT.workers.dev"; // ← update
+const SESSION_TOKEN_KEY = "ml_session_token";
+const SESSION_USER_KEY  = "ml_session_user";
+
+// All known permission keys with human-readable labels
+const PERMISSION_KEYS = [
+  { key: "main",           label: "Main Menu" },
+  { key: "checkin",        label: "Check In" },
+  { key: "checkout",       label: "Check Out" },
+  { key: "weekly",         label: "Weekly Summary" },
+  { key: "timesheet",      label: "Timesheet" },
+  { key: "holiday",        label: "Holiday Requests" },
+  { key: "purchase",       label: "Purchase Ref" },
+  { key: "documents",      label: "Documents" },
+  { key: "myAssets",       label: "My Assets" },
+  { key: "sharedAssets",   label: "Shared Assets" },
+  { key: "allAssets",      label: "All Assets" },
+  { key: "addSite",        label: "Add Site" },
+  { key: "siteManager",    label: "Site Manager" },
+  { key: "manageUsers",    label: "Manage Users" },
+  { key: "compliance",     label: "Compliance Portal" },
+  { key: "slaMain",        label: "SLA Dashboard" },
+  { key: "financials",     label: "Financials" },
+  { key: "slaPerformance", label: "SLA Performance" },
+  { key: "slaSettings",    label: "SLA Settings" },
+  { key: "assignJob",      label: "Assign Job" },
+  { key: "jobView",        label: "Job View" },
+  { key: "adminRates",     label: "Admin Rates" },
+  { key: "patPlanner",     label: "PAT Planner" },
+  { key: "patWorkflow",    label: "PAT Workflow" },
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allUsers = [];
+let editingUsername = null;  // null = creating new
+let permsUsername   = null;
+let pwUsername      = null;
+
+// ── Auth headers ──────────────────────────────────────────────────────────────
+function authHeaders() {
+  const token = sessionStorage.getItem(SESSION_TOKEN_KEY)
+             || localStorage.getItem(SESSION_TOKEN_KEY);
+  const user  = sessionStorage.getItem(SESSION_USER_KEY)
+             || localStorage.getItem(SESSION_USER_KEY);
+  const h = { "Content-Type": "application/json" };
+  if (token) h["X-Session-Token"] = token;
+  else if (user) h["X-Session-User"] = user;
+  return h;
+}
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(`${USERS_WORKER_URL}${path}`, {
+    headers: authHeaders(),
+    ...opts,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = "ok") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = `show toast-${type}`;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = ""; }, 3200);
+}
+
+// ── Load users ────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  try {
+    const data = await apiFetch("/users");
+    allUsers = data.users || [];
+    updateStats();
+    renderGrid();
+  } catch (e) {
+    document.getElementById("userGrid").innerHTML =
+      `<div class="empty-state">⚠️ Failed to load users: ${e.message}</div>`;
+    toast("Failed to load users: " + e.message, "err");
+  }
+}
+
+function updateStats() {
+  document.getElementById("statTotal").textContent  = allUsers.length;
+  document.getElementById("statActive").textContent = allUsers.filter(u => u.active).length;
+  document.getElementById("statField").textContent  = allUsers.filter(u => u.role === "Field").length;
+  document.getElementById("statOffice").textContent = allUsers.filter(u => ["Office","Admin","Director"].includes(u.role)).length;
+  document.getElementById("statSE").textContent     = allUsers.filter(u => u.employmentType === "SelfEmployed").length;
+}
+
+// ── Render grid ───────────────────────────────────────────────────────────────
+function renderGrid() {
+  const q      = document.getElementById("searchInput").value.toLowerCase();
+  const fRole  = document.getElementById("filterRole").value;
+  const fEmp   = document.getElementById("filterEmp").value;
+  const fStat  = document.getElementById("filterStatus").value;
+
+  const filtered = allUsers.filter(u => {
+    const searchable = `${u.firstName} ${u.lastName} ${u.username} ${u.email||""}`.toLowerCase();
+    if (q && !searchable.includes(q)) return false;
+    if (fRole && u.role !== fRole) return false;
+    if (fEmp  && u.employmentType !== fEmp) return false;
+    if (fStat === "active"   && !u.active) return false;
+    if (fStat === "inactive" &&  u.active) return false;
+    return true;
+  });
+
+  const grid = document.getElementById("userGrid");
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="empty-state">No users match your filters.</div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(u => buildUserCard(u)).join("");
+}
+
+function roleClass(role) {
+  const map = { Field: "field", Office: "office", Admin: "admin", Director: "director" };
+  return "badge-role-" + (map[role] || "field");
+}
+
+function initials(u) {
+  return ((u.firstName||"?")[0] + (u.lastName||"?")[0]).toUpperCase();
+}
+
+function buildUserCard(u) {
+  const name = `${u.firstName||""} ${u.lastName||""}`.trim();
+  const roleB   = `<span class="badge ${roleClass(u.role)}">${u.role}</span>`;
+  const empB    = `<span class="badge badge-emp-${u.employmentType?.toLowerCase().replace("-","")}">${u.employmentType}</span>`;
+  const statB   = `<span class="badge ${u.active ? "badge-active" : "badge-inactive"}">${u.active ? "Active" : "Inactive"}</span>`;
+
+  const phone = u.phone  ? `<div class="card-info"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>${u.phone}</div>` : "";
+  const email = u.email  ? `<div class="card-info"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>${u.email}</div>` : "";
+  const device = u.deviceId ? `<div class="card-info"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7 2a2 2 0 00-2 2v12a2 2 0 002 2h6a2 2 0 002-2V4a2 2 0 00-2-2H7zm3 14a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>${u.deviceId}</div>` : "";
+  const vehicle = u.vehicleRegistration ? `<div class="card-info"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/><path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H11a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7h2.05A2.5 2.5 0 0118.95 9H19a1 1 0 011 1v3a1 1 0 01-1 1h-1a2.5 2.5 0 01-4.9 0H14a1 1 0 01-1-1V8a1 1 0 011-1z"/></svg>${u.vehicleRegistration}</div>` : "";
+
+  const toggleBtn = u.active
+    ? `<button class="btn-card btn-toggle-active" onclick="toggleActive('${u.username}', false, event)">Deactivate</button>`
+    : `<button class="btn-card btn-toggle-inactive" onclick="toggleActive('${u.username}', true, event)">Activate</button>`;
+
+  return `
+    <div class="user-card${u.active ? "" : " inactive"}" onclick="openEditModal('${u.username}')">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;flex:1;">
+          <div class="card-avatar">${initials(u)}</div>
+          <div>
+            <div class="card-name">${name}</div>
+            <div class="card-username">${u.username}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card-meta">${roleB}${empB}${statB}</div>
+      <div>${phone}${email}${device}${vehicle}</div>
+      <div class="card-actions" onclick="event.stopPropagation()">
+        <button class="btn-card btn-edit"  onclick="openEditModal('${u.username}')">✏️ Edit</button>
+        <button class="btn-card btn-perms" onclick="openPermsModal('${u.username}')">🔑 Perms</button>
+        <button class="btn-card btn-pw"    onclick="openPwModal('${u.username}')">🔒 Password</button>
+        ${toggleBtn}
+      </div>
+    </div>`;
+}
+
+// ── Create / Edit modal ───────────────────────────────────────────────────────
+function openCreateModal() {
+  editingUsername = null;
+  document.getElementById("editModalTitle").textContent = "Add New User";
+  document.getElementById("pwSection").style.display = "block";
+  document.getElementById("editModalSaveBtn").textContent = "Create User";
+
+  // Clear all fields
+  ["firstName","lastName","username","email","phone","postcode",
+   "rateOfPay","overtimeRate","overtimeThreshold","fuelAllowancePerMile",
+   "vehicleRegistration","deviceId","sharePointFolder","sharePointPath",
+   "notes","password"].forEach(f => {
+    const el = document.getElementById(`ef_${f}`);
+    if (el) el.value = "";
+  });
+  document.getElementById("ef_role").value = "Field";
+  document.getElementById("ef_employmentType").value = "Employed";
+  document.getElementById("ef_active").value = "true";
+  document.getElementById("ef_travelTimeEligible").value = "false";
+  document.getElementById("ef_overtimeThreshold").value = "10";
+  document.getElementById("ef_fuelAllowancePerMile").value = "0.45";
+
+  openModal("editModal");
+}
+
+function openEditModal(username) {
+  const u = allUsers.find(x => x.username === username);
+  if (!u) { toast("User not found", "err"); return; }
+
+  editingUsername = username;
+  document.getElementById("editModalTitle").textContent = `Edit — ${u.firstName} ${u.lastName}`;
+  document.getElementById("pwSection").style.display = "none";
+  document.getElementById("editModalSaveBtn").textContent = "Save Changes";
+
+  document.getElementById("ef_firstName").value   = u.firstName || "";
+  document.getElementById("ef_lastName").value    = u.lastName  || "";
+  document.getElementById("ef_username").value    = u.username  || "";
+  document.getElementById("ef_email").value       = u.email     || "";
+  document.getElementById("ef_phone").value       = u.phone     || "";
+  document.getElementById("ef_postcode").value    = u.postcode  || "";
+  document.getElementById("ef_role").value        = u.role      || "Field";
+  document.getElementById("ef_employmentType").value = u.employmentType || "Employed";
+  document.getElementById("ef_active").value      = String(u.active !== false);
+  document.getElementById("ef_rateOfPay").value   = u.rateOfPay      || "";
+  document.getElementById("ef_overtimeRate").value = u.overtimeRate   || "";
+  document.getElementById("ef_overtimeThreshold").value = u.overtimeThreshold || 10;
+  document.getElementById("ef_fuelAllowancePerMile").value = u.fuelAllowancePerMile || 0.45;
+  document.getElementById("ef_travelTimeEligible").value = String(u.travelTimeEligible || false);
+  document.getElementById("ef_vehicleRegistration").value = u.vehicleRegistration || "";
+  document.getElementById("ef_deviceId").value    = u.deviceId         || "";
+  document.getElementById("ef_sharePointFolder").value = u.sharePointFolder || "";
+  document.getElementById("ef_sharePointPath").value   = u.sharePointPath   || "";
+  document.getElementById("ef_notes").value       = (u.meta && u.meta.notes) || "";
+
+  openModal("editModal");
+}
+
+async function saveUser() {
+  const firstName = document.getElementById("ef_firstName").value.trim();
+  const lastName  = document.getElementById("ef_lastName").value.trim();
+  if (!firstName || !lastName) { toast("First and last name are required", "err"); return; }
+
+  const payload = {
+    firstName,
+    lastName,
+    email:              document.getElementById("ef_email").value.trim()    || null,
+    phone:              document.getElementById("ef_phone").value.trim()    || null,
+    postcode:           document.getElementById("ef_postcode").value.trim() || null,
+    role:               document.getElementById("ef_role").value,
+    employmentType:     document.getElementById("ef_employmentType").value,
+    active:             document.getElementById("ef_active").value === "true",
+    rateOfPay:          parseFloatOrNull(document.getElementById("ef_rateOfPay").value),
+    overtimeRate:       parseFloatOrNull(document.getElementById("ef_overtimeRate").value),
+    overtimeThreshold:  parseFloatOrNull(document.getElementById("ef_overtimeThreshold").value) || 10,
+    fuelAllowancePerMile: parseFloatOrNull(document.getElementById("ef_fuelAllowancePerMile").value) || 0.45,
+    travelTimeEligible: document.getElementById("ef_travelTimeEligible").value === "true",
+    vehicleRegistration: document.getElementById("ef_vehicleRegistration").value.trim() || null,
+    deviceId:           document.getElementById("ef_deviceId").value.trim()  || null,
+    sharePointFolder:   document.getElementById("ef_sharePointFolder").value.trim() || null,
+    sharePointPath:     document.getElementById("ef_sharePointPath").value.trim()   || null,
+    notes:              document.getElementById("ef_notes").value.trim()     || "",
+  };
+
+  const btn = document.getElementById("editModalSaveBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    if (editingUsername === null) {
+      // Create
+      const password = document.getElementById("ef_password").value;
+      if (password) payload.password = password;
+      const data = await apiFetch("/user", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      toast(`✅ ${data.username} created`, "ok");
+    } else {
+      // Update (PATCH)
+      await apiFetch(`/user/${encodeURIComponent(editingUsername)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      toast(`✅ ${editingUsername} updated`, "ok");
+    }
+    closeModal("editModal");
+    await loadUsers();
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = editingUsername ? "Save Changes" : "Create User";
+  }
+}
+
+// ── Auto-generate username preview ───────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  ["ef_firstName","ef_lastName"].forEach(id => {
+    document.getElementById(id)?.addEventListener("input", () => {
+      const fn = document.getElementById("ef_firstName").value.trim();
+      const ln = document.getElementById("ef_lastName").value.trim();
+      if (fn && ln) {
+        document.getElementById("ef_username").value = `${fn}.${ln}`;
+        document.getElementById("ef_sharePointFolder").value = `${fn} ${ln}`;
+        document.getElementById("ef_sharePointPath").value =
+          `Mostlane Shared Documents/Mostlane Construction/Portal/User Folders/${fn} ${ln}`;
+      }
+    });
+  });
+
+  loadUsers();
+});
+
+// ── Permissions modal ─────────────────────────────────────────────────────────
+function openPermsModal(username) {
+  const u = allUsers.find(x => x.username === username);
+  if (!u) { toast("User not found", "err"); return; }
+  permsUsername = username;
+
+  document.getElementById("permsModalTitle").textContent =
+    `Permissions — ${u.firstName} ${u.lastName}`;
+
+  const perms = u.permissions || {};
+  const grid = document.getElementById("permsGrid");
+  grid.innerHTML = PERMISSION_KEYS.map(({ key, label }) => {
+    const checked = perms[key] ? "checked" : "";
+    const onClass = perms[key] ? "perm-on" : "";
+    return `
+      <label class="perm-item ${onClass}" id="perm_label_${key}">
+        <input type="checkbox" data-key="${key}" ${checked}
+          onchange="this.closest('.perm-item').classList.toggle('perm-on', this.checked)" />
+        ${label}
+      </label>`;
+  }).join("");
+
+  openModal("permsModal");
+}
+
+async function savePermissions() {
+  const checkboxes = document.querySelectorAll("#permsGrid input[type='checkbox']");
+  const permsPayload = {};
+  checkboxes.forEach(cb => {
+    permsPayload[cb.dataset.key] = cb.checked;
+  });
+
+  try {
+    await apiFetch(`/user/${encodeURIComponent(permsUsername)}/permissions`, {
+      method: "POST",
+      body: JSON.stringify(permsPayload),
+    });
+    toast(`✅ Permissions saved for ${permsUsername}`, "ok");
+    closeModal("permsModal");
+    await loadUsers();
+  } catch (e) {
+    toast("Error saving permissions: " + e.message, "err");
+  }
+}
+
+// ── Password modal ────────────────────────────────────────────────────────────
+function openPwModal(username) {
+  const u = allUsers.find(x => x.username === username);
+  if (!u) { toast("User not found", "err"); return; }
+  pwUsername = username;
+  document.getElementById("pwModalTitle").textContent = `Change Password — ${u.firstName} ${u.lastName}`;
+  document.getElementById("pw_new").value = "";
+  document.getElementById("pw_confirm").value = "";
+  openModal("pwModal");
+}
+
+async function savePassword() {
+  const pw  = document.getElementById("pw_new").value;
+  const pw2 = document.getElementById("pw_confirm").value;
+  if (!pw)       { toast("Please enter a new password", "err"); return; }
+  if (pw !== pw2) { toast("Passwords do not match", "err"); return; }
+  if (pw.length < 6) { toast("Password must be at least 6 characters", "err"); return; }
+
+  try {
+    await apiFetch(`/user/${encodeURIComponent(pwUsername)}/set-password`, {
+      method: "POST",
+      body: JSON.stringify({ password: pw }),
+    });
+    toast(`✅ Password updated for ${pwUsername}`, "ok");
+    closeModal("pwModal");
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  }
+}
+
+// ── Toggle active ─────────────────────────────────────────────────────────────
+async function toggleActive(username, newState, event) {
+  if (event) event.stopPropagation();
+  const label = newState ? "activate" : "deactivate";
+  if (!confirm(`Are you sure you want to ${label} ${username}?`)) return;
+  try {
+    await apiFetch(`/user/${encodeURIComponent(username)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active: newState }),
+    });
+    toast(`✅ ${username} ${newState ? "activated" : "deactivated"}`, "ok");
+    await loadUsers();
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  }
+}
+
+// ── Modal open/close ──────────────────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove("open");
+  document.body.style.overflow = "";
+}
+
+// Close on overlay click
+document.querySelectorAll(".modal-overlay").forEach(overlay => {
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) closeModal(overlay.id);
+  });
+});
+
+// Escape key
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    ["editModal","permsModal","pwModal"].forEach(closeModal);
+  }
+});
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function parseFloatOrNull(val) {
+  const n = parseFloat(val);
+  return isNaN(n) ? null : n;
+}
+</script>
+
+</body>
+</html>
