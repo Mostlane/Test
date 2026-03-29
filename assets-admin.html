@@ -478,7 +478,9 @@
       checkAccess();
     });
 
-    async function checkAccess() {
+    const ALLOWED_USERS = ["joe.line", "greg.line", "jamie.line"];
+
+    function checkAccess() {
       const user = sessionStorage.getItem("mostlaneUser");
       if (!user) {
         alert("You are not logged in.");
@@ -486,23 +488,8 @@
         return;
       }
 
-      try {
-        const res = await fetch("role-type.txt");
-        const text = await res.text();
-
-        // FIX #2 — whole-line / delimited match to prevent substring collisions
-        // Expects lines like: Jamie.Line,Office
-        const roleLine = text.split("\n").find(l => {
-          const parts = l.split(",");
-          return parts[0].trim().toLowerCase() === user.toLowerCase();
-        });
-
-        if (!roleLine || !roleLine.toLowerCase().includes("office")) {
-          alert("Access denied. Office users only.");
-          window.location.href = "main.html";
-        }
-      } catch (e) {
-        alert("Could not verify access. Please try again.");
+      if (!ALLOWED_USERS.includes(user.toLowerCase().trim())) {
+        alert("Access denied. You do not have permission to view this page.");
         window.location.href = "main.html";
       }
     }
