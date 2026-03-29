@@ -56,9 +56,17 @@
   .chip-bad  { color:#b00020; border-color:rgba(176,0,32,0.25); }
 
   .tinyBtn {
-    margin-left:10px; width:auto; padding:6px 10px;
-    font-size:12px; border-radius:6px;
-    background:rgba(0,74,153,0.75); margin-top:0;
+    margin-left: 8px;
+    width: auto;
+    padding: 5px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    background: rgba(0,74,153,0.75);
+    margin-top: 0;
+    vertical-align: middle;
+  }
+  .tinyBtnDanger {
+    background: rgba(176,0,32,0.8);
   }
 
   /* ── Large stat cards ── */
@@ -82,8 +90,8 @@
     line-height: 1;
     color: #003366;
   }
-  .stat-card .stat-num.good   { color: #15803d; }
-  .stat-card .stat-num.warn   { color: #b45309; }
+  .stat-card .stat-num.good { color: #15803d; }
+  .stat-card .stat-num.warn { color: #b45309; }
   .stat-card .stat-label {
     font-size: 13px;
     color: #64748b;
@@ -94,7 +102,7 @@
   @media(max-width:600px){
     body { padding: 16px 10px; }
     .form-section, .summary-section { padding: 20px 16px; }
-    .stat-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat-grid { gap: 8px; }
     .stat-card { padding: 14px 8px; border-radius: 10px; }
     .stat-card .stat-num { font-size: 36px; }
     .stat-card .stat-label { font-size: 11px; }
@@ -143,10 +151,9 @@
     </form>
   </div>
 
-  <!-- SUMMARY with large stat cards -->
+  <!-- SUMMARY -->
   <div class="summary-section">
     <h2>Holiday Summary</h2>
-
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-num" id="allowance">—</div>
@@ -161,7 +168,6 @@
         <div class="stat-label">Remaining</div>
       </div>
     </div>
-
     <p style="font-size:13px;color:#475569;margin-top:10px;text-align:center;">
       Includes bank holidays + company shutdown (credited back if marked as worked).
     </p>
@@ -200,17 +206,16 @@ if (!user) {
 const year = new Date().getFullYear();
 document.getElementById("engineer").value = user.replace(".", " ");
 
-// ─── Helpers ───────────────────────────────────────────────
-function $(id){ return document.getElementById(id); }
+function $(id) { return document.getElementById(id); }
 
 function formatDatePretty(iso) {
   if (!iso) return "";
   const parts = iso.split("-");
   if (parts.length !== 3) return iso;
   const y = Number(parts[0]), m = Number(parts[1]) - 1, d = Number(parts[2]);
-  const date = new Date(Date.UTC(y, m, d));
-  const day  = date.getUTCDate();
-  const yr   = String(date.getUTCFullYear()).slice(-2);
+  const date    = new Date(Date.UTC(y, m, d));
+  const day     = date.getUTCDate();
+  const yr      = String(date.getUTCFullYear()).slice(-2);
   const weekday = date.toLocaleDateString("en-GB", { weekday:"short", timeZone:"UTC" });
   const month   = date.toLocaleDateString("en-GB", { month:"short",   timeZone:"UTC" });
   const suffix  = day > 3 && day < 21 ? "th"
@@ -220,7 +225,7 @@ function formatDatePretty(iso) {
   return `${weekday} ${day}${suffix} ${month} ${yr}`;
 }
 
-// ─── Summary (large stat cards) ────────────────────────────
+// ─── Summary ──────────────────────────────────────────────────
 async function loadSummary() {
   try {
     const res = await fetch(`${API}/holiday/summary?year=${year}`, {
@@ -228,23 +233,19 @@ async function loadSummary() {
       cache: "no-store"
     });
     if (!res.ok) throw new Error(await res.text());
-
-    // Handle both flat { allowance, used, remaining } and wrapped { data: {...} }
     let raw = await res.json();
     const s = raw.data ?? raw;
 
-    const allowance  = Number(s.allowance  ?? 0);
-    const used       = Number(s.used       ?? 0);
-    const remaining  = Number(s.remaining  ?? 0);
+    const allowance = Number(s.allowance ?? 0);
+    const used      = Number(s.used      ?? 0);
+    const remaining = Number(s.remaining ?? 0);
 
     $("allowance").textContent = allowance;
     $("used").textContent      = used;
     $("remaining").textContent = remaining;
 
-    // Colour remaining red if 0 or negative
     const remEl = $("remaining");
     remEl.className = "stat-num " + (remaining <= 0 ? "warn" : "good");
-
   } catch(e) {
     console.error("loadSummary error:", e);
     $("allowance").textContent = "?";
@@ -253,7 +254,7 @@ async function loadSummary() {
   }
 }
 
-// ─── Cancel request ────────────────────────────────────────
+// ─── Cancel pending request ───────────────────────────────────
 async function cancelRequest(id) {
   if (!confirm("Cancel this pending holiday request?")) return;
   const res = await fetch(`${API}/holiday/cancel?year=${year}`, {
@@ -266,9 +267,22 @@ async function cancelRequest(id) {
   await loadMyHolidays();
 }
 
-// ─── Load holidays + system days ───────────────────────────
+// ─── Delete cancelled/rejected request ───────────────────────
+async function deleteRequest(id) {
+  if (!confirm("Permanently delete this request from your history?")) return;
+  const res = await fetch(`${API}/holiday/delete-own?year=${year}`, {
+    method: "POST",
+    headers: { "Content-Type":"application/json", "X-User":user, "X-Role":role },
+    body: JSON.stringify({ id })
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  await loadSummary();
+  await loadMyHolidays();
+}
+
+// ─── Load holidays + system days ─────────────────────────────
 async function loadMyHolidays() {
-  $("systemList").innerHTML   = "<li class='system'  style='color:#94a3b8;'>Loading…</li>";
+  $("systemList").innerHTML   = "<li class='system'   style='color:#94a3b8;'>Loading…</li>";
   $("approvedList").innerHTML = "<li class='approved' style='color:#94a3b8;'>Loading…</li>";
   $("pendingList").innerHTML  = "<li class='pending'  style='color:#94a3b8;'>Loading…</li>";
 
@@ -280,7 +294,6 @@ async function loadMyHolidays() {
     });
     if (!res.ok) throw new Error(await res.text());
     const raw = await res.json();
-    // Handle wrapped or flat array
     data = Array.isArray(raw) ? raw : (Array.isArray(raw.data) ? raw.data : []);
   } catch(e) {
     console.error("loadMyHolidays error:", e);
@@ -296,7 +309,7 @@ async function loadMyHolidays() {
 
   for (const h of data) {
 
-    // SYSTEM DAYS (bank holidays / shutdown)
+    // SYSTEM DAYS
     if (h.category === "BankHoliday" || h.category === "Shutdown") {
       const li  = document.createElement("li");
       const lbl = h.label || (h.category === "BankHoliday" ? "Bank Holiday" : "Company Shutdown");
@@ -309,7 +322,7 @@ async function loadMyHolidays() {
       continue;
     }
 
-    // HOLIDAY REQUESTS — must have start, end, status
+    // HOLIDAY REQUESTS
     if (!h.start || !h.end || !h.status) continue;
 
     const li   = document.createElement("li");
@@ -321,12 +334,14 @@ async function loadMyHolidays() {
     li.innerHTML = `${formatDatePretty(h.start)} → ${formatDatePretty(h.end)} `
       + `(${days} day${days === 1 ? "" : "s"}) — ${h.type || "Annual Leave"}${note}`;
 
+    // APPROVED
     if (h.status === "Approved") {
       li.className = "approved";
       $("approvedList").appendChild(li);
       continue;
     }
 
+    // PENDING — can cancel
     if (h.status === "Pending") {
       li.className = "pending";
       li.innerHTML += ` <span class="chip chip-warn">Pending</span>`;
@@ -339,16 +354,28 @@ async function loadMyHolidays() {
       continue;
     }
 
+    // REJECTED — can delete
     if (h.status === "Rejected") {
       li.className = "rejected";
       li.innerHTML += ` <span class="chip chip-bad">Declined</span>`;
+      const btn = document.createElement("button");
+      btn.className   = "tinyBtn tinyBtnDanger";
+      btn.textContent = "Delete";
+      btn.onclick     = () => deleteRequest(h.id);
+      li.appendChild(btn);
       $("pendingList").appendChild(li);
       continue;
     }
 
+    // CANCELLED — can delete
     if (h.status === "Cancelled") {
       li.className = "rejected";
       li.innerHTML += ` <span class="chip chip-bad">Cancelled</span>`;
+      const btn = document.createElement("button");
+      btn.className   = "tinyBtn tinyBtnDanger";
+      btn.textContent = "Delete";
+      btn.onclick     = () => deleteRequest(h.id);
+      li.appendChild(btn);
       $("pendingList").appendChild(li);
       continue;
     }
@@ -363,7 +390,7 @@ async function loadMyHolidays() {
     $("pendingList").innerHTML = "<li class='pending'>No pending or other requests.</li>";
 }
 
-// ─── Submit request ────────────────────────────────────────
+// ─── Submit request ───────────────────────────────────────────
 document.getElementById("holidayForm").addEventListener("submit", async e => {
   e.preventDefault();
   const submitBtn = $("submitBtn");
@@ -393,9 +420,7 @@ document.getElementById("holidayForm").addEventListener("submit", async e => {
         notes: reminder
       })
     });
-
     if (!res.ok) { alert(await res.text()); submitBtn.disabled = false; return; }
-
     alert("Holiday request submitted successfully.");
     document.getElementById("holidayForm").reset();
     document.getElementById("engineer").value = user.replace(".", " ");
@@ -408,7 +433,7 @@ document.getElementById("holidayForm").addEventListener("submit", async e => {
   submitBtn.disabled = false;
 });
 
-// ─── Initial load ──────────────────────────────────────────
+// ─── Initial load ─────────────────────────────────────────────
 loadSummary();
 loadMyHolidays();
 </script>
