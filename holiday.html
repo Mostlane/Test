@@ -70,6 +70,52 @@
   }
 
   /* ── Large stat cards ── */
+  .summary-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .summary-header h2 {
+    margin: 0;
+  }
+  .refresh-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(0,74,153,0.12);
+    border: 1px solid rgba(0,74,153,0.20);
+    color: #003366;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    margin-top: 0;
+    line-height: 1;
+    transition: background 0.15s, transform 0.15s;
+  }
+  .refresh-btn:hover {
+    background: rgba(0,74,153,0.20);
+  }
+  .refresh-btn:active {
+    transform: translateY(-50%) scale(0.92);
+  }
+  .refresh-btn.spinning svg {
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
   .stat-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -153,7 +199,20 @@
 
   <!-- SUMMARY -->
   <div class="summary-section">
-    <h2>Holiday Summary</h2>
+    <div class="summary-header">
+      <h2>Holiday Summary</h2>
+      <button class="refresh-btn" id="summaryRefreshBtn" title="Refresh summary" onclick="refreshSummary()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"/>
+          <path d="M1 20v-6h6"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+          <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+        </svg>
+      </button>
+    </div>
+
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-num" id="allowance">—</div>
@@ -225,10 +284,18 @@ function formatDatePretty(iso) {
   return `${weekday} ${day}${suffix} ${month} ${yr}`;
 }
 
+// ─── Summary refresh button ───────────────────────────────────
+async function refreshSummary() {
+  const btn = $("summaryRefreshBtn");
+  btn.classList.add("spinning");
+  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
+  btn.classList.remove("spinning");
+}
+
 // ─── Summary ──────────────────────────────────────────────────
 async function loadSummary() {
   try {
-    const res = await fetch(`${API}/holiday/summary?year=${year}`, {
+    const res = await fetch(`${API}/holiday/summary?year=${year}&t=${Date.now()}`, {
       headers: { "X-User": user, "X-Role": role },
       cache: "no-store"
     });
@@ -282,10 +349,7 @@ async function deleteRequest(id) {
     return;
   }
 
-  // Small pause to allow KV to propagate before reloading
   await new Promise(r => setTimeout(r, 600));
-
-  // Run both reloads independently so one failure doesn't block the other
   await Promise.allSettled([loadSummary(), loadMyHolidays()]);
 }
 
@@ -297,7 +361,7 @@ async function loadMyHolidays() {
 
   let data;
   try {
-    const res = await fetch(`${API}/holiday/my?year=${year}`, {
+    const res = await fetch(`${API}/holiday/my?year=${year}&t=${Date.now()}`, {
       headers: { "X-User":user, "X-Role":role },
       cache: "no-store"
     });
