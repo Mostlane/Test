@@ -263,21 +263,30 @@ async function cancelRequest(id) {
     body: JSON.stringify({ id })
   });
   if (!res.ok) { alert(await res.text()); return; }
-  await loadSummary();
-  await loadMyHolidays();
+  await new Promise(r => setTimeout(r, 600));
+  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
 }
 
 // ─── Delete cancelled/rejected request ───────────────────────
 async function deleteRequest(id) {
   if (!confirm("Permanently delete this request from your history?")) return;
+
   const res = await fetch(`${API}/holiday/delete-own?year=${year}`, {
     method: "POST",
-    headers: { "Content-Type":"application/json", "X-User":user, "X-Role":role },
+    headers: { "Content-Type": "application/json", "X-User": user, "X-Role": role },
     body: JSON.stringify({ id })
   });
-  if (!res.ok) { alert(await res.text()); return; }
-  await loadSummary();
-  await loadMyHolidays();
+
+  if (!res.ok) {
+    alert(await res.text());
+    return;
+  }
+
+  // Small pause to allow KV to propagate before reloading
+  await new Promise(r => setTimeout(r, 600));
+
+  // Run both reloads independently so one failure doesn't block the other
+  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
 }
 
 // ─── Load holidays + system days ─────────────────────────────
@@ -424,8 +433,8 @@ document.getElementById("holidayForm").addEventListener("submit", async e => {
     alert("Holiday request submitted successfully.");
     document.getElementById("holidayForm").reset();
     document.getElementById("engineer").value = user.replace(".", " ");
-    await loadSummary();
-    await loadMyHolidays();
+    await new Promise(r => setTimeout(r, 600));
+    await Promise.allSettled([loadSummary(), loadMyHolidays()]);
   } catch(e) {
     alert("Submission failed. Please try again.");
   }
