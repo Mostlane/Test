@@ -154,29 +154,53 @@
     .dayCell.evShutdown{background:rgba(0,0,0,0.10)}
     .dayCell.evWorked{outline:2px solid rgba(21,128,61,0.55);outline-offset:-2px}
 
-    /* ── Tappable indicator for bank holiday / shutdown cells ── */
+    /* Tappable indicator — bank/shutdown cells */
     .dayCell.evBank,
     .dayCell.evShutdown {
       cursor: pointer;
     }
     .dayCell.evBank::after,
     .dayCell.evShutdown::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      border-radius: 3px;
-      border: 2px solid rgba(0,74,153,0.35);
-      pointer-events: none;
+      content:'';
+      position:absolute;
+      inset:0;
+      border-radius:3px;
+      border:2px solid rgba(0,74,153,0.35);
+      pointer-events:none;
     }
     .dayCell.evBank.evWorked::after,
     .dayCell.evShutdown.evWorked::after {
-      border-color: rgba(21,128,61,0.55);
+      border-color:rgba(21,128,61,0.55);
     }
-    /* Active/tap feedback */
+
+    /* Tappable indicator — approved holiday cells */
+    .dayCell.evHoliday,
+    .dayCell.evSick,
+    .dayCell.evUnpaid,
+    .dayCell.evCompulsory {
+      cursor: pointer;
+    }
+    .dayCell.evHoliday::after,
+    .dayCell.evSick::after,
+    .dayCell.evUnpaid::after,
+    .dayCell.evCompulsory::after {
+      content:'';
+      position:absolute;
+      inset:0;
+      border-radius:3px;
+      border:2px solid rgba(176,0,32,0.30);
+      pointer-events:none;
+    }
+
+    /* Active/tap feedback for all interactive cells */
     .dayCell.evBank:active,
-    .dayCell.evShutdown:active {
-      filter: brightness(0.92);
-      transform: scale(0.92);
+    .dayCell.evShutdown:active,
+    .dayCell.evHoliday:active,
+    .dayCell.evSick:active,
+    .dayCell.evUnpaid:active,
+    .dayCell.evCompulsory:active {
+      filter:brightness(0.92);
+      transform:scale(0.92);
     }
 
     .tooltip{
@@ -192,7 +216,7 @@
     .listRow .btnSmall{flex:0 0 auto}
     .actionBtns{display:flex;gap:6px;flex-wrap:wrap}
 
-    /* ── Bottom sheet for mobile tap confirm ── */
+    /* ── Bottom sheet ── */
     .sheet-backdrop{
       display:none;position:fixed;inset:0;z-index:8000;
       background:rgba(0,0,0,0.45);
@@ -208,8 +232,8 @@
     }
     .sheet.open{transform:translateY(0);}
     .sheet-title{font-size:17px;font-weight:800;color:var(--ml-blue);margin-bottom:4px;}
-    .sheet-date{font-size:13px;color:var(--muted);margin-bottom:14px;}
-    .sheet-status{font-size:14px;margin-bottom:18px;color:var(--ink);}
+    .sheet-date{font-size:13px;color:var(--muted);margin-bottom:10px;}
+    .sheet-body{font-size:14px;color:var(--ink);margin-bottom:18px;line-height:1.5;}
     .sheet-btns{display:flex;gap:10px;}
     .sheet-btns .btn{flex:1;text-align:center;padding:13px;}
 
@@ -312,7 +336,7 @@
         <div class="panel" style="flex:1;">
           <h2>Month View</h2>
           <div class="muted" id="calHint" style="margin-bottom:10px;">
-            Approved leave shown in blue. Tap a bank holiday or shutdown cell to mark as worked/not worked.
+            Tap a bank holiday or shutdown cell to toggle worked status. Tap an approved holiday cell to cancel it.
           </div>
           <div class="calWrap" id="calWrap"></div>
         </div>
@@ -351,15 +375,15 @@
   <!-- Tooltip (desktop hover) -->
   <div class="tooltip" id="tooltip"></div>
 
-  <!-- Bottom sheet (mobile tap confirm) -->
+  <!-- Bottom sheet -->
   <div class="sheet-backdrop" id="sheetBackdrop">
     <div class="sheet" id="sheet">
-      <div class="sheet-title" id="sheetTitle">—</div>
-      <div class="sheet-date"  id="sheetDate">—</div>
-      <div class="sheet-status" id="sheetStatus">—</div>
+      <div class="sheet-title"  id="sheetTitle">—</div>
+      <div class="sheet-date"   id="sheetDate">—</div>
+      <div class="sheet-body"   id="sheetBody">—</div>
       <div class="sheet-btns">
-        <button class="btn btnPrimary" id="sheetConfirm">Confirm</button>
-        <button class="btn"            id="sheetCancel">Cancel</button>
+        <button class="btn btnDanger" id="sheetConfirm">Confirm</button>
+        <button class="btn"           id="sheetCancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -424,24 +448,25 @@ async function apiPOST(path, body) {
   return res.json();
 }
 
-// ─── Bottom sheet ───────────────────────────────────────────
+// ─── Bottom sheet ────────────────────────────────────────────
+// Returns a Promise that resolves true (confirm) or false (cancel).
+// options: { title, date, body, confirmLabel, confirmClass }
 let sheetResolve = null;
 
-function openSheet(cell) {
+function openSheet({ title, date, body, confirmLabel = "Confirm", confirmClass = "btnDanger" }) {
   return new Promise(resolve => {
     sheetResolve = resolve;
 
-    const label = cell.label || (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
-    const currentState = cell.worked ? "Worked (credited)" : "Deducted from allowance";
-    const newState     = cell.worked ? "Deducted from allowance" : "Worked (credited)";
+    $("sheetTitle").textContent = title;
+    $("sheetDate").textContent  = date;
+    $("sheetBody").innerHTML    = body;
 
-    $("sheetTitle").textContent  = label;
-    $("sheetDate").textContent   = cell.date + (cell.username ? ` — ${cell.username.replace(".", " ")}` : "");
-    $("sheetStatus").innerHTML   =
-      `Currently: <b>${currentState}</b><br>Change to: <b>${newState}</b>`;
+    // Swap confirm button style
+    const confirmBtn = $("sheetConfirm");
+    confirmBtn.className = `btn ${confirmClass}`;
+    confirmBtn.textContent = confirmLabel;
 
     $("sheetBackdrop").classList.add("open");
-    // Trigger transition on next frame
     requestAnimationFrame(() => $("sheet").classList.add("open"));
   });
 }
@@ -452,13 +477,13 @@ function closeSheet(confirmed) {
   if (sheetResolve) { sheetResolve(confirmed); sheetResolve = null; }
 }
 
-$("sheetConfirm").onclick = () => closeSheet(true);
-$("sheetCancel").onclick  = () => closeSheet(false);
+$("sheetConfirm").onclick   = () => closeSheet(true);
+$("sheetCancel").onclick    = () => closeSheet(false);
 $("sheetBackdrop").addEventListener("click", (e) => {
   if (e.target === $("sheetBackdrop")) closeSheet(false);
 });
 
-// ─── Year selector ──────────────────────────────────────────
+// ─── Year selector ───────────────────────────────────────────
 function buildYearOptions() {
   const sel = $("yearSel");
   sel.innerHTML = "";
@@ -472,7 +497,7 @@ function buildYearOptions() {
   sel.onchange = () => { state.year = parseInt(sel.value, 10); refreshAll(); };
 }
 
-// ─── buildCells ─────────────────────────────────────────────
+// ─── buildCells ──────────────────────────────────────────────
 function buildCells(eng, year, month) {
   const cells = {};
 
@@ -489,7 +514,17 @@ function buildCells(eng, year, month) {
       const [y, m] = iso.split("-").map(Number);
       if (y !== year || m !== month) continue;
       if (!cells[iso]) {
-        cells[iso] = { kind:"holiday", type:h.type||"Annual Leave", note:h.notes||"", status:h.status };
+        cells[iso] = {
+          kind:     "holiday",
+          type:     h.type   || "Annual Leave",
+          note:     h.notes  || "",
+          status:   h.status,
+          // Carry the request id and full range so we can revoke it
+          requestId: h.id,
+          rangeStart: h.start,
+          rangeEnd:   h.end,
+          days:       h.days
+        };
       }
     }
   }
@@ -513,7 +548,7 @@ function buildCells(eng, year, month) {
   return cells;
 }
 
-// ─── Pending approvals ───────────────────────────────────────
+// ─── Pending approvals ────────────────────────────────────────
 function renderPending() {
   const tbody = $("pendingTbody");
   tbody.innerHTML = "";
@@ -568,7 +603,7 @@ function renderPending() {
   });
 }
 
-// ─── Allowance table ─────────────────────────────────────────
+// ─── Allowance table ──────────────────────────────────────────
 function renderAllowance() {
   const tbody = $("allowTbody");
   tbody.innerHTML = "";
@@ -578,8 +613,8 @@ function renderAllowance() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><b>${e.name}</b><div class="muted" style="font-size:11px;">${e.username}</div></td>
-      <td>${Number(e.allowance || 0).toFixed(0)}</td>
-      <td>${Number(e.used      || 0).toFixed(0)}</td>
+      <td>${Number(e.allowance  || 0).toFixed(0)}</td>
+      <td>${Number(e.used       || 0).toFixed(0)}</td>
       <td><b>${Number(e.remaining || 0).toFixed(0)}</b></td>
       <td><button class="btn btnSmall" data-edit="${e.username}">Edit</button></td>
     `;
@@ -607,7 +642,7 @@ function renderAllowance() {
   });
 }
 
-// ─── Calendar helpers ────────────────────────────────────────
+// ─── Calendar helpers ─────────────────────────────────────────
 function dayIsWeekend(year, month, day) {
   const d  = new Date(`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00Z`);
   const wd = d.getUTCDay();
@@ -639,7 +674,7 @@ function tooltipShow(html, x, y) {
 }
 function tooltipHide() { $("tooltip").style.display = "none"; }
 
-// ─── Calendar render ─────────────────────────────────────────
+// ─── Calendar render ──────────────────────────────────────────
 function renderCalendar() {
   const wrap = $("calWrap");
   wrap.innerHTML = "";
@@ -699,47 +734,107 @@ function renderCalendar() {
     let cell;
     try { cell = JSON.parse(decodeURIComponent(raw)); } catch { return; }
 
-    const isToggleable = cell.kind === "bankholiday" || cell.kind === "shutdown";
+    const isSystemDay = cell.kind === "bankholiday" || cell.kind === "shutdown";
+    const isHoliday   = cell.kind === "holiday";
+
+    // Neither type — nothing to do
+    if (!isSystemDay && !isHoliday) return;
 
     // Desktop tooltip on hover
     el.addEventListener("mousemove", (ev) => {
-      const title = cell.kind === "holiday"
-        ? (cell.type || "Holiday")
-        : (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
+      let title, sub, extra;
 
-      const sub = cell.kind === "holiday"
-        ? (cell.note ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>` : "")
-        : `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
+      if (isHoliday) {
+        title = cell.type || "Annual Leave";
+        sub   = cell.note
+          ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>`
+          : "";
+        extra = `<div style="margin-top:6px;color:#cbd5e1;">
+                   ${cell.rangeStart} → ${cell.rangeEnd} (${cell.days} day${cell.days===1?"":"s"})<br>
+                   <span style="opacity:0.85;">Tap to cancel this approval</span>
+                 </div>`;
+      } else {
+        title = cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown";
+        sub   = `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
+        extra = `<div style="margin-top:6px;color:#cbd5e1;">
+                   Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br>
+                   <span style="opacity:0.85;">Tap to toggle</span>
+                 </div>`;
+      }
 
-      const extra = isToggleable
-        ? `<div style="margin-top:6px;color:#cbd5e1;">
-             Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br>
-             <span style="opacity:0.85;">Tap to toggle</span>
-           </div>`
-        : "";
-
-      tooltipShow(`<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`, ev.clientX, ev.clientY);
+      tooltipShow(
+        `<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`,
+        ev.clientX, ev.clientY
+      );
     });
     el.addEventListener("mouseleave", tooltipHide);
 
-    if (!isToggleable) return;
-
-    // Unified tap/click handler — bottom sheet on touch, confirm() on desktop
+    // Tap / click handler
     el.addEventListener("click", async (ev) => {
       tooltipHide();
 
-      // Detect touch vs mouse
       const isTouch = ev.sourceCapabilities?.firesTouchEvents
         || window.matchMedia("(hover:none)").matches;
 
+      // ── Approved holiday: revoke / cancel ──
+      if (isHoliday) {
+        const engName  = (cell.username || "").replace(".", " ");
+        const days     = cell.days ?? "?";
+        const bodyText = `<b>${engName}</b> — ${cell.type || "Annual Leave"}<br>`
+          + `${cell.rangeStart} → ${cell.rangeEnd} (${days} day${days===1?"":"s"})<br><br>`
+          + `This will cancel the approval and credit the days back to their allowance.`;
+
+        let confirmed;
+        if (isTouch) {
+          confirmed = await openSheet({
+            title:        "Cancel Approved Holiday?",
+            date:         cell.date,
+            body:         bodyText,
+            confirmLabel: "Cancel Holiday",
+            confirmClass: "btnDanger"
+          });
+        } else {
+          confirmed = confirm(
+            `Cancel approved holiday for ${engName}?\n`
+            + `${cell.rangeStart} → ${cell.rangeEnd} (${days} days)\n\n`
+            + `This will cancel the full request and credit days back.`
+          );
+        }
+
+        if (!confirmed) return;
+
+        try {
+          setStatus("Cancelling holiday…");
+          await apiPOST(`/holiday/cancel-approved?year=${state.year}`, {
+            id: cell.requestId
+          });
+          await refreshAll();
+          setStatus("");
+        } catch (e) {
+          alert("Cancel failed: " + e.message);
+          setStatus("");
+        }
+        return;
+      }
+
+      // ── System day: toggle worked ──
+      const label        = cell.label || (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
+      const currentState = cell.worked ? "Worked (credited)" : "Deducted from allowance";
+      const newState     = cell.worked ? "Deducted from allowance" : "Worked (credited)";
+
       let confirmed;
       if (isTouch) {
-        confirmed = await openSheet(cell);
+        confirmed = await openSheet({
+          title:        label,
+          date:         cell.date + (cell.username ? ` — ${cell.username.replace(".", " ")}` : ""),
+          body:         `Currently: <b>${currentState}</b><br>Change to: <b>${newState}</b>`,
+          confirmLabel: "Confirm",
+          confirmClass: "btnPrimary"
+        });
       } else {
-        const label        = cell.label || (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
-        const currentState = cell.worked ? "Worked (credited)" : "Deducted";
-        const newState     = cell.worked ? "Deducted" : "Worked (credited)";
-        confirmed = confirm(`${label} — ${cell.date}\n\nCurrently: ${currentState}\nChange to: ${newState}?`);
+        confirmed = confirm(
+          `${label} — ${cell.date}\n\nCurrently: ${currentState}\nChange to: ${newState}?`
+        );
       }
 
       if (!confirmed) return;
@@ -832,7 +927,7 @@ async function saveBank() {
     setStatus("Saving bank holidays…");
     await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: state.config.bankholidays });
     await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: " + e.message); setStatus(""); }
+  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
 }
 
 async function saveShutdown() {
@@ -840,7 +935,7 @@ async function saveShutdown() {
     setStatus("Saving shutdown days…");
     await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: state.config.shutdown });
     await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: " + e.message); setStatus(""); }
+  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
 }
 
 $("addBH").onclick = async () => {
