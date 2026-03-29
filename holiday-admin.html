@@ -192,7 +192,7 @@
       pointer-events:none;
     }
 
-    /* Active/tap feedback for all interactive cells */
+    /* Active/tap feedback */
     .dayCell.evBank:active,
     .dayCell.evShutdown:active,
     .dayCell.evHoliday:active,
@@ -378,9 +378,9 @@
   <!-- Bottom sheet -->
   <div class="sheet-backdrop" id="sheetBackdrop">
     <div class="sheet" id="sheet">
-      <div class="sheet-title"  id="sheetTitle">—</div>
-      <div class="sheet-date"   id="sheetDate">—</div>
-      <div class="sheet-body"   id="sheetBody">—</div>
+      <div class="sheet-title" id="sheetTitle">—</div>
+      <div class="sheet-date"  id="sheetDate">—</div>
+      <div class="sheet-body"  id="sheetBody">—</div>
       <div class="sheet-btns">
         <button class="btn btnDanger" id="sheetConfirm">Confirm</button>
         <button class="btn"           id="sheetCancel">Cancel</button>
@@ -448,24 +448,18 @@ async function apiPOST(path, body) {
   return res.json();
 }
 
-// ─── Bottom sheet ────────────────────────────────────────────
-// Returns a Promise that resolves true (confirm) or false (cancel).
-// options: { title, date, body, confirmLabel, confirmClass }
+// ─── Bottom sheet ─────────────────────────────────────────────
 let sheetResolve = null;
 
 function openSheet({ title, date, body, confirmLabel = "Confirm", confirmClass = "btnDanger" }) {
   return new Promise(resolve => {
     sheetResolve = resolve;
-
     $("sheetTitle").textContent = title;
     $("sheetDate").textContent  = date;
     $("sheetBody").innerHTML    = body;
-
-    // Swap confirm button style
     const confirmBtn = $("sheetConfirm");
-    confirmBtn.className = `btn ${confirmClass}`;
+    confirmBtn.className   = `btn ${confirmClass}`;
     confirmBtn.textContent = confirmLabel;
-
     $("sheetBackdrop").classList.add("open");
     requestAnimationFrame(() => $("sheet").classList.add("open"));
   });
@@ -477,13 +471,13 @@ function closeSheet(confirmed) {
   if (sheetResolve) { sheetResolve(confirmed); sheetResolve = null; }
 }
 
-$("sheetConfirm").onclick   = () => closeSheet(true);
-$("sheetCancel").onclick    = () => closeSheet(false);
+$("sheetConfirm").onclick = () => closeSheet(true);
+$("sheetCancel").onclick  = () => closeSheet(false);
 $("sheetBackdrop").addEventListener("click", (e) => {
   if (e.target === $("sheetBackdrop")) closeSheet(false);
 });
 
-// ─── Year selector ───────────────────────────────────────────
+// ─── Year selector ────────────────────────────────────────────
 function buildYearOptions() {
   const sel = $("yearSel");
   sel.innerHTML = "";
@@ -497,14 +491,21 @@ function buildYearOptions() {
   sel.onchange = () => { state.year = parseInt(sel.value, 10); refreshAll(); };
 }
 
-// ─── buildCells ──────────────────────────────────────────────
+// ─── buildCells ───────────────────────────────────────────────
+// Priority: pre-keyed API cells (most complete, include requestId)
+// then eng.holidays[] expansion for any gaps,
+// then bank holidays and shutdown from config.
 function buildCells(eng, year, month) {
   const cells = {};
 
+  // 1. Copy pre-keyed cells from API — these are authoritative and include
+  //    requestId, rangeStart, rangeEnd, days on holiday cells
   if (eng.cells && typeof eng.cells === "object" && !Array.isArray(eng.cells)) {
     Object.assign(cells, eng.cells);
   }
 
+  // 2. Expand eng.holidays[] — only fills days NOT already set by the API
+  //    so we never overwrite requestId with an incomplete fallback cell
   for (const h of (eng.holidays || [])) {
     if (h.status !== "Approved") continue;
     const start = new Date(h.start + "T00:00:00Z");
@@ -514,13 +515,13 @@ function buildCells(eng, year, month) {
       const [y, m] = iso.split("-").map(Number);
       if (y !== year || m !== month) continue;
       if (!cells[iso]) {
+        // Fallback cell — carries requestId from the holiday object
         cells[iso] = {
-          kind:     "holiday",
-          type:     h.type   || "Annual Leave",
-          note:     h.notes  || "",
-          status:   h.status,
-          // Carry the request id and full range so we can revoke it
-          requestId: h.id,
+          kind:       "holiday",
+          type:       h.type   || "Annual Leave",
+          note:       h.notes  || "",
+          status:     h.status,
+          requestId:  h.id,
           rangeStart: h.start,
           rangeEnd:   h.end,
           days:       h.days
@@ -529,19 +530,29 @@ function buildCells(eng, year, month) {
     }
   }
 
+  // 3. Overlay bank holidays from config
   for (const bh of (state.config.bankholidays || [])) {
     const [y, m] = (bh.date || "").split("-").map(Number);
     if (y !== year || m !== month) continue;
     if (!cells[bh.date]) {
-      cells[bh.date] = { kind:"bankholiday", label:bh.label||"Bank Holiday", worked:bh.worked||false };
+      cells[bh.date] = {
+        kind:   "bankholiday",
+        label:  bh.label || "Bank Holiday",
+        worked: bh.worked || false
+      };
     }
   }
 
+  // 4. Overlay shutdown days from config
   for (const sd of (state.config.shutdown || [])) {
     const [y, m] = (sd.date || "").split("-").map(Number);
     if (y !== year || m !== month) continue;
     if (!cells[sd.date]) {
-      cells[sd.date] = { kind:"shutdown", label:sd.label||"Company Shutdown", worked:sd.worked||false };
+      cells[sd.date] = {
+        kind:   "shutdown",
+        label:  sd.label || "Company Shutdown",
+        worked: sd.worked || false
+      };
     }
   }
 
@@ -737,20 +748,18 @@ function renderCalendar() {
     const isSystemDay = cell.kind === "bankholiday" || cell.kind === "shutdown";
     const isHoliday   = cell.kind === "holiday";
 
-    // Neither type — nothing to do
     if (!isSystemDay && !isHoliday) return;
 
-    // Desktop tooltip on hover
+    // Desktop tooltip
     el.addEventListener("mousemove", (ev) => {
       let title, sub, extra;
-
       if (isHoliday) {
         title = cell.type || "Annual Leave";
         sub   = cell.note
           ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>`
           : "";
         extra = `<div style="margin-top:6px;color:#cbd5e1;">
-                   ${cell.rangeStart} → ${cell.rangeEnd} (${cell.days} day${cell.days===1?"":"s"})<br>
+                   ${cell.rangeStart || "?"} → ${cell.rangeEnd || "?"} (${cell.days ?? "?"} day${cell.days===1?"":"s"})<br>
                    <span style="opacity:0.85;">Tap to cancel this approval</span>
                  </div>`;
       } else {
@@ -761,7 +770,6 @@ function renderCalendar() {
                    <span style="opacity:0.85;">Tap to toggle</span>
                  </div>`;
       }
-
       tooltipShow(
         `<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`,
         ev.clientX, ev.clientY
@@ -769,19 +777,25 @@ function renderCalendar() {
     });
     el.addEventListener("mouseleave", tooltipHide);
 
-    // Tap / click handler
+    // Tap / click
     el.addEventListener("click", async (ev) => {
       tooltipHide();
 
       const isTouch = ev.sourceCapabilities?.firesTouchEvents
         || window.matchMedia("(hover:none)").matches;
 
-      // ── Approved holiday: revoke / cancel ──
+      // ── Approved holiday: cancel ──
       if (isHoliday) {
+        if (!cell.requestId) {
+          console.error("Holiday cell missing requestId:", cell);
+          alert("Cannot cancel — request ID missing. Please refresh and try again.");
+          return;
+        }
+
         const engName  = (cell.username || "").replace(".", " ");
         const days     = cell.days ?? "?";
         const bodyText = `<b>${engName}</b> — ${cell.type || "Annual Leave"}<br>`
-          + `${cell.rangeStart} → ${cell.rangeEnd} (${days} day${days===1?"":"s"})<br><br>`
+          + `${cell.rangeStart} → ${cell.rangeEnd} (${days} day${days === 1 ? "" : "s"})<br><br>`
           + `This will cancel the approval and credit the days back to their allowance.`;
 
         let confirmed;
@@ -805,9 +819,7 @@ function renderCalendar() {
 
         try {
           setStatus("Cancelling holiday…");
-          await apiPOST(`/holiday/cancel-approved?year=${state.year}`, {
-            id: cell.requestId
-          });
+          await apiPOST(`/holiday/cancel-approved?year=${state.year}`, { id: cell.requestId });
           await refreshAll();
           setStatus("");
         } catch (e) {
