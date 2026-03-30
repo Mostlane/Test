@@ -121,6 +121,11 @@
       color: #00509e;
     }
 
+    .user-row-tag.unlimited {
+      background: #fff3cd;
+      color: #856404;
+    }
+
     /* Right – Detail panel */
     .detail-panel {
       flex: 1;
@@ -209,10 +214,25 @@
       font-size: 13px;
     }
 
-    .toggle-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
+    .unlimited-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffc107;
+    }
+
+    .unlimited-notice {
+      background: #fffbea;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: #856404;
+      margin-bottom: 6px;
     }
 
     .device-table,
@@ -337,19 +357,28 @@
         <!-- Settings -->
         <div class="section-card">
           <div class="section-title">Device Settings</div>
+
+          <!-- Shown for unlimited users only -->
+          <div id="unlimitedNotice" class="unlimited-notice" style="display:none;">
+            ♾️ <strong>Unlimited devices</strong> — this account is not subject to device limits.
+            Any device this user logs in from will be registered automatically.
+          </div>
+
           <div class="muted" id="deviceUsageText"></div>
-          <div class="form-row">
+
+          <!-- Hidden for unlimited users -->
+          <div id="allowedDevicesRow" class="form-row">
             <label for="allowedDevicesInput"><strong>Allowed Devices</strong></label>
             <input type="number" id="allowedDevicesInput" min="1" max="5" step="1" style="width:70px;">
             <span class="muted">Overrides default limit for this user.</span>
           </div>
- 
-<div class="form-row">
-  <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
-  <button class="btn btn-danger" id="forceResetBtn">Force Reset All Devices</button>
-  <button class="btn btn-secondary" id="viewLoginHistoryBtn">📜 Login Activity</button>
-</div>
-</div> <!-- END Device Settings section-card -->
+
+          <div class="form-row">
+            <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+            <button class="btn btn-danger" id="forceResetBtn">Force Reset All Devices</button>
+            <button class="btn btn-secondary" id="viewLoginHistoryBtn">📜 Login Activity</button>
+          </div>
+        </div>
 
         <!-- Devices -->
         <div class="section-card">
@@ -368,6 +397,27 @@
 
   <div class="toast" id="toast"></div>
 
+  <!-- Login History Modal -->
+  <div id="loginHistoryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99999;">
+    <div style="
+      background:#fff;
+      max-width:900px;
+      margin:5vh auto;
+      padding:20px;
+      border-radius:10px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.3);
+      max-height:80vh;
+      display:flex;
+      flex-direction:column;
+    ">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="margin:0; color:#003366;">Login Activity</h3>
+        <button class="btn btn-secondary" onclick="closeLoginHistory()">Close</button>
+      </div>
+      <div id="loginHistoryContent" style="overflow:auto; font-size:13px;"></div>
+    </div>
+  </div>
+
   <script>
     const DEVICE_WORKER_BASE = "https://userdevicekv.jamie-def.workers.dev";
 
@@ -376,6 +426,9 @@
     let selectedUsername = null;
     let selectedRecord = null;
 
+    // -------------------------------------------------------
+    // TOAST
+    // -------------------------------------------------------
     function showToast(msg, type = "info") {
       const toast = document.getElementById("toast");
       toast.textContent = msg;
@@ -392,6 +445,9 @@
       }, 2500);
     }
 
+    // -------------------------------------------------------
+    // AUTH GATE
+    // -------------------------------------------------------
     function requireLoginAndPermission() {
       const loggedIn = sessionStorage.getItem("mostlaneLoggedIn") === "true";
       if (!loggedIn) {
@@ -399,26 +455,23 @@
         return false;
       }
 
-     const permsRaw = sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions");
+      const permsRaw = sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions");
       let perms = {};
       try { perms = JSON.parse(permsRaw || "{}"); } catch (e) {}
 
-const has = (k) =>
-  perms[k] === true || String(perms[k] || "").toLowerCase() === "yes";
+      const has = (k) =>
+        perms[k] === true || String(perms[k] || "").toLowerCase() === "yes";
 
-const hasFullAccess   = has("FullAccess");
-const hasDeviceAccess = has("DeviceAdmin");
+      const hasFullAccess   = has("FullAccess");
+      const hasDeviceAccess = has("DeviceAdmin");
+      const hasUsersAdmin   = has("UsersAdmin") || has("Users Admin") || has("Users");
+      const hasDeviceAdmin2 = has("Device Management") || has("DeviceManagement");
 
-// Backwards-compatible aliases (older portal keys)
-const hasUsersAdmin   = has("UsersAdmin") || has("Users Admin") || has("Users");
-const hasDeviceAdmin2 = has("Device Management") || has("DeviceManagement");
-
-if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
-  alert("You do not have permission to access Device Management.");
-  window.location.href = "main.html";
-  return false;
-}
-
+      if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
+        alert("You do not have permission to access Device Management.");
+        window.location.href = "main.html";
+        return false;
+      }
 
       const adminUser = sessionStorage.getItem("mostlaneUser") || "";
       const adminUserDisplay = document.getElementById("adminUserDisplay");
@@ -428,15 +481,19 @@ if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
       return true;
     }
 
+    // -------------------------------------------------------
+    // DATA FETCH
+    // -------------------------------------------------------
     async function fetchAllRecords() {
-      const res = await fetch(DEVICE_WORKER_BASE + "/list", {
-        method: "GET"
-      });
+      const res = await fetch(DEVICE_WORKER_BASE + "/list", { method: "GET" });
       if (!res.ok) throw new Error("Failed to load device records");
       const data = await res.json();
       return data.records || [];
     }
 
+    // -------------------------------------------------------
+    // USER LIST RENDERING
+    // -------------------------------------------------------
     function renderUserList() {
       const container = document.getElementById("userList");
       container.innerHTML = "";
@@ -449,18 +506,22 @@ if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
       filteredRecords.forEach(rec => {
         const row = document.createElement("div");
         row.className = "user-row";
-        if (rec.username === selectedUsername) {
-          row.classList.add("active");
-        }
+        if (rec.username === selectedUsername) row.classList.add("active");
 
         const nameSpan = document.createElement("span");
         nameSpan.className = "user-row-name";
         nameSpan.textContent = rec.username || "(unknown)";
 
         const tagSpan = document.createElement("span");
-        tagSpan.className = "user-row-tag";
         const devCount = (rec.devices || []).length;
-        tagSpan.textContent = devCount + " device" + (devCount === 1 ? "" : "s");
+
+        if (rec.unlimited) {
+          tagSpan.className = "user-row-tag unlimited";
+          tagSpan.textContent = "♾️ " + devCount + " device" + (devCount === 1 ? "" : "s");
+        } else {
+          tagSpan.className = "user-row-tag";
+          tagSpan.textContent = devCount + " device" + (devCount === 1 ? "" : "s");
+        }
 
         row.appendChild(nameSpan);
         row.appendChild(tagSpan);
@@ -488,6 +549,9 @@ if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
       renderUserList();
     }
 
+    // -------------------------------------------------------
+    // DATE FORMATTER
+    // -------------------------------------------------------
     function formatDate(iso) {
       if (!iso) return "–";
       const d = new Date(iso);
@@ -495,88 +559,107 @@ if (!hasFullAccess && !hasDeviceAccess && !hasUsersAdmin && !hasDeviceAdmin2) {
       return d.toLocaleString();
     }
 
-function loadDetailForSelected() {
-  const titleEl = document.getElementById("detailTitle");
-  const subtitleEl = document.getElementById("detailSubtitle");
-  const detailContent = document.getElementById("detailContent");
+    // -------------------------------------------------------
+    // DETAIL PANEL
+    // -------------------------------------------------------
+    function loadDetailForSelected() {
+      const titleEl    = document.getElementById("detailTitle");
+      const subtitleEl = document.getElementById("detailSubtitle");
+      const detailContent = document.getElementById("detailContent");
 
-  if (!selectedRecord || !selectedUsername) {
-    titleEl.textContent = "Select a user";
-    subtitleEl.textContent = "Choose a user from the left to view and edit device settings.";
-    detailContent.style.display = "none";
-    return;
-  }
+      if (!selectedRecord || !selectedUsername) {
+        titleEl.textContent    = "Select a user";
+        subtitleEl.textContent = "Choose a user from the left to view and edit device settings.";
+        detailContent.style.display = "none";
+        return;
+      }
 
-  titleEl.textContent = selectedUsername;
-  subtitleEl.textContent = "Manage device limits, reset devices and view history.";
+      titleEl.textContent    = selectedUsername;
+      subtitleEl.textContent = "Manage device limits, reset devices and view history.";
+      detailContent.style.display = "block";
 
-  detailContent.style.display = "block";
+      const isUnlimited = !!selectedRecord.unlimited;
 
-  const allowedInput = document.getElementById("allowedDevicesInput");
-  const allowedDevices = typeof selectedRecord.allowedDevices === "number"
-    ? selectedRecord.allowedDevices
-    : 1;
-  allowedInput.value = allowedDevices;
+      // Toggle unlimited notice / allowed-devices row
+      document.getElementById("unlimitedNotice").style.display  = isUnlimited ? "block" : "none";
+      document.getElementById("allowedDevicesRow").style.display = isUnlimited ? "none"  : "flex";
 
-  const used = (selectedRecord.devices || []).length;
-  const usageEl = document.getElementById("deviceUsageText");
-  if (usageEl) {
-    usageEl.textContent = `Devices used: ${used} of ${allowedDevices}`;
-  }
+      if (!isUnlimited) {
+        const allowedDevices = typeof selectedRecord.allowedDevices === "number"
+          ? selectedRecord.allowedDevices : 1;
+        document.getElementById("allowedDevicesInput").value = allowedDevices;
+      }
 
-  renderDevicesTable();
-  renderHistoryTable();
+      // Usage text
+      const used = (selectedRecord.devices || []).length;
+      const usageEl = document.getElementById("deviceUsageText");
+      if (usageEl) {
+        if (isUnlimited) {
+          usageEl.textContent = "Devices registered: " + used + " (no limit)";
+        } else {
+          const cap = typeof selectedRecord.allowedDevices === "number" ? selectedRecord.allowedDevices : 1;
+          usageEl.textContent = "Devices used: " + used + " of " + cap;
+        }
+      }
 
-  // ✅ ADD THIS BLOCK (THIS IS THE IMPORTANT PART)
-  const btn = document.getElementById("viewLoginHistoryBtn");
-  if (btn) {
-    btn.onclick = () => {
-      if (!selectedUsername) return;
-      openLoginHistory(selectedUsername);
-    };
-  }
-}
+      renderDevicesTable();
+      renderHistoryTable();
 
-function renderDevicesTable() {
-  const container = document.getElementById("devicesSection");
-  container.innerHTML = "";
+      // Login history button
+      const btn = document.getElementById("viewLoginHistoryBtn");
+      if (btn) {
+        btn.onclick = () => {
+          if (!selectedUsername) return;
+          openLoginHistory(selectedUsername);
+        };
+      }
 
-  const devices = selectedRecord.devices || [];
+      // Save settings: no-op for unlimited users (worker guards this too)
+      document.getElementById("saveSettingsBtn").onclick = isUnlimited
+        ? () => showToast("Unlimited users do not have a device cap to save.", "warn")
+        : saveUserSettings;
+    }
 
-  if (!devices.length) {
-    container.innerHTML = '<span class="muted">No devices registered for this user.</span>';
-    return;
-  }
+    function renderDevicesTable() {
+      const container = document.getElementById("devicesSection");
+      container.innerHTML = "";
 
-  let html = `
-    <table class="device-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Device ID</th>
-          <th>Label</th>
-          <th>First Seen</th>
-          <th>Last Seen</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
+      const devices = selectedRecord.devices || [];
 
-  devices.forEach((d, i) => {
-    html += `
-      <tr>
-        <td>${i + 1}</td>
-        <td>${d.deviceId}</td>
-        <td>${d.label || ""}</td>
-        <td>${formatDate(d.firstSeen)}</td>
-        <td>${formatDate(d.lastSeen)}</td>
-      </tr>
-    `;
-  });
+      if (!devices.length) {
+        container.innerHTML = '<span class="muted">No devices registered for this user.</span>';
+        return;
+      }
 
-  html += "</tbody></table>";
-  container.innerHTML = html;
-}
+      let html = `
+        <table class="device-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Device ID</th>
+              <th>Label</th>
+              <th>First Seen</th>
+              <th>Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      devices.forEach((d, i) => {
+        html += `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${d.deviceId}</td>
+            <td>${d.label || ""}</td>
+            <td>${formatDate(d.firstSeen)}</td>
+            <td>${formatDate(d.lastSeen)}</td>
+          </tr>
+        `;
+      });
+
+      html += "</tbody></table>";
+      container.innerHTML = html;
+    }
 
     function renderHistoryTable() {
       const container = document.getElementById("historySection");
@@ -597,9 +680,9 @@ function renderDevicesTable() {
         const type = entry.type || "EVENT";
 
         let detailParts = [];
-        if (entry.deviceId) detailParts.push("Device: " + entry.deviceId);
-        if (entry.label) detailParts.push("Label: " + entry.label);
-        if (entry.reason) detailParts.push("Reason: " + entry.reason);
+        if (entry.deviceId)    detailParts.push("Device: " + entry.deviceId);
+        if (entry.label)       detailParts.push("Label: " + entry.label);
+        if (entry.reason)      detailParts.push("Reason: " + entry.reason);
         if (entry.oldDeviceId) detailParts.push("Replaced: " + entry.oldDeviceId);
 
         html += `<tr>
@@ -613,6 +696,9 @@ function renderDevicesTable() {
       container.innerHTML = html;
     }
 
+    // -------------------------------------------------------
+    // SAVE SETTINGS (non-unlimited users only)
+    // -------------------------------------------------------
     async function saveUserSettings() {
       if (!selectedUsername || !selectedRecord) return;
       const input = document.getElementById("allowedDevicesInput");
@@ -624,26 +710,25 @@ function renderDevicesTable() {
         const res = await fetch(DEVICE_WORKER_BASE + "/admin/update-allowed-devices", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: selectedUsername,
-            allowedDevices: val
-          })
+          body: JSON.stringify({ username: selectedUsername, allowedDevices: val })
         });
         if (!res.ok) throw new Error("Failed to save settings");
-        const data = await res.json();
 
-        // Update local record
         selectedRecord.allowedDevices = val;
         const idx = allRecords.findIndex(r => r.username === selectedUsername);
         if (idx >= 0) allRecords[idx].allowedDevices = val;
 
         showToast("Settings saved for " + selectedUsername);
+        loadDetailForSelected(); // refresh usage text
       } catch (err) {
         console.error(err);
         showToast("Error saving settings", "error");
       }
     }
 
+    // -------------------------------------------------------
+    // FORCE RESET
+    // -------------------------------------------------------
     async function forceResetUserDevices() {
       if (!selectedUsername) return;
       if (!confirm("Force reset all devices for " + selectedUsername + "?\nThis will require re-registration on their next login.")) {
@@ -655,15 +740,13 @@ function renderDevicesTable() {
           method: "POST"
         });
         if (!res.ok) throw new Error("Failed to reset devices");
-        const data = await res.json();
         showToast("Devices reset for " + selectedUsername, "warn");
 
         const idx = allRecords.findIndex(r => r.username === selectedUsername);
-        if (idx >= 0) {
-          allRecords.splice(idx, 1);
-        }
+        if (idx >= 0) allRecords.splice(idx, 1);
+
         selectedUsername = null;
-        selectedRecord = null;
+        selectedRecord   = null;
         filterUserList();
         loadDetailForSelected();
       } catch (err) {
@@ -672,17 +755,76 @@ function renderDevicesTable() {
       }
     }
 
+    // -------------------------------------------------------
+    // LOGIN HISTORY MODAL
+    // -------------------------------------------------------
+    async function openLoginHistory(username) {
+      const modal   = document.getElementById("loginHistoryModal");
+      const content = document.getElementById("loginHistoryContent");
+
+      modal.style.display = "block";
+      content.innerHTML   = "Loading login history…";
+
+      try {
+        const res = await fetch(
+          `https://login.jamie-def.workers.dev/admin/login-history?username=${encodeURIComponent(username)}`
+        );
+        if (!res.ok) throw new Error("Failed to load login history");
+
+        const data    = await res.json();
+        const history = data.history || [];
+
+        if (!history.length) {
+          content.innerHTML = "<div class='muted'>No login activity recorded.</div>";
+          return;
+        }
+
+        let html = `
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>IP Address</th>
+                <th>User Agent</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        history.slice().reverse().forEach(e => {
+          html += `
+            <tr>
+              <td>${formatDate(e.at)}</td>
+              <td>${e.ip || "–"}</td>
+              <td style="max-width:500px; word-break:break-all;">${e.userAgent || "–"}</td>
+            </tr>
+          `;
+        });
+
+        html += "</tbody></table>";
+        content.innerHTML = html;
+
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = "<span class='muted'>Unable to load login history.</span>";
+      }
+    }
+
+    function closeLoginHistory() {
+      document.getElementById("loginHistoryModal").style.display = "none";
+    }
+
+    // -------------------------------------------------------
+    // INIT
+    // -------------------------------------------------------
     document.addEventListener("DOMContentLoaded", async () => {
       if (!requireLoginAndPermission()) return;
 
-      const searchInput = document.getElementById("userSearch");
-      searchInput.addEventListener("input", filterUserList);
-
-      document.getElementById("saveSettingsBtn").addEventListener("click", saveUserSettings);
+      document.getElementById("userSearch").addEventListener("input", filterUserList);
       document.getElementById("forceResetBtn").addEventListener("click", forceResetUserDevices);
 
       try {
-        allRecords = await fetchAllRecords();
+        allRecords      = await fetchAllRecords();
         filteredRecords = [...allRecords].sort((a, b) => (a.username || "").localeCompare(b.username || ""));
         renderUserList();
       } catch (err) {
@@ -690,84 +832,6 @@ function renderDevicesTable() {
         showToast("Could not load device records", "error");
       }
     });
-
-async function openLoginHistory(username) {
-  const modal = document.getElementById("loginHistoryModal");
-  const content = document.getElementById("loginHistoryContent");
-
-  modal.style.display = "block";
-  content.innerHTML = "Loading login history…";
-
-  try {
-    const res = await fetch(
-      `https://login.jamie-def.workers.dev/admin/login-history?username=${encodeURIComponent(username)}`
-    );
-
-    if (!res.ok) throw new Error("Failed to load login history");
-
-    const data = await res.json();
-    const history = data.history || [];
-
-    if (!history.length) {
-      content.innerHTML = "<div class='muted'>No login activity recorded.</div>";
-      return;
-    }
-
-    let html = `
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>IP Address</th>
-            <th>User Agent</th>
-          </tr>
-        </thead>
-        <tbody>
-    `;
-
-    history.slice().reverse().forEach(e => {
-      html += `
-        <tr>
-          <td>${formatDate(e.at)}</td>
-          <td>${e.ip || "–"}</td>
-          <td style="max-width:500px; word-break:break-all;">${e.userAgent || "–"}</td>
-        </tr>
-      `;
-    });
-
-    html += "</tbody></table>";
-    content.innerHTML = html;
-
-  } catch (err) {
-    console.error(err);
-    content.innerHTML = "<span class='muted'>Unable to load login history.</span>";
-  }
-}
-
-function closeLoginHistory() {
-  document.getElementById("loginHistoryModal").style.display = "none";
-}
   </script>
-    <!-- Login History Modal -->
-<div id="loginHistoryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99999;">
-  <div style="
-    background:#fff;
-    max-width:900px;
-    margin:5vh auto;
-    padding:20px;
-    border-radius:10px;
-    box-shadow:0 10px 30px rgba(0,0,0,0.3);
-    max-height:80vh;
-    display:flex;
-    flex-direction:column;
-  ">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <h3 style="margin:0; color:#003366;">Login Activity</h3>
-      <button class="btn btn-secondary" onclick="closeLoginHistory()">Close</button>
-    </div>
-
-    <div id="loginHistoryContent" style="overflow:auto; font-size:13px;"></div>
-  </div>
-</div>
 </body>
 </html>
