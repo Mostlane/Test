@@ -334,9 +334,16 @@
 </div>
 <script>
 
-const USERS_API_URL = "https://mostlane-users.jamie-def.workers.dev/";
+const API_BASE = "https://mostlane-users.jamie-def.workers.dev";
+const USERS_URL = API_BASE + "/users";
 const HOURS_LOG_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
-const DRAFT_KEY="hourEntryDraft_v4";
+const DRAFT_KEY = "hourEntryDraft_v4";
+
+// Auth — matches the rest of the Mostlane portal
+const TOKEN = sessionStorage.getItem("mostlaneToken");
+const CURRENT = sessionStorage.getItem("mostlaneUser");
+if (!CURRENT) { window.location.href = "login.html"; }
+
 let USERS_RAW=[],ENGINEERS=[],VEHICLE_SET=new Set();let HOURS_LOG_CACHE={};let LOG_COUNTER=0;
 const $=id=>document.getElementById(id);
 // Hardcoded exclusions — directors and test accounts should never appear in engineer hours
