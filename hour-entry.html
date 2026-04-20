@@ -358,17 +358,20 @@ function getWeekKey(dateStr){const d=new Date(dateStr+"T12:00");const sun=new Da
 function debounce(fn,ms=300){let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};}
 async function init(){
   try{
-    const r=await fetch(USERS_API_URL+"?t="+Date.now(),{cache:"no-store"});
-    const j=await r.json();
-    // Handle any of: { Users: [...] }, [...], { all_users: [...] }, { value: "..." }
-    if (Array.isArray(j)) USERS_RAW = j;
-    else if (Array.isArray(j?.Users)) USERS_RAW = j.Users;
-    else if (Array.isArray(j?.all_users)) USERS_RAW = j.all_users;
-    else if (typeof j?.value === "string") {
-      const parsed = JSON.parse(j.value);
-      USERS_RAW = parsed.Users || parsed.all_users || parsed || [];
+    const r = await fetch(USERS_URL + "?v=" + Date.now(), {
+      cache: "no-store",
+      headers: TOKEN ? { "Authorization": "Bearer " + TOKEN } : {}
+    });
+    if (r.status === 401) {
+      // Token expired or missing — send back to login
+      sessionStorage.removeItem("mostlaneToken");
+      sessionStorage.removeItem("mostlaneUser");
+      window.location.href = "login.html";
+      return;
     }
-    else USERS_RAW = [];
+    if (!r.ok) throw new Error("Users API returned " + r.status);
+    const j = await r.json();
+    USERS_RAW = Array.isArray(j?.Users) ? j.Users : [];
   }catch(err){
     console.error("Failed to load users from directory:", err);
     USERS_RAW = [];
