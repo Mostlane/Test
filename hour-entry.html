@@ -334,12 +334,13 @@
 </div>
 <script>
 
-const USERS_JSON_PATH = "./users.json";
+const USERS_API_URL = "https://mostlane-users.jamie-def.workers.dev/";
 const HOURS_LOG_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
 const DRAFT_KEY="hourEntryDraft_v4";
 let USERS_RAW=[],ENGINEERS=[],VEHICLE_SET=new Set();let HOURS_LOG_CACHE={};let LOG_COUNTER=0;
 const $=id=>document.getElementById(id);
-const OFFICE_BLOCKLIST=new Set(["Chloe Line","Greg Line","Jamie Line","Joanna Marcinkowska","Joe Line","Megan Line","Tanya Chinnery"]);
+// Hardcoded exclusions — directors and test accounts should never appear in engineer hours
+const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie.Line", "Joe.Line", "Greg.Line", "Test.Account"]);
 function timeToMin(t){if(!t||!t.includes(":"))return null;const[h,m]=t.split(":").map(Number);return h*60+m;}
 function minsToHr(m){return Math.round((m/60)*100)/100;}
 function fmtDate(d){return d.toISOString().split("T")[0];}
@@ -348,16 +349,53 @@ function dow(d){return new Date(d+"T12:00").toLocaleDateString(undefined,{weekda
 function dayNum(d){return new Date(d+"T12:00").getDay();}
 function getWeekKey(dateStr){const d=new Date(dateStr+"T12:00");const sun=new Date(d);sun.setDate(d.getDate()-d.getDay());return sun.toISOString().split("T")[0];}
 function debounce(fn,ms=300){let t;return(...args)=>{clearTimeout(t);t=setTimeout(()=>fn(...args),ms);};}
-async function init(){try{const r=await fetch(USERS_JSON_PATH+"?t="+Date.now(),{cache:"no-store"});const j=await r.json();USERS_RAW=j.Users||j;}catch{USERS_RAW=[];}
-ENGINEERS=USERS_RAW.filter(u=>u.Status==="Active").map(u=>({name:`${u.FirstName} ${u.LastName}`.trim(),username:u.Username,vehicle:u.VehicleAssigned||""})).filter(e=>!OFFICE_BLOCKLIST.has(e.name)).sort((a,b)=>a.name.localeCompare(b.name));
-USERS_RAW.forEach(u=>{if(u.VehicleAssigned)VEHICLE_SET.add(u.VehicleAssigned);});
-const y=new Date();y.setDate(y.getDate()-1);$("date").value=fmtDate(y);
-$("prevDayBtn").onclick=()=>shiftDate(-1);$("nextDayBtn").onclick=()=>shiftDate(1);
-$("date").addEventListener("change",()=>{updateDayForAll();saveDraft();});
-addEngineerLog();restoreDraftIfAny();
-$("refreshChecklistBtn").onclick=()=>refreshChecklist();await refreshChecklist();
-$("addLogBtn").onclick=()=>addEngineerLog();$("submitAllBtn").onclick=()=>submitAll();
-updateDayForAll();}
+async function init(){
+  try{
+    const r=await fetch(USERS_API_URL+"?t="+Date.now(),{cache:"no-store"});
+    const j=await r.json();
+    // Handle any of: { Users: [...] }, [...], { all_users: [...] }, { value: "..." }
+    if (Array.isArray(j)) USERS_RAW = j;
+    else if (Array.isArray(j?.Users)) USERS_RAW = j.Users;
+    else if (Array.isArray(j?.all_users)) USERS_RAW = j.all_users;
+    else if (typeof j?.value === "string") {
+      const parsed = JSON.parse(j.value);
+      USERS_RAW = parsed.Users || parsed.all_users || parsed || [];
+    }
+    else USERS_RAW = [];
+  }catch(err){
+    console.error("Failed to load users from directory:", err);
+    USERS_RAW = [];
+  }
+
+  ENGINEERS = USERS_RAW
+    .filter(u => u.Status === "Active")
+    .filter(u => !HARDCODED_EXCLUDE_USERNAMES.has(u.Username))
+    .map(u => ({
+      name: `${u.FirstName} ${u.LastName}`.trim(),
+      username: u.Username,
+      vehicle: u.VehicleAssigned || ""
+    }))
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  USERS_RAW.forEach(u => { if (u.VehicleAssigned) VEHICLE_SET.add(u.VehicleAssigned); });
+
+  const y = new Date(); y.setDate(y.getDate()-1);
+  $("date").value = fmtDate(y);
+  $("prevDayBtn").onclick = () => shiftDate(-1);
+  $("nextDayBtn").onclick = () => shiftDate(1);
+  $("date").addEventListener("change", () => { updateDayForAll(); saveDraft(); });
+
+  addEngineerLog();
+  restoreDraftIfAny();
+
+  $("refreshChecklistBtn").onclick = () => refreshChecklist();
+  await refreshChecklist();
+
+  $("addLogBtn").onclick = () => addEngineerLog();
+  $("submitAllBtn").onclick = () => submitAll();
+
+  updateDayForAll();
+}
 /* ====== CREATE A LOG BLOCK ====== */
 function addEngineerLog(initial={}) {
   LOG_COUNTER++;
@@ -380,7 +418,7 @@ function addEngineerLog(initial={}) {
           <div>
             <label>Engineer</label>
             <select id="${id}_engineer" required></select>
-            <div class="muted">Active users from users.json</div>
+            <div class="muted">Active users from Mostlane directory</div>
           </div>
           <div>
             <label>Vehicle Used</label>
