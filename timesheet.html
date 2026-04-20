@@ -109,6 +109,15 @@
 
 <script>
 const HOURS_URL = "https://odd-water-f78a.jamie-def.workers.dev/Hours";
+const USERS_URL = "https://mostlane-users.jamie-def.workers.dev/users";
+
+// Auth — matches the rest of the Mostlane portal
+const TOKEN = sessionStorage.getItem("mostlaneToken");
+const CURRENT = sessionStorage.getItem("mostlaneUser");
+if (!CURRENT) { window.location.href = "login.html"; }
+
+// Hardcoded exclusions — directors and test accounts should never appear in engineer timesheets
+const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie.Line", "Joe.Line", "Greg.Line", "Test.Account"]);
 
 const $ = (id)=>document.getElementById(id);
 
@@ -128,14 +137,16 @@ function fmtNice(d){
 function addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 
 // --- State ---
-let RAW = {};                 // GET result from Worker (object keyed by date → arrays)
-let ENGINEERS = [];           // all names discovered
+let RAW = {};                 // GET result from Hours Worker (object keyed by date → arrays)
+let ENGINEERS = [];           // active engineers from user directory
 let currentWeekMon = null;    // Date (Monday)
 let currentEngineer = null;   // string
 
 // Load + init
 window.addEventListener("DOMContentLoaded", async () => {
   $("status").textContent = "Loading…";
+
+  // 1. Fetch hours data
   try{
     const res = await fetch(HOURS_URL + "?t=" + Date.now(), {cache:"no-store"});
     let j = await res.text();
@@ -143,7 +154,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       j = JSON.parse(j);
     } catch (e) {
-      console.warn("Non-JSON response from worker:", j);
+      console.warn("Non-JSON response from hours worker:", j);
       j = {};
     }
 
@@ -155,28 +166,48 @@ window.addEventListener("DOMContentLoaded", async () => {
       RAW = {};
     }
 
-    console.log("✅ RAW loaded:", RAW);
+    console.log("✅ Hours RAW loaded:", RAW);
   }catch(e){
-    $("status").textContent = "Could not load data.";
+    $("status").textContent = "Could not load hours data.";
     RAW = {};
   }
 
-  // Build engineer list from all entries
-  const names = new Set();
-  Object.values(RAW).forEach(arr=>{
-    if(Array.isArray(arr)){
-      arr.forEach(e=>{
-        if(e && typeof e === "object" && e.engineer){
-          names.add(String(e.engineer).trim());
-        } else if (typeof e === "string"){
-          names.add(e.trim());
-        }
-      });
+  // 2. Build engineer list from the Mostlane user directory (single source of truth)
+  try{
+    const ur = await fetch(USERS_URL + "?v=" + Date.now(), {
+      cache: "no-store",
+      headers: TOKEN ? { "Authorization": "Bearer " + TOKEN } : {}
+    });
+    if (ur.status === 401) {
+      sessionStorage.removeItem("mostlaneToken");
+      sessionStorage.removeItem("mostlaneUser");
+      window.location.href = "login.html";
+      return;
     }
-  });
-  ENGINEERS = Array.from(names).sort((a,b)=>a.localeCompare(b));
+    if (!ur.ok) throw new Error("Users API returned " + ur.status);
+    const uj = await ur.json();
+    const users = Array.isArray(uj?.Users) ? uj.Users : [];
 
-  // Fill dropdown
+    ENGINEERS = users
+      .filter(u => u.Status === "Active")
+      .filter(u => !HARDCODED_EXCLUDE_USERNAMES.has(u.Username))
+      .map(u => `${u.FirstName} ${u.LastName}`.trim())
+      .sort((a,b) => a.localeCompare(b));
+  }catch(err){
+    console.error("Failed to load users from directory:", err);
+    // Fallback: scrape from hours data so the page isn't totally broken if users API is down
+    const names = new Set();
+    Object.values(RAW).forEach(arr=>{
+      if(Array.isArray(arr)){
+        arr.forEach(e=>{
+          if(e && typeof e === "object" && e.engineer) names.add(String(e.engineer).trim());
+        });
+      }
+    });
+    ENGINEERS = Array.from(names).sort((a,b)=>a.localeCompare(b));
+  }
+
+  // 3. Fill dropdown
   const sel = $("engineerSel");
   sel.innerHTML = "";
   ENGINEERS.forEach(n=>{
