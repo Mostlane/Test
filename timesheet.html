@@ -95,12 +95,13 @@
         <div class="pill">Standard: <span id="sumStd">0.00</span> h</div>
         <div class="pill">Overtime: <span id="sumOT">0.00</span> h</div>
         <div class="pill">Total: <span id="sumTotal">0.00</span> h</div>
-        <div class="pill">Overtime days: <span id="sumOTDays">0</span> / 5</div>
+        <div class="pill">Overtime days: <span id="sumOTDays">0</span> / 7</div>
       </div>
 
       <div class="note">
         Start = <b>leaveHome</b> · Finish = <b>arriveHome</b>.  
         Overtime day = any day with OT &gt; 0 (ignores excluded entries).
+        Saturday and Sunday shown for weekend / callout hours.
       </div>
 
       <div id="status" class="muted" style="margin-top:10px;"></div>
@@ -249,7 +250,7 @@ function collectWeekEntries(weekMonISO, engineer){
       if (wk === weekMonISO || wk === sundayKey) {
         out.push(e);
       }
-      // Also include if date itself falls within the Mon–Fri window
+      // Also include if date itself falls within the Mon–Sun window
       else if (e.date) {
         const d = new Date(e.date + "T00:00:00");
         if (d >= weekMon && d < addDays(weekMon,7)) out.push(e);
@@ -279,8 +280,8 @@ function render(){
   // Get entries for this engineer + week
   const byDate = collectWeekEntries(weekMonISO, currentEngineer);
 
-  // Build 5 working days Mon..Fri
-  const days = [0,1,2,3,4].map(i => addDays(currentWeekMon, i));
+  // Build full week Mon..Sun
+  const days = [0,1,2,3,4,5,6].map(i => addDays(currentWeekMon, i));
   const tbody = $("tbody");
   tbody.innerHTML = "";
 
