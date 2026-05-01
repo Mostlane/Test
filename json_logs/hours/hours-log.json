@@ -9269,6 +9269,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2026-05-01T08:11:23.319Z"
+    },
+    {
+      "id": "1777623198186-0jjdpj",
+      "receivedAt": "2026-05-01T08:13:18.186Z",
+      "date": "2026-04-22",
+      "day": "Wednesday",
+      "engineer": "Colby Lunsford",
+      "vehicle": "HX69 KHZ",
+      "leaveHome": "07:07",
+      "arriveFirstSite": "07:39",
+      "leaveLastSite": "14:38",
+      "arriveHome": "16:04",
+      "deductLunch": true,
+      "totalHours": 8.45,
+      "standardHours": 8.45,
+      "overtimeHours": null,
+      "travelToHours": 0.53,
+      "travelFromHours": 1.43,
+      "totalTravelHours": 1.96,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2026-05-01T08:13:18.186Z"
     }
   ]
 }
