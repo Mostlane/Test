@@ -9149,6 +9149,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2026-05-01T08:07:22.980Z"
+    },
+    {
+      "id": "1777622921941-ow2cgd",
+      "receivedAt": "2026-05-01T08:08:41.948Z",
+      "date": "2026-04-22",
+      "day": "Wednesday",
+      "engineer": "Chris Freeman",
+      "vehicle": "LB21 VZU",
+      "leaveHome": "06:35",
+      "arriveFirstSite": "08:17",
+      "leaveLastSite": "13:29",
+      "arriveHome": "14:59",
+      "deductLunch": true,
+      "totalHours": 7.9,
+      "standardHours": 7.9,
+      "overtimeHours": null,
+      "travelToHours": 1.7,
+      "travelFromHours": 1.5,
+      "totalTravelHours": 3.2,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2026-05-01T08:08:41.948Z"
     }
   ]
 }
