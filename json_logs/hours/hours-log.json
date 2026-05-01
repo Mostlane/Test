@@ -9599,6 +9599,36 @@
       "notes": "",
       "noteVisible": false,
       "submittedAt": "2026-05-01T08:20:50.558Z"
+    },
+    {
+      "id": "1777623759693-yg027y",
+      "receivedAt": "2026-05-01T08:22:39.710Z",
+      "date": "2026-04-24",
+      "day": "Friday",
+      "engineer": "David Molloy",
+      "vehicle": "HT75 YMM",
+      "leaveHome": "07:33",
+      "arriveFirstSite": "08:55",
+      "leaveLastSite": "17:04",
+      "arriveHome": "18:23",
+      "deductLunch": true,
+      "totalHours": 10.33,
+      "standardHours": 10,
+      "overtimeHours": 0.33,
+      "travelToHours": 1.37,
+      "travelFromHours": 1.32,
+      "totalTravelHours": 2.69,
+      "enhancedOvertimePreview": "Yes",
+      "excludeFromPay": false,
+      "forceEnhanced": false,
+      "manualOvertimeApplied": false,
+      "manualOvertimeHours": null,
+      "vanCheck": "",
+      "vanScore": null,
+      "personalMileage": null,
+      "notes": "",
+      "noteVisible": false,
+      "submittedAt": "2026-05-01T08:22:39.710Z"
     }
   ]
 }
