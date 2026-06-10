@@ -1,9 +1,9 @@
 -- ============================================================================
 -- Mostlane Portal — D1 schema (single database for the whole portal)
 -- Replaces: users.json, timesheets.json, holiday-*.json, vans.json,
---           van-scores.json, po-log.json, suppliers.json, sites.json,
---           assets/*.json, eicr-log*.json, activity-log.json, and the
---           per-Worker KV namespaces.
+--           van-scores.json, sites.json, assets/*.json, eicr-log*.json,
+--           activity-log.json, and the per-Worker KV namespaces.
+-- (Purchase Orders / suppliers are out of scope — separate system.)
 --
 -- Apply:  npx wrangler d1 execute mostlane --file=./schema.sql --remote
 -- Field names mirror the existing JSON so migration is a straight map.
@@ -139,26 +139,8 @@ CREATE TABLE IF NOT EXISTS van_scores (
   week_of  TEXT
 );
 
--- ── Purchase orders (replaces mostlane-po + mostlane-pos + po-log.json) ─────
-CREATE TABLE IF NOT EXISTS purchase_orders (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  po_number   TEXT UNIQUE,
-  engineer    TEXT,
-  site        TEXT,
-  supplier    TEXT,
-  description TEXT,
-  cost        TEXT,                        -- keep as text (existing data has "£x")
-  gps         TEXT,
-  status      TEXT,
-  pdf_link    TEXT,
-  created_at  TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_po_site ON purchase_orders(site);
-
-CREATE TABLE IF NOT EXISTS suppliers (
-  supplier_number TEXT PRIMARY KEY,
-  supplier_name   TEXT NOT NULL
-);
+-- ── Purchase orders: intentionally NOT modelled here.
+--    POs will be handled by a separate external system.
 
 -- ── Sites (replaces mostlane-sites + sites.json) ────────────────────────────
 CREATE TABLE IF NOT EXISTS sites (

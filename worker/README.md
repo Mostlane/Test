@@ -38,11 +38,10 @@ worker/
         ├── hours.js         🟡 /hours /timesheet     (replaces 5 hours Workers)
         ├── holidays.js      🟡 /holiday              (replaces `mostlane-holidays`)
         ├── vehicles.js      🟡 /vehicles /van        (replaces `vehicles`,`vehicles-fuel`)
-        ├── po.js            🟡 /po /suppliers        (replaces `mostlane-po`,`mostlane-pos`)
         ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
         ├── assets.js        🟡 /assets               (replaces `mostlane-assets`)
         ├── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
-        ├── compliance.js    🔴 /Compliance           (needs `mostlane-pos` source)
+        ├── compliance.js    🔴 /Compliance           (needs compliance Worker source)
         ├── projects.js      🔴 /project              (needs `projects-ml-portal`)
         └── labour.js        🔴 /labour               (needs `mostlane-labour-api`)
 ```
@@ -103,8 +102,10 @@ I can do that sweep across all 103 pages once the backend is verified.
 
 Send me each Worker's source (Cloudflare dashboard → Worker → Edit code) and
 I'll port its exact logic into the matching route file. Priority order:
-~~`mostlane-sla`~~ ✅ done, `mostlane-po` + `mostlane-pos`, the hours Workers,
-then the rest.
+~~`mostlane-sla`~~ ✅ done, the hours Workers, `mostlane-holidays`, then the rest.
+
+> **Purchase Orders** (`mostlane-po`, `mostlane-pos`) and suppliers are
+> intentionally **excluded** — they'll be handled by a separate system.
 
 ### SLA notes (done)
 

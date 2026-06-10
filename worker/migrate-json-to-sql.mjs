@@ -41,9 +41,7 @@ if (usersDoc?.Users) {
   }
 }
 
-// ── Suppliers ───────────────────────────────────────────────────────────────
-for (const s of read("suppliers.json") || [])
-  out.push(`INSERT OR REPLACE INTO suppliers (supplier_number, supplier_name) VALUES (${q(s.supplierNumber)}, ${q(s.supplierName)});`);
+// ── Purchase orders & suppliers: intentionally skipped (separate system).
 
 // ── Sites ───────────────────────────────────────────────────────────────────
 for (const s of read("sites.json") || [])
@@ -66,11 +64,6 @@ for (const h of read("holiday-log.json") || [])
 // ── Timesheets ──────────────────────────────────────────────────────────────
 for (const t of read("timesheets.json") || [])
   out.push(`INSERT INTO timesheets (engineer, date, start, finish, lunch_deducted, travel_time, job_type, job_number, source) VALUES (${q(t.Engineer)}, ${q(t.Date)}, ${q(t.Start)}, ${q(t.Finish)}, ${t.LunchDeducted ? 1 : 0}, ${t.TravelTime ?? "NULL"}, ${q(t.JobType)}, ${q(t.JobNumber)}, 'migrated');`);
-
-// ── Purchase orders ─────────────────────────────────────────────────────────
-const poDoc = read("po-log.json");
-for (const p of poDoc?.entries || [])
-  out.push(`INSERT OR REPLACE INTO purchase_orders (po_number, engineer, site, supplier, description, cost, gps, status, pdf_link, created_at) VALUES (${q(p.poNumber)}, ${q(p.engineer)}, ${q(p.site)}, ${q(p.supplier)}, ${q(p.description)}, ${q(p.cost)}, ${q(p.gps)}, ${q(p.status)}, ${q(p.pdfLink)}, ${q(p.timestamp)});`);
 
 writeFileSync(join(dirname(fileURLToPath(import.meta.url)), "seed.sql"), out.join("\n") + "\n");
 console.log(`Wrote seed.sql with ${out.length} statements.`);

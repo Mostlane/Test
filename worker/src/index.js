@@ -24,7 +24,6 @@ import * as checkinout from "./routes/checkinout.js"; // STUB <- ckeck-in-out
 import * as hours from "./routes/hours.js";        // STUB <- odd-water/average-hours/labourhours/timesheet
 import * as holidays from "./routes/holidays.js";  // STUB <- mostlane-holidays
 import * as vehicles from "./routes/vehicles.js";  // STUB <- vehicles / vehicles-fuel
-import * as po from "./routes/po.js";              // STUB <- mostlane-po / mostlane-pos
 import * as sites from "./routes/sites.js";        // STUB <- mostlane-sites
 import * as assets from "./routes/assets.js";      // STUB <- mostlane-assets
 import * as sla from "./routes/sla.js";            // STUB <- mostlane-sla
@@ -45,8 +44,7 @@ const ROUTES = [
   ["*", "/holiday",    holidays.handle],
   ["*", "/vehicle",    vehicles.handle],
   ["*", "/van",        vehicles.handle],
-  ["*", "/po",         po.handle],
-  ["*", "/suppliers",  po.suppliers],
+  // Purchase Orders intentionally excluded — handled by a separate system.
   ["*", "/sites",      sites.handle],
   ["*", "/site",       sites.handle],
   ["*", "/asset",      assets.handle],
