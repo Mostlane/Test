@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { preflight, error, json } from "./lib/http.js";
+import { requireSession } from "./lib/auth.js";
 import * as auth from "./routes/auth.js";          // DONE  (login, logout, me)
 import * as users from "./routes/users.js";        // DONE  (/user, /users)
 import * as devices from "./routes/devices.js";    // DONE  (device lock)
@@ -65,6 +66,16 @@ export default {
       return json({ ok: true, service: "mostlane-portal", time: new Date().toISOString() }, {}, env, request);
     }
 
+    // ── Auth gate ──────────────────────────────────────────────────────────
+    // Every endpoint requires a valid session token EXCEPT the public ones
+    // below. This closes the "no token needed" hole on the data APIs while
+    // leaving open the routes that browsers / <img> tags / native deep-links
+    // hit without an Authorization header.
+    if (!isPublic(request.method, url.pathname)) {
+      const sess = await requireSession(env, request);
+      if (!sess) return error("Not authenticated", 401, env, request);
+    }
+
     // Dispatch by longest matching prefix
     const match = ROUTES
       .filter(([, prefix]) => url.pathname === prefix || url.pathname.startsWith(prefix + "/") || url.pathname.startsWith(prefix))
@@ -80,3 +91,20 @@ export default {
     }
   },
 };
+
+// Routes reachable WITHOUT a session token.
+const PUBLIC_ROUTES = [
+  ["POST", "/auth/login"],
+  ["POST", "/auth/forgot-password"],
+  ["POST", "/auth/reset-password"],
+  // Image bytes are loaded by <img> tags, which can't send an auth header.
+  ["GET", "/asset-image"],
+  ["GET", "/asset-thumb"],
+];
+
+function isPublic(method, pathname) {
+  if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
+  // SLA job sheet downloads are opened as plain browser links (no header).
+  if (method === "GET" && /^\/sla\/jobs\/[^/]+\/export(\.pdf)?$/.test(pathname)) return true;
+  return false;
+}

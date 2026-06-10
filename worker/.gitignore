@@ -2,3 +2,4 @@ node_modules/
 .dev.vars
 .wrangler/
 seed.sql
+kv-seed.sql

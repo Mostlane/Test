@@ -59,6 +59,17 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
   }
 
+  // Rotate the session token and extend its expiry (mobile apps call this to
+  // stay signed in without forcing a re-login).
+  if (path === "/auth/refresh" && request.method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { token, expires } = await createSession(env, sess.user.username, sess.session.device_id);
+    await destroySession(env, sess.session.token);
+    const perms = await permissionsFor(env, sess.user.username);
+    return json({ ok: true, token, expires, user: shapeUser(sess.user, perms) }, {}, env, request);
+  }
+
   // ── Self-service: change own password (logged in) ──────────────────────────
   if (path === "/auth/change-password" && request.method === "POST") {
     const sess = await requireSession(env, request);

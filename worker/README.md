@@ -154,9 +154,14 @@ Admin endpoints require a valid session token whose user has `FullAccess` or
 **Zapier Catch Hook → Outlook/365 send email**. Set `APP_BASE_URL` to the portal
 URL so links resolve. Swap the webhook for Graph/Resend later if you prefer.
 
-> Note: admin/user endpoints are now token-enforced. Enforcing the token on
-> *every* data endpoint (holidays/SLA/assets/etc.) is the remaining security
-> hardening step.
+> ✅ Token enforcement is now global: `src/index.js` rejects any request without
+> a valid session token except a small public allowlist (login, forgot/reset
+> password, and image/`export` GETs that browsers fetch without headers).
+> `POST /auth/refresh` rotates the token for long-lived app sessions.
+
+**Deploying?** See [`DEPLOY.md`](./DEPLOY.md) for the full 10-minute runbook
+(D1 create, secrets, KV→D1 migration, deploy, one-line cutover) plus the
+Apple/Android app notes.
 
 ### Holidays notes (done)
 
