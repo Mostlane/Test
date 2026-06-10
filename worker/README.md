@@ -74,24 +74,36 @@ npm run db:seed
 npm run deploy
 ```
 
-## Front-end change (later, one line per page)
+## Front-end bridge & cutover (`/portal-config.js`)
 
-Every page currently hard-codes a different Worker host. Once this is live we
-point them all at the single base URL, e.g.:
+All 103 root pages now include `/portal-config.js` as the first thing in
+`<head>` (done — see `tools/inject-portal-config.mjs`). That one file:
+
+1. Holds the single API base URL (`window.MOSTLANE_API`).
+2. Transparently rewrites calls aimed at the OLD per-feature workers to the new
+   one (so existing `fetch()` calls keep working untouched).
+3. Attaches the login session token (`Authorization: Bearer`) to those calls.
+
+**It is a no-op until configured.** While `MOSTLANE_API` still contains
+`REPLACE-ME`, every page keeps calling its existing worker exactly as before —
+so this was safe to commit before the worker is even deployed.
+
+### Cutover = edit ONE line
+
+After `npx wrangler deploy`, set the real URL in `portal-config.js`:
 
 ```js
-const API = "https://mostlane-portal.<your-subdomain>.workers.dev";
+window.MOSTLANE_API = "https://mostlane-portal.<your-subdomain>.workers.dev";
 ```
 
-and add the session token to calls:
+From that moment, all pages route the **migrated** features to the new worker:
+`login`, `mostlane-users`, `mostlane-holidays`, `mostlane-assets`,
+`mostlane-sla`, `userdevicekv`. Anything not yet ported keeps hitting its old
+worker until you add its host to the `ROUTES` list in `portal-config.js`.
 
-```js
-fetch(API + "/user?u=" + username, {
-  headers: { Authorization: "Bearer " + localStorage.getItem("mostlaneToken") }
-});
-```
-
-I can do that sweep across all 103 pages once the backend is verified.
+Login now stores the server session token (`mostlaneToken`); the bridge sends it
+on every API call. Full server-side enforcement of that token on all endpoints
+lands with the users/auth overhaul.
 
 ## Passwords & security
 

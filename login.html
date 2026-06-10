@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/portal-config.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mostlane Portal Login</title>
@@ -134,6 +135,10 @@ if (!result.ok) {
   return;
 }
 const user = result.user;
+
+        // ✅ Store the server session token (consolidated worker). Old login
+        // worker doesn't return one, so this is a no-op until cutover.
+        if (result.token) localStorage.setItem('mostlaneToken', result.token);
 
         // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);

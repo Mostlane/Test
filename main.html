@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <script src="/portal-config.js"></script>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -160,7 +161,7 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
     <!-- FIXED -->
-    <a class="button visible" href="javascript:void(0)" onclick="sessionStorage.clear(); window.location.href='login.html';">
+    <a class="button visible" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
     </a>
 
