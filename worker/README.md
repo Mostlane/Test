@@ -31,25 +31,21 @@ worker/
     │   ├── http.js          # JSON + CORS helpers
     │   └── auth.js          # PBKDF2 passwords + server-side sessions
     └── routes/
-        ├── auth.js          ✅ login / logout / me   (replaces `login`)
-        ├── users.js         ✅ /user /users          (replaces `mostlane-users`)
-        ├── devices.js       ✅ device lock           (replaces `userdevicekv`)
-        ├── checkinout.js    🟡 /check                (replaces `ckeck-in-out`)
-        ├── holidays.js      ✅ /holiday/*             (replaces `mostlane-holidays`)
-        ├── vehicles.js      🟡 /vehicles /van        (replaces `vehicles`,`vehicles-fuel`)
-        ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
-        ├── assets.js        ✅ /assets, /asset/*      (replaces `mostlane-assets`; images→R2)
-        ├── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
-        ├── compliance.js    🔴 /Compliance           (needs compliance Worker source)
-        └── projects.js      🔴 /project              (needs `projects-ml-portal`)
+        ├── auth.js          ✅ /auth/*               (replaces `login`; + passwords/refresh)
+        ├── users.js         ✅ /user /users          (replaces `mostlane-users`; + admin mgmt)
+        ├── devices.js       ✅ /device/*             (replaces `userdevicekv`)
+        ├── holidays.js      ✅ /holiday/*            (replaces `mostlane-holidays`)
+        ├── assets.js        ✅ /assets, /asset/*     (replaces `mostlane-assets`; images→R2)
+        └── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
 ```
 
-✅ done · 🟡 working but verify against original · 🔴 stub, needs your Worker code
+✅ done — every section in the consolidated worker is fully ported.
 
-**Out of scope (separate / later systems):** Purchase Orders & suppliers
-(`mostlane-po`, `mostlane-pos`), Hours/Timesheets (`odd-water-f78a`,
-`average-hours`, `labourhours`, `timesheet`), Labour Planning
-(`mostlane-labour-api`).
+**Out of scope (separate / later systems):** Purchase Orders & suppliers,
+Hours/Timesheets, Labour Planning, Check-in/out, Vehicles, Sites, Compliance,
+Projects. These keep using their existing workers (they aren't listed in the
+`portal-config.js` bridge), and can be folded in later by adding a route module
++ a `ROUTES` entry.
 
 ## One-time setup
 

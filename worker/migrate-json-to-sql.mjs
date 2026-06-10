@@ -41,17 +41,8 @@ if (usersDoc?.Users) {
   }
 }
 
-// ── Purchase orders & suppliers: intentionally skipped (separate system).
-
-// ── Sites ───────────────────────────────────────────────────────────────────
-for (const s of read("sites.json") || [])
-  out.push(`INSERT OR REPLACE INTO sites (job_number, site_name, site_type, status, address, lat, lon, mileage, drive_time) VALUES (${q(s.jobNumber)}, ${q(s.siteName)}, ${q(s.siteType)}, ${q(s.status || "Active")}, ${q(s.address)}, ${s.lat ?? "NULL"}, ${s.lon ?? "NULL"}, ${s.mileage ?? "NULL"}, ${q(s.driveTime)});`);
-
-// ── Vehicles + scores ───────────────────────────────────────────────────────
-for (const v of read("vans.json") || [])
-  if (v.reg) out.push(`INSERT OR REPLACE INTO vehicles (reg, driver) VALUES (${q(v.reg)}, ${q(v.driver)});`);
-for (const v of read("van-scores.json") || [])
-  out.push(`INSERT INTO van_scores (driver, van, mileage, trips, van_check, score, trend) VALUES (${q(v.driver)}, ${q(v.van)}, ${v.mileage ?? "NULL"}, ${v.trips ?? "NULL"}, ${v.van_check ? 1 : 0}, ${v.score ?? "NULL"}, ${q(v.trend)});`);
+// ── Purchase orders, suppliers, sites, vehicles, check-in/out, hours, labour,
+//    compliance, projects: intentionally skipped (separate / later systems).
 
 // ── Assets (blob model: full JSON in `data`). NOTE: this is repo seed/test
 //    data; the live assets live in the assets Worker's ASSETS_KV and should be

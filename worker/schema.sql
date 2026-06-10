@@ -83,21 +83,9 @@ CREATE TABLE IF NOT EXISTS login_history (
   at        TEXT DEFAULT (datetime('now'))
 );
 
--- ── Check in / out (replaces ckeck-in-out Worker + checkinout logs) ─────────
-CREATE TABLE IF NOT EXISTS check_events (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  username  TEXT NOT NULL,
-  type      TEXT NOT NULL,               -- in | out
-  site      TEXT,
-  job_number TEXT,
-  lat       REAL,
-  lon       REAL,
-  at        TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_check_user_at ON check_events(username, at);
-
--- ── Hours / timesheets / labour planning: intentionally NOT modelled here
---    (handled by separate / later systems).
+-- ── Check-in/out, Hours/Timesheets, Labour, Vehicles, Sites, Compliance,
+--    Projects and Purchase Orders are intentionally NOT modelled here — they're
+--    handled by separate / later systems.
 
 -- ── Holidays (full port of mostlane-holidays Worker) ────────────────────────
 -- Leave requests (was HOLIDAYS_KV `holiday:<id>`).
@@ -165,39 +153,6 @@ CREATE TABLE IF NOT EXISTS holiday_log (
 --   holiday:bankholidays:<year>  -> [ { "date": "...", "label": "..." }, ... ]
 --   holiday:shutdown:<year>      -> [ { "date": "...", "label": "..." }, ... ]
 
--- ── Vehicles (replaces vehicles, vehicles-fuel, vans/van-scores json) ───────
-CREATE TABLE IF NOT EXISTS vehicles (
-  reg     TEXT PRIMARY KEY,
-  driver  TEXT
-);
-CREATE TABLE IF NOT EXISTS van_scores (
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  driver   TEXT,
-  van      TEXT,
-  mileage  REAL,
-  trips    INTEGER,
-  van_check INTEGER DEFAULT 0,
-  score    INTEGER,
-  trend    TEXT,
-  week_of  TEXT
-);
-
--- ── Purchase orders: intentionally NOT modelled here.
---    POs will be handled by a separate external system.
-
--- ── Sites (replaces mostlane-sites + sites.json) ────────────────────────────
-CREATE TABLE IF NOT EXISTS sites (
-  job_number TEXT PRIMARY KEY,
-  site_name  TEXT,
-  site_type  TEXT,
-  status     TEXT DEFAULT 'Active',
-  address    TEXT,
-  lat        REAL,
-  lon        REAL,
-  mileage    REAL,
-  drive_time TEXT
-);
-
 -- ── Assets / plant (full port of mostlane-assets Worker) ────────────────────
 -- The Worker stored each asset as free-form JSON (ASSETS_KV key = asset id),
 -- merging updates with {...existing, ...body}. We keep that exactly: full JSON
@@ -251,32 +206,5 @@ CREATE TABLE IF NOT EXISTS app_config (
   value TEXT NOT NULL
 );
 
--- ── Compliance (replaces mostlane-pos /Compliance + Compliance/*.json) ──────
-CREATE TABLE IF NOT EXISTS compliance (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  client     TEXT,                         -- cobra | wenzels | retail | els | ...
-  site       TEXT,
-  doc_type   TEXT,
-  status     TEXT,
-  file_link  TEXT,
-  payload    TEXT,                         -- JSON blob
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
--- ── Projects (replaces projects-ml-portal) ──────────────────────────────────
-CREATE TABLE IF NOT EXISTS projects (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  name       TEXT,
-  status     TEXT,
-  payload    TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
--- ── Generic activity log (replaces activity-log.json) ───────────────────────
-CREATE TABLE IF NOT EXISTS activity_log (
-  id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT,
-  action   TEXT,
-  detail   TEXT,
-  at       TEXT DEFAULT (datetime('now'))
-);
+-- ── Compliance and Projects are intentionally NOT modelled here yet —
+--    they'll be added (or handled by separate systems) later.
