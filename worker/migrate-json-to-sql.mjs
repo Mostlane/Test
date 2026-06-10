@@ -57,9 +57,10 @@ for (const v of read("van-scores.json") || [])
 for (const a of read("assets/assets.json") || [])
   out.push(`INSERT OR REPLACE INTO assets (id, name, category, serial, value, assigned_to, shared) VALUES (${q(a.id)}, ${q(a.name)}, ${q(a.category)}, ${q(a.serial)}, ${q(a.value)}, ${q(a.assignedTo)}, ${q(a.shared)});`);
 
-// ── Holidays ────────────────────────────────────────────────────────────────
-for (const h of read("holiday-log.json") || [])
-  out.push(`INSERT INTO holidays (name, start, end, type, status, notes) VALUES (${q(h.name)}, ${q(h.start)}, ${q(h.end)}, ${q(h.type)}, ${q(h.status || "Pending")}, ${q(h.notes)});`);
+// ── Holidays: NOT migrated from repo JSON. Live holiday data lives in the
+//    mostlane-holidays Worker's KV (HOLIDAYS_KV / HOLIDAY_CONFIG_KV), and the
+//    repo's holiday-log.json is stale sample data with no year/id/days. Use the
+//    KV export step (see README "Migrating KV data") instead.
 
 // ── Hours / timesheets / labour: intentionally skipped (separate systems).
 

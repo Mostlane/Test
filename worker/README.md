@@ -35,7 +35,7 @@ worker/
         ├── users.js         ✅ /user /users          (replaces `mostlane-users`)
         ├── devices.js       ✅ device lock           (replaces `userdevicekv`)
         ├── checkinout.js    🟡 /check                (replaces `ckeck-in-out`)
-        ├── holidays.js      🟡 /holiday              (replaces `mostlane-holidays`)
+        ├── holidays.js      ✅ /holiday/*             (replaces `mostlane-holidays`)
         ├── vehicles.js      🟡 /vehicles /van        (replaces `vehicles`,`vehicles-fuel`)
         ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
         ├── assets.js        🟡 /assets               (replaces `mostlane-assets`)
@@ -112,6 +112,29 @@ port: `mostlane-holidays`, `vehicles`/`vehicles-fuel`, `mostlane-sites`,
 > (`mostlane-po`, `mostlane-pos`), Hours/Timesheets (`odd-water-f78a`,
 > `average-hours`, `labourhours`, `timesheet`), Labour Planning
 > (`mostlane-labour-api`).
+
+### Holidays notes (done)
+
+- Routes keep their `/holiday/*` paths, so the front-end change is just the base
+  URL: `const API = "<new-worker-url>"` in `holiday.html` and `holiday-admin.html`.
+- Identity: still reads `X-User` / `X-Role` headers (so those pages work
+  unchanged), falling back to the verified session token if absent. ⚠️ Like the
+  original, the header path trusts the client — tighten this in the security pass
+  so `Admin`/`Director` is derived server-side from permissions, not a header.
+- All KV moved to D1: requests → `holidays`, bank-holiday/shutdown days →
+  `holiday_system_days`, per-user allowances → `holiday_allowance`, audit →
+  `holiday_log`; year config + date lists → `app_config`. Active-user list now
+  comes from the D1 `users` table instead of `USERS_KV`.
+- **`holiday-config.html` is broken/superseded** (posts to a non-existent
+  `/holiday/config` and sends the wrong role) — delete it; `holiday-admin.html`
+  already does config correctly. Not ported.
+
+### Migrating KV data (SLA + Holidays)
+
+The JSON seed only covers repo files. **SLA jobs and all holiday data live in
+the live Workers' KV**, not the repo, so they need a one-off KV → D1 export at
+cutover (dump each KV namespace with `wrangler kv key list/get`, transform to
+`INSERT`s). I can generate that export script when you're ready to migrate.
 
 ### SLA notes (done)
 

@@ -9,7 +9,7 @@ export function corsHeaders(env, request) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User, X-Role",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };

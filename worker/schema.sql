@@ -88,26 +88,71 @@ CREATE INDEX IF NOT EXISTS idx_check_user_at ON check_events(username, at);
 -- ── Hours / timesheets / labour planning: intentionally NOT modelled here
 --    (handled by separate / later systems).
 
--- ── Holidays (replaces mostlane-holidays, holiday-log/summary.json) ─────────
+-- ── Holidays (full port of mostlane-holidays Worker) ────────────────────────
+-- Leave requests (was HOLIDAYS_KV `holiday:<id>`).
 CREATE TABLE IF NOT EXISTS holidays (
-  id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  name    TEXT NOT NULL,                  -- username
-  start   TEXT NOT NULL,
-  end     TEXT NOT NULL,
-  type    TEXT,                           -- Annual Leave | Sick | Bank Holiday | ...
-  status  TEXT DEFAULT 'Pending',         -- Pending | Approved | Rejected
-  notes   TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
+  id           TEXT PRIMARY KEY,          -- "H-<timestamp>"
+  username     TEXT NOT NULL,
+  engineer     TEXT,                      -- display name (username with dot->space)
+  year         INTEGER NOT NULL,
+  start_date   TEXT NOT NULL,
+  end_date     TEXT NOT NULL,
+  days         INTEGER,                   -- weekdays inclusive
+  type         TEXT,                      -- Annual Leave | Sick | ...
+  notes        TEXT,
+  status       TEXT DEFAULT 'Pending',    -- Pending | Approved | Rejected | Cancelled
+  submitted_at TEXT,
+  approved_by  TEXT,
+  decision_at  TEXT,
+  cancelled_by TEXT,
+  cancel_note  TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_holidays_name ON holidays(name);
+CREATE INDEX IF NOT EXISTS idx_holidays_user_year ON holidays(username, year);
+CREATE INDEX IF NOT EXISTS idx_holidays_year_status ON holidays(year, status);
 
--- Per-user yearly allowance (replaces holiday-summary.json header figures)
-CREATE TABLE IF NOT EXISTS holiday_allowance (
-  username  TEXT PRIMARY KEY,
-  available INTEGER DEFAULT 28,
-  carried   INTEGER DEFAULT 0,
-  year      INTEGER
+-- System-generated per-user days for bank holidays & company shutdowns
+-- (was HOLIDAYS_KV `system:<kind>:<year>:<date>:<username>`).
+CREATE TABLE IF NOT EXISTS holiday_system_days (
+  kind       TEXT NOT NULL,               -- 'bankholiday' | 'shutdown'
+  year       INTEGER NOT NULL,
+  date       TEXT NOT NULL,
+  username   TEXT NOT NULL,
+  id         TEXT,
+  engineer   TEXT,
+  label      TEXT,
+  days       INTEGER DEFAULT 1,
+  category   TEXT,                         -- 'BankHoliday' | 'Shutdown'
+  worked     INTEGER DEFAULT 0,            -- 0/1
+  status     TEXT,                         -- 'Deducted' | 'Credited'
+  created_at TEXT,
+  updated_by TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (kind, year, date, username)
 );
+CREATE INDEX IF NOT EXISTS idx_sysdays_year_user ON holiday_system_days(year, username);
+
+-- Per-user yearly allowance override (was HOLIDAY_CONFIG_KV `allowance:<year>:<user>`).
+CREATE TABLE IF NOT EXISTS holiday_allowance (
+  year      INTEGER NOT NULL,
+  username  TEXT NOT NULL,
+  allowance INTEGER NOT NULL,
+  PRIMARY KEY (year, username)
+);
+
+-- Audit log (was HOLIDAY_LOG_KV `log:<id>:<ts>`).
+CREATE TABLE IF NOT EXISTS holiday_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id TEXT,
+  action     TEXT,
+  by_user    TEXT,
+  at         TEXT DEFAULT (datetime('now'))
+);
+
+-- Year config (defaultAllowance) and the bank-holiday / shutdown date lists are
+-- stored in app_config under keys:
+--   holiday:config:<year>        -> { "defaultAllowance": 28 }
+--   holiday:bankholidays:<year>  -> [ { "date": "...", "label": "..." }, ... ]
+--   holiday:shutdown:<year>      -> [ { "date": "...", "label": "..." }, ... ]
 
 -- ── Vehicles (replaces vehicles, vehicles-fuel, vans/van-scores json) ───────
 CREATE TABLE IF NOT EXISTS vehicles (
