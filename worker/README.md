@@ -38,7 +38,7 @@ worker/
         ├── holidays.js      ✅ /holiday/*             (replaces `mostlane-holidays`)
         ├── vehicles.js      🟡 /vehicles /van        (replaces `vehicles`,`vehicles-fuel`)
         ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
-        ├── assets.js        🟡 /assets               (replaces `mostlane-assets`)
+        ├── assets.js        ✅ /assets, /asset/*      (replaces `mostlane-assets`; images→R2)
         ├── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
         ├── compliance.js    🔴 /Compliance           (needs compliance Worker source)
         └── projects.js      🔴 /project              (needs `projects-ml-portal`)
@@ -129,12 +129,26 @@ port: `mostlane-holidays`, `vehicles`/`vehicles-fuel`, `mostlane-sites`,
   `/holiday/config` and sends the wrong role) — delete it; `holiday-admin.html`
   already does config correctly. Not ported.
 
-### Migrating KV data (SLA + Holidays)
+### Assets notes (done)
 
-The JSON seed only covers repo files. **SLA jobs and all holiday data live in
-the live Workers' KV**, not the repo, so they need a one-off KV → D1 export at
-cutover (dump each KV namespace with `wrangler kv key list/get`, transform to
-`INSERT`s). I can generate that export script when you're ready to migrate.
+- Routes keep their original paths, so the front-end change is just the base URL
+  in `assets-admin.html`, `my-assets.html`, `shared-assets.html`.
+- Assets stored as full JSON (faithful to the Worker's schemaless `{...existing,
+  ...body}` merge); `assigned_to` denormalised for `/assets?user=`.
+- **Images stay in R2** (`ASSET_BUCKET`) — point `bucket_name` in wrangler.toml
+  at the assets Worker's existing bucket so current images keep resolving.
+- Image URLs are served by this Worker at `/asset-image?key=` / `/asset-thumb`.
+  Existing stored image URLs point at the *old* worker origin — rewrite them to
+  the new origin during the KV export (below), or keep the old worker alive for
+  images only during transition.
+
+### Migrating KV data (SLA + Holidays + Assets)
+
+The JSON seed only covers repo files. **SLA jobs, all holiday data, and the live
+asset records live in the Workers' KV**, not the repo, so they need a one-off
+KV → D1 export at cutover (dump each KV namespace with `wrangler kv key
+list/get`, transform to `INSERT`s; rewrite asset image origins). I can generate
+that export script when you're ready to migrate.
 
 ### SLA notes (done)
 

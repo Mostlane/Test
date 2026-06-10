@@ -26,6 +26,12 @@ database_id = "PASTE_DATABASE_ID_HERE"
 binding = "JOB_FILES"
 bucket_name = "mostlane-job-files"   # set to the SLA Worker's existing bucket name
 
+# Asset photos (reuses the mostlane-assets Worker's existing bucket so old
+# images keep resolving).
+[[r2_buckets]]
+binding = "ASSET_BUCKET"
+bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucket name
+
 # ── Secrets (set via `wrangler secret put`, never commit them) ───────
 # SESSION_SECRET     - HMAC key used to sign session tokens
 #   npx wrangler secret put SESSION_SECRET

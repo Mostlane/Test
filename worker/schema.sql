@@ -187,23 +187,28 @@ CREATE TABLE IF NOT EXISTS sites (
   drive_time TEXT
 );
 
--- ── Assets / plant (replaces mostlane-assets + assets/*.json) ───────────────
+-- ── Assets / plant (full port of mostlane-assets Worker) ────────────────────
+-- The Worker stored each asset as free-form JSON (ASSETS_KV key = asset id),
+-- merging updates with {...existing, ...body}. We keep that exactly: full JSON
+-- in `data`, with assigned_to denormalised for the /assets?user= filter.
+-- Asset images stay in the ASSET_BUCKET R2 bucket.
 CREATE TABLE IF NOT EXISTS assets (
   id          TEXT PRIMARY KEY,
-  name        TEXT,
-  category    TEXT,
-  serial      TEXT,
-  value       TEXT,
   assigned_to TEXT,
-  shared      TEXT
+  data        TEXT NOT NULL                -- full asset JSON (name, serial, value,
+                                           -- shared, calibrationDate, images[], ...)
 );
+CREATE INDEX IF NOT EXISTS idx_assets_assigned ON assets(assigned_to);
+
+-- Transfer log (was ASSET_LOG_KV key `<assetID>-<timestamp>`). Full log JSON in
+-- `data`; asset_id + at denormalised for lookups/ordering.
 CREATE TABLE IF NOT EXISTS asset_transfers (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  asset_id  TEXT,
-  from_user TEXT,
-  to_user   TEXT,
-  at        TEXT DEFAULT (datetime('now'))
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id TEXT NOT NULL,
+  at       TEXT,
+  data     TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_asset_tx_asset ON asset_transfers(asset_id);
 
 -- ── SLA jobs (replaces mostlane-sla Worker's SLA_JOBS KV) ───────────────────
 -- Indexed columns drive the list filters; `data` holds the full job object

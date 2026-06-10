@@ -24,7 +24,7 @@ import * as checkinout from "./routes/checkinout.js"; // STUB <- ckeck-in-out
 import * as holidays from "./routes/holidays.js";  // STUB <- mostlane-holidays
 import * as vehicles from "./routes/vehicles.js";  // STUB <- vehicles / vehicles-fuel
 import * as sites from "./routes/sites.js";        // STUB <- mostlane-sites
-import * as assets from "./routes/assets.js";      // STUB <- mostlane-assets
+import * as assets from "./routes/assets.js";      // DONE  (replaces mostlane-assets)
 import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-sla)
 import * as compliance from "./routes/compliance.js"; // STUB <- compliance Worker
 import * as projects from "./routes/projects.js";  // STUB <- projects-ml-portal
@@ -44,8 +44,10 @@ const ROUTES = [
   // Hours/Timesheets, Labour Planning.
   ["*", "/sites",      sites.handle],
   ["*", "/site",       sites.handle],
-  ["*", "/asset",      assets.handle],
-  ["*", "/transfer-log", assets.transferLog],
+  ["*", "/asset",      assets.handle],   // /assets, /asset/*, /asset-image, /asset-thumb
+  ["*", "/transfer",   assets.handle],   // /transfer, /transfer-log
+  ["*", "/upload-asset-image", assets.handle],
+  ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
   ["*", "/compliance", compliance.handle],
   ["*", "/Compliance", compliance.handle],

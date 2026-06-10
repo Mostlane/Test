@@ -53,9 +53,11 @@ for (const v of read("vans.json") || [])
 for (const v of read("van-scores.json") || [])
   out.push(`INSERT INTO van_scores (driver, van, mileage, trips, van_check, score, trend) VALUES (${q(v.driver)}, ${q(v.van)}, ${v.mileage ?? "NULL"}, ${v.trips ?? "NULL"}, ${v.van_check ? 1 : 0}, ${v.score ?? "NULL"}, ${q(v.trend)});`);
 
-// ── Assets ──────────────────────────────────────────────────────────────────
+// ── Assets (blob model: full JSON in `data`). NOTE: this is repo seed/test
+//    data; the live assets live in the assets Worker's ASSETS_KV and should be
+//    brought over via the KV export at cutover (see README "Migrating KV data").
 for (const a of read("assets/assets.json") || [])
-  out.push(`INSERT OR REPLACE INTO assets (id, name, category, serial, value, assigned_to, shared) VALUES (${q(a.id)}, ${q(a.name)}, ${q(a.category)}, ${q(a.serial)}, ${q(a.value)}, ${q(a.assignedTo)}, ${q(a.shared)});`);
+  out.push(`INSERT OR REPLACE INTO assets (id, assigned_to, data) VALUES (${q(a.id)}, ${q(a.assignedTo)}, ${q(JSON.stringify(a))});`);
 
 // ── Holidays: NOT migrated from repo JSON. Live holiday data lives in the
 //    mostlane-holidays Worker's KV (HOLIDAYS_KV / HOLIDAY_CONFIG_KV), and the
