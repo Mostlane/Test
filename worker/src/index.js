@@ -21,15 +21,13 @@ import * as auth from "./routes/auth.js";          // DONE  (login, logout, me)
 import * as users from "./routes/users.js";        // DONE  (/user, /users)
 import * as devices from "./routes/devices.js";    // DONE  (device lock)
 import * as checkinout from "./routes/checkinout.js"; // STUB <- ckeck-in-out
-import * as hours from "./routes/hours.js";        // STUB <- odd-water/average-hours/labourhours/timesheet
 import * as holidays from "./routes/holidays.js";  // STUB <- mostlane-holidays
 import * as vehicles from "./routes/vehicles.js";  // STUB <- vehicles / vehicles-fuel
 import * as sites from "./routes/sites.js";        // STUB <- mostlane-sites
 import * as assets from "./routes/assets.js";      // STUB <- mostlane-assets
-import * as sla from "./routes/sla.js";            // STUB <- mostlane-sla
-import * as compliance from "./routes/compliance.js"; // STUB <- mostlane-pos /Compliance
+import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-sla)
+import * as compliance from "./routes/compliance.js"; // STUB <- compliance Worker
 import * as projects from "./routes/projects.js";  // STUB <- projects-ml-portal
-import * as labour from "./routes/labour.js";      // STUB <- mostlane-labour-api
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -39,12 +37,11 @@ const ROUTES = [
   ["*", "/user",       users.handle],   // /user and /users
   ["*", "/device",     devices.handle],
   ["*", "/check",      checkinout.handle],
-  ["*", "/hours",      hours.handle],
-  ["*", "/timesheet",  hours.handle],
   ["*", "/holiday",    holidays.handle],
   ["*", "/vehicle",    vehicles.handle],
   ["*", "/van",        vehicles.handle],
-  // Purchase Orders intentionally excluded — handled by a separate system.
+  // Excluded for now (separate / later systems): Purchase Orders,
+  // Hours/Timesheets, Labour Planning.
   ["*", "/sites",      sites.handle],
   ["*", "/site",       sites.handle],
   ["*", "/asset",      assets.handle],
@@ -53,7 +50,6 @@ const ROUTES = [
   ["*", "/compliance", compliance.handle],
   ["*", "/Compliance", compliance.handle],
   ["*", "/project",    projects.handle],
-  ["*", "/labour",     labour.handle],
 ];
 
 export default {

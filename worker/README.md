@@ -35,18 +35,21 @@ worker/
         ├── users.js         ✅ /user /users          (replaces `mostlane-users`)
         ├── devices.js       ✅ device lock           (replaces `userdevicekv`)
         ├── checkinout.js    🟡 /check                (replaces `ckeck-in-out`)
-        ├── hours.js         🟡 /hours /timesheet     (replaces 5 hours Workers)
         ├── holidays.js      🟡 /holiday              (replaces `mostlane-holidays`)
         ├── vehicles.js      🟡 /vehicles /van        (replaces `vehicles`,`vehicles-fuel`)
         ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
         ├── assets.js        🟡 /assets               (replaces `mostlane-assets`)
         ├── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
         ├── compliance.js    🔴 /Compliance           (needs compliance Worker source)
-        ├── projects.js      🔴 /project              (needs `projects-ml-portal`)
-        └── labour.js        🔴 /labour               (needs `mostlane-labour-api`)
+        └── projects.js      🔴 /project              (needs `projects-ml-portal`)
 ```
 
 ✅ done · 🟡 working but verify against original · 🔴 stub, needs your Worker code
+
+**Out of scope (separate / later systems):** Purchase Orders & suppliers
+(`mostlane-po`, `mostlane-pos`), Hours/Timesheets (`odd-water-f78a`,
+`average-hours`, `labourhours`, `timesheet`), Labour Planning
+(`mostlane-labour-api`).
 
 ## One-time setup
 
@@ -101,11 +104,14 @@ I can do that sweep across all 103 pages once the backend is verified.
 ## What I need from you to finish the 🔴/🟡 modules
 
 Send me each Worker's source (Cloudflare dashboard → Worker → Edit code) and
-I'll port its exact logic into the matching route file. Priority order:
-~~`mostlane-sla`~~ ✅ done, the hours Workers, `mostlane-holidays`, then the rest.
+I'll port its exact logic into the matching route file. Remaining to verify /
+port: `mostlane-holidays`, `vehicles`/`vehicles-fuel`, `mostlane-sites`,
+`mostlane-assets`, `ckeck-in-out`, the compliance Worker, `projects-ml-portal`.
 
-> **Purchase Orders** (`mostlane-po`, `mostlane-pos`) and suppliers are
-> intentionally **excluded** — they'll be handled by a separate system.
+> **Excluded for now** (separate / later systems): Purchase Orders & suppliers
+> (`mostlane-po`, `mostlane-pos`), Hours/Timesheets (`odd-water-f78a`,
+> `average-hours`, `labourhours`, `timesheet`), Labour Planning
+> (`mostlane-labour-api`).
 
 ### SLA notes (done)
 

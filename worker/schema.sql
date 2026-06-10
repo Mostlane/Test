@@ -1,9 +1,10 @@
 -- ============================================================================
 -- Mostlane Portal — D1 schema (single database for the whole portal)
--- Replaces: users.json, timesheets.json, holiday-*.json, vans.json,
---           van-scores.json, sites.json, assets/*.json, eicr-log*.json,
---           activity-log.json, and the per-Worker KV namespaces.
--- (Purchase Orders / suppliers are out of scope — separate system.)
+-- Replaces: users.json, holiday-*.json, vans.json, van-scores.json,
+--           sites.json, assets/*.json, eicr-log*.json, activity-log.json,
+--           and the per-Worker KV namespaces.
+-- Out of scope (separate / later systems): Purchase Orders & suppliers,
+--           Hours/Timesheets, Labour Planning.
 --
 -- Apply:  npx wrangler d1 execute mostlane --file=./schema.sql --remote
 -- Field names mirror the existing JSON so migration is a straight map.
@@ -84,22 +85,8 @@ CREATE TABLE IF NOT EXISTS check_events (
 );
 CREATE INDEX IF NOT EXISTS idx_check_user_at ON check_events(username, at);
 
--- ── Hours / timesheets (replaces odd-water /Hours, average-hours,
---     labourhours, timesheet, mostlane-labour-api, timesheets.json) ──────────
-CREATE TABLE IF NOT EXISTS timesheets (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  engineer   TEXT NOT NULL,
-  date       TEXT NOT NULL,
-  start      TEXT,
-  finish     TEXT,
-  lunch_deducted INTEGER DEFAULT 0,
-  travel_time REAL,
-  job_type   TEXT,
-  job_number TEXT,
-  source     TEXT,                        -- which flow created it
-  created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_timesheets_eng_date ON timesheets(engineer, date);
+-- ── Hours / timesheets / labour planning: intentionally NOT modelled here
+--    (handled by separate / later systems).
 
 -- ── Holidays (replaces mostlane-holidays, holiday-log/summary.json) ─────────
 CREATE TABLE IF NOT EXISTS holidays (
@@ -220,18 +207,6 @@ CREATE TABLE IF NOT EXISTS projects (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT,
   status     TEXT,
-  payload    TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-
--- ── Labour planning (replaces mostlane-labour-api / labour-tracker) ─────────
-CREATE TABLE IF NOT EXISTS labour_plan (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  engineer   TEXT,
-  date       TEXT,
-  site       TEXT,
-  job_number TEXT,
-  hours      REAL,
   payload    TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );

@@ -61,9 +61,7 @@ for (const a of read("assets/assets.json") || [])
 for (const h of read("holiday-log.json") || [])
   out.push(`INSERT INTO holidays (name, start, end, type, status, notes) VALUES (${q(h.name)}, ${q(h.start)}, ${q(h.end)}, ${q(h.type)}, ${q(h.status || "Pending")}, ${q(h.notes)});`);
 
-// ── Timesheets ──────────────────────────────────────────────────────────────
-for (const t of read("timesheets.json") || [])
-  out.push(`INSERT INTO timesheets (engineer, date, start, finish, lunch_deducted, travel_time, job_type, job_number, source) VALUES (${q(t.Engineer)}, ${q(t.Date)}, ${q(t.Start)}, ${q(t.Finish)}, ${t.LunchDeducted ? 1 : 0}, ${t.TravelTime ?? "NULL"}, ${q(t.JobType)}, ${q(t.JobNumber)}, 'migrated');`);
+// ── Hours / timesheets / labour: intentionally skipped (separate systems).
 
 writeFileSync(join(dirname(fileURLToPath(import.meta.url)), "seed.sql"), out.join("\n") + "\n");
 console.log(`Wrote seed.sql with ${out.length} statements.`);
