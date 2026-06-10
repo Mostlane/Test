@@ -41,7 +41,7 @@ worker/
         ├── po.js            🟡 /po /suppliers        (replaces `mostlane-po`,`mostlane-pos`)
         ├── sites.js         🟡 /sites                (replaces `mostlane-sites`)
         ├── assets.js        🟡 /assets               (replaces `mostlane-assets`)
-        ├── sla.js           🔴 /sla                  (needs `mostlane-sla` source)
+        ├── sla.js           ✅ /sla/*                (replaces `mostlane-sla`; jobs+config→D1, files→R2)
         ├── compliance.js    🔴 /Compliance           (needs `mostlane-pos` source)
         ├── projects.js      🔴 /project              (needs `projects-ml-portal`)
         └── labour.js        🔴 /labour               (needs `mostlane-labour-api`)
@@ -103,4 +103,16 @@ I can do that sweep across all 103 pages once the backend is verified.
 
 Send me each Worker's source (Cloudflare dashboard → Worker → Edit code) and
 I'll port its exact logic into the matching route file. Priority order:
-`mostlane-sla`, `mostlane-po` + `mostlane-pos`, the hours Workers, then the rest.
+~~`mostlane-sla`~~ ✅ done, `mostlane-po` + `mostlane-pos`, the hours Workers,
+then the rest.
+
+### SLA notes (done)
+
+- Routes are namespaced under `/sla/*`. Front-end change is one line per page:
+  `const SLA_API = "<new-worker-url>/sla"` (was `https://mostlane-sla...`).
+  Every appended path (`/jobs`, `/config`, `/pdf`, `/job/:id`) then lines up.
+- Jobs + config moved to D1; **photos & signatures stay in the R2 bucket**
+  (`JOB_FILES` binding) — point `bucket_name` in wrangler.toml at the SLA
+  Worker's existing bucket so old photos keep resolving.
+- Set the `PDFSHIFT_API_KEY` secret for PDF export; optionally
+  `MOSTLANE_LOGO_BASE64` for the logo on exported job sheets.

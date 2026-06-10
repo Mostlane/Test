@@ -191,17 +191,34 @@ CREATE TABLE IF NOT EXISTS asset_transfers (
   at        TEXT DEFAULT (datetime('now'))
 );
 
--- ── SLA / EICR (replaces mostlane-sla + eicr-log*.json) ─────────────────────
+-- ── SLA jobs (replaces mostlane-sla Worker's SLA_JOBS KV) ───────────────────
+-- Indexed columns drive the list filters; `data` holds the full job object
+-- (events, statusHistory, signature, etc.) exactly as the front end expects.
+-- Binary files (photos/signatures) stay in the JOB_FILES R2 bucket.
 CREATE TABLE IF NOT EXISTS sla_jobs (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  ref        TEXT,
-  site       TEXT,
-  client     TEXT,
-  type       TEXT,
-  status     TEXT,
-  due_at     TEXT,
-  payload    TEXT,                         -- JSON blob for fields not yet modelled
-  created_at TEXT DEFAULT (datetime('now'))
+  id           TEXT PRIMARY KEY,
+  helpdesk_ref TEXT,
+  description  TEXT,
+  priority     TEXT,
+  status       TEXT,
+  assigned_to  TEXT,
+  site_code    TEXT,
+  raised_at    TEXT,
+  target_at    TEXT,
+  scheduled_at TEXT,
+  created_at   TEXT,
+  updated_at   TEXT,
+  closed_at    TEXT,
+  data         TEXT NOT NULL                -- full job JSON
+);
+CREATE INDEX IF NOT EXISTS idx_sla_status   ON sla_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_sla_assigned ON sla_jobs(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_sla_site     ON sla_jobs(site_code);
+
+-- Generic key/value config store (replaces SLA_CONFIG KV; reusable elsewhere).
+CREATE TABLE IF NOT EXISTS app_config (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 -- ── Compliance (replaces mostlane-pos /Compliance + Compliance/*.json) ──────
