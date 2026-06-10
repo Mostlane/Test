@@ -1,0 +1,17 @@
+{
+  "name": "mostlane-portal-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single consolidated Cloudflare Worker + D1 backend for the Mostlane Portal",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute mostlane --file=./schema.sql --remote",
+    "db:seed": "node migrate-json-to-sql.mjs && wrangler d1 execute mostlane --file=./seed.sql --remote",
+    "db:local": "wrangler d1 execute mostlane --file=./schema.sql --local"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
