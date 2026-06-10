@@ -1,16 +1,18 @@
-// Auth routes — replaces the `login` Worker.
-//   POST /auth/login          { username, password } -> { ok, token, user }
-//   POST /auth/logout         (Bearer token)
-//   GET  /auth/me             (Bearer token) -> current user + permissions
+// Auth routes — replaces the `login` Worker + adds password management.
+//   POST /auth/login            { username, password } -> { ok, token, mustChangePassword, user }
+//   POST /auth/logout           (Bearer token)
+//   GET  /auth/me               (Bearer token) -> current user + permissions
+//   POST /auth/change-password  (Bearer)  { currentPassword, newPassword }
+//   POST /auth/forgot-password  { username | email }  -> emails a reset link
+//   POST /auth/reset-password   { token, newPassword }
 //   GET  /admin/login-history
 //
-// Key upgrade vs the old portal: login now returns a real server session
-// TOKEN. The front end should send it as `Authorization: Bearer <token>` on
-// every API call, and the protected routes verify it server-side.
+// Login returns a real server session TOKEN; the front end sends it as
+// `Authorization: Bearer <token>` on every API call.
 
 import { json, error } from "../lib/http.js";
 import {
-  verifyPassword, hashPassword, createSession, destroySession,
+  verifyPassword, hashPassword, validatePassword, createSession, destroySession,
   requireSession, permissionsFor,
 } from "../lib/auth.js";
 
@@ -37,7 +39,11 @@ export async function handle(request, env, ctx, url) {
 
     const { token, expires } = await createSession(env, username, null);
     const perms = await permissionsFor(env, username);
-    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
+    return json({
+      ok: true, token, expires,
+      mustChangePassword: !!user.must_change_password,
+      user: shapeUser(user, perms)
+    }, {}, env, request);
   }
 
   if (path === "/auth/logout" && request.method === "POST") {
@@ -53,6 +59,58 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true, user: shapeUser(sess.user, perms) }, {}, env, request);
   }
 
+  // ── Self-service: change own password (logged in) ──────────────────────────
+  if (path === "/auth/change-password" && request.method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { currentPassword, newPassword } = await request.json().catch(() => ({}));
+    if (!await verifyPassword(currentPassword || "", sess.user))
+      return error("Current password is incorrect.", 403, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    await setPassword(env, sess.user.username, newPassword);
+    return json({ ok: true }, {}, env, request);
+  }
+
+  // ── Self-service: forgot password (sends reset link) ───────────────────────
+  if (path === "/auth/forgot-password" && request.method === "POST") {
+    const { username, email } = await request.json().catch(() => ({}));
+    const ident = (username || email || "").trim();
+    if (!ident) return error("Username or email required", 400, env, request);
+
+    const user = await env.DB.prepare(
+      "SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND lower(email) = lower(?))"
+    ).bind(ident, ident).first();
+
+    // Only act for active users, but always return a generic success (no enumeration).
+    if (user && user.status !== "Disabled") {
+      const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+      const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+      await env.DB.prepare(
+        "INSERT INTO password_resets (token, username, expires_at) VALUES (?,?,?)"
+      ).bind(token, user.username, expires).run();
+      const base = (env.APP_BASE_URL || "").replace(/\/$/, "");
+      const resetUrl = `${base}/reset-password.html?token=${token}`;
+      await sendResetEmail(env, { to: user.email, name: user.first_name || user.username, resetUrl });
+    }
+    return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
+  }
+
+  // ── Complete reset via emailed token ───────────────────────────────────────
+  if (path === "/auth/reset-password" && request.method === "POST") {
+    const { token, newPassword } = await request.json().catch(() => ({}));
+    if (!token) return error("Missing token", 400, env, request);
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+    const row = await env.DB.prepare(
+      "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > datetime('now')"
+    ).bind(token).first();
+    if (!row) return error("This reset link is invalid or has expired.", 400, env, request);
+    await setPassword(env, row.username, newPassword);
+    await env.DB.prepare("UPDATE password_resets SET used = 1 WHERE token = ?").bind(token).run();
+    return json({ ok: true }, {}, env, request);
+  }
+
   return error("Unknown auth route", 404, env, request);
 }
 
@@ -63,6 +121,27 @@ export async function loginHistory(request, env, ctx, url) {
     "SELECT username, device_id, ip, outcome, at FROM login_history ORDER BY at DESC LIMIT 200"
   ).all();
   return json({ ok: true, history: results || [] }, {}, env, request);
+}
+
+// Set a new PBKDF2 password and clear the force-change flag.
+async function setPassword(env, username, newPassword) {
+  const hash = await hashPassword(newPassword);
+  await env.DB.prepare(
+    "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE username=?"
+  ).bind(hash, username).run();
+}
+
+// POST the reset link to a configurable webhook (e.g. a Zapier Catch Hook that
+// emails via Outlook/365). No-op if RESET_EMAIL_WEBHOOK isn't set.
+async function sendResetEmail(env, payload) {
+  if (!env.RESET_EMAIL_WEBHOOK) { console.warn("RESET_EMAIL_WEBHOOK not set — reset link not emailed:", payload.resetUrl); return; }
+  try {
+    await fetch(env.RESET_EMAIL_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "password_reset", ...payload })
+    });
+  } catch (e) { console.error("Reset email webhook failed:", e.message); }
 }
 
 // Return the camel/Pascal shape the existing front-end reads (user.Username etc.)
@@ -77,6 +156,7 @@ function shapeUser(u, perms) {
     EmploymentType: u.employment_type,
     Status: u.status,
     SharePointPath: u.sharepoint_path,
+    MustChangePassword: !!u.must_change_password,
     ...perms,
   };
 }

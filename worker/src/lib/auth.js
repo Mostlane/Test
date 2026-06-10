@@ -44,6 +44,19 @@ export async function verifyPassword(password, user) {
   return (await sha256Hex(password)) === (user.password_hash || "");
 }
 
+// ── Password policy ──────────────────────────────────────────────────────────
+// Returns an error string, or null if the password is acceptable.
+export function validatePassword(pw) {
+  if (typeof pw !== "string" || pw.length < 8) return "Password must be at least 8 characters.";
+  if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return "Password must contain a letter and a number.";
+  return null;
+}
+
+// Short, readable temporary password for admin resets (e.g. "Mostlane-4827").
+export function generateTempPassword() {
+  return "Mostlane-" + Math.floor(1000 + Math.random() * 9000);
+}
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 export async function createSession(env, username, deviceId) {
   const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");

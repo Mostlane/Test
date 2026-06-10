@@ -1,13 +1,25 @@
-// User routes — replaces the `mostlane-users` Worker.
-//   GET  /user?u=<username>     -> { found, user } with flat permission flags
-//   GET  /users                 -> { users: [...] }
-//   POST /users                 -> create/update a user (admin)
+// User routes — replaces the `mostlane-users` Worker + admin user management.
+//   GET  /user?u=<username>      -> { found, user } with flat permission flags
+//   GET  /users                  -> { Users: [...] }
+//   POST /users                  -> create/update a user (admin)
+//   POST /users/reset-password   -> admin reset (temp password + force change)
+//   POST /users/delete           -> remove a user (admin)
 //
 // The front-end's main.html reads user.FullAccess / user.CheckInOut etc., so
 // we return those flat keys by joining users + user_permissions.
 
 import { json, error } from "../lib/http.js";
-import { requireSession, permissionsFor, hashPassword } from "../lib/auth.js";
+import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword } from "../lib/auth.js";
+
+// Require a valid session whose user has admin rights (FullAccess or Users).
+async function requireAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
+    return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
 
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
@@ -33,11 +45,8 @@ export async function handle(request, env, ctx, url) {
 
   // POST /users  (create or update — admin only)
   if (path === "/users" && request.method === "POST") {
-    const sess = await requireSession(env, request);
-    if (!sess) return error("Not authenticated", 401, env, request);
-    const adminPerms = await permissionsFor(env, sess.user.username);
-    if (adminPerms.FullAccess !== "Yes" && adminPerms.Users !== "Yes")
-      return error("Forbidden", 403, env, request);
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
 
     const b = await request.json().catch(() => ({}));
     if (!b.Username) return error("Username required", 400, env, request);
@@ -59,9 +68,13 @@ export async function handle(request, env, ctx, url) {
     ).run();
 
     if (b.Password) {
+      const bad = validatePassword(b.Password);
+      if (bad) return error(bad, 400, env, request);
       const hash = await hashPassword(b.Password);
-      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2' WHERE username=?")
-        .bind(hash, b.Username).run();
+      // Force a change on first login unless the admin explicitly opts out.
+      const force = b.ForceChange === false ? 0 : 1;
+      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE username=?")
+        .bind(hash, force, b.Username).run();
     }
 
     // Upsert permission flags supplied in the body.
@@ -75,6 +88,47 @@ export async function handle(request, env, ctx, url) {
       }
     }
 
+    return json({ ok: true }, {}, env, request);
+  }
+
+  // POST /users/reset-password (admin) — sets a temp password + forces change
+  if (path === "/users/reset-password" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const exists = await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(b.username).first();
+    if (!exists) return error("User not found", 404, env, request);
+
+    const tempProvided = !!b.newPassword;
+    const newPassword = b.newPassword || generateTempPassword();
+    const bad = validatePassword(newPassword);
+    if (bad) return error(bad, 400, env, request);
+
+    const hash = await hashPassword(newPassword);
+    await env.DB.prepare(
+      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE username=?"
+    ).bind(hash, b.username).run();
+    // Invalidate any existing sessions for that user.
+    await env.DB.prepare("DELETE FROM sessions WHERE username=?").bind(b.username).run();
+
+    // Return the temp password so the admin can relay it (only if we generated it).
+    return json({ ok: true, tempPassword: tempProvided ? undefined : newPassword }, {}, env, request);
+  }
+
+  // POST /users/delete (admin)
+  if (path === "/users/delete" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM users WHERE username=?").bind(b.username),
+      env.DB.prepare("DELETE FROM user_permissions WHERE username=?").bind(b.username),
+      env.DB.prepare("DELETE FROM sessions WHERE username=?").bind(b.username),
+      env.DB.prepare("DELETE FROM devices WHERE username=?").bind(b.username),
+    ]);
     return json({ ok: true }, {}, env, request);
   }
 

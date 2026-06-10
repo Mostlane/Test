@@ -125,6 +125,39 @@ port: `mostlane-holidays`, `vehicles`/`vehicles-fuel`, `mostlane-sites`,
 > `average-hours`, `labourhours`, `timesheet`), Labour Planning
 > (`mostlane-labour-api`).
 
+### Users & auth overhaul (done)
+
+Full login + user management runs through this worker:
+
+| Endpoint | Who | Purpose |
+|---|---|---|
+| `POST /auth/login` | anyone | returns session token + `mustChangePassword` |
+| `POST /auth/change-password` | logged in | change own password |
+| `POST /auth/forgot-password` | anyone | emails a reset link (1h token) |
+| `POST /auth/reset-password` | reset token | set new password via emailed link |
+| `GET /auth/me` | logged in | current user + permissions |
+| `GET /users`, `GET /user?u=` | admin | list / fetch |
+| `POST /users` | admin | create / update (fields + permissions; setting a password forces change on first login) |
+| `POST /users/reset-password` | admin | temp password + force change; returns the temp password to relay |
+| `POST /users/delete` | admin | remove user (+ permissions, sessions, devices) |
+
+Admin endpoints require a valid session token whose user has `FullAccess` or
+`Users`. Passwords are PBKDF2; legacy SHA-256 auto-upgrades on next login.
+
+**Front-end pages:** rebuilt `users-admin.html` (search / add / edit / permissions
+/ reset / delete), plus new `change-password.html`, `forgot-password.html`,
+`reset-password.html`. Login now redirects to a forced password change when
+`mustChangePassword` is set, and has a "Forgot password?" link.
+
+**Email for resets:** the worker POSTs the reset link to `RESET_EMAIL_WEBHOOK`
+(JSON `{type:"password_reset", to, name, resetUrl}`). Easiest wiring is a
+**Zapier Catch Hook → Outlook/365 send email**. Set `APP_BASE_URL` to the portal
+URL so links resolve. Swap the webhook for Graph/Resend later if you prefer.
+
+> Note: admin/user endpoints are now token-enforced. Enforcing the token on
+> *every* data endpoint (holidays/SLA/assets/etc.) is the remaining security
+> hardening step.
+
 ### Holidays notes (done)
 
 - Routes keep their `/holiday/*` paths, so the front-end change is just the base

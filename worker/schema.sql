@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
   employment_type TEXT,                 -- Employed | Self Employed
   status          TEXT DEFAULT 'Active',
   sharepoint_path TEXT,
+  must_change_password INTEGER DEFAULT 0,  -- force change on next login (admin reset / new user)
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
 );
@@ -51,6 +52,16 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);
+
+-- Self-service password reset tokens (forgot-password flow).
+CREATE TABLE IF NOT EXISTS password_resets (
+  token      TEXT PRIMARY KEY,
+  username   TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used       INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pwreset_username ON password_resets(username);
 
 -- Device locking (replaces userdevicekv Worker)
 CREATE TABLE IF NOT EXISTS devices (
