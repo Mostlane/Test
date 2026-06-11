@@ -439,6 +439,13 @@
       opacity:0.75;
       transform:translate3d(0,0,0);
     }
+
+    /* Phones: give the schedule more width by shrinking the time column */
+    @media (max-width: 600px){
+      .scheduler-grid{ grid-template-columns:42px 1fr; }
+      .time-column{ font-size:9px; }
+      .time-label{ padding-right:3px; justify-content:center; }
+    }
   </style>
 </head>
 <body>
@@ -733,9 +740,16 @@ function render(){
   if(loadingEl) loadingEl.style.display="none";   // may be gone after first render — guard it
   const wrapper=document.getElementById("schedulerWrapper");
   if(!wrapper) return;
+  // Remember horizontal scroll so a redraw doesn't snap back to the first engineer
+  const prevInner = wrapper.querySelector(".engineers-column-wrapper");
+  const keepInner = prevInner ? prevInner.scrollLeft : 0;
+  const keepOuter = wrapper.scrollLeft;
   wrapper.innerHTML="";
   if(viewMode==="day") renderDayView(wrapper);
   else renderWeekView(wrapper);
+  wrapper.scrollLeft = keepOuter;
+  const newInner = wrapper.querySelector(".engineers-column-wrapper");
+  if(newInner) newInner.scrollLeft = keepInner;
 }
 
 function getFilteredEngineers(){
