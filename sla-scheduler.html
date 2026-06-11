@@ -887,6 +887,7 @@ async function onPointerUp(e){
   updateOverridesForJob(job);
   pushJobUpdate(job);
 
+  applyLocalOverrides(); // re-apply saved positions so the move shows immediately
   render();
   setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
 }
@@ -1171,6 +1172,7 @@ document.getElementById("jobForm").addEventListener("submit",async function(e){
   selectedDate = baseDate;
   document.getElementById("datePicker").value = formatDateInput(baseDate);
 
+  applyLocalOverrides(); // re-apply saved positions so the change shows immediately
   render();
   closeJobModal();
   setStatus(`Saved changes for job: ${job.title}`);
