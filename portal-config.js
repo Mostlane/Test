@@ -16,9 +16,8 @@
  * editing the ONE line below.
  * ==========================================================================*/
 (function () {
-  // ⬇️ EDIT THIS after deploying the worker (`npx wrangler deploy`).
-  //    Use your workers.dev subdomain, or a custom route like https://api.mostlane.com
-  window.MOSTLANE_API = "https://mostlane-portal.jamie-def.workers.dev";
+  // ⬇️ The deployed API worker (separate from the site worker).
+  window.MOSTLANE_API = "https://mostlane-api.jamie-def.workers.dev";
 
   const API = window.MOSTLANE_API.replace(/\/$/, "");
   const CONFIGURED = !/REPLACE-ME/.test(API);
