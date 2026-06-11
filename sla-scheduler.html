@@ -783,13 +783,23 @@ function attachPointerDrag(jobEl, job){
 
     document.addEventListener("pointermove", onPointerMove, {passive:false});
     document.addEventListener("pointerup", onPointerUp, {passive:false});
+    document.addEventListener("pointercancel", onPointerUp, {passive:false}); // touch sometimes fires this instead
     e.preventDefault();
   });
 }
 
 function getLaneUnderPointer(clientX, clientY){
-  const el = document.elementFromPoint(clientX, clientY);
-  return el ? el.closest(".lane-body") : null;
+  // Find the engineer lane whose box contains the finger/cursor, by coordinates.
+  // (Avoids elementFromPoint, which on touch can return the dragged ghost or a
+  // job card sitting on top of the lane.)
+  const lanes = document.querySelectorAll(".lane-body");
+  for(const lane of lanes){
+    const r = lane.getBoundingClientRect();
+    if(clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom){
+      return lane;
+    }
+  }
+  return null;
 }
 
 function onPointerMove(e){
@@ -832,6 +842,7 @@ async function onPointerUp(e){
 
   document.removeEventListener("pointermove", onPointerMove);
   document.removeEventListener("pointerup", onPointerUp);
+  document.removeEventListener("pointercancel", onPointerUp);
 
   const ghost = dragState.ghost;
   if(ghost) ghost.remove();
