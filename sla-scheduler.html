@@ -833,6 +833,12 @@ function onPointerMove(e){
   dragState.ghost.style.top  = (rect.top + slot * SLOT_HEIGHT) + "px";
   dragState.ghost.style.width = rect.width + "px";
 
+  // Live-update the time shown on the ghost so you can see where it'll drop
+  const dropMins = slotIndexToMinutes(slot, dayStartMins);
+  const th = Math.floor(dropMins / 60), tm = dropMins % 60;
+  const timeSpan = dragState.ghost.querySelector(".job-meta span");
+  if (timeSpan) timeSpan.textContent = pad2(th) + ":" + pad2(tm);
+
   dragState.targetEngineer = lane.dataset.engineer;
   dragState.targetSlot = slot;
 
