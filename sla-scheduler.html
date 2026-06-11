@@ -475,7 +475,7 @@
       </div>
 
       <div class="controls-group">
-        <span class="tag" style="background:#d11;color:#fff;font-weight:bold;">★ BUILD-C ★ Drag jobs to change time / engineer</span>
+        <span class="tag">Drag jobs to change time / engineer</span>
       </div>
     </div>
 
@@ -729,8 +729,10 @@ function updateOverridesForJob(job){
 }
 
 function render(){
-  document.getElementById("schedulerLoading").style.display="none";
+  const loadingEl=document.getElementById("schedulerLoading");
+  if(loadingEl) loadingEl.style.display="none";   // may be gone after first render — guard it
   const wrapper=document.getElementById("schedulerWrapper");
+  if(!wrapper) return;
   wrapper.innerHTML="";
   if(viewMode==="day") renderDayView(wrapper);
   else renderWeekView(wrapper);
@@ -880,14 +882,12 @@ async function onPointerUp(e){
     job.assignedEngineers = [engineerUsername];
 
     updateOverridesForJob(job);
-    setStatus(`Saving ${job.title}… (eng=${engineerUsername||"?"}, slot=${slot})`);
-
-    await pushJobUpdate(job);
-    await loadJobs();
-    render();
-    setStatus(`Moved ${job.title} → ${pad2(h)}:${pad2(m)} ✓ (jobs=${jobs.length})`);
+    applyLocalOverrides();
+    render();                       // redraw immediately (now that render() no longer crashes)
+    setStatus(`Moved ${job.title} → ${pad2(h)}:${pad2(m)}`);
+    pushJobUpdate(job);             // save to server in the background
   } catch(err) {
-    setStatus("DROP ERROR: " + (err && err.message ? err.message : String(err)), true);
+    setStatus("Drop error: " + (err && err.message ? err.message : String(err)), true);
     console.error("Drop error:", err);
   }
 }
