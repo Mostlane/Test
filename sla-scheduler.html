@@ -475,7 +475,7 @@
       </div>
 
       <div class="controls-group">
-        <span class="tag" style="background:#d11;color:#fff;font-weight:bold;">★ BUILD-B ★ Drag jobs to change time / engineer</span>
+        <span class="tag" style="background:#d11;color:#fff;font-weight:bold;">★ BUILD-C ★ Drag jobs to change time / engineer</span>
       </div>
     </div>
 
@@ -862,35 +862,34 @@ async function onPointerUp(e){
   if(!moved) return;
 
   const job = jobs.find(j => j.id === jobId);
-  if(!job) return;
+  if(!job) { setStatus("Drop: job not found", true); return; }
+  if(!Array.isArray(job.assignedEngineers)) job.assignedEngineers = [];
 
-  const engineerUsername = dragState.targetEngineer || (job.assignedEngineers[0] || "");
-  const slot = (dragState.targetSlot ?? 0);
+  try {
+    const engineerUsername = dragState.targetEngineer || (job.assignedEngineers[0] || "");
+    const slot = (dragState.targetSlot ?? 0);
 
-  // Convert slot → start time
-  const dayStartMins = DAY_START_HOUR * 60;
-  const mins = slotIndexToMinutes(slot, dayStartMins);
+    const dayStartMins = DAY_START_HOUR * 60;
+    const mins = slotIndexToMinutes(slot, dayStartMins);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
 
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-
-  const startDate = withTime(selectedDate, h, m);
-  job.scheduledStart = startDate.toISOString();
-  job.scheduledAt = job.scheduledStart;
-
-  if (!job.assignedEngineers.includes(engineerUsername)) {
+    const startDate = withTime(selectedDate, h, m);
+    job.scheduledStart = startDate.toISOString();
+    job.scheduledAt = job.scheduledStart;
     job.assignedEngineers = [engineerUsername];
-  } else {
-    job.assignedEngineers = [engineerUsername]; // keep single lane assignment like your original drop behaviour
+
+    updateOverridesForJob(job);
+    setStatus(`Saving ${job.title}… (eng=${engineerUsername||"?"}, slot=${slot})`);
+
+    await pushJobUpdate(job);
+    await loadJobs();
+    render();
+    setStatus(`Moved ${job.title} → ${pad2(h)}:${pad2(m)} ✓ (jobs=${jobs.length})`);
+  } catch(err) {
+    setStatus("DROP ERROR: " + (err && err.message ? err.message : String(err)), true);
+    console.error("Drop error:", err);
   }
-
-  updateOverridesForJob(job);
-  setStatus(`Updated job ${job.title} → ${pad2(h)}:${pad2(m)}`);
-
-  // Save, then reload the board exactly like a manual refresh so the move shows.
-  await pushJobUpdate(job);
-  await loadJobs();
-  render();
 }
 
 function renderDayView(container){
