@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script src="/portal-config.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mostlane Portal Login</title>
@@ -70,6 +71,7 @@
       <p id="error"></p>
     </form>
 
+    <a href="forgot-password.html">Forgot password?</a>
     <a href="onboard.html">Sign up</a>
   </div>
 
@@ -79,19 +81,25 @@
   <script>
 
     // ⭐ New helper — safe, fallback-compatible
+    // After login, go to the forced password-change screen if required,
+    // otherwise the main menu.
+    function nextPage() {
+      return window.__mostlaneMustChange ? "change-password.html?forced=1" : "main.html";
+    }
+
     function runDeviceCheckAndContinue(username) {
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
           DeviceAuth.checkOnLogin(username, () => {
-            window.location.href = "main.html";
+            window.location.href = nextPage();
           });
         } else {
           console.warn("DeviceAuth missing — continuing login without device check");
-          window.location.href = "main.html";
+          window.location.href = nextPage();
         }
       } catch (e) {
         console.error("DeviceAuth error:", e);
-        window.location.href = "main.html";
+        window.location.href = nextPage();
       }
     }
 
@@ -134,6 +142,13 @@ if (!result.ok) {
   return;
 }
 const user = result.user;
+
+        // ✅ Store the server session token (consolidated worker). Old login
+        // worker doesn't return one, so this is a no-op until cutover.
+        if (result.token) localStorage.setItem('mostlaneToken', result.token);
+
+        // Flag whether the user must change their password (admin reset / new user).
+        window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
 
         // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);

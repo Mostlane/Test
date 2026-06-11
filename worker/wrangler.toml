@@ -1,0 +1,56 @@
+# Mostlane Portal — single consolidated Worker
+# Replaces the ~19 separate *.jamie-def.workers.dev Workers with one API,
+# backed by a single D1 (SQLite) database instead of JSON files / KV.
+#
+# Deploy:  npx wrangler deploy
+# Dev:     npx wrangler dev
+# DB init: npx wrangler d1 execute mostlane --file=./schema.sql --remote
+
+name = "mostlane-portal"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# ── D1: the single source of truth for all portal data ──────────────
+# Create once with:  npx wrangler d1 create mostlane
+# then paste the printed database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "mostlane"
+database_id = "PASTE_DATABASE_ID_HERE"
+
+# ── R2: binary files (SLA job photos & signatures) ──────────────────
+# These don't belong in D1. Reuses the existing bucket the mostlane-sla
+# Worker already wrote to, so existing photos keep working.
+# Create/confirm with:  npx wrangler r2 bucket create mostlane-job-files
+[[r2_buckets]]
+binding = "JOB_FILES"
+bucket_name = "mostlane-job-files"   # set to the SLA Worker's existing bucket name
+
+# Asset photos (reuses the mostlane-assets Worker's existing bucket so old
+# images keep resolving).
+[[r2_buckets]]
+binding = "ASSET_BUCKET"
+bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucket name
+
+# ── Secrets (set via `wrangler secret put`, never commit them) ───────
+# SESSION_SECRET       - HMAC key used to sign session tokens
+#   npx wrangler secret put SESSION_SECRET
+# PDFSHIFT_API_KEY     - for SLA job PDF export (/sla/jobs/:id/export.pdf, /sla/pdf)
+#   npx wrangler secret put PDFSHIFT_API_KEY
+# RESET_EMAIL_WEBHOOK  - URL that emails the password-reset link (e.g. a Zapier
+#   Catch Hook wired to send via Outlook/365). Receives JSON:
+#   { type:"password_reset", to, name, resetUrl }
+#   npx wrangler secret put RESET_EMAIL_WEBHOOK
+#
+# Example local-dev values live in .dev.vars (git-ignored).
+
+[vars]
+# Non-secret config. Front-end origin(s) allowed to call this API (CORS).
+ALLOWED_ORIGINS = "*"
+SESSION_TTL_HOURS = "12"
+# Base URL of the portal front-end, used to build password-reset links.
+APP_BASE_URL = "https://mostlane-portal.REPLACE-ME.workers.dev"
+# Public base URL of the JOB_FILES R2 bucket (for photo/signature links).
+R2_PUBLIC_BASE = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev"
+# Optional: base64 PNG of the Mostlane logo for PDF/HTML job exports.
+# MOSTLANE_LOGO_BASE64 = ""
