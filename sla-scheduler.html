@@ -258,6 +258,105 @@
       z-index:2;
     }
 
+    /* ✅ Day timeline: engineers down the side, time across, draggable jobs */
+    .day-timeline{
+      position:relative;
+      overflow-x:auto;
+      border-top:1px solid var(--border);
+      background:#fff;
+      font-size:11px;
+      -webkit-overflow-scrolling:touch;
+    }
+    .day-row{
+      display:flex;
+      align-items:stretch;
+      border-bottom:1px solid var(--border);
+    }
+    .day-head-row{
+      position:sticky;
+      top:0;
+      z-index:5;
+    }
+    .day-name{
+      position:sticky;
+      left:0;
+      z-index:4;
+      flex:0 0 80px;
+      box-sizing:border-box;
+      background:#f9fafb;
+      border-right:1px solid var(--border);
+      padding:4px 6px;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+    }
+    .day-corner{
+      z-index:6;
+      height:28px;
+    }
+    .day-track{
+      position:relative;
+      flex:0 0 auto;
+      background:#ffffff;
+    }
+    .day-hours{
+      height:28px;
+      background:#f9fafb;
+      border-bottom:1px solid var(--border);
+    }
+    .day-hour-tick{
+      position:absolute;
+      top:0;
+      height:28px;
+      color:var(--muted);
+      padding-left:3px;
+      border-left:1px solid rgba(148,163,184,0.25);
+      box-sizing:border-box;
+      display:flex;
+      align-items:center;
+    }
+    .day-vline{
+      position:absolute;
+      top:0;
+      bottom:0;
+      width:1px;
+      background:rgba(148,163,184,0.18);
+    }
+    .day-job{
+      position:absolute;
+      top:6px;
+      height:32px;
+      box-sizing:border-box;
+      border-radius:999px;
+      padding:0 8px;
+      background:#e0f2fe;
+      border:1px solid #60a5fa;
+      color:#0f172a;
+      box-shadow:0 2px 5px rgba(15,23,42,0.18);
+      cursor:grab;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+      display:flex;
+      align-items:center;
+      touch-action:none; /* required for pointer dragging on mobile */
+      user-select:none;
+    }
+    .day-job-time{ font-weight:700; margin-right:2px; }
+    .day-job.dragging{
+      opacity:0.75;
+      box-shadow:0 8px 16px rgba(15,23,42,0.4);
+      cursor:grabbing;
+    }
+    .now-line-v{
+      position:absolute;
+      top:0;
+      width:2px;
+      background:rgba(220,38,38,0.9);
+      z-index:3;
+      pointer-events:none;
+    }
+
     .status-bar{
       margin-top:10px;
       font-size:12px;
@@ -450,14 +549,6 @@
 </head>
 <body>
 
-<!-- DEPLOY VERIFICATION MARKER — remove once confirmed -->
-<div style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#dc2626;color:#fff;
-            text-align:center;font:700 14px/1.4 system-ui,sans-serif;padding:6px 8px;
-            box-shadow:0 2px 6px rgba(0,0,0,0.3);">
-  🚀 BUILD 2026-06-12-A · scheduler drag + ghost-time LIVE
-</div>
-<div style="height:30px"></div>
-
 <div class="shell">
   <div class="card">
     <header>
@@ -573,6 +664,12 @@ const HOUR_HEIGHT = 40; // unchanged visual scale
 const SLOT_HEIGHT = (HOUR_HEIGHT * SLOT_MINUTES) / 60; // 10px per 15 mins
 const SLOTS_PER_HOUR = 60 / SLOT_MINUTES;
 
+/* ✅ horizontal day timeline (engineers down the side, time runs across) */
+const HOUR_WIDTH = 64;                                   // px per hour across the day
+const SLOT_WIDTH = (HOUR_WIDTH * SLOT_MINUTES) / 60;     // 16px per 15-min slot
+const DAY_ROW_HEIGHT = 44;                               // height of each engineer row
+const DAY_NAME_WIDTH = 80;                               // sticky name column (matches week)
+
 let currentUser=null;
 let engineers=[];
 let jobs=[];
@@ -586,7 +683,7 @@ let dragState = {
   jobId:null,
   moved:false,
   pointerId:null,
-  offsetY:0,
+  offsetX:0,
   ghost:null,
   targetEngineer:null,
   targetSlot:null
@@ -749,14 +846,14 @@ function render(){
   const wrapper=document.getElementById("schedulerWrapper");
   if(!wrapper) return;
   // Remember horizontal scroll so a redraw doesn't snap back to the first engineer
-  const prevInner = wrapper.querySelector(".engineers-column-wrapper");
+  const prevInner = wrapper.querySelector(".engineers-column-wrapper, .day-timeline");
   const keepInner = prevInner ? prevInner.scrollLeft : 0;
   const keepOuter = wrapper.scrollLeft;
   wrapper.innerHTML="";
   if(viewMode==="day") renderDayView(wrapper);
   else renderWeekView(wrapper);
   wrapper.scrollLeft = keepOuter;
-  const newInner = wrapper.querySelector(".engineers-column-wrapper");
+  const newInner = wrapper.querySelector(".engineers-column-wrapper, .day-timeline");
   if(newInner) newInner.scrollLeft = keepInner;
 }
 
@@ -788,7 +885,7 @@ function attachPointerDrag(jobEl, job){
     dragState.pointerId = e.pointerId;
 
     const rect = jobEl.getBoundingClientRect();
-    dragState.offsetY = e.clientY - rect.top;
+    dragState.offsetX = e.clientX - rect.left;
 
     // Create ghost
     const ghost = jobEl.cloneNode(true);
@@ -813,14 +910,16 @@ function attachPointerDrag(jobEl, job){
 }
 
 function getLaneUnderPointer(clientX, clientY){
-  // Find the engineer lane whose box contains the finger/cursor, by coordinates.
+  // Find the engineer track (row) whose vertical band contains the finger/cursor.
+  // Match by Y only so horizontal dragging across the row — even over the sticky
+  // name column — still resolves to the right engineer.
   // (Avoids elementFromPoint, which on touch can return the dragged ghost or a
-  // job card sitting on top of the lane.)
-  const lanes = document.querySelectorAll(".lane-body");
-  for(const lane of lanes){
-    const r = lane.getBoundingClientRect();
-    if(clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom){
-      return lane;
+  // job card sitting on top of the track.)
+  const tracks = document.querySelectorAll(".day-track");
+  for(const track of tracks){
+    const r = track.getBoundingClientRect();
+    if(clientY >= r.top && clientY <= r.bottom){
+      return track;
     }
   }
   return null;
@@ -833,35 +932,34 @@ function onPointerMove(e){
   // Prevent scroll while dragging on touch
   e.preventDefault();
 
-  const lane = getLaneUnderPointer(e.clientX, e.clientY);
-  if(!lane) return;
+  const track = getLaneUnderPointer(e.clientX, e.clientY);
+  if(!track) return;
 
-  const rect = lane.getBoundingClientRect();
+  const rect = track.getBoundingClientRect();
 
-  // y position within lane (account for where user grabbed the block)
-  const y = (e.clientY - rect.top) - dragState.offsetY;
+  // x position within the track (account for where user grabbed the block)
+  const x = (e.clientX - rect.left) - dragState.offsetX;
 
   const dayStartMins = DAY_START_HOUR * 60;
   const dayEndMins   = DAY_END_HOUR * 60;
 
   const totalSlots = (dayEndMins - dayStartMins) / SLOT_MINUTES;
 
-  // Convert to discrete slot index
-  let slot = Math.round(y / SLOT_HEIGHT);
+  // Convert to discrete slot index (time runs left→right)
+  let slot = Math.round(x / SLOT_WIDTH);
   slot = clampSlot(slot, 0, totalSlots - 2); // keep at least 30 mins inside day (2 slots at 15 mins)
 
-  // Update ghost position
-  dragState.ghost.style.left = rect.left + "px";
-  dragState.ghost.style.top  = (rect.top + slot * SLOT_HEIGHT) + "px";
-  dragState.ghost.style.width = rect.width + "px";
+  // Update ghost position: snap horizontally to the slot, sit on the hovered row
+  dragState.ghost.style.left = (rect.left + slot * SLOT_WIDTH) + "px";
+  dragState.ghost.style.top  = rect.top + "px";
 
   // Live-update the time shown on the ghost so you can see where it'll drop
   const dropMins = slotIndexToMinutes(slot, dayStartMins);
   const th = Math.floor(dropMins / 60), tm = dropMins % 60;
-  const timeSpan = dragState.ghost.querySelector(".job-meta span");
+  const timeSpan = dragState.ghost.querySelector(".day-job-time");
   if (timeSpan) timeSpan.textContent = pad2(th) + ":" + pad2(tm);
 
-  dragState.targetEngineer = lane.dataset.engineer;
+  dragState.targetEngineer = track.dataset.engineer;
   dragState.targetSlot = slot;
 
   dragState.moved = true;
@@ -884,7 +982,7 @@ async function onPointerUp(e){
   dragState.active = false;
   dragState.jobId = null;
   dragState.pointerId = null;
-  dragState.offsetY = 0;
+  dragState.offsetX = 0;
   dragState.ghost = null;
 
   // If it was basically a click (no movement), do nothing here.
@@ -924,54 +1022,61 @@ function renderDayView(container){
   const dayDate=selectedDate;
   const engineerList=getFilteredEngineers();
 
-  const grid=document.createElement("div");
-  grid.className="scheduler-grid";
-
-  const timeCol=document.createElement("div");
-  timeCol.className="time-column";
-  const headerSpacer=document.createElement("div");
-  headerSpacer.style.height="30px";
-  timeCol.appendChild(headerSpacer);
-
-  for(let h=DAY_START_HOUR;h<=DAY_END_HOUR;h++){
-    const tl=document.createElement("div");
-    tl.className="time-label";
-    tl.style.height=HOUR_HEIGHT+"px";
-    tl.textContent=pad2(h)+":00";
-    timeCol.appendChild(tl);
-  }
-  grid.appendChild(timeCol);
-
-  const engWrap=document.createElement("div");
-  engWrap.className="engineers-column-wrapper";
-
-  const engRow=document.createElement("div");
-  engRow.className="engineers-row";
-
   const dayStartMins=DAY_START_HOUR*60;
   const dayEndMins=DAY_END_HOUR*60;
-  const laneHeight=(DAY_END_HOUR-DAY_START_HOUR)*HOUR_HEIGHT;
+  const totalHours=DAY_END_HOUR-DAY_START_HOUR;
+  const trackWidth=totalHours*HOUR_WIDTH;
+  const totalSlots=(dayEndMins-dayStartMins)/SLOT_MINUTES;
 
+  /* Engineers down the side (one row each, week-view styling); time runs across
+     so jobs can be dragged to a new time/engineer with a live ghost preview. */
+  const timeline=document.createElement("div");
+  timeline.className="day-timeline";
+
+  // Header row: sticky corner + hour labels running left→right
+  const header=document.createElement("div");
+  header.className="day-row day-head-row";
+
+  const corner=document.createElement("div");
+  corner.className="day-name day-corner";
+  header.appendChild(corner);
+
+  const hours=document.createElement("div");
+  hours.className="day-track day-hours";
+  hours.style.width=trackWidth+"px";
+  for(let h=DAY_START_HOUR;h<DAY_END_HOUR;h++){
+    const tick=document.createElement("div");
+    tick.className="day-hour-tick";
+    tick.style.left=((h-DAY_START_HOUR)*HOUR_WIDTH)+"px";
+    tick.style.width=HOUR_WIDTH+"px";
+    tick.textContent=pad2(h)+":00";
+    hours.appendChild(tick);
+  }
+  header.appendChild(hours);
+  timeline.appendChild(header);
+
+  // One row per engineer
   engineerList.forEach(engineer=>{
-    const lane=document.createElement("div");
-    lane.className="engineer-lane";
+    const row=document.createElement("div");
+    row.className="day-row";
 
-    const header=document.createElement("div");
-    header.className="engineer-header";
-    header.innerHTML=`<span>${engineer.name}</span><span class="role">ENG ${engineer.engineerNumber}</span>`;
-    lane.appendChild(header);
+    const name=document.createElement("div");
+    name.className="day-name";
+    name.textContent=engineer.name;
+    row.appendChild(name);
 
-    const body=document.createElement("div");
-    body.className="lane-body";
-    body.style.height=laneHeight+"px";
-    body.dataset.engineer=engineer.username;
+    const track=document.createElement("div");
+    track.className="day-track";
+    track.style.width=trackWidth+"px";
+    track.style.height=DAY_ROW_HEIGHT+"px";
+    track.dataset.engineer=engineer.username;
 
-    for(let h=DAY_START_HOUR+1;h<=DAY_END_HOUR;h++){
-      const line=document.createElement("div");
-      line.className="time-slot-line";
-      const offsetMins=(h*60 - dayStartMins);
-      line.style.top=((offsetMins/60)*HOUR_HEIGHT)+"px";
-      body.appendChild(line);
+    // hour grid lines
+    for(let h=DAY_START_HOUR+1;h<DAY_END_HOUR;h++){
+      const v=document.createElement("div");
+      v.className="day-vline";
+      v.style.left=((h-DAY_START_HOUR)*HOUR_WIDTH)+"px";
+      track.appendChild(v);
     }
 
     const jobsForEngineer=jobs
@@ -991,71 +1096,55 @@ function renderDayView(container){
       let startMins = minsSinceMidnight(dStart);
       let dur = job.durationMinutes;
 
-      // Clamp in minutes (unchanged intent)
       startMins = clamp(startMins,dayStartMins,dayEndMins-30);
       const endMins=clamp(startMins+dur,dayStartMins+30,dayEndMins);
       dur=endMins-startMins;
 
-      /* ✅ CHANGED: position uses discrete slot math (Workever-style) */
-      const startSlot = clampSlot(
-        minutesToSlotIndex(startMins, dayStartMins),
-        0,
-        ((dayEndMins - dayStartMins)/SLOT_MINUTES) - 2
-      );
+      const startSlot = clampSlot(minutesToSlotIndex(startMins, dayStartMins), 0, totalSlots - 2);
+      const durSlots = Math.max(2, Math.round(dur / SLOT_MINUTES)); // min 30 mins => 2 slots
 
-      const durSlots = Math.max(2, Math.round(dur / SLOT_MINUTES)); // min 30 mins => 2 slots at 15 mins
-
-      const top = startSlot * SLOT_HEIGHT;
-      const height = Math.max(24, durSlots * SLOT_HEIGHT);
+      const left = startSlot * SLOT_WIDTH;
+      const width = Math.max(2 * SLOT_WIDTH, durSlots * SLOT_WIDTH);
 
       const el=document.createElement("div");
-      el.className="job-block";
+      el.className="day-job";
       el.dataset.jobId=job.id;
       el.dataset.engineer=engineer.username;
-      el.style.top=top+"px";
-      el.style.height=height+"px";
+      el.style.left=left+"px";
+      el.style.width=width+"px";
 
       const timeLabel=pad2(Math.floor(startMins/60))+":"+pad2(startMins%60);
-      el.innerHTML=`
-        <div class="job-title">${job.title}</div>
-        <div class="job-meta">
-          <span>${timeLabel}</span>
-          <span>${job.site}</span>
-        </div>`;
+      el.innerHTML=`<span class="day-job-time">${timeLabel}</span> ${job.title}`;
 
-      /* ✅ CHANGED: remove native drag handlers; attach pointer drag */
       attachPointerDrag(el, job);
 
       el.addEventListener("click", (e) => {
-        // ✅ ignore click if we were dragging (Workever behaviour)
         if (dragState.active || dragState.moved) return;
         openJobModal(job.id);
       });
 
-      body.appendChild(el);
+      track.appendChild(el);
     });
 
-    lane.appendChild(body);
-    engRow.appendChild(lane);
+    row.appendChild(track);
+    timeline.appendChild(row);
   });
 
+  // "now" marker: vertical line at the current time, across all rows
   const now=new Date();
   if(now.toDateString()===dayDate.toDateString()){
     const nowMins=minsSinceMidnight(now);
     if(nowMins>=dayStartMins && nowMins<=dayEndMins){
-      const relTop=((nowMins-dayStartMins)/60)*HOUR_HEIGHT;
+      const relLeft=((nowMins-dayStartMins)/60)*HOUR_WIDTH;
       const nowLine=document.createElement("div");
-      nowLine.className="now-line";
-      nowLine.style.top=(30+relTop)+"px";
-      nowLine.style.left="80px";
-      nowLine.style.right="0";
-      grid.appendChild(nowLine);
+      nowLine.className="now-line-v";
+      nowLine.style.left=(DAY_NAME_WIDTH+relLeft)+"px";
+      nowLine.style.height=((engineerList.length*DAY_ROW_HEIGHT)+28)+"px";
+      timeline.appendChild(nowLine);
     }
   }
 
-  engWrap.appendChild(engRow);
-  grid.appendChild(engWrap);
-  container.appendChild(grid);
+  container.appendChild(timeline);
 }
 
 function renderWeekView(container){
