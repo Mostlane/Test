@@ -916,57 +916,29 @@ function renderDayView(container){
   const dayDate=selectedDate;
   const engineerList=getFilteredEngineers();
 
+  /* Same layout as the week view: engineers down the side, one column for the
+     selected day, jobs shown as pills. Reuses the week-view styling. */
   const grid=document.createElement("div");
-  grid.className="scheduler-grid";
+  grid.className="week-grid";
+  grid.style.gridTemplateColumns="80px 1fr";
 
-  const timeCol=document.createElement("div");
-  timeCol.className="time-column";
-  const headerSpacer=document.createElement("div");
-  headerSpacer.style.height="30px";
-  timeCol.appendChild(headerSpacer);
-
-  for(let h=DAY_START_HOUR;h<=DAY_END_HOUR;h++){
-    const tl=document.createElement("div");
-    tl.className="time-label";
-    tl.style.height=HOUR_HEIGHT+"px";
-    tl.textContent=pad2(h)+":00";
-    timeCol.appendChild(tl);
-  }
-  grid.appendChild(timeCol);
-
-  const engWrap=document.createElement("div");
-  engWrap.className="engineers-column-wrapper";
-
-  const engRow=document.createElement("div");
-  engRow.className="engineers-row";
-
-  const dayStartMins=DAY_START_HOUR*60;
-  const dayEndMins=DAY_END_HOUR*60;
-  const laneHeight=(DAY_END_HOUR-DAY_START_HOUR)*HOUR_HEIGHT;
+  // top-left corner spacer + the single day header
+  grid.appendChild(document.createElement("div"));
+  const dayHeader=document.createElement("div");
+  dayHeader.className="week-day-header";
+  dayHeader.textContent=dayDate.toDateString().slice(0,15);
+  grid.appendChild(dayHeader);
 
   engineerList.forEach(engineer=>{
-    const lane=document.createElement("div");
-    lane.className="engineer-lane";
+    const nameCell=document.createElement("div");
+    nameCell.className="week-day-header";
+    nameCell.textContent=engineer.name;
+    grid.appendChild(nameCell);
 
-    const header=document.createElement("div");
-    header.className="engineer-header";
-    header.innerHTML=`<span>${engineer.name}</span><span class="role">ENG ${engineer.engineerNumber}</span>`;
-    lane.appendChild(header);
+    const dayCell=document.createElement("div");
+    dayCell.className="week-engineer-cell";
 
-    const body=document.createElement("div");
-    body.className="lane-body";
-    body.style.height=laneHeight+"px";
-    body.dataset.engineer=engineer.username;
-
-    for(let h=DAY_START_HOUR+1;h<=DAY_END_HOUR;h++){
-      const line=document.createElement("div");
-      line.className="time-slot-line";
-      const offsetMins=(h*60 - dayStartMins);
-      line.style.top=((offsetMins/60)*HOUR_HEIGHT)+"px";
-      body.appendChild(line);
-    }
-
-    const jobsForEngineer=jobs
+    const jobsForDay=jobs
       .filter(j => j.assignedEngineers.map(a=>a.toLowerCase()).includes(engineer.username.toLowerCase()))
       .filter(j => {
   const d = new Date(j.scheduledStart);
@@ -976,77 +948,22 @@ function renderDayView(container){
     d.getDate() === dayDate.getDate()
   );
 })
+      .sort((a,b)=> new Date(a.scheduledStart) - new Date(b.scheduledStart));
 
-    jobsForEngineer.forEach(job=>{
-      const dStart = new Date(job.scheduledStart);
+    jobsForDay.forEach(job=>{
+      const dStart=new Date(job.scheduledStart);
+      const timeLabel=pad2(dStart.getHours())+":"+pad2(dStart.getMinutes());
 
-      let startMins = minsSinceMidnight(dStart);
-      let dur = job.durationMinutes;
-
-      // Clamp in minutes (unchanged intent)
-      startMins = clamp(startMins,dayStartMins,dayEndMins-30);
-      const endMins=clamp(startMins+dur,dayStartMins+30,dayEndMins);
-      dur=endMins-startMins;
-
-      /* ✅ CHANGED: position uses discrete slot math (Workever-style) */
-      const startSlot = clampSlot(
-        minutesToSlotIndex(startMins, dayStartMins),
-        0,
-        ((dayEndMins - dayStartMins)/SLOT_MINUTES) - 2
-      );
-
-      const durSlots = Math.max(2, Math.round(dur / SLOT_MINUTES)); // min 30 mins => 2 slots at 15 mins
-
-      const top = startSlot * SLOT_HEIGHT;
-      const height = Math.max(24, durSlots * SLOT_HEIGHT);
-
-      const el=document.createElement("div");
-      el.className="job-block";
-      el.dataset.jobId=job.id;
-      el.dataset.engineer=engineer.username;
-      el.style.top=top+"px";
-      el.style.height=height+"px";
-
-      const timeLabel=pad2(Math.floor(startMins/60))+":"+pad2(startMins%60);
-      el.innerHTML=`
-        <div class="job-title">${job.title}</div>
-        <div class="job-meta">
-          <span>${timeLabel}</span>
-          <span>${job.site}</span>
-        </div>`;
-
-      /* ✅ CHANGED: remove native drag handlers; attach pointer drag */
-      attachPointerDrag(el, job);
-
-      el.addEventListener("click", (e) => {
-        // ✅ ignore click if we were dragging (Workever behaviour)
-        if (dragState.active || dragState.moved) return;
-        openJobModal(job.id);
-      });
-
-      body.appendChild(el);
+      const chip=document.createElement("div");
+      chip.className="week-job-chip";
+      chip.textContent=timeLabel+" · "+job.title;
+      chip.addEventListener("click",()=>openJobModal(job.id));
+      dayCell.appendChild(chip);
     });
 
-    lane.appendChild(body);
-    engRow.appendChild(lane);
+    grid.appendChild(dayCell);
   });
 
-  const now=new Date();
-  if(now.toDateString()===dayDate.toDateString()){
-    const nowMins=minsSinceMidnight(now);
-    if(nowMins>=dayStartMins && nowMins<=dayEndMins){
-      const relTop=((nowMins-dayStartMins)/60)*HOUR_HEIGHT;
-      const nowLine=document.createElement("div");
-      nowLine.className="now-line";
-      nowLine.style.top=(30+relTop)+"px";
-      nowLine.style.left="80px";
-      nowLine.style.right="0";
-      grid.appendChild(nowLine);
-    }
-  }
-
-  engWrap.appendChild(engRow);
-  grid.appendChild(engWrap);
   container.appendChild(grid);
 }
 
