@@ -327,8 +327,8 @@
       top:6px;
       height:32px;
       box-sizing:border-box;
-      border-radius:999px;
-      padding:0 8px;
+      border-radius:8px;
+      padding:0 9px;
       background:#e0f2fe;
       border:1px solid #60a5fa;
       color:#0f172a;
@@ -337,12 +337,14 @@
       overflow:hidden;
       white-space:nowrap;
       text-overflow:ellipsis;
-      display:flex;
-      align-items:center;
+      line-height:30px;
+      font-size:11px;
       touch-action:none; /* required for pointer dragging on mobile */
       user-select:none;
     }
-    .day-job-time{ font-weight:700; margin-right:2px; }
+    .day-job-time{ display:none; font-weight:700; margin-right:5px; }
+    .drag-ghost .day-job-time{ display:inline; }   /* time only shows while dragging */
+    .day-job-ref{ font-weight:700; margin-right:5px; color:#1e3a8a; }
     .day-job.dragging{
       opacity:0.75;
       box-shadow:0 8px 16px rgba(15,23,42,0.4);
@@ -665,8 +667,9 @@ const SLOT_HEIGHT = (HOUR_HEIGHT * SLOT_MINUTES) / 60; // 10px per 15 mins
 const SLOTS_PER_HOUR = 60 / SLOT_MINUTES;
 
 /* ✅ horizontal day timeline (engineers down the side, time runs across) */
-const HOUR_WIDTH = 64;                                   // px per hour across the day
-const SLOT_WIDTH = (HOUR_WIDTH * SLOT_MINUTES) / 60;     // 16px per 15-min slot
+const HOUR_WIDTH = 64;                                   // fallback px per hour (day view computes dynamically)
+const SLOT_WIDTH = (HOUR_WIDTH * SLOT_MINUTES) / 60;     // fallback 16px per 15-min slot
+const MIN_HOUR_WIDTH = 52;                               // narrowest hour before the day starts scrolling (phones)
 const DAY_ROW_HEIGHT = 44;                               // height of each engineer row
 const DAY_NAME_WIDTH = 80;                               // sticky name column (matches week)
 
@@ -752,6 +755,7 @@ async function loadJobs(){
 function normaliseJob(j){
   const id = j.id || ("job_"+Math.random().toString(36).slice(2));
   const title = j.description || j.title || ("Job "+id);
+  const ref   = j.helpdeskRef || j.ref || "";
   const site  = j.siteName || j.site || "";
   const priority = j.priority || "";
   const notes = j.notes || "";
@@ -785,6 +789,7 @@ function normaliseJob(j){
   return {
     id,
     title,
+    ref,
     site,
     priority,
     notes,
@@ -945,12 +950,15 @@ function onPointerMove(e){
 
   const totalSlots = (dayEndMins - dayStartMins) / SLOT_MINUTES;
 
+  // Derive slot width from the rendered track so snapping matches the dynamic page-width layout
+  const slotWidth = rect.width / totalSlots;
+
   // Convert to discrete slot index (time runs left→right)
-  let slot = Math.round(x / SLOT_WIDTH);
+  let slot = Math.round(x / slotWidth);
   slot = clampSlot(slot, 0, totalSlots - 2); // keep at least 30 mins inside day (2 slots at 15 mins)
 
   // Update ghost position: snap horizontally to the slot, sit on the hovered row
-  dragState.ghost.style.left = (rect.left + slot * SLOT_WIDTH) + "px";
+  dragState.ghost.style.left = (rect.left + slot * slotWidth) + "px";
   dragState.ghost.style.top  = rect.top + "px";
 
   // Live-update the time shown on the ghost so you can see where it'll drop
@@ -1025,8 +1033,14 @@ function renderDayView(container){
   const dayStartMins=DAY_START_HOUR*60;
   const dayEndMins=DAY_END_HOUR*60;
   const totalHours=DAY_END_HOUR-DAY_START_HOUR;
-  const trackWidth=totalHours*HOUR_WIDTH;
   const totalSlots=(dayEndMins-dayStartMins)/SLOT_MINUTES;
+
+  // Stretch the day to fill the available page width; fall back to a scrollable
+  // minimum on narrow screens so a full day still fits on a phone.
+  const avail = (container.clientWidth || 900) - DAY_NAME_WIDTH - 2;
+  const HOUR_WIDTH = Math.max(MIN_HOUR_WIDTH, Math.floor(avail / totalHours));
+  const SLOT_WIDTH = (HOUR_WIDTH * SLOT_MINUTES) / 60;
+  const trackWidth = totalHours * HOUR_WIDTH;
 
   /* Engineers down the side (one row each, week-view styling); time runs across
      so jobs can be dragged to a new time/engineer with a live ghost preview. */
@@ -1114,7 +1128,11 @@ function renderDayView(container){
       el.style.width=width+"px";
 
       const timeLabel=pad2(Math.floor(startMins/60))+":"+pad2(startMins%60);
-      el.innerHTML=`<span class="day-job-time">${timeLabel}</span> ${job.title}`;
+      el.innerHTML='<span class="day-job-time"></span><span class="day-job-ref"></span><span class="day-job-label"></span>';
+      el.querySelector(".day-job-time").textContent=timeLabel;          // hidden on the board, shown on the drag ghost
+      if(job.ref) el.querySelector(".day-job-ref").textContent=job.ref;
+      el.querySelector(".day-job-label").textContent=job.title;
+      el.title=timeLabel+"   "+(job.ref?job.ref+"   ":"")+job.title+(job.site?"   ·   "+job.site:"");
 
       attachPointerDrag(el, job);
 
