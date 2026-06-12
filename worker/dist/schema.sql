@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   status          TEXT DEFAULT 'Active',
   sharepoint_path TEXT,
   must_change_password INTEGER DEFAULT 0,  -- force change on next login (admin reset / new user)
+  profile         TEXT,                    -- JSON: rates, fuel, contact/HR details, etc.
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
 );

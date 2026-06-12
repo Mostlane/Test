@@ -51,20 +51,23 @@ export async function handle(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     if (!b.Username) return error("Username required", 400, env, request);
 
+    const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
+
     await env.DB.prepare(`
       INSERT INTO users (engineer_number, first_name, last_name, username, email,
-                         vehicle_assigned, employment_type, status, sharepoint_path)
-      VALUES (?,?,?,?,?,?,?,?,?)
+                         vehicle_assigned, employment_type, status, sharepoint_path, profile)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(username) DO UPDATE SET
         engineer_number=excluded.engineer_number, first_name=excluded.first_name,
         last_name=excluded.last_name, email=excluded.email,
         vehicle_assigned=excluded.vehicle_assigned,
         employment_type=excluded.employment_type, status=excluded.status,
-        sharepoint_path=excluded.sharepoint_path, updated_at=datetime('now')
+        sharepoint_path=excluded.sharepoint_path,
+        profile=COALESCE(excluded.profile, users.profile), updated_at=datetime('now')
     `).bind(
       b.EngineerNumber || null, b.FirstName || null, b.LastName || null,
       b.Username, b.Email || null, b.VehicleAssigned || null,
-      b.EmploymentType || null, b.Status || "Active", b.SharePointPath || null
+      b.EmploymentType || null, b.Status || "Active", b.SharePointPath || null, profileJson
     ).run();
 
     if (b.Password) {
@@ -143,6 +146,8 @@ const PERMISSION_KEYS = [
 ];
 
 function shapeUser(u, perms) {
+  let profile = {};
+  try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch { profile = {}; }
   return {
     EngineerNumber: u.engineer_number,
     FirstName: u.first_name,
@@ -153,6 +158,7 @@ function shapeUser(u, perms) {
     EmploymentType: u.employment_type,
     Status: u.status,
     SharePointPath: u.sharepoint_path,
+    Profile: profile,
     ...perms,
   };
 }

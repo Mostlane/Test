@@ -25,20 +25,26 @@
     .pill.active { background:#e3f6e8; color:#0c7d27; } .pill.disabled { background:#fde8ea; color:#b00020; }
     .muted { color:#667085; font-size:12px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:24px; overflow:auto; }
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; }
     .overlay.open { display:flex; }
-    .panel { background:#fff; border-radius:12px; width:100%; max-width:640px; padding:20px; }
-    .panel h2 { color:#003366; margin:0 0 14px; font-size:18px; }
+    .panel { background:#fff; border-radius:12px; width:100%; max-width:680px; padding:18px; }
+    .panel h2 { color:#003366; margin:0 0 6px; font-size:18px; }
+    /* Section tabs */
+    .tabs { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0 14px; }
+    .tabs button { background:#eef2f6; border:none; border-radius:999px; padding:7px 12px; font-size:13px; cursor:pointer; color:#27313a; }
+    .tabs button.active { background:#0066cc; color:#fff; }
+    .section { display:none; }
+    .section.active { display:block; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     label { font-size:12px; color:#667085; display:block; margin:8px 0 2px; }
     .panel input, .panel select { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
-    .perms { margin-top:12px; border-top:1px solid #eef2f6; padding-top:12px; }
-    .perms h3 { font-size:13px; color:#003366; margin:0 0 8px; }
-    .permgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:6px; }
+    .permgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
     .permgrid label { display:flex; align-items:center; gap:6px; font-size:13px; color:#27313a; margin:0; }
-    .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+    .devrow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #eef2f6; font-size:13px; }
+    .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
     .msg { font-size:14px; margin-top:10px; } .msg.err { color:#b00020; } .msg.ok { color:#0c7d27; }
     .notice { background:#fff3cd; color:#7a5b00; padding:12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+    @media (max-width:560px){ .grid2{ grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -49,7 +55,7 @@
 
   <div class="wrap">
     <div id="configNotice" class="notice" style="display:none;">
-      ⚠️ The portal API URL isn't set yet. Edit <code>portal-config.js</code> (set <code>MOSTLANE_API</code>) after deploying the worker.
+      ⚠️ The portal API URL isn't set yet. Edit <code>portal-config.js</code> after deploying the worker.
     </div>
 
     <div class="bar">
@@ -68,28 +74,87 @@
   <div class="overlay" id="overlay">
     <div class="panel">
       <h2 id="panelTitle">Edit user</h2>
-      <div class="grid2">
-        <div><label>Username *</label><input id="f_username" /></div>
-        <div><label>Engineer #</label><input id="f_engno" /></div>
-        <div><label>First name</label><input id="f_first" /></div>
-        <div><label>Last name</label><input id="f_last" /></div>
-        <div><label>Email</label><input id="f_email" type="email" /></div>
-        <div><label>Vehicle</label><input id="f_vehicle" /></div>
-        <div>
-          <label>Employment</label>
-          <select id="f_emp"><option>Employed</option><option>Self Employed</option></select>
+
+      <div class="tabs" id="tabs">
+        <button data-tab="details" class="active">Details</button>
+        <button data-tab="pay">Pay &amp; rates</button>
+        <button data-tab="vehicle">Vehicle &amp; fuel</button>
+        <button data-tab="perms">Permissions</button>
+        <button data-tab="devices">Devices</button>
+        <button data-tab="account">Account</button>
+      </div>
+
+      <!-- DETAILS -->
+      <div class="section active" data-sec="details">
+        <div class="grid2">
+          <div><label>Username *</label><input id="f_username" /></div>
+          <div><label>Engineer #</label><input id="f_engno" /></div>
+          <div><label>First name</label><input id="f_first" /></div>
+          <div><label>Last name</label><input id="f_last" /></div>
+          <div><label>Email</label><input id="f_email" type="email" /></div>
+          <div><label>Phone</label><input id="p_phone" /></div>
+          <div><label>Job title</label><input id="p_jobTitle" /></div>
+          <div><label>Start date</label><input id="p_startDate" type="date" /></div>
         </div>
-        <div>
-          <label>Status</label>
-          <select id="f_status"><option>Active</option><option>Disabled</option></select>
+        <div><label>Address</label><input id="p_address" /></div>
+        <div class="grid2">
+          <div><label>Emergency contact name</label><input id="p_emergencyName" /></div>
+          <div><label>Emergency contact phone</label><input id="p_emergencyPhone" /></div>
+          <div>
+            <label>Employment</label>
+            <select id="f_emp"><option>Employed</option><option>Self Employed</option></select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="f_status"><option>Active</option><option>Disabled</option></select>
+          </div>
         </div>
       </div>
-      <div><label>SharePoint path</label><input id="f_sp" /></div>
-      <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" /></div>
 
-      <div class="perms">
-        <h3>Permissions</h3>
+      <!-- PAY -->
+      <div class="section" data-sec="pay">
+        <div class="grid2">
+          <div><label>Hourly rate (£)</label><input id="p_hourlyRate" type="number" step="0.01" /></div>
+          <div><label>Overtime rate (£)</label><input id="p_overtimeRate" type="number" step="0.01" /></div>
+          <div><label>Day rate (£)</label><input id="p_dayRate" type="number" step="0.01" /></div>
+          <div><label>Travel / mileage rate (£)</label><input id="p_travelRate" type="number" step="0.01" /></div>
+        </div>
+      </div>
+
+      <!-- VEHICLE -->
+      <div class="section" data-sec="vehicle">
+        <div class="grid2">
+          <div><label>Linked vehicle (reg)</label><input id="f_vehicle" /></div>
+          <div><label>Fuel card number</label><input id="p_fuelCard" /></div>
+          <div><label>Pence per mile (p)</label><input id="p_pencePerMile" type="number" step="0.1" /></div>
+          <div>
+            <label>Fuel payment method</label>
+            <select id="p_fuelMethod">
+              <option value="">—</option>
+              <option>Fuel card</option>
+              <option>Claim back</option>
+              <option>Allowance</option>
+              <option>None</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- PERMISSIONS -->
+      <div class="section" data-sec="perms">
         <div class="permgrid" id="permGrid"></div>
+      </div>
+
+      <!-- DEVICES -->
+      <div class="section" data-sec="devices">
+        <p class="muted">Registered devices for this person. Removing one lets them re-register on their next login (use this to move someone to a new phone).</p>
+        <div id="deviceList"><div class="muted">—</div></div>
+      </div>
+
+      <!-- ACCOUNT -->
+      <div class="section" data-sec="account">
+        <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" /></div>
+        <div><label>SharePoint path</label><input id="f_sp" /></div>
       </div>
 
       <p id="panelMsg" class="msg"></p>
@@ -107,6 +172,9 @@
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA"];
+    // Profile fields (ids prefixed p_) <-> Profile object keys
+    const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
+      "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod"];
 
     let allUsers = [];
 
@@ -116,12 +184,20 @@
       return fetch(API + path, opts);
     }
     const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    const g = id => document.getElementById(id);
 
-    document.getElementById("permGrid").innerHTML = PERMISSIONS.map(p =>
+    g("permGrid").innerHTML = PERMISSIONS.map(p =>
       `<label><input type="checkbox" data-perm="${p}" /> ${p}</label>`).join("");
 
-    if (/REPLACE-ME/.test(API || "")) document.getElementById("configNotice").style.display = "block";
+    if (/REPLACE-ME/.test(API || "")) g("configNotice").style.display = "block";
     if (!token) location.href = "login.html";
+
+    // Tab switching
+    g("tabs").addEventListener("click", e => {
+      const t = e.target.closest("button"); if (!t) return;
+      [...document.querySelectorAll("#tabs button")].forEach(b => b.classList.toggle("active", b === t));
+      document.querySelectorAll(".section").forEach(s => s.classList.toggle("active", s.dataset.sec === t.dataset.tab));
+    });
 
     async function guardAndLoad() {
       try {
@@ -131,8 +207,7 @@
         }
         await loadUsers();
       } catch (e) {
-        document.getElementById("rows").innerHTML =
-          `<tr><td colspan="6" class="muted">Could not reach the portal API. Set MOSTLANE_API in portal-config.js.</td></tr>`;
+        g("rows").innerHTML = `<tr><td colspan="6" class="muted">Could not reach the portal API.</td></tr>`;
       }
     }
 
@@ -149,10 +224,10 @@
     }
 
     function render() {
-      const q = document.getElementById("search").value.trim().toLowerCase();
+      const q = g("search").value.trim().toLowerCase();
       const list = allUsers.filter(u => !q ||
         [u.Username, u.FirstName, u.LastName, u.Email].some(v => String(v || "").toLowerCase().includes(q)));
-      const rows = document.getElementById("rows");
+      const rows = g("rows");
       if (!list.length) { rows.innerHTML = `<tr><td colspan="6" class="muted">No users.</td></tr>`; return; }
       rows.innerHTML = list.map(u => `
         <tr>
@@ -168,15 +243,13 @@
           </div></td>
         </tr>`).join("");
     }
-
-    document.getElementById("search").addEventListener("input", render);
+    g("search").addEventListener("input", render);
 
     function openEditor(user) {
-      document.getElementById("panelTitle").textContent = user ? "Edit user" : "Add user";
-      document.getElementById("pwLabel").textContent = user
-        ? "Set password (leave blank to keep current)"
-        : "Initial password (user must change on first login)";
-      const g = id => document.getElementById(id);
+      // reset to first tab
+      document.querySelector('#tabs button[data-tab="details"]').click();
+      g("panelTitle").textContent = user ? "Edit user" : "Add user";
+      g("pwLabel").textContent = user ? "Set password (leave blank to keep current)" : "Initial password (user must change on first login)";
       g("f_username").value = user?.Username || "";
       g("f_username").disabled = !!user;
       g("f_engno").value = user?.EngineerNumber || "";
@@ -188,35 +261,40 @@
       g("f_status").value = user?.Status || "Active";
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
+      const prof = user?.Profile || {};
+      PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
       document.querySelectorAll("[data-perm]").forEach(cb => { cb.checked = user ? user[cb.dataset.perm] === "Yes" : false; });
-      document.getElementById("panelMsg").textContent = "";
-      document.getElementById("overlay").classList.add("open");
+      g("panelMsg").textContent = "";
+      g("overlay").classList.add("open");
+      loadDevices(user?.Username || "");
     }
-    function closeEditor() { document.getElementById("overlay").classList.remove("open"); }
+    function closeEditor() { g("overlay").classList.remove("open"); }
 
-    document.getElementById("addBtn").onclick = () => openEditor(null);
-    document.getElementById("cancelBtn").onclick = closeEditor;
+    g("addBtn").onclick = () => openEditor(null);
+    g("cancelBtn").onclick = closeEditor;
 
-    document.getElementById("rows").addEventListener("click", async (e) => {
+    g("rows").addEventListener("click", async (e) => {
       const t = e.target;
       if (t.dataset.edit) openEditor(allUsers.find(u => u.Username === t.dataset.edit));
       else if (t.dataset.reset) await resetPw(t.dataset.reset);
       else if (t.dataset.del) await delUser(t.dataset.del);
     });
 
-    document.getElementById("saveBtn").onclick = async () => {
-      const msg = document.getElementById("panelMsg");
+    g("saveBtn").onclick = async () => {
+      const msg = g("panelMsg");
       msg.className = "msg"; msg.textContent = "Saving…";
-      const g = id => document.getElementById(id).value.trim();
       const body = {
-        Username: g("f_username"), EngineerNumber: g("f_engno"),
-        FirstName: g("f_first"), LastName: g("f_last"), Email: g("f_email"),
-        VehicleAssigned: g("f_vehicle"), EmploymentType: g("f_emp"),
-        Status: document.getElementById("f_status").value, SharePointPath: g("f_sp")
+        Username: g("f_username").value.trim(), EngineerNumber: g("f_engno").value.trim(),
+        FirstName: g("f_first").value.trim(), LastName: g("f_last").value.trim(), Email: g("f_email").value.trim(),
+        VehicleAssigned: g("f_vehicle").value.trim(), EmploymentType: g("f_emp").value,
+        Status: g("f_status").value, SharePointPath: g("f_sp").value.trim()
       };
       if (!body.Username) { msg.className = "msg err"; msg.textContent = "Username is required."; return; }
-      const pw = document.getElementById("f_pw").value;
+      const pw = g("f_pw").value;
       if (pw) body.Password = pw;
+      const profile = {};
+      PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el && el.value !== "") profile[k] = el.value; });
+      body.Profile = profile;
       document.querySelectorAll("[data-perm]").forEach(cb => { body[cb.dataset.perm] = cb.checked ? "Yes" : "No"; });
       try {
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
@@ -225,6 +303,31 @@
         closeEditor(); await loadUsers();
       } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; }
     };
+
+    // ── Devices ──
+    async function loadDevices(username) {
+      const el = g("deviceList");
+      if (!username) { el.innerHTML = '<div class="muted">Save the user first, then re-open to manage devices.</div>'; return; }
+      el.innerHTML = '<div class="muted">Loading…</div>';
+      try {
+        const r = await (await api("/device/list?u=" + encodeURIComponent(username))).json();
+        const devs = r.devices || [];
+        if (!devs.length) { el.innerHTML = '<div class="muted">No registered devices.</div>'; return; }
+        el.innerHTML = devs.map(d => `
+          <div class="devrow">
+            <span><b>${esc(d.label || "(unnamed device)")}</b><div class="muted">${esc(d.device_id)} · ${esc((d.registered_at||"").slice(0,10))}</div></span>
+            <button class="btn small red" data-dev="${esc(d.device_id)}">Remove</button>
+          </div>`).join("");
+      } catch (e) { el.innerHTML = '<div class="muted">Could not load devices.</div>'; }
+    }
+    g("deviceList").addEventListener("click", async (e) => {
+      const t = e.target; if (!t.dataset.dev) return;
+      if (!confirm("Remove this device? The person will be asked to register again next time they log in.")) return;
+      try {
+        await api("/device/" + encodeURIComponent(t.dataset.dev), { method: "DELETE" });
+        await loadDevices(g("f_username").value.trim());
+      } catch (e) { alert("Could not remove device."); }
+    });
 
     async function resetPw(username) {
       if (!confirm(`Reset password for ${username}? They'll be forced to set a new one on next login.`)) return;
