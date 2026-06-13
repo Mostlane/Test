@@ -37,9 +37,12 @@ bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucke
 #   npx wrangler secret put SESSION_SECRET
 # PDFSHIFT_API_KEY     - for SLA job PDF export (/sla/jobs/:id/export.pdf, /sla/pdf)
 #   npx wrangler secret put PDFSHIFT_API_KEY
-# RESET_EMAIL_WEBHOOK  - URL that emails the password-reset link (e.g. a Zapier
-#   Catch Hook wired to send via Outlook/365). Receives JSON:
-#   { type:"password_reset", to, name, resetUrl }
+# RESEND_API_KEY       - transactional email (welcome + password-reset). Free tier
+#   at resend.com. This is all that's needed for the Worker to send email.
+#   npx wrangler secret put RESEND_API_KEY
+# RESET_EMAIL_WEBHOOK  - OPTIONAL fallback if you'd rather email via a webhook
+#   (e.g. a Zapier Catch Hook → Outlook/365). Only used if RESEND_API_KEY is unset.
+#   Receives JSON: { to, subject, html, text }
 #   npx wrangler secret put RESET_EMAIL_WEBHOOK
 #
 # Example local-dev values live in .dev.vars (git-ignored).
@@ -48,8 +51,11 @@ bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucke
 # Non-secret config. Front-end origin(s) allowed to call this API (CORS).
 ALLOWED_ORIGINS = "*"
 SESSION_TTL_HOURS = "12"
-# Base URL of the portal front-end, used to build password-reset links.
-APP_BASE_URL = "https://mostlane-portal.REPLACE-ME.workers.dev"
+# Base URL of the portal front-end, used to build welcome / password-reset links.
+APP_BASE_URL = "https://mostlane-portal.com"
+# From address for portal emails. The domain must be verified in your email
+# provider (Resend) for reliable delivery.
+EMAIL_FROM = "Mostlane <no-reply@mostlane-portal.com>"
 # Public base URL of the JOB_FILES R2 bucket (for photo/signature links).
 R2_PUBLIC_BASE = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev"
 # Optional: base64 PNG of the Mostlane logo for PDF/HTML job exports.

@@ -10,6 +10,10 @@
 
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword } from "../lib/auth.js";
+import { sendEmail, welcomeEmail, issuePasswordToken, appBase } from "../lib/email.js";
+
+// How long a new user's "set your password" welcome link stays valid.
+const WELCOME_TOKEN_HOURS = 72;
 
 // Require a valid session whose user has admin rights (FullAccess or Users).
 async function requireAdmin(env, request) {
@@ -51,6 +55,10 @@ export async function handle(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     if (!b.Username) return error("Username required", 400, env, request);
 
+    // Is this a brand-new account (vs. an edit)? Decides whether to send a welcome email.
+    const already = await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(b.Username).first();
+    const isNewUser = !already;
+
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
 
     await env.DB.prepare(`
@@ -91,7 +99,23 @@ export async function handle(request, env, ctx, url) {
       }
     }
 
-    return json({ ok: true }, {}, env, request);
+    // New account with an email → send a welcome / "set your password" link so
+    // onboarding needs no manual credential hand-off.
+    let welcomeEmailed = false;
+    if (isNewUser && b.Email) {
+      const token = await issuePasswordToken(env, b.Username, WELCOME_TOKEN_HOURS);
+      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = welcomeEmail({
+        name: b.FirstName || b.Username,
+        username: b.Username,
+        setUrl,
+        ttlHours: WELCOME_TOKEN_HOURS,
+      });
+      const res = await sendEmail(env, { to: b.Email, ...msg });
+      welcomeEmailed = !!res.ok;
+    }
+
+    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
   }
 
   // POST /users/reset-password (admin) — sets a temp password + forces change
