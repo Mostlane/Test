@@ -15,6 +15,7 @@ import {
   verifyPassword, hashPassword, validatePassword, createSession, destroySession,
   requireSession, permissionsFor,
 } from "../lib/auth.js";
+import { sendEmail, resetEmail, issuePasswordToken, appBase } from "../lib/email.js";
 
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
@@ -93,16 +94,13 @@ export async function handle(request, env, ctx, url) {
       "SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND lower(email) = lower(?))"
     ).bind(ident, ident).first();
 
-    // Only act for active users, but always return a generic success (no enumeration).
-    if (user && user.status !== "Disabled") {
-      const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-      const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
-      await env.DB.prepare(
-        "INSERT INTO password_resets (token, username, expires_at) VALUES (?,?,?)"
-      ).bind(token, user.username, expires).run();
-      const base = (env.APP_BASE_URL || "").replace(/\/$/, "");
-      const resetUrl = `${base}/reset-password.html?token=${token}`;
-      await sendResetEmail(env, { to: user.email, name: user.first_name || user.username, resetUrl });
+    // Only act for active users with an email, but always return a generic
+    // success (so the response can't be used to enumerate accounts).
+    if (user && user.status !== "Disabled" && user.email) {
+      const token = await issuePasswordToken(env, user.username, 1); // 1 hour
+      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl });
+      await sendEmail(env, { to: user.email, ...msg });
     }
     return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
   }
@@ -140,19 +138,6 @@ async function setPassword(env, username, newPassword) {
   await env.DB.prepare(
     "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE username=?"
   ).bind(hash, username).run();
-}
-
-// POST the reset link to a configurable webhook (e.g. a Zapier Catch Hook that
-// emails via Outlook/365). No-op if RESET_EMAIL_WEBHOOK isn't set.
-async function sendResetEmail(env, payload) {
-  if (!env.RESET_EMAIL_WEBHOOK) { console.warn("RESET_EMAIL_WEBHOOK not set — reset link not emailed:", payload.resetUrl); return; }
-  try {
-    await fetch(env.RESET_EMAIL_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "password_reset", ...payload })
-    });
-  } catch (e) { console.error("Reset email webhook failed:", e.message); }
 }
 
 // Return the camel/Pascal shape the existing front-end reads (user.Username etc.)

@@ -300,6 +300,11 @@
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
         if (!res.ok || !r.ok) { msg.className = "msg err"; msg.textContent = r.error || "Save failed."; return; }
+        if (r.isNewUser && body.Email) {
+          alert(r.welcomeEmailed
+            ? `User created. A welcome email with a “set your password” link was sent to ${body.Email}.`
+            : `User created, but the welcome email could NOT be sent (email isn’t configured on the server yet).\n\nSet a password for them manually, or configure email and use “Reset password”.`);
+        }
         closeEditor(); await loadUsers();
       } catch (e) { msg.className = "msg err"; msg.textContent = "Network error."; }
     };
