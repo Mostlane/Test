@@ -11,8 +11,9 @@
 const BRAND = "Mostlane";
 
 // Front-end base URL (where reset-password.html lives), trailing slash stripped.
+// Defaults to the live portal so no env var is required.
 export function appBase(env) {
-  return (env.APP_BASE_URL || "").replace(/\/$/, "");
+  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
 }
 
 // Issue a single-use password token. Reused for both "forgot password" and the

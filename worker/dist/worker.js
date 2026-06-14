@@ -103,6 +103,108 @@ async function permissionsFor(env, username) {
   return perms;
 }
 
+// src/lib/email.js
+var BRAND = "Mostlane";
+function appBase(env) {
+  return (env.APP_BASE_URL || "https://mostlane-portal.com").replace(/\/$/, "");
+}
+async function issuePasswordToken(env, username, ttlHours = 1) {
+  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+  const expires = new Date(Date.now() + ttlHours * 3600 * 1e3).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO password_resets (token, username, expires_at) VALUES (?,?,?)"
+  ).bind(token, username, expires).run();
+  return token;
+}
+async function sendEmail(env, { to, subject, html, text }) {
+  if (!to) return { ok: false, skipped: true, reason: "no recipient" };
+  const body = text || stripHtml(html);
+  if (env.RESEND_API_KEY) {
+    const from = env.EMAIL_FROM || `${BRAND} <no-reply@mostlane-portal.com>`;
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ from, to, subject, html, text: body })
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error("Resend send failed:", res.status, errBody);
+        return { ok: false, status: res.status, error: errBody };
+      }
+      return { ok: true, via: "resend" };
+    } catch (e) {
+      console.error("Resend send error:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  if (env.RESET_EMAIL_WEBHOOK) {
+    try {
+      await fetch(env.RESET_EMAIL_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, html, text: body })
+      });
+      return { ok: true, via: "webhook" };
+    } catch (e) {
+      console.error("Email webhook failed:", e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+  console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
+  return { ok: false, skipped: true, reason: "no provider" };
+}
+function welcomeEmail({ name, username, setUrl, ttlHours }) {
+  return {
+    subject: `Welcome to ${BRAND} \u2014 set your password`,
+    html: shell(`
+      <p>Hi ${esc(name)},</p>
+      <p>An account has been created for you on the ${BRAND} portal.</p>
+      <p style="margin:6px 0;"><strong>Username:</strong> ${esc(username)}</p>
+      <p>Click below to set your password and get started:</p>
+      <p style="margin:22px 0;">${button(setUrl, "Set your password")}</p>
+      <p style="color:#6b7280;font-size:12px;">This link expires in ${ttlHours} hours. If it expires, use
+      &ldquo;Forgot password&rdquo; on the login page to get a new one.</p>
+    `)
+  };
+}
+function resetEmail({ name, resetUrl }) {
+  return {
+    subject: `${BRAND} password reset`,
+    html: shell(`
+      <p>Hi ${esc(name)},</p>
+      <p>We received a request to reset your ${BRAND} portal password.</p>
+      <p style="margin:22px 0;">${button(resetUrl, "Reset your password")}</p>
+      <p style="color:#6b7280;font-size:12px;">This link expires in 1 hour. If you didn&rsquo;t request this you can
+      ignore this email &mdash; your password won&rsquo;t change.</p>
+    `)
+  };
+}
+function shell(inner) {
+  return `<!doctype html><html><body style="margin:0;background:#f3f4f6;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+      <tr><td style="background:#003b82;padding:16px 24px;color:#fff;font-size:18px;font-weight:700;">${BRAND}</td></tr>
+      <tr><td style="padding:24px;font-size:14px;line-height:1.55;">${inner}</td></tr>
+      <tr><td style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:11px;border-top:1px solid #eee;">
+        Automated message from the ${BRAND} portal.
+      </td></tr>
+    </table>
+  </td></tr></table></body></html>`;
+}
+function button(href, label) {
+  return `<a href="${href}" style="display:inline-block;background:#1e66ff;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;">${label}</a>`;
+}
+function stripHtml(html = "") {
+  return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function esc(s = "") {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
 // src/routes/auth.js
 async function handle(request, env, ctx, url) {
   const path = url.pathname;
@@ -164,15 +266,11 @@ async function handle(request, env, ctx, url) {
     const user = await env.DB.prepare(
       "SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND lower(email) = lower(?))"
     ).bind(ident, ident).first();
-    if (user && user.status !== "Disabled") {
-      const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-      const expires = new Date(Date.now() + 60 * 60 * 1e3).toISOString();
-      await env.DB.prepare(
-        "INSERT INTO password_resets (token, username, expires_at) VALUES (?,?,?)"
-      ).bind(token, user.username, expires).run();
-      const base = (env.APP_BASE_URL || "").replace(/\/$/, "");
-      const resetUrl = `${base}/reset-password.html?token=${token}`;
-      await sendResetEmail(env, { to: user.email, name: user.first_name || user.username, resetUrl });
+    if (user && user.status !== "Disabled" && user.email) {
+      const token = await issuePasswordToken(env, user.username, 1);
+      const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl });
+      await sendEmail(env, { to: user.email, ...msg });
     }
     return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
   }
@@ -205,21 +303,6 @@ async function setPassword(env, username, newPassword) {
     "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=0, updated_at=datetime('now') WHERE username=?"
   ).bind(hash, username).run();
 }
-async function sendResetEmail(env, payload) {
-  if (!env.RESET_EMAIL_WEBHOOK) {
-    console.warn("RESET_EMAIL_WEBHOOK not set \u2014 reset link not emailed:", payload.resetUrl);
-    return;
-  }
-  try {
-    await fetch(env.RESET_EMAIL_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "password_reset", ...payload })
-    });
-  } catch (e) {
-    console.error("Reset email webhook failed:", e.message);
-  }
-}
 function shapeUser(u, perms) {
   return {
     EngineerNumber: u.engineer_number,
@@ -250,6 +333,7 @@ async function logLogin(env, request, username, outcome) {
 }
 
 // src/routes/users.js
+var WELCOME_TOKEN_HOURS = 72;
 async function requireAdmin(env, request) {
   const sess = await requireSession(env, request);
   if (!sess) return { err: error("Not authenticated", 401, env, request) };
@@ -279,6 +363,8 @@ async function handle2(request, env, ctx, url) {
     if (gate.err) return gate.err;
     const b = await request.json().catch(() => ({}));
     if (!b.Username) return error("Username required", 400, env, request);
+    const already = await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(b.Username).first();
+    const isNewUser = !already;
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
     await env.DB.prepare(`
       INSERT INTO users (engineer_number, first_name, last_name, username, email,
@@ -319,7 +405,20 @@ async function handle2(request, env, ctx, url) {
         `).bind(b.Username, key, val).run();
       }
     }
-    return json({ ok: true }, {}, env, request);
+    let welcomeEmailed = false;
+    if (isNewUser && b.Email) {
+      const token = await issuePasswordToken(env, b.Username, WELCOME_TOKEN_HOURS);
+      const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+      const msg = welcomeEmail({
+        name: b.FirstName || b.Username,
+        username: b.Username,
+        setUrl,
+        ttlHours: WELCOME_TOKEN_HOURS
+      });
+      const res = await sendEmail(env, { to: b.Email, ...msg });
+      welcomeEmailed = !!res.ok;
+    }
+    return json({ ok: true, isNewUser, welcomeEmailed }, {}, env, request);
   }
   if (path === "/users/reset-password" && request.method === "POST") {
     const gate = await requireAdmin(env, request);
