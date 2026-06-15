@@ -78,51 +78,73 @@ export async function sendEmail(env, { to, subject, html, text }) {
 
 // ── Templates ───────────────────────────────────────────────────────────────
 
-export function welcomeEmail({ name, username, setUrl, ttlHours }) {
+export function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
   return {
     subject: `Welcome to ${BRAND} — set your password`,
     html: shell(`
-      <p>Hi ${esc(name)},</p>
-      <p>An account has been created for you on the ${BRAND} portal.</p>
-      <p style="margin:6px 0;"><strong>Username:</strong> ${esc(username)}</p>
-      <p>Click below to set your password and get started:</p>
-      <p style="margin:22px 0;">${button(setUrl, "Set your password")}</p>
-      <p style="color:#6b7280;font-size:12px;">This link expires in ${ttlHours} hours. If it expires, use
-      &ldquo;Forgot password&rdquo; on the login page to get a new one.</p>
-    `),
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
+      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
+        <tr><td style="padding:12px 16px;">
+          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
+          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
+        </td></tr>
+      </table>
+      <p style="margin:0 0 6px;">Set your password to get started:</p>
+      ${button(setUrl, "Set your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
+      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
+    `, appUrl),
   };
 }
 
-export function resetEmail({ name, resetUrl }) {
+export function resetEmail({ name, resetUrl, appUrl }) {
   return {
-    subject: `${BRAND} password reset`,
+    subject: `${BRAND} — password reset`,
     html: shell(`
-      <p>Hi ${esc(name)},</p>
-      <p>We received a request to reset your ${BRAND} portal password.</p>
-      <p style="margin:22px 0;">${button(resetUrl, "Reset your password")}</p>
-      <p style="color:#6b7280;font-size:12px;">This link expires in 1 hour. If you didn&rsquo;t request this you can
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
+      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
+      ${button(resetUrl, "Reset your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
       ignore this email &mdash; your password won&rsquo;t change.</p>
-    `),
+    `, appUrl),
   };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function shell(inner) {
-  return `<!doctype html><html><body style="margin:0;background:#f3f4f6;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
-      <tr><td style="background:#003b82;padding:16px 24px;color:#fff;font-size:18px;font-weight:700;">${BRAND}</td></tr>
-      <tr><td style="padding:24px;font-size:14px;line-height:1.55;">${inner}</td></tr>
-      <tr><td style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:11px;border-top:1px solid #eee;">
-        Automated message from the ${BRAND} portal.
-      </td></tr>
-    </table>
-  </td></tr></table></body></html>`;
+// Branded HTML shell: gradient brand bar, centred logo, content, footer.
+// Table-based + inline styles for broad email-client support (incl. Outlook).
+function shell(inner, appUrl) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
+  const logo = `${base}/mostlane-logo.jpg`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f4;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
+        <tr><td align="center" style="padding:26px 24px 6px;">
+          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
+        </td></tr>
+        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
+        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
+          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
+        </td></tr>
+      </table>
+      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
+    </td></tr>
+  </table>
+</body></html>`;
 }
 
+// Bulletproof (table-based) call-to-action button.
 function button(href, label) {
-  return `<a href="${href}" style="display:inline-block;background:#1e66ff;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;">${label}</a>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
+    <td align="center" style="border-radius:8px;background:#1e66ff;">
+      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
+    </td></tr></table>`;
 }
 
 function stripHtml(html = "") {

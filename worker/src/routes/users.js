@@ -110,6 +110,7 @@ export async function handle(request, env, ctx, url) {
         username: b.Username,
         setUrl,
         ttlHours: WELCOME_TOKEN_HOURS,
+        appUrl: appBase(env),
       });
       const res = await sendEmail(env, { to: b.Email, ...msg });
       welcomeEmailed = !!res.ok;
@@ -141,6 +142,31 @@ export async function handle(request, env, ctx, url) {
 
     // Return the temp password so the admin can relay it (only if we generated it).
     return json({ ok: true, tempPassword: tempProvided ? undefined : newPassword }, {}, env, request);
+  }
+
+  // POST /users/resend-welcome (admin) — re-send the "set your password" welcome email.
+  if (path === "/users/resend-welcome" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const user = await env.DB.prepare("SELECT username, first_name, email FROM users WHERE username=?")
+      .bind(b.username).first();
+    if (!user) return error("User not found", 404, env, request);
+    if (!user.email) return error("That user has no email address on file.", 400, env, request);
+
+    const token = await issuePasswordToken(env, user.username, WELCOME_TOKEN_HOURS);
+    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+    const msg = welcomeEmail({
+      name: user.first_name || user.username,
+      username: user.username,
+      setUrl,
+      ttlHours: WELCOME_TOKEN_HOURS,
+      appUrl: appBase(env),
+    });
+    const res = await sendEmail(env, { to: user.email, ...msg });
+    if (!res.ok) return error("Email could not be sent — check the email configuration.", 502, env, request);
+    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
   }
 
   // POST /users/delete (admin)

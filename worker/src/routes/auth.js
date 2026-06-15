@@ -99,7 +99,7 @@ export async function handle(request, env, ctx, url) {
     if (user && user.status !== "Disabled" && user.email) {
       const token = await issuePasswordToken(env, user.username, 1); // 1 hour
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = resetEmail({ name: user.first_name || user.username, resetUrl });
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
       await sendEmail(env, { to: user.email, ...msg });
     }
     return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
