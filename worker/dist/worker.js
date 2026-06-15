@@ -1464,6 +1464,7 @@ async function patchJob(env, id, patch) {
   }
   if (patch.scheduledAt !== void 0) job.scheduledAt = patch.scheduledAt;
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
+  if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.status) {
     const s = normalizeStatus(patch.status);
     if (s !== job.status) {

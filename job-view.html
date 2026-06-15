@@ -439,6 +439,24 @@
         <textarea id="noteInput" placeholder="e.g. Arrived on site, waiting on materials…"></textarea>
       </div>
     </div>
+    <div id="quotePanel" style="display:none;margin-top:14px;padding:14px;border:1px solid #cdd7e2;border-radius:10px;background:#f7faff;">
+      <div style="font-weight:700;color:#003b82;margin-bottom:8px;">Quote details — so the office can quote the works</div>
+      <div class="field-label">Description of works required *</div>
+      <textarea id="q_desc" placeholder="What needs doing?"></textarea>
+      <div class="field-label" style="margin-top:8px;">Why it needs quoting *</div>
+      <input id="q_reason" placeholder="e.g. out of scope / materials needed / specialist access" />
+      <div class="field-label" style="margin-top:8px;">Materials / parts needed *</div>
+      <textarea id="q_materials" placeholder="One per line:  item  ×  qty"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <div class="col"><div class="field-label">Est. labour (hours)</div><input id="q_hours" type="number" min="0" step="0.5" /></div>
+        <div class="col"><div class="field-label">Engineers needed</div><input id="q_engs" type="number" min="1" step="1" /></div>
+      </div>
+      <div class="field-label" style="margin-top:8px;">Access / site constraints</div>
+      <input id="q_access" placeholder="e.g. out of hours, scaffold, permit to work" />
+      <div class="field-label" style="margin-top:8px;">Measurements / notes</div>
+      <textarea id="q_notes"></textarea>
+      <div style="font-size:12px;color:#6b7280;margin-top:8px;">Add photos in the gallery below — at least one is expected for a quote.</div>
+    </div>
     <div style="margin-top:10px;display:flex;gap:8px;">
       <button class="btn primary" id="saveBtn">Save Update</button>
     </div>
@@ -664,6 +682,9 @@ function renderJob(){
     $("noteInput").value = "";
   }
 
+  fillQuoteFromJob();
+  syncQuotePanel();
+
   const poUrl =
     `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
   $("poBtn").href = poUrl;
@@ -733,6 +754,41 @@ async function loadJob(){
   }
 }
 
+/* ---- Story Mode: Quote pack ---- */
+function isStoryMode(){
+  try {
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return p.StoryMode === "Yes";
+  } catch { return false; }
+}
+function syncQuotePanel(){
+  const panel = $("quotePanel");
+  if(panel) panel.style.display = ($("statusSelect").value === "Quote") ? "block" : "none";
+}
+function fillQuoteFromJob(){
+  const q = (job && job.quote) || {};
+  $("q_desc").value      = q.description || "";
+  $("q_reason").value    = q.reason || "";
+  $("q_materials").value = q.materials || "";
+  $("q_hours").value     = (q.labourHours ?? "") === null ? "" : (q.labourHours ?? "");
+  $("q_engs").value      = (q.engineers ?? "") === null ? "" : (q.engineers ?? "");
+  $("q_access").value    = q.access || "";
+  $("q_notes").value     = q.notes || "";
+}
+function collectQuote(){
+  return {
+    description: $("q_desc").value.trim(),
+    reason:      $("q_reason").value.trim(),
+    materials:   $("q_materials").value.trim(),
+    labourHours: $("q_hours").value ? Number($("q_hours").value) : null,
+    engineers:   $("q_engs").value ? Number($("q_engs").value) : null,
+    access:      $("q_access").value.trim(),
+    notes:       $("q_notes").value.trim(),
+    capturedBy:  getUser(),
+    capturedAt:  new Date().toISOString()
+  };
+}
+
 async function saveUpdate(){
   if(!job){
     $("statusBar").textContent = "No job loaded.";
@@ -742,6 +798,17 @@ async function saveUpdate(){
   const note = $("noteInput").value.trim();
   const user = getUser();
 
+  // Story Mode: moving a job to Quote requires the quote pack first.
+  let quote;
+  if(status === "Quote"){
+    quote = collectQuote();
+    if(isStoryMode() && (!quote.description || !quote.reason || !quote.materials)){
+      $("quotePanel").style.display = "block";
+      $("statusBar").textContent = "⚠️ Fill in the required quote fields (description, why, materials) before saving.";
+      return;
+    }
+  }
+
   $("statusBar").textContent = "Saving update…";
 
   try{
@@ -750,6 +817,7 @@ async function saveUpdate(){
       note,
       changedBy: user
     };
+    if(quote) payload.quote = quote;
     const res = await fetch(
       `${SLA_API}/jobs/${encodeURIComponent(job.id)}`,
       {
@@ -853,6 +921,7 @@ function showPrevPhoto(){
 ---------------------------- */
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
+  $("statusSelect").addEventListener("change", syncQuotePanel);
         $("openSignatureBtn").addEventListener("click", openSignatureModal);
 $("closeSignatureModal").addEventListener("click", closeSignatureModal);
 $("clearSig").addEventListener("click", () => {
