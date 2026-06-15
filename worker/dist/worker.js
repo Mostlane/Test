@@ -157,46 +157,65 @@ async function sendEmail(env, { to, subject, html, text }) {
   console.warn(`No email provider set (RESEND_API_KEY / RESET_EMAIL_WEBHOOK) \u2014 "${subject}" to ${to} was NOT sent.`);
   return { ok: false, skipped: true, reason: "no provider" };
 }
-function welcomeEmail({ name, username, setUrl, ttlHours }) {
+function welcomeEmail({ name, username, setUrl, ttlHours, appUrl }) {
   return {
     subject: `Welcome to ${BRAND} \u2014 set your password`,
     html: shell(`
-      <p>Hi ${esc(name)},</p>
-      <p>An account has been created for you on the ${BRAND} portal.</p>
-      <p style="margin:6px 0;"><strong>Username:</strong> ${esc(username)}</p>
-      <p>Click below to set your password and get started:</p>
-      <p style="margin:22px 0;">${button(setUrl, "Set your password")}</p>
-      <p style="color:#6b7280;font-size:12px;">This link expires in ${ttlHours} hours. If it expires, use
-      &ldquo;Forgot password&rdquo; on the login page to get a new one.</p>
-    `)
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Welcome to ${BRAND}</h1>
+      <p style="margin:0 0 14px;">Hi ${esc(name)}, an account has been created for you on the ${BRAND} portal.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 20px;background:#f3f6fb;border:1px solid #e1e9f5;border-radius:10px;">
+        <tr><td style="padding:12px 16px;">
+          <div style="font-size:12px;color:#6b7a90;text-transform:uppercase;letter-spacing:.04em;">Your username</div>
+          <div style="font-size:16px;font-weight:700;color:#0f2a52;margin-top:2px;">${esc(username)}</div>
+        </td></tr>
+      </table>
+      <p style="margin:0 0 6px;">Set your password to get started:</p>
+      ${button(setUrl, "Set your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in ${ttlHours} hours. If it expires, just use
+      &ldquo;Forgot password&rdquo; on the sign-in page to get a fresh one.</p>
+    `, appUrl)
   };
 }
-function resetEmail({ name, resetUrl }) {
+function resetEmail({ name, resetUrl, appUrl }) {
   return {
-    subject: `${BRAND} password reset`,
+    subject: `${BRAND} \u2014 password reset`,
     html: shell(`
-      <p>Hi ${esc(name)},</p>
-      <p>We received a request to reset your ${BRAND} portal password.</p>
-      <p style="margin:22px 0;">${button(resetUrl, "Reset your password")}</p>
-      <p style="color:#6b7280;font-size:12px;">This link expires in 1 hour. If you didn&rsquo;t request this you can
+      <h1 style="margin:0 0 14px;font-size:21px;font-weight:700;color:#003b82;">Password reset</h1>
+      <p style="margin:0 0 16px;">Hi ${esc(name)}, we received a request to reset your ${BRAND} portal password. Click below to choose a new one:</p>
+      ${button(resetUrl, "Reset your password")}
+      <p style="margin:18px 0 0;color:#8a94a3;font-size:13px;">This link expires in 1 hour. If you didn&rsquo;t request this you can safely
       ignore this email &mdash; your password won&rsquo;t change.</p>
-    `)
+    `, appUrl)
   };
 }
-function shell(inner) {
-  return `<!doctype html><html><body style="margin:0;background:#f3f4f6;padding:24px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
-    <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
-      <tr><td style="background:#003b82;padding:16px 24px;color:#fff;font-size:18px;font-weight:700;">${BRAND}</td></tr>
-      <tr><td style="padding:24px;font-size:14px;line-height:1.55;">${inner}</td></tr>
-      <tr><td style="padding:14px 24px;background:#f9fafb;color:#6b7280;font-size:11px;border-top:1px solid #eee;">
-        Automated message from the ${BRAND} portal.
-      </td></tr>
-    </table>
-  </td></tr></table></body></html>`;
+function shell(inner, appUrl) {
+  const base = (appUrl || "https://mostlane-portal.com").replace(/\/$/, "");
+  const logo = `${base}/mostlane-logo.jpg`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef1f4;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${BRAND} portal notification</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e3e6ea;box-shadow:0 8px 24px rgba(15,23,42,0.08);">
+        <tr><td style="height:6px;line-height:6px;font-size:0;background:#1e66ff;background:linear-gradient(90deg,#003b82,#1e66ff);">&nbsp;</td></tr>
+        <tr><td align="center" style="padding:26px 24px 6px;">
+          <img src="${logo}" alt="${BRAND}" height="46" style="height:46px;display:block;border:0;outline:none;text-decoration:none;">
+        </td></tr>
+        <tr><td style="padding:10px 32px 28px;color:#26303d;font-size:15px;line-height:1.6;">${inner}</td></tr>
+        <tr><td style="padding:16px 32px;background:#f7f9fb;border-top:1px solid #edf0f4;color:#8a94a3;font-size:12px;line-height:1.5;">
+          ${BRAND} Portal &middot; automated message.<br>If you weren&rsquo;t expecting this, you can ignore it.
+        </td></tr>
+      </table>
+      <div style="max-width:480px;color:#aab2bd;font-size:11px;padding:12px 0;">&copy; ${BRAND}</div>
+    </td></tr>
+  </table>
+</body></html>`;
 }
 function button(href, label) {
-  return `<a href="${href}" style="display:inline-block;background:#1e66ff;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;">${label}</a>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0;"><tr>
+    <td align="center" style="border-radius:8px;background:#1e66ff;">
+      <a href="${href}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a>
+    </td></tr></table>`;
 }
 function stripHtml(html = "") {
   return html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -269,7 +288,7 @@ async function handle(request, env, ctx, url) {
     if (user && user.status !== "Disabled" && user.email) {
       const token = await issuePasswordToken(env, user.username, 1);
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
-      const msg = resetEmail({ name: user.first_name || user.username, resetUrl });
+      const msg = resetEmail({ name: user.first_name || user.username, resetUrl, appUrl: appBase(env) });
       await sendEmail(env, { to: user.email, ...msg });
     }
     return json({ ok: true, message: "If that account exists, a reset link has been sent." }, {}, env, request);
@@ -413,7 +432,8 @@ async function handle2(request, env, ctx, url) {
         name: b.FirstName || b.Username,
         username: b.Username,
         setUrl,
-        ttlHours: WELCOME_TOKEN_HOURS
+        ttlHours: WELCOME_TOKEN_HOURS,
+        appUrl: appBase(env)
       });
       const res = await sendEmail(env, { to: b.Email, ...msg });
       welcomeEmailed = !!res.ok;
@@ -437,6 +457,27 @@ async function handle2(request, env, ctx, url) {
     ).bind(hash, b.username).run();
     await env.DB.prepare("DELETE FROM sessions WHERE username=?").bind(b.username).run();
     return json({ ok: true, tempPassword: tempProvided ? void 0 : newPassword }, {}, env, request);
+  }
+  if (path === "/users/resend-welcome" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    if (!b.username) return error("username required", 400, env, request);
+    const user = await env.DB.prepare("SELECT username, first_name, email FROM users WHERE username=?").bind(b.username).first();
+    if (!user) return error("User not found", 404, env, request);
+    if (!user.email) return error("That user has no email address on file.", 400, env, request);
+    const token = await issuePasswordToken(env, user.username, WELCOME_TOKEN_HOURS);
+    const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
+    const msg = welcomeEmail({
+      name: user.first_name || user.username,
+      username: user.username,
+      setUrl,
+      ttlHours: WELCOME_TOKEN_HOURS,
+      appUrl: appBase(env)
+    });
+    const res = await sendEmail(env, { to: user.email, ...msg });
+    if (!res.ok) return error("Email could not be sent \u2014 check the email configuration.", 502, env, request);
+    return json({ ok: true, sent: true, email: user.email }, {}, env, request);
   }
   if (path === "/users/delete" && request.method === "POST") {
     const gate = await requireAdmin(env, request);

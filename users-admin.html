@@ -238,6 +238,7 @@
           <td>${esc(accessSummary(u))}</td>
           <td><div class="actions">
             <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
+            ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
             <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
             <button class="btn small red" data-del="${esc(u.Username)}">Delete</button>
           </div></td>
@@ -276,6 +277,7 @@
     g("rows").addEventListener("click", async (e) => {
       const t = e.target;
       if (t.dataset.edit) openEditor(allUsers.find(u => u.Username === t.dataset.edit));
+      else if (t.dataset.welcome) await resendWelcome(t.dataset.welcome);
       else if (t.dataset.reset) await resetPw(t.dataset.reset);
       else if (t.dataset.del) await delUser(t.dataset.del);
     });
@@ -333,6 +335,16 @@
         await loadDevices(g("f_username").value.trim());
       } catch (e) { alert("Could not remove device."); }
     });
+
+    async function resendWelcome(username) {
+      if (!confirm(`Send a fresh welcome / set-password email to ${username}?`)) return;
+      try {
+        const res = await api("/users/resend-welcome", { method: "POST", body: JSON.stringify({ username }) });
+        const r = await res.json();
+        if (!res.ok || !r.ok) { alert(r.error || "Could not send the welcome email."); return; }
+        alert(`Welcome email sent to ${r.email}.`);
+      } catch (e) { alert("Network error."); }
+    }
 
     async function resetPw(username) {
       if (!confirm(`Reset password for ${username}? They'll be forced to set a new one on next login.`)) return;
