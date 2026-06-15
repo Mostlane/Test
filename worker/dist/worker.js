@@ -1228,10 +1228,9 @@ async function handle6(request, env, ctx, url) {
     return jsonResponse(jobs, headers);
   }
   if (subpath === "/jobs/for-engineer" && method === "GET") {
-    const normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env)).filter((j) => normId(j.assignedTo) === engineer);
+    let jobs = (await listJobs(env)).filter((j) => assignedList(j).some((a) => normId(a) === engineer));
     if (date) {
       jobs = jobs.filter((j) => {
         if (!j.scheduledAt) return false;
@@ -1246,7 +1245,7 @@ async function handle6(request, env, ctx, url) {
     const body = await readJson(request);
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
-      assignedTo: Array.isArray(body.assignedEngineers) ? body.assignedEngineers[0] || "" : body.assignedTo || "",
+      assignedEngineers: Array.isArray(body.assignedEngineers) ? body.assignedEngineers.filter(Boolean) : body.assignedTo !== void 0 ? body.assignedTo ? [body.assignedTo] : [] : void 0,
       changedBy: body.changedBy || "scheduler"
     };
     const updated = await patchJob(env, id, patch);
@@ -1369,6 +1368,13 @@ function normalizeStatus(status) {
   if (s === "closed" || s === "cancelled") return "Closed Jobs";
   return CANONICAL_STATUSES.find((x) => x.toLowerCase() === s) || "Pending";
 }
+var normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+function assignedList(job) {
+  if (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length) {
+    return job.assignedEngineers.filter(Boolean);
+  }
+  return job.assignedTo ? [job.assignedTo] : [];
+}
 async function getJob(env, id) {
   const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE id = ?").bind(id).first();
   return row ? JSON.parse(row.data) : null;
@@ -1415,6 +1421,7 @@ async function createOrUpdateJobFromPayload(env, body) {
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
+  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -1423,7 +1430,9 @@ async function createOrUpdateJobFromPayload(env, body) {
     raisedAt,
     targetAt,
     status,
-    assignedTo: body.assignedTo || existing?.assignedTo || "",
+    assignedTo: assignedEngineers[0] || "",
+    // legacy single field = primary engineer
+    assignedEngineers,
     siteCode: body.siteCode || existing?.siteCode || "",
     // carried so the siteCode filter works
     scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
@@ -1443,7 +1452,13 @@ async function patchJob(env, id, patch) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
   job.events ||= [];
-  if (patch.assignedTo !== void 0) job.assignedTo = patch.assignedTo;
+  if (patch.assignedEngineers !== void 0) {
+    job.assignedEngineers = patch.assignedEngineers;
+    job.assignedTo = patch.assignedEngineers[0] || "";
+  } else if (patch.assignedTo !== void 0) {
+    job.assignedTo = patch.assignedTo;
+    job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
+  }
   if (patch.scheduledAt !== void 0) job.scheduledAt = patch.scheduledAt;
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
   if (patch.status) {

@@ -1317,7 +1317,8 @@ async function pushJobUpdate(job){
   try{
     const payload = {
       scheduledAt: job.scheduledStart,
-      assignedTo: job.assignedEngineers[0] || "",
+      assignedEngineers: Array.isArray(job.assignedEngineers) ? job.assignedEngineers : [],
+      assignedTo: (job.assignedEngineers && job.assignedEngineers[0]) || "",
       priority: job.priority || undefined
     };
 
