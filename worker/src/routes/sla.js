@@ -54,14 +54,11 @@ export async function handle(request, env, ctx, url) {
 
   /* GET /sla/jobs/for-engineer (must precede /jobs/{id}) */
   if (subpath === "/jobs/for-engineer" && method === "GET") {
-    // Normalise BOTH sides the same way, so a username stored as "John Thorn"
-    // still matches a login/query of "john.thorn" (and vice-versa). Previously
-    // only the query was space→dot normalised, so space-containing usernames
-    // never matched and their jobs were missing from "My Jobs".
-    const normId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    // Match if the engineer is ANY of the job's assigned engineers. Both sides
+    // are normalised the same way so "John Thorn" matches "john.thorn".
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env)).filter(j => normId(j.assignedTo) === engineer);
+    let jobs = (await listJobs(env)).filter(j => assignedList(j).some(a => normId(a) === engineer));
     if (date) {
       jobs = jobs.filter(j => {
         if (!j.scheduledAt) return false;
@@ -78,8 +75,9 @@ export async function handle(request, env, ctx, url) {
     const body = await readJson(request);
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
-      assignedTo: Array.isArray(body.assignedEngineers)
-        ? (body.assignedEngineers[0] || "") : (body.assignedTo || ""),
+      assignedEngineers: Array.isArray(body.assignedEngineers)
+        ? body.assignedEngineers.filter(Boolean)
+        : (body.assignedTo !== undefined ? (body.assignedTo ? [body.assignedTo] : []) : undefined),
       changedBy: body.changedBy || "scheduler"
     };
     const updated = await patchJob(env, id, patch);
@@ -217,6 +215,21 @@ function normalizeStatus(status) {
   return CANONICAL_STATUSES.find(x => x.toLowerCase() === s) || "Pending";
 }
 
+/* ================= ASSIGNMENT ================= */
+
+// Normalise an engineer identifier so "John Thorn", "john.thorn" and "JOHN.THORN"
+// all compare equal.
+const normId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+
+// A job may have many assigned engineers (assignedEngineers[]); fall back to the
+// legacy single assignedTo for older records.
+function assignedList(job) {
+  if (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length) {
+    return job.assignedEngineers.filter(Boolean);
+  }
+  return job.assignedTo ? [job.assignedTo] : [];
+}
+
 /* ================= STORAGE (D1) ================= */
 
 async function getJob(env, id) {
@@ -264,6 +277,11 @@ async function createOrUpdateJobFromPayload(env, body) {
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
 
+  const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length
+    ? body.assignedEngineers.filter(Boolean)
+    : (body.assignedTo ? [body.assignedTo]
+       : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : [])));
+
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -272,7 +290,8 @@ async function createOrUpdateJobFromPayload(env, body) {
     raisedAt,
     targetAt,
     status,
-    assignedTo: body.assignedTo || existing?.assignedTo || "",
+    assignedTo: assignedEngineers[0] || "",   // legacy single field = primary engineer
+    assignedEngineers,
     siteCode: body.siteCode || existing?.siteCode || "",  // carried so the siteCode filter works
     scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
     createdAt: existing?.createdAt || now,
@@ -294,7 +313,13 @@ async function patchJob(env, id, patch) {
   job.statusHistory ||= [];
   job.events ||= [];
 
-  if (patch.assignedTo !== undefined) job.assignedTo = patch.assignedTo;
+  if (patch.assignedEngineers !== undefined) {
+    job.assignedEngineers = patch.assignedEngineers;
+    job.assignedTo = patch.assignedEngineers[0] || "";   // keep legacy field as the primary
+  } else if (patch.assignedTo !== undefined) {
+    job.assignedTo = patch.assignedTo;
+    job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
+  }
   if (patch.scheduledAt !== undefined) job.scheduledAt = patch.scheduledAt;
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
 
