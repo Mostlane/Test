@@ -203,7 +203,7 @@ function jsonResponse(data, headers, status = 200) {
 
 const CANONICAL_STATUSES = [
   "Pending","Scheduled","Travelling","In Progress",
-  "Complete","On Hold","Closed Jobs","Order","Quote"
+  "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote"
 ];
 
 function normalizeStatus(status) {
