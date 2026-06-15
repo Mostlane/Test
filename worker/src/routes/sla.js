@@ -54,9 +54,14 @@ export async function handle(request, env, ctx, url) {
 
   /* GET /sla/jobs/for-engineer (must precede /jobs/{id}) */
   if (subpath === "/jobs/for-engineer" && method === "GET") {
-    const engineer = (searchParams.get("engineer") || "").toLowerCase().replace(/\s+/g, ".").trim();
+    // Normalise BOTH sides the same way, so a username stored as "John Thorn"
+    // still matches a login/query of "john.thorn" (and vice-versa). Previously
+    // only the query was space→dot normalised, so space-containing usernames
+    // never matched and their jobs were missing from "My Jobs".
+    const normId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env)).filter(j => (j.assignedTo || "").toLowerCase() === engineer);
+    let jobs = (await listJobs(env)).filter(j => normId(j.assignedTo) === engineer);
     if (date) {
       jobs = jobs.filter(j => {
         if (!j.scheduledAt) return false;

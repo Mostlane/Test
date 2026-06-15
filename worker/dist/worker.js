@@ -1228,9 +1228,10 @@ async function handle6(request, env, ctx, url) {
     return jsonResponse(jobs, headers);
   }
   if (subpath === "/jobs/for-engineer" && method === "GET") {
-    const engineer = (searchParams.get("engineer") || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env)).filter((j) => (j.assignedTo || "").toLowerCase() === engineer);
+    let jobs = (await listJobs(env)).filter((j) => normId(j.assignedTo) === engineer);
     if (date) {
       jobs = jobs.filter((j) => {
         if (!j.scheduledAt) return false;
