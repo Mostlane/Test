@@ -517,7 +517,9 @@ var PERMISSION_KEYS = [
   "ProjectsAdmin",
   "TimesheetAdmin",
   "LabourPlanning",
-  "SLA"
+  "SLA",
+  "StoryMode"
+  // opt-in: guided day protocol for this engineer
 ];
 function shapeUser2(u, perms) {
   let profile = {};
@@ -1357,6 +1359,7 @@ var CANONICAL_STATUSES = [
   "Complete",
   "On Hold",
   "Closed Jobs",
+  "Invoiced",
   "Order",
   "Quote"
 ];

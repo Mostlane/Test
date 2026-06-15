@@ -193,6 +193,7 @@ const PERMISSION_KEYS = [
   "HolidayAdmin", "EngineersHoursMenu", "HoursDashboard", "PurchaseOrders",
   "Sites", "AddSite", "Assets", "MyDocuments", "Weekly", "Forms", "Compliance",
   "Projects", "ProjectsAdmin", "TimesheetAdmin", "LabourPlanning", "SLA",
+  "StoryMode",   // opt-in: guided day protocol for this engineer
 ];
 
 function shapeUser(u, perms) {
