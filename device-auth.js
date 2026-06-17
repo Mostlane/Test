@@ -85,6 +85,14 @@ function showBlock(message) {
   window.location.href = "login.html";
 }
 
+// Break-glass: a master-password login (flagged by login.html for this browser
+// session) skips all device-lock checks. Session-scoped, so it ends when the
+// tab/browser closes — it does not permanently disable the device lock.
+function isMasterSession() {
+  try { return sessionStorage.getItem("mostlaneMasterLogin") === "1"; }
+  catch { return false; }
+}
+
 // ───────────────────────────────────────────────────────────────
 // PUBLIC API: Called by login.html + protected pages
 // ───────────────────────────────────────────────────────────────
@@ -92,6 +100,7 @@ window.DeviceAuth = {
 
   // Called immediately after successful username/password login
   async checkOnLogin(username, onSuccess) {
+    if (isMasterSession()) return onSuccess();
     const deviceId = getOrCreateDeviceId();
 
     const res = await postToWorker("/auth/check-device", {
@@ -125,6 +134,7 @@ window.DeviceAuth = {
 
   // Call this at top of all protected pages
   async enforceOnPage() {
+    if (isMasterSession()) return;
     const username = sessionStorage.getItem(USERNAME_SESSION_KEY);
     if (!username) {
       window.location.href = "login.html";
