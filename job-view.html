@@ -358,6 +358,9 @@
 </head>
 <body>
 <div class="shell">
+  <div id="storyModeBanner" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:10px;background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;font-weight:700;font-size:14px;">
+    ⚡ Story Mode — guided day · work this job through each step
+  </div>
   <!-- HEADER / SUMMARY -->
   <div class="card">
     <div class="header-row">
@@ -456,6 +459,18 @@
       <div class="field-label" style="margin-top:8px;">Measurements / notes</div>
       <textarea id="q_notes"></textarea>
       <div style="font-size:12px;color:#6b7280;margin-top:8px;">Add photos in the gallery below — at least one is expected for a quote.</div>
+    </div>
+    <div id="raPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid #f0c98a;border-radius:10px;background:#fffaf0;">
+      <div style="font-weight:700;color:#92500a;margin-bottom:8px;">Risk assessment — before you start work</div>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra1"> Safe access &amp; egress</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra2"> Correct PPE for the task</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra3"> Isolation / lock-off done where needed</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra4"> Working at height controlled (or N/A)</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra5"> Others at risk — barriers / signage in place</label>
+      <label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="ra6"> Hazardous materials considered (asbestos / COSHH)</label>
+      <div class="field-label" style="margin-top:8px;">Notes (optional)</div>
+      <textarea id="ra_note" placeholder="Anything noteworthy about site conditions…"></textarea>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;color:#92500a;"><input type="checkbox" id="ra_safe"> I've assessed the site and it's safe to proceed</label>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;">
       <button class="btn primary" id="saveBtn">Save Update</button>
@@ -683,7 +698,9 @@ function renderJob(){
   }
 
   fillQuoteFromJob();
-  syncQuotePanel();
+  fillRAFromJob();
+  syncPanels();
+  if(isStoryMode() && $("storyModeBanner")) $("storyModeBanner").style.display = "block";
 
   if(job.signature && job.signature.signedBy){
     $("signatureStatus").innerHTML =
@@ -767,9 +784,35 @@ function isStoryMode(){
     return p.StoryMode === "Yes";
   } catch { return false; }
 }
-function syncQuotePanel(){
-  const panel = $("quotePanel");
-  if(panel) panel.style.display = ($("statusSelect").value === "Quote") ? "block" : "none";
+function syncPanels(){
+  const s = $("statusSelect").value;
+  if($("quotePanel")) $("quotePanel").style.display = (s === "Quote") ? "block" : "none";
+  if($("raPanel"))    $("raPanel").style.display    = (s === "In Progress") ? "block" : "none";
+}
+function collectRA(){
+  return {
+    safeAccess:   $("ra1").checked,
+    ppe:          $("ra2").checked,
+    isolation:    $("ra3").checked,
+    height:       $("ra4").checked,
+    othersAtRisk: $("ra5").checked,
+    hazardous:    $("ra6").checked,
+    note:         $("ra_note").value.trim(),
+    safeToProceed:$("ra_safe").checked,
+    by:           getUser(),
+    at:           new Date().toISOString()
+  };
+}
+function fillRAFromJob(){
+  const r = (job && job.riskAssessment) || {};
+  $("ra1").checked = !!r.safeAccess;
+  $("ra2").checked = !!r.ppe;
+  $("ra3").checked = !!r.isolation;
+  $("ra4").checked = !!r.height;
+  $("ra5").checked = !!r.othersAtRisk;
+  $("ra6").checked = !!r.hazardous;
+  $("ra_safe").checked = !!r.safeToProceed;
+  $("ra_note").value = r.note || "";
 }
 function fillQuoteFromJob(){
   const q = (job && job.quote) || {};
@@ -815,6 +858,17 @@ async function saveUpdate(){
     }
   }
 
+  // Story Mode: starting work (In Progress) needs a completed risk assessment.
+  let riskAssessment;
+  if(status === "In Progress"){
+    riskAssessment = collectRA();
+    if(isStoryMode() && !riskAssessment.safeToProceed){
+      $("raPanel").style.display = "block";
+      $("statusBar").textContent = "⚠️ Complete the risk assessment and tick 'safe to proceed' before starting work.";
+      return;
+    }
+  }
+
   // Story Mode: marking a job Complete needs evidence — note + photo + signature.
   if(status === "Complete" && isStoryMode()){
     const missing = [];
@@ -836,6 +890,7 @@ async function saveUpdate(){
       changedBy: user
     };
     if(quote) payload.quote = quote;
+    if(riskAssessment) payload.riskAssessment = riskAssessment;
     const res = await fetch(
       `${SLA_API}/jobs/${encodeURIComponent(job.id)}`,
       {
@@ -939,7 +994,7 @@ function showPrevPhoto(){
 ---------------------------- */
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
-  $("statusSelect").addEventListener("change", syncQuotePanel);
+  $("statusSelect").addEventListener("change", syncPanels);
         $("openSignatureBtn").addEventListener("click", openSignatureModal);
 $("closeSignatureModal").addEventListener("click", closeSignatureModal);
 $("clearSig").addEventListener("click", () => {

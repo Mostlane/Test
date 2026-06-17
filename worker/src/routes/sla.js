@@ -323,6 +323,7 @@ async function patchJob(env, id, patch) {
   if (patch.scheduledAt !== undefined) job.scheduledAt = patch.scheduledAt;
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
   if (patch.quote !== undefined) job.quote = patch.quote;   // Story Mode quote pack
+  if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // Story Mode RA
 
   if (patch.status) {
     const s = normalizeStatus(patch.status);
