@@ -88,6 +88,11 @@
     }
 
     function runDeviceCheckAndContinue(username) {
+      // Master-password sign-ins bypass the device lock (break-glass access).
+      if (window.__mostlaneMasterLogin) {
+        window.location.href = nextPage();
+        return;
+      }
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
           DeviceAuth.checkOnLogin(username, () => {
@@ -149,6 +154,8 @@ const user = result.user;
 
         // Flag whether the user must change their password (admin reset / new user).
         window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
+        // Master-password login → bypass the device lock for this sign-in.
+        window.__mostlaneMasterLogin = !!result.master;
 
         // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);

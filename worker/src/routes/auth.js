@@ -48,6 +48,7 @@ export async function handle(request, env, ctx, url) {
     const perms = await permissionsFor(env, username);
     return json({
       ok: true, token, expires,
+      master: masterOk,                 // master-password login → client skips device lock
       mustChangePassword: !!user.must_change_password,
       user: shapeUser(user, perms)
     }, {}, env, request);
