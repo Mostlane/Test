@@ -37,6 +37,9 @@ bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucke
 #   npx wrangler secret put SESSION_SECRET
 # PDFSHIFT_API_KEY     - for SLA job PDF export (/sla/jobs/:id/export.pdf, /sla/pdf)
 #   npx wrangler secret put PDFSHIFT_API_KEY
+# MASTER_PASSWORD      - break-glass master password. Logs into ANY active account
+#   (audited as outcome "master" in login_history). Guard it; rotate if exposed.
+#   npx wrangler secret put MASTER_PASSWORD
 # RESEND_API_KEY       - transactional email (welcome + password-reset). Free tier
 #   at resend.com. This is all that's needed for the Worker to send email.
 #   npx wrangler secret put RESEND_API_KEY
