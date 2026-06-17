@@ -54,6 +54,21 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);
 
+-- Story Mode: one shift row per engineer per day (clock on/off, mileage, fuel).
+CREATE TABLE IF NOT EXISTS shifts (
+  username      TEXT NOT NULL,
+  date          TEXT NOT NULL,
+  clock_on_at   TEXT,
+  clock_on_gps  TEXT,
+  start_mileage INTEGER,
+  clock_off_at  TEXT,
+  clock_off_gps TEXT,
+  end_mileage   INTEGER,
+  fuel          TEXT,
+  data          TEXT,
+  PRIMARY KEY (username, date)
+);
+
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (
   token      TEXT PRIMARY KEY,

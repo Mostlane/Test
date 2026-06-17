@@ -68,6 +68,36 @@ export async function handle(request, env, ctx, url) {
     return jsonResponse(jobs.map(decorateJobWithLiveSla), headers);
   }
 
+  /* ===== Story Mode: daily shift (clock on / off) ===== */
+  if (subpath === "/shift/today" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const date = searchParams.get("date") || todayStr();
+    return jsonResponse({ shift: await getShift(env, engineer, date) }, headers);
+  }
+  if (subpath === "/shift/clock-on" && method === "POST") {
+    const b = await readJson(request);
+    if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
+    const date = b.date || todayStr();
+    await env.DB.prepare(`
+      INSERT INTO shifts (username, date, clock_on_at, clock_on_gps, start_mileage)
+      VALUES (?,?,?,?,?)
+      ON CONFLICT(username, date) DO UPDATE SET
+        clock_on_at   = COALESCE(shifts.clock_on_at, excluded.clock_on_at),
+        clock_on_gps  = COALESCE(shifts.clock_on_gps, excluded.clock_on_gps),
+        start_mileage = COALESCE(shifts.start_mileage, excluded.start_mileage)
+    `).bind(b.engineer, date, new Date().toISOString(), b.gps || null, b.startMileage ?? null).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, b.engineer, date) }, headers, 201);
+  }
+  if (subpath === "/shift/clock-off" && method === "POST") {
+    const b = await readJson(request);
+    if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
+    const date = b.date || todayStr();
+    await env.DB.prepare(
+      "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE username=? AND date=?"
+    ).bind(new Date().toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, b.engineer, date).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, b.engineer, date) }, headers);
+  }
+
   /* PUT /sla/job/{id} (scheduler drag/drop) */
   if (subpath.startsWith("/job/") && method === "PUT") {
     const id = subpath.split("/").filter(Boolean)[1];
@@ -235,6 +265,12 @@ function assignedList(job) {
 async function getJob(env, id) {
   const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE id = ?").bind(id).first();
   return row ? JSON.parse(row.data) : null;
+}
+
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+async function getShift(env, username, date) {
+  if (!username) return null;
+  return (await env.DB.prepare("SELECT * FROM shifts WHERE username=? AND date=?").bind(username, date).first()) || null;
 }
 
 async function listJobs(env) {

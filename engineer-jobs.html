@@ -264,6 +264,7 @@
     </header>
 
     <div class="content">
+<div id="dayBar" style="display:none;margin-bottom:12px;"></div>
 <div class="nav-row">
   <button type="button" class="btn" id="prevWeekBtn">← Load Previous Week</button>
   <button type="button" class="btn" id="nextWeekBtn">Load Next Week →</button>
@@ -600,9 +601,99 @@ function addLongPress(el, onLongPress){
   el.addEventListener("pointerleave", cancel);
 }
 
+/* ===== Story Mode: the guided day (clock on/off) ===== */
+let todayShift = null;
+function isStoryMode(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}").StoryMode === "Yes"; }
+  catch { return false; }
+}
+function todayLocal(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function fmtTime(iso){ try { return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+function getGps(){
+  return new Promise(resolve => {
+    if(!navigator.geolocation) return resolve("");
+    navigator.geolocation.getCurrentPosition(
+      p => resolve(`${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`),
+      () => resolve(""),
+      { timeout: 8000 }
+    );
+  });
+}
+async function loadShift(){
+  const engineer = getEngineer();
+  try {
+    const res = await fetch(`${SLA_API}/shift/today?engineer=${encodeURIComponent(engineer)}&date=${todayLocal()}`, { cache:"no-store" });
+    const data = await res.json();
+    todayShift = data.shift || null;
+  } catch { todayShift = null; }
+}
+async function clockOn(){
+  const engineer = getEngineer();
+  const m = prompt("Start mileage on the van? (optional)");
+  const startMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
+  const gps = await getGps();
+  await fetch(`${SLA_API}/shift/clock-on`, { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ engineer, gps, startMileage, date: todayLocal() }) });
+  await loadShift(); renderDayBar(); applyDayGate();
+}
+async function clockOff(){
+  const engineer = getEngineer();
+  const m = prompt("End mileage on the van? (optional)");
+  const endMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
+  const fuel = prompt("Fuel added today? (£ or litres — optional)") || "";
+  const gps = await getGps();
+  await fetch(`${SLA_API}/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ engineer, gps, endMileage, fuel, date: todayLocal() }) });
+  await loadShift(); renderDayBar(); applyDayGate();
+}
+function renderDayBar(){
+  const bar = $("dayBar");
+  if(!isStoryMode()){ bar.style.display="none"; return; }
+  bar.style.display="block";
+  const s = todayShift;
+  if(!s || !s.clock_on_at){
+    bar.innerHTML =
+      `<div style="padding:16px;border-radius:12px;background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-align:center;">
+         <div style="font-weight:700;font-size:16px;margin-bottom:10px;">⚡ Story Mode — start your day to see your jobs</div>
+         <button class="btn" style="background:#fff;color:#003b82;font-weight:700;" onclick="clockOn()">▶ Start my day</button>
+       </div>`;
+  } else if(!s.clock_off_at){
+    bar.innerHTML =
+      `<div style="padding:12px 14px;border-radius:12px;background:#0e7a3b;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+         <div style="font-weight:700;">🟢 On shift since ${fmtTime(s.clock_on_at)}${s.start_mileage!=null?` · ${s.start_mileage} mi`:""}</div>
+         <button class="btn" style="background:#fff;color:#0e7a3b;font-weight:700;" onclick="clockOff()">■ End my day</button>
+       </div>`;
+  } else {
+    const mi = (s.start_mileage!=null && s.end_mileage!=null) ? (s.end_mileage - s.start_mileage) : null;
+    bar.innerHTML =
+      `<div style="padding:12px 14px;border-radius:12px;background:#374151;color:#fff;">
+         <div style="font-weight:700;">✔ Day ended ${fmtTime(s.clock_off_at)}</div>
+         <div style="font-size:13px;opacity:.9;margin-top:2px;">On ${fmtTime(s.clock_on_at)} → Off ${fmtTime(s.clock_off_at)}${mi!=null?` · ${mi} miles`:""}${s.fuel?` · fuel ${s.fuel}`:""}</div>
+       </div>`;
+  }
+}
+function applyDayGate(){
+  if(!isStoryMode()) return;            // normal users: no gating
+  const onShift = !!(todayShift && todayShift.clock_on_at);
+  $("jobsTimeline").style.display = onShift ? "" : "none";
+  $("statusBar").style.display    = onShift ? "" : "none";
+}
+
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
+
+  // Story Mode: gate the day behind clock-on (hide jobs until they start their day).
+  if(isStoryMode()){
+    $("dayBar").style.display = "block";
+    $("dayBar").innerHTML = `<div style="padding:12px;text-align:center;color:#64748b;">Loading your day…</div>`;
+    $("jobsTimeline").style.display = "none";
+    $("statusBar").style.display = "none";
+    (async () => { await loadShift(); renderDayBar(); applyDayGate(); })();
+  }
 
   const prevBtn = $("prevWeekBtn");
   const nextBtn = $("nextWeekBtn");
