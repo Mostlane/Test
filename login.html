@@ -154,8 +154,10 @@ const user = result.user;
 
         // Flag whether the user must change their password (admin reset / new user).
         window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
-        // Master-password login → bypass the device lock for this sign-in.
+        // Master-password login → bypass the device lock for this session.
         window.__mostlaneMasterLogin = !!result.master;
+        if (result.master) sessionStorage.setItem("mostlaneMasterLogin", "1");
+        else sessionStorage.removeItem("mostlaneMasterLogin");
 
         // Stored session — unchanged
         const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
