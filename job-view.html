@@ -685,6 +685,12 @@ function renderJob(){
   fillQuoteFromJob();
   syncQuotePanel();
 
+  if(job.signature && job.signature.signedBy){
+    $("signatureStatus").innerHTML =
+      `✔ Signed by <strong>${job.signature.signedBy}</strong>` +
+      (job.signature.signedAt ? ` on ${fmtDateTimeLong(new Date(job.signature.signedAt))}` : "");
+  }
+
   const poUrl =
     `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
   $("poBtn").href = poUrl;
@@ -805,6 +811,18 @@ async function saveUpdate(){
     if(isStoryMode() && (!quote.description || !quote.reason || !quote.materials)){
       $("quotePanel").style.display = "block";
       $("statusBar").textContent = "⚠️ Fill in the required quote fields (description, why, materials) before saving.";
+      return;
+    }
+  }
+
+  // Story Mode: marking a job Complete needs evidence — note + photo + signature.
+  if(status === "Complete" && isStoryMode()){
+    const missing = [];
+    if(!note) missing.push("a completion note");
+    if(!photoGallery.length) missing.push("at least one photo");
+    if(!(job && job.signature)) missing.push("a customer signature");
+    if(missing.length){
+      $("statusBar").textContent = "⚠️ To mark Complete you need: " + missing.join(", ") + ". Add them below, then save.";
       return;
     }
   }
@@ -1096,6 +1114,7 @@ async function saveSignature(){
 
     if(!res.ok) throw new Error();
 
+    if(job) job.signature = { signedBy: name, signedAt: payload.signedAt };  // so the Complete gate sees it
     $("signatureStatus").innerHTML =
       `✔ Signed by <strong>${name}</strong> on ${fmtDateTimeLong(new Date())}`;
     closeSignatureModal();
