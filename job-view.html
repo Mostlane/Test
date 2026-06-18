@@ -784,6 +784,17 @@ function isStoryMode(){
     return p.StoryMode === "Yes";
   } catch { return false; }
 }
+// Story Mode "one job at a time": find any OTHER job assigned to this engineer
+// that's currently Travelling / In Progress.
+async function findOtherActiveJob(currentJobId, engineer){
+  try {
+    const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}`, { cache:"no-store" });
+    const jobs = await res.json();
+    return (Array.isArray(jobs) ? jobs : []).find(j =>
+      j.id !== currentJobId && (j.status === "Travelling" || j.status === "In Progress")
+    ) || null;
+  } catch { return null; }
+}
 function syncPanels(){
   const s = $("statusSelect").value;
   if($("quotePanel")) $("quotePanel").style.display = (s === "Quote") ? "block" : "none";
@@ -846,6 +857,16 @@ async function saveUpdate(){
   const status = $("statusSelect").value;
   const note = $("noteInput").value.trim();
   const user = getUser();
+
+  // Story Mode: only one active job (Travelling / In Progress) at a time.
+  if(isStoryMode() && (status === "Travelling" || status === "In Progress")){
+    const other = await findOtherActiveJob(job.id, user);
+    if(other){
+      $("statusBar").textContent =
+        `⚠️ You already have an active job: ${other.helpdeskRef || other.id} (${other.status}). Finish, quote, hold or park it before starting another.`;
+      return;
+    }
+  }
 
   // Story Mode: moving a job to Quote requires the quote pack first.
   let quote;
