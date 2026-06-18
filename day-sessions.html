@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day Sessions — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:1100px; margin:20px auto 40px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:16px 18px 20px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    .back-btn{ text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; background:#fff; border:1px solid var(--border); color:var(--ml-blue); }
+    .filters{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+    .filters label{ display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+    input,select{ padding:7px 9px; font-size:13px; border-radius:6px; border:1px solid var(--border); background:#fff; }
+    .btn{ background:var(--ml-blue); color:#fff; border:none; padding:8px 14px; border-radius:8px; font-size:14px; cursor:pointer; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid #eef1f4; white-space:nowrap; }
+    th{ background:#f7f9fb; color:#475569; font-weight:600; position:sticky; top:0; }
+    tr:hover td{ background:#fafcff; }
+    .num{ text-align:right; }
+    a.map{ color:var(--ml-blue); text-decoration:none; }
+    .muted{ color:var(--muted); }
+    .scroll{ overflow-x:auto; }
+    .open{ color:#0e7a3b; font-weight:600; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>Day Sessions</h1>
+      <a href="sla-main.html" class="back-btn">← Back to SLA Board</a>
+    </header>
+    <div class="filters">
+      <div><label>From</label><input type="date" id="from" /></div>
+      <div><label>To</label><input type="date" id="to" /></div>
+      <div><label>Engineer (username)</label><input id="engineer" placeholder="all" /></div>
+      <button class="btn" id="loadBtn">Load</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="summary" class="muted" style="margin-bottom:8px;">—</div>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>Engineer</th><th>On</th><th>Off</th><th>Hours</th>
+          <th class="num">Start mi</th><th class="num">End mi</th><th class="num">Miles</th>
+          <th>Fuel</th><th>Location</th>
+        </tr></thead>
+        <tbody id="rows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+
+// Light access gate — office/admin only.
+(function gate(){
+  let perms = {};
+  try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch {}
+  if (!(perms.FullAccess === "Yes" || perms.Users === "Yes" || perms.SLA === "Yes")) {
+    document.body.innerHTML = '<div style="max-width:480px;margin:60px auto;text-align:center;font-family:system-ui;color:#334155;">'
+      + '<h2>Access denied</h2><p>You don’t have permission to view day sessions.</p>'
+      + '<a href="main.html">Back to portal</a></div>';
+    throw new Error("no access");
+  }
+})();
+
+function fmtTime(iso){ try { return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+function fmtDate(d){ try { return new Date(d+"T00:00:00").toLocaleDateString(undefined,{weekday:"short",day:"2-digit",month:"short"}); } catch { return d; } }
+function hoursBetween(a, b){
+  if(!a || !b) return null;
+  const ms = new Date(b) - new Date(a);
+  if(!(ms > 0)) return null;
+  const h = Math.floor(ms/3600000), m = Math.round((ms%3600000)/60000);
+  return `${h}h ${String(m).padStart(2,"0")}m`;
+}
+function mapLink(gps){
+  if(!gps) return '<span class="muted">—</span>';
+  return `<a class="map" target="_blank" href="https://maps.google.com/?q=${encodeURIComponent(gps)}">map</a>`;
+}
+
+async function load(){
+  const params = new URLSearchParams();
+  if($("from").value) params.set("from", $("from").value);
+  if($("to").value) params.set("to", $("to").value);
+  if($("engineer").value.trim()) params.set("engineer", $("engineer").value.trim());
+  $("rows").innerHTML = '<tr><td colspan="10" class="muted">Loading…</td></tr>';
+  try {
+    const res = await fetch(`${API}/sla/shifts?${params.toString()}`, { cache:"no-store" });
+    const data = await res.json();
+    const shifts = data.shifts || [];
+    if(!shifts.length){ $("rows").innerHTML = '<tr><td colspan="10" class="muted">No day sessions in this range.</td></tr>'; $("summary").textContent = "0 sessions"; return; }
+    let totalMiles = 0, totalMs = 0;
+    $("rows").innerHTML = shifts.map(s => {
+      const miles = (s.start_mileage!=null && s.end_mileage!=null) ? (s.end_mileage - s.start_mileage) : null;
+      if(miles!=null) totalMiles += miles;
+      if(s.clock_on_at && s.clock_off_at) totalMs += Math.max(0, new Date(s.clock_off_at)-new Date(s.clock_on_at));
+      const off = s.clock_off_at ? fmtTime(s.clock_off_at) : '<span class="open">on shift</span>';
+      return `<tr>
+        <td>${fmtDate(s.date)}</td>
+        <td>${s.username||""}</td>
+        <td>${s.clock_on_at?fmtTime(s.clock_on_at):"—"}</td>
+        <td>${off}</td>
+        <td>${hoursBetween(s.clock_on_at, s.clock_off_at) || "—"}</td>
+        <td class="num">${s.start_mileage??"—"}</td>
+        <td class="num">${s.end_mileage??"—"}</td>
+        <td class="num">${miles!=null?miles:"—"}</td>
+        <td>${s.fuel?String(s.fuel):'<span class="muted">—</span>'}</td>
+        <td>${mapLink(s.clock_on_gps)}</td>
+      </tr>`;
+    }).join("");
+    const th = Math.floor(totalMs/3600000), tm = Math.round((totalMs%3600000)/60000);
+    $("summary").textContent = `${shifts.length} session(s) · ${th}h ${String(tm).padStart(2,"0")}m on shift · ${totalMiles} miles driven`;
+  } catch(e){
+    $("rows").innerHTML = '<tr><td colspan="10" class="muted">Failed to load sessions.</td></tr>';
+  }
+}
+
+// Default range: last 14 days.
+(function(){
+  const d = new Date(), from = new Date(); from.setDate(d.getDate()-14);
+  const iso = x => x.toISOString().slice(0,10);
+  $("to").value = iso(d); $("from").value = iso(from);
+})();
+$("loadBtn").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

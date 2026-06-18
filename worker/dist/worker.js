@@ -1280,6 +1280,29 @@ async function handle6(request, env, ctx, url) {
     ).bind((/* @__PURE__ */ new Date()).toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, b.engineer, date).run();
     return jsonResponse({ ok: true, shift: await getShift(env, b.engineer, date) }, headers);
   }
+  if (subpath === "/shifts" && method === "GET") {
+    const engineer = searchParams.get("engineer");
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+    const conds = [], binds = [];
+    if (engineer) {
+      conds.push("username = ?");
+      binds.push(engineer);
+    }
+    if (from) {
+      conds.push("date >= ?");
+      binds.push(from);
+    }
+    if (to) {
+      conds.push("date <= ?");
+      binds.push(to);
+    }
+    let q = "SELECT * FROM shifts";
+    if (conds.length) q += " WHERE " + conds.join(" AND ");
+    q += " ORDER BY date DESC, username ASC LIMIT 500";
+    const { results } = await env.DB.prepare(q).bind(...binds).all();
+    return jsonResponse({ shifts: results || [] }, headers);
+  }
   if (subpath.startsWith("/job/") && method === "PUT") {
     const id = subpath.split("/").filter(Boolean)[1];
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
