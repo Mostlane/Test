@@ -292,6 +292,22 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="vcModal" role="dialog" aria-modal="true" style="display:none;align-items:center;justify-content:center;">
+  <div class="modal-card" style="max-width:430px;width:calc(100% - 32px);max-height:85vh;overflow:auto;text-align:left;">
+    <h3 class="modal-title">Weekly vehicle check</h3>
+    <p class="modal-sub">Quick walkaround — tick each item that's OK.</p>
+    <div id="vcItems"></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:700;">
+      <input type="checkbox" id="vc_safe"> Vehicle is safe &amp; roadworthy to drive
+    </label>
+    <textarea id="vc_note" placeholder="Note any defects…" style="width:100%;box-sizing:border-box;margin-top:8px;min-height:60px;"></textarea>
+    <div id="vcMsg" style="color:#b91c1c;font-size:13px;margin-top:6px;"></div>
+    <div class="modal-actions" style="margin-top:12px;">
+      <button type="button" class="btn primary" id="vcSubmit">Submit check</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
@@ -630,7 +646,66 @@ async function loadShift(){
     todayShift = data.shift || null;
   } catch { todayShift = null; }
 }
+/* ---- Weekly vehicle check (gates clock-on) ---- */
+const VC_ITEMS = [
+  "Tyres & pressures","Lights & indicators","Brakes",
+  "Mirrors & glass","Fluid levels (oil/coolant/washer)","Bodywork / damage",
+  "Load secured / racking","Dashboard warning lights",
+  "First-aid kit & extinguisher present","Clean & tidy"
+];
+let vehicleCheckOnDone = null;
+function getVehicle(){ return sessionStorage.getItem("mostlaneVehicle") || localStorage.getItem("mostlaneVehicle") || ""; }
+function mondayOfWeek(d=new Date()){
+  const x = new Date(d); const day = (x.getDay()+6)%7;          // Mon=0 … Sun=6
+  x.setDate(x.getDate()-day); x.setHours(0,0,0,0);
+  return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;
+}
+function pastVehicleDeadline(){
+  const now = new Date(), x = new Date(now), day = (x.getDay()+6)%7;
+  const wed = new Date(x); wed.setDate(x.getDate()-day+2); wed.setHours(12,0,0,0);  // Wed 12:00 this week
+  return now >= wed;
+}
+async function vehicleCheckStatus(){
+  try {
+    const res = await fetch(`${SLA_API}/vehicle-check?engineer=${encodeURIComponent(getEngineer())}&week=${mondayOfWeek()}`, { cache:"no-store" });
+    const data = await res.json();
+    if(data.check && data.check.checked_at) return "done";
+  } catch {}
+  return pastVehicleDeadline() ? "enforce" : "prompt";
+}
+function buildVcItems(){
+  const host = $("vcItems"); if(!host) return;
+  host.innerHTML = VC_ITEMS.map((label,i)=>
+    `<label style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:14px;"><input type="checkbox" id="vc${i}"> ${label}</label>`).join("");
+}
+function openVehicleCheck(onDone){
+  vehicleCheckOnDone = onDone || null;
+  VC_ITEMS.forEach((_,i)=>{ const el=$("vc"+i); if(el) el.checked=false; });
+  $("vc_safe").checked = false; $("vc_note").value = ""; $("vcMsg").textContent = "";
+  $("vcModal").style.display = "flex";
+}
+async function submitVehicleCheck(){
+  if(!$("vc_safe").checked){ $("vcMsg").textContent = "Tick 'safe to drive' to confirm (note any defects below)."; return; }
+  const items = {}; VC_ITEMS.forEach((label,i)=>{ items[label] = $("vc"+i).checked; });
+  try {
+    await fetch(`${SLA_API}/vehicle-check`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ engineer:getEngineer(), week:mondayOfWeek(), vehicle:getVehicle(),
+        safeToDrive:true, items, note:$("vc_note").value.trim() }) });
+  } catch {}
+  $("vcModal").style.display = "none";
+  const cb = vehicleCheckOnDone; vehicleCheckOnDone = null;
+  if(cb) cb();
+}
+
 async function clockOn(){
+  const st = await vehicleCheckStatus();
+  if(st === "enforce"){ openVehicleCheck(doClockOn); return; }   // must do it (past Wed 12:00)
+  if(st === "prompt"){
+    if(confirm("Your weekly vehicle check isn't done yet (due Wednesday lunchtime). Do it now?")){ openVehicleCheck(doClockOn); return; }
+  }
+  doClockOn();
+}
+async function doClockOn(){
   const engineer = getEngineer();
   const m = prompt("Start mileage on the van? (optional)");
   const startMileage = (m && !isNaN(+m)) ? Math.round(+m) : null;
@@ -685,6 +760,9 @@ function applyDayGate(){
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
+
+  buildVcItems();
+  $("vcSubmit").addEventListener("click", submitVehicleCheck);
 
   // Story Mode: gate the day behind clock-on (hide jobs until they start their day).
   if(isStoryMode()){

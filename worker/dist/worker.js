@@ -1303,6 +1303,32 @@ async function handle6(request, env, ctx, url) {
     const { results } = await env.DB.prepare(q).bind(...binds).all();
     return jsonResponse({ shifts: results || [] }, headers);
   }
+  if (subpath === "/vehicle-check" && method === "GET") {
+    const engineer = searchParams.get("engineer") || "";
+    const week = searchParams.get("week") || "";
+    const row = engineer && week ? await env.DB.prepare("SELECT * FROM vehicle_checks WHERE username=? AND week=?").bind(engineer, week).first() : null;
+    return jsonResponse({ check: row || null }, headers);
+  }
+  if (subpath === "/vehicle-check" && method === "POST") {
+    const b = await readJson(request);
+    if (!b.engineer || !b.week) return jsonResponse({ error: "engineer and week required" }, headers, 400);
+    await env.DB.prepare(`
+      INSERT INTO vehicle_checks (username, week, vehicle, checked_at, safe_to_drive, items, note)
+      VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(username, week) DO UPDATE SET
+        vehicle=excluded.vehicle, checked_at=excluded.checked_at,
+        safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
+    `).bind(
+      b.engineer,
+      b.week,
+      b.vehicle || null,
+      (/* @__PURE__ */ new Date()).toISOString(),
+      b.safeToDrive ? 1 : 0,
+      JSON.stringify(b.items || {}),
+      b.note || null
+    ).run();
+    return jsonResponse({ ok: true }, headers, 201);
+  }
   if (subpath.startsWith("/job/") && method === "PUT") {
     const id = subpath.split("/").filter(Boolean)[1];
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);

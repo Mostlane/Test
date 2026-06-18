@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS shifts (
   PRIMARY KEY (username, date)
 );
 
+-- Story Mode: one weekly vehicle (van walkaround) check per engineer.
+CREATE TABLE IF NOT EXISTS vehicle_checks (
+  username      TEXT NOT NULL,
+  week          TEXT NOT NULL,   -- Monday date yyyy-mm-dd
+  vehicle       TEXT,
+  checked_at    TEXT,
+  safe_to_drive INTEGER,
+  items         TEXT,            -- JSON of checklist items
+  note          TEXT,
+  PRIMARY KEY (username, week)
+);
+
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (
   token      TEXT PRIMARY KEY,
