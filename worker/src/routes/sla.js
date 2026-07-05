@@ -398,6 +398,8 @@ async function patchJob(env, id, patch) {
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
   if (patch.quote !== undefined) job.quote = patch.quote;   // Story Mode quote pack
   if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // Story Mode RA
+  if (patch.order !== undefined) job.order = patch.order;   // Story Mode parts-order pack
+  if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
 
   if (patch.status) {
     const s = normalizeStatus(patch.status);

@@ -1561,6 +1561,8 @@ async function patchJob(env, id, patch) {
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
   if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
+  if (patch.order !== void 0) job.order = patch.order;
+  if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;
   if (patch.status) {
     const s = normalizeStatus(patch.status);
     if (s !== job.status) {
