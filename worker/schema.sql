@@ -69,6 +69,33 @@ CREATE TABLE IF NOT EXISTS shifts (
   PRIMARY KEY (username, date)
 );
 
+-- Customers (clients) — own sites; billing details feed quoting/invoicing.
+CREATE TABLE IF NOT EXISTS customers (
+  id              TEXT PRIMARY KEY,   -- slug, matches sites.client
+  name            TEXT,
+  contact_name    TEXT,
+  email           TEXT,
+  phone           TEXT,
+  invoice_email   TEXT,
+  billing_address TEXT,
+  notes           TEXT,
+  created_at      TEXT DEFAULT (datetime('now')),
+  updated_at      TEXT
+);
+
+-- Sites — replaces the mostlane-sites Worker's KV. Full site JSON in `data`.
+CREATE TABLE IF NOT EXISTS sites (
+  client      TEXT NOT NULL,          -- customer id (slug)
+  site_number TEXT NOT NULL,
+  site_name   TEXT,
+  postcode    TEXT,
+  active      INTEGER DEFAULT 1,
+  job_number  TEXT,
+  data        TEXT,
+  updated_at  TEXT,
+  PRIMARY KEY (client, site_number)
+);
+
 -- Story Mode: one weekly vehicle (van walkaround) check per engineer.
 CREATE TABLE IF NOT EXISTS vehicle_checks (
   username      TEXT NOT NULL,
