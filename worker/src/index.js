@@ -24,6 +24,7 @@ import * as devices from "./routes/devices.js";    // DONE  (device lock)
 import * as holidays from "./routes/holidays.js";  // DONE  (replaces mostlane-holidays)
 import * as assets from "./routes/assets.js";      // DONE  (replaces mostlane-assets)
 import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-sla)
+import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-sites + adds customers)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -38,8 +39,15 @@ const ROUTES = [
   ["*", "/upload-asset-image", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
+  ["*", "/get-sites",  sites.handle],
+  ["*", "/add-site",   sites.handle],
+  ["*", "/update-site", sites.handle],
+  ["*", "/next-project-job-number", sites.handle],
+  ["*", "/upload-image", sites.handle],
+  ["*", "/customers",  sites.handle],
+  ["*", "/import-sites", sites.handle],
   // Excluded for now (separate / later systems): Purchase Orders,
-  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles, Sites,
+  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
 ];
 

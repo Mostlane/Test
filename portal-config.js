@@ -31,6 +31,7 @@
     { host: "mostlane-holidays.jamie-def.workers.dev" },            // /holiday/*
     { host: "mostlane-assets.jamie-def.workers.dev" },              // /assets, /asset/*, images
     { host: "mostlane-sla.jamie-def.workers.dev", prefix: "/sla" }, // /jobs -> /sla/jobs, etc.
+    { host: "mostlane-sites.jamie-def.workers.dev" },               // /get-sites, /add-site, /update-site, /upload-image
     { host: "userdevicekv.jamie-def.workers.dev",                   // device lock
       rewrite: p => p.replace(/^\/auth\//, "/device/") },
   ];

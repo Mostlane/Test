@@ -1744,6 +1744,158 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 </html>`;
 }
 
+// src/routes/sites.js
+var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
+async function handle7(request, env, ctx, url) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (path === "/get-sites" && method === "GET") {
+    const cat = (q.get("category") || "all").toLowerCase();
+    let rows;
+    if (cat === "all") {
+      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites ORDER BY client, site_number").all());
+    } else {
+      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites WHERE client=? ORDER BY site_number").bind(cat).all());
+    }
+    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
+  }
+  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
+    const site = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    site.client = client;
+    const oldNum = q.get("oldSiteNumber");
+    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
+      await env.DB.prepare("DELETE FROM sites WHERE client=? AND site_number=?").bind(client, oldNum).run();
+    }
+    if (path === "/add-site" && client === "projects" && !site.jobNumber) {
+      site.jobNumber = await nextProjectNumber(env);
+    }
+    await saveSite(env, site);
+    await ensureCustomer(env, client);
+    return json({ success: true, site }, {}, env, request);
+  }
+  if (path === "/next-project-job-number" && method === "GET") {
+    return json({ next: await nextProjectNumber(env) }, {}, env, request);
+  }
+  if (path === "/upload-image" && method === "POST") {
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const siteNumber = form && String(form.get("siteNumber") || "").trim();
+    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
+    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
+    const safeName = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName}`;
+    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
+    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+  }
+  if (path === "/customers" && method === "GET") {
+    const { results } = await env.DB.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.client = c.id) AS site_count
+      FROM customers c ORDER BY c.name COLLATE NOCASE
+    `).all();
+    return json({ customers: results || [] }, {}, env, request);
+  }
+  if (path === "/customers" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = slug(b.id || b.name);
+    if (!id) return error("name required", 400, env, request);
+    await env.DB.prepare(`
+      INSERT INTO customers (id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
+        phone=excluded.phone, invoice_email=excluded.invoice_email,
+        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
+    `).bind(
+      id,
+      b.name || id,
+      b.contactName || null,
+      b.email || null,
+      b.phone || null,
+      b.invoiceEmail || null,
+      b.billingAddress || null,
+      b.notes || null
+    ).run();
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (path === "/customers/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM sites WHERE client=?").bind(b.id).first();
+    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
+    await env.DB.prepare("DELETE FROM customers WHERE id=?").bind(b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/import-sites" && method === "POST") {
+    let list = [];
+    try {
+      const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+      list = await res.json();
+      if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+    } catch (e) {
+      return error("Could not read the old sites worker: " + e.message, 502, env, request);
+    }
+    let imported = 0;
+    const clients = /* @__PURE__ */ new Set();
+    for (const site of list) {
+      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
+      const siteNumber = String(site.siteNumber || "").trim();
+      if (!siteNumber) continue;
+      site.client = client;
+      await saveSite(env, site);
+      clients.add(client);
+      imported++;
+    }
+    for (const c of clients) await ensureCustomer(env, c);
+    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
+  }
+  return error("Unknown sites route", 404, env, request);
+}
+async function saveSite(env, site) {
+  await env.DB.prepare(`
+    INSERT INTO sites (client, site_number, site_name, postcode, active, job_number, data, updated_at)
+    VALUES (?,?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(client, site_number) DO UPDATE SET
+      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
+      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
+  `).bind(
+    site.client,
+    String(site.siteNumber).trim(),
+    site.siteName || null,
+    site.postcode || null,
+    site.active === false ? 0 : 1,
+    site.jobNumber || null,
+    JSON.stringify(site)
+  ).run();
+}
+async function ensureCustomer(env, id) {
+  if (!id) return;
+  await env.DB.prepare(
+    "INSERT INTO customers (id, name) VALUES (?,?) ON CONFLICT(id) DO NOTHING"
+  ).bind(id, prettify(id)).run();
+}
+async function nextProjectNumber(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT job_number FROM sites WHERE client='projects' AND job_number IS NOT NULL"
+  ).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.job_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "P" + String(max + 1).padStart(4, "0");
+}
+function slug(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function prettify(id) {
+  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -1758,9 +1910,16 @@ var ROUTES = [
   // /transfer, /transfer-log
   ["*", "/upload-asset-image", handle5],
   ["*", "/delete-asset-image", handle5],
-  ["*", "/sla", handle6]
+  ["*", "/sla", handle6],
+  ["*", "/get-sites", handle7],
+  ["*", "/add-site", handle7],
+  ["*", "/update-site", handle7],
+  ["*", "/next-project-job-number", handle7],
+  ["*", "/upload-image", handle7],
+  ["*", "/customers", handle7],
+  ["*", "/import-sites", handle7]
   // Excluded for now (separate / later systems): Purchase Orders,
-  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles, Sites,
+  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
 ];
 var index_default = {
