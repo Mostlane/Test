@@ -225,14 +225,27 @@ const MAP = {
   HSPlan: ["HSPlan", "hsPlan", "hsPlanBtn"]
 };
 
-// H&S planner launch. Token goes in the #hash so it never reaches server logs;
-// the page is only shown to users with the HSPlan permission.
-const HS_PLAN_TOKEN = "PASTE_HS_TOKEN_HERE";
-(function(){
+// H&S planner launch. The app token lives as a secret on the API worker;
+// it's fetched here only for users with the HSPlan permission, and goes in
+// the URL #hash so it never reaches server logs.
+(async function(){
   const b = document.getElementById("HSPlan");
-  if (b) b.href = "hs-plan/#worker=" +
-    encodeURIComponent("https://mostlane-hs-jobs.jamie-def.workers.dev") +
-    "&token=" + encodeURIComponent(HS_PLAN_TOKEN);
+  if (!b) return;
+  try{
+    const t = localStorage.getItem("mostlaneToken");
+    const r = await fetch(window.MOSTLANE_API + "/hs-plan-config",
+      { headers: t ? { "Authorization": "Bearer " + t } : {} });
+    const c = await r.json().catch(() => ({}));
+    if (r.ok && c.ok && c.token) {
+      b.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) +
+               "&token=" + encodeURIComponent(c.token);
+      return;
+    }
+  }catch(e){}
+  b.addEventListener("click", e => {
+    e.preventDefault();
+    alert("The H&S planner isn't available for your account yet (or its token isn't configured on the server).");
+  });
 })();
       Object.entries(MAP).forEach(([buttonID, keyList]) => {
 
