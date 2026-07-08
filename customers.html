@@ -163,11 +163,30 @@ $("saveBtn").addEventListener("click", async () => {
   }catch(e){ $("mMsg").className = "msg err"; $("mMsg").textContent = e.message; }
 });
 
+// Fetch from the OLD sites worker with XHR — window.fetch is rewritten by
+// portal-config to point at the new worker, which would loop back to ourselves.
+function fetchOldSites(){
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("GET", "https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all");
+    x.onload = () => {
+      try{
+        const list = JSON.parse(x.responseText);
+        Array.isArray(list) ? resolve(list) : reject(new Error("Old system didn't return a site list."));
+      }catch(e){ reject(new Error("Old system returned invalid data.")); }
+    };
+    x.onerror = () => reject(new Error("Couldn't reach the old sites system."));
+    x.send();
+  });
+}
+
 $("importBtn").addEventListener("click", async () => {
   if(!confirm("Pull all sites from the old sites system into the new database? Safe to run more than once (it overwrites with the old system's copy).")) return;
-  $("importMsg").className = "msg"; $("importMsg").textContent = "Importing…";
+  $("importMsg").className = "msg"; $("importMsg").textContent = "Reading old system…";
   try{
-    const r = await (await api("/import-sites", { method:"POST", body:"{}" })).json();
+    const sites = await fetchOldSites();
+    $("importMsg").textContent = `Importing ${sites.length} sites…`;
+    const r = await (await api("/import-sites", { method:"POST", body: JSON.stringify({ sites }) })).json();
     if(!r.ok) throw new Error(r.error || "Import failed");
     $("importMsg").className = "msg ok";
     $("importMsg").textContent = `✔ Imported ${r.imported} sites across ${r.customers.length} customers.`;
