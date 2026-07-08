@@ -76,4 +76,31 @@
 
   // Convenience for new code: apiFetch("/user?u=...") hits the new worker directly.
   window.apiFetch = function (path, init) { return window.fetch(API + path, init); };
+
+  // ── Story Mode: floating "back to My Day" button on every portal page ──────
+  // The guided day is a Story Mode engineer's home screen; wherever they wander
+  // in the portal, one tap brings them straight back.
+  try {
+    var smPerms = {};
+    try { smPerms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+    var smPage = (location.pathname.split("/").pop() || "").toLowerCase();
+    var smSkip = ["my-day.html", "login.html", "onboard.html", "forgot-password.html",
+                  "reset-password.html", "change-password.html", "index.html", ""];
+    if (smPerms.StoryMode === "Yes" && smSkip.indexOf(smPage) === -1) {
+      var addBtn = function () {
+        if (document.getElementById("smReturnBtn")) return;
+        var a = document.createElement("a");
+        a.id = "smReturnBtn";
+        a.href = "my-day.html";
+        a.textContent = "⚡ My Day";
+        a.style.cssText = "position:fixed;bottom:18px;right:16px;z-index:99998;" +
+          "background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-decoration:none;" +
+          "font:700 15px/1 system-ui,-apple-system,sans-serif;padding:13px 18px;border-radius:999px;" +
+          "box-shadow:0 6px 18px rgba(0,30,80,.35);";
+        document.body.appendChild(a);
+      };
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addBtn);
+      else addBtn();
+    }
+  } catch (e) {}
 })();
