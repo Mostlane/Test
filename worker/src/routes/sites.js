@@ -183,6 +183,7 @@ export async function handle(request, env, ctx, url) {
     // Preferred: the browser fetches the old worker and sends the list here
     // (Cloudflare blocks worker→worker fetches on *.workers.dev — error 1042).
     const body = await request.json().catch(() => ({}));
+    const imagesOnly = !!body.imagesOnly;   // restore original photos, touch nothing else
     let list = Array.isArray(body.sites) ? body.sites : [];
     if (!list.length) {
       try {
@@ -199,6 +200,17 @@ export async function handle(request, env, ctx, url) {
       const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
       const siteNumber = String(site.siteNumber || "").trim();
       if (!siteNumber) continue;
+      if (imagesOnly) {
+        if (!site.imageURL) continue;
+        const row = await env.DB.prepare("SELECT data FROM sites WHERE client=? AND site_number=?")
+          .bind(client, siteNumber).first();
+        if (!row) continue;
+        const cur = JSON.parse(row.data);
+        cur.imageURL = site.imageURL;   // original hand-uploaded photo wins
+        await saveSite(env, cur);
+        imported++;
+        continue;
+      }
       site.client = client;
       await saveSite(env, site);
       clients.add(client);
