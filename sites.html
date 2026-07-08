@@ -183,6 +183,16 @@
       .row2{grid-template-columns:1fr;}
     }
     #uploadStatus{font-size:12px;color:var(--muted);margin-top:4px}
+
+    /* Site photo thumbnails + lightbox */
+    .thumb{width:54px;height:40px;object-fit:cover;border-radius:8px;border:1px solid #cfd6e4;cursor:pointer;display:block;background:#f1f5f9;}
+    .thumb:hover{box-shadow:0 2px 8px rgba(15,23,42,.25);}
+    .thumb-empty{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:16px;cursor:default;}
+    .card .thumb{width:64px;height:48px;flex:0 0 64px;}
+    #lightbox{position:fixed;inset:0;background:rgba(15,23,42,.85);display:none;align-items:center;justify-content:center;z-index:99999;padding:18px;flex-direction:column;gap:10px;}
+    #lightbox img{max-width:min(94vw,900px);max-height:80vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+    #lightbox .cap{color:#e2e8f0;font-size:14px;font-weight:600;text-align:center;}
+    #lightbox .close{position:absolute;top:14px;right:18px;background:none;border:none;color:#fff;font-size:30px;cursor:pointer;line-height:1;}
   </style>
 </head>
 <body>
@@ -221,6 +231,7 @@
     <table>
       <thead>
         <tr>
+          <th></th>
           <th>#</th>
           <th>Site Name</th>
           <th>Client</th>
@@ -713,7 +724,7 @@ cleanPostcode(s).toLowerCase().includes(q) ||
     cardsEl.innerHTML = "";
 
     if (!filtered.length) {
-      rowsEl.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#999;">No sites found</td></tr>`;
+      rowsEl.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#999;">No sites found</td></tr>`;
       document.getElementById("count").textContent = "0 sites";
       return;
     }
@@ -726,6 +737,9 @@ cleanPostcode(s).toLowerCase().includes(q) ||
       // TABLE ROW (desktop)
 const tr = document.createElement("tr");
 tr.innerHTML = `
+ <td>${s.imageURL
+   ? `<img class="thumb" src="${s.imageURL}" loading="lazy" alt="" data-action="photo">`
+   : `<span class="thumb thumb-empty" title="No photo yet">📍</span>`}</td>
  <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
  <td>
    <a class="linklike" data-action="details">
@@ -747,6 +761,8 @@ tr.innerHTML = `
       `;
       tr.querySelector('[data-action="details"]').onclick = ()=>openDetails(s);
       tr.querySelector('[data-action="edit"]').onclick = ()=>openEdit(s);
+      const trPhoto = tr.querySelector('[data-action="photo"]');
+      if (trPhoto) trPhoto.onclick = ()=>openLightbox(s);
       tr.querySelector('[data-action="toggle-active"]').onchange = (ev)=>handleToggleActive(s, ev.target);
       rowsEl.appendChild(tr);
 
@@ -755,6 +771,7 @@ const card = document.createElement("div");
 card.className = "site-card";
 card.innerHTML = `
   <div class="card-header">
+    ${s.imageURL ? `<img class="thumb" src="${s.imageURL}" loading="lazy" alt="" data-action="photo">` : ``}
     <div class="card-title">
       <span class="card-name" data-action="details">
         ${s.siteName || "-"} ${hasFerryFlag(s) ? "🚢" : ""}
@@ -793,6 +810,8 @@ card.innerHTML = `
       const cEdit = card.querySelector('[data-action="edit"]');
       const cView = card.querySelector('[data-action="view"]');
       const cToggle = card.querySelector('[data-action="toggle-active"]');
+      const cPhoto = card.querySelector('[data-action="photo"]');
+      if (cPhoto) cPhoto.onclick = ()=>openLightbox(s);
 
       cDetails.onclick = ()=>openDetails(s);
       cView.onclick = ()=>openDetails(s);
@@ -1134,11 +1153,31 @@ btnRecalc.onclick = async () => {
   statusEl.textContent = `Recalculated ${updatedCount} site(s)`;
   alert(`Mileage updated for ${updatedCount} sites`);
 };
+  // Photo lightbox
+  function openLightbox(s){
+    if(!s || !s.imageURL) return;
+    document.getElementById("lightboxImg").src = s.imageURL;
+    document.getElementById("lightboxCap").textContent =
+      `${s.siteName || ""}${s.siteNumber ? " · #" + s.siteNumber : ""}`;
+    document.getElementById("lightbox").style.display = "flex";
+  }
+  function closeLightbox(){
+    document.getElementById("lightbox").style.display = "none";
+    document.getElementById("lightboxImg").src = "";
+  }
+  document.addEventListener("keydown", e => { if(e.key === "Escape") closeLightbox(); });
+
   // Init
   (async()=>{
     try{await fetchAllSites();}catch(e){console.error(e);statusEl.textContent="Error loading sites"; }
   })();
   </script>
+
+<div id="lightbox" onclick="closeLightbox()">
+  <button class="close" aria-label="Close" onclick="closeLightbox()">×</button>
+  <img id="lightboxImg" alt="Site photo" onclick="event.stopPropagation()">
+  <div class="cap" id="lightboxCap"></div>
+</div>
 
 <!-- Google Maps loader -->
 <script>
