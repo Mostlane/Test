@@ -32,6 +32,7 @@ const ROUTES = [
   ["*", "/auth",       auth.handle],
   ["*", "/admin/login-history", auth.loginHistory],
   ["*", "/user",       users.handle],   // /user and /users
+  ["*", "/hs-plan-config", users.handle],
   ["*", "/device",     devices.handle],
   ["*", "/holiday",    holidays.handle],
   ["*", "/asset",      assets.handle],   // /assets, /asset/*, /asset-image, /asset-thumb

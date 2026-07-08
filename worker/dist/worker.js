@@ -374,6 +374,18 @@ async function requireAdmin(env, request) {
 }
 async function handle2(request, env, ctx, url) {
   const path = url.pathname;
+  if (path === "/hs-plan-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    return json({
+      ok: true,
+      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
+      token: env.HS_PLAN_TOKEN || ""
+    }, {}, env, request);
+  }
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
     if (!username) return error("Missing ?u=", 400, env, request);
@@ -2012,6 +2024,7 @@ var ROUTES = [
   ["*", "/admin/login-history", loginHistory],
   ["*", "/user", handle2],
   // /user and /users
+  ["*", "/hs-plan-config", handle2],
   ["*", "/device", handle3],
   ["*", "/holiday", handle4],
   ["*", "/asset", handle5],
