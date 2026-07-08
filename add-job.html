@@ -407,35 +407,30 @@ async function populateUsersDropdown() {
    SITES – same categories as po.html
 ------------------------------------------- */
 
-const SITE_ENDPOINTS = {
-  retail:   "https://mostlane-po.jamie-def.workers.dev/sites/retail",
-  els:      "https://mostlane-po.jamie-def.workers.dev/sites/els",
-  els_private: "https://mostlane-po.jamie-def.workers.dev/sites/els_private",
-  cobra:    "https://mostlane-po.jamie-def.workers.dev/sites/cobra",
-  wenzels:  "https://mostlane-po.jamie-def.workers.dev/sites/wenzels",
-  projects: "https://mostlane-po.jamie-def.workers.dev/sites/projects"
-};
+// Site list now comes from the portal's own sites database (D1) via the
+// consolidated worker — the same data managed in Manage Sites / Customers.
+const SITES_API = "https://mostlane-sites.jamie-def.workers.dev";
 
 let allSites = [];
 
 async function fetchSitesForKey(key){
-  const url = SITE_ENDPOINTS[key];
-  if (!url) return [];
+  if (!key) return [];
   try{
-    const resp = await fetchJSON(url);
-    const data = resp.data || [];
+    const resp = await fetchJSON(`${SITES_API}/get-sites?category=${encodeURIComponent(key)}`);
+    const data = Array.isArray(resp) ? resp : (resp.data || []);
 
-    return data.map(s => {
-      const raw = s.raw || {};
-      const siteNumber = s.siteNumber || raw.siteNumber || "";
+    return data
+      .filter(s => s.active !== false)
+      .map(s => {
+      const siteNumber = s.siteNumber || "";
       const code = siteNumber.toString().padStart(4,"0");
-      const name = s.siteName || raw.siteName || "";
-      const postcode = s.postcode || raw.postcode || "";
-      const telephone = raw.telephone || "";
+      const name = s.siteName || "";
+      const postcode = (s.postcode || "").replace(/\*+$/, "");
+      const telephone = s.telephone || s.phone || "";
       const addressParts = [
-        raw.address1 || raw.street || "",
-        raw.town || "",
-        raw.county || "",
+        s.address1 || s.street || "",
+        s.town || "",
+        s.county || "",
         postcode
       ].filter(Boolean);
       const address = addressParts.join(", ");
@@ -446,11 +441,11 @@ async function fetchSitesForKey(key){
         postcode,
         telephone,
         address,
-        lat: raw.lat ?? null,
-        lon: raw.lon ?? null,
-        mileageFromHQ: raw.mileageFromHQ ?? null,
-        storeType: raw.storeType || s.client || "",
-        sharepointURL: s.sharepointURL || raw.sharepointURL || ""
+        lat: s.lat ?? null,
+        lon: s.lon ?? null,
+        mileageFromHQ: s.mileageFromHQ ?? s.mileage ?? null,
+        storeType: s.storeType || s.client || "",
+        sharepointURL: s.sharepointURL || s.sharepoint || ""
       };
     })
     .filter(x => x.code && x.name);
