@@ -1904,6 +1904,7 @@ async function handle7(request, env, ctx, url) {
   }
   if (path === "/import-sites" && method === "POST") {
     const body = await request.json().catch(() => ({}));
+    const imagesOnly = !!body.imagesOnly;
     let list = Array.isArray(body.sites) ? body.sites : [];
     if (!list.length) {
       try {
@@ -1920,6 +1921,16 @@ async function handle7(request, env, ctx, url) {
       const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
       const siteNumber = String(site.siteNumber || "").trim();
       if (!siteNumber) continue;
+      if (imagesOnly) {
+        if (!site.imageURL) continue;
+        const row = await env.DB.prepare("SELECT data FROM sites WHERE client=? AND site_number=?").bind(client, siteNumber).first();
+        if (!row) continue;
+        const cur = JSON.parse(row.data);
+        cur.imageURL = site.imageURL;
+        await saveSite(env, cur);
+        imported++;
+        continue;
+      }
       site.client = client;
       await saveSite(env, site);
       clients.add(client);
