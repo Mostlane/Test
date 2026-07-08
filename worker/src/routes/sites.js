@@ -130,7 +130,7 @@ export async function handle(request, env, ctx, url) {
       ? `${s.lat},${s.lon}`
       : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
     const todo = all.filter(s =>
-      !s._noStreetView &&
+      !s._noImagery &&
       (overwrite ? (!s._svAt || s._svAt < since) : !s.imageURL) &&
       locOf(s));
 
@@ -138,19 +138,32 @@ export async function handle(request, env, ctx, url) {
     let updated = 0; const failed = [];
     const now = new Date().toISOString();
     for (const site of batch) {
+      const loc = locOf(site);
+      let buf = null;
+      // 1st choice: Street View shopfront photo (only if that API is enabled on the key).
       try {
-        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(locOf(site))}&fov=80&return_error_code=true&key=${key}`;
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
         const res = await fetch(svUrl);
-        if (!res.ok) throw new Error("no imagery / key rejected: " + res.status);
-        const buf = await res.arrayBuffer();
+        if (res.ok) buf = await res.arrayBuffer();
+      } catch (e) {}
+      // Fallback: satellite photo via Maps Static API (aerial view of the building).
+      if (!buf) {
+        try {
+          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
+          const res = await fetch(smUrl);
+          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
+        } catch (e) {}
+      }
+      if (buf) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
         await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
         site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
         site._svAt = now;
+        delete site._noImagery;
         await saveSite(env, site);
         updated++;
-      } catch (e) {
-        site._noStreetView = true;   // don't retry a site with no imagery every run
+      } else {
+        site._noImagery = true;   // both sources failed — don't retry every run
         site._svAt = now;
         await saveSite(env, site);
         failed.push(String(site.siteNumber));

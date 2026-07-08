@@ -1851,25 +1851,38 @@ async function handle7(request, env, ctx, url) {
     const { results } = await env.DB.prepare("SELECT data FROM sites").all();
     const all = (results || []).map((r) => JSON.parse(r.data));
     const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
-    const todo = all.filter((s) => !s._noStreetView && (overwrite ? !s._svAt || s._svAt < since : !s.imageURL) && locOf(s));
+    const todo = all.filter((s) => !s._noImagery && (overwrite ? !s._svAt || s._svAt < since : !s.imageURL) && locOf(s));
     const batch = todo.slice(0, limit);
     let updated = 0;
     const failed = [];
     const now = (/* @__PURE__ */ new Date()).toISOString();
     for (const site of batch) {
+      const loc = locOf(site);
+      let buf = null;
       try {
-        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(locOf(site))}&fov=80&return_error_code=true&key=${key}`;
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
         const res = await fetch(svUrl);
-        if (!res.ok) throw new Error("no imagery / key rejected: " + res.status);
-        const buf = await res.arrayBuffer();
+        if (res.ok) buf = await res.arrayBuffer();
+      } catch (e) {
+      }
+      if (!buf) {
+        try {
+          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
+          const res = await fetch(smUrl);
+          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
+        } catch (e) {
+        }
+      }
+      if (buf) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
         await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
         site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
         site._svAt = now;
+        delete site._noImagery;
         await saveSite(env, site);
         updated++;
-      } catch (e) {
-        site._noStreetView = true;
+      } else {
+        site._noImagery = true;
         site._svAt = now;
         await saveSite(env, site);
         failed.push(String(site.siteNumber));
