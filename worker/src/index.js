@@ -46,6 +46,7 @@ const ROUTES = [
   ["*", "/upload-image", sites.handle],
   ["*", "/customers",  sites.handle],
   ["*", "/import-sites", sites.handle],
+  ["*", "/sites",      sites.handle],   // /sites/street-images (bulk imagery)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

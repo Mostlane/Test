@@ -111,6 +111,57 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true }, {}, env, request);
   }
 
+  /* ── Bulk site images from Google Street View ────────────────────────────
+     Fetches each site's Street View photo ONCE, stores it in R2, and points
+     site.imageURL at our own copy (no per-view Google billing, no key in the
+     stored URL). Batched — the caller loops until remaining === 0. */
+  if (path === "/sites/street-images" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const key = b.key || env.GOOGLE_MAPS_KEY;
+    if (!key) return error("Google Maps API key required", 400, env, request);
+    const overwrite = !!b.overwrite;
+    const since = b.since || "";                       // run marker for overwrite mode
+    const limit = Math.min(Number(b.limit) || 15, 25); // stay under subrequest caps
+    const size = b.size || "640x400";
+
+    const { results } = await env.DB.prepare("SELECT data FROM sites").all();
+    const all = (results || []).map(r => JSON.parse(r.data));
+    const locOf = s => (s.lat != null && s.lon != null)
+      ? `${s.lat},${s.lon}`
+      : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
+    const todo = all.filter(s =>
+      !s._noStreetView &&
+      (overwrite ? (!s._svAt || s._svAt < since) : !s.imageURL) &&
+      locOf(s));
+
+    const batch = todo.slice(0, limit);
+    let updated = 0; const failed = [];
+    const now = new Date().toISOString();
+    for (const site of batch) {
+      try {
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(locOf(site))}&fov=80&return_error_code=true&key=${key}`;
+        const res = await fetch(svUrl);
+        if (!res.ok) throw new Error("no imagery / key rejected: " + res.status);
+        const buf = await res.arrayBuffer();
+        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
+        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
+        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site._svAt = now;
+        await saveSite(env, site);
+        updated++;
+      } catch (e) {
+        site._noStreetView = true;   // don't retry a site with no imagery every run
+        site._svAt = now;
+        await saveSite(env, site);
+        failed.push(String(site.siteNumber));
+      }
+    }
+    return json({
+      ok: true, updated, failed,
+      remaining: Math.max(0, todo.length - batch.length)
+    }, {}, env, request);
+  }
+
   /* ── One-time migration from the old worker ──────────────────────────── */
 
   if (path === "/import-sites" && method === "POST") {
