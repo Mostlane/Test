@@ -155,6 +155,7 @@
       <div class="section" data-sec="account">
         <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" /></div>
         <div><label>SharePoint path</label><input id="f_sp" /></div>
+        <div><label>PO system personal link</label><input id="p_poUrl" placeholder="e.g. https://…workers.dev/o/jamie or /e/david-molloy" /></div>
         <div style="margin-top:14px;padding:12px;border:1px solid #d7dee6;border-radius:8px;background:#f7faff;">
           <label style="display:flex;align-items:flex-start;gap:8px;margin:0;font-weight:600;cursor:pointer;">
             <input type="checkbox" data-perm="StoryMode" style="margin-top:3px;" />
@@ -186,7 +187,7 @@
       "TimesheetAdmin","LabourPlanning","SLA","HSPlan"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
-      "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod"];
+      "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
 
     let allUsers = [];
 

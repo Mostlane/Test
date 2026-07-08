@@ -374,6 +374,19 @@ async function requireAdmin(env, request) {
 }
 async function handle2(request, env, ctx, url) {
   const path = url.pathname;
+  if (path === "/po-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try {
+      profile = sess.user.profile ? JSON.parse(sess.user.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
   if (path === "/hs-plan-config" && request.method === "GET") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -2025,6 +2038,7 @@ var ROUTES = [
   ["*", "/user", handle2],
   // /user and /users
   ["*", "/hs-plan-config", handle2],
+  ["*", "/po-config", handle2],
   ["*", "/device", handle3],
   ["*", "/holiday", handle4],
   ["*", "/asset", handle5],

@@ -28,6 +28,19 @@ async function requireAdmin(env, request) {
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
 
+  // GET /po-config — the logged-in user's personal PO-system link (stored on
+  // their profile). Gated by the PurchaseOrders permission.
+  if (path === "/po-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try { profile = sess.user.profile ? JSON.parse(sess.user.profile) : {}; } catch {}
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
+
   // GET /hs-plan-config — launch details for the H&S planner. The app token
   // lives as a worker secret (HS_PLAN_TOKEN) and is only released to users
   // holding the HSPlan permission (or FullAccess).
