@@ -210,8 +210,16 @@ $("svBtn").addEventListener("click", async () => {
                      localStorage.getItem("mostlaneMapsImageKey") || "");
   if(!key) return;
   localStorage.setItem("mostlaneMapsImageKey", key.trim());
-  const overwrite = confirm("Overwrite sites that ALREADY have an image?\n\nOK = re-do every site · Cancel = only fill sites with no image.");
+  const overwrite = confirm("Re-do images on sites that already have one?\n\nOK = regenerate all Google-made images (hand-uploaded photos are never touched) · Cancel = only fill sites with no image.");
   const since = new Date().toISOString();
+  // What each client's branches actually are — makes Places find the right business.
+  const BRAND_HINTS = {
+    cobra: "Starbucks",
+    els: "The Co-operative Funeralcare",
+    els_private: "The Co-operative Funeralcare",
+    retail: "Southern Co-op",
+    wenzels: "Wenzel's"
+  };
   $("svBtn").disabled = true;
   let total = 0, failedTotal = 0, rounds = 0, lastError = "";
   try{
@@ -219,7 +227,7 @@ $("svBtn").addEventListener("click", async () => {
       $("svMsg").className = "msg";
       $("svMsg").textContent = `Fetching images… ${total} done${failedTotal ? `, ${failedTotal} failed` : ""}`;
       const r = await (await api("/sites/street-images", { method:"POST",
-        body: JSON.stringify({ key, overwrite, since }) })).json();
+        body: JSON.stringify({ key, overwrite, since, brands: BRAND_HINTS }) })).json();
       if(!r.ok) throw new Error(r.error || "Image run failed");
       total += r.updated; failedTotal += (r.failed || []).length;
       if(r.sampleError) lastError = r.sampleError;

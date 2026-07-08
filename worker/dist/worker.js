@@ -1846,22 +1846,44 @@ async function handle7(request, env, ctx, url) {
     if (!key) return error("Google Maps API key required", 400, env, request);
     const overwrite = !!b.overwrite;
     const since = b.since || "";
-    const limit = Math.min(Number(b.limit) || 15, 25);
+    const brands = b.brands || {};
+    const limit = Math.min(Number(b.limit) || 8, 10);
     const size = b.size || "640x400";
     const { results } = await env.DB.prepare("SELECT data FROM sites").all();
     const all = (results || []).map((r) => JSON.parse(r.data));
     const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
+    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
     const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
-    (overwrite ? !s._svAt || s._svAt < since : !s.imageURL) && locOf(s));
+    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
     const batch = todo.slice(0, limit);
     let updated = 0;
     const failed = [];
     let sampleError = "";
     const now = (/* @__PURE__ */ new Date()).toISOString();
     for (const site of batch) {
-      const loc = locOf(site);
+      let loc = locOf(site);
       let buf = null;
       try {
+        const q2 = [
+          brands[site.client] || "",
+          site.siteName || "",
+          (site.postcode || "").replace(/\*+$/, "")
+        ].filter(Boolean).join(" ");
+        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
+        const fpj = await fp.json();
+        const cand = fpj.candidates && fpj.candidates[0];
+        if (cand) {
+          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
+          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
+          if (ref) {
+            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
+            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
+          }
+        }
+      } catch (e) {
+        if (!sampleError) sampleError = "Places: " + e.message;
+      }
+      if (!buf) try {
         const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
         const res = await fetch(svUrl);
         if (res.ok) buf = await res.arrayBuffer();
