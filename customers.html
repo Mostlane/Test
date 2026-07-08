@@ -207,23 +207,24 @@ $("svBtn").addEventListener("click", async () => {
   const overwrite = confirm("Overwrite sites that ALREADY have an image?\n\nOK = re-do every site · Cancel = only fill sites with no image.");
   const since = new Date().toISOString();
   $("svBtn").disabled = true;
-  let total = 0, failedTotal = 0, rounds = 0;
+  let total = 0, failedTotal = 0, rounds = 0, lastError = "";
   try{
     while(rounds++ < 40){
       $("svMsg").className = "msg";
-      $("svMsg").textContent = `Fetching images… ${total} done${failedTotal ? `, ${failedTotal} without imagery` : ""}`;
+      $("svMsg").textContent = `Fetching images… ${total} done${failedTotal ? `, ${failedTotal} failed` : ""}`;
       const r = await (await api("/sites/street-images", { method:"POST",
         body: JSON.stringify({ key, overwrite, since }) })).json();
       if(!r.ok) throw new Error(r.error || "Image run failed");
       total += r.updated; failedTotal += (r.failed || []).length;
+      if(r.sampleError) lastError = r.sampleError;
       if(r.updated === 0 && (r.failed || []).length === 0) break;
       if(r.remaining === 0) break;
     }
     $("svMsg").className = "msg ok";
-    $("svMsg").textContent = `✔ ${total} site image(s) saved${failedTotal ? ` · ${failedTotal} had no Street View imagery (skipped)` : ""}.`;
+    $("svMsg").textContent = `✔ ${total} site image(s) saved${failedTotal ? ` · ${failedTotal} failed/no imagery` : ""}.`;
     if(total === 0 && failedTotal > 0){
       $("svMsg").className = "msg err";
-      $("svMsg").textContent = "Every site failed — the API key probably doesn't have 'Street View Static API' enabled in Google Cloud.";
+      $("svMsg").textContent = "Every site failed. Google said: " + (lastError || "(no detail)");
     }
   }catch(e){
     $("svMsg").className = "msg err"; $("svMsg").textContent = e.message;

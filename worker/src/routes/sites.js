@@ -130,12 +130,12 @@ export async function handle(request, env, ctx, url) {
       ? `${s.lat},${s.lon}`
       : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
     const todo = all.filter(s =>
-      !s._noImagery &&
+      (overwrite || !s._noImagery) &&   // an overwrite run retries previously-failed sites
       (overwrite ? (!s._svAt || s._svAt < since) : !s.imageURL) &&
       locOf(s));
 
     const batch = todo.slice(0, limit);
-    let updated = 0; const failed = [];
+    let updated = 0; const failed = []; let sampleError = "";
     const now = new Date().toISOString();
     for (const site of batch) {
       const loc = locOf(site);
@@ -145,14 +145,16 @@ export async function handle(request, env, ctx, url) {
         const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
         const res = await fetch(svUrl);
         if (res.ok) buf = await res.arrayBuffer();
-      } catch (e) {}
+        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
+      } catch (e) { if (!sampleError) sampleError = "StreetView: " + e.message; }
       // Fallback: satellite photo via Maps Static API (aerial view of the building).
       if (!buf) {
         try {
           const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
           const res = await fetch(smUrl);
           if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
-        } catch (e) {}
+          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
+        } catch (e) { if (!sampleError) sampleError = "StaticMap: " + e.message; }
       }
       if (buf) {
         const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
@@ -170,7 +172,7 @@ export async function handle(request, env, ctx, url) {
       }
     }
     return json({
-      ok: true, updated, failed,
+      ok: true, updated, failed, sampleError,
       remaining: Math.max(0, todo.length - batch.length)
     }, {}, env, request);
   }
