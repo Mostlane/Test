@@ -367,6 +367,16 @@ async function createOrUpdateJobFromPayload(env, body) {
     assignedTo: assignedEngineers[0] || "",   // legacy single field = primary engineer
     assignedEngineers,
     siteCode: body.siteCode || existing?.siteCode || "",  // carried so the siteCode filter works
+    // Full site details captured at creation — shown to engineers (address,
+    // phone, directions) without a lookup. Previously these were dropped.
+    siteName: body.siteName || existing?.siteName || "",
+    address: body.address || existing?.address || "",
+    telephone: body.telephone || existing?.telephone || "",
+    postcode: body.postcode || existing?.postcode || "",
+    lat: body.lat ?? existing?.lat ?? null,
+    lon: body.lon ?? existing?.lon ?? null,
+    storeType: body.storeType || existing?.storeType || "",
+    sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,

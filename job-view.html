@@ -415,6 +415,25 @@
     </div>
   </div>
 
+  <!-- SITE DETAILS -->
+  <div class="card" id="siteCard" style="display:none;">
+    <h2 class="section-title">Site</h2>
+    <div class="row">
+      <div class="col">
+        <div class="field-label">Address</div>
+        <div class="field-value" id="siteAddress">—</div>
+      </div>
+      <div class="col">
+        <div class="field-label">Contact</div>
+        <div class="field-value" id="sitePhone">—</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <a class="btn" id="siteMapBtn" target="_blank" rel="noopener" style="display:none;">🗺️ Directions</a>
+      <a class="btn" id="siteSharepointBtn" target="_blank" rel="noopener" style="display:none;">📁 Site folder</a>
+    </div>
+  </div>
+
   <!-- STATUS / NOTES -->
   <div class="card">
     <h2 class="section-title">Update Status</h2>
@@ -521,6 +540,19 @@
   <div style="margin-top:10px;">
     <button class="btn primary" id="openSignatureBtn">✍️ Capture Signature</button>
   </div>
+</div>
+
+<!-- ENGINEER CAPTURE (quote / RA / order / mileage from Story Mode) -->
+<div class="card" id="captureCard" style="display:none;">
+  <h2 class="section-title">Engineer capture</h2>
+  <div id="captureBody"></div>
+</div>
+
+<!-- ACTIVITY TIMELINE -->
+<div class="card">
+  <h2 class="section-title">Activity</h2>
+  <p class="section-sub">Every status change and note, newest first.</p>
+  <div id="timeline" class="panel-light">No activity recorded yet.</div>
 </div>
 </div>
   <!-- SIGNATURE MODAL -->
@@ -680,7 +712,13 @@ function renderJob(){
   pill.textContent = st;
   pill.className = statusClass(st, slaInfo.status);
 
-  $("jobAssigned").textContent = job.assignedTo || "Unassigned";
+  const engs = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length)
+    ? job.assignedEngineers : (job.assignedTo ? [job.assignedTo] : []);
+  $("jobAssigned").textContent = engs.length ? engs.join(", ") : "Unassigned";
+
+  renderSite();
+  renderCapture();
+  renderTimeline();
 
   const statusSelect = $("statusSelect");
   let matched = false;
@@ -775,6 +813,137 @@ async function loadJob(){
     console.error("load error", err);
     $("statusBar").textContent = "❌ Error loading job.";
   }
+}
+
+/* ---- Site details (from the job, else looked up in the sites DB) ---- */
+let sitesCache = null;
+async function lookupSite(code){
+  if(!code) return null;
+  try{
+    if(!sitesCache){
+      const res = await fetch("https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all", {cache:"no-store"});
+      sitesCache = await res.json();
+      if(!Array.isArray(sitesCache)) sitesCache = [];
+    }
+    const digits = (String(code).match(/(\d+)\s*$/) || [])[1];
+    if(!digits) return null;
+    const want = digits.padStart(4,"0");
+    return sitesCache.find(s => String(s.siteNumber||"").padStart(4,"0") === want) || null;
+  }catch(e){ return null; }
+}
+
+async function renderSite(){
+  let info = {
+    address: job.address || "", phone: job.telephone || "",
+    lat: job.lat, lon: job.lon, sharepoint: job.sharepointURL || ""
+  };
+  if(!info.address && !info.phone){
+    const s = await lookupSite(job.siteCode);
+    if(s){
+      info.address = [s.address1 || s.street || "", s.town || "", s.county || "", (s.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
+      info.phone = s.telephone || s.phone || "";
+      info.lat = s.lat; info.lon = s.lon;
+      info.sharepoint = s.sharepointURL || s.sharepoint || "";
+    }
+  }
+  if(!info.address && !info.phone) return;   // nothing useful — keep the card hidden
+  $("siteAddress").textContent = info.address || "—";
+  if(info.phone){
+    $("sitePhone").innerHTML = "";
+    const a = document.createElement("a"); a.href = "tel:" + info.phone.replace(/\s+/g,""); a.textContent = info.phone;
+    $("sitePhone").appendChild(a);
+  }
+  const dest = (info.lat != null && info.lon != null) ? `${info.lat},${info.lon}` : info.address;
+  if(dest){
+    $("siteMapBtn").href = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest);
+    $("siteMapBtn").style.display = "inline-block";
+  }
+  if(info.sharepoint){
+    $("siteSharepointBtn").href = info.sharepoint;
+    $("siteSharepointBtn").style.display = "inline-block";
+  }
+  $("siteCard").style.display = "block";
+}
+
+/* ---- Engineer capture (Story Mode packs stored on the job) ---- */
+function kvRow(k, v){
+  if(v === null || v === undefined || v === "") return "";
+  const d = document.createElement("div");
+  d.style.cssText = "display:flex;gap:10px;padding:4px 0;font-size:13px;";
+  const kk = document.createElement("b"); kk.style.cssText = "min-width:150px;color:#475569;font-weight:600;"; kk.textContent = k;
+  const vv = document.createElement("span"); vv.style.whiteSpace = "pre-wrap"; vv.textContent = String(v);
+  d.append(kk, vv); return d;
+}
+function captureSection(title, rows){
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-bottom:10px;";
+  const h = document.createElement("div"); h.style.cssText = "font-weight:700;color:#003b82;margin-bottom:4px;"; h.textContent = title;
+  wrap.appendChild(h);
+  rows.forEach(r => { if(r) wrap.appendChild(r); });
+  return wrap;
+}
+function renderCapture(){
+  const body = $("captureBody"); body.innerHTML = "";
+  let any = false;
+  if(job.quote){
+    any = true;
+    const q = job.quote;
+    body.appendChild(captureSection("💰 Quote pack" + (q.capturedBy ? ` — ${q.capturedBy}` : ""), [
+      kvRow("Works required", q.description), kvRow("Why quote", q.reason),
+      kvRow("Materials", q.materials),
+      kvRow("Est. labour", q.labourHours != null ? `${q.labourHours} hrs × ${q.engineers || 1} engineer(s)` : ""),
+      kvRow("Access", q.access), kvRow("Notes", q.notes)
+    ]));
+  }
+  if(job.riskAssessment){
+    any = true;
+    const r = job.riskAssessment;
+    const ticks = [["Safe access", r.safeAccess],["PPE", r.ppe],["Isolation", r.isolation],
+                   ["Height controlled", r.height],["Others protected", r.othersAtRisk],["Hazmat considered", r.hazardous]]
+      .map(([label, ok]) => `${ok ? "✅" : "▫️"} ${label}`).join("   ");
+    body.appendChild(captureSection("🦺 Risk assessment" + (r.by ? ` — ${r.by}` : ""), [
+      kvRow("Checks", ticks),
+      kvRow("Safe to proceed", r.safeToProceed ? "Yes" : "No"),
+      kvRow("Notes", r.note)
+    ]));
+  }
+  if(job.order){
+    any = true;
+    const o = job.order;
+    body.appendChild(captureSection("📦 Parts order" + (o.by ? ` — ${o.by}` : ""), [
+      kvRow("Parts", o.parts), kvRow("Supplier", o.supplier),
+      kvRow("ETA", o.eta), kvRow("PO number", o.po)
+    ]));
+  }
+  if(job.travelStartMileage != null){
+    any = true;
+    body.appendChild(captureSection("🚐 Mileage", [kvRow("Odometer at arrival", job.travelStartMileage + " mi")]));
+  }
+  $("captureCard").style.display = any ? "block" : "none";
+}
+
+/* ---- Activity timeline (statusHistory + events, newest first) ---- */
+function renderTimeline(){
+  const entries = [];
+  (job.statusHistory || []).forEach(h => entries.push({ at: h.at, by: h.by, text: "Status → " + h.status }));
+  (job.events || []).forEach(e => entries.push({ at: e.at, by: e.by, text: e.note || e.type || "" }));
+  if(job.signature && job.signature.signedAt)
+    entries.push({ at: job.signature.signedAt, by: job.signature.signedBy, text: "Customer signed" });
+  entries.sort((a,b) => new Date(b.at) - new Date(a.at));
+  const el = $("timeline");
+  if(!entries.length){ el.textContent = "No activity recorded yet."; return; }
+  el.innerHTML = "";
+  entries.forEach(en => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #eef1f4;font-size:13px;align-items:baseline;";
+    const t = document.createElement("span");
+    t.style.cssText = "min-width:130px;color:#64748b;font-variant-numeric:tabular-nums;";
+    t.textContent = fmtDateTimeLong(parseDate(en.at));
+    const w = document.createElement("span");
+    w.textContent = en.text + (en.by ? ` — ${en.by}` : "");
+    row.append(t, w);
+    el.appendChild(row);
+  });
 }
 
 /* ---- Story Mode: Quote pack ---- */

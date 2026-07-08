@@ -62,6 +62,12 @@
 <script>
 const API = window.MOSTLANE_API;
 const $ = id => document.getElementById(id);
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
 
 // Light access gate — office/admin only.
 (function gate(){
@@ -96,7 +102,7 @@ async function load(){
   if($("engineer").value.trim()) params.set("engineer", $("engineer").value.trim());
   $("rows").innerHTML = '<tr><td colspan="10" class="muted">Loading…</td></tr>';
   try {
-    const res = await fetch(`${API}/sla/shifts?${params.toString()}`, { cache:"no-store" });
+    const res = await authFetch(`${API}/sla/shifts?${params.toString()}`, { cache:"no-store" });
     const data = await res.json();
     const shifts = data.shifts || [];
     if(!shifts.length){ $("rows").innerHTML = '<tr><td colspan="10" class="muted">No day sessions in this range.</td></tr>'; $("summary").textContent = "0 sessions"; return; }
