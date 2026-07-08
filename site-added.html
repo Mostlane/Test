@@ -1,79 +1,12 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <script src="/portal-config.js"></script>
-<script src="auth.js"></script>
-  <meta charset="utf-8">
-  <title>Site Added</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      font-family: 'Segoe UI', sans-serif;
-    }
-    .container {
-      max-width: 600px;
-      margin: 60px auto;
-      background: rgba(255,255,255,0.9);
-      padding: 30px;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      text-align: center;
-    }
-    h2 {
-      color: #004a99;
-      margin-bottom: 10px;
-    }
-    .summary-box {
-      margin-top: 20px;
-      padding: 15px;
-      border-radius: 8px;
-      background: #f4f6f8;
-      text-align: left;
-    }
-    .summary-box p {
-      margin: 6px 0;
-      font-weight: bold;
-    }
-    .btn {
-      display: inline-block;
-      margin-top: 25px;
-      padding: 10px 20px;
-      background: #004a99;
-      color: white;
-      text-decoration: none;
-      border-radius: 6px;
-      font-size: 16px;
-    }
-  </style>
+  <meta charset="UTF-8">
+  <title>Moved — Mostlane Portal</title>
+  <script>location.replace("sites.html");</script>
+  <meta http-equiv="refresh" content="0;url=sites.html">
 </head>
-<body>
-  <div class="container">
-    <h2>✅ Site Successfully Added</h2>
-    <p>The following details have been submitted:</p>
-    <div class="summary-box">
-      <p>📍 <strong>Site Name:</strong> <span id="siteNameText"></span></p>
-      <p>🏢 <strong>Store Type:</strong> <span id="siteTypeText"></span></p>
-      <p>📌 <strong>Address:</strong> <span id="addressText"></span></p>
-      <p>🌍 <strong>Latitude:</strong> <span id="latText"></span></p>
-      <p>🌍 <strong>Longitude:</strong> <span id="lonText"></span></p>
-      <p>🛣️ <strong>Distance from Mostlane Office:</strong> <span id="mileageText"></span> miles</p>
-      <p>⏱️ <strong>Driving Time:</strong> <span id="driveTimeText"></span></p>
-    </div>
-    <a href="main.html" class="btn">Return to Main Menu</a>
-  </div>
-
-  <script>
-    document.getElementById("siteNameText").textContent = sessionStorage.getItem("lastSiteName") || "N/A";
-    document.getElementById("siteTypeText").textContent = sessionStorage.getItem("lastSiteType") || "N/A";
-    document.getElementById("addressText").textContent = sessionStorage.getItem("lastAddress") || "N/A";
-    document.getElementById("latText").textContent = sessionStorage.getItem("lastLatitude") || "N/A";
-    document.getElementById("lonText").textContent = sessionStorage.getItem("lastLongitude") || "N/A";
-    document.getElementById("mileageText").textContent = sessionStorage.getItem("lastMileage") || "N/A";
-    document.getElementById("driveTimeText").textContent = sessionStorage.getItem("lastDriveTime") || "N/A";
-  </script>
+<body style="font-family:system-ui;padding:40px;text-align:center;color:#334155;">
+  This page has been replaced — <a href="sites.html">continue</a>.
 </body>
 </html>
