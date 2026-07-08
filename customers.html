@@ -49,9 +49,13 @@
         <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
       </table>
     </div>
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f4;">
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f4;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <button class="btn grey" id="importBtn">⇩ Import sites from old system (one-time)</button>
       <span class="msg" id="importMsg"></span>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn grey" id="svBtn">🖼️ Set site images from Google Street View</button>
+      <span class="msg" id="svMsg"></span>
     </div>
   </div>
 </div>
@@ -192,6 +196,40 @@ $("importBtn").addEventListener("click", async () => {
     $("importMsg").textContent = `✔ Imported ${r.imported} sites across ${r.customers.length} customers.`;
     load();
   }catch(e){ $("importMsg").className = "msg err"; $("importMsg").textContent = e.message; }
+});
+
+/* Bulk site images: loops batches until every site has a Street View photo
+   stored in our own R2 bucket (one-time Google fetch per site). */
+const DEFAULT_MAPS_KEY = "AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM"; // portal maps key
+$("svBtn").addEventListener("click", async () => {
+  const key = prompt("Google Maps API key (needs 'Street View Static API' enabled):", DEFAULT_MAPS_KEY);
+  if(!key) return;
+  const overwrite = confirm("Overwrite sites that ALREADY have an image?\n\nOK = re-do every site · Cancel = only fill sites with no image.");
+  const since = new Date().toISOString();
+  $("svBtn").disabled = true;
+  let total = 0, failedTotal = 0, rounds = 0;
+  try{
+    while(rounds++ < 40){
+      $("svMsg").className = "msg";
+      $("svMsg").textContent = `Fetching images… ${total} done${failedTotal ? `, ${failedTotal} without imagery` : ""}`;
+      const r = await (await api("/sites/street-images", { method:"POST",
+        body: JSON.stringify({ key, overwrite, since }) })).json();
+      if(!r.ok) throw new Error(r.error || "Image run failed");
+      total += r.updated; failedTotal += (r.failed || []).length;
+      if(r.updated === 0 && (r.failed || []).length === 0) break;
+      if(r.remaining === 0) break;
+    }
+    $("svMsg").className = "msg ok";
+    $("svMsg").textContent = `✔ ${total} site image(s) saved${failedTotal ? ` · ${failedTotal} had no Street View imagery (skipped)` : ""}.`;
+    if(total === 0 && failedTotal > 0){
+      $("svMsg").className = "msg err";
+      $("svMsg").textContent = "Every site failed — the API key probably doesn't have 'Street View Static API' enabled in Google Cloud.";
+    }
+  }catch(e){
+    $("svMsg").className = "msg err"; $("svMsg").textContent = e.message;
+  }finally{
+    $("svBtn").disabled = false;
+  }
 });
 
 load();
