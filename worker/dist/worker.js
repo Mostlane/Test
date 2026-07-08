@@ -1831,13 +1831,16 @@ async function handle7(request, env, ctx, url) {
     return json({ ok: true }, {}, env, request);
   }
   if (path === "/import-sites" && method === "POST") {
-    let list = [];
-    try {
-      const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
-      list = await res.json();
-      if (!Array.isArray(list)) throw new Error("old worker did not return a list");
-    } catch (e) {
-      return error("Could not read the old sites worker: " + e.message, 502, env, request);
+    const body = await request.json().catch(() => ({}));
+    let list = Array.isArray(body.sites) ? body.sites : [];
+    if (!list.length) {
+      try {
+        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+        list = await res.json();
+        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+      } catch (e) {
+        return error("Could not read the old sites worker: " + e.message, 502, env, request);
+      }
     }
     let imported = 0;
     const clients = /* @__PURE__ */ new Set();

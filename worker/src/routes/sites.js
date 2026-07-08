@@ -114,13 +114,18 @@ export async function handle(request, env, ctx, url) {
   /* ── One-time migration from the old worker ──────────────────────────── */
 
   if (path === "/import-sites" && method === "POST") {
-    let list = [];
-    try {
-      const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
-      list = await res.json();
-      if (!Array.isArray(list)) throw new Error("old worker did not return a list");
-    } catch (e) {
-      return error("Could not read the old sites worker: " + e.message, 502, env, request);
+    // Preferred: the browser fetches the old worker and sends the list here
+    // (Cloudflare blocks worker→worker fetches on *.workers.dev — error 1042).
+    const body = await request.json().catch(() => ({}));
+    let list = Array.isArray(body.sites) ? body.sites : [];
+    if (!list.length) {
+      try {
+        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+        list = await res.json();
+        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+      } catch (e) {
+        return error("Could not read the old sites worker: " + e.message, 502, env, request);
+      }
     }
     let imported = 0;
     const clients = new Set();
