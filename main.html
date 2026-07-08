@@ -293,6 +293,24 @@ const MAP = {
 }
       });
 
+      // Story Mode: the guided day is home. Limit the menu to day-relevant
+      // areas (whatever their permissions allow within this set) and pin a
+      // "Back to My Day" button at the top so they can always jump straight back.
+      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "Holiday", "MyDocuments", "Assets", "Forms", "Compliance"]);
+      if (String(user.StoryMode || "").toLowerCase() === "yes") {
+        document.querySelectorAll("#menuGrid .button").forEach(b => {
+          if (!STORY_ALLOWED.has(b.id)) b.classList.remove("visible");
+        });
+        const back = document.createElement("a");
+        back.className = "button visible";
+        back.id = "backToMyDay";
+        back.href = "my-day.html";
+        back.innerHTML = '<span class="emoji">⚡</span> Back to My Day';
+        back.style.cssText = "background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;font-weight:700;grid-column:1 / -1;";
+        const grid = document.getElementById("menuGrid");
+        grid.insertBefore(back, grid.firstChild);
+      }
+
       setTimeout(() => {
         const buttons = [...document.querySelectorAll(".button.visible")];
         buttons.forEach(b => b.classList.remove("full-width"));
