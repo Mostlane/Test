@@ -4,179 +4,109 @@
   <script src="/portal-config.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Set On-Call Roles</title>
+  <title>On-Call — Mostlane Portal</title>
+  <script src="auth.js"></script>
   <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size: cover;
-      margin: 0;
-      padding: 0;
-      color: #003366;
-    }
-    .container {
-      max-width: 520px;
-      margin: 80px auto;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 30px 35px 40px;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      text-align: center;
-    }
-    h1 { margin-top: 0; color: #003366; }
-    .current {
-      background: #f5f7fa;
-      border-radius: 10px;
-      padding: 10px 0 15px;
-      margin-bottom: 20px;
-      font-size: 16px;
-      line-height: 1.5;
-    }
-    select {
-      width: 100%;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      font-size: 16px;
-      margin-bottom: 20px;
-    }
-    button {
-      background-color: #004a99;
-      color: white;
-      border: none;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 16px;
-      cursor: pointer;
-      width: 100%;
-      margin-bottom: 12px;
-    }
-    button:hover { background-color: #003366; }
-    .history-btn {
-      background-color: #ffffff;
-      color: #004a99;
-      border: 2px solid #004a99;
-      font-weight: bold;
-    }
-    .history-btn:hover { background-color: #004a99; color: #ffffff; }
-    .status { margin-top: 20px; font-weight: bold; }
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:560px; margin:20px auto 40px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    .back-btn{ text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; background:#fff; border:1px solid var(--border); color:var(--ml-blue); }
+    .who{ border:1px solid var(--border); border-radius:12px; padding:14px; margin:8px 0; }
+    .who .role{ font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
+    .who .name{ font-size:22px; font-weight:700; color:var(--ml-blue); margin:2px 0; }
+    .who .meta{ font-size:12px; color:var(--muted); }
+    label{ display:block; font-size:13px; font-weight:600; color:var(--ml-blue); margin:12px 0 4px; }
+    select{ width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; background:#fff; }
+    .btn{ display:inline-block; border:none; background:var(--ml-blue); color:#fff; padding:11px 18px; border-radius:9px; font-size:15px; font-weight:600; cursor:pointer; margin-top:14px; text-decoration:none; }
+    .msg{ font-size:13px; margin-top:10px; min-height:16px; }
+    .msg.ok{ color:#0e7a3b; font-weight:600; } .msg.err{ color:#b91c1c; font-weight:600; }
+    .foot{ text-align:center; }
+    .foot a{ color:var(--ml-blue); font-size:13px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Set On-Call Roles</h1>
-
-    <div class="current" id="currentSection">
-      Loading current on-call data...
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>📞 On-Call</h1>
+      <a href="main.html" class="back-btn">← Menu</a>
+    </header>
+    <div class="who">
+      <div class="role">On-call engineer</div>
+      <div class="name" id="curEng">—</div>
+      <div class="meta" id="curEngMeta"></div>
     </div>
-
-    <label for="manager">Select On-Call Manager:</label>
-    <select id="manager">
-      <option value="">-- Choose Manager --</option>
-      <option value="Joe Line">Joe Line</option>
-      <option value="Jamie Line">Jamie Line</option>
-      <option value="Greg Line">Greg Line</option>
-      <option value="Megan Line">Megan Line</option>
-      <option value="Chloe Molloy">Chloe Molloy</option>
-      <option value="Joanna Marcinkowska">Joanna Marcinkowska</option>
-      <option value="Tanya Chinnery">Tanya Chinnery</option>
-      <option value="Chris Freeman">Chris Freeman</option>
-      <option value="On Call Phone">On Call Phone</option>
-    </select>
-
-    <label for="engineer">Select On-Call Engineer:</label>
-    <select id="engineer">
-      <option value="">-- Choose Engineer --</option>
-      <option value="David Molloy">David Molloy</option>
-      <option value="Ryan Diggens">Ryan Diggens</option>
-      <option value="Chris Cooke">Chris Cooke</option>
-      <option value="Colby Lunsford">Colby Lunsford</option>
-      <option value="Connor Brady">Connor Brady</option>
-      <option value="Tony Pelin">Tony Pelin</option>
-      <option value="John Thorn">John Thorn</option>
-      <option value="Bradley Graham">Bradley Graham</option>
-    </select>
-
-    <button onclick="saveOnCall()">Save On-Call Settings</button>
-    <button class="history-btn" type="button" onclick="window.location.href='oncall-history.html'">View History</button>
-
-    <div class="status" id="status"></div>
+    <div class="who">
+      <div class="role">On-call manager</div>
+      <div class="name" id="curMgr">—</div>
+      <div class="meta" id="curMgrMeta"></div>
+    </div>
   </div>
 
-  <script>
-    const apiURL = "https://api.github.com/repos/Mostlane/Test/contents/json_logs/oncall/oncall-current.json?ref=main";
-    const webhookURL = "https://hooks.zapier.com/hooks/catch/20261714/u51954c/";
+  <div class="card">
+    <h1 style="font-size:15px;">Change on-call</h1>
+    <label>On-call engineer</label>
+    <select id="selEng"><option value="">— no change —</option></select>
+    <label>On-call manager</label>
+    <select id="selMgr"><option value="">— no change —</option></select>
+    <button class="btn" id="saveBtn">Save on-call settings</button>
+    <div class="msg" id="msg"></div>
+  </div>
 
-    function safeAtob(b64) {
-      // remove newlines/spaces GitHub includes in base64
-      return atob((b64 || '').replace(/(\r\n|\n|\r|\s)/g, ''));
+  <div class="foot"><a href="oncall-history.html">View change history →</a></div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
+function fmt(iso){ try { return new Date(iso.replace(" ", "T") + "Z").toLocaleString("en-GB"); } catch { return iso || ""; } }
+
+async function load(){
+  try{
+    const [cur, usersRes] = await Promise.all([
+      authFetch(`${API}/oncall/current`, {cache:"no-store"}).then(r=>r.json()),
+      authFetch(`${API}/users`, {cache:"no-store"}).then(r=>r.json())
+    ]);
+    if(cur.ok){
+      $("curEng").textContent = cur.engineer?.name || "Not set";
+      $("curEngMeta").textContent = cur.engineer ? `Set ${fmt(cur.engineer.set_at)} by ${cur.engineer.set_by || "—"}` : "";
+      $("curMgr").textContent = cur.manager?.name || "Not set";
+      $("curMgrMeta").textContent = cur.manager ? `Set ${fmt(cur.manager.set_at)} by ${cur.manager.set_by || "—"}` : "";
     }
+    const users = (usersRes.Users || []).filter(u => (u.Status || "Active") !== "Disabled");
+    const opts = users.map(u => {
+      const name = `${u.FirstName || ""} ${u.LastName || ""}`.trim() || u.Username;
+      return `<option value="${name.replace(/"/g,"&quot;")}">${name}</option>`;
+    }).join("");
+    $("selEng").innerHTML = '<option value="">— no change —</option>' + opts;
+    $("selMgr").innerHTML = '<option value="">— no change —</option>' + opts;
+  }catch(e){ $("msg").className = "msg err"; $("msg").textContent = "Couldn't load — check connection."; }
+}
 
-    async function loadCurrentData() {
-      try {
-        const res = await fetch(apiURL + "&t=" + Date.now()); // cache-bust
-        const file = await res.json();
-        const data = JSON.parse(safeAtob(file.content));
+$("saveBtn").addEventListener("click", async () => {
+  const engineer = $("selEng").value, manager = $("selMgr").value;
+  if(!engineer && !manager){ $("msg").className="msg err"; $("msg").textContent = "Pick a new engineer and/or manager first."; return; }
+  $("msg").className = "msg"; $("msg").textContent = "Saving…";
+  try{
+    const r = await (await authFetch(`${API}/oncall/set`, { method:"POST",
+      headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ engineer, manager }) })).json();
+    if(!r.ok) throw new Error(r.error || "Save failed");
+    $("msg").className = "msg ok"; $("msg").textContent = "✔ Updated.";
+    $("selEng").value = ""; $("selMgr").value = "";
+    load();
+  }catch(e){ $("msg").className = "msg err"; $("msg").textContent = e.message; }
+});
 
-        const currentManager = data.current_on_call_manager?.name || "Not set";
-        const currentEngineer = data.current_on_call_engineer?.name || "Not set";
-        const lastUpdated = data.last_updated
-          ? new Date(data.last_updated).toLocaleString("en-GB")
-          : "Unknown";
-        const updatedBy = data.updated_by || "System";
-
-        document.getElementById("currentSection").innerHTML = `
-          🧑‍💼 <strong>Manager:</strong> ${currentManager}<br>
-          👷 <strong>Engineer:</strong> ${currentEngineer}<br>
-          🕓 <strong>Last Updated:</strong> ${lastUpdated} by ${updatedBy}
-        `;
-      } catch (error) {
-        document.getElementById("currentSection").innerText = "⚠️ Error loading on-call data.";
-      }
-    }
-
-    async function saveOnCall() {
-      const manager = document.getElementById("manager").value;
-      const engineer = document.getElementById("engineer").value;
-
-      if (!manager || !engineer) {
-        document.getElementById("status").innerText = "⚠️ Please select both a manager and an engineer.";
-        return;
-      }
-
-      document.getElementById("status").style.color = "#333";
-      document.getElementById("status").innerText = "Saving...";
-
-      const payload = new URLSearchParams({
-        manager,
-        engineer,
-        updated_by: sessionStorage.getItem("mostlaneUser") || "Admin Portal",
-        timestamp: new Date().toISOString()
-      });
-
-      try {
-        const res = await fetch(webhookURL, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: payload.toString()
-        });
-
-        if (res.ok) {
-          document.getElementById("status").style.color = "green";
-          document.getElementById("status").innerText =
-            `✅ ${manager} (Manager) & ${engineer} (Engineer) are now On-Call`;
-          loadCurrentData();
-        } else {
-          document.getElementById("status").style.color = "red";
-          document.getElementById("status").innerText = "❌ Failed to update settings.";
-        }
-      } catch (err) {
-        document.getElementById("status").style.color = "red";
-        document.getElementById("status").innerText = "❌ Error connecting to Zapier.";
-      }
-    }
-
-    loadCurrentData();
-  </script>
+load();
+</script>
 </body>
 </html>

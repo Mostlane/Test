@@ -96,6 +96,30 @@ CREATE TABLE IF NOT EXISTS sites (
   PRIMARY KEY (client, site_number)
 );
 
+-- On-call rota: append-only log; the latest row per role is the current holder.
+CREATE TABLE IF NOT EXISTS oncall_log (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  role   TEXT NOT NULL,             -- 'engineer' | 'manager'
+  name   TEXT NOT NULL,
+  set_by TEXT,
+  set_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Engineer daily logs (replaces the Zapier daily-log form).
+CREATE TABLE IF NOT EXISTS daily_logs (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  engineer       TEXT NOT NULL,
+  date           TEXT NOT NULL,
+  site           TEXT,
+  standard_hours REAL,
+  overtime_hours REAL,
+  travel_time    REAL,
+  mileage        REAL,
+  notes          TEXT,
+  submitted_by   TEXT,
+  created_at     TEXT DEFAULT (datetime('now'))
+);
+
 -- Story Mode: one weekly vehicle (van walkaround) check per engineer.
 CREATE TABLE IF NOT EXISTS vehicle_checks (
   username      TEXT NOT NULL,
