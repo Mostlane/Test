@@ -678,10 +678,10 @@
         <div class="ref" id="assignModalRef">—</div>
       </div>
       <div class="field">
-        <label for="assignEngineerSelect">Engineer</label>
-        <select id="assignEngineerSelect">
-          <option value="">Loading engineers…</option>
-        </select>
+        <label>Engineers (tick all that will attend)</label>
+        <div id="assignEngineerChecks" style="max-height:180px;overflow:auto;border:1px solid #d1d5db;border-radius:8px;padding:8px;">
+          Loading engineers…
+        </div>
       </div>
       <div class="field">
         <label for="assignDate">Scheduled Date</label>
@@ -839,8 +839,9 @@ function normaliseJob(raw){
   const status =
     j.status || j.callStatus || j.state || "With Contractor - R";
 
+  const assignedEngineers = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean) : [];
   const engineer =
-    j.engineer || j.assignedEngineer || j.assignedTo || "";
+    assignedEngineers.join(", ") || j.engineer || j.assignedEngineer || j.assignedTo || "";
 
   // keep scheduledAt from Worker
   const scheduledAt = j.scheduledAt || null;
@@ -855,6 +856,7 @@ function normaliseJob(raw){
     slaTarget,
     status,
     engineer,
+    assignedEngineers,
     scheduledAt,
     raw
   };
@@ -1233,7 +1235,7 @@ function openUpdateModal(jobId){
   }
 
   ensureUsersLoaded().then(() => {
-    populateUpdateEngineerSelect(job.engineer || "");
+    populateUpdateEngineerSelect((job.assignedEngineers && job.assignedEngineers[0]) || "");
   });
 
   const dt = isoToDateAndTime(job.scheduledAt);
@@ -1282,15 +1284,15 @@ async function saveUpdateModal(){
       changedBy: user
     };
 
-    if(engineer){
-      payload.assignedTo = engineer;
-    } else {
-      payload.assignedTo = "";
+    // Only send assignment/schedule when actually changed — sending them
+    // unconditionally wiped multi-engineer lists and cleared schedules.
+    const jobNow = allJobs.find(j => j.id === currentUpdateJobId);
+    const currentPrimary = (jobNow && jobNow.assignedEngineers && jobNow.assignedEngineers[0]) || "";
+    if(engineer !== currentPrimary){
+      payload.assignedTo = engineer;   // "" = deliberate unassign
     }
     if(scheduledAt){
       payload.scheduledAt = scheduledAt;
-    } else {
-      payload.scheduledAt = null;
     }
 
     const res = await fetch(
@@ -1354,28 +1356,26 @@ async function ensureUsersLoaded(){
   }
 }
 
-function populateEngineerSelect(){
-  const sel = $("assignEngineerSelect");
-  sel.innerHTML = "";
+function populateEngineerSelect(selected = []){
+  const box = $("assignEngineerChecks");
+  box.innerHTML = "";
 
   if(!cachedUsers.length){
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "No users found";
-    sel.appendChild(opt);
+    box.textContent = "No users found";
     return;
   }
 
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Select engineer…";
-  sel.appendChild(placeholder);
-
+  const sel = selected.map(s => (s || "").toLowerCase());
   cachedUsers.forEach(u => {
-    const opt = document.createElement("option");
-    opt.value = u.username;
-    opt.textContent = u.displayName;
-    sel.appendChild(opt);
+    const label = document.createElement("label");
+    label.style.cssText = "display:flex;align-items:center;gap:8px;padding:3px 2px;font-size:13px;cursor:pointer;";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = u.username;
+    cb.checked = sel.includes((u.username || "").toLowerCase());
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(" " + u.displayName));
+    box.appendChild(label);
   });
 }
 
@@ -1433,18 +1433,10 @@ async function openAssignModal(jobId){
   $("assignModalStatusText").textContent = "";
 
   await ensureUsersLoaded();
-  populateEngineerSelect();
-
-  const sel = $("assignEngineerSelect");
-  if(job.engineer){
-    Array.from(sel.options).forEach(opt => {
-      if(opt.value === job.engineer){
-        sel.value = opt.value;
-      }
-    });
-  } else {
-    sel.value = "";
-  }
+  const current = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length)
+    ? job.assignedEngineers
+    : (job.engineer ? [job.engineer] : []);
+  populateEngineerSelect(current);
 
   const {dateStr, timeStr} = defaultDateAndTime();
   $("assignDate").value = dateStr;
@@ -1465,14 +1457,14 @@ function closeAssignModal(){
 async function saveAssignModal(){
   if(!currentAssignJobId) return;
 
-  const engineer = $("assignEngineerSelect").value;
+  const engineers = [...document.querySelectorAll("#assignEngineerChecks input:checked")].map(c => c.value);
   const date = $("assignDate").value;
   const time = $("assignTime").value;
   const note = $("assignNote").value.trim();
   const user = getCurrentUser();
 
-  if(!engineer){
-    $("assignModalStatusText").textContent = "Please select an engineer.";
+  if(!engineers.length){
+    $("assignModalStatusText").textContent = "Tick at least one engineer.";
     return;
   }
   if(!date || !time){
@@ -1486,7 +1478,8 @@ async function saveAssignModal(){
 
   try{
     const payload = {
-      assignedTo: engineer,
+      assignedEngineers: engineers,
+      assignedTo: engineers[0],
       scheduledAt,
       note,
       changedBy: user
