@@ -529,8 +529,10 @@ var PERMISSION_KEYS = [
   "TimesheetAdmin",
   "LabourPlanning",
   "SLA",
-  "StoryMode"
+  "StoryMode",
   // opt-in: guided day protocol for this engineer
+  "HSPlan"
+  // access to the H&S planning tool
 ];
 function shapeUser2(u, perms) {
   let profile = {};
