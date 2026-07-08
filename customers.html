@@ -200,10 +200,12 @@ $("importBtn").addEventListener("click", async () => {
 
 /* Bulk site images: loops batches until every site has a Street View photo
    stored in our own R2 bucket (one-time Google fetch per site). */
-const DEFAULT_MAPS_KEY = "AIzaSyAGqOm3qfyYqOx7WXhMzyNZ7kcKNlcWgQM"; // portal maps key
 $("svBtn").addEventListener("click", async () => {
-  const key = prompt("Google Maps API key (needs 'Street View Static API' enabled):", DEFAULT_MAPS_KEY);
+  // Prefill with the key that last worked on this browser.
+  const key = prompt("Google Maps API key (needs Street View Static / Maps Static enabled):",
+                     localStorage.getItem("mostlaneMapsImageKey") || "");
   if(!key) return;
+  localStorage.setItem("mostlaneMapsImageKey", key.trim());
   const overwrite = confirm("Overwrite sites that ALREADY have an image?\n\nOK = re-do every site · Cancel = only fill sites with no image.");
   const since = new Date().toISOString();
   $("svBtn").disabled = true;
