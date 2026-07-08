@@ -114,6 +114,20 @@ async function fillSiteBlock(j){
     (dest ? `<a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}">🗺️ Directions</a>` : "");
 }
 
+// "Raise a PO" opens this engineer's personal link on the PO system.
+let poUrlCache;
+async function fillPoLink(){
+  const a = $("poLink"); if(!a) return;
+  if(poUrlCache === undefined){
+    try{
+      const r = await authFetch(`${API}/po-config`, {cache:"no-store"});
+      const c = await r.json().catch(() => ({}));
+      poUrlCache = (r.ok && c.ok && c.url) ? c.url : "";
+    }catch(e){ poUrlCache = ""; }
+  }
+  if(poUrlCache){ a.href = poUrlCache; a.style.display = "block"; }
+}
+
 function getEngineer(){
   return sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || sessionStorage.getItem("username") || "";
 }
@@ -374,7 +388,7 @@ function renderWorking(j){
       <h2>🔧 On site — ${esc(j.helpdeskRef || j.id)}</h2>
       <p class="sub">${esc(j.description || "")} · ${esc(j.siteCode || "")} · started ${lastStatusTime(j,"In Progress")}</p>
       <div id="siteBlock" class="sub" style="margin:-6px 0 12px;"></div>
-      <a class="bigbtn ghost" style="text-align:center;text-decoration:none;" href="po.html?jobId=${encodeURIComponent(j.id)}&ref=${encodeURIComponent(j.helpdeskRef||"")}&site=${encodeURIComponent(j.siteCode||"")}">🧾 Raise a PO for parts</a>
+      <a class="bigbtn ghost" id="poLink" style="text-align:center;text-decoration:none;display:none;" href="#" target="_blank" rel="noopener">🧾 Raise a PO for parts</a>
       <div class="rowbtns">
         <button class="bigbtn green" id="oComplete">✅ Complete</button>
         <button class="bigbtn amber" id="oQuote">💰 Needs quote</button>
@@ -384,6 +398,7 @@ function renderWorking(j){
       <div id="outcomeForm"></div>
     </div>`;
   fillSiteBlock(j);
+  fillPoLink();
   $("oComplete").addEventListener("click", () => showCompleteForm(j));
   $("oQuote").addEventListener("click", () => showQuoteForm(j));
   $("oOrder").addEventListener("click", () => showOrderForm(j));

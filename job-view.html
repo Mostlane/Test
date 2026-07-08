@@ -746,9 +746,7 @@ function renderJob(){
       (job.signature.signedAt ? ` on ${fmtDateTimeLong(new Date(job.signature.signedAt))}` : "");
   }
 
-  const poUrl =
-    `po.html?jobId=${encodeURIComponent(job.id)}&ref=${encodeURIComponent(ref)}&site=${encodeURIComponent(site)}`;
-  $("poBtn").href = poUrl;
+  fillPoButton();
 
   startCountdownLoop();
 }
@@ -813,6 +811,20 @@ async function loadJob(){
     console.error("load error", err);
     $("statusBar").textContent = "❌ Error loading job.";
   }
+}
+
+/* "Raise PO" opens this user's personal link on the new PO system. */
+async function fillPoButton(){
+  const btn = $("poBtn");
+  if(!btn || btn.dataset.done) return;
+  btn.dataset.done = "1";
+  try{
+    const t = localStorage.getItem("mostlaneToken");
+    const r = await fetch(window.MOSTLANE_API + "/po-config", { headers: t ? { "Authorization": "Bearer " + t } : {} });
+    const c = await r.json().catch(() => ({}));
+    if(r.ok && c.ok && c.url){ btn.href = c.url; return; }
+  }catch(e){}
+  btn.style.display = "none";   // no PO link on this account — hide the button
 }
 
 /* ---- Site details (from the job, else looked up in the sites DB) ---- */
