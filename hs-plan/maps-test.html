@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mostlane — Maps API key test</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#1c2530;line-height:1.5}
+  h1{font-size:20px;color:#1b5a9b}
+  .row{border:1px solid #ccd6e0;border-radius:8px;padding:12px 14px;margin:10px 0}
+  .row h2{font-size:15px;margin:0 0 6px}
+  .ok{color:#1a7f37;font-weight:bold}
+  .bad{color:#c0392b;font-weight:bold}
+  .muted{color:#5a6675;font-size:13px}
+  code{background:#f1f4f8;padding:1px 5px;border-radius:4px}
+  input{width:100%;padding:8px;border:1px solid #ccd6e0;border-radius:5px;font:inherit;margin:4px 0 10px}
+  button{font:inherit;background:#1b5a9b;color:#fff;border:0;border-radius:6px;padding:9px 14px;cursor:pointer}
+  pre{background:#f1f4f8;padding:8px;border-radius:6px;overflow:auto;font-size:12px;max-height:180px}
+</style>
+</head>
+<body>
+  <h1>Mostlane — Google Maps API key test</h1>
+  <p class="muted">This page runs the same calls the H&amp;S plan tool uses, through the Maps JavaScript API,
+     so it tests the key under the real conditions (referrer = this page's address). Open it on the same
+     domain you host the tool on (e.g. <code>https://mostlane.github.io/health-and-safety-/maps-test.html</code>).</p>
+
+  <label>Origin (site)<input id="origin" value="Lake Road, Verwood, BH31 6EH"></label>
+  <label>Destination (hospital)<input id="dest" value="Royal Bournemouth Hospital, Castle Lane, Bournemouth BH7 7DW"></label>
+  <button id="run">Run tests</button>
+
+  <div class="row"><h2>1. Maps JavaScript API <span id="r-js">…</span></h2><div class="muted" id="d-js">Loading the API.</div></div>
+  <div class="row"><h2>2. Geocoding API <span id="r-geo">…</span></h2><div class="muted" id="d-geo"></div></div>
+  <div class="row"><h2>3. Routes API (road route + drive time) <span id="r-dir">…</span></h2><div class="muted" id="d-dir"></div></div>
+  <div class="row"><h2>4. Distance Matrix API (drive distance + time) <span id="r-dm">…</span></h2><div class="muted" id="d-dm"></div></div>
+  <div class="row"><h2>5. Places API (A&amp;E search) <span id="r-places">…</span></h2><div class="muted" id="d-places"></div></div>
+  <div class="row"><h2>6. Maps Static API (inserted map images) <span id="r-static">…</span></h2><div class="muted" id="d-static"></div></div>
+
+<script>
+/* Same key the tool uses. */
+const KEY = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM";
+
+function mark(id, ok, txt){
+  const s=document.getElementById("r-"+id), d=document.getElementById("d-"+id);
+  s.className = ok ? "ok" : "bad";
+  s.textContent = ok ? "✓ OK" : "✗ FAILED";
+  if(txt!==undefined) d.innerHTML = txt;
+}
+
+window.__ready = function(){
+  mark("js", true, "Loaded successfully.");
+  document.getElementById("run").onclick = runTests;
+  runTests();
+};
+
+function geocode(addr){
+  return new Promise(res=>{
+    new google.maps.Geocoder().geocode({address:addr, region:"GB"}, (r,st)=>{
+      res({st, loc: (st==="OK"&&r[0]) ? r[0].geometry.location : null});
+    });
+  });
+}
+
+async function runTests(){
+  const origin = document.getElementById("origin").value;
+  const dest   = document.getElementById("dest").value;
+  ["geo","dir","dm","places","static"].forEach(id=>{document.getElementById("r-"+id).textContent="…";document.getElementById("r-"+id).className="";});
+
+  // 2. Geocoding
+  const g1 = await geocode(origin);
+  const g2 = await geocode(dest);
+  const geoOk = g1.st==="OK" && g2.st==="OK";
+  mark("geo", geoOk, geoOk
+    ? "Both addresses geocoded."
+    : "Origin status: <code>"+g1.st+"</code>, destination status: <code>"+g2.st+"</code>");
+  if(!geoOk){ mark("dir",false,"Skipped — geocoding failed."); mark("dm",false,"Skipped — geocoding failed."); return; }
+
+  // 3. Routes API (modern replacement for the legacy Directions API)
+  fetch("https://routes.googleapis.com/directions/v2:computeRoutes",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","X-Goog-Api-Key":KEY,
+      "X-Goog-FieldMask":"routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"},
+    body:JSON.stringify({
+      origin:{location:{latLng:{latitude:g1.loc.lat(),longitude:g1.loc.lng()}}},
+      destination:{location:{latLng:{latitude:g2.loc.lat(),longitude:g2.loc.lng()}}},
+      travelMode:"DRIVE", polylineEncoding:"ENCODED_POLYLINE"})
+  }).then(r=>r.json()).then(j=>{
+    const rt=j&&j.routes&&j.routes[0];
+    if(rt&&rt.distanceMeters!=null){
+      const miles=(rt.distanceMeters/1609.344).toFixed(1), mins=Math.round(parseInt(rt.duration,10)/60);
+      mark("dir", true, "Drive: <b>"+miles+" miles</b> · <b>"+mins+" mins</b>.");
+    }else{
+      mark("dir", false, "Error: <code>"+((j&&j.error&&j.error.message)||"no route")+"</code>. Enable the <b>Routes API</b> on the project / key.");
+    }
+  }).catch(e=>mark("dir", false, "Request failed: "+e.message+" (possible CORS / key restriction)."));
+
+  // 4. Distance Matrix
+  new google.maps.DistanceMatrixService().getDistanceMatrix(
+    {origins:[g1.loc], destinations:[g2.loc], travelMode:google.maps.TravelMode.DRIVING},
+    (dm, st)=>{
+      const el = dm && dm.rows && dm.rows[0] && dm.rows[0].elements[0];
+      if(st==="OK" && el && el.status==="OK"){
+        mark("dm", true, "Drive: <b>"+el.distance.text+"</b> · <b>"+el.duration.text+"</b>.");
+      }else{
+        mark("dm", false, "Service status: <code>"+st+"</code>"+(el?(", element status: <code>"+el.status+"</code>"):"")+". If REQUEST_DENIED, enable the <b>Distance Matrix API</b>.");
+      }
+    });
+
+  // 5. Places API (the app uses this for the A&E search + autocomplete)
+  try{
+    const svc=new google.maps.places.PlacesService(document.createElement("div"));
+    svc.textSearch({query:"A&E accident and emergency hospital", location:g1.loc, radius:30000},(res,st)=>{
+      const PS=google.maps.places.PlacesServiceStatus;
+      if(st===PS.OK||st===PS.ZERO_RESULTS) mark("places", true, (res&&res.length)?(res.length+" results found."):"Reachable (0 results).");
+      else mark("places", false, "Status: <code>"+st+"</code>. Enable the <b>Places API</b> on the project / key.");
+    });
+  }catch(e){ mark("places", false, "Places library not available: "+e.message); }
+
+  // 6. Maps Static API (the app embeds inserted compound / route images via this)
+  const surl="https://maps.googleapis.com/maps/api/staticmap?center="+g1.loc.lat()+","+g1.loc.lng()+"&zoom=14&size=320x140&key="+KEY;
+  const img=new Image();
+  img.onload=()=>mark("static", true, 'Image loaded ('+img.naturalWidth+'×'+img.naturalHeight+'):<br><img src="'+surl+'" style="max-width:100%;border:1px solid #ccd6e0;border-radius:4px;margin-top:6px">');
+  img.onerror=()=>mark("static", false, "Image failed to load. Enable the <b>Maps Static API</b> and check the key's referrer restrictions.");
+  img.src=surl;
+}
+
+window.gm_authFailure = function(){
+  mark("js", false, "Authentication failed — the key is invalid for this site. Check the key value and that this page's address is in the key's HTTP-referrer allowlist.");
+};
+</script>
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM&libraries=places,geometry&callback=__ready"
+  onerror="document.getElementById('d-js').innerHTML='Failed to load the Maps script.';document.getElementById('r-js').textContent='✗ FAILED';document.getElementById('r-js').className='bad';"></script>
+</body>
+</html>
