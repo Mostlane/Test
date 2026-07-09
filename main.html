@@ -134,6 +134,7 @@ a.button {
     <a class="button" href="customers.html" id="Customers"><span class="emoji">🏢</span> Customers</a>
     <a class="button" href="#" id="HSPlan"><span class="emoji">🦺</span> H&amp;S Plans</a>
     <a class="button" href="#" id="PurchaseOrders2"><span class="emoji">🧾</span> PO System</a>
+    <a class="button" href="sitelog.html" id="SiteLog"><span class="emoji">📍</span> SiteLog</a>
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <a class="button" href="timesheet-admin.html" id="TimesheetAdmin">
   <span class="emoji">🧾</span> Timesheet Admin
@@ -223,7 +224,8 @@ const MAP = {
   HSPlan: ["HSPlan", "hsPlan", "hsPlanBtn"],
   // Map KEY = button element id; the list = permission names that unlock it.
   Customers: ["Sites", "AddSite"],
-  PurchaseOrders2: ["PurchaseOrders"]
+  PurchaseOrders2: ["PurchaseOrders"],
+  SiteLog: ["SiteLog"]
 };
 
 // H&S planner launch. The app token lives as a secret on the API worker;
@@ -296,7 +298,7 @@ const MAP = {
       // Story Mode: the guided day is home. Limit the menu to day-relevant
       // areas (whatever their permissions allow within this set) and pin a
       // "Back to My Day" button at the top so they can always jump straight back.
-      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "Holiday", "MyDocuments", "Assets", "Forms", "Compliance"]);
+      const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "SiteLog", "Holiday", "MyDocuments", "Assets", "Forms", "Compliance"]);
       if (String(user.StoryMode || "").toLowerCase() === "yes") {
         document.querySelectorAll("#menuGrid .button").forEach(b => {
           if (!STORY_ALLOWED.has(b.id)) b.classList.remove("visible");
