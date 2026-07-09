@@ -374,6 +374,41 @@ async function requireAdmin(env, request) {
 }
 async function handle2(request, env, ctx, url) {
   const path = url.pathname;
+  if (path === "/onboard" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const firstName = (b.firstName || "").trim();
+    const lastName = (b.lastName || "").trim();
+    const email = (b.email || "").trim();
+    if (!firstName || !lastName || !email)
+      return error("First name, last name and email are required.", 400, env, request);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return error("Please enter a valid email address.", 400, env, request);
+    const existingEmail = await env.DB.prepare(
+      "SELECT username FROM users WHERE email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(email).first();
+    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
+    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
+    let username = base;
+    for (let n = 2; await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(username).first(); n++) {
+      username = base + n;
+    }
+    const profile = {
+      phone: b.mobile || "",
+      jobTitle: b.jobRole || "",
+      postcode: b.postcode || "",
+      onboard: {
+        deviceId: b.deviceId || "",
+        lat: b.latitude || "",
+        lng: b.longitude || "",
+        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    await env.DB.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile)
+      VALUES (?,?,?,?, 'Pending', ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile)).run();
+    return json({ ok: true, pending: true, username }, {}, env, request);
+  }
   if (path === "/po-config" && request.method === "GET") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -2244,6 +2279,8 @@ var ROUTES = [
   ["*", "/admin/login-history", loginHistory],
   ["*", "/user", handle2],
   // /user and /users
+  ["*", "/onboard", handle2],
+  // public self-registration (Pending)
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
@@ -2298,6 +2335,8 @@ var PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
+  // Public self-registration form (login page → "Sign up").
+  ["POST", "/onboard"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"]

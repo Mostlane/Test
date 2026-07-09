@@ -34,6 +34,7 @@ const ROUTES = [
   ["*", "/auth",       auth.handle],
   ["*", "/admin/login-history", auth.loginHistory],
   ["*", "/user",       users.handle],   // /user and /users
+  ["*", "/onboard",    users.handle],   // public self-registration (Pending)
   ["*", "/hs-plan-config", users.handle],
   ["*", "/po-config",  users.handle],
   ["*", "/device",     devices.handle],
@@ -103,6 +104,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
+  // Public self-registration form (login page → "Sign up").
+  ["POST", "/onboard"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],
