@@ -55,6 +55,7 @@ const ROUTES = [
   ["*", "/oncall",     portal.handle],
   ["*", "/daily-logs", portal.handle],
   ["*", "/sitelog",    sitelog.handle],
+  ["*", "/sitelog-launch", sitelog.handle],
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

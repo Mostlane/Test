@@ -2147,7 +2147,28 @@ function num(v) {
 
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
+var SCAN_URL = "https://site-log.co.uk/scan.html";
 async function handle9(request, env, ctx, url) {
+  const path = url.pathname;
+  if (path === "/sitelog-launch" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms2 = await permissionsFor(env, sess2.user.username);
+    if (perms2.SiteLog !== "Yes" && perms2.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    if (!env.PORTAL_BRIDGE_SECRET)
+      return json({ ok: true, url: SCAN_URL, linked: false }, {}, env, request);
+    const payload = {
+      u: sess2.user.username,
+      f: sess2.user.first_name || "",
+      l: sess2.user.last_name || "",
+      c: "Mostlane",
+      exp: Date.now() + 5 * 60 * 1e3
+      // 5 minutes to tap through
+    };
+    const token = await signBridgeToken(env.PORTAL_BRIDGE_SECRET, payload);
+    return json({ ok: true, url: SCAN_URL + "#pt=" + token, linked: true }, {}, env, request);
+  }
   const sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.user.username);
@@ -2155,7 +2176,7 @@ async function handle9(request, env, ctx, url) {
     return error("Forbidden \u2014 SiteLog admin data needs Full Access", 403, env, request);
   if (!env.SITELOG_ADMIN_SECRET)
     return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
-  const sub = url.pathname.replace(/^\/sitelog(?=\/|$)/, "") || "/";
+  const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
   const target = SITELOG_API + sub + url.search;
   const init = {
     method: request.method,
@@ -2177,6 +2198,22 @@ async function handle9(request, env, ctx, url) {
   const cd = res.headers.get("Content-Disposition");
   if (cd) headers.set("Content-Disposition", cd);
   return new Response(res.body, { status: res.status, headers });
+}
+function b64u(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function signBridgeToken(secret, payload) {
+  const enc2 = new TextEncoder();
+  const body = "v1." + b64u(enc2.encode(JSON.stringify(payload)));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc2.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc2.encode(body));
+  return body + "." + b64u(sig);
 }
 
 // src/index.js
@@ -2208,7 +2245,8 @@ var ROUTES = [
   ["*", "/settings", handle8],
   ["*", "/oncall", handle8],
   ["*", "/daily-logs", handle8],
-  ["*", "/sitelog", handle9]
+  ["*", "/sitelog", handle9],
+  ["*", "/sitelog-launch", handle9]
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
