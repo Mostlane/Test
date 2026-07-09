@@ -1814,6 +1814,7 @@ async function handle7(request, env, ctx, url) {
     }
     await saveSite(env, site);
     await ensureCustomer(env, client);
+    await pushSiteToSiteLog(env, site);
     return json({ success: true, site }, {}, env, request);
   }
   if (path === "/next-project-job-number" && method === "GET") {
@@ -2014,6 +2015,27 @@ async function ensureCustomer(env, id) {
   await env.DB.prepare(
     "INSERT INTO customers (id, name) VALUES (?,?) ON CONFLICT(id) DO NOTHING"
   ).bind(id, prettify(id)).run();
+}
+async function pushSiteToSiteLog(env, site) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET) return;
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const name = String(site.siteName || "").trim();
+    if (!name) return;
+    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{
+        siteName: name,
+        lat,
+        lng,
+        radius: 500,
+        category: prettify(site.client || "") || "Projects"
+      }] })
+    });
+  } catch (e) {
+  }
 }
 async function nextProjectNumber(env) {
   const { results } = await env.DB.prepare(

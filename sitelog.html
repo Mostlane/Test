@@ -41,6 +41,8 @@
     <h2>🟢 On site right now <span class="muted" id="onSiteCount"></span></h2>
     <div id="onSiteList" class="muted">Loading…</div>
     <div class="msg err" id="adminMsg"></div>
+    <button class="bigbtn" id="pushBtn" style="border:none;cursor:pointer;background:#374151;">⇪ Push portal sites to SiteLog geofences</button>
+    <div class="msg" id="pushMsg"></div>
     <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
   </div>
 </div>
@@ -89,6 +91,39 @@ if (perms().FullAccess === "Yes") {
   $("adminCard").style.display = "block";
   loadOnSite();
 }
+
+// Bulk-sync: send every portal site with coordinates to SiteLog as a
+// geofenced site. SiteLog skips names it already has, so re-running is safe
+// and never overwrites SiteLog-side edits.
+const pb = $("pushBtn");
+if (pb) pb.addEventListener("click", async () => {
+  if(!confirm("Send every portal site (with map coordinates) to SiteLog as a geofenced site?\n\nSites SiteLog already has are left untouched — safe to re-run any time.")) return;
+  pb.disabled = true;
+  $("pushMsg").className = "msg"; $("pushMsg").textContent = "Reading portal sites…";
+  try{
+    const sites = await (await authFetch(`${API}/get-sites?category=all`, {cache:"no-store"})).json();
+    const all = Array.isArray(sites) ? sites : [];
+    const withCoords = all.filter(s => s.active !== false &&
+      Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lon ?? s.lng)) && String(s.siteName||"").trim());
+    const noCoords = all.filter(s => s.active !== false).length - withCoords.length;
+    if(!withCoords.length) throw new Error("No portal sites have coordinates yet.");
+    const payload = withCoords.map(s => ({
+      siteName: String(s.siteName).trim(),
+      lat: Number(s.lat), lng: Number(s.lon ?? s.lng),
+      radius: 500,
+      category: String(s.client || "Projects").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+    }));
+    $("pushMsg").textContent = `Pushing ${payload.length} sites…`;
+    const r = await (await authFetch(`${API}/sitelog/bulk-add-sites`, { method:"POST",
+      headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ sites: payload }) })).json();
+    if(!r.ok) throw new Error(r.error || "SiteLog rejected the push");
+    $("pushMsg").className = "msg"; $("pushMsg").style.color = "#0e7a3b";
+    $("pushMsg").textContent = `✔ ${r.added} new geofence(s) added · ${r.skipped} already existed` +
+      (noCoords ? ` · ${noCoords} site(s) skipped (no coordinates)` : "");
+  }catch(e){
+    $("pushMsg").className = "msg err"; $("pushMsg").textContent = e.message;
+  }finally{ pb.disabled = false; }
+});
 
 // Identity hand-off: swap the plain scan link for one carrying a signed
 // portal-identity token, so the phone auto-registers as this user.

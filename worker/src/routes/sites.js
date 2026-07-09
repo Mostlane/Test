@@ -56,6 +56,7 @@ export async function handle(request, env, ctx, url) {
 
     await saveSite(env, site);
     await ensureCustomer(env, client);
+    await pushSiteToSiteLog(env, site);
     return json({ success: true, site }, {}, env, request);
   }
 
@@ -265,6 +266,27 @@ async function ensureCustomer(env, id) {
   await env.DB.prepare(
     "INSERT INTO customers (id, name) VALUES (?,?) ON CONFLICT(id) DO NOTHING"
   ).bind(id, prettify(id)).run();
+}
+
+// Keep SiteLog's geofences in step: any portal site with coordinates is pushed
+// to SiteLog on save. bulk-add-sites skips names that already exist, so this
+// never duplicates or overwrites SiteLog-side edits. Fire-and-forget.
+async function pushSiteToSiteLog(env, site) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET) return;
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const name = String(site.siteName || "").trim();
+    if (!name) return;
+    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{
+        siteName: name, lat, lng, radius: 500,
+        category: prettify(site.client || "") || "Projects"
+      }] })
+    });
+  } catch (e) { /* sync is best-effort; the portal save must never fail on it */ }
 }
 
 async function nextProjectNumber(env) {
