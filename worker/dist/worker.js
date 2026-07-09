@@ -556,8 +556,10 @@ var PERMISSION_KEYS = [
   "SLA",
   "StoryMode",
   // opt-in: guided day protocol for this engineer
-  "HSPlan"
+  "HSPlan",
   // access to the H&S planning tool
+  "SiteLog"
+  // access to SiteLog (site check-in/attendance)
 ];
 function shapeUser2(u, perms) {
   let profile = {};
@@ -2143,6 +2145,40 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// src/routes/sitelog.js
+var SITELOG_API = "https://api.site-log.co.uk";
+async function handle9(request, env, ctx, url) {
+  const sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes")
+    return error("Forbidden \u2014 SiteLog admin data needs Full Access", 403, env, request);
+  if (!env.SITELOG_ADMIN_SECRET)
+    return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
+  const sub = url.pathname.replace(/^\/sitelog(?=\/|$)/, "") || "/";
+  const target = SITELOG_API + sub + url.search;
+  const init = {
+    method: request.method,
+    headers: { "x-admin-secret": env.SITELOG_ADMIN_SECRET }
+  };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.headers["Content-Type"] = request.headers.get("Content-Type") || "application/json";
+    init.body = await request.arrayBuffer();
+  }
+  let res;
+  try {
+    res = await fetch(target, init);
+  } catch (e) {
+    return error("SiteLog API unreachable: " + e.message, 502, env, request);
+  }
+  const headers = new Headers(corsHeaders(env, request));
+  const ct = res.headers.get("Content-Type");
+  if (ct) headers.set("Content-Type", ct);
+  const cd = res.headers.get("Content-Disposition");
+  if (cd) headers.set("Content-Disposition", cd);
+  return new Response(res.body, { status: res.status, headers });
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -2171,7 +2207,8 @@ var ROUTES = [
   // /sites/street-images (bulk imagery)
   ["*", "/settings", handle8],
   ["*", "/oncall", handle8],
-  ["*", "/daily-logs", handle8]
+  ["*", "/daily-logs", handle8],
+  ["*", "/sitelog", handle9]
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

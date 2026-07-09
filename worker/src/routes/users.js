@@ -224,6 +224,7 @@ const PERMISSION_KEYS = [
   "Projects", "ProjectsAdmin", "TimesheetAdmin", "LabourPlanning", "SLA",
   "StoryMode",   // opt-in: guided day protocol for this engineer
   "HSPlan",      // access to the H&S planning tool
+  "SiteLog",     // access to SiteLog (site check-in/attendance)
 ];
 
 function shapeUser(u, perms) {

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SiteLog — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --green:#0e7a3b; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:640px; margin:20px auto 40px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    h2{ margin:0 0 10px; font-size:15px; color:var(--ml-blue); }
+    .back-btn{ text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; background:#fff; border:1px solid var(--border); color:var(--ml-blue); }
+    .bigbtn{ display:block; text-align:center; text-decoration:none; border:none; border-radius:12px; padding:16px; font-size:17px; font-weight:700; color:#fff; background:linear-gradient(90deg,#003b82,#1e66ff); margin-top:10px; }
+    .bigbtn.green{ background:var(--green); }
+    .muted{ color:var(--muted); font-size:13px; }
+    .row{ display:flex; gap:12px; padding:9px 0; border-bottom:1px solid #eef1f5; align-items:baseline; }
+    .row:last-child{ border-bottom:none; }
+    .row b{ color:var(--ml-blue); }
+    .row .meta{ font-size:12px; color:var(--muted); margin-left:auto; white-space:nowrap; }
+    .msg{ font-size:13px; margin-top:8px; min-height:16px; }
+    .msg.err{ color:#b91c1c; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>📍 SiteLog</h1>
+      <a href="main.html" class="back-btn">← Menu</a>
+    </header>
+    <p class="muted" style="margin:0 0 6px;">GPS site check-in and attendance. Scanning opens the SiteLog app — your phone stays registered to you.</p>
+    <a class="bigbtn green" href="https://site-log.co.uk/scan.html" target="_blank" rel="noopener">📲 Scan in / out of site</a>
+  </div>
+
+  <div class="card" id="adminCard" style="display:none;">
+    <h2>🟢 On site right now <span class="muted" id="onSiteCount"></span></h2>
+    <div id="onSiteList" class="muted">Loading…</div>
+    <div class="msg err" id="adminMsg"></div>
+    <a class="bigbtn" href="https://site-log.co.uk/admin.html" target="_blank" rel="noopener">📊 Open the full SiteLog dashboard</a>
+  </div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
+function perms(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch { return {}; }
+}
+function fmtTime(v){ try { const d = new Date(v); return isNaN(d) ? String(v||"") : d.toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+
+async function loadOnSite(){
+  try{
+    const res = await authFetch(`${API}/sitelog/on-site`, {cache:"no-store"});
+    if(res.status === 403 || res.status === 401) { $("adminCard").style.display = "none"; return; }
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error || "SiteLog error");
+    // Defensive rendering — accept an array or {rows|visits|onSite:[...]}
+    const list = Array.isArray(data) ? data : (data.rows || data.visits || data.onSite || data.people || []);
+    $("onSiteCount").textContent = `(${list.length})`;
+    if(!list.length){ $("onSiteList").textContent = "Nobody is signed in to a site right now."; return; }
+    $("onSiteList").innerHTML = list.map(v => {
+      const name = v.name || [v.first_name, v.last_name].filter(Boolean).join(" ") || v.person_name || "Unknown";
+      const site = v.site_name || v.site || v.site_code || v.provided_site_name || "";
+      const co   = v.company || "";
+      const inAt = v.check_in_at || v.checkin_at || v.in_at || "";
+      return `<div class="row"><b>${esc(name)}</b><span>${esc(site)}${co ? " · " + esc(co) : ""}</span><span class="meta">${inAt ? "in " + fmtTime(inAt) : ""}</span></div>`;
+    }).join("");
+  }catch(e){
+    $("onSiteList").textContent = "";
+    $("adminMsg").textContent = e.message === "SITELOG_ADMIN_SECRET is not configured on this worker"
+      ? "SiteLog secret isn't set on the portal worker yet."
+      : "Couldn't reach SiteLog: " + e.message;
+  }
+}
+
+if (perms().FullAccess === "Yes") {
+  $("adminCard").style.display = "block";
+  loadOnSite();
+}
+</script>
+</body>
+</html>
