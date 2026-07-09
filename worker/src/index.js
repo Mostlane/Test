@@ -24,6 +24,9 @@ import * as devices from "./routes/devices.js";    // DONE  (device lock)
 import * as holidays from "./routes/holidays.js";  // DONE  (replaces mostlane-holidays)
 import * as assets from "./routes/assets.js";      // DONE  (replaces mostlane-assets)
 import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-sla)
+import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-sites + adds customers)
+import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
+import * as sitelog from "./routes/sitelog.js";    // DONE  (server-side proxy to api.site-log.co.uk)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -31,6 +34,9 @@ const ROUTES = [
   ["*", "/auth",       auth.handle],
   ["*", "/admin/login-history", auth.loginHistory],
   ["*", "/user",       users.handle],   // /user and /users
+  ["*", "/onboard",    users.handle],   // public self-registration (Pending)
+  ["*", "/hs-plan-config", users.handle],
+  ["*", "/po-config",  users.handle],
   ["*", "/device",     devices.handle],
   ["*", "/holiday",    holidays.handle],
   ["*", "/asset",      assets.handle],   // /assets, /asset/*, /asset-image, /asset-thumb
@@ -38,8 +44,21 @@ const ROUTES = [
   ["*", "/upload-asset-image", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
+  ["*", "/get-sites",  sites.handle],
+  ["*", "/add-site",   sites.handle],
+  ["*", "/update-site", sites.handle],
+  ["*", "/next-project-job-number", sites.handle],
+  ["*", "/upload-image", sites.handle],
+  ["*", "/customers",  sites.handle],
+  ["*", "/import-sites", sites.handle],
+  ["*", "/sites",      sites.handle],   // /sites/street-images (bulk imagery)
+  ["*", "/settings",   portal.handle],
+  ["*", "/oncall",     portal.handle],
+  ["*", "/daily-logs", portal.handle],
+  ["*", "/sitelog",    sitelog.handle],
+  ["*", "/sitelog-launch", sitelog.handle],
   // Excluded for now (separate / later systems): Purchase Orders,
-  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles, Sites,
+  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
 ];
 
@@ -85,6 +104,8 @@ const PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
+  // Public self-registration form (login page → "Sign up").
+  ["POST", "/onboard"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],

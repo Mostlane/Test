@@ -764,13 +764,13 @@ function init(){
   buildVcItems();
   $("vcSubmit").addEventListener("click", submitVehicleCheck);
 
-  // Story Mode: gate the day behind clock-on (hide jobs until they start their day).
+  // Story Mode: the guided day lives on my-day.html — this page is job history.
   if(isStoryMode()){
     $("dayBar").style.display = "block";
-    $("dayBar").innerHTML = `<div style="padding:12px;text-align:center;color:#64748b;">Loading your day…</div>`;
-    $("jobsTimeline").style.display = "none";
-    $("statusBar").style.display = "none";
-    (async () => { await loadShift(); renderDayBar(); applyDayGate(); })();
+    $("dayBar").innerHTML =
+      `<a href="my-day.html" style="display:block;text-decoration:none;padding:14px;border-radius:12px;background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-align:center;font-weight:700;">
+         ⚡ Open My Day — start &amp; work your day here →
+       </a>`;
   }
 
   const prevBtn = $("prevWeekBtn");

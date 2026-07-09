@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Customers — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:900px; margin:20px auto 40px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:16px 18px 20px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; flex-wrap:wrap; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    .back-btn{ text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; background:#fff; border:1px solid var(--border); color:var(--ml-blue); }
+    .btn{ background:var(--ml-blue); color:#fff; border:none; padding:9px 14px; border-radius:8px; font-size:14px; cursor:pointer; text-decoration:none; display:inline-block; }
+    .btn.grey{ background:#64748b; } .btn.red{ background:#b91c1c; } .btn.small{ padding:5px 10px; font-size:12px; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid #eef1f4; }
+    th{ background:#f7f9fb; color:#475569; font-weight:600; }
+    .muted{ color:var(--muted); }
+    label{ display:block; font-size:12px; color:var(--muted); margin:10px 0 3px; }
+    input,textarea{ width:100%; box-sizing:border-box; padding:9px; font-size:14px; border:1px solid var(--border); border-radius:8px; }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+    @media (max-width:560px){ .grid2{ grid-template-columns:1fr; } }
+    .backdrop{ position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; align-items:center; justify-content:center; z-index:999; }
+    .modal{ background:#fff; border-radius:14px; max-width:460px; width:calc(100% - 40px); max-height:88vh; overflow:auto; padding:18px; }
+    .msg{ font-size:13px; margin-top:8px; min-height:16px; }
+    .msg.err{ color:#b91c1c; } .msg.ok{ color:#0e7a3b; }
+    .pill{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#4338ca; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>Customers</h1>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a href="sites.html" class="back-btn">📍 Sites</a>
+        <a href="main.html" class="back-btn">← Menu</a>
+        <button class="btn" id="addBtn">＋ Add customer</button>
+      </div>
+    </header>
+    <p class="muted" style="margin:0 0 10px;">Customers own sites. Billing details here feed quoting &amp; invoicing.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Customer</th><th>Sites</th><th>Contact</th><th>Invoice email</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #eef1f4;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn grey" id="importBtn">⇩ Import sites from old system (one-time)</button>
+      <span class="msg" id="importMsg"></span>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn grey" id="svBtn">🖼️ Set site images from Google Street View</button>
+      <span class="msg" id="svMsg"></span>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn grey" id="restoreBtn">↺ Restore original site photos (from old system)</button>
+      <span class="msg" id="restoreMsg"></span>
+    </div>
+  </div>
+</div>
+
+<div class="backdrop" id="modal">
+  <div class="modal">
+    <h2 style="margin:0 0 4px;font-size:17px;color:var(--ml-blue);" id="mTitle">Add customer</h2>
+    <label>Name *</label><input id="f_name" />
+    <div class="grid2">
+      <div><label>Contact name</label><input id="f_contact" /></div>
+      <div><label>Phone</label><input id="f_phone" /></div>
+    </div>
+    <div class="grid2">
+      <div><label>Email</label><input id="f_email" type="email" /></div>
+      <div><label>Invoice email</label><input id="f_invoice" type="email" /></div>
+    </div>
+    <label>Billing address</label><textarea id="f_address"></textarea>
+    <label>Notes</label><textarea id="f_notes"></textarea>
+    <p class="msg" id="mMsg"></p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+      <button class="btn grey" id="cancelBtn">Cancel</button>
+      <button class="btn" id="saveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const token = localStorage.getItem("mostlaneToken");
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+function api(path, opts = {}){
+  opts.headers = Object.assign({ "Content-Type":"application/json" }, opts.headers || {});
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+  return fetch(API + path, opts);
+}
+
+let customers = [], editingId = null;
+
+async function load(){
+  try{
+    const r = await (await api("/customers")).json();
+    customers = r.customers || [];
+    render();
+  }catch(e){ $("rows").innerHTML = '<tr><td colspan="5" class="muted">Failed to load.</td></tr>'; }
+}
+
+function render(){
+  if(!customers.length){
+    $("rows").innerHTML = '<tr><td colspan="5" class="muted">No customers yet — add one, or import your sites from the old system below.</td></tr>';
+    return;
+  }
+  $("rows").innerHTML = customers.map(c => `
+    <tr>
+      <td><b>${esc(c.name || c.id)}</b><div class="muted" style="font-size:11px;">${esc(c.id)}</div></td>
+      <td><span class="pill">${c.site_count || 0}</span></td>
+      <td>${esc(c.contact_name || "")}${c.phone ? `<div class="muted">${esc(c.phone)}</div>` : ""}</td>
+      <td>${esc(c.invoice_email || c.email || "")}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn small" data-edit="${esc(c.id)}">Edit</button>
+        <button class="btn small red" data-del="${esc(c.id)}">Delete</button>
+      </td>
+    </tr>`).join("");
+}
+
+function openModal(c){
+  editingId = c ? c.id : null;
+  $("mTitle").textContent = c ? `Edit — ${c.name || c.id}` : "Add customer";
+  $("f_name").value = c?.name || "";
+  $("f_contact").value = c?.contact_name || "";
+  $("f_phone").value = c?.phone || "";
+  $("f_email").value = c?.email || "";
+  $("f_invoice").value = c?.invoice_email || "";
+  $("f_address").value = c?.billing_address || "";
+  $("f_notes").value = c?.notes || "";
+  $("mMsg").textContent = "";
+  $("modal").style.display = "flex";
+}
+
+$("rows").addEventListener("click", async e => {
+  const t = e.target;
+  if(t.dataset.edit) openModal(customers.find(c => c.id === t.dataset.edit));
+  else if(t.dataset.del){
+    if(!confirm(`Delete customer "${t.dataset.del}"?`)) return;
+    const r = await (await api("/customers/delete", { method:"POST", body: JSON.stringify({ id: t.dataset.del }) })).json();
+    if(r.ok) load(); else alert(r.error || "Delete failed.");
+  }
+});
+
+$("addBtn").addEventListener("click", () => openModal(null));
+$("cancelBtn").addEventListener("click", () => $("modal").style.display = "none");
+$("modal").addEventListener("click", e => { if(e.target.id === "modal") $("modal").style.display = "none"; });
+
+$("saveBtn").addEventListener("click", async () => {
+  const name = $("f_name").value.trim();
+  if(!name){ $("mMsg").className = "msg err"; $("mMsg").textContent = "Name is required."; return; }
+  $("mMsg").className = "msg"; $("mMsg").textContent = "Saving…";
+  try{
+    const body = {
+      id: editingId || undefined, name,
+      contactName: $("f_contact").value.trim(), phone: $("f_phone").value.trim(),
+      email: $("f_email").value.trim(), invoiceEmail: $("f_invoice").value.trim(),
+      billingAddress: $("f_address").value.trim(), notes: $("f_notes").value.trim()
+    };
+    const r = await (await api("/customers", { method:"POST", body: JSON.stringify(body) })).json();
+    if(!r.ok) throw new Error(r.error || "Save failed");
+    $("modal").style.display = "none";
+    load();
+  }catch(e){ $("mMsg").className = "msg err"; $("mMsg").textContent = e.message; }
+});
+
+// Fetch from the OLD sites worker with XHR — window.fetch is rewritten by
+// portal-config to point at the new worker, which would loop back to ourselves.
+function fetchOldSites(){
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("GET", "https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all");
+    x.onload = () => {
+      try{
+        const list = JSON.parse(x.responseText);
+        Array.isArray(list) ? resolve(list) : reject(new Error("Old system didn't return a site list."));
+      }catch(e){ reject(new Error("Old system returned invalid data.")); }
+    };
+    x.onerror = () => reject(new Error("Couldn't reach the old sites system."));
+    x.send();
+  });
+}
+
+$("importBtn").addEventListener("click", async () => {
+  if(!confirm("Pull all sites from the old sites system into the new database? Safe to run more than once (it overwrites with the old system's copy).")) return;
+  $("importMsg").className = "msg"; $("importMsg").textContent = "Reading old system…";
+  try{
+    const sites = await fetchOldSites();
+    $("importMsg").textContent = `Importing ${sites.length} sites…`;
+    const r = await (await api("/import-sites", { method:"POST", body: JSON.stringify({ sites }) })).json();
+    if(!r.ok) throw new Error(r.error || "Import failed");
+    $("importMsg").className = "msg ok";
+    $("importMsg").textContent = `✔ Imported ${r.imported} sites across ${r.customers.length} customers.`;
+    load();
+  }catch(e){ $("importMsg").className = "msg err"; $("importMsg").textContent = e.message; }
+});
+
+/* Bulk site images: loops batches until every site has a Street View photo
+   stored in our own R2 bucket (one-time Google fetch per site). */
+$("svBtn").addEventListener("click", async () => {
+  // Prefill with the key that last worked on this browser.
+  const key = prompt("Google Maps API key (needs Street View Static / Maps Static enabled):",
+                     localStorage.getItem("mostlaneMapsImageKey") || "");
+  if(!key) return;
+  localStorage.setItem("mostlaneMapsImageKey", key.trim());
+  const overwrite = confirm("Re-do images on sites that already have one?\n\nOK = regenerate all Google-made images (hand-uploaded photos are never touched) · Cancel = only fill sites with no image.");
+  const since = new Date().toISOString();
+  // What each client's branches actually are — makes Places find the right business.
+  const BRAND_HINTS = {
+    cobra: "Starbucks",
+    els: "The Co-operative Funeralcare",
+    els_private: "The Co-operative Funeralcare",
+    retail: "Southern Co-op",
+    wenzels: "Wenzel's"
+  };
+  $("svBtn").disabled = true;
+  let total = 0, failedTotal = 0, rounds = 0, lastError = "";
+  try{
+    while(rounds++ < 40){
+      $("svMsg").className = "msg";
+      $("svMsg").textContent = `Fetching images… ${total} done${failedTotal ? `, ${failedTotal} failed` : ""}`;
+      const r = await (await api("/sites/street-images", { method:"POST",
+        body: JSON.stringify({ key, overwrite, since, brands: BRAND_HINTS }) })).json();
+      if(!r.ok) throw new Error(r.error || "Image run failed");
+      total += r.updated; failedTotal += (r.failed || []).length;
+      if(r.sampleError) lastError = r.sampleError;
+      if(r.updated === 0 && (r.failed || []).length === 0) break;
+      if(r.remaining === 0) break;
+    }
+    $("svMsg").className = "msg ok";
+    $("svMsg").textContent = `✔ ${total} site image(s) saved${failedTotal ? ` · ${failedTotal} failed/no imagery` : ""}.`;
+    if(total === 0 && failedTotal > 0){
+      $("svMsg").className = "msg err";
+      $("svMsg").textContent = "Every site failed. Google said: " + (lastError || "(no detail)");
+    }
+  }catch(e){
+    $("svMsg").className = "msg err"; $("svMsg").textContent = e.message;
+  }finally{
+    $("svBtn").disabled = false;
+  }
+});
+
+/* Restore hand-uploaded photos from the old sites system — only replaces the
+   image link on sites that HAD a photo there; Google images elsewhere stay. */
+$("restoreBtn").addEventListener("click", async () => {
+  if(!confirm("Put back the original photos from the old sites system?\n\nOnly sites that had a photo there are touched — Google images on the rest stay.")) return;
+  $("restoreMsg").className = "msg"; $("restoreMsg").textContent = "Reading old system…";
+  try{
+    const sites = await fetchOldSites();
+    $("restoreMsg").textContent = "Restoring photos…";
+    const r = await (await api("/import-sites", { method:"POST",
+      body: JSON.stringify({ sites, imagesOnly: true }) })).json();
+    if(!r.ok) throw new Error(r.error || "Restore failed");
+    $("restoreMsg").className = "msg ok";
+    $("restoreMsg").textContent = `✔ ${r.imported} original photo(s) restored.`;
+  }catch(e){ $("restoreMsg").className = "msg err"; $("restoreMsg").textContent = e.message; }
+});
+
+load();
+</script>
+</body>
+</html>

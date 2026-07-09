@@ -2,729 +2,109 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js"></script>
-  <script src="auth.js"></script>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>⚙️ Settings – Mostlane Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal Settings — Mostlane</title>
+  <script src="auth.js"></script>
   <style>
-    :root{
-      --ml-blue:#003366;
-      --ml-blue-2:#004a99;
-      --panel-bg:rgba(255,255,255,0.6);
-      --text:#1f2937;
-      --muted:#6b7280;
-      --ok:#0f9d58;
-      --warn:#d97706;
-      --err:#d32f2f;
-      --chip:#eef2f7;
-      --radius:12px;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
-      color:var(--text);
-      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center/180% fixed;
-      min-height:100vh;
-    }
-    .wrap{
-      max-width:1200px;
-      margin:20px auto 60px;
-      background:var(--panel-bg);
-      border-radius:var(--radius);
-      box-shadow:0 6px 24px rgba(0,0,0,.15);
-      overflow:hidden;
-    }
-    .topbar{
-      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-      padding:16px 18px; background:rgba(255,255,255,.75); border-bottom:1px solid #ddd;
-    }
-    .title{font-weight:700; font-size:20px; color:var(--ml-blue); flex:1}
-    .btn{
-      background:var(--ml-blue); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer;
-    }
-    .btn.alt{background:var(--ml-blue-2)}
-    .btn.ghost{background:transparent; color:var(--ml-blue); border:1px solid var(--ml-blue)}
-    .btn.small{padding:6px 10px; font-size:13px}
-    .userpill{
-      background:#fff; border:1px solid #d7dbe3; padding:8px 12px; border-radius:999px; color:#374151; font-size:14px;
-    }
-    .tabs{
-      display:flex; gap:6px; overflow:auto; padding:10px 10px 0; background:rgba(255,255,255,.55);
-      border-bottom:1px solid #e5e7eb;
-    }
-    .tab{
-      padding:10px 14px; border:1px solid #cbd5e1; background:#fff; border-bottom:none; border-top-left-radius:10px; border-top-right-radius:10px; cursor:pointer; color:#334155;
-      white-space:nowrap;
-    }
-    .tab.active{ background:#f8fafc; color:var(--ml-blue); font-weight:700; }
-    .content{ padding:16px; background:#f8fafc; }
-    .grid{ display:grid; gap:12px; }
-    @media(min-width:900px){ .grid.cols-2{ grid-template-columns: 1fr 1fr; } .grid.cols-3{ grid-template-columns: 1fr 1fr 1fr; } }
-    .card{ background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; }
-    .card h3{ margin:0 0 10px 0; color:var(--ml-blue) }
-    .toolbar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px }
-    input[type="text"], input[type="password"], input[type="number"], input[type="email"], select, textarea{
-      width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:15px; background:#fff;
-    }
-    table{
-      width:100%; border-collapse:separate; border-spacing:0; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff;
-    }
-    th, td{ padding:10px 12px; border-bottom:1px solid #eef2f7; font-size:14px; vertical-align:middle }
-    th{ background:#f1f5f9; text-align:left; color:#334155 }
-    tr:last-child td{ border-bottom:none }
-    .chip{ display:inline-block; padding:4px 8px; border-radius:999px; background:var(--chip); font-size:12px; color:#374151; }
-    .row-actions{ display:flex; gap:8px; flex-wrap:wrap }
-    .note{ color:var(--muted); font-size:13px }
-    .matrix{ overflow:auto; }
-    .matrix table{ min-width:720px }
-    .tag{ font-size:12px; background:#f3f4f6; padding:3px 8px; border-radius:999px; border:1px solid #e5e7eb }
-    .radio-group{ display:flex; gap:8px; flex-wrap:wrap }
-    /* Modal */
-    .backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:9999; padding:10px }
-    .modal{
-      background:#fff; width:min(760px, 100%); border-radius:12px; padding:16px;
-      box-shadow:0 12px 40px rgba(0,0,0,.25); max-height:90vh; display:flex; flex-direction:column;
-    }
-    .modal h3{ margin:0 0 10px 0; color:var(--ml-blue) }
-    .modal .body{ overflow:auto; padding-right:4px; }
-    .modal .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-shrink:0 }
-    /* Toast */
-    .toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 14px; border-radius:999px; opacity:0; pointer-events:none; transition:.25s; z-index:99999; font-size:14px }
-    .toast.show{ opacity:1 }
-    /* Mobile tables -> cards (Users & Sites) */
-    @media(max-width:760px){
-      table.responsive{ display:block }
-      table.responsive thead{ display:none }
-      table.responsive tbody{ display:grid; gap:10px }
-      table.responsive tr{ display:block; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff }
-      table.responsive td{ display:flex; justify-content:space-between; gap:10px; border-bottom:1px solid #eef2f7 }
-      table.responsive td::before{ content:attr(data-label); font-weight:600; color:#475569 }
-      table.responsive tr td:last-child{ border-bottom:none }
-    }
-    .error{ color:var(--err); font-weight:600; }
-    .success{ color:var(--ok); font-weight:600; }
-    .muted{ color:#6b7280; }
-    .pill{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #e5e7eb; background:#f9fafb; font-size:12px; }
-    .kvs{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; background:#f8fafc; padding:6px 8px; border-radius:8px; border:1px solid #e5e7eb; }
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:640px; margin:20px auto 40px; padding:0 12px; }
+    .card{ background:#fff; border-radius:14px; padding:18px; box-shadow:0 12px 28px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:14px; }
+    header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+    h1{ margin:0; font-size:20px; color:var(--ml-blue); }
+    h2{ margin:0 0 10px; font-size:15px; color:var(--ml-blue); }
+    .back-btn{ text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; background:#fff; border:1px solid var(--border); color:var(--ml-blue); }
+    label{ display:block; font-size:13px; font-weight:600; color:var(--ml-blue); margin:12px 0 4px; }
+    input{ width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; }
+    .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+    @media (max-width:520px){ .grid2{ grid-template-columns:1fr; } }
+    .btn{ display:inline-block; border:none; background:var(--ml-blue); color:#fff; padding:11px 18px; border-radius:9px; font-size:15px; font-weight:600; cursor:pointer; margin-top:14px; text-decoration:none; }
+    .btn.ghost{ background:#fff; color:var(--ml-blue); border:1px solid var(--border); }
+    .msg{ font-size:13px; margin-top:10px; min-height:16px; }
+    .msg.ok{ color:#0e7a3b; font-weight:600; } .msg.err{ color:#b91c1c; font-weight:600; }
+    .links{ display:flex; gap:8px; flex-wrap:wrap; }
+    .muted{ color:var(--muted); font-size:13px; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="title">⚙️ Settings</div>
-      <a class="btn ghost" href="main.html">Main Menu</a>
-      <div class="userpill" id="whoami">Signed in: …</div>
-    </div>
-
-    <div class="tabs" id="tabs">
-      <div class="tab active" data-tab="users">👥 Users</div>
-      <div class="tab" data-tab="pages">🌐 Pages</div>
-      <div class="tab" data-tab="sites">🏗 Sites</div>
-      <div class="tab" data-tab="system">⚙️ System</div>
-    </div>
-
-    <div class="content">
-      <!-- USERS -->
-      <section id="panel-users">
-        <div class="toolbar">
-          <input type="text" id="userSearch" placeholder="Search users… (name, username, role, vehicle)"/>
-          <button class="btn" id="btnAddUser">+ Add User</button>
-          <label class="chip"><input type="checkbox" id="toggleDeleted" /> Show deleted</label>
-        </div>
-        <div class="card">
-          <h3>All Users</h3>
-          <div class="note">Tap Edit to change any field. “New Password” will be SHA-256 hashed into <code>HashedPassword</code>.</div>
-          <div id="usersTableWrap"></div>
-        </div>
-      </section>
-
-      <!-- PAGES -->
-      <section id="panel-pages" style="display:none">
-        <div class="toolbar">
-          <button class="btn alt" id="btnReloadPages">Reload Pages</button>
-          <span class="chip" id="pagesCount">0 pages</span>
-        </div>
-        <div class="card">
-          <h3>Page Access Matrix</h3>
-          <div class="note">Tick which pages each user can access. Click “Save” to persist to each user’s <code>permissions</code> object.</div>
-          <div class="matrix" id="pagesMatrix">Loading…</div>
-          <div style="margin-top:10px; display:flex; gap:10px; justify-content:flex-end">
-            <button class="btn" id="btnSavePermissions">Save Changes</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- SITES -->
-      <section id="panel-sites" style="display:none">
-        <div class="toolbar">
-          <div class="radio-group">
-            <label class="tag"><input type="radio" name="siteType" value="retail" checked> Retail</label>
-            <label class="tag"><input type="radio" name="siteType" value="els"> ELS</label>
-            <label class="tag"><input type="radio" name="siteType" value="els_private"> ELS Private</label>
-            <label class="tag"><input type="radio" name="siteType" value="cobra"> Cobra</label>
-            <label class="tag"><input type="radio" name="siteType" value="wenzels"> Wenzel’s</label>
-            <label class="tag"><input type="radio" name="siteType" value="projects"> Projects</label>
-          </div>
-          <div style="flex:1"></div>
-          <input type="text" id="siteSearch" placeholder="Search sites… (name, code, postcode)"/>
-          <button class="btn" id="btnAddSite">+ Add Site</button>
-        </div>
-        <div class="card">
-          <h3>Sites</h3>
-          <div id="sitesTableWrap"></div>
-        </div>
-      </section>
-
-      <!-- SYSTEM -->
-      <section id="panel-system" style="display:none">
-        <div class="grid cols-2">
-          <div class="card">
-            <h3>Global Config</h3>
-            <label>SharePoint Root Path
-              <input type="text" id="cfgSharePoint" placeholder="Mostlane Shared Documents > …"/>
-            </label>
-            <label>HQ Postcode
-              <input type="text" id="cfgPostcode" placeholder="PO15 5RQ"/>
-            </label>
-            <label>Google Maps API Key
-              <input type="password" id="cfgMapsKey" placeholder="••••••••"/>
-            </label>
-            <div class="grid cols-2">
-              <label>VAT Rate %
-                <input type="number" id="cfgVAT" step="0.01" placeholder="20"/>
-              </label>
-              <label>Mileage Rate (£/mile)
-                <input type="number" id="cfgMileage" step="0.01" placeholder="0.25"/>
-              </label>
-            </div>
-            <div style="margin-top:12px; display:flex; gap:10px; justify-content:flex-end">
-              <button class="btn" id="btnSaveConfig">Save Config</button>
-            </div>
-            <div class="note" id="cfgNote">If your Worker doesn’t yet have <code>/update-config</code>, you’ll see a warning.</div>
-          </div>
-
-          <div class="card">
-            <h3>Worker / KV (read-only quick view)</h3>
-            <div class="note">Endpoints in use:</div>
-            <div class="kvs">
-              <div>USERS: <code>/get-users</code>, <code>/update-user</code>, <code>/add-user</code>, <code>/delete-user</code>, <code>/restore-user</code></div>
-              <div>PAGES: <code>/get-pages</code></div>
-              <div>SITES: <code>/get-sites?type=retail|els|els_private|cobra|wenzels|projects</code></div>
-              <div>CONFIG: <code>/get-config</code>, <code>/update-config</code></div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>⚙️ Portal Settings</h1>
+      <a href="main.html" class="back-btn">← Menu</a>
+    </header>
+    <p class="muted" style="margin:0;">Global values used across the portal. Stored centrally in the portal database.</p>
   </div>
 
-  <!-- Add/Edit User Modal -->
-  <div class="backdrop" id="userModal">
-    <div class="modal">
-      <h3 id="userModalTitle">Edit User</h3>
-      <div class="body">
-        <div class="note" style="margin-bottom:10px">All fields are editable. “New Password” will become <code>HashedPassword</code> via SHA-256.</div>
-        <div id="userDynamicFields" class="grid cols-2"></div>
-        <div class="card" style="margin-top:12px">
-          <h3>Set New Password</h3>
-          <input type="password" id="uNewPassword" placeholder="Leave blank to keep existing password">
-          <div class="note">We will hash this to <code>HashedPassword</code> when you press Save.</div>
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn ghost" id="userCancel">Cancel</button>
-        <button class="btn" id="userSave">Save</button>
-      </div>
+  <div class="card">
+    <h2>Global config</h2>
+    <label>SharePoint root path</label>
+    <input id="s_sharePoint" placeholder="Mostlane Shared Documents > …" />
+    <label>HQ postcode</label>
+    <input id="s_hqPostcode" placeholder="PO15 5RQ" />
+    <label>Google Maps API key (browser)</label>
+    <input id="s_mapsKey" type="password" placeholder="••••••••" />
+    <div class="grid2">
+      <div><label>VAT rate %</label><input id="s_vatRate" type="number" step="0.01" placeholder="20" /></div>
+      <div><label>Mileage rate (£/mile)</label><input id="s_mileageRate" type="number" step="0.01" placeholder="0.25" /></div>
     </div>
+    <button class="btn" id="saveBtn">💾 Save settings</button>
+    <div class="msg" id="msg"></div>
   </div>
 
-  <!-- Add/Edit Site Modal -->
-  <div class="backdrop" id="siteModal">
-    <div class="modal">
-      <h3 id="siteModalTitle">Add Site</h3>
-      <div class="body">
-        <div class="grid cols-2">
-          <label>Site Code
-            <input type="text" id="sCode" placeholder="0006">
-          </label>
-          <label>Site Name
-            <input type="text" id="sName" placeholder="Co-op Portsmouth Elm Grove">
-          </label>
-          <label>Postcode
-            <input type="text" id="sPostcode" placeholder="PO15 5RQ">
-          </label>
-          <label>Address
-            <input type="text" id="sAddress" placeholder="Unit A5, Segensworth Business Centre">
-          </label>
-        </div>
-      </div>
-      <div class="actions">
-        <button class="btn ghost" id="siteCancel">Cancel</button>
-        <button class="btn" id="siteSave">Save</button>
-      </div>
+  <div class="card">
+    <h2>Managed elsewhere</h2>
+    <p class="muted" style="margin:0 0 10px;">Users, permissions, sites and customers each have their own admin pages:</p>
+    <div class="links">
+      <a class="btn ghost" href="users-admin.html">👥 Users &amp; permissions</a>
+      <a class="btn ghost" href="sites.html">📍 Manage Sites</a>
+      <a class="btn ghost" href="customers.html">🏢 Customers</a>
     </div>
   </div>
+</div>
 
-  <div class="toast" id="toast">Saved</div>
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
+(function gate(){
+  let perms = {};
+  try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch {}
+  if (perms.FullAccess !== "Yes") {
+    document.body.innerHTML = '<div style="max-width:480px;margin:60px auto;text-align:center;font-family:system-ui;color:#334155;"><h2>Access denied</h2><p>Portal settings need Full Access.</p><a href="main.html">Back to portal</a></div>';
+    throw new Error("no access");
+  }
+})();
 
-  <script>
-    /* ========== CONFIG ========= */
-    const WORKER = 'https://mostlane-pos.jamie-def.workers.dev';
+const FIELDS = ["sharePoint","hqPostcode","mapsKey","vatRate","mileageRate"];
 
-    /* ========== MINI UTILS ========= */
-    const $  = sel => document.querySelector(sel);
-    const $$ = sel => document.querySelectorAll(sel);
-    const toast = (msg)=>{ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); };
-    const safeJson = async (res)=>{ try{ return await res.json(); }catch{ return null; } };
-    const dotToSpace = s => (s||'').replace(/\./g, ' ');
-    const getSessionUser = () => sessionStorage.getItem('mostlaneUser') || '';
+async function load(){
+  try{
+    const r = await (await authFetch(`${API}/settings`, {cache:"no-store"})).json();
+    if(!r.ok) throw new Error(r.error || "Load failed");
+    FIELDS.forEach(k => { $("s_" + k).value = r.settings[k] ?? ""; });
+  }catch(e){ $("msg").className = "msg err"; $("msg").textContent = e.message; }
+}
 
-    /* ========== NORMALISERS ========= */
-    // Accepts array or {Users:[...]} and returns array
-    function normaliseUsers(payload){
-      let arr = [];
-      if (Array.isArray(payload)) arr = payload;
-      else if (payload && Array.isArray(payload.Users)) arr = payload.Users;
-      else if (payload && Array.isArray(payload.users)) arr = payload.users;
-      else arr = [];
+$("saveBtn").addEventListener("click", async () => {
+  $("msg").className = "msg"; $("msg").textContent = "Saving…";
+  const body = {};
+  FIELDS.forEach(k => { const v = $("s_" + k).value.trim(); if (v !== "") body[k] = v; });
+  try{
+    const r = await (await authFetch(`${API}/settings`, { method:"POST",
+      headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) })).json();
+    if(!r.ok) throw new Error(r.error || "Save failed");
+    $("msg").className = "msg ok"; $("msg").textContent = "✔ Saved.";
+  }catch(e){ $("msg").className = "msg err"; $("msg").textContent = e.message; }
+});
 
-      // Nothing else enforced; keep original keys (Jamie wants to edit everything).
-      return arr;
-    }
-
-    // Turn any user object into a few display helpers, but DO NOT mutate original keys.
-    function userDisplayMeta(u){
-      const username = u.Username || u.username || '';
-      const name = [u.FirstName||u.firstName, u.LastName||u.lastName].filter(Boolean).join(' ') || (u.displayName||'');
-      const employment = u.EmploymentType || u.employmentType || '';
-      const status = u.Status || u.status || '';
-      const vehicle = u.VehicleAssigned || u.vehicleAssigned || u.vehicleReg || '';
-      return { username, name, employment, status, vehicle };
-    }
-
-    // Sites can be array or wrapped under arbitrary key (sites/Sites/data/etc.)
-    function normaliseSites(payload){
-      if (Array.isArray(payload)) return payload;
-      if (!payload || typeof payload !== 'object') return [];
-      for (const k of Object.keys(payload)) {
-        const v = payload[k];
-        if (Array.isArray(v)) return v;
-      }
-      return [];
-    }
-
-    // Try to pick a site code/name/postcode/address from inconsistent records
-    function normaliseSiteRecord(s){
-      const code = s.siteCode || s.SiteCode || s.code || s.store || s.Store || s.id || '';
-      const name = s.siteName || s.SiteName || s.name || s.StoreName || s.title || '';
-      const postcode = s.postcode || s.Postcode || s.post_code || s.post_code1 || s.pc || '';
-      const address  = s.address || s.Address || s.addr || s.street || '';
-      return { siteCode:String(code||''), siteName:String(name||''), postcode:String(postcode||''), address:String(address||'') };
-    }
-
-    /* ========= STATE ========= */
-    let allUsers = [];
-    let showDeleted = false;
-    let pagesList = [];        // from /get-pages
-    let pageMatrixEdits = {};  // username -> { path: boolean }
-    let currentSiteType = 'retail';
-    let currentSites = [];
-    let currentUserEdit = null; // raw object under edit
-
-    /* ========= TABS ========= */
-    $$('#tabs .tab').forEach(tab => {
-      tab.addEventListener('click', ()=>{
-        $$('#tabs .tab').forEach(t=>t.classList.remove('active'));
-        tab.classList.add('active');
-        const name = tab.dataset.tab;
-        ['users','pages','sites','system'].forEach(p=>{
-          const el = $('#panel-'+p);
-          el.style.display = (p===name)?'block':'none';
-        });
-        if(name==='pages'){ loadPages(); }
-        if(name==='sites'){ loadSites(); }
-        if(name==='system'){ loadConfig(); }
-      });
-    });
-
-    /* ========= INIT ========= */
-    document.addEventListener('DOMContentLoaded', async ()=>{
-      const u = getSessionUser();
-      $('#whoami').textContent = 'Signed in: ' + (u ? dotToSpace(u) : 'Unknown');
-
-      await loadUsers();
-      bindUsersUI();
-      bindPagesUI();
-      bindSitesUI();
-      bindSystemUI();
-    });
-
-    /* ========= USERS ========= */
-    async function loadUsers(){
-      try{
-        const res = await fetch(WORKER + '/get-users', { cache:'no-store' });
-        if(!res.ok){ $('#usersTableWrap').innerHTML = `<div class="error">/get-users returned ${res.status}</div>`; return; }
-        const raw = await safeJson(res);
-        allUsers = normaliseUsers(raw);
-        renderUsers();
-      }catch(e){
-        $('#usersTableWrap').innerHTML = `<div class="error">Failed to load users.</div>`;
-      }
-    }
-
-    function renderUsers(){
-      const q = ($('#userSearch').value||'').toLowerCase().trim();
-      // NOTE: “deleted” flag may not exist in your monolithic JSON → treat missing as not deleted.
-      const filtered = (allUsers||[])
-        .filter(u => showDeleted ? true : !Boolean(u.deleted))
-        .filter(u => {
-          if(!q) return true;
-          const meta = userDisplayMeta(u);
-          const hay = [
-            meta.username, meta.name, meta.employment, meta.status, meta.vehicle,
-            u.Email||u.email||'', u.Role||u.role||''
-          ].filter(Boolean).join(' ').toLowerCase();
-          return hay.includes(q);
-        });
-
-      let html = `
-        <table class="responsive">
-          <thead><tr>
-            <th>Username</th><th>Name</th><th>Employment</th><th>Status</th><th>Vehicle</th><th>Actions</th>
-          </tr></thead>
-          <tbody>
-      `;
-      filtered.forEach(u=>{
-        const meta = userDisplayMeta(u);
-        html += `
-          <tr>
-            <td data-label="Username"><span class="chip">${meta.username}</span></td>
-            <td data-label="Name">${meta.name}</td>
-            <td data-label="Employment">${meta.employment}</td>
-            <td data-label="Status">${meta.status}</td>
-            <td data-label="Vehicle">${meta.vehicle}</td>
-            <td data-label="Actions">
-              <div class="row-actions">
-                <button class="btn ghost small" data-act="edit" data-username="${meta.username}">Edit</button>
-              </div>
-            </td>
-          </tr>
-        `;
-      });
-      html += `</tbody></table>`;
-      $('#usersTableWrap').innerHTML = html;
-
-      // Bind edits
-      $$('#usersTableWrap [data-act="edit"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>openUserModal(btn.dataset.username));
-      });
-    }
-
-    function bindUsersUI(){
-      $('#userSearch').addEventListener('input', renderUsers);
-      $('#toggleDeleted').addEventListener('change', e=>{ showDeleted=e.target.checked; renderUsers(); });
-      $('#btnAddUser').addEventListener('click', ()=>openUserModal(null, true));
-      // Modal controls
-      $('#userCancel').addEventListener('click', closeUserModal);
-      $('#userModal').addEventListener('click', e=>{ if(e.target.id==='userModal') closeUserModal(); });
-      $('#userSave').addEventListener('click', saveUserFromModal);
-    }
-
-    function openUserModal(username, isNew=false){
-      let u = {};
-      if(!isNew){
-        u = (allUsers.find(x => (x.Username||x.username) === username) || {});
-      }
-      currentUserEdit = JSON.parse(JSON.stringify(u)); // deep-ish copy to edit safely
-      $('#userModalTitle').textContent = isNew ? 'Add User' : `Edit User – ${username || ''}`;
-
-      // Build dynamic field list from keys present (for Add, show a sensible starter set)
-      const keys = isNew
-        ? ['EngineerNumber','FirstName','LastName','Username','Email','HashedPassword','VehicleAssigned','EmploymentType','Status','FullAccess','PurchaseOrders','CheckInOut','Holiday','Forms','Assets','AddSite','MyDocuments','Compliance','HoursDashboard','SharePointPath','Phone']
-        : Object.keys(currentUserEdit);
-
-      const wrap = $('#userDynamicFields');
-      wrap.innerHTML = '';
-      keys.forEach(key=>{
-        const val = currentUserEdit[key] ?? '';
-        const inputType = (String(key).toLowerCase().includes('password') || key==='HashedPassword') ? 'text' : 'text';
-        const readOnly = (key==='Username' && !isNew) ? 'readonly' : '';
-        const help = (key==='HashedPassword') ? `<div class="note">Auto-set from “New Password” below when you save.</div>` : '';
-        const field = document.createElement('div');
-        field.innerHTML = `
-          <label>${key}
-            <input ${readOnly} type="${inputType}" data-k="${key}" value="${String(val)}" />
-          </label>
-          ${help}
-        `;
-        wrap.appendChild(field);
-      });
-
-      $('#uNewPassword').value = '';
-      $('#userModal').style.display='flex';
-    }
-
-    function closeUserModal(){ $('#userModal').style.display='none'; currentUserEdit=null; }
-
-    async function sha256(text){
-      const enc = new TextEncoder().encode(text);
-      const buf = await crypto.subtle.digest('SHA-256', enc);
-      return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-    }
-
-    async function saveUserFromModal(){
-      if(!currentUserEdit) return;
-      // gather fields
-      $$('#userDynamicFields input').forEach(inp=>{
-        const k = inp.dataset.k;
-        currentUserEdit[k] = inp.value;
-      });
-      const newPwd = $('#uNewPassword').value.trim();
-      if(newPwd){
-        // Write to HashedPassword (preserve your scheme)
-        currentUserEdit['HashedPassword'] = await sha256(newPwd);
-      }
-
-      // Decide add vs update:
-      const username = currentUserEdit.Username || currentUserEdit.username;
-      const exists = allUsers.some(u => (u.Username||u.username) === username);
-
-      try{
-        if(exists){
-          // We’ll send the entire object as a patch under a canonical key “username” for the worker
-          const patch = { ...currentUserEdit, username: username };
-          await fetch(WORKER + '/update-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch) });
-          toast('User updated');
-        }else{
-          // Add new
-          await fetch(WORKER + '/add-user', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(currentUserEdit) });
-          toast('User added');
-        }
-        closeUserModal();
-        await loadUsers();
-      }catch(e){
-        toast('Failed to save user');
-      }
-    }
-
-    /* ========= PAGES (permissions) ========= */
-    function bindPagesUI(){
-      $('#btnReloadPages').addEventListener('click', loadPages);
-      $('#btnSavePermissions').addEventListener('click', savePermissions);
-    }
-
-    async function loadPages(){
-      try{
-        const [usrRes, pgRes] = await Promise.all([
-          fetch(WORKER + '/get-users', { cache:'no-store' }),
-          fetch(WORKER + '/get-pages', { cache:'no-store' })
-        ]);
-        const usersRaw = await safeJson(usrRes);
-        allUsers = normaliseUsers(usersRaw);
-
-        const data = await safeJson(pgRes) || {};
-        pagesList = Array.isArray(data.pages) ? data.pages : [];
-        $('#pagesCount').textContent = (pagesList.length||0) + ' pages';
-        renderPagesMatrix();
-      }catch(e){
-        $('#pagesMatrix').innerHTML = `<div class="error">Failed to load pages.</div>`;
-      }
-    }
-
-    function renderPagesMatrix(){
-      if(!pagesList.length){
-        $('#pagesMatrix').innerHTML = `<div class="note">No pages discovered from GitHub yet.</div>`;
-        return;
-      }
-      // header
-      let html = `<table><thead><tr><th>User</th>`;
-      pagesList.forEach(p=>{ html += `<th title="${p.path}">${p.name}</th>`; });
-      html += `</tr></thead><tbody>`;
-
-      pageMatrixEdits = {};
-      (allUsers||[]).filter(u=>!u.deleted).forEach(u=>{
-        const uname = u.Username || u.username || '';
-        const perms = (u.permissions && typeof u.permissions==='object') ? u.permissions : {};
-        pageMatrixEdits[uname] = {...perms};
-        html += `<tr><td><span class="chip">${uname}</span></td>`;
-        pagesList.forEach(p=>{
-          const checked = !!perms[p.path];
-          html += `<td style="text-align:center"><input type="checkbox" data-u="${uname}" data-path="${p.path}" ${checked?'checked':''}></td>`;
-        });
-        html += `</tr>`;
-      });
-
-      html += `</tbody></table>`;
-      $('#pagesMatrix').innerHTML = html;
-
-      // bind
-      $$('#pagesMatrix input[type="checkbox"]').forEach(ch=>{
-        ch.addEventListener('change', ()=>{
-          const uname = ch.dataset.u;
-          const path = ch.dataset.path;
-          pageMatrixEdits[uname] = pageMatrixEdits[uname] || {};
-          pageMatrixEdits[uname][path] = ch.checked;
-        });
-      });
-    }
-
-    async function savePermissions(){
-      try{
-        const ops = [];
-        Object.keys(pageMatrixEdits).forEach(username=>{
-          ops.push(fetch(WORKER + '/update-user', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({ username, permissions: pageMatrixEdits[username] })
-          }));
-        });
-        await Promise.all(ops);
-        toast('Permissions saved');
-      }catch(e){
-        toast('Failed to save permissions');
-      }
-    }
-
-    /* ========= SITES ========= */
-    function bindSitesUI(){
-      $$('input[name="siteType"]').forEach(r=>{
-        r.addEventListener('change', async ()=>{
-          currentSiteType = r.value;
-          await loadSites();
-        });
-      });
-      $('#siteSearch').addEventListener('input', renderSites);
-      $('#btnAddSite').addEventListener('click', ()=>openSiteModal());
-      // Modal controls
-      $('#siteCancel').addEventListener('click', closeSiteModal);
-      $('#siteModal').addEventListener('click', e=>{ if(e.target.id==='siteModal') closeSiteModal(); });
-      $('#siteSave').addEventListener('click', saveSiteFromModal);
-    }
-
-    async function loadSites(){
-      try{
-        const res = await fetch(`${WORKER}/get-sites?type=${encodeURIComponent(currentSiteType)}`, { cache:'no-store' });
-        if(!res.ok){ $('#sitesTableWrap').innerHTML = `<div class="error">/get-sites?type=${currentSiteType} → ${res.status}</div>`; return; }
-        const raw = await safeJson(res);
-        const arr = normaliseSites(raw);
-        currentSites = arr.map(normaliseSiteRecord);
-        renderSites();
-      }catch(e){
-        $('#sitesTableWrap').innerHTML = `<div class="error">Failed to load sites.</div>`;
-      }
-    }
-
-    function renderSites(){
-      const q = ($('#siteSearch').value||'').toLowerCase().trim();
-      const filtered = (currentSites||[]).filter(s=>{
-        if(!q) return true;
-        return [s.siteCode,s.siteName,s.postcode,s.address].filter(Boolean).some(x=>String(x).toLowerCase().includes(q));
-      });
-
-      let html = `
-        <table class="responsive">
-          <thead><tr>
-            <th>Code</th><th>Name</th><th>Postcode</th><th>Address</th><th>Actions</th>
-          </tr></thead><tbody>
-      `;
-      filtered.forEach(s=>{
-        const code = s.siteCode || '';
-        html += `
-          <tr>
-            <td data-label="Code"><span class="chip">${code}</span></td>
-            <td data-label="Name">${s.siteName||''}</td>
-            <td data-label="Postcode">${s.postcode||''}</td>
-            <td data-label="Address">${s.address||''}</td>
-            <td data-label="Actions">
-              <div class="row-actions">
-                <button class="btn ghost small" data-sact="edit" data-code="${code}">Edit</button>
-                <button class="btn alt small" data-sact="delete" data-code="${code}">Delete</button>
-              </div>
-            </td>
-          </tr>
-        `;
-      });
-      html += `</tbody></table>`;
-      $('#sitesTableWrap').innerHTML = html;
-
-      $$('#sitesTableWrap [data-sact]').forEach(b=>{
-        b.addEventListener('click', async ()=>{
-          const act = b.dataset.sact;
-          const code = b.dataset.code;
-          const rec = (currentSites||[]).find(s=>s.siteCode===code) || {};
-          if(act==='edit'){ openSiteModal(rec); }
-          if(act==='delete'){
-            if(!confirm(`Delete site ${code}? (Soft delete)`)) return;
-            await fetch(`${WORKER}/delete-site?type=${encodeURIComponent(currentSiteType)}`, {
-              method:'POST', headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({ siteCode: code })
-            });
-            await loadSites(); toast(`Deleted ${code}`);
-          }
-        });
-      });
-    }
-
-    function openSiteModal(rec){
-      const isEdit = !!rec && !!rec.siteCode;
-      $('#siteModalTitle').textContent = isEdit ? `Edit Site – ${rec.siteCode}` : 'Add Site';
-      $('#sCode').value = rec?.siteCode || '';
-      $('#sCode').disabled = !!rec?.siteCode;
-      $('#sName').value = rec?.siteName || '';
-      $('#sPostcode').value = rec?.postcode || '';
-      $('#sAddress').value = rec?.address || '';
-      $('#siteModal').style.display = 'flex';
-    }
-    function closeSiteModal(){ $('#siteModal').style.display='none'; }
-    async function saveSiteFromModal(){
-      const body = {
-        siteCode: $('#sCode').value.trim(),
-        siteName: $('#sName').value.trim(),
-        postcode: $('#sPostcode').value.trim(),
-        address: $('#sAddress').value.trim()
-      };
-      if(!body.siteCode || !body.siteName){ alert('Site Code & Name required'); return; }
-
-      const isEdit = !!(currentSites.find(s=>s.siteCode===body.siteCode));
-      const url = isEdit ? `${WORKER}/update-site?type=${encodeURIComponent(currentSiteType)}`
-                         : `${WORKER}/add-site?type=${encodeURIComponent(currentSiteType)}`;
-      await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-      closeSiteModal(); await loadSites(); toast(isEdit?'Site updated':'Site added');
-    }
-
-    /* ========= SYSTEM ========= */
-    function bindSystemUI(){
-      $('#btnSaveConfig').addEventListener('click', saveConfig);
-    }
-    async function loadConfig(){
-      try{
-        const res = await fetch(WORKER + '/get-config', { cache:'no-store' });
-        if(!res.ok) return;
-        const cfg = await safeJson(res) || {};
-        $('#cfgSharePoint').value = cfg.sharepointRoot || '';
-        $('#cfgPostcode').value = cfg.hqPostcode || '';
-        $('#cfgMapsKey').value = cfg.mapsApiKey || '';
-        $('#cfgVAT').value = (cfg.vatRate ?? 20);
-        $('#cfgMileage').value = (cfg.mileageRate ?? 0.25);
-      }catch(e){ /* ignore */ }
-    }
-    async function saveConfig(){
-      const cfg = {
-        sharepointRoot: $('#cfgSharePoint').value.trim(),
-        hqPostcode: $('#cfgPostcode').value.trim(),
-        mapsApiKey: $('#cfgMapsKey').value.trim(),
-        vatRate: parseFloat($('#cfgVAT').value || '20'),
-        mileageRate: parseFloat($('#cfgMileage').value || '0.25'),
-        updatedAt: new Date().toISOString()
-      };
-      try{
-        const res = await fetch(WORKER + '/update-config', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
-        });
-        if(res.ok){ toast('Config saved'); }
-        else{ toast('Your Worker has no /update-config yet'); alert('Add /update-config in Worker to save.'); }
-      }catch(err){ toast('Failed to save'); }
-    }
-  </script>
+load();
+</script>
 </body>
 </html>

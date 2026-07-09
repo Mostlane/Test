@@ -106,25 +106,69 @@
         });
     });
 
-    document.getElementById("driverForm").addEventListener("submit", function(e) {
+    const API = window.MOSTLANE_API;
+    function authFetch(path, init = {}) {
+      init.headers = Object.assign({}, init.headers);
+      const t = localStorage.getItem("mostlaneToken");
+      if (t) init.headers["Authorization"] = "Bearer " + t;
+      return fetch(API + path, init);
+    }
+
+    document.getElementById("driverForm").addEventListener("submit", async function(e) {
       e.preventDefault();
-      const fullName = document.getElementById("fullName").value;
-      const username = document.getElementById("username").value;
+      const conf = document.getElementById("confirmation");
+      const fullName = document.getElementById("fullName").value.trim();
+      const username = document.getElementById("username").value.trim();
+      if (!username) return;
 
-      const formData = new URLSearchParams();
-      formData.append("fullName", fullName);
-      formData.append("username", username);
-      formData.append("latitude", latitude);
-      formData.append("longitude", longitude);
-      formData.append("radius", 300);
+      // Split "First Last" → FirstName / LastName (rest of the words).
+      const parts = fullName.split(/\s+/).filter(Boolean);
+      const firstName = parts.shift() || "";
+      const lastName = parts.join(" ");
 
-      fetch("https://hooks.zapier.com/hooks/catch/20261714/2vd4dv4/", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString()
-      }).then(() => {
-        document.getElementById("confirmation").style.display = "block";
-      });
+      conf.style.color = "green";
+      conf.style.display = "block";
+      conf.textContent = "Saving…";
+
+      try {
+        // Fetch-merge-save: keep any existing profile fields (pay, vehicle, etc.)
+        // and only overlay the home geofence.
+        let profile = {};
+        try {
+          const existing = await (await authFetch("/user?u=" + encodeURIComponent(username))).json();
+          if (existing && existing.found && existing.user && existing.user.Profile)
+            profile = existing.user.Profile;
+        } catch (_) { /* new driver — start with an empty profile */ }
+
+        profile.homeLat = Number(latitude);
+        profile.homeLng = Number(longitude);
+        profile.homeRadius = 300;
+        if (document.getElementById("postcode").value.trim())
+          profile.postcode = document.getElementById("postcode").value.trim();
+
+        const body = { Username: username, Profile: profile };
+        if (firstName) body.FirstName = firstName;
+        if (lastName) body.LastName = lastName;
+
+        const res = await authFetch("/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok || !r.ok) {
+          conf.style.color = "#b00020";
+          conf.textContent = res.status === 403
+            ? "You don't have permission to add drivers."
+            : (r.error || "Could not save driver.");
+          return;
+        }
+        conf.style.color = "green";
+        conf.textContent = "Driver saved successfully!";
+      } catch (err) {
+        conf.style.color = "#b00020";
+        conf.textContent = "Network error — please try again.";
+      }
     });
   </script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCvcvG15HB6XBJBbnHifjL8jZtsSE5m0i4&callback=initMap" async defer></script>

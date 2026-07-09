@@ -13,7 +13,7 @@ if (
   return;
 }
   // Pages that should be allowed without a session
-  const openPages = ["login.html", "onboard.html"];
+  const openPages = ["login.html", "onboard.html", "confirmation.html"];
 
   // If we're on login or onboarding, do nothing
   const path = window.location.pathname.toLowerCase();

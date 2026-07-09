@@ -374,6 +374,66 @@ async function requireAdmin(env, request) {
 }
 async function handle2(request, env, ctx, url) {
   const path = url.pathname;
+  if (path === "/onboard" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const firstName = (b.firstName || "").trim();
+    const lastName = (b.lastName || "").trim();
+    const email = (b.email || "").trim();
+    if (!firstName || !lastName || !email)
+      return error("First name, last name and email are required.", 400, env, request);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return error("Please enter a valid email address.", 400, env, request);
+    const existingEmail = await env.DB.prepare(
+      "SELECT username FROM users WHERE email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(email).first();
+    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
+    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "") || "user";
+    let username = base;
+    for (let n = 2; await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(username).first(); n++) {
+      username = base + n;
+    }
+    const profile = {
+      phone: b.mobile || "",
+      jobTitle: b.jobRole || "",
+      postcode: b.postcode || "",
+      onboard: {
+        deviceId: b.deviceId || "",
+        lat: b.latitude || "",
+        lng: b.longitude || "",
+        submittedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    await env.DB.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile)
+      VALUES (?,?,?,?, 'Pending', ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile)).run();
+    return json({ ok: true, pending: true, username }, {}, env, request);
+  }
+  if (path === "/po-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try {
+      profile = sess.user.profile ? JSON.parse(sess.user.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
+  if (path === "/hs-plan-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    return json({
+      ok: true,
+      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
+      token: env.HS_PLAN_TOKEN || ""
+    }, {}, env, request);
+  }
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
     if (!username) return error("Missing ?u=", 400, env, request);
@@ -529,8 +589,12 @@ var PERMISSION_KEYS = [
   "TimesheetAdmin",
   "LabourPlanning",
   "SLA",
-  "StoryMode"
+  "StoryMode",
   // opt-in: guided day protocol for this engineer
+  "HSPlan",
+  // access to the H&S planning tool
+  "SiteLog"
+  // access to SiteLog (site check-in/attendance)
 ];
 function shapeUser2(u, perms) {
   let profile = {};
@@ -1533,6 +1597,16 @@ async function createOrUpdateJobFromPayload(env, body) {
     assignedEngineers,
     siteCode: body.siteCode || existing?.siteCode || "",
     // carried so the siteCode filter works
+    // Full site details captured at creation — shown to engineers (address,
+    // phone, directions) without a lookup. Previously these were dropped.
+    siteName: body.siteName || existing?.siteName || "",
+    address: body.address || existing?.address || "",
+    telephone: body.telephone || existing?.telephone || "",
+    postcode: body.postcode || existing?.postcode || "",
+    lat: body.lat ?? existing?.lat ?? null,
+    lon: body.lon ?? existing?.lon ?? null,
+    storeType: body.storeType || existing?.storeType || "",
+    sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -1561,6 +1635,8 @@ async function patchJob(env, id, patch) {
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
   if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
+  if (patch.order !== void 0) job.order = patch.order;
+  if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;
   if (patch.status) {
     const s = normalizeStatus(patch.status);
     if (s !== job.status) {
@@ -1742,12 +1818,471 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 </html>`;
 }
 
+// src/routes/sites.js
+var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
+async function handle7(request, env, ctx, url) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (path === "/get-sites" && method === "GET") {
+    const cat = (q.get("category") || "all").toLowerCase();
+    let rows;
+    if (cat === "all") {
+      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites ORDER BY client, site_number").all());
+    } else {
+      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites WHERE client=? ORDER BY site_number").bind(cat).all());
+    }
+    return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
+  }
+  if ((path === "/add-site" || path === "/update-site") && method === "POST") {
+    const site = await request.json().catch(() => ({}));
+    const client = ((q.get("category") || site.client || "") + "").toLowerCase().trim();
+    const siteNumber = String(site.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client (category) and siteNumber required", 400, env, request);
+    site.client = client;
+    const oldNum = q.get("oldSiteNumber");
+    if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
+      await env.DB.prepare("DELETE FROM sites WHERE client=? AND site_number=?").bind(client, oldNum).run();
+    }
+    if (path === "/add-site" && client === "projects" && !site.jobNumber) {
+      site.jobNumber = await nextProjectNumber(env);
+    }
+    await saveSite(env, site);
+    await ensureCustomer(env, client);
+    await pushSiteToSiteLog(env, site);
+    return json({ success: true, site }, {}, env, request);
+  }
+  if (path === "/next-project-job-number" && method === "GET") {
+    return json({ next: await nextProjectNumber(env) }, {}, env, request);
+  }
+  if (path === "/upload-image" && method === "POST") {
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    const siteNumber = form && String(form.get("siteNumber") || "").trim();
+    const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
+    if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
+    const safeName = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName}`;
+    await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
+    return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
+  }
+  if (path === "/customers" && method === "GET") {
+    const { results } = await env.DB.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.client = c.id) AS site_count
+      FROM customers c ORDER BY c.name COLLATE NOCASE
+    `).all();
+    return json({ customers: results || [] }, {}, env, request);
+  }
+  if (path === "/customers" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = slug(b.id || b.name);
+    if (!id) return error("name required", 400, env, request);
+    await env.DB.prepare(`
+      INSERT INTO customers (id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
+        phone=excluded.phone, invoice_email=excluded.invoice_email,
+        billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
+    `).bind(
+      id,
+      b.name || id,
+      b.contactName || null,
+      b.email || null,
+      b.phone || null,
+      b.invoiceEmail || null,
+      b.billingAddress || null,
+      b.notes || null
+    ).run();
+    return json({ ok: true, id }, {}, env, request);
+  }
+  if (path === "/customers/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("id required", 400, env, request);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM sites WHERE client=?").bind(b.id).first();
+    if (n && n.n > 0) return error(`Customer has ${n.n} site(s) \u2014 move or delete them first.`, 400, env, request);
+    await env.DB.prepare("DELETE FROM customers WHERE id=?").bind(b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/sites/street-images" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const key = b.key || env.GOOGLE_MAPS_KEY;
+    if (!key) return error("Google Maps API key required", 400, env, request);
+    const overwrite = !!b.overwrite;
+    const since = b.since || "";
+    const brands = b.brands || {};
+    const limit = Math.min(Number(b.limit) || 8, 10);
+    const size = b.size || "640x400";
+    const { results } = await env.DB.prepare("SELECT data FROM sites").all();
+    const all = (results || []).map((r) => JSON.parse(r.data));
+    const locOf = (s) => s.lat != null && s.lon != null ? `${s.lat},${s.lon}` : [s.address1 || s.street || s.siteName, s.town, (s.postcode || "").replace(/\*+$/, "")].filter(Boolean).join(", ");
+    const ownImage = (s) => !s.imageURL || /\/streetview\.jpg(\?|$)/.test(s.imageURL);
+    const todo = all.filter((s) => (overwrite || !s._noImagery) && // an overwrite run retries previously-failed sites
+    (overwrite ? ownImage(s) && (!s._svAt || s._svAt < since) : !s.imageURL) && locOf(s));
+    const batch = todo.slice(0, limit);
+    let updated = 0;
+    const failed = [];
+    let sampleError = "";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    for (const site of batch) {
+      let loc = locOf(site);
+      let buf = null;
+      try {
+        const q2 = [
+          brands[site.client] || "",
+          site.siteName || "",
+          (site.postcode || "").replace(/\*+$/, "")
+        ].filter(Boolean).join(" ");
+        const fp = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(q2)}&inputtype=textquery&fields=photos,geometry&key=${key}`);
+        const fpj = await fp.json();
+        const cand = fpj.candidates && fpj.candidates[0];
+        if (cand) {
+          if (cand.geometry && cand.geometry.location) loc = `${cand.geometry.location.lat},${cand.geometry.location.lng}`;
+          const ref = cand.photos && cand.photos[0] && cand.photos[0].photo_reference;
+          if (ref) {
+            const ph = await fetch(`https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${encodeURIComponent(ref)}&key=${key}`);
+            if (ph.ok && (ph.headers.get("content-type") || "").startsWith("image/")) buf = await ph.arrayBuffer();
+          }
+        }
+      } catch (e) {
+        if (!sampleError) sampleError = "Places: " + e.message;
+      }
+      if (!buf) try {
+        const svUrl = `https://maps.googleapis.com/maps/api/streetview?size=${size}&location=${encodeURIComponent(loc)}&fov=80&return_error_code=true&key=${key}`;
+        const res = await fetch(svUrl);
+        if (res.ok) buf = await res.arrayBuffer();
+        else if (!sampleError) sampleError = `StreetView ${res.status}: ${(await res.text()).slice(0, 160)}`;
+      } catch (e) {
+        if (!sampleError) sampleError = "StreetView: " + e.message;
+      }
+      if (!buf) {
+        try {
+          const smUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(loc)}&zoom=19&size=${size}&maptype=satellite&format=jpg&markers=size:small%7C${encodeURIComponent(loc)}&key=${key}`;
+          const res = await fetch(smUrl);
+          if (res.ok && (res.headers.get("content-type") || "").startsWith("image/")) buf = await res.arrayBuffer();
+          else if (!sampleError) sampleError = `StaticMap ${res.status}: ${(await res.text()).slice(0, 160)}`;
+        } catch (e) {
+          if (!sampleError) sampleError = "StaticMap: " + e.message;
+        }
+      }
+      if (buf) {
+        const r2key = `sites/${site.client}/${String(site.siteNumber).trim()}/streetview.jpg`;
+        await env.JOB_FILES.put(r2key, buf, { httpMetadata: { contentType: "image/jpeg" } });
+        site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
+        site._svAt = now;
+        delete site._noImagery;
+        await saveSite(env, site);
+        updated++;
+      } else {
+        site._noImagery = true;
+        site._svAt = now;
+        await saveSite(env, site);
+        failed.push(String(site.siteNumber));
+      }
+    }
+    return json({
+      ok: true,
+      updated,
+      failed,
+      sampleError,
+      remaining: Math.max(0, todo.length - batch.length)
+    }, {}, env, request);
+  }
+  if (path === "/import-sites" && method === "POST") {
+    const body = await request.json().catch(() => ({}));
+    const imagesOnly = !!body.imagesOnly;
+    let list = Array.isArray(body.sites) ? body.sites : [];
+    if (!list.length) {
+      try {
+        const res = await fetch(`${OLD_SITES_WORKER}/get-sites?category=all`);
+        list = await res.json();
+        if (!Array.isArray(list)) throw new Error("old worker did not return a list");
+      } catch (e) {
+        return error("Could not read the old sites worker: " + e.message, 502, env, request);
+      }
+    }
+    let imported = 0;
+    const clients = /* @__PURE__ */ new Set();
+    for (const site of list) {
+      const client = ((site.client || "") + "").toLowerCase().trim() || "retail";
+      const siteNumber = String(site.siteNumber || "").trim();
+      if (!siteNumber) continue;
+      if (imagesOnly) {
+        if (!site.imageURL) continue;
+        const row = await env.DB.prepare("SELECT data FROM sites WHERE client=? AND site_number=?").bind(client, siteNumber).first();
+        if (!row) continue;
+        const cur = JSON.parse(row.data);
+        cur.imageURL = site.imageURL;
+        await saveSite(env, cur);
+        imported++;
+        continue;
+      }
+      site.client = client;
+      await saveSite(env, site);
+      clients.add(client);
+      imported++;
+    }
+    for (const c of clients) await ensureCustomer(env, c);
+    return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
+  }
+  return error("Unknown sites route", 404, env, request);
+}
+async function saveSite(env, site) {
+  await env.DB.prepare(`
+    INSERT INTO sites (client, site_number, site_name, postcode, active, job_number, data, updated_at)
+    VALUES (?,?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(client, site_number) DO UPDATE SET
+      site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
+      job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
+  `).bind(
+    site.client,
+    String(site.siteNumber).trim(),
+    site.siteName || null,
+    site.postcode || null,
+    site.active === false ? 0 : 1,
+    site.jobNumber || null,
+    JSON.stringify(site)
+  ).run();
+}
+async function ensureCustomer(env, id) {
+  if (!id) return;
+  await env.DB.prepare(
+    "INSERT INTO customers (id, name) VALUES (?,?) ON CONFLICT(id) DO NOTHING"
+  ).bind(id, prettify(id)).run();
+}
+async function pushSiteToSiteLog(env, site) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET) return;
+    const lat = Number(site.lat), lng = Number(site.lon ?? site.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const name = String(site.siteName || "").trim();
+    if (!name) return;
+    await fetch("https://api.site-log.co.uk/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{
+        siteName: name,
+        lat,
+        lng,
+        radius: 500,
+        category: prettify(site.client || "") || "Projects"
+      }] })
+    });
+  } catch (e) {
+  }
+}
+async function nextProjectNumber(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT job_number FROM sites WHERE client='projects' AND job_number IS NOT NULL"
+  ).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = String(r.job_number).match(/(\d+)\s*$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return "P" + String(max + 1).padStart(4, "0");
+}
+function slug(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function prettify(id) {
+  return String(id).replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// src/routes/portal.js
+var SETTINGS_KEY = "portal:settings";
+async function requireFullAccess(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { err: error("Not authenticated", 401, env, request) };
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
+  return { sess };
+}
+async function handle8(request, env, ctx, url) {
+  const path = url.pathname;
+  const method = request.method;
+  if (path === "/settings" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(SETTINGS_KEY).first();
+    let settings = {};
+    try {
+      settings = row ? JSON.parse(row.value) : {};
+    } catch {
+    }
+    return json({ ok: true, settings }, {}, env, request);
+  }
+  if (path === "/settings" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    await env.DB.prepare(`
+      INSERT INTO app_config (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    `).bind(SETTINGS_KEY, JSON.stringify(b || {})).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/oncall/current" && method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const cur = async (role) => await env.DB.prepare(
+      "SELECT name, set_by, set_at FROM oncall_log WHERE role=? ORDER BY id DESC LIMIT 1"
+    ).bind(role).first();
+    return json({ ok: true, engineer: await cur("engineer"), manager: await cur("manager") }, {}, env, request);
+  }
+  if (path === "/oncall/set" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const by = sess.user.username;
+    const stmts = [];
+    if (b.engineer) stmts.push(env.DB.prepare("INSERT INTO oncall_log (role, name, set_by) VALUES ('engineer', ?, ?)").bind(String(b.engineer), by));
+    if (b.manager) stmts.push(env.DB.prepare("INSERT INTO oncall_log (role, name, set_by) VALUES ('manager', ?, ?)").bind(String(b.manager), by));
+    if (!stmts.length) return error("Nothing to set \u2014 send engineer and/or manager", 400, env, request);
+    await env.DB.batch(stmts);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/oncall/history" && method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT role, name, set_by, set_at FROM oncall_log ORDER BY id DESC LIMIT 200"
+    ).all();
+    return json({ ok: true, history: results || [] }, {}, env, request);
+  }
+  if (path === "/daily-logs" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!b.engineer || !b.date) return error("engineer and date required", 400, env, request);
+    await env.DB.prepare(`
+      INSERT INTO daily_logs (engineer, date, site, standard_hours, overtime_hours, travel_time, mileage, notes, submitted_by)
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).bind(
+      b.engineer,
+      b.date,
+      b.site || null,
+      num(b.standardHours),
+      num(b.overtimeHours),
+      num(b.travelTime),
+      num(b.mileage),
+      b.notes || null,
+      sess.user.username
+    ).run();
+    return json({ ok: true }, { status: 201 }, env, request);
+  }
+  if (path === "/daily-logs" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const conds = [], binds = [];
+    if (q.get("engineer")) {
+      conds.push("engineer = ?");
+      binds.push(q.get("engineer"));
+    }
+    if (q.get("from")) {
+      conds.push("date >= ?");
+      binds.push(q.get("from"));
+    }
+    if (q.get("to")) {
+      conds.push("date <= ?");
+      binds.push(q.get("to"));
+    }
+    let sql = "SELECT * FROM daily_logs";
+    if (conds.length) sql += " WHERE " + conds.join(" AND ");
+    sql += " ORDER BY date DESC, id DESC LIMIT 500";
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    return json({ ok: true, logs: results || [] }, {}, env, request);
+  }
+  return error("Unknown portal route", 404, env, request);
+}
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// src/routes/sitelog.js
+var SITELOG_API = "https://api.site-log.co.uk";
+var SCAN_URL = "https://site-log.co.uk/scan.html";
+async function handle9(request, env, ctx, url) {
+  const path = url.pathname;
+  if (path === "/sitelog-launch" && request.method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    const perms2 = await permissionsFor(env, sess2.user.username);
+    if (perms2.SiteLog !== "Yes" && perms2.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    if (!env.PORTAL_BRIDGE_SECRET)
+      return json({ ok: true, url: SCAN_URL, linked: false }, {}, env, request);
+    const payload = {
+      u: sess2.user.username,
+      f: sess2.user.first_name || "",
+      l: sess2.user.last_name || "",
+      c: "Mostlane",
+      exp: Date.now() + 5 * 60 * 1e3
+      // 5 minutes to tap through
+    };
+    const token = await signBridgeToken(env.PORTAL_BRIDGE_SECRET, payload);
+    return json({ ok: true, url: SCAN_URL + "#pt=" + token, linked: true }, {}, env, request);
+  }
+  const sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes")
+    return error("Forbidden \u2014 SiteLog admin data needs Full Access", 403, env, request);
+  if (!env.SITELOG_ADMIN_SECRET)
+    return error("SITELOG_ADMIN_SECRET is not configured on this worker", 500, env, request);
+  const sub = path.replace(/^\/sitelog(?=\/|$)/, "") || "/";
+  const target = SITELOG_API + sub + url.search;
+  const init = {
+    method: request.method,
+    headers: { "x-admin-secret": env.SITELOG_ADMIN_SECRET }
+  };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.headers["Content-Type"] = request.headers.get("Content-Type") || "application/json";
+    init.body = await request.arrayBuffer();
+  }
+  let res;
+  try {
+    res = await fetch(target, init);
+  } catch (e) {
+    return error("SiteLog API unreachable: " + e.message, 502, env, request);
+  }
+  const headers = new Headers(corsHeaders(env, request));
+  const ct = res.headers.get("Content-Type");
+  if (ct) headers.set("Content-Type", ct);
+  const cd = res.headers.get("Content-Disposition");
+  if (cd) headers.set("Content-Disposition", cd);
+  return new Response(res.body, { status: res.status, headers });
+}
+function b64u(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function signBridgeToken(secret, payload) {
+  const enc2 = new TextEncoder();
+  const body = "v1." + b64u(enc2.encode(JSON.stringify(payload)));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc2.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc2.encode(body));
+  return body + "." + b64u(sig);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
   ["*", "/admin/login-history", loginHistory],
   ["*", "/user", handle2],
   // /user and /users
+  ["*", "/onboard", handle2],
+  // public self-registration (Pending)
+  ["*", "/hs-plan-config", handle2],
+  ["*", "/po-config", handle2],
   ["*", "/device", handle3],
   ["*", "/holiday", handle4],
   ["*", "/asset", handle5],
@@ -1756,9 +2291,23 @@ var ROUTES = [
   // /transfer, /transfer-log
   ["*", "/upload-asset-image", handle5],
   ["*", "/delete-asset-image", handle5],
-  ["*", "/sla", handle6]
+  ["*", "/sla", handle6],
+  ["*", "/get-sites", handle7],
+  ["*", "/add-site", handle7],
+  ["*", "/update-site", handle7],
+  ["*", "/next-project-job-number", handle7],
+  ["*", "/upload-image", handle7],
+  ["*", "/customers", handle7],
+  ["*", "/import-sites", handle7],
+  ["*", "/sites", handle7],
+  // /sites/street-images (bulk imagery)
+  ["*", "/settings", handle8],
+  ["*", "/oncall", handle8],
+  ["*", "/daily-logs", handle8],
+  ["*", "/sitelog", handle9],
+  ["*", "/sitelog-launch", handle9]
   // Excluded for now (separate / later systems): Purchase Orders,
-  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles, Sites,
+  // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
 ];
 var index_default = {
@@ -1786,6 +2335,8 @@ var PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
   ["POST", "/auth/forgot-password"],
   ["POST", "/auth/reset-password"],
+  // Public self-registration form (login page → "Sign up").
+  ["POST", "/onboard"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"]

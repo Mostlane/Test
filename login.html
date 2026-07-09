@@ -84,7 +84,9 @@
     // After login, go to the forced password-change screen if required,
     // otherwise the main menu.
     function nextPage() {
-      return window.__mostlaneMustChange ? "change-password.html?forced=1" : "main.html";
+      if (window.__mostlaneMustChange) return "change-password.html?forced=1";
+      if (window.__mostlaneStory) return "my-day.html";   // Story Mode engineers land on their guided day
+      return "main.html";
     }
 
     function runDeviceCheckAndContinue(username) {
@@ -156,6 +158,8 @@ const user = result.user;
         window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
         // Master-password login → bypass the device lock for this session.
         window.__mostlaneMasterLogin = !!result.master;
+        // Story Mode engineers are routed to the guided My Day screen.
+        window.__mostlaneStory = user.StoryMode === "Yes";
         if (result.master) sessionStorage.setItem("mostlaneMasterLogin", "1");
         else sessionStorage.removeItem("mostlaneMasterLogin");
 
@@ -194,7 +198,9 @@ const user = result.user;
   Weekly: user.Weekly,
   Forms: user.Forms,
   Compliance: user.Compliance,
-  StoryMode: user.StoryMode
+  StoryMode: user.StoryMode,
+  HSPlan: user.HSPlan,
+  SiteLog: user.SiteLog
 };
 
 

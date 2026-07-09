@@ -23,6 +23,7 @@
     tr:last-child td { border-bottom:none; }
     .pill { font-size:11px; padding:2px 8px; border-radius:999px; }
     .pill.active { background:#e3f6e8; color:#0c7d27; } .pill.disabled { background:#fde8ea; color:#b00020; }
+    .pill.pending { background:#fff3cd; color:#7a5b00; }
     .muted { color:#667085; font-size:12px; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
     .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; }
@@ -106,7 +107,7 @@
           </div>
           <div>
             <label>Status</label>
-            <select id="f_status"><option>Active</option><option>Disabled</option></select>
+            <select id="f_status"><option>Active</option><option>Pending</option><option>Disabled</option></select>
           </div>
         </div>
       </div>
@@ -155,6 +156,7 @@
       <div class="section" data-sec="account">
         <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" /></div>
         <div><label>SharePoint path</label><input id="f_sp" /></div>
+        <div><label>PO system personal link</label><input id="p_poUrl" placeholder="e.g. https://…workers.dev/o/jamie or /e/david-molloy" /></div>
         <div style="margin-top:14px;padding:12px;border:1px solid #d7dee6;border-radius:8px;background:#f7faff;">
           <label style="display:flex;align-items:flex-start;gap:8px;margin:0;font-weight:600;cursor:pointer;">
             <input type="checkbox" data-perm="StoryMode" style="margin-top:3px;" />
@@ -183,12 +185,16 @@
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
-      "TimesheetAdmin","LabourPlanning","SLA"];
+      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
-      "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod"];
+      "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
 
     let allUsers = [];
+    // The Profile blob of the user currently open in the editor. We keep it so
+    // that keys this form doesn't manage (e.g. home geofence, onboarding data)
+    // survive a save instead of being wiped by the full-Profile replace.
+    let editingProfile = {};
 
     function api(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
@@ -246,7 +252,7 @@
           <td><b>${esc((u.FirstName||"") + " " + (u.LastName||""))}</b><div class="muted">${esc(u.Username)}</div></td>
           <td>${esc(u.Email||"")}</td>
           <td>${esc(u.EmploymentType||"")}</td>
-          <td><span class="pill ${u.Status==='Disabled'?'disabled':'active'}">${esc(u.Status||'Active')}</span></td>
+          <td><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></td>
           <td>${esc(accessSummary(u))}</td>
           <td><div class="actions">
             <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
@@ -275,6 +281,7 @@
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
+      editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
       document.querySelectorAll("[data-perm]").forEach(cb => { cb.checked = user ? user[cb.dataset.perm] === "Yes" : false; });
       g("panelMsg").textContent = "";
@@ -306,8 +313,13 @@
       if (!body.Username) { msg.className = "msg err"; msg.textContent = "Username is required."; return; }
       const pw = g("f_pw").value;
       if (pw) body.Password = pw;
-      const profile = {};
-      PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el && el.value !== "") profile[k] = el.value; });
+      // Start from the profile we loaded so unmanaged keys (home geofence,
+      // onboarding capture, …) are preserved; overlay the managed fields.
+      const profile = Object.assign({}, editingProfile);
+      PROFILE_FIELDS.forEach(k => {
+        const el = g("p_" + k); if (!el) return;
+        if (el.value !== "") profile[k] = el.value; else delete profile[k];
+      });
       body.Profile = profile;
       document.querySelectorAll("[data-perm]").forEach(cb => { body[cb.dataset.perm] = cb.checked ? "Yes" : "No"; });
       try {

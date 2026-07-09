@@ -28,6 +28,86 @@ async function requireAdmin(env, request) {
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
 
+  // POST /onboard — PUBLIC self-registration (the login page "Sign up" form).
+  // Files the new starter as a Pending account for an admin to review; no
+  // password is set and no permissions are granted, so the record is inert
+  // until an admin activates it in Users admin. Create-only: it never touches
+  // an existing account, so an anonymous caller can't hijack or overwrite one.
+  if (path === "/onboard" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const firstName = (b.firstName || "").trim();
+    const lastName = (b.lastName || "").trim();
+    const email = (b.email || "").trim();
+    if (!firstName || !lastName || !email)
+      return error("First name, last name and email are required.", 400, env, request);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return error("Please enter a valid email address.", 400, env, request);
+
+    // If someone with this email already exists, don't create a duplicate — and
+    // don't reveal that it exists. Respond success without touching the account.
+    const existingEmail = await env.DB.prepare(
+      "SELECT username FROM users WHERE email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(email).first();
+    if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
+
+    // Pick a free username: first.last, then first.last2, first.last3, …
+    const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase()
+      .replace(/[^a-z0-9._-]/g, "") || "user";
+    let username = base;
+    for (let n = 2; await env.DB.prepare("SELECT username FROM users WHERE username=?")
+        .bind(username).first(); n++) {
+      username = base + n;
+    }
+
+    const profile = {
+      phone: b.mobile || "",
+      jobTitle: b.jobRole || "",
+      postcode: b.postcode || "",
+      onboard: {
+        deviceId: b.deviceId || "",
+        lat: b.latitude || "",
+        lng: b.longitude || "",
+        submittedAt: new Date().toISOString(),
+      },
+    };
+
+    await env.DB.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile)
+      VALUES (?,?,?,?, 'Pending', ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile)).run();
+
+    return json({ ok: true, pending: true, username }, {}, env, request);
+  }
+
+  // GET /po-config — the logged-in user's personal PO-system link (stored on
+  // their profile). Gated by the PurchaseOrders permission.
+  if (path === "/po-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    let profile = {};
+    try { profile = sess.user.profile ? JSON.parse(sess.user.profile) : {}; } catch {}
+    return json({ ok: true, url: profile.poUrl || "" }, {}, env, request);
+  }
+
+  // GET /hs-plan-config — launch details for the H&S planner. The app token
+  // lives as a worker secret (HS_PLAN_TOKEN) and is only released to users
+  // holding the HSPlan permission (or FullAccess).
+  if (path === "/hs-plan-config" && request.method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+      return error("Forbidden", 403, env, request);
+    return json({
+      ok: true,
+      worker: env.HS_PLAN_WORKER || "https://mostlane-hs-jobs.jamie-def.workers.dev",
+      token: env.HS_PLAN_TOKEN || ""
+    }, {}, env, request);
+  }
+
   // GET /user?u=username
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
@@ -194,6 +274,8 @@ const PERMISSION_KEYS = [
   "Sites", "AddSite", "Assets", "MyDocuments", "Weekly", "Forms", "Compliance",
   "Projects", "ProjectsAdmin", "TimesheetAdmin", "LabourPlanning", "SLA",
   "StoryMode",   // opt-in: guided day protocol for this engineer
+  "HSPlan",      // access to the H&S planning tool
+  "SiteLog",     // access to SiteLog (site check-in/attendance)
 ];
 
 function shapeUser(u, perms) {

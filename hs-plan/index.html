@@ -1,0 +1,2075 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mostlane &mdash; Construction Phase H&amp;S Plan Builder</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1b5a9b">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mostlane H&amp;S">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style id="appstyle">
+  :root{
+    --brand:#1b5a9b;          /* Mostlane blue */
+    --brand-dark:#134272;
+    --brand-light:#e7eff6;
+    --line:#ccd6e0;
+    --ink:#1c2530;
+    --muted:#5a6675;
+    --paper:#fff;
+    --head:"Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    --body:"Barlow", Arial, Helvetica, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family:var(--body);
+    color:var(--ink);
+    background:#eef1f5;
+    -webkit-text-size-adjust:100%;
+  }
+
+  /* ---------- Layout (screen) ---------- */
+  .layout{display:flex;min-height:100vh}
+  .form-pane{
+    width:430px;
+    flex:0 0 430px;
+    background:var(--paper);
+    border-right:1px solid var(--line);
+    padding:18px 20px 80px;
+    overflow-y:auto;
+    height:100vh;
+    position:sticky;
+    top:0;
+  }
+  .doc-pane{
+    flex:1;
+    padding:28px;
+    overflow-y:auto;
+    height:100vh;
+  }
+
+  .app-title{font-size:18px;color:var(--brand);margin:0 0 2px}
+  .app-sub{font-size:12px;color:var(--muted);margin:0 0 16px}
+
+  .toolbar{
+    display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;
+    position:sticky;top:-18px;background:var(--paper);padding:10px 0;z-index:5;
+    border-bottom:1px solid var(--line);
+  }
+  button{
+    font:inherit;cursor:pointer;border:1px solid var(--brand);
+    background:var(--brand);color:#fff;border-radius:6px;padding:9px 14px;
+  }
+  button.secondary{background:#fff;color:var(--brand)}
+  button.small{padding:4px 9px;font-size:12px}
+  button.danger{border-color:#a33;color:#a33;background:#fff}
+  button:hover{filter:brightness(.96)}
+
+  details.group{
+    border:1px solid var(--line);border-radius:8px;margin-bottom:12px;
+    background:#fbfcfe;overflow:hidden;
+  }
+  details.group>summary{
+    cursor:pointer;padding:11px 14px;font-weight:bold;color:var(--brand);
+    background:var(--brand-light);list-style:none;user-select:none;
+  }
+  details.group>summary::-webkit-details-marker{display:none}
+  details.group>summary::before{content:"\25B8  ";color:var(--brand)}
+  details.group[open]>summary::before{content:"\25BE  "}
+  .group-body{padding:12px 14px}
+
+  label.field{display:block;margin-bottom:11px;font-size:13px}
+  label.field>span.lbl{display:block;font-weight:bold;margin-bottom:3px}
+  label.field>span.help{display:block;font-weight:normal;color:var(--muted);font-size:11px;margin-bottom:4px}
+  input[type=text], textarea, select{
+    width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:5px;
+    font:inherit;background:#fff;
+  }
+  textarea{min-height:64px;resize:vertical;line-height:1.4}
+
+  .repeat-row{
+    border:1px dashed var(--line);border-radius:6px;padding:10px;margin-bottom:10px;
+    background:#fff;position:relative;
+  }
+  .repeat-row .row-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .repeat-row .row-head b{font-size:12px;color:var(--muted)}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+  .hint{font-size:12px;color:var(--muted);margin:0 0 14px;line-height:1.5}
+
+  /* ---------- Library / home screen ---------- */
+  .library{position:fixed;inset:0;z-index:900;background:#eef1f5;overflow:auto;display:none}
+  .library.show{display:block}
+  .lib-inner{max-width:1000px;margin:0 auto;padding:28px 22px 60px}
+  .lib-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;
+    border-bottom:3px solid var(--brand);padding-bottom:14px;margin-bottom:18px}
+  .lib-head h1{font-family:var(--head);color:var(--brand-dark);font-size:26px;margin:0}
+  .lib-sub{color:var(--muted);font-size:12px;margin:4px 0 0;font-family:var(--head)}
+  .lib-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .lib-status{font-size:13px;color:var(--muted);min-height:18px;margin:0 0 12px}
+  .lib-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .job-card{border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:8px;
+    background:#fff;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+  .job-card h3{font-family:var(--head);color:var(--brand-dark);font-size:17px;margin:0;line-height:1.2}
+  .job-card .meta{font-size:11px;color:var(--muted);font-family:var(--head);text-transform:uppercase;letter-spacing:.04em}
+  .job-card .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+  .job-card .row button{flex:0 0 auto}
+  .lib-empty{border:1px dashed var(--line);border-radius:8px;padding:24px;text-align:center;color:var(--muted)}
+
+  /* ---------- Document (the printable plan) ---------- */
+  .doc-pane{background:#dce2ea}
+  .page{
+    position:relative;
+    background:var(--paper);
+    width:210mm;
+    max-width:100%;
+    min-height:297mm;
+    margin:0 auto 20px;
+    padding:14mm 16mm 12mm;
+    box-shadow:0 2px 12px rgba(20,40,70,.18);
+    font-size:11.5px;
+    line-height:1.55;
+    color:var(--ink);
+    display:flex;            /* lets the footer sit at the bottom of the page */
+    flex-direction:column;
+  }
+
+  /* running header (company details) at the top of every page */
+  .doc .runhead{
+    display:flex;align-items:center;justify-content:space-between;gap:14px;flex:0 0 auto;
+    border-bottom:2px solid var(--brand);padding-bottom:8px;margin-bottom:14px;
+  }
+  .doc .runhead img{height:30px;width:auto}
+  .doc .runhead .rh-co{font-family:var(--head);font-size:9.5px;line-height:1.4;color:var(--muted);text-align:right}
+  .doc .runhead .rh-co b{display:block;font-size:12px;color:var(--brand-dark);letter-spacing:.05em;text-transform:uppercase}
+
+  /* headings */
+  .doc h1{font-family:var(--head);font-weight:700;font-size:30px;line-height:1.05;
+    color:var(--brand-dark);letter-spacing:.01em;margin:0 0 14px}
+  .doc h2{font-family:var(--head);font-weight:600;font-size:17px;text-transform:uppercase;
+    letter-spacing:.04em;color:var(--brand-dark);margin:22px 0 10px;
+    padding:6px 0 6px 12px;border-left:5px solid var(--brand);background:var(--brand-light)}
+  .doc h3{font-family:var(--head);font-weight:600;font-size:13.5px;text-transform:uppercase;
+    letter-spacing:.05em;color:var(--brand);margin:16px 0 5px}
+  .doc h4{font-family:var(--head);font-weight:600;font-size:12px;text-transform:uppercase;
+    letter-spacing:.04em;color:var(--ink);margin:13px 0 3px}
+  .doc p{margin:0 0 9px;text-align:justify}
+  .doc ul{margin:0 0 9px;padding-left:20px}
+
+  /* tables */
+  .doc table{width:100%;border-collapse:collapse;margin:10px 0 16px;font-size:10.8px}
+  .doc th,.doc td{border:1px solid #c4cedb;padding:6px 8px;text-align:left;vertical-align:top}
+  .doc thead th, .doc tr:first-child th{background:var(--brand);color:#fff;font-family:var(--head);
+    text-transform:uppercase;letter-spacing:.04em;font-weight:600;border-color:var(--brand)}
+  .doc th{background:var(--brand-light);color:var(--brand-dark);font-weight:600}
+  .doc tbody tr:nth-child(even) td{background:#f5f8fb}
+  .doc table.cm td:first-child{width:30%;font-weight:600;color:var(--brand-dark)}
+  .doc table.cm tbody tr:nth-child(even) td{background:#fff}
+  .doc table.rs td{text-align:center}
+  .doc table.rs td.haz{text-align:left;font-weight:600;color:var(--brand-dark)}
+  .doc table.rs td.aff{text-align:left;font-size:9.5px}
+  .doc .rk-h{background:#f5c6c6;font-weight:600}.doc .rk-m{background:#fde9b8;font-weight:600}.doc .rk-l{background:#cdeacd;font-weight:600}
+  .doc .keygrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:10px;margin:4px 0 12px}
+  .doc .keygrid h4{margin:0 0 4px}
+  .doc .keygrid ul{margin:0;padding-left:16px;list-style:none}
+  .doc .ms-yesno{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;margin:8px 0 14px}
+  .doc .ms-yesno div{border:1px solid #c4cedb;border-radius:4px;padding:6px 4px;font-size:10px}
+  .doc .ms-yesno b{display:block;font-family:var(--head);text-transform:uppercase;letter-spacing:.03em;color:var(--brand-dark);font-size:9.5px;margin-bottom:3px}
+  .doc .ms-fill{min-height:34px;border:1px solid #c4cedb;border-radius:4px;padding:8px;white-space:pre-wrap;background:#fafcfe;margin:0 0 12px}
+
+  /* ----- cover page ----- */
+  .doc .cover{padding:0;overflow:hidden}
+  .doc .cover .cover-logo{background:#fff;padding:14mm 18mm 6mm}
+  .doc .cover .cover-logo img, .doc .cover .cover-logo svg{height:96px;width:auto;max-width:100%;display:block}
+  .doc .cover .band{background:var(--brand);color:#fff;padding:13mm 18mm;position:relative;flex:0 0 auto}
+  .doc .cover .band::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;background:var(--brand-dark)}
+  .doc .cover h1{color:#fff;font-size:38px;margin:0}
+  .doc .cover .cover-body{flex:1 0 auto;display:flex;flex-direction:column;padding:14mm 18mm}
+  .doc .cover .card-row{display:flex;gap:16px;margin:0 0 16px;align-items:stretch}
+  .doc .cover .sitecard{flex:1;border:1px solid var(--line);border-top:4px solid var(--brand);
+    border-radius:4px;padding:14px 16px;margin:0;background:#fafcfe}
+  .doc .cover .sitecard .lab{font-family:var(--head);text-transform:uppercase;letter-spacing:.06em;
+    font-size:10px;color:var(--muted);margin:0 0 2px}
+  .doc .cover .sitecard .big{font-family:var(--head);font-weight:600;font-size:18px;color:var(--brand-dark);margin:0 0 8px}
+  .doc .cover .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+
+  /* misc */
+  .doc .company-block{font-size:11px;line-height:1.45}
+  .doc .footer-note{margin-top:auto;flex:0 0 auto;          /* pinned to the bottom of the page */
+    font-family:var(--head);font-size:9.5px;letter-spacing:.04em;color:var(--muted);
+    border-top:1px solid var(--line);padding-top:6px;display:flex;align-items:center;gap:7px}
+  .doc .footer-note img{max-height:18px}
+  .doc .appendix-tab{font-family:var(--head);font-size:46px;font-weight:700;color:#b4c6d8;
+    text-align:right;margin:0;line-height:1;letter-spacing:.04em}
+  .doc .appendix-tab b{color:var(--brand)}
+  .doc .danger-tag{display:inline-block;background:#fff;border:1.5px solid #c0392b;color:#922;
+    padding:3px 12px;border-radius:20px;font-family:var(--head);text-transform:uppercase;
+    letter-spacing:.05em;font-weight:600;font-size:11px}
+  .doc .route-meta{background:var(--brand-light);border-left:4px solid var(--brand);
+    padding:8px 12px;border-radius:0 4px 4px 0;margin:8px 0}
+  .doc figure{margin:8px 0 14px}
+  .doc figure img{display:block;width:100%;border:1px solid #c4cedb;border-radius:4px}
+  .doc figcaption{font-family:var(--head);text-transform:uppercase;letter-spacing:.05em;
+    font-size:9.5px;color:var(--muted);margin-top:4px}
+  .risk-high{background:#f5c6c6}.risk-med{background:#fde9b8}.risk-low{background:#cdeacd}
+
+  /* ---------- Map modals (screen only) ---------- */
+  .modal-overlay{position:fixed;inset:0;background:rgba(12,22,38,.55);z-index:1000;
+    display:flex;align-items:center;justify-content:center;padding:18px}
+  .modal{background:#fff;border-radius:8px;width:min(940px,96vw);max-height:94vh;
+    display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 44px rgba(0,0,0,.4)}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    padding:12px 16px;background:var(--brand);color:#fff;font-family:var(--head);
+    font-size:15px;text-transform:uppercase;letter-spacing:.04em}
+  .modal-head .mx{background:transparent;border:none;color:#fff;font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
+  .modal-body{padding:14px 16px;overflow:auto}
+  .modal-foot{padding:12px 16px;border-top:1px solid var(--line);display:flex;
+    gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+  .modal .map{height:52vh;min-height:320px;border:1px solid var(--line);border-radius:6px}
+  .modal .map-search{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:5px;margin-bottom:8px;font:inherit}
+  .modal .tools{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .modal .ae-list{max-height:150px;overflow:auto}
+  .modal .ae-list .repeat-row{margin-bottom:6px}
+  .modal .rinfo{font-family:var(--head);color:var(--brand-dark);font-weight:600}
+
+  /* ---------- Print ---------- */
+  @page{size:A4;margin:0}
+  @media print{
+    body{background:#fff}
+    .form-pane,.toolbar,.no-print,.modal-overlay{display:none !important}
+    .layout{display:block}
+    .doc-pane{height:auto;overflow:visible;padding:0;background:#fff}
+    .page{
+      box-shadow:none;margin:0;width:auto;min-height:296mm;padding:13mm 14mm;
+      page-break-after:always;
+    }
+    .page.cover{padding:0}
+    .page:last-child{page-break-after:auto}
+    .doc figure, .doc table, .doc h2{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LIBRARY / HOME SCREEN ============ -->
+<div id="library" class="library">
+  <div class="lib-inner">
+    <div class="lib-head">
+      <div>
+        <h1>Construction Phase H&amp;S Plans</h1>
+        <p class="lib-sub">Mostlane Construction Ltd &mdash; job library <span style="opacity:.6">&middot; build 2026-06-11k</span></p>
+      </div>
+      <div class="lib-actions">
+        <button id="libMain" class="secondary">&#9776; Main Menu</button>
+        <button id="libNew">+ New job</button>
+        <button id="libRefresh" class="secondary">Refresh</button>
+        <button id="libCloud" class="secondary">Cloud settings</button>
+      </div>
+    </div>
+    <p id="libStatus" class="lib-status"></p>
+    <div id="libList" class="lib-list"></div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- ============ FORM PANE ============ -->
+  <div class="form-pane">
+    <h1 class="app-title">Construction Phase H&amp;S Plan</h1>
+    <p class="app-sub">Mostlane Construction Ltd &mdash; job set-up questionnaire <span style="opacity:.6">&middot; build 2026-06-11k</span></p>
+
+    <div class="toolbar">
+      <button id="btnMainMenu" class="secondary">&#9776; Main Menu</button>
+      <button id="btnLibrary" class="secondary">&larr; Library</button>
+      <button id="btnCloudSave">Save to cloud</button>
+      <button id="btnPrint">Save / Print PDF</button>
+      <button id="btnPreview" class="secondary">Preview PDF</button>
+      <button id="btnNew" class="secondary small">Blank form</button>
+      <button id="btnExample" class="secondary small">Load example</button>
+      <button id="btnSave" class="secondary small">Backup file</button>
+      <button id="btnLoad" class="secondary small">Restore file</button>
+    </div>
+
+    <p class="hint">
+      Fill in the fields below &mdash; the document on the right updates as you type.
+      When it looks right, click <b>Save / Print PDF</b> and choose
+      &ldquo;Save as PDF&rdquo;. Your answers are kept in this browser automatically.
+    </p>
+
+    <div id="formRoot"></div>
+    <input type="file" id="fileInput" accept="application/json" class="no-print" style="display:none">
+  </div>
+
+  <!-- ============ DOCUMENT PANE ============ -->
+  <div class="doc-pane">
+    <div id="docRoot" class="doc"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   1. FIELD CONFIGURATION
+   Edit this list to add / remove / rename questions.
+   type: text | textarea | select | issues | directory
+   ============================================================ */
+const GROUPS = [
+  { title:"Company branding", open:true, fields:[
+    { id:"_brand", label:"Brand colour", type:"color", def:"#1b5a9b",
+      help:"Used for headings, table headers and accents throughout the plan." },
+    { id:"_logo",  label:"Company logo", type:"logo",
+      help:"PNG or JPG. Appears on the cover and at the foot of every page. Stored in this browser and included in your backup file." },
+    { id:"_mapsKey", label:"Google Maps API key (override)", type:"text",
+      help:"A Mostlane key is already built in, so the map features work without entering anything here. Only fill this in to use a different key (it overrides the built-in one and is stored only in this browser)." },
+  ]},
+
+  { title:"1. Project & issue details", open:true, fields:[
+    { id:"projectName",  label:"Project / site name", type:"text", def:"Lake Road Surgery" },
+    { id:"siteAddress",  label:"Site address", type:"textarea", def:"Lake Road\nVerwood\nBH31 6EH",
+      help:"One line per row." },
+    { id:"projectNo",    label:"Project number", type:"text", def:"45105" },
+    { id:"projectRef",   label:"Project reference", type:"text", def:"MOS0552/00012" },
+    { id:"scheme",       label:"Scheme description", type:"text",
+      def:"Demolition, extension & refurbishment of existing Building" },
+    { id:"duration",     label:"Project duration", type:"text", def:"16 Weeks" },
+    { id:"workingHours", label:"Working hours", type:"text", def:"08:00 – 16:30 Mon – Fri" },
+    { id:"asbestos",     label:"Asbestos likely (build date)?", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"issues",       label:"Issue / revision history", type:"issues" },
+  ]},
+
+  { title:"2. Mostlane project team", open:false, fields:[
+    { id:"officeTel",          label:"Office telephone", type:"text", def:"02380 262 000" },
+    { id:"projectDirector",    label:"Project Director", type:"text", def:"Joe Line" },
+    { id:"projectDirectorMob", label:"Project Director mobile", type:"text", def:"07774 252851" },
+    { id:"contractsManager",   label:"Contracts Manager(s)", type:"text", def:"Joe Line / Jamie Line" },
+    { id:"contractsManagerTel",label:"Contracts Manager phone", type:"text", def:"07771 357346" },
+    { id:"siteManager",        label:"Site Manager", type:"text", def:"Chris Freeman" },
+    { id:"siteManagerTel",     label:"Site Manager phone", type:"text", def:"07770 572991" },
+  ]},
+
+  { title:"3. Site-specific arrangements", open:false, fields:[
+    { id:"welfare", label:"Welfare facilities & first aid (site set-up)", type:"textarea",
+      def:"Welfare facilities including toilet, hot and cold running water and a sink will be provided on site by the client in the form of the area in the bungalow on the site that has been set aside for the use of Mostlane Construction Ltd employees and sub-contractors for the duration of the project. A portaloo will be supplied when services have to be removed during the refurbishment." },
+    { id:"accessEgress", label:"Access & egress (incl. deliveries)", type:"textarea",
+      def:"Access is restricted to working area only. Access to site is only via staff entrance and no vans or deliveries should use the main surgery car park or entrance. Deliveries will be carried out by Mostlane Construction Ltd direct to site operatives." },
+    { id:"stability", label:"Stability of existing structure", type:"textarea", def:"N/A" },
+    { id:"fallPrevention", label:"Fall prevention (scaffold / access notes)", type:"textarea",
+      def:"For this project it is anticipated that a Stairwell Tower Scaffold may be used. This will be assembled by the site supervisor who is PASMA trained and he will also record inspections for each time the Stairwell tower scaffold is erected." },
+    { id:"lifting", label:"Lifting operations", type:"textarea",
+      def:"It is not anticipated that there will be any lifting operations carried out on this project." },
+    { id:"traffic", label:"Traffic routes & segregation", type:"textarea",
+      def:"Care to be taken that this is a busy car park used by the public all day." },
+    { id:"storage", label:"Storage of materials & compound", type:"textarea",
+      def:"A compound area will be agreed in designated car park spaces in the car park area and will be made up with locked Heras fencing." },
+  ]},
+
+  { title:"4. Project directory (Appendix A & D)", open:false, fields:[
+    { id:"directory", label:"Project directory contacts", type:"directory" },
+  ]},
+
+  { title:"5. Risk assessment summary (Appendix B)", open:false, fields:[
+    { id:"ramsTitle",     label:"RAMS title", type:"text", def:"Lake Road Surgery - Internal Alterations" },
+    { id:"ramsDanger",    label:"Overall risk level", type:"select", options:["Low Risk Activity","Medium Risk Activity","High Risk Activity"], def:"Medium Risk Activity" },
+    { id:"ramsLocation",  label:"Location of activity", type:"text", def:"Lake Road Surgery, Verwood, BH31 6EH" },
+    { id:"ramsDesc",      label:"Description of activity", type:"text", def:"Demolition, extension and internal refurbishment" },
+    { id:"ramsEquipment", label:"Equipment used", type:"textarea", def:"General Building Tools, Cordless drills, Excavators, Breakers & General Groundworking Tools" },
+    { id:"ramsSupporting",label:"Supporting documents", type:"text", def:"Risk Assessments & COSHH" },
+    { id:"ramsPersons",   label:"Persons affected", type:"text", def:"Management, Supervisor, Operative, Client, Apprentice" },
+    { id:"ramsNumbers",   label:"Total numbers affected", type:"text", def:"Less than 5 on site at any one time" },
+    { id:"ramsFrequency", label:"Frequency of exposure", type:"text", def:"Most items most days" },
+    { id:"ramsExposure",  label:"Duration of exposure", type:"text", def:"10 week contract" },
+    { id:"ramsAssessor",  label:"Assessor", type:"text", def:"Joe Line" },
+    { id:"ramsCreated",   label:"Created on", type:"text", def:"22/02/2026" },
+    { id:"ramsReview",    label:"Review before", type:"text", def:"22/02/2028" },
+  ]},
+
+  { title:"6. Compound location (Appendix C)", open:false, fields:[
+    { id:"includeCompound", label:"Include a compound location section?", type:"select", options:["Yes","No"], def:"Yes",
+      help:"Set to No to leave Appendix C out of the plan entirely." },
+    { id:"compoundText", label:"Compound / site set-up notes", type:"textarea",
+      def:"Compound Area to include Contractor Parking.\nNo Entry to Main Car Park for Contractors or Deliveries.\nAll Entry for Contractors & Deliveries via Newtown Road.\nBeware of Staff Parking adjacent to compound area." },
+    { id:"compoundMap", label:"Compound location map", type:"compoundmap",
+      help:"Open the map, set the pin / compound area (drag corners & mid-points for any shape) / access-route arrow, choose the area colour, frame the zoom, then Insert the image into Appendix C." },
+  ]},
+
+  { title:"7. Local hospital / A&E (Appendix E)", open:false, fields:[
+    { id:"hospitalFinder",  label:"A&E route planner", type:"hospitalfinder",
+      help:"Open the planner to find/choose a hospital, see the drive distance & time, frame the map, then Insert the route image into Appendix E." },
+    { id:"hospitalName",    label:"Nearest A&E hospital", type:"text", def:"Royal Bournemouth Hospital" },
+    { id:"hospitalAddress", label:"Hospital address", type:"textarea", def:"Castle Lane\nBournemouth BH7 7DW" },
+  ]},
+
+  { title:"8. Method statement (Appendix B)", open:false, fields:[
+    { id:"msSummary",   label:"Summary of the project", type:"textarea",
+      def:"Demolition of garage, new extension and internal alterations / refurbishment to the existing building." },
+    { id:"msStartDate", label:"Start date", type:"text", def:"" },
+    { id:"msFinishDate",label:"Finish date", type:"text", def:"" },
+    { id:"msIssueDate", label:"Issue date", type:"text", def:"22/02/2026" },
+    { id:"msDocNumber", label:"Document number", type:"text", def:"MOS0552/00012" },
+    { id:"msFirstAider",label:"On-site first aider", type:"text", def:"Chris Freeman" },
+    { id:"msFirstAidBox",label:"First aid box location", type:"text", def:"Site office / with Mostlane operatives" },
+    { id:"msEvacPoint", label:"Designated evacuation meeting point", type:"text", def:"Site compound (as per existing Fire Safety evacuation plan)" },
+    { id:"msPermit1",   label:"Work permit 1 name", type:"text", def:"Hot Works Permit" },
+    { id:"msPermit1Final", label:"Permit 1 finalised?", type:"select", options:["Yes","No"], def:"No" },
+    { id:"msPermit2",   label:"Work permit 2 name", type:"text", def:"Permit to Work / Isolation Certificate" },
+    { id:"msPermit2Final", label:"Permit 2 finalised?", type:"select", options:["Yes","No"], def:"No" },
+    { id:"msTraining",  label:"Staff training requirements", type:"textarea",
+      def:"CSCS, PASMA (tower scaffold), Asbestos awareness, Abrasive wheels, Manual handling, task-specific toolbox talks." },
+    { id:"msEquipment", label:"Equipment needed", type:"textarea",
+      def:"General building tools, cordless drills, excavators, breakers, general groundworking tools, stairwell tower scaffold." },
+    { id:"msHardHats",  label:"PPE: Hard hats", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msBoots",     label:"PPE: Safety boots", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msHiVis",     label:"PPE: High-visibility jackets", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msGloves",    label:"PPE: Safety gloves", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msEye",       label:"PPE: Eye protection", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msHearing",   label:"PPE: Hearing protection", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msResp",      label:"PPE: Respiratory protection", type:"select", options:["Yes","No"], def:"Yes" },
+    { id:"msWaste",     label:"Waste disposal arrangements", type:"textarea",
+      def:"All waste segregated where practicable and removed by a registered/licensed waste carrier; waste transfer/consignment notes retained in the PMS folder." },
+    { id:"msOrderOps",  label:"Order of operations", type:"textarea",
+      def:"1. Site set-up, welfare & compound.\n2. Soft strip / demolition of garage.\n3. Groundworks & foundations to extension.\n4. Structure & weathertight.\n5. Internal alterations & first/second fix.\n6. Finishes, testing & handover." },
+    { id:"msOtherInfo", label:"Other important information", type:"textarea", def:"" },
+  ]},
+];
+
+/* Default contents for the repeatable lists */
+const DEFAULT_ISSUES = [
+  { no:"1", date:"22/02/26", desc:"First issue", by:"Joe Line" },
+  { no:"2", date:"13/05/26", desc:"Revised Start Dates - Second Issue", by:"Joe Line" },
+];
+const DEFAULT_DIRECTORY = [
+  { service:"Client", name:"Jo Morris (Managing Partner) / Annie Morris (Operations Manager)", company:"The Cranborne Practice", address:"Lake Road Surgery, Lake Road, Verwood BH31 6EH", phone:"01202 822825", mobile:"07825 001787", email:"jo.morris@dorsetgp.nhs.uk" },
+  { service:"Architect", name:"Rhiannon North / Gareth Jenkins", company:"Studio Four Architects", address:"Tollgate Estates, Stanbridge Earls, Romsey SO51 0HE", phone:"01794 511255", mobile:"", email:"r.north@s4architects.co.uk" },
+  { service:"Structural Engineer", name:"Phil Fenna", company:"R Elliott Associates", address:"Dennett House, Brighton Road, Sway SO41 6EB", phone:"01590 683176", mobile:"", email:"p.fenna@rea-ltd.co.uk" },
+  { service:"CDM PD / Project Manager", name:"Joe Line (MD)", company:"Mostlane Construction Ltd", address:"Unit A5, Segensworth Business Centre, PO15 5RQ", phone:"023 8026 2000", mobile:"07774 252851", email:"joe@mostlane.com" },
+  { service:"Site Manager", name:"Chris Freeman", company:"Mostlane Construction Ltd", address:"Unit A5, Segensworth Business Centre, PO15 5RQ", phone:"", mobile:"07770 572991", email:"" },
+];
+
+/* ============================================================
+   2. STATE
+   ============================================================ */
+const STORAGE_KEY = "mostlane_cphsp_v1";
+let state = {};
+
+/* Non-question state used by the map features */
+const AUX_DEFAULTS = {
+  siteLatLng:null, compoundPin:null, compoundRect:null, compoundRoute:null, compoundImg:"", compoundBoxColor:"",
+  hospitalLatLng:null, hospitalPolyline:"", hospitalStraight:null, hospitalRouteText:"", hospitalImg:""
+};
+function ensureAux(){ for(const k in AUX_DEFAULTS) if(!(k in state)) state[k]=AUX_DEFAULTS[k]; }
+
+function blankState(){
+  const s={};
+  GROUPS.forEach(g=>g.fields.forEach(f=>{
+    if(f.type==="issues") s[f.id]=[{no:"1",date:"",desc:"First issue",by:""}];
+    else if(f.type==="directory") s[f.id]=[emptyContact()];
+    else if(f.type==="color") s[f.id]=f.def||"#1b5a9b";   // keep branding on a new job
+    else if(f.type==="logo") s[f.id]=state[f.id]||"";       // keep logo on a new job
+    else if(f.id==="_mapsKey") s[f.id]=state[f.id]||"";     // keep maps key on a new job
+    else if(f.type==="select") s[f.id]=f.def||"";           // sensible default for toggles
+    else s[f.id]="";
+  }));
+  Object.assign(s,{...AUX_DEFAULTS});                       // fresh maps state
+  return s;
+}
+function exampleState(){
+  const s={};
+  GROUPS.forEach(g=>g.fields.forEach(f=>{
+    if(f.type==="issues") s[f.id]=JSON.parse(JSON.stringify(DEFAULT_ISSUES));
+    else if(f.type==="directory") s[f.id]=JSON.parse(JSON.stringify(DEFAULT_DIRECTORY));
+    else if(f.id==="_logo"||f.id==="_mapsKey") s[f.id]=state[f.id]||"";  // keep logo & key
+    else s[f.id]=f.def||"";
+  }));
+  Object.assign(s,{...AUX_DEFAULTS});
+  return s;
+}
+function emptyContact(){return {service:"",name:"",company:"",address:"",phone:"",mobile:"",email:""};}
+
+function load(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(raw){ state=JSON.parse(raw); mergeDefaults(); ensureAux(); return; }
+  }catch(e){}
+  state=exampleState();           // first visit shows the worked example
+  ensureAux();
+}
+/* For returning users whose saved record predates newer fields (e.g. the
+   method-statement ms* fields): add any field that's missing, with its
+   default, without overwriting values they've already entered. */
+function mergeDefaults(){
+  const d=exampleState();
+  for(const k in d){ if(!(k in state)) state[k]=d[k]; }
+}
+function persist(){ try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(state)); }catch(e){} }
+
+/* ============================================================
+   3. HELPERS
+   ============================================================ */
+const esc = s => (s==null?"":String(s)).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const nl  = s => esc(s).replace(/\n/g,"<br>");
+const v   = id => state[id]||"";
+
+/* ============================================================
+   4. BUILD FORM
+   ============================================================ */
+const formRoot=document.getElementById("formRoot");
+
+function buildForm(){
+  formRoot.innerHTML="";
+  GROUPS.forEach(group=>{
+    const det=document.createElement("details");
+    det.className="group"; det.open=!!group.open;
+    det.innerHTML=`<summary>${esc(group.title)}</summary><div class="group-body"></div>`;
+    const body=det.querySelector(".group-body");
+    group.fields.forEach(f=>body.appendChild(buildField(f)));
+    formRoot.appendChild(det);
+  });
+}
+
+function buildField(f){
+  if(f.type==="issues")        return buildIssues(f);
+  if(f.type==="directory")     return buildDirectory(f);
+  if(f.type==="logo")          return buildLogo(f);
+  if(f.type==="compoundmap")   return buildCompoundMap(f);
+  if(f.type==="hospitalfinder")return buildHospitalFinder(f);
+
+  const wrap=document.createElement("label");
+  wrap.className="field";
+  let inner=`<span class="lbl">${esc(f.label)}</span>`;
+  if(f.help) inner+=`<span class="help">${esc(f.help)}</span>`;
+  if(f.type==="textarea"){
+    inner+=`<textarea data-id="${f.id}">${esc(v(f.id))}</textarea>`;
+  }else if(f.type==="color"){
+    inner+=`<input type="color" data-id="${f.id}" value="${esc(v(f.id)||"#1b5a9b")}" style="width:64px;height:34px;padding:2px;cursor:pointer">`;
+  }else if(f.type==="select"){
+    inner+=`<select data-id="${f.id}">`+
+      f.options.map(o=>`<option ${v(f.id)===o?"selected":""}>${esc(o)}</option>`).join("")+
+      `</select>`;
+  }else{
+    inner+=`<input type="text" data-id="${f.id}" value="${esc(v(f.id))}">`;
+  }
+  wrap.innerHTML=inner;
+  wrap.querySelector("[data-id]").addEventListener("input",e=>{
+    state[f.id]=e.target.value;
+    // The cached A&E route is only valid for the exact site + hospital it was built
+    // from. Invalidate it whenever any of those inputs change so Appendix E never
+    // shows a distance/time/map for a stale site or hospital.
+    if(f.id==="siteAddress"){
+      state.siteLatLng=null;                                   // re-geocode the site next time
+      state.hospitalPolyline=""; state.hospitalStraight=null; state.hospitalRouteText=""; state.hospitalImg="";
+    }
+    if(f.id==="hospitalName"||f.id==="hospitalAddress"){
+      state.hospitalLatLng=null; state.hospitalPolyline=""; state.hospitalStraight=null; state.hospitalRouteText=""; state.hospitalImg="";
+    }
+    persist(); renderDoc();
+  });
+  if(f.id==="_mapsKey"){   // once a key is entered/removed, refresh the map widgets
+    wrap.querySelector("[data-id]").addEventListener("change",()=>{
+      persist();
+      // If Maps JS already loaded under the previous key, reload so the
+      // interactive APIs use the new override too (not just the static URLs).
+      if(_mapsReady) location.reload(); else buildForm();
+    });
+  }
+  return wrap;
+}
+
+/* ---- repeatable: issues ---- */
+function buildIssues(f){
+  const box=document.createElement("div");
+  const draw=()=>{
+    box.innerHTML=`<span class="lbl" style="font-size:13px">${esc(f.label)}</span>`;
+    (state[f.id]||[]).forEach((row,i)=>{
+      const div=document.createElement("div"); div.className="repeat-row";
+      div.innerHTML=`
+        <div class="row-head"><b>Issue ${i+1}</b>
+          <button type="button" class="small danger" data-del="${i}">Remove</button></div>
+        <div class="two-col">
+          <label class="field"><span class="lbl">Issue no.</span><input type="text" data-k="no" value="${esc(row.no)}"></label>
+          <label class="field"><span class="lbl">Date</span><input type="text" data-k="date" value="${esc(row.date)}"></label>
+        </div>
+        <label class="field"><span class="lbl">Description of revision</span><input type="text" data-k="desc" value="${esc(row.desc)}"></label>
+        <label class="field"><span class="lbl">Reviewed by</span><input type="text" data-k="by" value="${esc(row.by)}"></label>`;
+      div.querySelectorAll("[data-k]").forEach(inp=>inp.addEventListener("input",e=>{
+        state[f.id][i][e.target.dataset.k]=e.target.value; persist(); renderDoc();
+      }));
+      div.querySelector("[data-del]").addEventListener("click",()=>{
+        state[f.id].splice(i,1); persist(); draw(); renderDoc();
+      });
+      box.appendChild(div);
+    });
+    const add=document.createElement("button");
+    add.type="button"; add.className="secondary small"; add.textContent="+ Add issue";
+    add.addEventListener("click",()=>{
+      state[f.id].push({no:String((state[f.id].length||0)+1),date:"",desc:"",by:""});
+      persist(); draw(); renderDoc();
+    });
+    box.appendChild(add);
+  };
+  draw(); return box;
+}
+
+/* ---- repeatable: directory ---- */
+function buildDirectory(f){
+  const box=document.createElement("div");
+  const draw=()=>{
+    box.innerHTML=`<span class="lbl" style="font-size:13px">${esc(f.label)}</span>`;
+    (state[f.id]||[]).forEach((row,i)=>{
+      const div=document.createElement("div"); div.className="repeat-row";
+      div.innerHTML=`
+        <div class="row-head"><b>Contact ${i+1}</b>
+          <button type="button" class="small danger" data-del="${i}">Remove</button></div>
+        <label class="field"><span class="lbl">Role / service</span><input type="text" data-k="service" value="${esc(row.service)}"></label>
+        <label class="field"><span class="lbl">Name(s)</span><input type="text" data-k="name" value="${esc(row.name)}"></label>
+        <label class="field"><span class="lbl">Company</span><input type="text" data-k="company" value="${esc(row.company)}"></label>
+        <label class="field"><span class="lbl">Address</span><input type="text" data-k="address" value="${esc(row.address)}"></label>
+        <div class="two-col">
+          <label class="field"><span class="lbl">Telephone</span><input type="text" data-k="phone" value="${esc(row.phone)}"></label>
+          <label class="field"><span class="lbl">Mobile</span><input type="text" data-k="mobile" value="${esc(row.mobile)}"></label>
+        </div>
+        <label class="field"><span class="lbl">Email</span><input type="text" data-k="email" value="${esc(row.email)}"></label>`;
+      div.querySelectorAll("[data-k]").forEach(inp=>inp.addEventListener("input",e=>{
+        state[f.id][i][e.target.dataset.k]=e.target.value; persist(); renderDoc();
+      }));
+      div.querySelector("[data-del]").addEventListener("click",()=>{
+        state[f.id].splice(i,1); persist(); draw(); renderDoc();
+      });
+      box.appendChild(div);
+    });
+    const add=document.createElement("button");
+    add.type="button"; add.className="secondary small"; add.textContent="+ Add contact";
+    add.addEventListener("click",()=>{ state[f.id].push(emptyContact()); persist(); draw(); renderDoc(); });
+    box.appendChild(add);
+  };
+  draw(); return box;
+}
+
+/* ---- company logo upload ---- */
+function buildLogo(f){
+  const box=document.createElement("div");
+  const draw=()=>{
+    box.innerHTML=`<span class="lbl" style="font-size:13px">${esc(f.label)}</span>`+
+                  (f.help?`<span class="help">${esc(f.help)}</span>`:"");
+    if(v(f.id)){
+      const img=document.createElement("img");
+      img.src=v(f.id);
+      img.style.cssText="max-width:180px;max-height:80px;display:block;margin:4px 0 6px;border:1px solid var(--line);padding:4px;background:#fff";
+      box.appendChild(img);
+      const rm=document.createElement("button");
+      rm.type="button"; rm.className="small danger"; rm.textContent="Remove logo";
+      rm.addEventListener("click",()=>{ state[f.id]=""; persist(); draw(); renderDoc(); });
+      box.appendChild(rm);
+    }
+    const inp=document.createElement("input");
+    inp.type="file"; inp.accept="image/*"; inp.style.marginTop="6px";
+    inp.addEventListener("change",e=>{
+      const file=e.target.files[0]; if(!file) return;
+      const r=new FileReader();
+      r.onload=()=>{ state[f.id]=r.result; persist(); draw(); renderDoc(); };
+      r.readAsDataURL(file);
+    });
+    box.appendChild(inp);
+  };
+  draw(); return box;
+}
+
+/* ============================================================
+   4b. GOOGLE MAPS (optional — only active when a key is supplied)
+   ============================================================ */
+/* Built-in Google Maps API key. This is used automatically so the map
+   features work without anyone pasting a key. A key entered in the form
+   (Company branding) overrides it. NOTE: this key is visible in the public
+   site source, so it MUST be restricted in Google Cloud to this site's web
+   address (HTTP referrer) and to the 5 APIs the tool uses. */
+const DEFAULT_MAPS_KEY = "AIzaSyANo2Q7OehYzHTTgMTxRr5ISamf5IradcM";   // restricted Mostlane key
+function effectiveMapsKey(){ return (v("_mapsKey")||"").trim() || DEFAULT_MAPS_KEY; }
+
+let _mapsReady=false,_mapsLoading=false,_mapsQueue=[];
+const mapsAvailable = () => !!effectiveMapsKey();
+
+function loadMaps(cb){
+  if(_mapsReady){ cb&&cb(); return; }
+  if(!mapsAvailable()){ cb&&cb(new Error("no-key")); return; }
+  _mapsQueue.push(cb);
+  if(_mapsLoading) return;
+  _mapsLoading=true;
+  window.__mostlaneMapsReady=function(){
+    _mapsReady=true; _mapsLoading=false;
+    _mapsQueue.splice(0).forEach(f=>f&&f());
+  };
+  const s=document.createElement("script");
+  s.async=true;
+  s.onerror=()=>{ _mapsLoading=false; _mapsQueue.splice(0).forEach(f=>f&&f(new Error("load-failed")));
+    alert("Could not load Google Maps. Check the API key and that the required APIs are enabled."); };
+  s.src="https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(effectiveMapsKey())+
+        "&libraries=places,drawing,geometry&callback=__mostlaneMapsReady&v=quarterly";
+  document.head.appendChild(s);
+}
+
+function geocodeSite(cb){
+  if(state.siteLatLng){ cb(state.siteLatLng); return; }
+  const addr=(v("siteAddress")||"").replace(/\n/g,", ").trim();
+  if(!addr){ cb(null); return; }
+  new google.maps.Geocoder().geocode({address:addr,region:"GB"},(res,status)=>{
+    if(status==="OK"&&res[0]){
+      const l=res[0].geometry.location;
+      state.siteLatLng={lat:l.lat(),lng:l.lng()}; persist(); cb(state.siteLatLng);
+    }else cb(null);
+  });
+}
+
+function brandHex(){ return "0x"+(v("_brand")||"#1b5a9b").replace("#",""); }
+
+/* Small "caret" (the two wings of an arrowhead) at the end of the access
+   route, angled from the route's final heading. Local planar approximation. */
+function routeArrowhead(pts){
+  if(!pts || pts.length<2) return null;
+  const tip=pts[pts.length-1], prev=pts[pts.length-2];
+  const mPerLat=111320, mPerLng=111320*Math.cos(tip.lat*Math.PI/180);
+  let dx=(tip.lng-prev.lng)*mPerLng, dy=(tip.lat-prev.lat)*mPerLat;
+  const len=Math.hypot(dx,dy); if(!len) return null;
+  dx/=len; dy/=len;
+  const ARM=14, ANG=30*Math.PI/180;
+  const wing=(sign)=>{
+    const ca=Math.cos(sign*ANG), sa=Math.sin(sign*ANG);
+    const rx=(-dx)*ca-(-dy)*sa, ry=(-dx)*sa+(-dy)*ca;
+    return { lat: tip.lat + (ry*ARM)/mPerLat, lng: tip.lng + (rx*ARM)/mPerLng };
+  };
+  return [wing(1), tip, wing(-1)];
+}
+
+/* Build the static-map image for the inserted COMPOUND view (current centre +
+   zoom from the modal, plus whatever pin / box / route was drawn). */
+function buildCompoundStatic(clat,clng,zoom,maptype){
+  const col="0x"+(state.compoundBoxColor||v("_brand")||"#1b5a9b").replace("#","");
+  const p=["size=640x420","scale=2","maptype="+(maptype||"hybrid"),
+           "center="+clat+","+clng,"zoom="+Math.round(zoom),
+           "key="+encodeURIComponent(effectiveMapsKey())];
+  if(state.compoundRect && state.compoundRect.length>1){
+    const pts=state.compoundRect.concat([state.compoundRect[0]]).map(c=>c.lat+","+c.lng).join("%7C");
+    p.push("path=color:"+col+"ff%7Cweight:3%7Cfillcolor:"+col+"55%7C"+pts);
+  }
+  if(state.compoundRoute && state.compoundRoute.length>1){
+    p.push("path=color:0xe02020ff%7Cweight:4%7C"+state.compoundRoute.map(c=>c.lat+","+c.lng).join("%7C"));
+    const head=routeArrowhead(state.compoundRoute);
+    if(head) p.push("path=color:0xe02020ff%7Cweight:4%7C"+head.map(c=>c.lat+","+c.lng).join("%7C"));
+  }
+  if(state.compoundPin) p.push("markers=color:red%7C"+state.compoundPin.lat+","+state.compoundPin.lng);
+  return "https://maps.googleapis.com/maps/api/staticmap?"+p.join("&");
+}
+
+/* Build the static-map image for the inserted ROUTE view (current centre +
+   zoom, S/H markers and the driving polyline). */
+function buildRouteStatic(clat,clng,zoom){
+  const bc=brandHex();
+  const p=["size=640x430","scale=2","center="+clat+","+clng,"zoom="+Math.round(zoom),
+           "key="+encodeURIComponent(effectiveMapsKey())];
+  p.push("markers=color:green%7Clabel:S%7C"+state.siteLatLng.lat+","+state.siteLatLng.lng);
+  p.push("markers=color:red%7Clabel:H%7C"+state.hospitalLatLng.lat+","+state.hospitalLatLng.lng);
+  if(state.hospitalPolyline){
+    p.push("path=weight:4%7Ccolor:"+bc+"ff%7Cenc:"+encodeURIComponent(state.hospitalPolyline));
+  }else if(state.hospitalStraight){
+    p.push("path=weight:4%7Ccolor:"+bc+"ff%7Cgeodesic:true%7C"+state.hospitalStraight.map(c=>c.lat+","+c.lng).join("%7C"));
+  }
+  return "https://maps.googleapis.com/maps/api/staticmap?"+p.join("&");
+}
+
+/* ---- generic modal shell ---- */
+function openModal(title){
+  const ov=document.createElement("div"); ov.className="modal-overlay";
+  ov.innerHTML=`<div class="modal"><div class="modal-head"><span>${esc(title)}</span>`+
+    `<button class="mx" type="button" aria-label="Close">&times;</button></div>`+
+    `<div class="modal-body"></div><div class="modal-foot"></div></div>`;
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  ov.querySelector(".mx").onclick=close;
+  ov.addEventListener("click",e=>{ if(e.target===ov) close(); });
+  return { body:ov.querySelector(".modal-body"), foot:ov.querySelector(".modal-foot"), close };
+}
+
+/* ---- compound location modal ---- */
+function openCompoundModal(){
+  const {body,foot,close}=openModal("Compound location & access route");
+  body.innerHTML=`<input class="map-search" type="text" placeholder="Search an address or place to move the map…">
+    <div class="tools">
+      <button type="button" class="small secondary" data-act="pin">Drop / move pin</button>
+      <button type="button" class="small secondary" data-act="area">Draw / edit compound area</button>
+      <button type="button" class="small secondary" data-act="route">Draw access route</button>
+      <button type="button" class="small danger" data-act="clear">Clear</button>
+      <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">Area colour
+        <input type="color" data-areacolor style="width:42px;height:28px;padding:1px;border:1px solid var(--line);border-radius:4px;cursor:pointer"></label>
+    </div>
+    <div class="map"></div>
+    <p class="help" style="margin:8px 0 0">Add the area, then drag its corners — drag a faint <b>mid-point handle</b> to add a corner (square → octagon). Pan &amp; zoom to frame, then <b>Insert image</b>.</p>`;
+  foot.innerHTML=`<span class="help">Satellite view</span>
+    <span><button type="button" class="secondary" data-act="cancel">Close</button>
+    <button type="button" data-act="insert">Insert image</button></span>`;
+  loadMaps(err=>{
+    if(err){ body.innerHTML='<p class="help">Google Maps failed to load — check the API key / enabled APIs.</p>'; return; }
+    geocodeSite(site=>{
+      const brand=v("_brand")||"#1b5a9b";
+      const center=state.compoundPin||site||{lat:50.8806,lng:-1.8757};
+      const map=new google.maps.Map(body.querySelector(".map"),
+        {center,zoom:18,mapTypeId:"hybrid",tilt:0,streetViewControl:false});
+      const ac=new google.maps.places.Autocomplete(body.querySelector(".map-search"),{fields:["geometry"]});
+      ac.bindTo("bounds",map);
+      ac.addListener("place_changed",()=>{ const pl=ac.getPlace();
+        if(pl.geometry){ pl.geometry.viewport?map.fitBounds(pl.geometry.viewport):(map.setCenter(pl.geometry.location),map.setZoom(18)); } });
+
+      let marker=null,poly=null,routeLine=null,pinMode=false;
+      let areaColor=state.compoundBoxColor||brand;
+      body.querySelector("[data-areacolor]").value=areaColor;
+
+      function setMarker(pos){ const p={lat:pos.lat,lng:pos.lng};
+        if(marker) marker.setPosition(p);
+        else{ marker=new google.maps.Marker({position:p,map,draggable:true});
+          marker.addListener("dragend",e=>{ state.compoundPin={lat:e.latLng.lat(),lng:e.latLng.lng()}; persist(); }); }
+        state.compoundPin=p; persist(); }
+      function attachPoly(polygon){ if(poly) poly.setMap(null);
+        poly=polygon; poly.setMap(map); poly.setEditable(true); poly.setDraggable(true);
+        poly.setOptions({fillColor:areaColor,fillOpacity:.3,strokeColor:areaColor,strokeWeight:2});
+        const save=()=>{ state.compoundRect=poly.getPath().getArray().map(p=>({lat:p.lat(),lng:p.lng()})); persist(); };
+        const path=poly.getPath(); ["set_at","insert_at","remove_at"].forEach(ev=>path.addListener(ev,save));
+        poly.addListener("dragend",save); save(); }
+      function defaultSquare(){ const c=map.getCenter(),lat=c.lat(),lng=c.lng();
+        const dLat=45/111320, dLng=45/(111320*Math.cos(lat*Math.PI/180));
+        return [{lat:lat+dLat,lng:lng-dLng},{lat:lat+dLat,lng:lng+dLng},{lat:lat-dLat,lng:lng+dLng},{lat:lat-dLat,lng:lng-dLng}]; }
+      function attachRoute(line){ if(routeLine) routeLine.setMap(null);
+        routeLine=line; routeLine.setMap(map); routeLine.setEditable(true);
+        const save=()=>{ state.compoundRoute=routeLine.getPath().getArray().map(p=>({lat:p.lat(),lng:p.lng()})); persist(); };
+        const path=routeLine.getPath(); ["set_at","insert_at","remove_at"].forEach(ev=>path.addListener(ev,save)); save(); }
+
+      if(state.compoundPin) setMarker(state.compoundPin);
+      if(state.compoundRoute && state.compoundRoute.length>1)
+        attachRoute(new google.maps.Polyline({path:state.compoundRoute.map(p=>({lat:p.lat,lng:p.lng})),strokeColor:"#e02020",strokeWeight:4,strokeOpacity:.95}));
+      if(state.compoundRect && state.compoundRect.length>1)
+        attachPoly(new google.maps.Polygon({paths:state.compoundRect.map(p=>({lat:p.lat,lng:p.lng}))}));
+
+      const dm=new google.maps.drawing.DrawingManager({drawingControl:false,
+        polylineOptions:{strokeColor:"#e02020",strokeWeight:4,strokeOpacity:.95}});
+      dm.setMap(map);
+      dm.addListener("polylinecomplete",line=>{ dm.setDrawingMode(null); attachRoute(line); });
+      map.addListener("click",e=>{ if(pinMode) setMarker({lat:e.latLng.lat(),lng:e.latLng.lng()}); });
+
+      body.querySelector('[data-areacolor]').addEventListener("input",e=>{
+        areaColor=e.target.value; state.compoundBoxColor=areaColor; persist();
+        if(poly) poly.setOptions({fillColor:areaColor,strokeColor:areaColor}); });
+      body.querySelector('[data-act="pin"]').onclick  =()=>{ pinMode=true;  dm.setDrawingMode(null); };
+      body.querySelector('[data-act="area"]').onclick =()=>{ pinMode=false; dm.setDrawingMode(null);
+        if(!poly) attachPoly(new google.maps.Polygon({paths:defaultSquare()})); };
+      body.querySelector('[data-act="route"]').onclick=()=>{ pinMode=false; dm.setDrawingMode(google.maps.drawing.OverlayType.POLYLINE); };
+      body.querySelector('[data-act="clear"]').onclick=()=>{
+        if(marker){marker.setMap(null);marker=null;} if(poly){poly.setMap(null);poly=null;} if(routeLine){routeLine.setMap(null);routeLine=null;}
+        state.compoundPin=null; state.compoundRect=null; state.compoundRoute=null; persist(); };
+      foot.querySelector('[data-act="cancel"]').onclick=close;
+      foot.querySelector('[data-act="insert"]').onclick=()=>{
+        const c=map.getCenter();
+        state.compoundImg=buildCompoundStatic(c.lat(),c.lng(),map.getZoom(),map.getMapTypeId());
+        persist(); buildForm(); renderDoc(); close();
+      };
+    });
+  });
+}
+
+/* ---- A&E / route planner modal ---- */
+function openHospitalModal(){
+  const {body,foot,close}=openModal("Local A&E — route planner");
+  body.innerHTML=`<input class="map-search" type="text" placeholder="Search a hospital or destination…">
+    <div class="tools"><button type="button" class="small" data-act="suggest">Suggest local A&amp;E</button></div>
+    <div class="ae-list" data-list></div>
+    <div class="map"></div>
+    <p class="rinfo" data-info style="margin:8px 0 0"></p>`;
+  foot.innerHTML=`<span class="help">Pan &amp; zoom to frame, then Insert</span>
+    <span><button type="button" class="secondary" data-act="cancel">Close</button>
+    <button type="button" data-act="insert">Insert image</button></span>`;
+  const info=body.querySelector("[data-info]"), list=body.querySelector("[data-list]");
+  loadMaps(err=>{
+    if(err){ body.innerHTML='<p class="help">Google Maps failed to load — check the API key / enabled APIs.</p>'; return; }
+    geocodeSite(site=>{
+      const center=site||{lat:50.8806,lng:-1.8757};
+      const map=new google.maps.Map(body.querySelector(".map"),{center,zoom:12,streetViewControl:false});
+      const svc=new google.maps.places.PlacesService(map);
+      let line=null,sMark=null,hMark=null;
+      function clearOverlay(){ [line,sMark,hMark].forEach(o=>o&&o.setMap(null)); line=sMark=hMark=null; }
+      function straightMiles(toLatLng){
+        return google.maps.geometry.spherical.computeDistanceBetween(
+          new google.maps.LatLng(site.lat,site.lng), toLatLng)/1609.344;
+      }
+      function drawPath(loc,path,geodesic){
+        clearOverlay();
+        sMark=new google.maps.Marker({position:site,map,label:"S",title:"Site"});
+        hMark=new google.maps.Marker({position:loc,map,label:"H",title:state.hospitalName});
+        line=new google.maps.Polyline({path,map,geodesic:!!geodesic,strokeColor:v("_brand")||"#1b5a9b",strokeWeight:4});
+        const b=new google.maps.LatLngBounds(); path.forEach(p=>b.extend(p)); map.fitBounds(b);
+      }
+      // Modern Routes API — the legacy Directions API is not available on newer
+      // Google projects, so we use Routes API (which is enabled) for the road route.
+      function routesRoute(o,d){
+        return fetch("https://routes.googleapis.com/directions/v2:computeRoutes",{
+          method:"POST",
+          headers:{"Content-Type":"application/json","X-Goog-Api-Key":effectiveMapsKey(),
+            "X-Goog-FieldMask":"routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"},
+          body:JSON.stringify({
+            origin:{location:{latLng:{latitude:o.lat,longitude:o.lng}}},
+            destination:{location:{latLng:{latitude:d.lat,longitude:d.lng}}},
+            travelMode:"DRIVE", polylineEncoding:"ENCODED_POLYLINE"})
+        }).then(r=>r.json());
+      }
+
+      function chooseDest(name,addr,loc){
+        state.hospitalName=name||"";
+        state.hospitalAddress=(addr||"").replace(/,\s*/g,"\n");
+        state.hospitalLatLng={lat:loc.lat(),lng:loc.lng()};
+        // Invalidate any previous route immediately so the Insert guard can't
+        // save the new hospital marker with the old route while this is pending.
+        state.hospitalPolyline=""; state.hospitalStraight=null; state.hospitalRouteText="";
+        const dest={lat:loc.lat(),lng:loc.lng()};
+        info.textContent="Calculating route…"; persist();
+        // 1) Routes API — full road route + drive distance + time
+        routesRoute(site,dest).then(j=>{
+          const rt=j&&j.routes&&j.routes[0];
+          if(rt&&rt.polyline&&rt.polyline.encodedPolyline){
+            const miles=(rt.distanceMeters/1609.344).toFixed(1);
+            const mins=Math.round(parseInt(rt.duration,10)/60);
+            state.hospitalPolyline=rt.polyline.encodedPolyline; state.hospitalStraight=null;
+            state.hospitalRouteText=miles+" miles • approx. "+mins+" mins by road";
+            drawPath(loc, google.maps.geometry.encoding.decodePath(rt.polyline.encodedPolyline), false);
+            info.textContent=state.hospitalRouteText; persist(); return;
+          }
+          throw new Error((j&&j.error&&j.error.message)||"no route");
+        }).catch(()=>{
+          // 2) Distance Matrix — real drive distance + time (straight line drawn)
+          new google.maps.DistanceMatrixService().getDistanceMatrix(
+            {origins:[site],destinations:[dest],travelMode:google.maps.TravelMode.DRIVING,unitSystem:google.maps.UnitSystem.IMPERIAL},
+            (dm,dst)=>{
+              const el = dm && dm.rows && dm.rows[0] && dm.rows[0].elements[0];
+              state.hospitalPolyline=""; state.hospitalStraight=[{lat:site.lat,lng:site.lng},dest];
+              if(dst==="OK" && el && el.status==="OK"){
+                state.hospitalRouteText=el.distance.text+" • approx. "+el.duration.text+" by road";
+                drawPath(loc,[site,dest],true);
+                info.textContent=state.hospitalRouteText; persist(); return;
+              }
+              // 3) final fallback — straight-line distance
+              const mi=straightMiles(loc);
+              state.hospitalRouteText="≈ "+mi.toFixed(1)+" miles (straight line)";
+              drawPath(loc,[site,dest],true);
+              info.innerHTML=esc(state.hospitalRouteText)+
+                ` <span class="help">— drive distance unavailable. Enable the Routes API or Distance Matrix API on the Maps key.</span>`;
+              persist();
+            });
+        });
+      }
+
+      const ac=new google.maps.places.Autocomplete(body.querySelector(".map-search"),{fields:["name","formatted_address","geometry"]});
+      ac.addListener("place_changed",()=>{ const pl=ac.getPlace(); if(pl.geometry) chooseDest(pl.name,pl.formatted_address,pl.geometry.location); });
+
+      body.querySelector('[data-act="suggest"]').onclick=()=>{
+        if(!site){ list.innerHTML='<p class="help">Site address not found — check section 1.</p>'; return; }
+        list.innerHTML='<p class="help">Searching…</p>';
+        svc.textSearch({query:"A&E accident and emergency hospital",location:new google.maps.LatLng(site.lat,site.lng),radius:32000},(res,st)=>{
+          if(st!==google.maps.places.PlacesServiceStatus.OK||!res||!res.length){ list.innerHTML='<p class="help">No A&E found nearby.</p>'; return; }
+          list.innerHTML="";
+          res.map(p=>({p,mi:straightMiles(p.geometry.location)}))
+             .sort((a,b)=>a.mi-b.mi).slice(0,6)
+             .forEach(({p,mi})=>{
+               const r=document.createElement("div"); r.className="repeat-row";
+               r.innerHTML=`<b>${esc(p.name)}</b> <span class="rinfo">${mi.toFixed(1)} mi</span><br><span class="help">${esc(p.formatted_address||"")}</span><br>`;
+               const b=document.createElement("button"); b.type="button"; b.className="small secondary"; b.textContent="Use & route";
+               b.onclick=()=>chooseDest(p.name,p.formatted_address,p.geometry.location);
+               r.appendChild(b); list.appendChild(r);
+             });
+        });
+      };
+
+      // restore a previously chosen hospital/route for editing
+      if(state.hospitalLatLng && site)
+        chooseDest(state.hospitalName||"Hospital",(state.hospitalAddress||"").replace(/\n/g,", "),
+          new google.maps.LatLng(state.hospitalLatLng.lat,state.hospitalLatLng.lng));
+
+      foot.querySelector('[data-act="cancel"]').onclick=close;
+      foot.querySelector('[data-act="insert"]').onclick=()=>{
+        if(!state.siteLatLng||!state.hospitalLatLng||(!state.hospitalPolyline&&!state.hospitalStraight)){
+          alert("Pick a hospital and wait for the route/distance to calculate first."); return; }
+        const c=map.getCenter();
+        state.hospitalImg=buildRouteStatic(c.lat(),c.lng(),map.getZoom());
+        persist(); buildForm(); renderDoc(); close();
+      };
+    });
+  });
+}
+
+/* ---- compound field (opens the modal) ---- */
+function buildCompoundMap(f){
+  const box=document.createElement("div");
+  const draw=()=>{
+    box.innerHTML=`<span class="lbl" style="font-size:13px">${esc(f.label)}</span>`+(f.help?`<span class="help">${esc(f.help)}</span>`:"");
+    if(!mapsAvailable()){ const m=document.createElement("p"); m.className="help"; m.textContent="Maps unavailable (no API key set)."; box.appendChild(m); return; }
+    const open=document.createElement("button"); open.type="button"; open.className="small";
+    open.textContent=state.compoundImg?"Edit compound map":"Open compound map"; open.onclick=openCompoundModal;
+    box.appendChild(open);
+    if(state.compoundImg){
+      const img=document.createElement("img"); img.src=state.compoundImg;
+      img.style.cssText="display:block;max-width:100%;margin:8px 0;border:1px solid var(--line);border-radius:4px"; box.appendChild(img);
+      const rm=document.createElement("button"); rm.type="button"; rm.className="small danger"; rm.textContent="Remove image";
+      rm.onclick=()=>{ state.compoundImg=""; persist(); draw(); renderDoc(); }; box.appendChild(rm);
+    }else{ const s=document.createElement("p"); s.className="help"; s.textContent="No image inserted yet."; box.appendChild(s); }
+  };
+  draw(); return box;
+}
+
+/* ---- A&E field (opens the route planner modal) ---- */
+function buildHospitalFinder(f){
+  const box=document.createElement("div");
+  const draw=()=>{
+    box.innerHTML=`<span class="lbl" style="font-size:13px">${esc(f.label)}</span>`+(f.help?`<span class="help">${esc(f.help)}</span>`:"");
+    if(!mapsAvailable()){ const m=document.createElement("p"); m.className="help"; m.textContent="Maps unavailable (no API key set)."; box.appendChild(m); return; }
+    const open=document.createElement("button"); open.type="button"; open.className="small";
+    open.textContent=state.hospitalImg?"Edit route planner":"Open A&E / route planner"; open.onclick=openHospitalModal;
+    box.appendChild(open);
+    if(state.hospitalRouteText){ const s=document.createElement("p"); s.className="help"; s.style.margin="6px 0 0"; s.textContent=state.hospitalRouteText; box.appendChild(s); }
+    if(state.hospitalImg){
+      const img=document.createElement("img"); img.src=state.hospitalImg;
+      img.style.cssText="display:block;max-width:100%;margin:8px 0;border:1px solid var(--line);border-radius:4px"; box.appendChild(img);
+      const rm=document.createElement("button"); rm.type="button"; rm.className="small danger"; rm.textContent="Remove image";
+      rm.onclick=()=>{ state.hospitalImg=""; persist(); draw(); renderDoc(); }; box.appendChild(rm);
+    }
+  };
+  draw(); return box;
+}
+
+/* ============================================================
+   5. RENDER DOCUMENT
+   Constant legal text is reproduced verbatim from the master
+   plan; ${...} bindings are the per-job answers.
+   ============================================================ */
+let FOOT = "";   // rebuilt on each render so it can include the logo
+
+/* Official Mostlane logo — used as the default when no logo has been uploaded
+   in the form. The in-app upload overrides this. */
+const DEFAULT_LOGO_URL = "https://mostlane.com/wp-content/uploads/2017/06/Mostlane.jpg";
+
+function applyBranding(){
+  const c = v("_brand") || "#1b5a9b";
+  document.documentElement.style.setProperty("--brand", c);
+  document.documentElement.style.setProperty("--brand-light", c + "1c"); // light tint
+}
+
+/* Returns logo markup sized to the given pixel height — the uploaded image
+   if present, otherwise the official Mostlane logo. */
+function logoMarkup(px){
+  const src = v("_logo") || DEFAULT_LOGO_URL;
+  return `<img src="${src}" alt="Mostlane" style="height:${px}px;width:auto;max-width:100%;display:block">`;
+}
+function buildFoot(){
+  FOOT = `<div class="footer-note">${logoMarkup(16)}<span>Mostlane Construction Ltd &nbsp;&bull;&nbsp; Construction Phase Health &amp; Safety Plan &nbsp;&bull;&nbsp; Rev 01</span></div>`;
+}
+const COMPANY_ADDR = "Unit A5, Segensworth Business Centre, Segensworth Road, Fareham, PO15 5RQ";
+function runHead(){
+  return `<div class="runhead">${logoMarkup(30)}
+    <div class="rh-co"><b>Mostlane Construction Ltd</b>${esc(COMPANY_ADDR)}</div></div>`;
+}
+
+function issuesRows(){
+  return (state.issues||[]).map(r=>`<tr>
+    <td>${esc(r.no)}</td><td>${esc(r.date)}</td><td>${esc(r.desc)}</td><td>${esc(r.by)}</td></tr>`).join("");
+}
+function directoryRows(){
+  return (state.directory||[]).map(r=>`<tr>
+    <td>${esc(r.service)}</td><td>${esc(r.name)}</td><td>${esc(r.company)}</td>
+    <td>${nl(r.address)}</td><td>${esc(r.phone)}</td><td>${esc(r.mobile)}</td><td>${esc(r.email)}</td></tr>`).join("");
+}
+function asbestosLine(){
+  return v("asbestos")==="No"
+    ? "Asbestos containing materials are not anticipated on this project; however an asbestos register / refurbishment survey must be reviewed before works commence."
+    : "The presence of asbestos containing materials is likely given the build date.";
+}
+
+function renderDoc(){
+  applyBranding();
+  buildFoot();
+  const root=document.getElementById("docRoot");
+  const cmPer=Math.ceil(RAMS_CONTROLS.length/3);
+  const cmSlices=[RAMS_CONTROLS.slice(0,cmPer),RAMS_CONTROLS.slice(cmPer,cmPer*2),RAMS_CONTROLS.slice(cmPer*2)];
+  root.innerHTML = [
+    pageCover(),
+    pageIndex(),
+    pageDescription(),
+    pageManagement(),
+    pageManagement2(),
+    pageManagement3(),
+    pageSafetyRisks(),
+    pageHealthAndFile(),
+    pageEnvironment(),
+    pageAppendixA(),
+    pageRamsCover(),
+    pageRamsHarms(),
+    pageRamsSummary(),
+    cmSlices.map((s,i)=>pageRamsControls(s,i+1,3)).join(""),
+    pageRamsActions(),
+    pageRamsPPE(),
+    pageMethod(),
+    pageAppendixCDE(),
+  ].join("");
+}
+
+function pageCover(){
+  return `<div class="page cover">
+    <div class="cover-logo">${logoMarkup(96)}</div>
+    <div class="band">
+      <h1>Construction Phase<br>Health &amp; Safety Plan</h1>
+    </div>
+    <div class="cover-body">
+      <div class="card-row">
+        <div class="sitecard">
+          <p class="lab">Project</p>
+          <p class="big">${esc(v("projectName"))||"&mdash;"}</p>
+          <p class="lab">Site address</p>
+          <p style="margin:0 0 12px">${nl(v("siteAddress"))}</p>
+          <div class="meta-grid">
+            <div><p class="lab">Project no.</p><p style="margin:0">${esc(v("projectNo"))||"&mdash;"}</p></div>
+            <div><p class="lab">Project ref.</p><p style="margin:0">${esc(v("projectRef"))||"&mdash;"}</p></div>
+          </div>
+        </div>
+        <div class="sitecard">
+          <p class="lab">Principal Contractor</p>
+          <p class="big">Mostlane Construction Ltd</p>
+          <p class="lab">Address</p>
+          <p style="margin:0 0 12px">${esc(COMPANY_ADDR)}</p>
+          <p class="lab">Office telephone</p>
+          <p style="margin:0">${esc(v("officeTel"))}</p>
+        </div>
+      </div>
+
+      <h2>Issue Status</h2>
+      <table>
+        <tr><th>Issue</th><th>Date</th><th>Description of revision</th><th>Reviewed by</th></tr>
+        ${issuesRows()}
+      </table>
+
+      <p>This live document is to remain on site at all times and be used by the project management team in
+         conjunction with the Project Management System (PMS) Folder. At project completion please return the
+         complete folder to Mostlane Construction Ltd.</p>
+      <p class="route-meta"><b>Asbestos:</b> ${esc(asbestosLine())}</p>
+      ${FOOT}
+    </div>
+  </div>`;
+}
+
+function pageIndex(){
+  return `<div class="page">
+    ${runHead()}
+    <h2>Construction Phase Health &amp; Safety Plan &mdash; Index</h2>
+    <table>
+      <tr><th style="width:14%">1.0</th><td>Introduction</td></tr>
+      <tr><th>2.0</th><td>Description of the Project &mdash; 2.1 Project Description &amp; Programme Details; 2.2 Project Contacts; 2.3 Existing Information</td></tr>
+      <tr><th>3.0</th><td>Management of the Project &mdash; 3.1 Management Structure &amp; Responsibilities; 3.2 Safety Objectives &amp; Monitoring Procedures; 3.3 Arrangements for Managing the Project (communication, consultation, design information &amp; changes, selection &amp; control of contractors, site security, induction, training, welfare &amp; first aid, accident/incident/near-miss reporting, risk assessments &amp; safe systems of work, site rules, fire &amp; emergency procedures, PPE)</td></tr>
+      <tr><th>4.0</th><td>Arrangements for Controlling Significant Project Risks &mdash; 4.1 Safety Risks (access &amp; egress, live services, stability, fall prevention, lifting, maintenance of plant, traffic routes, storage, protection of the public); 4.2 Health Risks (manual handling, hazardous substances, noise &amp; vibration)</td></tr>
+      <tr><th>5.0</th><td>The Health &amp; Safety File</td></tr>
+      <tr><th>6.0</th><td>Environmental Management Plan</td></tr>
+      <tr><th>A&ndash;F</th><td>Appendices: Project Directory; Risk Assessment &amp; Method Statement; Compound Location &amp; Site Set-up; Contacts &amp; Professional Team; Local Hospital &amp; A&amp;E Department; Mostlane Health &amp; Safety Policy</td></tr>
+    </table>
+    <p><i>The presence of asbestos containing materials is likely given the build date.</i></p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageDescription(){
+  return `<div class="page">
+    ${runHead()}
+    <h2>1.0&nbsp;&nbsp;Introduction</h2>
+    <p>This document forms the Health &amp; Safety Plan for the project as required under the Construction
+       (Design &amp; Management) Regulations 2015. It is a live document to be reviewed and amended throughout the
+       life of the project. An initial review is to be undertaken by the Project Manager who will complete those
+       appendices that require to be made site specific.</p>
+    <p>The project will be carried out in accordance with the Construction (Design &amp; Management) Regulations
+       2015, Approved Codes of Practice, Guidance Notes and all other relevant Regulations under the Health &amp;
+       Safety at Work Act 1974.</p>
+    <p>Our Company Health &amp; Safety Policy and Safety Management System forms part of the Construction Phase
+       Health &amp; Safety Plan and all construction work will be carried out in accordance with these requirements.
+       This plan is to be used in conjunction with the PMS Folder.</p>
+
+    <h2>2.0&nbsp;&nbsp;Description of the Project</h2>
+    <h3>2.1&nbsp;&nbsp;Project Description &amp; Programme Details</h3>
+    <table>
+      <tr><th style="width:34%">Description of the project</th><td>${esc(v("scheme"))}</td></tr>
+      <tr><th>Location</th><td>${nl(v("siteAddress"))}</td></tr>
+      <tr><th>Project duration</th><td>${esc(v("duration"))}</td></tr>
+      <tr><th>Working hours are expected to be</th><td>${esc(v("workingHours"))}</td></tr>
+    </table>
+
+    <h3>2.2&nbsp;&nbsp;Project Contacts</h3>
+    <p>A project directory with all team members is appended to this Construction Phase Health &amp; Safety Plan
+       (Appendix A).</p>
+    <table>
+      <tr><th colspan="2">Mostlane Construction project management and HSE department contact details</th></tr>
+      <tr><th style="width:34%">Project Director</th><td>${esc(v("projectDirector"))} &mdash; Office ${esc(v("officeTel"))}, Mobile ${esc(v("projectDirectorMob"))}</td></tr>
+      <tr><th>Contracts Manager(s)</th><td>${esc(v("contractsManager"))} &mdash; ${esc(v("contractsManagerTel"))}</td></tr>
+      <tr><th>Site Manager</th><td>${esc(v("siteManager"))} &mdash; ${esc(v("siteManagerTel"))}</td></tr>
+    </table>
+
+    <h3>2.3&nbsp;&nbsp;Existing Information</h3>
+    <p>Existing information relevant to the health and safety of the project (including any asbestos register /
+       survey, existing services information and the pre-construction information) is held with the project
+       management team and reviewed before works commence.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageManagement(){
+  return `<div class="page">
+    ${runHead()}
+    <h2>3.0&nbsp;&nbsp;Management of the Project</h2>
+    <h3>3.1&nbsp;&nbsp;Management Structure &amp; Responsibilities</h3>
+    <p>Management structure for health and safety:</p>
+    <ul>
+      <li>Joe Line &mdash; Managing Director</li>
+      <li>THSP (external safety advisers)</li>
+      <li>Directors / Contracts Manager &mdash; with Personal Assistants and Administration Staff</li>
+      <li>Site Managers</li>
+      <li>Operatives / Labour-Only Sub-Contractors</li>
+      <li>Trade Contractors</li>
+    </ul>
+
+    <h3>3.2&nbsp;&nbsp;Safety Objectives &amp; Monitoring Procedures</h3>
+    <h4>3.2.1&nbsp;&nbsp;Objectives</h4>
+    <p>It is our aim that the project should be carried out to, wherever possible, eliminate, reduce and control
+       all foreseeable risks to the health &amp; safety of:</p>
+    <ul>
+      <li>Those involved in the construction work;</li>
+      <li>Third parties who may be affected (including members of the public) by such work;</li>
+      <li>Those who may carry out maintenance, cleaning or future construction work or demolition on the finished
+          building or infrastructure.</li>
+    </ul>
+    <p>Mostlane Construction Ltd Construction Phase Health &amp; Safety Plan will provide information and
+       instruction to all persons engaged on the project so as to enable them to comply with the principal
+       objective, i.e. to reduce serious and minor accidents on site.</p>
+    <h4>3.2.2&nbsp;&nbsp;Monitoring Procedures</h4>
+    <p>The Construction Phase Health and Safety Plan developed for each project identifies significant hazards and
+       what control measures will be implemented. Site specific and generic procedures are contained within each
+       plan identifying hazardous tasks, permit to work requirements, hazardous material controls etc.</p>
+    <p>Mostlane Construction Ltd Projects Director will not allow any works to commence on site unless site
+       specific risk assessments and method statements are produced by the relevant sub-contractors. The Project
+       Manager must fully review the site specific documentation prior to allowing any works to start.</p>
+    <p>The Mostlane Construction Ltd Site Manager controls and monitors the standard of Health &amp; Safety on site
+       through effective supervision and the implementation of Mostlane Construction Limited management systems.</p>
+    <p>Monitoring procedures include a weekly management workplace inspection and regular (Mostlane Construction
+       Ltd) workplace inspections using form EHS-INS-01, regular health &amp; safety meetings and subcontractor
+       co-ordination meetings.</p>
+    <p>Statutory inspections of tower scaffolds, MEWPs and scaffolds that are directly controlled by Mostlane
+       Construction Ltd will be carried out by competent, trained persons and the results recorded. Sub-contractors
+       will maintain records of workplace inspections for scaffolds and excavations which they control and make
+       those records available for inspection when requested.</p>
+    <p>Mostlane Construction Ltd will utilise internal safety consultants throughout the duration of the project to
+       carry out audits on either a weekly or fortnightly basis to ensure safety management systems are
+       implemented. A summary of the corrective actions required will be left on the project for action by the site
+       team and copied to the client. It is the responsibility of the Mostlane Construction Limited project
+       management team to ensure the required actions are completed within the time scales stated. The audit report
+       will be emailed to the relevant project management team member.</p>
+    <h4>3.2.3&nbsp;&nbsp;Site Disciplinary Procedure</h4>
+    <p>The Mostlane Construction Ltd Site Disciplinary Procedure will be implemented in cases of minor and serious
+       breaches of site rules. In cases of minor breaches of site rules, initially a verbal warning may be issued.
+       Further breaches could lead to the issuing of either a Yellow or Red Card. Refer to EHD-DIS-01 within the
+       PMS Folder.</p>
+    <p>Yellow cards shall be issued to any operative in minor breach of the site rules, including for example,
+       actions in breach of permit conditions (carrying out hot works without a fire extinguisher). The Yellow Card
+       lasts for twelve months or the duration of the contract (whichever is shorter). Further breaches of a similar
+       nature could lead to a Red Card.</p>
+    <p>Red Cards shall be issued to operatives found in serious breach of site rules, including for example, smoking
+       on site, working dangerously, putting someone else&rsquo;s health &amp; safety at risk or by gaining two
+       yellow cards. The issue of a Red Card results in the offender&rsquo;s instant dismissal from site and lasts
+       for the duration of the contract.</p>
+    <p>Consequences of non-conformance could result in: (1) persons re-sitting the induction; (2) persons being
+       removed from the project.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageManagement2(){
+  return `<div class="page">
+    ${runHead()}
+    <h3>3.3&nbsp;&nbsp;Arrangements for Managing the Project</h3>
+    <h4>Communication on Site</h4>
+    <p>The Client or Principal Contractor will instigate weekly Project meetings throughout the course of the
+       project with health, safety and welfare a fixed item on the agenda. Health, Safety and Welfare issues are to
+       be contained in the minutes of the meetings.</p>
+    <p>It is the responsibility of the employer, be it Mostlane Construction Ltd or a sub-contractor, to ensure that
+       individuals who do not have English as their first language are treated as a special group, and a risk
+       assessment is completed identifying that they are particularly at risk and the control measures that will be
+       introduced to reduce this risk to an acceptable level. Sub-contractors must ensure they communicate the
+       information contained within the method statement and risk assessment to all their employees on site.</p>
+    <p>Required statutory signage will be displayed at the site entrance and/or within the designated site set-up
+       within the site compound. General site signage will be displayed at all access points to site and in areas
+       where public / client&rsquo;s employees are in close proximity to site personnel. All signage will be
+       displayed in such a way that it is visible by all required persons.</p>
+    <h4>Consultation with the Workforce</h4>
+    <p>Consultation with the workforce will be ongoing throughout the time scale of the project, with regular
+       daily / each shift handover sessions (informal) being completed by the Mostlane Construction Limited site
+       team; project meetings (formal) will be held and H&amp;S will be a regular agenda item within these meetings.
+       Toolbox talks will be undertaken on a regular basis.</p>
+    <h4>Communication Regarding Design Information</h4>
+    <p>All designers and design consultants will liaise with the Principal Designer for design assurity and to
+       ensure Health and Safety within the construction phase is not compromised.</p>
+    <h4>Handling Design Changes</h4>
+    <p>Mostlane Construction Ltd, and where applicable any sub-contractor, shall re-examine the health and safety
+       implications of any substantial design changes and implement all necessary measures to deal with those
+       changes. Information such as revised design risk drawing / review and risk assessments will be required from
+       any subcontractors that will have design input. Risk control measures to be implemented are to be recorded as
+       well as all information relayed via Health, Safety and Welfare meetings.</p>
+    <h4>Selection &amp; Control of Contractors</h4>
+    <p>Contractors are assessed against established criteria, which includes their health and safety performance,
+       competence and resource to provide the service as required prior to their selection. In addition, all
+       contractors will provide appropriate method statements and risk assessments prior to their commencing works
+       on site which will be reviewed by the project management team. Continual monitoring through the site
+       inspection and auditing regimes will ensure appropriate control and supervision of delivery.</p>
+    <h4>Communication Between Contractors</h4>
+    <p>Informal daily on-site meetings with sub-contractors will be held to identify any health and safety issues
+       arising from ongoing operations. Daily and weekly meetings will also be held with the Client&rsquo;s Site
+       Representative, when relevant, to agree interface issues.</p>
+    <h4>Site Security</h4>
+    <p>All Mostlane employees will sign in and out on site. When there are no persons working on the site the site
+       will be secured to prevent any unauthorised access. Only persons working on the site who have been inducted
+       will be permitted on site and the site will be secured to prevent public access.</p>
+    <h4>Site Induction</h4>
+    <p>All personnel wishing to visit site will be required in the first instance to report to the site office where
+       they will undergo a site-specific induction carried out by Mostlane Construction Ltd. Note: Visitors must be
+       accompanied by a Mostlane representative at all times unless they have completed the site induction.</p>
+    <h4>Site Training</h4>
+    <p>The Mostlane Construction Ltd Site Manager will ensure relevant toolbox talks are undertaken on site at
+       regular intervals or as required. These are to be delivered by the Site Manager or the Mostlane Construction
+       Ltd appointed adviser, on a health, safety or environmental topic which is relevant to the works being
+       undertaken, and will have a duration of no less than 10 minutes. Any toolbox talk carried out by contractors
+       will be recorded and a copy of the attendance register kept in the PMS folder to demonstrate continuous
+       passage of information on site.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageManagement3(){
+  return `<div class="page">
+    ${runHead()}
+    <h4>Welfare Facilities &amp; First Aid</h4>
+    <p>${nl(v("welfare"))}</p>
+    <p>The site supervisor is first aid trained and will be on site at all times when any person is working on the
+       premises. The first aid kit will be located within the site facilities or with the Mostlane operatives and
+       will be on site at all times when operatives are working on site. The first aid kit will be a fully stocked
+       first aid kit suitable for the number of persons working on site. This will be maintained by the site
+       supervisor to ensure it is fully stocked at all times.</p>
+    <h4>Accident / Incident / Near Miss Reporting &amp; Investigation</h4>
+    <p>Accidents and incidents requiring notification to the Health &amp; Safety Executive will be reported as
+       required under the RIDDOR Regulations 2013 within the allocated time constraints and on the relevant
+       documentation contained within the Mostlane Construction Ltd Project Management Systems Records Folder (PMS).
+       Mostlane Construction Ltd will ensure that all employees and contractors (including maintenance or IT) report
+       all accidents, incidents of ill health, dangerous occurrences, incidents, near misses and any environmental
+       complaints to the project manager without delay (contact details in the project directory).</p>
+    <p>All the above circumstances are to be entered in the Accident/Incident/Near Miss Register (EHS/ACC-01) and
+       investigated at site level using an Accident/Incident/Near Miss Report (EHS/ACC-02). This form should be
+       submitted to Mostlane Construction Limited within 24 hours and a copy kept on site in a secure location (e.g.
+       locked drawer). If required, Mostlane Construction Limited will carry out a further investigation using
+       Accident/Incident/Near Miss Investigation Report (ML/ACC-03). All RIDDOR reportable accident/incidents
+       (including those involving Client staff and members of the public) will be reported to the Project Manager,
+       Project Director, Managing Director and Mostlane Construction Limited nominated persons. Fatalities and major
+       incidents will be reported directly to the Health and Safety Executive Incident Control Centre.</p>
+    <h4>Risk Assessments &amp; Safe Systems of Work</h4>
+    <p>Mostlane Construction will maintain the site Construction Phase Health &amp; Safety Plan on site which will be
+       updated throughout the project. The Project Manager will manage the updating of this file and the information
+       collated throughout the works. All high-risk operations will require the provision of documented risk
+       assessments and method statements prior to works commencing on site. This is to be provided to the Project
+       Manager in reasonable time to allow a detailed review of the documentation. If the Project Manager feels that
+       the proposed method of works is suitable, the information will be retained and integrated into the
+       Construction Phase Health &amp; Safety Plan. All personnel involved in the task must be familiar with the
+       method statements along with the elements of risk involved and the associated control measures.</p>
+    <p>Any operation to be carried out on site and deemed by the design team or others as a hazardous activity will
+       require a risk analysis to be carried out to ascertain the levels of risk involved. Measures to minimise,
+       eliminate or control the elements of risk identified must be established. Where a Client&rsquo;s permit is not
+       available Mostlane Construction Ltd will provide a Permit to Work system, where appropriate, which is also to
+       be adopted for the installation and commissioning of new electrical services, hot works, use of
+       ladders/stepladders and any other high-risk activities. Before issuing a permit, the appointed issuer will
+       check the requesting contractor&rsquo;s risk assessments and method statement against the works to be carried
+       out under the permit. On completion of works under the permit, an inspection of the permit area / activity
+       will be conducted by a &lsquo;competent&rsquo; person and declared safe.</p>
+    <h4>Site Rules</h4>
+    <p>Mandatory site rules that apply to all of Mostlane Construction Limited projects will be displayed on site.
+       In addition, site specific site rules will also be displayed and will include the following:</p>
+    <ul>
+      <li>Unauthorised access points;</li>
+      <li>Permit to Work systems in place;</li>
+      <li>Emergency plans and arrangements.</li>
+    </ul>
+    <p>The site rules will also be included during the induction to ensure effective communication of them.</p>
+    <h4>Fire &amp; Emergency Procedures</h4>
+    <p>Mostlane Construction Ltd Project Fire Risk Assessment is completed in conjunction with the Pre-Start
+       Checklist and is the catalyst for the development of the site emergency plan. The plan must be displayed on
+       site, conveyed to all site personnel and updated as the project works develop. A copy of the assessment and
+       the plan must be given to the Client upon development and at each review when changes occur. The plan will be
+       displayed on site at designated fire points at all times and will identify emergency egress routes and fire
+       points on site. The fire assembly point will be pointed out as per the existing Fire Safety evacuation plan.</p>
+    <p>Where any fire alarm systems, smoke/fire detection systems or fire fighting systems are disconnected in order
+       to carry out extensions, modifications or repairs, temporary systems will be installed and, if possible, be
+       in operation prior to work commencing on the permanent system. An emergency contact list for relevant local
+       services will be compiled and displayed in the site office together with a map showing the route from site to
+       the nearest accident and emergency department (see Appendix E &mdash; ${esc(v("hospitalName"))}).</p>
+    <p>The duties of appointed Fire Warden(s) include assisting project management with development of the fire risk
+       assessment and fire plan; and monitoring that fire escape routes and exits are clear, fire detection
+       equipment is in good working order, fire signage is suitable and sufficient, fire alarms are in good working
+       order, and fire fighting equipment is suitable, sufficient and regularly inspected/maintained. In the event
+       of an evacuation they ensure the premises are clear of Mostlane Construction Ltd personnel, contractors and
+       visitors, ensure the fire brigade have been informed, and allow entry into the building only after
+       confirmation from the fire brigade.</p>
+    <h4>Personal Protective Equipment</h4>
+    <p>All personnel attending site, whether working on site or as a visitor, will be required to conform to the
+       Mostlane Construction Limited requirements for the wearing of mandatory Personal Protective Equipment in the
+       form of safety footwear &amp; high visibility vests, as a minimum. <b>Personnel arriving at site without the
+       required mandatory PPE will not be granted access to the site.</b> All contractors will provide method
+       statements and risk assessments for the works they are carrying out prior to operations commencing. These
+       operations may require additional PPE, such as ear protection, which must be worn. Any relaxation of the
+       personal protective equipment requirements on site must be accompanied by a suitable and sufficient risk
+       assessment, and notices to this effect should be posted on site at the relevant location and on site notice
+       boards.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageSafetyRisks(){
+  return `<div class="page">
+    ${runHead()}
+    <h2>4.0&nbsp;&nbsp;Arrangements for Controlling Significant Project Risks</h2>
+    <h3>4.1&nbsp;&nbsp;Safety Risks</h3>
+    <h4>Access &amp; Egress (including deliveries)</h4>
+    <p>${nl(v("accessEgress"))}</p>
+    <h4>Working On or Near Live Services</h4>
+    <p>Electrical work will only be done by a competent person who has the appropriate certification to demonstrate
+       their ability to work to the standards prescribed by BS 7671 &lsquo;Requirements for Electrical Installations,
+       IET Wiring Regulations&rsquo; in respect of any testing or inspection. Isolation points of all live services
+       within the building will be identified prior to works commencing. All necessary services that will be worked
+       on will be required to be isolated and tagged before the commencement of works. All temporary electrical
+       installations will be undertaken by competent persons; after installations are completed and tested, a copy
+       of the test certificate will be retained within the Folder.</p>
+    <h4>Stability of Existing Structure</h4>
+    <p>${nl(v("stability"))}</p>
+    <h4>Fall Prevention</h4>
+    <p>Stepladders and ladders will not be used on this project unless there is a suitable and sufficient quantified
+       risk assessment developed by Mostlane Construction Limited demonstrating why stepladders or ladders are
+       considered more suitable than other means of working at height, e.g. scaffold systems or mobile elevated
+       working platforms, in accordance with the Working at Height Regulations 2005. The assessment should
+       demonstrate that the use of more suitable work equipment is not justified because of a low risk and: (a) the
+       short duration of time; or (b) existing features on site which cannot be altered. If stepladders or ladders
+       are to be employed, they will only be used for works of short duration, e.g. 5 to 10 minutes&rsquo; maximum,
+       and then only if a three-point physical contact is maintained at all times and a permit has been issued. Rung
+       ladders, if used, are to be secured to a structure or firmly supported, i.e. &lsquo;footed&rsquo; by a
+       mechanical stop or second person at all times. All operatives erecting, dismantling and moving mobile
+       aluminium towers will be trained by a competent training provider; evidence of such training will be provided
+       before personnel are permitted to undertake such operations.</p>
+    <p>${nl(v("fallPrevention"))}</p>
+    <p>A Scafftag&copy; system must be implemented and prominently displayed at the access to all mobile
+       towers/scaffolds. &lsquo;Hop Ups&rsquo; or similar forms of equipment are not permitted on Mostlane
+       Construction Ltd projects/sites.</p>
+    <h4>Control of Lifting Operations</h4>
+    <p>Any lifting of equipment will be subject to a full review and approval of the detailed lifting plan and site
+       specific method of work from the appointed contractor. ${esc(v("lifting"))}</p>
+    <h4>Maintenance of Plant &amp; Equipment</h4>
+    <p>All non hand-held plant or equipment, i.e. MEWPs and hoists, will carry a current test certificate and copies
+       made available. Operators are required to produce training certification / confirmation of competence for all
+       non hand-held plant and equipment and the erection of mobile towers, which should be shown to the Mostlane
+       Construction Ltd Project Manager and the details recorded. Operators using abrasive wheels are also required
+       to produce training certificates. Details of equipment directly responsible to Mostlane Construction Ltd must
+       be entered onto the Plant and Equipment Register within the PMS Folder. Mostlane Construction Ltd do not
+       provide plant or equipment for any sub-contractors. Personnel with no certificated record of training will not
+       be permitted to use any items of plant and equipment on site.</p>
+    <h4>Traffic Routes &amp; Segregation</h4>
+    <p>${nl(v("traffic"))}</p>
+    <h4>Storage of Materials &amp; Equipment</h4>
+    <p>${nl(v("storage"))}</p>
+    <h4>Protection of the General Public / Client Staff</h4>
+    <p>Mostlane Construction Ltd will implement suitable and sufficient measures to ensure a safe environment for all
+       site personnel, client staff and members of the public whilst in possession of the site. Mostlane
+       Construction Ltd will ensure that Clients&rsquo; employees are not subject to any additional hazards whilst
+       project works are undertaken. Where required, suitable and sufficient barriers will be formed to protect
+       non-contract personnel, with adequate signage posted warning of the potential hazards.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageHealthAndFile(){
+  return `<div class="page">
+    ${runHead()}
+    <h3>4.2&nbsp;&nbsp;Health Risks</h3>
+    <h4>Manual Handling</h4>
+    <p>Where possible manual handling will be eliminated by mechanical means. Where this is not reasonably
+       practicable the Project Manager will ensure an assessment is completed and all relevant persons are aware of
+       the control measures required to carry out the task safely. The Project Manager will also ensure access routes
+       where manual handling is likely to take place are maintained clear from all trip hazards and lighting is of a
+       sufficient level.</p>
+    <h4>Use of Hazardous Substances</h4>
+    <p>Mostlane Construction Ltd and sub-contractors who intend to use potentially hazardous substances or materials
+       on site will submit Hazard Safety Data sheets and COSHH assessments.</p>
+    <h4>Reducing Noise &amp; Vibration</h4>
+    <p>Any works that may cause excess noise will be brought to the attention of the project manager so that
+       alternative means can be sought, or the particular works can be scheduled so as to provide minimum risks of
+       exposure to other operatives, client staff and members of the public. All tasks that include the use of power
+       tools that could cause White Finger will be under a hand-arm vibration assessment, submitted to the project
+       manager prior to tasks being carried out. Continual noise monitoring will be carried out by the project
+       manager and noisy works, or works that could affect third parties or neighbours, will be kept to a minimum;
+       these works, if necessary, will be co-ordinated and communicated to neighbouring parties.</p>
+
+    <h2>5.0&nbsp;&nbsp;The Health &amp; Safety File</h2>
+    <h3>5.1&nbsp;&nbsp;Layout &amp; Format (example)</h3>
+    <table>
+      <tr><th>Item required</th><th>No. of copies</th><th>Supplied by</th><th>Required</th></tr>
+      <tr><td>Contract details (commencement, practical completion, defects liability period)</td><td>1 electronic, 1 hard copy</td><td>Contract Administrator</td><td>Yes</td></tr>
+      <tr><td>Design information (specification details, as-built drawings, design criteria)</td><td>1 electronic, 1 hard copy</td><td>Designers</td><td>Yes</td></tr>
+      <tr><td>Project participants (all domestic, named and direct sub-contractors)</td><td>1 electronic, 1 hard copy</td><td>Client / Principal Contractor</td><td>Yes</td></tr>
+      <tr><td>Product information (data sheets for materials requiring a COSHH assessment)</td><td>1 electronic, 1 hard copy</td><td>Principal Contractor</td><td>Yes</td></tr>
+      <tr><td>Residual hazards in relation to future works, and demolition hazards left on completion</td><td>1 electronic, 1 hard copy</td><td>Designers / Principal Contractor</td><td>Yes</td></tr>
+    </table>
+    <h3>5.2&nbsp;&nbsp;Arrangement for Collation of Information</h3>
+    <p>All the above information is to be provided to the client, with one hard copy if required.</p>
+    <h3>5.3&nbsp;&nbsp;Storage of Information</h3>
+    <p>Information is stored and issued in accordance with the client&rsquo;s specification and the Mostlane
+       Construction Ltd management system.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageEnvironment(){
+  return `<div class="page">
+    ${runHead()}
+    <h2>6.0&nbsp;&nbsp;Environmental Management Plan</h2>
+    <h3>6.1&nbsp;&nbsp;Environmental Policy</h3>
+    <p>Mostlane Construction Ltd&rsquo;s commercial objectives are to provide professional, customer-focused
+       contracting services at optimum cost with a commitment to complying with all environmental legislation
+       applicable to our aspects and any other requirements that may be imposed upon us. We strive to improve the
+       positive impacts of our operations upon the environment and work towards the reduction and elimination of the
+       negative aspects wherever possible. These aspects include waste management, supplier and contractor
+       management (waste), use of raw materials / product sourcing, electricity consumption and noise management.</p>
+    <p>We are committed to the prevention of pollution and will assess all new proposed processes to identify
+       potential impacts upon the environment prior to implementation. We are committed to the continuous
+       improvement of our Environmental Management System, which is fully documented and provides the framework for
+       setting and reviewing environmental objectives and targets. The policy of Mostlane Construction Ltd is that
+       our Environmental Management System should comply with BS EN ISO 14001. We commit to implement, maintain and
+       communicate this policy to suppliers, customers and any other interested party.</p>
+    <h3>6.2&nbsp;&nbsp;Legal &amp; Other Requirements</h3>
+    <p>All requirements imposed upon Mostlane Construction Ltd are detailed on the Register of Legal and Other
+       Requirements available on the company Safety Databank. Environmental restrictions imposed on us for this
+       project by the client, local authority or any other interested parties are detailed within the Environmental
+       Plan.</p>
+    <h3>6.4&nbsp;&nbsp;Arrangements for Environmental Management of Significant Impacts</h3>
+    <p><b>Waste Management.</b> In accordance with our Environmental Policy all waste generated from our works will
+       be, where practicable, segregated and disposed of to a licensed tipping facility utilising registered and
+       licensed waste disposal contractors. Transfer notes will be retained by the Project Team within the PMS
+       Folder for all waste removed from site. All waste carriers will have the appropriate licence; all Waste
+       Consignment Notes will be stored on site within the PMS Record folder, recording the category of waste removed
+       and the destination of the waste.</p>
+    <p><b>Supplier &amp; Contractor Management (Waste).</b> All sub-contractors, at placement of order, have been
+       issued with the environmental aspects and associated targets of Mostlane Construction Ltd. Upon attendance to
+       site all sub-contractors will be inducted on the waste management procedures, and instructions for any
+       segregation will be given. Clear signage will identify the locations of segregated waste.</p>
+    <p><b>Noise.</b> Where practicable, Mostlane Construction Ltd will ensure noise generation is reduced to an
+       acceptable level for contractors on site and the general public in the local vicinity. All contractors will be
+       reviewed to ensure they use plant &amp; equipment with efficient noise suppression or controls fitted. All
+       complaints concerning noise emissions from our sites are to be reported as stipulated within our Environmental
+       Management System and investigated, with appropriate corrective and preventive measures taken to prevent
+       reoccurrence.</p>
+    <h4>Emissions into the Atmosphere and Water Courses</h4>
+    <table>
+      <tr><th style="width:34%">Product</th><th>Control technique</th></tr>
+      <tr><td>Diesel &amp; petrol; accidental spillage</td><td>Where possible, generators and fuel-powered machinery should be positioned in a bunded area to contain spillage. Ensure the bund has the capacity to contain the maximum amount of fuel stored in the machinery plus 10%.</td></tr>
+      <tr><td>Paints; thinners; cleaning fluids</td><td>Suggest utilising water-based products, negating the need for spirit-based products. Prevent products from entering the drainage systems.</td></tr>
+      <tr><td>Hazardous dusts (MDF dust &amp; formaldehyde, gypsum, cement-based products)</td><td>Suggest safer alternatives (ply, blockboard, natural timber products etc.). Prepare materials off site to minimise cutting and dust generation. Utilise dust extraction equipment and provide screening to contain dusty atmospheres. Damp down working areas.</td></tr>
+      <tr><td>Smoke</td><td>Company policy prohibits the lighting of fires on site. Extinguish accidental fires immediately. Maintain areas clear of combustible materials.</td></tr>
+    </table>
+    <h4>Emergency Procedures</h4>
+    <p><b>Spillages.</b> Any spillages that occur on site must be contained and prevented from entering any
+       watercourse and harming the local environment. Mostlane Construction Ltd will have COSHH information for all
+       substances being stored and used on site and will review the constraints of the substance/material prior to
+       any person handling or coming into physical contact with it.</p>
+    <p><b>Waste Contamination.</b> Where specific segregated waste storage facilities are cross-contaminated, the
+       worst-case scenario will be assumed and the waste will be removed as per the most hazardous waste contained
+       within. The requirement for waste segregation, where possible, will be fully explained during the induction
+       process onto site. The site team will ensure information is communicated to relevant site operatives and clear
+       signage is displayed at each waste storage facility.</p>
+    ${FOOT}
+  </div>`;
+}
+
+function pageAppendixA(){
+  return `<div class="page">
+    ${runHead()}
+    <p class="appendix-tab">APPENDIX <b>A</b></p>
+    <h2>Appendix A &mdash; Project Directory</h2>
+    <p><b>Project No:</b> ${esc(v("projectNo"))} &nbsp;&nbsp; <b>Project Name:</b> ${esc(v("projectName"))}</p>
+    <table>
+      <tr><th>Service</th><th>Representative</th><th>Company</th><th>Address</th><th>Telephone</th><th>Mobile</th><th>Email</th></tr>
+      ${directoryRows()}
+    </table>
+    ${FOOT}
+  </div>`;
+}
+
+/* ---- Appendix B: Risk Assessment (fixed assessment data) ---- */
+const RAMS_LIKELY_HARMS = ["Fatality","Fractures / broken bones","Burn injury","Crush injury","Head injury",
+  "Permanent loss or reduction in sight","Permanent loss or reduction in hearing","Amputation",
+  "Sprain, strain or musculoskeletal injury","Cut, abrasion, laceration or bruise","Long term health effects",
+  "Short term health effects"];
+
+/* hazard, persons affected, [sevWithout,likWithout,ratingWithout], [sevWith,likWith,ratingWith] */
+const RAMS_SUMMARY = [
+  ["Unauthorised access","Apprentice, Operative, Supervisor, Management, Client",[4,5,"High"],[4,4,"High"]],
+  ["Strike of person / property / equipment by falling object","Apprentice, Operative, Supervisor, Management",[5,3,"High"],[4,3,"Medium"]],
+  ["Contact with electricity","Apprentice, Operative, Supervisor, Management, Client",[4,3,"Medium"],[4,3,"Medium"]],
+  ["Fall of person / object from height","Apprentice, Operative, Supervisor, Management, Client",[4,3,"Medium"],[4,3,"Medium"]],
+  ["Inclement / extreme weather","Apprentice, Operative, Supervisor",[4,3,"Medium"],[4,3,"Medium"]],
+  ["Flying debris / ejected particles","Apprentice, Operative, Supervisor, Management",[3,3,"Medium"],[3,3,"Medium"]],
+  ["Manual handling","Operative, Supervisor",[3,3,"Medium"],[3,3,"Medium"]],
+  ["Exposure to noise","Operative, Supervisor",[2,3,"Low"],[2,3,"Low"]],
+  ["Exposure to vibration","Operative",[2,3,"Low"],[2,3,"Low"]],
+];
+const rkClass = r => r==="High"?"rk-h":r==="Medium"?"rk-m":"rk-l";
+
+/* hazards label, control measure (verbatim) */
+const RAMS_CONTROLS = [
+  ["Contact with electricity; Exposure to noise; Exposure to vibration; Flying debris / ejected particles","All new tools, equipment or machinery are checked before first use to ensure they have the CE Standard Mark, a 'Declaration of Conformity', that there are no obvious accessible dangerous moving parts, and the location of the machine does not cause additional hazards."],
+  ["Contact with electricity","The supply voltage will always be within the operating range of the selected tool. Wherever possible, 110V tools shall be used in construction applications. Portable construction and refurbishment site tools are 110V and subject to 3 monthly PA testing as per industry best practice, marked with a PA testing sticker and paper copy records kept for monitoring purposes. Any 240V or 415V portable electric equipment used in a construction or refurbishment setting is fitted with RCD."],
+  ["Exposure to noise; Flying debris / ejected particles; Unauthorised access","A safety exclusion zone is established around the perimeter of the works with suitable signage, barriers and screening as necessary. Authorised persons only are permitted to enter the exclusion zone."],
+  ["Contact with electricity; Exposure to noise","Worn, warped, blunted, defective or damaged items / tools are immediately removed from work area to designated repair location or disposed of immediately to prevent unauthorised or unintended use."],
+  ["Contact with electricity","All damaged and defective portable electrical tools are immediately taken out of use, reported to the supervisor and disposed of or clearly marked as being defective and not for use."],
+  ["Contact with electricity; Exposure to noise; Flying debris / ejected particles","Only suitably trained, competent and authorised personnel are allowed to use tools, equipment and machinery. They are instructed in the safe use and appropriate selection of items and associated parts or accessories, storage, PPE requirements, emergency requirements and procedures, use of guarding, interlocks and other required control measures specific to each item, process and particular activity, and how to inspect and check the equipment prior to use. All guards are installed in accordance with the manufacturers instructions, are appropriate for the equipment being used and are in place at all times the equipment is in operation."],
+  ["Contact with electricity; Exposure to noise","Suitable inspection, cleaning and maintenance regime is in place to ensure all items remain in safe working condition including annual thorough inspection, recorded weekly inspections and daily user checks where appropriate, in accordance with legislative requirements and manufacturer's recommendations."],
+  ["Flying debris / ejected particles","Abrasive Wheels are used in accordance with the principles of HSG17 &ndash; Safety in the Use of Abrasive Wheels."],
+  ["Flying debris / ejected particles","The condition of the blade / disc / wheel / bit is monitored and replaced when necessary. When changing accessories, the blade / disc / wheel / bit is inspected to ensure that it is of the correct type for the item and material being worked, and that it is in good condition."],
+  ["Contact with electricity","All electrical tools selected are either earthed or double insulated."],
+  ["Contact with electricity","All portable electric tools and cables are inspected before use, especially for cracked casing, abrasion, splits and charring."],
+  ["Contact with electricity","Only trained and competent users are allowed to use fixed electrical office equipment. Training includes information on the hazards, authorisation for attempting repairs, and associated COSHH information for any hazardous substances involved. Items could comprise: computers, printers, screens, telephones, faxes, photocopiers, vending machines, kettles, microwaves, fridges, coffee machines, binding, laminating and shredding machines."],
+  ["Contact with electricity","Staff are trained to spot and report any defective plugs, discoloured sockets, charring or burning smells or damaged cable / equipment. Defective equipment is taken out of use immediately and relocated to repair area or disposed of."],
+  ["Contact with electricity","Planned preventative maintenance systems are implemented whereby all equipment is regularly inspected, tested and maintained in accordance with the manufacturer's recommendations, including Portable Appliance Testing (PAT) where required. Repair, inspection and maintenance of fixed electrical items is only carried out by authorised, trained and competent persons."],
+  ["Flying debris / ejected particles","Suitable eye protection has been provided with appropriate impact resistance, commensurate to the potential speed and type of projectile hazard generated by the specific item in use and material being worked. Exact type and grade of eye protection required for task is specified in writing."],
+  ["Flying debris / ejected particles","Inclusion of eye wash materials in first aid kit and appropriately trained first aiders available where potential hazards to eyes have been identified."],
+  ["Flying debris / ejected particles","Operators do not apply excessive pressure during the operation of the tool or machine and ensure that the correct speed / torque / settings are used appropriate to the material / tool and part being used. No bumping or forcing of materials or equipment is allowed. Where items are powered, slow start-up speeds are used as appropriate, testing for material workability and any potential kickback or catching."],
+  ["Strike of person / property / equipment by falling object; Unauthorised access","A Safe Working Zone is established with personnel excluded wherever possible through the use of appropriate barriers and signage."],
+  ["Unauthorised access","Drivers of delivery vehicles, and drivers in general, are subject to a suitable induction including traffic segregation measures, details of dedicated unloading areas, no-go areas and loading restrictions."],
+  ["Unauthorised access","Parking facilities are suitably segregated from working areas and plant traffic routes, with provision of clear pedestrian signage and lighting where possible."],
+  ["Strike of person / property / equipment by falling object","Supervisors monitor plant and equipment operations to ensure that they are being carried out correctly."],
+  ["Inclement / extreme weather","Suitable procedures are in place for logistics and planning to ensure that safety controls are integrated into working practices and are maintained, for example: working in adverse weather conditions, working hours restrictions, required rest breaks, and work schedules."],
+  ["Inclement / extreme weather","Vehicle drivers are only allowed to park and unload in safe conditions: they are advised to assess the environment for gradients, poor ground conditions, holes / voids and for adverse weather conditions."],
+  ["Contact with electricity","Live electrical works will never be carried out."],
+  ["Contact with electricity","All areas, circuits and systems are considered and assumed live until certified and proved otherwise, prior to any works commencing."],
+  ["Contact with electricity; Unauthorised access","All persons involved in works are required to have a full working knowledge of isolation, lock-off procedures and protocols. Physical barriers are inserted wherever possible."],
+  ["Contact with electricity","Earthing is in place before carrying out works on 'dead' equipment."],
+  ["Contact with electricity","All circuits and parts are proved to be 'dead' with suitably insulated tools and working methods."],
+  ["Contact with electricity","Only competent JIB qualified electricians are appointed to carry out electrical works. They are required to maintain their qualifications to current regulations and IET guidance editions."],
+  ["Contact with electricity","All tools used during electrical works are insulated and, if required, flame resistant PPE is used, including the use of insulating mats."],
+  ["Contact with electricity","All staff working on electrical systems are trained in the emergency procedures to take should the operative be subject to electric shock, including electricity isolation points, first aid, and raising the alarm."],
+  ["Fall of person / object from height; Inclement / extreme weather; Strike by falling object","Weather conditions are monitored and taken into consideration for all work at height activities, especially wet, windy and freezing conditions. Works are stopped in adverse or worsening weather conditions."],
+  ["Fall of person / object from height","Ground and floor conditions are assessed for suitability prior to the erection and set up of any access equipment."],
+  ["Fall of person / object from height","Defective, damaged, worn or otherwise unsafe work-at-height equipment or accessories is completely removed from site immediately upon identification, or removed to manager's secure location to prevent accidental or unintended reuse."],
+  ["Fall of person / object from height; Strike by falling object; Unauthorised access","All reasonably practicable measures are taken to prevent unauthorised access to areas below and around work at height through the establishment of exclusion zones with suitable barriers, signage and guards."],
+  ["Fall of person / object from height","The work at height hierarchy is used to assess all work at height activities; wherever possible work at height activities are avoided."],
+  ["Fall of person / object from height; Strike by falling object","Work at height equipment and accessories are maintained in good order in accordance with manufacturer's instructions and best practice. It is subject to regular recorded user checks, regular inspection checks and statutory inspections."],
+  ["Fall of person / object from height; Strike by falling object","Regular refresher training / toolbox talks on work at height is provided to operatives."],
+  ["Fall of person / object from height; Strike by falling object","No horseplay, messing around, improvisation or substitution is permitted when using work at height equipment. Disciplinary consequences are clearly communicated to operatives. Where breaches of WAH safety are detected all members of the team identified are subject to deterrent enforcement actions, to encourage team safety awareness."],
+  ["Fall of person / object from height; Manual handling; Strike by falling object","Suitable consideration is given to distributing materials and tools to the point of work when working at height, providing suitable carrying and transportation aids such as tethers, lanyards, straps, bags, rucksacks, lifting systems, carriers and tool belts to prevent items falling from height wherever possible and to ensure persons can access their workplace at height safely."],
+  ["Strike of person / property / equipment by falling object","Workers are instructed that no items are to be deliberately thrown or dropped from any height, and suitable means of lowering items are to be used, for example use of rubble / debris chutes."],
+];
+
+const RAMS_PPE = [
+  ["Hearing protection","Ear muffs","SNR 30 or more &ndash; A-weighted noise level 100&ndash;105 dB"],
+  ["Hearing protection","Ear plugs","SNR 30 or more &ndash; A-weighted noise level 100&ndash;105 dB"],
+  ["Respiratory protection","Disposable half mask &ndash; particle filter","Filter type P WHITE (Particles)"],
+  ["Hi-Viz","Hi-Viz tabard","Class 1 &ndash; lowest level of conspicuity typically used in areas of minimal risk such as 'off road' activities"],
+  ["Hand protection","Gloves / gloves with a cuff","High durability"],
+  ["Foot protection","Boots","Steel / composite toecap"],
+  ["Eye protection","Goggles","Low energy impact resistance"],
+  ["Eye protection","Safety glasses","Low energy impact resistance"],
+  ["Head protection","Standard hard hat","BS EN 397"],
+];
+
+function ramsHead(){
+  return `${runHead()}<p class="appendix-tab">APPENDIX <b>B</b></p>
+    <p style="font-family:var(--head);text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-size:10px;margin:0 0 2px">Risk Assessment Builder &mdash; ${esc(v("projectName"))} &nbsp;&bull;&nbsp; Ref: ${esc(v("projectRef"))}</p>`;
+}
+
+function pageRamsCover(){
+  return `<div class="page">
+    ${ramsHead()}
+    <h2>Appendix B &mdash; Risk Assessment &amp; Method Statement</h2>
+    <p><b>${esc(v("ramsTitle"))}</b> &nbsp; <span class="danger-tag">Danger: ${esc(v("ramsDanger"))}</span></p>
+    <table>
+      <tr><th style="width:32%">Created</th><td>${esc(v("ramsCreated"))}</td></tr>
+      <tr><th>Reference</th><td>${esc(v("projectRef"))}</td></tr>
+      <tr><th>Location of activity</th><td>${esc(v("ramsLocation"))}</td></tr>
+      <tr><th>Description of activity</th><td>${esc(v("ramsDesc"))}</td></tr>
+      <tr><th>Equipment used</th><td>${nl(v("ramsEquipment"))}</td></tr>
+      <tr><th>Supporting documents</th><td>${esc(v("ramsSupporting"))}</td></tr>
+      <tr><th>Person(s) affected</th><td>${esc(v("ramsPersons"))}</td></tr>
+      <tr><th>Total numbers affected</th><td>${esc(v("ramsNumbers"))}</td></tr>
+      <tr><th>Frequency of exposure</th><td>${esc(v("ramsFrequency"))}</td></tr>
+      <tr><th>Duration of exposure</th><td>${esc(v("ramsExposure"))}</td></tr>
+      <tr><th>Assessor signature</th><td>${esc(v("ramsAssessor"))}</td></tr>
+      <tr><th>Created on</th><td>${esc(v("ramsCreated"))}</td></tr>
+      <tr><th>Review before</th><td>${esc(v("ramsReview"))}</td></tr>
+    </table>
+    ${FOOT}
+  </div>`;
+}
+
+function pageRamsHarms(){
+  return `<div class="page">
+    ${ramsHead()}
+    <h3>Likely Harm(s)</h3>
+    <ul>${RAMS_LIKELY_HARMS.map(h=>`<li>${h}</li>`).join("")}</ul>
+    ${FOOT}
+  </div>`;
+}
+
+function pageRamsSummary(){
+  const rows=RAMS_SUMMARY.map(r=>`<tr>
+      <td class="haz">${r[0]}</td><td class="aff">${r[1]}</td>
+      <td>${r[2][0]}</td><td>${r[2][1]}</td><td class="${rkClass(r[2][2])}">${r[2][2]}</td>
+      <td>${r[3][0]}</td><td>${r[3][1]}</td><td class="${rkClass(r[3][2])}">${r[3][2]}</td></tr>`).join("");
+  return `<div class="page">
+    ${ramsHead()}
+    <h3>Risk Summary</h3>
+    <table class="rs">
+      <tr><th rowspan="2">Hazard identified</th><th rowspan="2">Persons affected</th>
+          <th colspan="3">Risk rating WITHOUT controls</th><th colspan="3">Risk rating WITH controls</th></tr>
+      <tr><th>Sev.</th><th>Lik.</th><th>Rating</th><th>Sev.</th><th>Lik.</th><th>Rating</th></tr>
+      ${rows}
+    </table>
+    <div class="keygrid">
+      <div><h4>Severity</h4><ul>
+        <li>1 = Trivial / minor injury</li><li>2 = Moderate injury / minor property damage</li>
+        <li>3 = Major injury to one person / short-term health effects</li>
+        <li>4 = Major injury to several people / long-term health effects / major property damage</li>
+        <li>5 = Fatality</li></ul></div>
+      <div><h4>Likelihood</h4><ul>
+        <li>1 = Improbable occurrence</li><li>2 = Remote occurrence</li><li>3 = Possible occurrence</li>
+        <li>4 = Probable occurrence</li><li>5 = Likely occurrence</li></ul></div>
+      <div><h4>Risk (Severity &times; Likelihood)</h4><ul>
+        <li><span class="rk-h">15&ndash;25 = High risk</span></li>
+        <li><span class="rk-m">8&ndash;12 = Medium risk</span></li>
+        <li><span class="rk-l">1&ndash;6 = Low risk</span></li></ul></div>
+    </div>
+    ${FOOT}
+  </div>`;
+}
+
+function pageRamsControls(slice,part,total){
+  const rows=slice.map(c=>`<tr><td>${c[0]}</td><td>${c[1]}</td></tr>`).join("");
+  return `<div class="page">
+    ${ramsHead()}
+    <h3>Control Measures${total>1?` (${part} of ${total})`:""}</h3>
+    <table class="cm"><tr><th>Hazards</th><th>Control measure</th></tr>${rows}</table>
+    ${FOOT}
+  </div>`;
+}
+
+function pageRamsActions(){
+  return `<div class="page">
+    ${ramsHead()}
+    <h3>Additional Control Measure Action List</h3>
+    <table class="cm">
+      <tr><th>Responsibility</th><th>Hazard</th><th>Control measure</th><th>By when</th></tr>
+      <tr><td>Competent Person</td><td>Strike by falling object</td><td>Where possible, load is kept as low as possible to the ground during manoeuvre.</td><td>Ongoing</td></tr>
+      <tr><td>Appointed Person</td><td>Strike by falling object / Unauthorised access</td><td>Suitable secure cordons are established with physical signed barriers and monitored throughout the lift, to exclude any persons not involved in the lift.</td><td>Daily</td></tr>
+      <tr><td>Appointed Person</td><td>Inclement / extreme weather</td><td>Lifting equipment used is as specified and used in accordance with the lifting plan and manufacturer's instructions.</td><td>Daily</td></tr>
+      <tr><td>Appointed Person</td><td>Strike by falling object</td><td>Operators ensure the route of manoeuvre during the lifting operation is adequately lit and in good condition prior to works to minimise the possibility of overturning.</td><td>Daily</td></tr>
+      <tr><td>Employee / Worker / Operative</td><td>Strike by falling object</td><td>Hard hats to standard BS EN 397 are worn to protect against falling objects.</td><td>Daily</td></tr>
+    </table>
+    ${FOOT}
+  </div>`;
+}
+
+function pageRamsPPE(){
+  const rows=RAMS_PPE.map(p=>`<tr><td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td></tr>`).join("");
+  return `<div class="page">
+    ${ramsHead()}
+    <h3>Selected PPE for Task</h3>
+    <table><tr><th>Category</th><th>PPE</th><th>Grade / notes</th></tr>${rows}</table>
+    ${FOOT}
+  </div>`;
+}
+
+/* ---- Appendix B: Method Statement (fields editable) ---- */
+function yn(id){ return v(id)==="No" ? "No" : "Yes"; }
+function pageMethod(){
+  const ppe=[["Hard hats","msHardHats"],["Safety boots","msBoots"],["High-vis jackets","msHiVis"],
+    ["Safety gloves","msGloves"],["Eye protection","msEye"],["Hearing protection","msHearing"],["Respiratory","msResp"]];
+  return `<div class="page">
+    ${ramsHead()}
+    <h2>Method Statement</h2>
+    <h3>Project Summary</h3>
+    <table>
+      <tr><th style="width:32%">Project name</th><td>${esc(v("projectName"))}</td></tr>
+      <tr><th>Summary of the project</th><td>${nl(v("msSummary"))}</td></tr>
+      <tr><th>Site address</th><td>${nl(v("siteAddress"))}</td></tr>
+      <tr><th>Project reference</th><td>${esc(v("projectRef"))}</td></tr>
+      <tr><th>Start date</th><td>${esc(v("msStartDate"))}</td></tr>
+      <tr><th>Finish date</th><td>${esc(v("msFinishDate"))}</td></tr>
+      <tr><th>Issue date</th><td>${esc(v("msIssueDate"))}</td></tr>
+      <tr><th>Document number</th><td>${esc(v("msDocNumber"))}</td></tr>
+      <tr><th>Company name</th><td>Mostlane Construction Ltd</td></tr>
+      <tr><th>Address</th><td>${esc(COMPANY_ADDR)}</td></tr>
+    </table>
+    <h3>Health &amp; Safety Contact Details</h3>
+    <table>
+      <tr><th style="width:32%">Project Director</th><td>${esc(v("projectDirector"))} &mdash; ${esc(v("officeTel"))} / ${esc(v("projectDirectorMob"))}</td></tr>
+      <tr><th>Name of works supervisor</th><td>${esc(v("siteManager"))} &mdash; ${esc(v("siteManagerTel"))}</td></tr>
+      <tr><th>Contracts Manager(s)</th><td>${esc(v("contractsManager"))} &mdash; ${esc(v("contractsManagerTel"))}</td></tr>
+    </table>
+    <h3>Health &amp; Safety Procedures</h3>
+    <table>
+      <tr><th style="width:32%">On-site first aider</th><td>${esc(v("msFirstAider"))}</td></tr>
+      <tr><th>Address of nearest hospital</th><td>${esc(v("hospitalName"))}, ${nl(v("hospitalAddress")).replace(/<br>/g,", ")}</td></tr>
+      <tr><th>On-site first aid box location</th><td>${esc(v("msFirstAidBox"))}</td></tr>
+      <tr><th>Designated evacuation meeting point</th><td>${esc(v("msEvacPoint"))}</td></tr>
+    </table>
+    <h3>Work Permits</h3>
+    <table>
+      <tr><th>Permit name</th><th>Finalised?</th></tr>
+      <tr><td>${esc(v("msPermit1"))}</td><td>${esc(v("msPermit1Final"))}</td></tr>
+      <tr><td>${esc(v("msPermit2"))}</td><td>${esc(v("msPermit2Final"))}</td></tr>
+    </table>
+    <h3>Staff Training Requirements</h3>
+    <div class="ms-fill">${nl(v("msTraining"))}</div>
+    <h3>Equipment Needed</h3>
+    <div class="ms-fill">${nl(v("msEquipment"))}</div>
+    <h3>Required Personal Protective Equipment (PPE)</h3>
+    <div class="ms-yesno">${ppe.map(p=>`<div><b>${p[0]}</b>${yn(p[1])}</div>`).join("")}</div>
+    <h3>Waste Disposal Arrangements</h3>
+    <div class="ms-fill">${nl(v("msWaste"))}</div>
+    <h3>Order of Operations</h3>
+    <div class="ms-fill">${nl(v("msOrderOps"))}</div>
+    <h3>Other Important Information</h3>
+    <div class="ms-fill">${nl(v("msOtherInfo"))||"&mdash;"}</div>
+    ${FOOT}
+  </div>`;
+}
+
+function pageAppendixCDE(){
+  const showCompound = v("includeCompound")!=="No";
+  const compoundImg  = state.compoundImg;
+  const routeImg     = state.hospitalImg;
+  return `<div class="page">
+    ${runHead()}
+    ${ showCompound ? `
+    <p class="appendix-tab">APPENDIX <b>C</b></p>
+    <h2>Appendix C &mdash; Site Compound Location &amp; Set-up</h2>
+    <p>${nl(v("compoundText"))}</p>
+    ${ compoundImg ? `<figure><img src="${compoundImg}" alt="Compound location map"><figcaption>Site compound &amp; access &mdash; ${esc(v("projectName"))}</figcaption></figure>` : "" }
+    ` : "" }
+
+    <p class="appendix-tab">APPENDIX <b>D</b></p>
+    <h2>Appendix D &mdash; Contact Details</h2>
+    <table>
+      <tr><th>Service</th><th>Name(s)</th><th>Company</th><th>Telephone / Mobile</th></tr>
+      ${(state.directory||[]).map(r=>`<tr>
+        <td>${esc(r.service)}</td><td>${esc(r.name)}</td><td>${esc(r.company)}</td>
+        <td>${esc(r.phone)}${r.phone&&r.mobile?" / ":""}${esc(r.mobile)}</td></tr>`).join("")}
+    </table>
+
+    <p class="appendix-tab">APPENDIX <b>E</b></p>
+    <h2>Appendix E &mdash; Local Hospital &amp; A&amp;E Department</h2>
+    <p><b>${esc(v("hospitalName"))}</b><br>${nl(v("hospitalAddress"))}</p>
+    ${ state.hospitalRouteText ? `<p class="route-meta"><b>Driving route from site:</b> ${esc(state.hospitalRouteText)}</p>` : "" }
+    ${ routeImg ? `<figure><img src="${routeImg}" alt="Route from site to hospital"><figcaption>Route from site to ${esc(v("hospitalName"))}</figcaption></figure>` : "" }
+
+    <p class="appendix-tab">APPENDIX <b>F</b></p>
+    <h2>Appendix F &mdash; Mostlane Health &amp; Safety Policy</h2>
+    <p>(Sent as a separate email attachment as a protected file.)</p>
+    ${FOOT}
+  </div>`;
+}
+
+/* ============================================================
+   6. TOOLBAR ACTIONS
+   ============================================================ */
+document.getElementById("btnPrint").addEventListener("click",()=>window.print());
+
+document.getElementById("btnPreview").addEventListener("click",()=>{
+  const css   = document.getElementById("appstyle").innerHTML;  // our stylesheet (not one Google Maps injected)
+  const brand = v("_brand") || "#1b5a9b";
+  const win   = window.open("", "_blank");
+  if(!win){ alert("Please allow pop-ups for this page to open the preview."); return; }
+  win.document.write(`<!DOCTYPE html><html lang="en-GB"><head><meta charset="utf-8">
+    <title>${esc(v("projectName")||"H&S Plan")} — Preview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>${css}</style>
+    <style>
+      :root{--brand:${brand};--brand-light:${brand}1c}
+      body{background:#dce2ea;margin:0;padding:18px}
+      .pv-bar{position:sticky;top:-18px;z-index:10;display:flex;gap:8px;justify-content:center;
+        padding:12px;margin:-18px -18px 18px;background:#fff;border-bottom:1px solid var(--line)}
+      @media print{.pv-bar{display:none}body{background:#fff;padding:0}}
+    </style></head>
+    <body>
+      <div class="pv-bar">
+        <button onclick="window.print()">Save / Print as PDF</button>
+        <button class="secondary" onclick="window.close()">Close preview</button>
+      </div>
+      <div class="doc">${document.getElementById("docRoot").innerHTML}</div>
+    </body></html>`);
+  win.document.close();
+});
+
+document.getElementById("btnNew").addEventListener("click",()=>{
+  if(confirm("Start a new job? This clears all answers in this browser.")){
+    state=blankState(); persist(); buildForm(); renderDoc();
+  }
+});
+document.getElementById("btnExample").addEventListener("click",()=>{
+  if(confirm("Load the Lake Road Surgery example over your current answers?")){
+    state=exampleState(); persist(); buildForm(); renderDoc();
+  }
+});
+document.getElementById("btnSave").addEventListener("click",()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=(v("projectName")||"hs-plan").replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-answers.json";
+  a.click();
+});
+const fileInput=document.getElementById("fileInput");
+document.getElementById("btnLoad").addEventListener("click",()=>fileInput.click());
+fileInput.addEventListener("change",e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ state=JSON.parse(r.result); mergeDefaults(); ensureAux(); persist(); buildForm(); renderDoc(); }
+                 catch(err){ alert("Could not read that file."); } };
+  r.readAsText(file); fileInput.value="";
+});
+
+/* ============================================================
+   7. CLOUD LIBRARY (Cloudflare Worker + D1)
+   ============================================================ */
+const CLOUD_KEY="mostlane_cloud";
+const uid=()=> (window.crypto&&crypto.randomUUID)?crypto.randomUUID():"j"+Date.now()+Math.random().toString(16).slice(2);
+function getCloud(){ try{ return JSON.parse(localStorage.getItem(CLOUD_KEY))||{}; }catch(e){ return {}; } }
+function setCloud(c){ localStorage.setItem(CLOUD_KEY, JSON.stringify(c)); }
+function cloudOn(){ const c=getCloud(); return !!(c.url&&c.token); }
+
+async function cloudReq(method,path,body){
+  const c=getCloud();
+  const r=await fetch(c.url.replace(/\/+$/,"")+path,{
+    method,
+    headers:{ "Authorization":"Bearer "+c.token, ...(body?{"Content-Type":"application/json"}:{}) },
+    body: body?JSON.stringify(body):undefined,
+  });
+  if(!r.ok) throw new Error("HTTP "+r.status+(r.status===401?" — check your access token":""));
+  return r.json().catch(()=>null);
+}
+
+const libEl=()=>document.getElementById("library");
+function showLibrary(){ libEl().classList.add("show"); renderLibrary(); }
+function hideLibrary(){ libEl().classList.remove("show"); }
+
+async function renderLibrary(){
+  const list=document.getElementById("libList"), status=document.getElementById("libStatus");
+  if(!cloudOn()){
+    status.innerHTML='Not connected yet — click <b>Cloud settings</b> and paste your Cloudflare Worker URL and access token.';
+    list.innerHTML='<div class="lib-empty">Once connected, your saved jobs appear here on every device.</div>'; return;
+  }
+  status.textContent="Loading jobs…"; list.innerHTML="";
+  try{
+    const jobs=await cloudReq("GET","/jobs");
+    status.textContent = jobs.length ? (jobs.length+" saved job"+(jobs.length>1?"s":"")) : "";
+    if(!jobs.length){ list.innerHTML='<div class="lib-empty">No saved jobs yet. Click <b>+ New job</b> to create one.</div>'; return; }
+    jobs.forEach(j=>{
+      const d=document.createElement("div"); d.className="job-card";
+      let when=""; try{ when=new Date(j.updated_at).toLocaleString("en-GB"); }catch(e){}
+      d.innerHTML=`<h3>${esc(j.name||"Untitled job")}</h3><div class="meta">Edited ${esc(when)}</div>
+        <div class="row">
+          <button class="small" data-open>Open</button>
+          <button class="small secondary" data-dup>Duplicate</button>
+          <button class="small danger" data-del>Delete</button>
+        </div>`;
+      d.querySelector("[data-open]").onclick=()=>openJob(j.id);
+      d.querySelector("[data-dup]").onclick=()=>duplicateJob(j.id);
+      d.querySelector("[data-del]").onclick=()=>deleteJob(j.id,j.name);
+      list.appendChild(d);
+    });
+  }catch(e){ status.innerHTML='<span style="color:#c0392b">Could not load jobs: '+esc(e.message)+'</span>'; list.innerHTML=""; }
+}
+
+function newJob(){
+  state=exampleState();          // start from the standard template, ready to edit
+  state._id=uid(); persist(); buildForm(); renderDoc(); hideLibrary();
+}
+async function openJob(id){
+  try{
+    const data=await cloudReq("GET","/jobs/"+id);
+    state=data; state._id=id; ensureAux(); persist(); buildForm(); renderDoc(); hideLibrary();
+  }catch(e){ alert("Could not open job: "+e.message); }
+}
+async function duplicateJob(id){
+  try{
+    const data=await cloudReq("GET","/jobs/"+id);
+    data._id=uid(); data.projectName=(data.projectName||"Job")+" (copy)";
+    await cloudReq("PUT","/jobs/"+data._id,data); renderLibrary();
+  }catch(e){ alert("Could not duplicate: "+e.message); }
+}
+async function deleteJob(id,name){
+  if(!confirm('Delete "'+(name||"this job")+'"? This cannot be undone.')) return;
+  try{ await cloudReq("DELETE","/jobs/"+id); renderLibrary(); }
+  catch(e){ alert("Could not delete: "+e.message); }
+}
+function flashCloud(msg){ const b=document.getElementById("btnCloudSave"); const t=b.dataset.t||b.textContent; b.dataset.t=t; b.textContent=msg; setTimeout(()=>b.textContent=t,1500); }
+async function saveCurrent(toast){
+  if(!cloudOn()){ alert("Not connected to the cloud yet. Open the Library and click Cloud settings."); return false; }
+  if(!state._id) state._id=uid();
+  try{ await cloudReq("PUT","/jobs/"+state._id, state); persist(); if(toast) flashCloud("Saved ✓"); return true; }
+  catch(e){ alert("Could not save to cloud: "+e.message); return false; }
+}
+function cloudSettings(){
+  const c=getCloud();
+  const url=prompt("Cloudflare Worker URL\n(e.g. https://mostlane-hs-jobs.<your-subdomain>.workers.dev)", c.url||"");
+  if(url===null) return;
+  const token=prompt("Access token (the APP_TOKEN you set on the Worker)", c.token||"");
+  if(token===null) return;
+  setCloud({ url:(url||"").trim(), token:(token||"").trim() }); renderLibrary();
+}
+
+/* Return to the portal. Navigates the top-level window, so it works whether
+   the tool is opened directly or embedded in the portal via an iframe. */
+const MAIN_MENU_URL="https://mostlane-portal.com/main.html";
+function goMainMenu(){ try{ (window.top||window).location.href=MAIN_MENU_URL; }catch(e){ window.location.href=MAIN_MENU_URL; } }
+document.getElementById("btnMainMenu").onclick=goMainMenu;
+document.getElementById("libMain").onclick=goMainMenu;
+
+document.getElementById("libNew").onclick=newJob;
+document.getElementById("libRefresh").onclick=renderLibrary;
+document.getElementById("libCloud").onclick=cloudSettings;
+document.getElementById("btnLibrary").onclick=async()=>{ if(cloudOn()&&state._id) await saveCurrent(false); showLibrary(); };
+document.getElementById("btnCloudSave").onclick=()=>saveCurrent(true);
+
+/* ============================================================
+   8. INIT
+   ============================================================ */
+/* Portal launch (option B): if opened with #worker=<url>&token=<token>
+   (from a portal button), auto-connect cloud settings and strip the token
+   from the address bar so it isn't left visible / bookmarked. */
+function applyLaunchParams(){
+  try{
+    const h=(location.hash||"").replace(/^#/,"");
+    if(!h) return;
+    const p=new URLSearchParams(h);
+    const url=p.get("worker"), token=p.get("token");
+    if(url&&token){
+      setCloud({ url:url.trim(), token:token.trim() });
+      history.replaceState(null,"",location.pathname+location.search);
+    }
+  }catch(e){}
+}
+
+load();
+applyLaunchParams();
+buildForm();
+renderDoc();
+if(cloudOn()) showLibrary();   // start on the library when connected
+</script>
+</body>
+</html>

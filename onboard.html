@@ -52,7 +52,7 @@
       const postcode = document.getElementById("postcode").value;
       const deviceId = await getDeviceId();
 
-      getLocation((lat, lon) => {
+      getLocation(async (lat, lon) => {
         const data = {
           firstName, lastName, email, mobile, jobRole,
           postcode, deviceId,
@@ -60,20 +60,26 @@
           longitude: lon?.toString() || ""
         };
 
-        fetch("https://hooks.zapier.com/hooks/catch/20261714/2x5j07h/", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams(data).toString()
-        })
-        .then(() => {
+        try {
+          // Direct call to the portal API — /onboard is public (no token needed).
+          const res = await fetch(window.MOSTLANE_API + "/onboard", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data)
+          });
+          const r = await res.json().catch(() => ({}));
+          if (!res.ok || !r.ok) {
+            document.getElementById("statusMsg").textContent =
+              r.error || "Error submitting data. Please try again.";
+            return;
+          }
           document.getElementById("statusMsg").textContent = "Success! Redirecting...";
           setTimeout(() => {
             window.location.href = "confirmation.html";
           }, 1000);
-        })
-        .catch(() => {
+        } catch (e) {
           document.getElementById("statusMsg").textContent = "Error submitting data. Please try again.";
-        });
+        }
       });
     }
   </script>

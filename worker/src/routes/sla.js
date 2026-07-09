@@ -367,6 +367,16 @@ async function createOrUpdateJobFromPayload(env, body) {
     assignedTo: assignedEngineers[0] || "",   // legacy single field = primary engineer
     assignedEngineers,
     siteCode: body.siteCode || existing?.siteCode || "",  // carried so the siteCode filter works
+    // Full site details captured at creation — shown to engineers (address,
+    // phone, directions) without a lookup. Previously these were dropped.
+    siteName: body.siteName || existing?.siteName || "",
+    address: body.address || existing?.address || "",
+    telephone: body.telephone || existing?.telephone || "",
+    postcode: body.postcode || existing?.postcode || "",
+    lat: body.lat ?? existing?.lat ?? null,
+    lon: body.lon ?? existing?.lon ?? null,
+    storeType: body.storeType || existing?.storeType || "",
+    sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
     scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -398,6 +408,8 @@ async function patchJob(env, id, patch) {
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
   if (patch.quote !== undefined) job.quote = patch.quote;   // Story Mode quote pack
   if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // Story Mode RA
+  if (patch.order !== undefined) job.order = patch.order;   // Story Mode parts-order pack
+  if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
 
   if (patch.status) {
     const s = normalizeStatus(patch.status);

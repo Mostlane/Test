@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Day — Mostlane</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --ml-blue-light:#1e66ff; --border:#d1d5db; --muted:#6b7280; --green:#0e7a3b; --amber:#92500a; }
+    html,body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:#0f172a; background:#e6e8eb; }
+    .shell{ max-width:560px; margin:0 auto 60px; padding:0 12px; }
+    .topbar{ background:linear-gradient(90deg,#003b82,#1e66ff); color:#fff; border-radius:0 0 16px 16px; padding:16px 16px 14px; margin:0 -12px 14px; }
+    .topbar h1{ margin:0; font-size:18px; }
+    .topbar .sub{ font-size:12px; opacity:.85; margin-top:2px; }
+    .steps{ display:flex; gap:6px; margin-top:10px; }
+    .step-chip{ flex:1; text-align:center; font-size:11px; font-weight:600; padding:5px 2px; border-radius:999px; background:rgba(255,255,255,.18); }
+    .step-chip.on{ background:#fff; color:var(--ml-blue); }
+    .card{ background:#fff; border-radius:14px; padding:16px; box-shadow:0 10px 24px rgba(0,0,0,.10); border:1px solid rgba(15,23,42,.05); margin-bottom:12px; }
+    .card h2{ margin:0 0 6px; font-size:16px; color:var(--ml-blue); }
+    .card .sub{ font-size:13px; color:var(--muted); margin:0 0 12px; }
+    .bigbtn{ display:block; width:100%; box-sizing:border-box; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; color:#fff; background:var(--ml-blue-light); margin-top:10px; }
+    .bigbtn.green{ background:var(--green); }
+    .bigbtn.grey{ background:#64748b; }
+    .bigbtn.amber{ background:#b45309; }
+    .bigbtn.red{ background:#b91c1c; }
+    .bigbtn.ghost{ background:#fff; color:var(--ml-blue); border:1.5px solid var(--ml-blue); }
+    .bigbtn:disabled{ opacity:.5; }
+    label{ display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],input[type=number],textarea{ width:100%; box-sizing:border-box; padding:11px; font-size:15px; border:1px solid var(--border); border-radius:8px; background:#fff; }
+    textarea{ min-height:64px; }
+    .check{ display:flex; align-items:center; gap:10px; font-size:14px; font-weight:400; margin:7px 0; }
+    .check input{ width:20px; height:20px; }
+    .jobrow{ border:1px solid var(--border); border-radius:12px; padding:12px; margin:8px 0; }
+    .jobrow .ref{ font-weight:700; color:var(--ml-blue); font-size:13px; }
+    .jobrow .title{ font-size:15px; font-weight:600; margin:2px 0; }
+    .jobrow .meta{ font-size:12px; color:var(--muted); }
+    .jobrow.done{ opacity:.55; }
+    .pill{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#4338ca; }
+    .pill.hold{ background:#fef3c7; color:#92400e; }
+    .pill.act{ background:#dcfce7; color:#166534; }
+    .msg{ font-size:13px; margin-top:8px; min-height:16px; }
+    .msg.err{ color:#b91c1c; } .msg.ok{ color:var(--green); }
+    .rowbtns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+    canvas.sig{ width:100%; height:150px; border:1px solid var(--border); border-radius:8px; touch-action:none; background:#fff; }
+    .photos{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .photos img{ width:64px; height:64px; object-fit:cover; border-radius:8px; border:1px solid var(--border); }
+    .foot{ text-align:center; margin-top:16px; }
+    .foot a{ color:var(--ml-blue); font-size:13px; }
+    .summary-line{ display:flex; justify-content:space-between; font-size:14px; padding:7px 0; border-bottom:1px solid #eef1f4; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <h1>⚡ My Day</h1>
+    <div class="sub" id="who">…</div>
+    <div class="steps">
+      <div class="step-chip" id="chipStart">1 · Start</div>
+      <div class="step-chip" id="chipJobs">2 · Jobs</div>
+      <div class="step-chip" id="chipFinish">3 · Finish</div>
+    </div>
+  </div>
+
+  <div id="stage"><div class="card"><h2>Loading your day…</h2></div></div>
+
+  <div class="foot"><a href="engineer-jobs.html">Job history</a> · <a href="main.html">Portal menu</a></div>
+</div>
+
+<script>
+const API = window.MOSTLANE_API;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+// Direct calls to the new worker need the session token attached explicitly
+// (the portal-config bridge only does this for the legacy worker hostnames).
+function authFetch(url, init = {}){
+  init.headers = new Headers(init.headers || {});
+  const t = localStorage.getItem("mostlaneToken");
+  if (t && !init.headers.has("Authorization")) init.headers.set("Authorization", "Bearer " + t);
+  return fetch(url, init);
+}
+
+// Site info for a job: prefer what's stored on the job; fall back to the sites DB.
+let sitesCache = null;
+async function siteInfo(j){
+  let info = { address: j.address || "", phone: j.telephone || "", lat: j.lat, lon: j.lon };
+  if(!info.address && !info.phone && j.siteCode){
+    try{
+      if(!sitesCache){
+        const r = await authFetch(`${API}/get-sites?category=all`, {cache:"no-store"});
+        sitesCache = await r.json();
+        if(!Array.isArray(sitesCache)) sitesCache = [];
+      }
+      const digits = (String(j.siteCode).match(/(\d+)\s*$/) || [])[1];
+      const s = digits ? sitesCache.find(x => String(x.siteNumber||"").padStart(4,"0") === digits.padStart(4,"0")) : null;
+      if(s){
+        info.address = [s.address1 || s.street || "", s.town || "", (s.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
+        info.phone = s.telephone || s.phone || "";
+        info.lat = s.lat; info.lon = s.lon;
+      }
+    }catch(e){}
+  }
+  return info;
+}
+async function fillSiteBlock(j){
+  const el = $("siteBlock"); if(!el) return;
+  const s = await siteInfo(j);
+  if(!s.address && !s.phone) { el.textContent = ""; return; }
+  const dest = (s.lat != null && s.lon != null) ? `${s.lat},${s.lon}` : s.address;
+  el.innerHTML =
+    (s.address ? `📍 ${esc(s.address)}<br>` : "") +
+    (s.phone ? `☎ <a href="tel:${esc(s.phone.replace(/\s+/g,""))}">${esc(s.phone)}</a> · ` : "") +
+    (dest ? `<a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}">🗺️ Directions</a>` : "");
+}
+
+// "Raise a PO" opens this engineer's personal link on the PO system.
+let poUrlCache;
+async function fillPoLink(){
+  const a = $("poLink"); if(!a) return;
+  if(poUrlCache === undefined){
+    try{
+      const r = await authFetch(`${API}/po-config`, {cache:"no-store"});
+      const c = await r.json().catch(() => ({}));
+      poUrlCache = (r.ok && c.ok && c.url) ? c.url : "";
+    }catch(e){ poUrlCache = ""; }
+  }
+  if(poUrlCache){ a.href = poUrlCache; a.style.display = "block"; }
+}
+
+function getEngineer(){
+  return sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || sessionStorage.getItem("username") || "";
+}
+function isStoryMode(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}").StoryMode === "Yes"; }
+  catch { return false; }
+}
+function getVehicle(){ return sessionStorage.getItem("mostlaneVehicle") || localStorage.getItem("mostlaneVehicle") || ""; }
+function todayLocal(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function fmtTime(iso){ try { return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+function getGps(){
+  return new Promise(resolve => {
+    if(!navigator.geolocation) return resolve("");
+    navigator.geolocation.getCurrentPosition(
+      p => resolve(`${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`),
+      () => resolve(""), { timeout:8000 });
+  });
+}
+function mondayOfWeek(){
+  const x = new Date(); const day = (x.getDay()+6)%7;
+  x.setDate(x.getDate()-day);
+  return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`;
+}
+function pastVehicleDeadline(){
+  const now = new Date(), x = new Date(now), day = (x.getDay()+6)%7;
+  const wed = new Date(x); wed.setDate(x.getDate()-day+2); wed.setHours(12,0,0,0);
+  return now >= wed;
+}
+
+/* ── state ── */
+let shift = null, jobs = [], vcStatus = "prompt", photoCount = 0;
+
+async function loadState(){
+  const eng = getEngineer();
+  const [sRes, jRes, vRes] = await Promise.all([
+    authFetch(`${API}/sla/shift/today?engineer=${encodeURIComponent(eng)}&date=${todayLocal()}`, {cache:"no-store"}).then(r=>r.json()).catch(()=>({})),
+    authFetch(`${API}/sla/jobs/for-engineer?engineer=${encodeURIComponent(eng)}`, {cache:"no-store"}).then(r=>r.json()).catch(()=>[]),
+    authFetch(`${API}/sla/vehicle-check?engineer=${encodeURIComponent(eng)}&week=${mondayOfWeek()}`, {cache:"no-store"}).then(r=>r.json()).catch(()=>({}))
+  ]);
+  shift = sRes.shift || null;
+  jobs = Array.isArray(jRes) ? jRes : [];
+  vcStatus = (vRes.check && vRes.check.checked_at) ? "done" : (pastVehicleDeadline() ? "enforce" : "prompt");
+}
+
+const isToday = j => j.scheduledAt && new Date(j.scheduledAt).toDateString() === new Date().toDateString();
+const activeJob   = () => jobs.find(j => j.status === "Travelling" || j.status === "In Progress");
+const todaysJobs  = () => jobs.filter(j => isToday(j) && (j.status === "Pending" || j.status === "Scheduled"));
+const parkedJobs  = () => jobs.filter(j => j.status === "On Hold" || j.status === "Order");
+const doneToday   = () => jobs.filter(j => (j.status === "Complete" || j.status === "Quote") && j.updatedAt && new Date(j.updatedAt).toDateString() === new Date().toDateString());
+
+async function refresh(){ await loadState(); render(); }
+
+async function patchJob(id, body){
+  const res = await authFetch(`${API}/sla/jobs/${encodeURIComponent(id)}`, {
+    method:"PATCH", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ ...body, changedBy: getEngineer() })
+  });
+  if(!res.ok) throw new Error("save failed");
+  return res.json();
+}
+
+/* ── render ── */
+function setChips(step){
+  ["chipStart","chipJobs","chipFinish"].forEach((id,i)=> $(id).classList.toggle("on", i===step));
+}
+
+function render(){
+  $("who").textContent = `${getEngineer()}${getVehicle() ? " · " + getVehicle() : ""} · ${new Date().toLocaleDateString(undefined,{weekday:"long", day:"numeric", month:"short"})}`;
+
+  if(!isStoryMode()){
+    $("stage").innerHTML = `<div class="card"><h2>Story Mode is off</h2>
+      <p class="sub">This guided day view is for Story Mode engineers. You can use the normal job list instead.</p>
+      <a class="bigbtn ghost" href="engineer-jobs.html" style="text-align:center;text-decoration:none;">Go to My Jobs</a></div>`;
+    return;
+  }
+  if(!shift || !shift.clock_on_at) return renderStart();
+  if(shift.clock_off_at) return renderSummary();
+  const act = activeJob();
+  if(act && act.status === "Travelling") return renderTravelling(act);
+  if(act) return renderWorking(act);
+  renderPick();
+}
+
+/* ── STEP 1: start of day ── */
+function renderStart(){
+  setChips(0);
+  const needVc = vcStatus !== "done";
+  $("stage").innerHTML = `
+    <div class="card">
+      <h2>Good morning 👋</h2>
+      <p class="sub">Start your day to see your jobs. Your start time and location are recorded.</p>
+      ${needVc ? `
+        <div id="vcBox" style="border:1px solid #f0c98a;background:#fffaf0;border-radius:12px;padding:12px;margin-bottom:6px;">
+          <b style="color:var(--amber);">Weekly vehicle check ${vcStatus==="enforce" ? "— required now" : "— due by Wednesday lunchtime"}</b>
+          <div id="vcItems" style="margin-top:6px;"></div>
+          <label class="check" style="font-weight:700;"><input type="checkbox" id="vc_safe"> Vehicle is safe &amp; roadworthy</label>
+          <textarea id="vc_note" placeholder="Note any defects…"></textarea>
+          ${vcStatus==="prompt" ? `<label class="check"><input type="checkbox" id="vc_skip"> Skip for now (must be done by Wed 12:00)</label>` : ``}
+        </div>` : `<div class="msg ok">✔ This week's vehicle check is done.</div>`}
+      <label>Van start mileage (odometer)</label>
+      <input type="number" id="startMiles" inputmode="numeric" placeholder="e.g. 48213" />
+      <button class="bigbtn green" id="startBtn">▶ Start my day</button>
+      <div class="msg" id="startMsg"></div>
+    </div>`;
+  if(needVc){
+    $("vcItems").innerHTML = VC_ITEMS.map((t,i)=>`<label class="check"><input type="checkbox" id="vc${i}"> ${t}</label>`).join("");
+  }
+  $("startBtn").addEventListener("click", startDay);
+}
+
+const VC_ITEMS = [
+  "Tyres & pressures","Lights & indicators","Brakes","Mirrors & glass",
+  "Fluid levels (oil / coolant / washer)","Bodywork / damage","Load secured / racking",
+  "Dashboard warning lights","First-aid kit & extinguisher","Clean & tidy"
+];
+
+async function startDay(){
+  const msg = $("startMsg"); msg.className = "msg";
+  const btn = $("startBtn"); btn.disabled = true; msg.textContent = "Starting…";
+  try{
+    if(vcStatus !== "done"){
+      const skipping = vcStatus === "prompt" && $("vc_skip") && $("vc_skip").checked;
+      if(!skipping){
+        if(!$("vc_safe").checked){
+          msg.className = "msg err"; msg.textContent = "Complete the vehicle check (tick 'safe & roadworthy'), or tick skip if it's not Wednesday yet.";
+          btn.disabled = false; return;
+        }
+        const items = {}; VC_ITEMS.forEach((t,i)=>{ items[t] = $("vc"+i).checked; });
+        await authFetch(`${API}/sla/vehicle-check`, { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ engineer:getEngineer(), week:mondayOfWeek(), vehicle:getVehicle(), safeToDrive:true, items, note:$("vc_note").value.trim() }) });
+      }
+    }
+    const m = $("startMiles").value;
+    const gps = await getGps();
+    await authFetch(`${API}/sla/shift/clock-on`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ engineer:getEngineer(), gps, startMileage: m && !isNaN(+m) ? Math.round(+m) : null, date: todayLocal() }) });
+    await refresh();
+  }catch(e){
+    msg.className = "msg err"; msg.textContent = "Couldn't start your day — check signal and try again.";
+    btn.disabled = false;
+  }
+}
+
+/* ── STEP 2a: pick next job ── */
+function renderPick(){
+  setChips(1);
+  const today = todaysJobs(), parked = parkedJobs(), done = doneToday();
+  const jobRow = (j, extra="") => `
+    <div class="jobrow">
+      <div class="ref">${esc(j.helpdeskRef || j.id)} <span class="pill">${esc(j.priority || "")}</span> ${extra}</div>
+      <div class="title">${esc(j.description || "")}</div>
+      <div class="meta">${esc(j.siteCode || "")}${j.scheduledAt ? " · " + fmtTime(j.scheduledAt) : ""}</div>
+      <div id="travel_${esc(j.id)}"></div>
+      <button class="bigbtn" data-travel="${esc(j.id)}">🚐 Travel to this job</button>
+    </div>`;
+  $("stage").innerHTML = `
+    <div class="card">
+      <h2>🟢 On shift since ${fmtTime(shift.clock_on_at)}</h2>
+      <p class="sub">Pick your next job — one at a time. ${done.length ? `${done.length} finished today.` : ""}</p>
+      ${today.length ? today.map(j=>jobRow(j)).join("") : `<p class="sub">No more scheduled jobs today.</p>`}
+      ${parked.length ? `<h2 style="margin-top:14px;">Parked</h2>` + parked.map(j=>jobRow(j, `<span class="pill hold">${esc(j.status)}</span>`)).join("") : ``}
+      ${done.length ? `<h2 style="margin-top:14px;">Done today</h2>` + done.map(j=>`
+        <div class="jobrow done"><div class="ref">${esc(j.helpdeskRef || j.id)} <span class="pill act">${esc(j.status)}</span></div>
+        <div class="title">${esc(j.description || "")}</div></div>`).join("") : ``}
+    </div>
+    <div class="card">
+      <h2>Finished for the day?</h2>
+      <label>Van end mileage (odometer)</label>
+      <input type="number" id="endMiles" inputmode="numeric" placeholder="e.g. 48297" />
+      <label>Fuel added today (£ or litres)</label>
+      <input type="text" id="fuel" placeholder="optional" />
+      <button class="bigbtn red" id="endBtn">■ End my day</button>
+      <div class="msg" id="endMsg"></div>
+    </div>`;
+  document.querySelectorAll("[data-travel]").forEach(b => b.addEventListener("click", () => startTravel(b.dataset.travel, b)));
+  $("endBtn").addEventListener("click", endDay);
+}
+
+async function startTravel(jobId, btn){
+  btn.disabled = true; btn.textContent = "Starting travel…";
+  try{
+    const gps = await getGps();
+    const shiftMiles = shift && shift.start_mileage != null ? undefined : undefined;
+    await patchJob(jobId, { status:"Travelling", note:`Travelling started${gps ? " ("+gps+")" : ""}` });
+    await refresh();
+  }catch(e){ btn.disabled = false; btn.textContent = "🚐 Travel to this job"; }
+}
+
+async function endDay(){
+  const msg = $("endMsg"); msg.className = "msg";
+  if(activeJob()){ msg.className="msg err"; msg.textContent = "You still have an active job — finish, quote, order or hold it first."; return; }
+  $("endBtn").disabled = true; msg.textContent = "Ending your day…";
+  try{
+    const m = $("endMiles").value;
+    const gps = await getGps();
+    await authFetch(`${API}/sla/shift/clock-off`, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ engineer:getEngineer(), gps, endMileage: m && !isNaN(+m) ? Math.round(+m) : null, fuel: $("fuel").value.trim(), date: todayLocal() }) });
+    await refresh();
+  }catch(e){ msg.className="msg err"; msg.textContent = "Couldn't clock off — try again."; $("endBtn").disabled = false; }
+}
+
+/* ── STEP 2b: travelling ── */
+function renderTravelling(j){
+  setChips(1);
+  $("stage").innerHTML = `
+    <div class="card">
+      <h2>🚐 Travelling to ${esc(j.helpdeskRef || j.id)}</h2>
+      <p class="sub">${esc(j.description || "")} · ${esc(j.siteCode || "")}</p>
+      <div id="siteBlock" class="sub" style="margin:-6px 0 12px;"></div>
+      <div style="border:1px solid #f0c98a;background:#fffaf0;border-radius:12px;padding:12px;">
+        <b style="color:var(--amber);">Arrival checklist — before you start work</b>
+        <div id="raItems" style="margin-top:6px;"></div>
+        <textarea id="ra_note" placeholder="Site condition notes (optional)…"></textarea>
+        <label class="check" style="font-weight:700;"><input type="checkbox" id="ra_safe"> I've assessed the site — safe to proceed</label>
+      </div>
+      <label>Van odometer on arrival (for job mileage)</label>
+      <input type="number" id="jobMiles" inputmode="numeric" placeholder="optional" />
+      <button class="bigbtn green" id="arriveBtn">📍 I've arrived — start work</button>
+      <button class="bigbtn grey" id="unTravelBtn">↩ Not travelling (put back)</button>
+      <div class="msg" id="raMsg"></div>
+    </div>`;
+  const RA = ["Safe access & egress","Correct PPE for the task","Isolation / lock-off done where needed",
+              "Working at height controlled (or N/A)","Others at risk — barriers / signage","Hazardous materials considered (asbestos / COSHH)"];
+  $("raItems").innerHTML = RA.map((t,i)=>`<label class="check"><input type="checkbox" id="ra${i}"> ${t}</label>`).join("");
+  fillSiteBlock(j);
+  $("arriveBtn").addEventListener("click", async () => {
+    const msg = $("raMsg");
+    if(!$("ra_safe").checked){ msg.className="msg err"; msg.textContent = "Tick 'safe to proceed' once you've assessed the site."; return; }
+    $("arriveBtn").disabled = true; msg.className="msg"; msg.textContent = "Saving…";
+    const ra = {
+      safeAccess:$("ra0").checked, ppe:$("ra1").checked, isolation:$("ra2").checked,
+      height:$("ra3").checked, othersAtRisk:$("ra4").checked, hazardous:$("ra5").checked,
+      note:$("ra_note").value.trim(), safeToProceed:true, by:getEngineer(), at:new Date().toISOString()
+    };
+    const m = $("jobMiles").value;
+    try{
+      await patchJob(j.id, { status:"In Progress", riskAssessment: ra,
+        travelStartMileage: m && !isNaN(+m) ? Math.round(+m) : undefined,
+        note:"Arrived on site" });
+      await refresh();
+    }catch(e){ msg.className="msg err"; msg.textContent="Couldn't save — try again."; $("arriveBtn").disabled=false; }
+  });
+  $("unTravelBtn").addEventListener("click", async () => {
+    try{ await patchJob(j.id, { status:"Scheduled", note:"Travel cancelled" }); await refresh(); }catch(e){}
+  });
+}
+
+/* ── STEP 2c: on site ── */
+let sigCtx = null, sigDrawn = false;
+
+function renderWorking(j){
+  setChips(1);
+  $("stage").innerHTML = `
+    <div class="card">
+      <h2>🔧 On site — ${esc(j.helpdeskRef || j.id)}</h2>
+      <p class="sub">${esc(j.description || "")} · ${esc(j.siteCode || "")} · started ${lastStatusTime(j,"In Progress")}</p>
+      <div id="siteBlock" class="sub" style="margin:-6px 0 12px;"></div>
+      <a class="bigbtn ghost" id="poLink" style="text-align:center;text-decoration:none;display:none;" href="#" target="_blank" rel="noopener">🧾 Raise a PO for parts</a>
+      <div class="rowbtns">
+        <button class="bigbtn green" id="oComplete">✅ Complete</button>
+        <button class="bigbtn amber" id="oQuote">💰 Needs quote</button>
+        <button class="bigbtn" id="oOrder">📦 Order parts</button>
+        <button class="bigbtn grey" id="oHold">⏸ On hold</button>
+      </div>
+      <div id="outcomeForm"></div>
+    </div>`;
+  fillSiteBlock(j);
+  fillPoLink();
+  $("oComplete").addEventListener("click", () => showCompleteForm(j));
+  $("oQuote").addEventListener("click", () => showQuoteForm(j));
+  $("oOrder").addEventListener("click", () => showOrderForm(j));
+  $("oHold").addEventListener("click", () => showHoldForm(j));
+}
+
+function lastStatusTime(j, status){
+  const h = (j.statusHistory || []).filter(x => x.status === status).pop();
+  return h ? fmtTime(h.at) : "—";
+}
+
+function showHoldForm(j){
+  $("outcomeForm").innerHTML = `
+    <label>Why is it going on hold? *</label>
+    <textarea id="holdReason" placeholder="e.g. waiting on access / customer decision…"></textarea>
+    <label>What's needed to resume?</label>
+    <input type="text" id="holdNeeds" />
+    <button class="bigbtn grey" id="holdGo">⏸ Put on hold</button>
+    <div class="msg" id="fMsg"></div>`;
+  $("holdGo").addEventListener("click", async () => {
+    const r = $("holdReason").value.trim();
+    if(!r){ err("Give a reason for the hold."); return; }
+    await submitOutcome(j, { status:"On Hold", note:`ON HOLD: ${r}${$("holdNeeds").value.trim() ? " — needs: " + $("holdNeeds").value.trim() : ""}` }, "holdGo");
+  });
+}
+
+function showOrderForm(j){
+  $("outcomeForm").innerHTML = `
+    <label>Parts needed (one per line: item × qty) *</label>
+    <textarea id="ordParts"></textarea>
+    <label>Supplier</label><input type="text" id="ordSupplier" />
+    <label>Expected in (ETA)</label><input type="text" id="ordEta" placeholder="e.g. 2 days / Thursday" />
+    <label>PO number (if raised)</label><input type="text" id="ordPo" placeholder="optional" />
+    <button class="bigbtn" id="ordGo">📦 Save — parts on order</button>
+    <div class="msg" id="fMsg"></div>`;
+  $("ordGo").addEventListener("click", async () => {
+    const parts = $("ordParts").value.trim();
+    if(!parts){ err("List the parts needed."); return; }
+    const order = { parts, supplier:$("ordSupplier").value.trim(), eta:$("ordEta").value.trim(),
+                    po:$("ordPo").value.trim(), by:getEngineer(), at:new Date().toISOString() };
+    await submitOutcome(j, { status:"Order", order, note:"Parts on order" }, "ordGo");
+  });
+}
+
+function showQuoteForm(j){
+  $("outcomeForm").innerHTML = `
+    <label>Description of works required *</label><textarea id="qDesc"></textarea>
+    <label>Why it needs quoting *</label><input type="text" id="qReason" placeholder="out of scope / materials / access…" />
+    <label>Materials needed (item × qty) *</label><textarea id="qMat"></textarea>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div><label>Est. labour (hrs)</label><input type="number" id="qHrs" step="0.5" /></div>
+      <div><label>Engineers</label><input type="number" id="qEngs" step="1" /></div>
+    </div>
+    <label>Access / constraints</label><input type="text" id="qAccess" />
+    <label>Measurements / notes</label><textarea id="qNotes"></textarea>
+    <div class="sub" style="margin-top:8px;">Add photos of the works below — the office will quote from this.</div>
+    ${photoBlock()}
+    <button class="bigbtn amber" id="qGo">💰 Submit for quote</button>
+    <div class="msg" id="fMsg"></div>`;
+  wirePhotoBlock(j);
+  $("qGo").addEventListener("click", async () => {
+    if(!$("qDesc").value.trim() || !$("qReason").value.trim() || !$("qMat").value.trim()){
+      err("Description, why, and materials are required."); return;
+    }
+    const quote = {
+      description:$("qDesc").value.trim(), reason:$("qReason").value.trim(), materials:$("qMat").value.trim(),
+      labourHours:$("qHrs").value ? +$("qHrs").value : null, engineers:$("qEngs").value ? +$("qEngs").value : null,
+      access:$("qAccess").value.trim(), notes:$("qNotes").value.trim(), capturedBy:getEngineer(), capturedAt:new Date().toISOString()
+    };
+    await submitOutcome(j, { status:"Quote", quote, note:"Submitted for quoting" }, "qGo");
+  });
+}
+
+function showCompleteForm(j){
+  $("outcomeForm").innerHTML = `
+    <label>What was done? *</label>
+    <textarea id="cNote" placeholder="Work carried out, parts used…"></textarea>
+    <label>Photos of finished work * (at least 1)</label>
+    ${photoBlock()}
+    <label>Customer name *</label>
+    <input type="text" id="cSigName" />
+    <label>Customer signature *</label>
+    <canvas class="sig" id="cSig" width="480" height="150"></canvas>
+    <button class="bigbtn ghost" id="cSigClear" style="margin-top:6px;">Clear signature</button>
+    <button class="bigbtn green" id="cGo">✅ Complete job</button>
+    <div class="msg" id="fMsg"></div>`;
+  wirePhotoBlock(j);
+  initSig();
+  $("cSigClear").addEventListener("click", () => { sigCtx.clearRect(0,0,480,150); sigDrawn = false; });
+  $("cGo").addEventListener("click", async () => {
+    if(!$("cNote").value.trim()) return err("Describe what was done.");
+    if(photoCount < 1) return err("Add at least one photo of the finished work.");
+    const name = $("cSigName").value.trim();
+    if(!name) return err("Customer name is required.");
+    if(!sigDrawn) return err("Customer signature is required.");
+    $("cGo").disabled = true; $("fMsg").className="msg"; $("fMsg").textContent = "Saving…";
+    try{
+      await authFetch(`${API}/sla/jobs/${encodeURIComponent(j.id)}/signature`, {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ signedBy:name, signedAt:new Date().toISOString(), signatureBase64: $("cSig").toDataURL("image/png") })
+      });
+      await patchJob(j.id, { status:"Complete", note:$("cNote").value.trim() });
+      await refresh();
+    }catch(e){ err("Couldn't save — try again."); $("cGo").disabled = false; }
+  });
+}
+
+function initSig(){
+  const c = $("cSig");
+  sigCtx = c.getContext("2d");
+  sigCtx.lineWidth = 2; sigCtx.lineCap = "round"; sigCtx.strokeStyle = "#111";
+  sigDrawn = false;
+  let drawing = false;
+  const pos = e => {
+    const r = c.getBoundingClientRect();
+    return { x:(e.clientX - r.left) * (c.width / r.width), y:(e.clientY - r.top) * (c.height / r.height) };
+  };
+  c.onpointerdown = e => { drawing = true; const p = pos(e); sigCtx.beginPath(); sigCtx.moveTo(p.x, p.y); };
+  c.onpointermove = e => { if(!drawing) return; const p = pos(e); sigCtx.lineTo(p.x, p.y); sigCtx.stroke(); sigDrawn = true; };
+  c.onpointerup = c.onpointercancel = () => drawing = false;
+}
+
+/* photos: shared block for quote + complete forms */
+function photoBlock(){
+  return `<input type="file" id="phInput" accept="image/*" capture="environment" multiple style="margin-top:6px;" />
+          <button class="bigbtn ghost" id="phUpload" style="margin-top:6px;">📷 Upload photo(s)</button>
+          <div class="photos" id="phGrid"></div>
+          <div class="msg" id="phMsg"></div>`;
+}
+function wirePhotoBlock(j){
+  photoCount = 0;
+  authFetch(`${API}/sla/jobs/${encodeURIComponent(j.id)}/files`, {cache:"no-store"}).then(r=>r.json()).then(d => {
+    const files = (d && d.files) || [];
+    photoCount = files.length;
+    $("phGrid").innerHTML = files.map(f => `<img src="${esc(f.publicURL)}" alt="">`).join("");
+    if(files.length) $("phMsg").textContent = `${files.length} photo(s) already on this job.`;
+  }).catch(()=>{});
+  $("phUpload").addEventListener("click", async () => {
+    const files = $("phInput").files;
+    if(!files || !files.length){ $("phMsg").textContent = "Pick photo(s) first."; return; }
+    $("phUpload").disabled = true; $("phMsg").textContent = "Uploading…";
+    for(const file of files){
+      try{
+        const form = new FormData(); form.append("file", file, file.name);
+        const res = await authFetch(`${API}/sla/jobs/${encodeURIComponent(j.id)}/files?filename=${encodeURIComponent(file.name)}`, { method:"POST", body:form });
+        const d = await res.json();
+        if(res.ok){ photoCount++; if(d.publicURL) $("phGrid").insertAdjacentHTML("beforeend", `<img src="${esc(d.publicURL)}" alt="">`); }
+      }catch(e){}
+    }
+    $("phUpload").disabled = false; $("phMsg").textContent = `${photoCount} photo(s) on this job.`;
+    $("phInput").value = "";
+  });
+}
+
+function err(t){ const m = $("fMsg"); if(m){ m.className = "msg err"; m.textContent = t; } }
+async function submitOutcome(j, body, btnId){
+  const b = $(btnId); if(b) b.disabled = true;
+  $("fMsg").className = "msg"; $("fMsg").textContent = "Saving…";
+  try{ await patchJob(j.id, body); await refresh(); }
+  catch(e){ err("Couldn't save — try again."); if(b) b.disabled = false; }
+}
+
+/* ── STEP 3: day summary ── */
+function renderSummary(){
+  setChips(2);
+  const done = doneToday();
+  const miles = (shift.start_mileage != null && shift.end_mileage != null) ? shift.end_mileage - shift.start_mileage : null;
+  const ms = new Date(shift.clock_off_at) - new Date(shift.clock_on_at);
+  const hrs = `${Math.floor(ms/3600000)}h ${String(Math.round((ms%3600000)/60000)).padStart(2,"0")}m`;
+  $("stage").innerHTML = `
+    <div class="card">
+      <h2>✔ That's a wrap</h2>
+      <p class="sub">Your day is logged. See you tomorrow.</p>
+      <div class="summary-line"><span>On shift</span><b>${fmtTime(shift.clock_on_at)} → ${fmtTime(shift.clock_off_at)} (${hrs})</b></div>
+      <div class="summary-line"><span>Jobs finished</span><b>${done.length}</b></div>
+      <div class="summary-line"><span>Miles driven</span><b>${miles != null ? miles : "—"}</b></div>
+      <div class="summary-line"><span>Fuel</span><b>${esc(shift.fuel || "—")}</b></div>
+      ${done.map(j => `<div class="summary-line"><span>${esc(j.helpdeskRef || j.id)}</span><span class="pill act">${esc(j.status)}</span></div>`).join("")}
+    </div>`;
+}
+
+refresh();
+</script>
+</body>
+</html>
