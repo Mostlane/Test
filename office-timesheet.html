@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Timesheet — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    * { box-sizing:border-box; }
+    body { font-family:"Segoe UI",sans-serif; background:#eef1f4; margin:0; color:#27313a; }
+    header { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header h1 { font-size:18px; margin:0; flex:1; }
+    header a { color:#fff; text-decoration:none; font-size:14px; opacity:.9; }
+    .wrap { max-width:1100px; margin:18px auto; padding:0 14px; }
+    .bar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+    .btn { background:#0066cc; color:#fff; border:none; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
+    .btn.grey { background:#5b6b78; } .btn:disabled { opacity:.5; cursor:default; }
+    .weeklabel { font-weight:600; color:#003366; font-size:15px; min-width:220px; text-align:center; }
+    .spacer { flex:1; }
+    .card { background:#fff; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:760px; }
+    th,td { padding:10px 12px; border-bottom:1px solid #eef2f6; font-size:14px; text-align:center; font-variant-numeric:tabular-nums; }
+    th { background:#f6f8fa; color:#003366; font-size:12px; text-transform:uppercase; letter-spacing:.4px; position:sticky; top:0; }
+    th.name, td.name { text-align:left; }
+    td.name b { color:#27313a; } td.name .muted { color:#8a97a6; font-size:12px; }
+    td.day { color:#5b6b78; } td.day.has { color:#27313a; font-weight:600; }
+    td.total { font-weight:700; color:#003366; }
+    tr.grand td { border-top:2px solid #dbe2ea; background:#f9fbfd; font-weight:700; color:#003366; }
+    .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#fff3cd; color:#7a5b00; margin-left:6px; }
+    .empty { padding:26px; text-align:center; color:#8a97a6; }
+    .note { color:#6b7280; font-size:12.5px; margin-top:10px; }
+    @media print { header .btn, .bar .btn { display:none; } body { background:#fff; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💼 Office Timesheet</h1>
+    <a href="main.html">← Main menu</a>
+  </header>
+
+  <div class="wrap">
+    <div class="bar">
+      <button class="btn grey" id="prev">← Prev week</button>
+      <span class="weeklabel" id="weekLabel">…</span>
+      <button class="btn grey" id="next">Next week →</button>
+      <button class="btn grey" id="thisWeek">This week</button>
+      <span class="spacer"></span>
+      <button class="btn" id="csv">Download CSV</button>
+      <button class="btn" id="print">Print</button>
+    </div>
+
+    <div class="card">
+      <table id="tbl">
+        <thead><tr id="head"></tr></thead>
+        <tbody id="body"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="note">Totals are the sum of each person's clocked segments (breaks excluded). A
+      <span class="pill">running</span> tag means they're still clocked in — that open session isn't counted until they clock out.</p>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const token = localStorage.getItem("mostlaneToken");
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    if (!token) location.href = "login.html";
+    function authFetch(path, init = {}) {
+      init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});
+      return fetch(API + path, init);
+    }
+
+    const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    function todayLondon() { return new Date().toLocaleDateString("en-CA", { timeZone:"Europe/London" }); }
+    function mondayOf(dateStr) { const d = new Date(dateStr + "T12:00:00Z"); const dow = (d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-dow); return d.toISOString().slice(0,10); }
+    function addDays(dateStr, n) { const d = new Date(dateStr + "T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+    function fmtDayLabel(dateStr) { return new Date(dateStr + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+    function hm(sec) { sec = Math.floor(sec||0); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); if (!sec) return "–"; return h ? `${h}h ${m}m` : `${m}m`; }
+    function decimalHours(sec) { return ((sec||0)/3600).toFixed(2); }
+
+    let monday = mondayOf(todayLondon());
+    let current = null;
+
+    async function guardAndLoad() {
+      try {
+        const me = await (await authFetch("/auth/me")).json();
+        if (!me.ok || me.user.FullAccess !== "Yes") { alert("Access denied"); location.href = "main.html"; return; }
+      } catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="9">Could not reach the portal API.</td></tr>`; return; }
+      load();
+    }
+
+    async function load() {
+      g("weekLabel").textContent = "Loading…";
+      let data;
+      try { data = await (await authFetch("/office/timesheet?week=" + monday)).json(); }
+      catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="9">Could not load the timesheet.</td></tr>`; return; }
+      if (!data.ok) { g("body").innerHTML = `<tr><td class="empty" colspan="9">${esc(data.error||"Error")}</td></tr>`; return; }
+      current = data;
+      render(data);
+    }
+
+    function render(data) {
+      const days = data.days;
+      g("weekLabel").textContent = `${fmtDayLabel(days[0])} – ${fmtDayLabel(days[6])}, ${days[6].slice(0,4)}`;
+      g("head").innerHTML = `<th class="name">Name</th>` +
+        days.map((d,i) => `<th>${DOW[i]}<div style="font-weight:400;opacity:.7">${fmtDayLabel(d)}</div></th>`).join("") +
+        `<th>Total</th>`;
+
+      if (!data.users.length) { g("body").innerHTML = `<tr><td class="empty" colspan="${days.length+2}">No office-clock users yet. Give someone the “Office clock in/out” permission and flag their office device.</td></tr>`; return; }
+
+      const dayTotals = days.map(() => 0); let grand = 0;
+      const rows = data.users.map(u => {
+        const cells = days.map((d,i) => {
+          const sec = u.days[d] || 0; dayTotals[i] += sec;
+          return `<td class="day${sec?" has":""}">${hm(sec)}</td>`;
+        }).join("");
+        grand += u.total;
+        const open = u.open ? `<span class="pill">running</span>` : "";
+        return `<tr><td class="name"><b>${esc(u.name)}</b>${open}<div class="muted">${esc(u.username)}</div></td>${cells}<td class="total">${hm(u.total)}</td></tr>`;
+      }).join("");
+
+      const grandCells = dayTotals.map(s => `<td>${hm(s)}</td>`).join("");
+      const grandRow = `<tr class="grand"><td class="name">All office staff</td>${grandCells}<td class="total">${hm(grand)}</td></tr>`;
+      g("body").innerHTML = rows + grandRow;
+    }
+
+    g("prev").onclick = () => { monday = addDays(monday, -7); load(); };
+    g("next").onclick = () => { monday = addDays(monday, 7); load(); };
+    g("thisWeek").onclick = () => { monday = mondayOf(todayLondon()); load(); };
+    g("print").onclick = () => window.print();
+    g("csv").onclick = () => {
+      if (!current) return;
+      const days = current.days;
+      const head = ["Name","Username", ...days.map((d,i) => DOW[i] + " " + d), "Total (h)"];
+      const lines = [head.join(",")];
+      current.users.forEach(u => {
+        const row = [u.name, u.username, ...days.map(d => decimalHours(u.days[d] || 0)), decimalHours(u.total)];
+        lines.push(row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(","));
+      });
+      const blob = new Blob([lines.join("\n")], { type:"text/csv" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `office-timesheet_${current.monday}.csv`;
+      a.click(); URL.revokeObjectURL(a.href);
+    };
+
+    guardAndLoad();
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <script src="/portal-config.js"></script>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -103,6 +104,25 @@ a.button {
   width: 2.2rem;       /* fixed width prevents grid push */
   text-align: center;
 }
+
+/* Office clock in/out bar (top of main, office devices only) */
+#officeClockBar { display:none; width:min(820px, calc(100% - 24px)); margin:0 auto 18px; }
+.oc-card { background:#fff; border:1px solid #d7dee6; border-left:5px solid #0066cc; border-radius:14px;
+  padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:16px;
+  box-shadow:0 4px 12px rgba(0,0,0,.10); flex-wrap:wrap; }
+.oc-card.warn { border-left-color:#e0a800; }
+.oc-left { display:flex; align-items:center; gap:14px; }
+.oc-dot { width:12px; height:12px; border-radius:50%; background:#c2ccd6; flex:none; }
+.oc-dot.on { background:#0c7d3f; box-shadow:0 0 0 4px rgba(12,125,63,.15); animation:ocPulse 2s infinite; }
+@keyframes ocPulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+.oc-time { font-size:26px; font-weight:700; color:#003366; font-variant-numeric:tabular-nums; line-height:1; }
+.oc-sub { font-size:12.5px; color:#6b7280; margin-top:4px; }
+.oc-btn { border:none; border-radius:10px; padding:12px 22px; font-size:15px; font-weight:700; color:#fff;
+  cursor:pointer; transition:filter .15s ease; }
+.oc-btn:hover { filter:brightness(1.06); }
+.oc-btn:disabled { opacity:.6; cursor:default; }
+.oc-btn.start { background:#0c7d3f; } .oc-btn.stop { background:#b00020; }
+@media (prefers-reduced-motion:reduce){ .oc-dot.on{ animation:none; } }
   </style>
   <!-- PWA CORE -->
 <link rel="manifest" href="/manifest.json">
@@ -122,6 +142,8 @@ a.button {
     const user = sessionStorage.getItem("mostlaneUser");
     if (user) document.getElementById("userName").textContent = user;
   </script>
+
+  <div id="officeClockBar"></div>
 
   <div class="menu-grid" id="menuGrid">
     
@@ -152,6 +174,7 @@ a.button {
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
+    <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Office Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-menu.html" id="SLA"><span class="emoji">🚨</span> SLA</a>
@@ -225,7 +248,10 @@ const MAP = {
   // Map KEY = button element id; the list = permission names that unlock it.
   Customers: ["Sites", "AddSite"],
   PurchaseOrders2: ["PurchaseOrders"],
-  SiteLog: ["SiteLog"]
+  SiteLog: ["SiteLog"],
+  // Full-access only: no user holds "OfficeTimesheetView", so only FullAccess
+  // (which unlocks every button) sees the weekly office timesheet.
+  OfficeTimesheet: ["OfficeTimesheetView"]
 };
 
 // H&S planner launch. The app token lives as a secret on the API worker;
@@ -323,6 +349,104 @@ const MAP = {
 
     });
   </script>
+  <script>
+    // ── Office clock in/out bar ────────────────────────────────────────────
+    // Shows only on devices an admin flagged as office machines for a user who
+    // holds the OfficeClock permission (server decides via /office/config).
+    // Never shows on mobiles. The running time is server truth (clock-in stamp),
+    // so it survives refreshes and navigation.
+    (function () {
+      const API = window.MOSTLANE_API;
+      const bar = document.getElementById("officeClockBar");
+      if (!API || !bar) return;
+      const isMobile = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+      if (isMobile) return;
+
+      const token = localStorage.getItem("mostlaneToken");
+      const deviceId = localStorage.getItem("deviceID") || sessionStorage.getItem("deviceID") || "";
+      if (!token) return;
+
+      function authFetch(path, init = {}) {
+        init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});
+        if (init.body) init.headers["Content-Type"] = "application/json";
+        return fetch(API + path, init);
+      }
+      const pad = n => String(n).padStart(2, "0");
+      function hms(sec) { sec = Math.max(0, Math.floor(sec)); return `${pad(Math.floor(sec/3600))}:${pad(Math.floor(sec%3600/60))}:${pad(sec%60)}`; }
+      function hm(sec) { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); return h ? `${h}h ${m}m` : `${m}m`; }
+      function niceDate(d) { try { return new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" }); } catch { return d; } }
+
+      let tick = null, state = null;
+      function stopTick() { if (tick) { clearInterval(tick); tick = null; } }
+
+      async function refresh() {
+        let c;
+        try { c = await (await authFetch("/office/config?device=" + encodeURIComponent(deviceId))).json(); }
+        catch (e) { return; }
+        if (!c || !c.ok || !c.enabled) { bar.style.display = "none"; stopTick(); return; }
+        state = c;
+        render();
+        bar.style.display = "block";
+      }
+
+      function render() {
+        stopTick();
+        const open = state.open;
+        const banked = state.todayClosedSeconds || 0;
+
+        if (open && open.stale) {
+          bar.innerHTML =
+            `<div class="oc-card warn"><div class="oc-left"><span class="oc-dot on"></span>`
+            + `<div><div class="oc-time">Still clocked in</div>`
+            + `<div class="oc-sub">You didn't clock out on ${niceDate(open.date)}. Clock out to close it.</div></div></div>`
+            + `<button class="oc-btn stop" id="ocStop">Clock out</button></div>`;
+          document.getElementById("ocStop").onclick = doStop;
+          return;
+        }
+
+        if (open) {
+          const started = Date.parse(open.clockIn);
+          bar.innerHTML =
+            `<div class="oc-card"><div class="oc-left"><span class="oc-dot on"></span>`
+            + `<div><div class="oc-time" id="ocTime">00:00:00</div>`
+            + `<div class="oc-sub">Clocked in at ${new Date(started).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})} · today's total</div></div></div>`
+            + `<button class="oc-btn stop" id="ocStop">Stop day</button></div>`;
+          const timeEl = document.getElementById("ocTime");
+          const paint = () => { timeEl.textContent = hms(banked + (Date.now() - started) / 1000); };
+          paint(); tick = setInterval(paint, 1000);
+          document.getElementById("ocStop").onclick = doStop;
+          return;
+        }
+
+        bar.innerHTML =
+          `<div class="oc-card"><div class="oc-left"><span class="oc-dot"></span>`
+          + `<div><div class="oc-time">${banked ? hm(banked) : "Not started"}</div>`
+          + `<div class="oc-sub">${banked ? "Logged so far today — start again to add more" : "Start your day when you're ready"}</div></div></div>`
+          + `<button class="oc-btn start" id="ocStart">Start day</button></div>`;
+        document.getElementById("ocStart").onclick = doStart;
+      }
+
+      async function doStart(e) {
+        const btn = e.target; btn.disabled = true;
+        try {
+          const r = await (await authFetch("/office/clock-in", { method:"POST", body: JSON.stringify({ deviceId }) })).json();
+          if (!r.ok) { alert(r.error || "Couldn't start the timer."); btn.disabled = false; return; }
+        } catch (_) { alert("Network error — couldn't start the timer."); btn.disabled = false; return; }
+        await refresh();
+      }
+      async function doStop(e) {
+        const btn = e.target; btn.disabled = true;
+        try {
+          const r = await (await authFetch("/office/clock-out", { method:"POST", body: JSON.stringify({ deviceId }) })).json();
+          if (!r.ok) { alert(r.error || "Couldn't stop the timer."); btn.disabled = false; return; }
+        } catch (_) { alert("Network error — couldn't stop the timer."); btn.disabled = false; return; }
+        await refresh();
+      }
+
+      refresh();
+    })();
+  </script>
+
   <script>
     // ✅ PWA Push – Service Worker registration (STEP 2)
     if ("serviceWorker" in navigator) {

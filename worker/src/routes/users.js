@@ -276,6 +276,7 @@ const PERMISSION_KEYS = [
   "StoryMode",   // opt-in: guided day protocol for this engineer
   "HSPlan",      // access to the H&S planning tool
   "SiteLog",     // access to SiteLog (site check-in/attendance)
+  "OfficeClock", // opt-in: desktop clock in/out timer for office staff
 ];
 
 function shapeUser(u, perms) {

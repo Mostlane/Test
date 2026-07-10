@@ -165,6 +165,7 @@
       <!-- DEVICES -->
       <div class="section" data-sec="devices">
         <p class="muted">Registered devices for this person. Removing one lets them re-register on their next login (use this to move someone to a new phone).</p>
+        <p class="muted">Turn on <b>Office clock</b> for the office computer(s) where this person should see the clock in/out timer on the main menu. Leave it off for phones and home devices. (They also need the <b>Office clock in/out</b> permission.)</p>
         <div id="deviceList"><div class="muted">—</div></div>
       </div>
 
@@ -201,7 +202,7 @@
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
-      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog"];
+      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog","OfficeClock"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -215,7 +216,8 @@
       Sites:"Sites", AddSite:"Add site", Assets:"Assets", MyDocuments:"My documents",
       Weekly:"Weekly", Forms:"Forms", Compliance:"Compliance", Projects:"Projects",
       ProjectsAdmin:"Projects admin", TimesheetAdmin:"Timesheet admin",
-      LabourPlanning:"Labour planning", SLA:"SLA", HSPlan:"H&S planner", SiteLog:"SiteLog"
+      LabourPlanning:"Labour planning", SLA:"SLA", HSPlan:"H&S planner", SiteLog:"SiteLog",
+      OfficeClock:"Office clock in/out"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
@@ -224,7 +226,7 @@
       { title:"Administration",       perms:["Users","DeviceAdmin"] },
       { title:"Sites & assets",       perms:["Sites","AddSite","Assets","SiteLog"] },
       { title:"Jobs & SLA",           perms:["SLA","Forms"] },
-      { title:"Time & hours",         perms:["CheckInOut","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","Weekly"] },
+      { title:"Time & hours",         perms:["CheckInOut","OfficeClock","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","Weekly"] },
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
@@ -434,7 +436,12 @@
         el.innerHTML = devs.map(d => `
           <div class="devrow">
             <span><b>${esc(d.label || "(unnamed device)")}</b><div class="muted">${esc(d.device_id)} · ${esc((d.registered_at||"").slice(0,10))}</div></span>
-            <button class="btn small red" data-dev="${esc(d.device_id)}">Remove</button>
+            <span style="display:flex;align-items:center;gap:14px;">
+              <label class="switch" title="Show the office clock on this device">
+                <input type="checkbox" data-office="${esc(d.device_id)}" ${Number(d.office_clock)===1?"checked":""}><span class="slider"></span>
+              </label>
+              <button class="btn small red" data-dev="${esc(d.device_id)}">Remove</button>
+            </span>
           </div>`).join("");
       } catch (e) { el.innerHTML = '<div class="muted">Could not load devices.</div>'; }
     }
@@ -445,6 +452,16 @@
         await api("/device/" + encodeURIComponent(t.dataset.dev), { method: "DELETE" });
         await loadDevices(g("f_username").value.trim());
       } catch (e) { alert("Could not remove device."); }
+    });
+    // Office-clock per-device toggle.
+    g("deviceList").addEventListener("change", async (e) => {
+      const t = e.target; if (!t.dataset.office) return;
+      try {
+        const res = await api("/device/office-clock", { method: "POST",
+          body: JSON.stringify({ deviceId: t.dataset.office, office: t.checked }) });
+        const r = await res.json();
+        if (!res.ok || !r.ok) throw new Error();
+      } catch (err) { t.checked = !t.checked; alert("Could not update the office-clock setting for this device."); }
     });
 
     async function resendWelcome(username) {
