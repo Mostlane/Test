@@ -99,10 +99,39 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true, closed: true, seconds: secondsBetween(open.clock_in, iso), date: open.date }, {}, env, request);
   }
 
+  // ── GET /office/my?week=YYYY-MM-DD — the caller's OWN week ────────────────
+  // Any signed-in user can read their own hours (breakdown by day + segments).
+  if (path === "/office/my" && request.method === "GET") {
+    let week = url.searchParams.get("week") || "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) week = londonDate();
+    const monday = mondayOf(week);
+    const days = weekDays(monday);
+    const sunday = days[6];
+    const { results } = await env.DB.prepare(
+      "SELECT date, clock_in, clock_out FROM office_shifts WHERE username=? AND date>=? AND date<=? ORDER BY clock_in"
+    ).bind(me, monday, sunday).all();
+    const byDay = {};
+    for (const d of days) byDay[d] = { date: d, seconds: 0, open: false, segments: [] };
+    let weekTotal = 0;
+    for (const r of results || []) {
+      const day = byDay[r.date] || (byDay[r.date] = { date: r.date, seconds: 0, open: false, segments: [] });
+      if (r.clock_out) {
+        const s = secondsBetween(r.clock_in, r.clock_out);
+        day.seconds += s; weekTotal += s;
+        day.segments.push({ in: r.clock_in, out: r.clock_out, seconds: s, open: false });
+      } else {
+        day.open = true;
+        day.segments.push({ in: r.clock_in, out: null, seconds: 0, open: true });
+      }
+    }
+    return json({ ok: true, monday, sunday, days, byDay, weekTotal }, {}, env, request);
+  }
+
   // ── GET /office/timesheet?week=YYYY-MM-DD (Monday) — FullAccess only ───────
   if (path === "/office/timesheet" && request.method === "GET") {
     const perms = await permissionsFor(env, me);
-    if (perms.FullAccess !== "Yes") return error("Forbidden", 403, env, request);
+    if (perms.FullAccess !== "Yes" && perms.OfficeTimesheet !== "Yes")
+      return error("Forbidden", 403, env, request);
     let week = url.searchParams.get("week") || "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) week = londonDate();
     const monday = mondayOf(week);

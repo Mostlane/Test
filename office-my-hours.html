@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Hours — Mostlane Portal</title>
+  <script src="auth.js"></script>
+  <style>
+    * { box-sizing:border-box; }
+    body { font-family:"Segoe UI",sans-serif; background:#eef1f4; margin:0; color:#27313a; }
+    header { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header h1 { font-size:18px; margin:0; flex:1; }
+    header a { color:#fff; text-decoration:none; font-size:14px; opacity:.9; }
+    .wrap { max-width:680px; margin:18px auto; padding:0 14px; }
+    .bar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center; }
+    .btn { background:#5b6b78; color:#fff; border:none; border-radius:8px; padding:9px 14px; font-size:14px; cursor:pointer; }
+    .weeklabel { font-weight:600; color:#003366; font-size:15px; min-width:190px; text-align:center; }
+    .totalcard { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; border-radius:14px; padding:16px 20px;
+      display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; box-shadow:0 4px 12px rgba(0,0,0,.12); }
+    .totalcard .lbl { font-size:13px; opacity:.85; text-transform:uppercase; letter-spacing:.5px; }
+    .totalcard .val { font-size:30px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .day { background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.06); padding:12px 16px; margin-bottom:10px; }
+    .day.empty { opacity:.6; }
+    .dayhead { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .dayhead .d { font-weight:600; color:#003366; } .dayhead .d small { color:#8a97a6; font-weight:400; margin-left:6px; }
+    .dayhead .h { font-weight:700; color:#003366; font-variant-numeric:tabular-nums; }
+    .seg { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13.5px; color:#5b6b78;
+      padding:6px 0 0; margin-top:6px; border-top:1px dashed #eef2f6; }
+    .seg:first-of-type { border-top:none; }
+    .seg .times { font-variant-numeric:tabular-nums; }
+    .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#e4f6ea; color:#0c7d3f; }
+    .pill.run { background:#fff3cd; color:#7a5b00; }
+    .empty-note { text-align:center; color:#8a97a6; padding:20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🕒 My Hours</h1>
+    <a href="main.html">← Main menu</a>
+  </header>
+
+  <div class="wrap">
+    <div class="bar">
+      <button class="btn" id="prev">← Prev</button>
+      <span class="weeklabel" id="weekLabel">…</span>
+      <button class="btn" id="next">Next →</button>
+      <button class="btn" id="thisWeek">This week</button>
+    </div>
+
+    <div class="totalcard"><span class="lbl">Week total</span><span class="val" id="weekTotal">—</span></div>
+    <div id="days"><div class="empty-note">Loading…</div></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const token = localStorage.getItem("mostlaneToken");
+    const g = id => document.getElementById(id);
+    if (!token) location.href = "login.html";
+    function authFetch(path, init = {}) {
+      init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {});
+      return fetch(API + path, init);
+    }
+    const DOW = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+    function todayLondon() { return new Date().toLocaleDateString("en-CA", { timeZone:"Europe/London" }); }
+    function mondayOf(s) { const d = new Date(s + "T12:00:00Z"); const dow = (d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-dow); return d.toISOString().slice(0,10); }
+    function addDays(s, n) { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
+    function fmtDay(s) { return new Date(s + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
+    function hm(sec) { sec = Math.floor(sec||0); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); if (!sec) return "0m"; return h ? `${h}h ${m}m` : `${m}m`; }
+    function clock(iso) { return new Date(iso).toLocaleTimeString("en-GB", { timeZone:"Europe/London", hour:"2-digit", minute:"2-digit" }); }
+
+    let monday = mondayOf(todayLondon());
+
+    async function load() {
+      g("weekLabel").textContent = "Loading…";
+      let data;
+      try { data = await (await authFetch("/office/my?week=" + monday)).json(); }
+      catch (e) { g("days").innerHTML = `<div class="empty-note">Couldn't load your hours.</div>`; return; }
+      if (!data.ok) { g("days").innerHTML = `<div class="empty-note">Couldn't load your hours.</div>`; return; }
+      render(data);
+    }
+
+    function render(data) {
+      g("weekLabel").textContent = `${fmtDay(data.days[0])} – ${fmtDay(data.days[6])}`;
+      g("weekTotal").textContent = hm(data.weekTotal);
+      const anyData = data.weekTotal > 0 || data.days.some(d => (data.byDay[d]||{}).segments?.length);
+      if (!anyData) { g("days").innerHTML = `<div class="empty-note">No clocked time this week.</div>`; return; }
+
+      g("days").innerHTML = data.days.map((d, i) => {
+        const info = data.byDay[d] || { seconds:0, segments:[] };
+        const has = (info.segments || []).length;
+        const segs = (info.segments || []).map(s => s.open
+          ? `<div class="seg"><span class="times">${clock(s.in)} → …</span><span class="pill run">running</span></div>`
+          : `<div class="seg"><span class="times">${clock(s.in)} → ${clock(s.out)}</span><span>${hm(s.seconds)}</span></div>`
+        ).join("");
+        return `<div class="day${has?"":" empty"}">
+          <div class="dayhead"><span class="d">${DOW[i]}<small>${fmtDay(d)}</small></span><span class="h">${has?hm(info.seconds):"–"}</span></div>
+          ${segs}
+        </div>`;
+      }).join("");
+    }
+
+    g("prev").onclick = () => { monday = addDays(monday, -7); load(); };
+    g("next").onclick = () => { monday = addDays(monday, 7); load(); };
+    g("thisWeek").onclick = () => { monday = mondayOf(todayLondon()); load(); };
+
+    load();
+  </script>
+</body>
+</html>
