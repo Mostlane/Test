@@ -179,29 +179,15 @@ const user = result.user;
         set('mostlaneEmployment', user.EmploymentType || '');
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
-       const perms = {
-  // 🔐 Admin permissions (THIS IS THE FIX)
-  FullAccess: user.FullAccess,
-  Users: user.Users,
-  DeviceAdmin: user.DeviceAdmin,
-
-  // 🔹 Existing permissions (unchanged)
-  CheckInOut: user.CheckInOut,
-  Vehicles: user.Vehicles,
-  Holiday: user.Holiday,
-  EngineersHoursMenu: user.EngineersHoursMenu,
-  HoursDashboard: user.HoursDashboard,
-  PurchaseOrders: user.PurchaseOrders,
-  Sites: user.Sites,
-  Assets: user.Assets,
-  MyDocuments: user.MyDocuments,
-  Weekly: user.Weekly,
-  Forms: user.Forms,
-  Compliance: user.Compliance,
-  StoryMode: user.StoryMode,
-  HSPlan: user.HSPlan,
-  SiteLog: user.SiteLog
-};
+       // Cache the COMPLETE set of permission flags so the sidebar and menu
+       // gate correctly (previously several keys were missing here).
+       const PERM_KEYS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles",
+         "Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders",
+         "Sites","AddSite","Assets","MyDocuments","Weekly","Forms","Compliance","Projects",
+         "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan",
+         "SiteLog","OfficeClock","OfficeTimesheet"];
+       const perms = {};
+       PERM_KEYS.forEach(function (k) { perms[k] = user[k]; });
 
 
         sessionStorage.setItem('mostlanePermissions', JSON.stringify(perms));
