@@ -126,6 +126,19 @@ a.button {
 .oc-link { color:#0066cc; text-decoration:none; font-size:14px; font-weight:600; white-space:nowrap; }
 .oc-link:hover { text-decoration:underline; }
 @media (prefers-reduced-motion:reduce){ .oc-dot.on{ animation:none; } }
+
+/* Desktop landing — shown instead of the tile grid when the sidebar is present */
+#deskLanding { display:none; }
+#deskLanding .land-card { max-width:620px; margin:6vh auto 0; background:rgba(255,255,255,.9); border-radius:16px;
+  padding:34px 32px; box-shadow:0 12px 34px rgba(0,30,80,.14); text-align:center; }
+#deskLanding h1 { margin:0 0 6px; color:#003366; font-size:26px; }
+#deskLanding .land-date { color:#5b6b78; font-size:15px; margin:0 0 18px; }
+#deskLanding .land-hint { color:#43506a; font-size:15px; margin:0; }
+#deskLanding .land-hint b { color:#003366; }
+@media (min-width:1000px){
+  body.pnav-on #menuGrid, body.pnav-on #user-display { display:none !important; }
+  body.pnav-on #deskLanding { display:block; }
+}
   </style>
   <!-- PWA CORE -->
 <link rel="manifest" href="/manifest.json">
@@ -147,6 +160,25 @@ a.button {
   </script>
 
   <div id="officeClockBar"></div>
+
+  <div id="deskLanding">
+    <div class="land-card">
+      <h1 id="landHi">Welcome back</h1>
+      <p class="land-date" id="landDate"></p>
+      <p class="land-hint">Choose an area from the menu on the left to get started.</p>
+    </div>
+  </div>
+  <script>
+    (function(){
+      var fn = localStorage.getItem("firstName") || "";
+      var u = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+      var name = fn || (u ? u.replace(/[._]/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}) : "");
+      var hi = document.getElementById("landHi");
+      if (hi) hi.textContent = name ? ("Welcome back, " + name) : "Welcome back";
+      var d = document.getElementById("landDate");
+      if (d) d.textContent = new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+    })();
+  </script>
 
   <div class="menu-grid" id="menuGrid">
     

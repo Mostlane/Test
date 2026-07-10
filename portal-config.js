@@ -332,7 +332,13 @@
           + "#pnav .pn-logout{ background:none; border:none; color:#dbe7f6; cursor:pointer; display:flex; padding:6px; border-radius:8px; } #pnav .pn-logout:hover{ background:rgba(255,255,255,.1); color:#fff; } #pnav .pn-logout svg{ width:19px; height:19px; stroke:currentColor; stroke-width:1.9; fill:none; }"
           + "html.pnav-collapsed #pnav .pn-who, html.pnav-collapsed #pnav .pn-logout{ display:none; } html.pnav-collapsed #pnav .pn-foot{ justify-content:center; }"
           + "#pnav .pn-collapse{ display:flex; align-items:center; gap:10px; color:#9fc0e8; font-size:12px; padding:10px 18px; cursor:pointer; border:none; border-top:1px solid rgba(255,255,255,.08); background:none; width:100%; font-family:inherit; text-align:left; }"
-          + "#pnav .pn-collapse svg{ width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; flex:none; transition:transform .16s ease; } html.pnav-collapsed #pnav .pn-collapse svg{ transform:rotate(180deg); } html.pnav-collapsed #pnav .pn-collapse{ justify-content:center; padding:10px 0; } html.pnav-collapsed #pnav .pn-collapse .pn-label{ display:none; }";
+          + "#pnav .pn-collapse svg{ width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; flex:none; transition:transform .16s ease; } html.pnav-collapsed #pnav .pn-collapse svg{ transform:rotate(180deg); } html.pnav-collapsed #pnav .pn-collapse{ justify-content:center; padding:10px 0; } html.pnav-collapsed #pnav .pn-collapse .pn-label{ display:none; }"
+          // Standard portal back button (data-role='home' returns to the menu and
+          // is hidden on desktop where the sidebar replaces it; data-role='up' is
+          // a sub-page back and always stays).
+          + ".ml-back{ display:inline-flex; align-items:center; gap:6px; text-decoration:none; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif; padding:8px 13px; border-radius:999px; background:#fff; border:1px solid #d7dee6; color:#003366; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer; }"
+          + ".ml-back:hover{ background:#f4f7fb; }"
+          + "@media (min-width:1000px){ body.pnav-on .ml-back[data-role='home']{ display:none !important; } }";
         var st = document.createElement("style");
         st.id = "pnav-style";
         st.textContent = css;
