@@ -275,8 +275,9 @@ const PERMISSION_KEYS = [
   "Projects", "ProjectsAdmin", "TimesheetAdmin", "LabourPlanning", "SLA",
   "StoryMode",   // opt-in: guided day protocol for this engineer
   "HSPlan",      // access to the H&S planning tool
-  "SiteLog",     // access to SiteLog (site check-in/attendance)
-  "OfficeClock", // opt-in: desktop clock in/out timer for office staff
+  "SiteLog",       // access to SiteLog (site check-in/attendance)
+  "OfficeClock",   // opt-in: desktop clock in/out timer for office staff
+  "OfficeTimesheet",// view the weekly master office timesheet (all staff)
 ];
 
 function shapeUser(u, perms) {

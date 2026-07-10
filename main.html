@@ -122,6 +122,9 @@ a.button {
 .oc-btn:hover { filter:brightness(1.06); }
 .oc-btn:disabled { opacity:.6; cursor:default; }
 .oc-btn.start { background:#0c7d3f; } .oc-btn.stop { background:#b00020; }
+.oc-actions { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.oc-link { color:#0066cc; text-decoration:none; font-size:14px; font-weight:600; white-space:nowrap; }
+.oc-link:hover { text-decoration:underline; }
 @media (prefers-reduced-motion:reduce){ .oc-dot.on{ animation:none; } }
   </style>
   <!-- PWA CORE -->
@@ -249,9 +252,9 @@ const MAP = {
   Customers: ["Sites", "AddSite"],
   PurchaseOrders2: ["PurchaseOrders"],
   SiteLog: ["SiteLog"],
-  // Full-access only: no user holds "OfficeTimesheetView", so only FullAccess
-  // (which unlocks every button) sees the weekly office timesheet.
-  OfficeTimesheet: ["OfficeTimesheetView"]
+  // Weekly master office timesheet — visible to holders of the OfficeTimesheet
+  // permission (and FullAccess, which unlocks every button).
+  OfficeTimesheet: ["OfficeTimesheet"]
 };
 
 // H&S planner launch. The app token lives as a secret on the API worker;
@@ -393,13 +396,14 @@ const MAP = {
         stopTick();
         const open = state.open;
         const banked = state.todayClosedSeconds || 0;
+        const actions = btn => `<div class="oc-actions">${btn}<a class="oc-link" href="office-my-hours.html">📋 My hours</a></div>`;
 
         if (open && open.stale) {
           bar.innerHTML =
             `<div class="oc-card warn"><div class="oc-left"><span class="oc-dot on"></span>`
             + `<div><div class="oc-time">Still clocked in</div>`
             + `<div class="oc-sub">You didn't clock out on ${niceDate(open.date)}. Clock out to close it.</div></div></div>`
-            + `<button class="oc-btn stop" id="ocStop">Clock out</button></div>`;
+            + actions(`<button class="oc-btn stop" id="ocStop">Clock out</button>`) + `</div>`;
           document.getElementById("ocStop").onclick = doStop;
           return;
         }
@@ -410,7 +414,7 @@ const MAP = {
             `<div class="oc-card"><div class="oc-left"><span class="oc-dot on"></span>`
             + `<div><div class="oc-time" id="ocTime">00:00:00</div>`
             + `<div class="oc-sub">Clocked in at ${new Date(started).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})} · today's total</div></div></div>`
-            + `<button class="oc-btn stop" id="ocStop">Stop day</button></div>`;
+            + actions(`<button class="oc-btn stop" id="ocStop">Stop day</button>`) + `</div>`;
           const timeEl = document.getElementById("ocTime");
           const paint = () => { timeEl.textContent = hms(banked + (Date.now() - started) / 1000); };
           paint(); tick = setInterval(paint, 1000);
@@ -422,7 +426,7 @@ const MAP = {
           `<div class="oc-card"><div class="oc-left"><span class="oc-dot"></span>`
           + `<div><div class="oc-time">${banked ? hm(banked) : "Not started"}</div>`
           + `<div class="oc-sub">${banked ? "Logged so far today — start again to add more" : "Start your day when you're ready"}</div></div></div>`
-          + `<button class="oc-btn start" id="ocStart">Start day</button></div>`;
+          + actions(`<button class="oc-btn start" id="ocStart">Start day</button>`) + `</div>`;
         document.getElementById("ocStart").onclick = doStart;
       }
 
