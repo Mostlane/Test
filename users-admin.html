@@ -186,6 +186,18 @@
             </span>
           </label>
         </div>
+        <div style="margin-top:14px;padding:12px;border:1px solid #d7dee6;border-radius:8px;background:#f7faff;">
+          <label style="display:flex;align-items:flex-start;gap:8px;margin:0;font-weight:600;cursor:pointer;">
+            <input type="checkbox" data-perm="OfficeClock" style="margin-top:3px;" />
+            <span>Office clock in/out — desktop day timer
+              <span style="display:block;font-weight:400;font-size:12px;color:#6b7280;margin-top:3px;">
+                When ON, this person gets a clock in/out timer at the top of the main menu — but only on the
+                office computer(s) you flag under the <b>Devices</b> tab. Their hours feed the weekly Office
+                Timesheet. Set independently of Full access, so it can be turned on for anyone.
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
 
       <p id="panelMsg" class="msg"></p>
@@ -202,7 +214,7 @@
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
-      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog","OfficeClock"];
+      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -226,7 +238,7 @@
       { title:"Administration",       perms:["Users","DeviceAdmin"] },
       { title:"Sites & assets",       perms:["Sites","AddSite","Assets","SiteLog"] },
       { title:"Jobs & SLA",           perms:["SLA","Forms"] },
-      { title:"Time & hours",         perms:["CheckInOut","OfficeClock","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","Weekly"] },
+      { title:"Time & hours",         perms:["CheckInOut","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","Weekly"] },
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
@@ -411,6 +423,8 @@
       });
       const sm = document.querySelector('[data-perm="StoryMode"]');
       if (sm) body.StoryMode = sm.checked ? "Yes" : "No";
+      const oc = document.querySelector('[data-perm="OfficeClock"]');
+      if (oc) body.OfficeClock = oc.checked ? "Yes" : "No";
       try {
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
