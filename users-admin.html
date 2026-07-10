@@ -39,8 +39,24 @@
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     label { font-size:12px; color:#667085; display:block; margin:8px 0 2px; }
     .panel input, .panel select { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
-    .permgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
-    .permgrid label { display:flex; align-items:center; gap:6px; font-size:13px; color:#27313a; margin:0; }
+    .permwrap { display:block; }
+    .famaster { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:10px; padding:4px 12px; margin-bottom:4px; }
+    .permsec { margin-top:16px; }
+    .permsec h4 { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:#003366; padding-bottom:6px; border-bottom:1px solid #e6ebf1; }
+    .togrow { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 2px; border-bottom:1px solid #f2f5f8; }
+    .togrow:last-child { border-bottom:none; }
+    .togrow .tlabel { font-size:14px; color:#27313a; }
+    .togrow .tlabel b { font-weight:600; }
+    .togrow .tlabel small { display:block; font-size:12px; font-weight:400; color:#6b7280; margin-top:3px; max-width:360px; }
+    .switch { position:relative; width:46px; height:26px; flex:0 0 auto; }
+    .switch input { position:absolute; opacity:0; width:0; height:0; margin:0; }
+    .switch .slider { position:absolute; inset:0; background:#cbd5e0; border-radius:999px; transition:background .18s ease; cursor:pointer; }
+    .switch .slider::before { content:""; position:absolute; height:20px; width:20px; left:3px; top:3px; background:#fff; border-radius:50%; box-shadow:0 1px 3px rgba(0,0,0,.35); transition:transform .18s ease; }
+    .switch input:checked + .slider { background:#0066cc; }
+    .switch input:checked + .slider::before { transform:translateX(20px); }
+    .switch input:disabled + .slider { opacity:.5; cursor:not-allowed; }
+    .switch input:focus-visible + .slider { outline:2px solid #0066cc; outline-offset:2px; }
+    @media (prefers-reduced-motion:reduce){ .switch .slider, .switch .slider::before { transition:none; } }
     .devrow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid #eef2f6; font-size:13px; }
     .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
     .msg { font-size:14px; margin-top:10px; } .msg.err { color:#b00020; } .msg.ok { color:#0c7d27; }
@@ -143,7 +159,7 @@
 
       <!-- PERMISSIONS -->
       <div class="section" data-sec="perms">
-        <div class="permgrid" id="permGrid"></div>
+        <div class="permwrap" id="permGrid"></div>
       </div>
 
       <!-- DEVICES -->
@@ -190,11 +206,41 @@
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
 
+    // Human labels for the permission switches (data-perm keeps the exact key).
+    const PERM_LABELS = {
+      FullAccess:"Full access", Users:"Users", DeviceAdmin:"Device admin",
+      CheckInOut:"Check in / out", Vehicles:"Vehicles", Holiday:"Holiday",
+      HolidayAdmin:"Holiday admin", EngineersHoursMenu:"Engineers’ hours menu",
+      HoursDashboard:"Hours dashboard", PurchaseOrders:"Purchase orders",
+      Sites:"Sites", AddSite:"Add site", Assets:"Assets", MyDocuments:"My documents",
+      Weekly:"Weekly", Forms:"Forms", Compliance:"Compliance", Projects:"Projects",
+      ProjectsAdmin:"Projects admin", TimesheetAdmin:"Timesheet admin",
+      LabourPlanning:"Labour planning", SLA:"SLA", HSPlan:"H&S planner", SiteLog:"SiteLog"
+    };
+    // The 23 area permissions grouped for the Permissions tab (FullAccess is the
+    // master switch above the groups). Every PERMISSIONS key except FullAccess
+    // appears here exactly once.
+    const PERM_GROUPS = [
+      { title:"Administration",       perms:["Users","DeviceAdmin"] },
+      { title:"Sites & assets",       perms:["Sites","AddSite","Assets","SiteLog"] },
+      { title:"Jobs & SLA",           perms:["SLA","Forms"] },
+      { title:"Time & hours",         perms:["CheckInOut","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","Weekly"] },
+      { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
+      { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
+      { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
+      { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] }
+    ];
+
     let allUsers = [];
     // The Profile blob of the user currently open in the editor. We keep it so
     // that keys this form doesn't manage (e.g. home geofence, onboarding data)
     // survive a save instead of being wiped by the full-Profile replace.
     let editingProfile = {};
+    // While Full access is ON, holds each area switch's remembered underlying
+    // state ({perm: bool}); null when Full access is OFF. Used to restore the
+    // switches when Full access is turned off, and to save the admin's real
+    // selection rather than the forced-on visual state.
+    let faSnapshot = null;
 
     function api(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
@@ -204,8 +250,35 @@
     const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
     const g = id => document.getElementById(id);
 
-    g("permGrid").innerHTML = PERMISSIONS.map(p =>
-      `<label><input type="checkbox" data-perm="${p}" /> ${p}</label>`).join("");
+    // ── Permission switches ────────────────────────────────────────────────
+    function permRow(perm){
+      return `<div class="togrow"><span class="tlabel">${PERM_LABELS[perm] || perm}</span>`
+        + `<label class="switch"><input type="checkbox" data-perm="${perm}" data-grid="1"><span class="slider"></span></label></div>`;
+    }
+    function renderPerms(){
+      const master = `<div class="famaster"><div class="togrow">`
+        + `<span class="tlabel"><b>Full access</b><small>Grants every area below. Individual switches are remembered and restored if you turn this off.</small></span>`
+        + `<label class="switch"><input type="checkbox" id="faToggle" data-perm="FullAccess"><span class="slider"></span></label></div></div>`;
+      const groups = PERM_GROUPS.map(gp =>
+        `<div class="permsec"><h4>${gp.title}</h4>${gp.perms.map(permRow).join("")}</div>`).join("");
+      g("permGrid").innerHTML = master + groups;
+      g("faToggle").addEventListener("change", e => e.target.checked ? lockFullAccess() : unlockFullAccess());
+    }
+    const gridToggles = () => [...document.querySelectorAll("#permGrid input[data-grid]")];
+    // Full access ON → remember each switch, then force all on + lock them.
+    function lockFullAccess(){
+      faSnapshot = {};
+      gridToggles().forEach(cb => { faSnapshot[cb.dataset.perm] = cb.checked; cb.checked = true; cb.disabled = true; });
+    }
+    // Full access OFF → restore each switch to its remembered state + unlock.
+    function unlockFullAccess(){
+      gridToggles().forEach(cb => {
+        if (faSnapshot && cb.dataset.perm in faSnapshot) cb.checked = faSnapshot[cb.dataset.perm];
+        cb.disabled = false;
+      });
+      faSnapshot = null;
+    }
+    renderPerms();
 
     if (/REPLACE-ME/.test(API || "")) g("configNotice").style.display = "block";
     if (!token) location.href = "login.html";
@@ -283,7 +356,12 @@
       const prof = user?.Profile || {};
       editingProfile = Object.assign({}, prof);
       PROFILE_FIELDS.forEach(k => { const el = g("p_" + k); if (el) el.value = prof[k] ?? ""; });
+      // Clear any prior lock, set every switch from the user, then re-lock if
+      // this user has Full access so all areas show on + locked.
+      faSnapshot = null;
+      gridToggles().forEach(cb => cb.disabled = false);
       document.querySelectorAll("[data-perm]").forEach(cb => { cb.checked = user ? user[cb.dataset.perm] === "Yes" : false; });
+      if (g("faToggle").checked) lockFullAccess();
       g("panelMsg").textContent = "";
       g("overlay").classList.add("open");
       loadDevices(user?.Username || "");
@@ -321,7 +399,16 @@
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
       body.Profile = profile;
-      document.querySelectorAll("[data-perm]").forEach(cb => { body[cb.dataset.perm] = cb.checked ? "Yes" : "No"; });
+      // Full access + Story Mode read straight from their switches. Area
+      // permissions use the remembered underlying state while Full access has
+      // them locked on, so we persist the admin's real selection.
+      body.FullAccess = g("faToggle").checked ? "Yes" : "No";
+      gridToggles().forEach(cb => {
+        const on = (faSnapshot && cb.dataset.perm in faSnapshot) ? faSnapshot[cb.dataset.perm] : cb.checked;
+        body[cb.dataset.perm] = on ? "Yes" : "No";
+      });
+      const sm = document.querySelector('[data-perm="StoryMode"]');
+      if (sm) body.StoryMode = sm.checked ? "Yes" : "No";
       try {
         const res = await api("/users", { method: "POST", body: JSON.stringify(body) });
         const r = await res.json();
