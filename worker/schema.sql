@@ -69,6 +69,22 @@ CREATE TABLE IF NOT EXISTS shifts (
   PRIMARY KEY (username, date)
 );
 
+-- Office clock in/out: one row per clock-in→clock-out segment (breaks allowed).
+-- The weekly master timesheet sums each user's segments per day. The clock only
+-- shows on devices flagged office_clock=1 for a user holding the OfficeClock perm.
+CREATE TABLE IF NOT EXISTS office_shifts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  username   TEXT NOT NULL,
+  date       TEXT NOT NULL,          -- Europe/London calendar day yyyy-mm-dd
+  clock_in   TEXT NOT NULL,          -- ISO UTC timestamp
+  clock_out  TEXT,                   -- ISO UTC timestamp (NULL = still running)
+  device_id  TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_office_shifts_user_date ON office_shifts(username, date);
+CREATE INDEX IF NOT EXISTS idx_office_shifts_date ON office_shifts(date);
+
 -- Customers (clients) — own sites; billing details feed quoting/invoicing.
 CREATE TABLE IF NOT EXISTS customers (
   id              TEXT PRIMARY KEY,   -- slug, matches sites.client
@@ -147,6 +163,7 @@ CREATE TABLE IF NOT EXISTS devices (
   device_id   TEXT PRIMARY KEY,
   username    TEXT NOT NULL,
   label       TEXT,
+  office_clock INTEGER DEFAULT 0,          -- 1 = show the office clock on this device
   registered_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_devices_username ON devices(username);

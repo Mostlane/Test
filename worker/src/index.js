@@ -27,6 +27,7 @@ import * as sla from "./routes/sla.js";            // DONE  (replaces mostlane-s
 import * as sites from "./routes/sites.js";        // DONE  (replaces mostlane-sites + adds customers)
 import * as portal from "./routes/portal.js";      // DONE  (settings, on-call rota, daily logs)
 import * as sitelog from "./routes/sitelog.js";    // DONE  (server-side proxy to api.site-log.co.uk)
+import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -57,6 +58,7 @@ const ROUTES = [
   ["*", "/daily-logs", portal.handle],
   ["*", "/sitelog",    sitelog.handle],
   ["*", "/sitelog-launch", sitelog.handle],
+  ["*", "/office",     office.handle],   // office clock in/out + weekly timesheet
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

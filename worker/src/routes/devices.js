@@ -8,7 +8,7 @@
 //   OK | NEW_DEVICE_REQUIRED | DEVICE_MISMATCH
 
 import { json, error } from "../lib/http.js";
-import { requireSession } from "../lib/auth.js";
+import { requireSession, permissionsFor } from "../lib/auth.js";
 
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
@@ -56,6 +56,20 @@ export async function handle(request, env, ctx, url) {
       : env.DB.prepare("SELECT * FROM devices ORDER BY registered_at DESC");
     const { results } = await stmt.all();
     return json({ ok: true, devices: results || [] }, {}, env, request);
+  }
+
+  // Admin: flag/unflag a device as an office-clock machine for its owner.
+  if (path === "/device/office-clock" && request.method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+      return error("Forbidden", 403, env, request);
+    const { deviceId, office } = await request.json().catch(() => ({}));
+    if (!deviceId) return error("deviceId required", 400, env, request);
+    await env.DB.prepare("UPDATE devices SET office_clock=? WHERE device_id=?")
+      .bind(office ? 1 : 0, deviceId).run();
+    return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
   }
 
   if (path.startsWith("/device/") && request.method === "DELETE") {
