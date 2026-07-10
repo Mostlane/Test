@@ -29,8 +29,14 @@
       padding:6px 0 0; margin-top:6px; border-top:1px dashed #eef2f6; }
     .seg:first-of-type { border-top:none; }
     .seg .times { font-variant-numeric:tabular-nums; }
-    .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#e4f6ea; color:#0c7d3f; }
+    .seg.voided { opacity:.65; }
+    .times s { color:#9aa6b2; }
+    .times b { color:#27313a; }
+    .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#e4f6ea; color:#0c7d3f; white-space:nowrap; }
     .pill.run { background:#fff3cd; color:#7a5b00; }
+    .pill.edit { background:#e8eefc; color:#1a4f8f; }
+    .pill.void { background:#fde8ea; color:#b00020; }
+    .editnote { display:block; font-size:11px; color:#9aa6b2; margin-top:2px; }
     .empty-note { text-align:center; color:#8a97a6; padding:20px; }
   </style>
 </head>
@@ -67,7 +73,19 @@
     function addDays(s, n) { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); }
     function fmtDay(s) { return new Date(s + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"short" }); }
     function hm(sec) { sec = Math.floor(sec||0); const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60); if (!sec) return "0m"; return h ? `${h}h ${m}m` : `${m}m`; }
-    function clock(iso) { return new Date(iso).toLocaleTimeString("en-GB", { timeZone:"Europe/London", hour:"2-digit", minute:"2-digit" }); }
+    function clock(iso) { return iso ? new Date(iso).toLocaleTimeString("en-GB", { timeZone:"Europe/London", hour:"2-digit", minute:"2-digit" }) : "…"; }
+    // A session line. Admin edits show the auto time struck through with the new
+    // time beside it; voided sessions are struck and excluded from the total.
+    function segHtml(s) {
+      const note = s.note ? `<span class="editnote">Adjusted: ${String(s.note).replace(/[<>&]/g,"")}</span>` : "";
+      if (s.voided)
+        return `<div class="seg voided"><span class="times"><s>${clock(s.originalIn)} → ${clock(s.originalOut)}</s>${note}</span><span class="pill void">removed</span></div>`;
+      if (s.open)
+        return `<div class="seg"><span class="times">${clock(s.in)} → …</span><span class="pill run">running</span></div>`;
+      if (s.edited)
+        return `<div class="seg"><span class="times"><s>${clock(s.originalIn)} → ${clock(s.originalOut)}</s> <b>${clock(s.in)} → ${clock(s.out)}</b> <span class="pill edit">edited</span>${note}</span><span>${hm(s.seconds)}</span></div>`;
+      return `<div class="seg"><span class="times">${clock(s.in)} → ${clock(s.out)}</span><span>${hm(s.seconds)}</span></div>`;
+    }
 
     let monday = mondayOf(todayLondon());
 
@@ -89,10 +107,7 @@
       g("days").innerHTML = data.days.map((d, i) => {
         const info = data.byDay[d] || { seconds:0, segments:[] };
         const has = (info.segments || []).length;
-        const segs = (info.segments || []).map(s => s.open
-          ? `<div class="seg"><span class="times">${clock(s.in)} → …</span><span class="pill run">running</span></div>`
-          : `<div class="seg"><span class="times">${clock(s.in)} → ${clock(s.out)}</span><span>${hm(s.seconds)}</span></div>`
-        ).join("");
+        const segs = (info.segments || []).map(segHtml).join("");
         return `<div class="day${has?"":" empty"}">
           <div class="dayhead"><span class="d">${DOW[i]}<small>${fmtDay(d)}</small></span><span class="h">${has?hm(info.seconds):"–"}</span></div>
           ${segs}

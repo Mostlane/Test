@@ -75,10 +75,16 @@ CREATE TABLE IF NOT EXISTS shifts (
 CREATE TABLE IF NOT EXISTS office_shifts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   username   TEXT NOT NULL,
-  date       TEXT NOT NULL,          -- Europe/London calendar day yyyy-mm-dd
-  clock_in   TEXT NOT NULL,          -- ISO UTC timestamp
+  date       TEXT NOT NULL,          -- Europe/London calendar day yyyy-mm-dd (of the effective start)
+  clock_in   TEXT NOT NULL,          -- ISO UTC timestamp (auto-captured original)
   clock_out  TEXT,                   -- ISO UTC timestamp (NULL = still running)
   device_id  TEXT,
+  edited_in  TEXT,                   -- admin override start (NULL = use clock_in)
+  edited_out TEXT,                   -- admin override end   (NULL = use clock_out)
+  edited_by  TEXT,                   -- admin who last edited
+  edited_at  TEXT,                   -- when edited
+  edit_note  TEXT,                   -- optional reason
+  voided     INTEGER DEFAULT 0,      -- 1 = excluded from totals
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT
 );

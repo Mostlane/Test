@@ -30,7 +30,35 @@
     .pill { font-size:11px; padding:2px 8px; border-radius:999px; background:#fff3cd; color:#7a5b00; margin-left:6px; }
     .empty { padding:26px; text-align:center; color:#8a97a6; }
     .note { color:#6b7280; font-size:12.5px; margin-top:10px; }
-    @media print { header .btn, .bar .btn { display:none; } body { background:#fff; } }
+    .actcell { text-align:right; }
+    .editbtn { background:#eef2f6; color:#1a4f8f; border:1px solid #d7dee6; border-radius:7px; padding:5px 10px; font-size:13px; cursor:pointer; white-space:nowrap; }
+    .editbtn:hover { background:#e2e9f2; }
+    /* Edit modal */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding:18px; overflow:auto; z-index:50; }
+    .overlay.open { display:flex; }
+    .panel { background:#fff; border-radius:12px; width:100%; max-width:620px; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+    .phead { display:flex; align-items:center; gap:12px; padding:15px 18px; border-bottom:1px solid #eef2f6; }
+    .phead h2 { margin:0; font-size:17px; color:#003366; flex:1; }
+    .phead .x { background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:#8a97a6; }
+    .pbody { padding:14px 18px; max-height:66vh; overflow:auto; }
+    .eday { margin-bottom:14px; }
+    .eday h4 { margin:0 0 8px; font-size:12px; color:#003366; text-transform:uppercase; letter-spacing:.4px; }
+    .eseg { border:1px solid #e6ebf1; border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+    .eseg.voided { opacity:.6; }
+    .eseg-orig { font-size:12px; color:#8a97a6; margin-bottom:7px; }
+    .eseg-orig s { color:#b7c0cb; }
+    .badge { font-size:11px; padding:2px 7px; border-radius:999px; margin-left:6px; }
+    .badge.edit { background:#e8eefc; color:#1a4f8f; } .badge.run { background:#fff3cd; color:#7a5b00; } .badge.void { background:#fde8ea; color:#b00020; }
+    .eseg-inputs { display:flex; gap:12px; flex-wrap:wrap; }
+    .eseg-inputs label { font-size:12px; color:#667085; display:flex; flex-direction:column; gap:3px; }
+    .eseg-inputs input { padding:7px 9px; border:1px solid #ccd5dd; border-radius:7px; font-size:14px; }
+    .eseg-actions { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
+    .eseg-actions button { border:none; border-radius:7px; padding:6px 11px; font-size:13px; cursor:pointer; color:#fff; }
+    .eseg-actions .save { background:#0066cc; } .eseg-actions .reset { background:#5b6b78; } .eseg-actions .void { background:#b00020; }
+    .eseg-msg { font-size:12px; margin-left:2px; } .eseg-msg.ok { color:#0c7d3f; } .eseg-msg.err { color:#b00020; }
+    .eseg-none { color:#8a97a6; font-size:13px; padding:8px 0; }
+    .pfoot { padding:12px 18px; border-top:1px solid #eef2f6; text-align:right; }
+    @media print { header .btn, .bar .btn, .actcell, th.actcol { display:none; } body { background:#fff; } }
   </style>
 </head>
 <body>
@@ -53,11 +81,25 @@
     <div class="card">
       <table id="tbl">
         <thead><tr id="head"></tr></thead>
-        <tbody id="body"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
+        <tbody id="body"><tr><td class="empty" colspan="10">Loading…</td></tr></tbody>
       </table>
     </div>
     <p class="note">Totals are the sum of each person's clocked segments (breaks excluded). A
-      <span class="pill">running</span> tag means they're still clocked in — that open session isn't counted until they clock out.</p>
+      <span class="pill">running</span> tag means they're still clocked in — that open session isn't counted until
+      they clock out (or you set an end time via <b>Edit</b>). Use <b>Edit</b> to correct clocked times: the
+      original auto times are kept and shown struck through, and totals use your edited times.</p>
+  </div>
+
+  <!-- Edit modal -->
+  <div class="overlay" id="editOverlay">
+    <div class="panel">
+      <div class="phead">
+        <h2 id="editTitle">Edit hours</h2>
+        <button class="x" id="editClose" title="Close">✕</button>
+      </div>
+      <div class="pbody"><div id="editBody"><div class="eseg-none">Loading…</div></div></div>
+      <div class="pfoot"><button class="btn" id="editDone">Done</button></div>
+    </div>
   </div>
 
   <script>
@@ -86,7 +128,7 @@
       try {
         const me = await (await authFetch("/auth/me")).json();
         if (!me.ok || (me.user.FullAccess !== "Yes" && me.user.OfficeTimesheet !== "Yes")) { alert("Access denied"); location.href = "main.html"; return; }
-      } catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="9">Could not reach the portal API.</td></tr>`; return; }
+      } catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="10">Could not reach the portal API.</td></tr>`; return; }
       load();
     }
 
@@ -94,8 +136,8 @@
       g("weekLabel").textContent = "Loading…";
       let data;
       try { data = await (await authFetch("/office/timesheet?week=" + monday)).json(); }
-      catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="9">Could not load the timesheet.</td></tr>`; return; }
-      if (!data.ok) { g("body").innerHTML = `<tr><td class="empty" colspan="9">${esc(data.error||"Error")}</td></tr>`; return; }
+      catch (e) { g("body").innerHTML = `<tr><td class="empty" colspan="10">Could not load the timesheet.</td></tr>`; return; }
+      if (!data.ok) { g("body").innerHTML = `<tr><td class="empty" colspan="10">${esc(data.error||"Error")}</td></tr>`; return; }
       current = data;
       render(data);
     }
@@ -105,9 +147,9 @@
       g("weekLabel").textContent = `${fmtDayLabel(days[0])} – ${fmtDayLabel(days[6])}, ${days[6].slice(0,4)}`;
       g("head").innerHTML = `<th class="name">Name</th>` +
         days.map((d,i) => `<th>${DOW[i]}<div style="font-weight:400;opacity:.7">${fmtDayLabel(d)}</div></th>`).join("") +
-        `<th>Total</th>`;
+        `<th>Total</th><th class="actcol"></th>`;
 
-      if (!data.users.length) { g("body").innerHTML = `<tr><td class="empty" colspan="${days.length+2}">No office-clock users yet. Give someone the “Office clock in/out” permission and flag their office device.</td></tr>`; return; }
+      if (!data.users.length) { g("body").innerHTML = `<tr><td class="empty" colspan="${days.length+3}">No office-clock users yet. Give someone the “Office clock in/out” permission and flag their office device.</td></tr>`; return; }
 
       const dayTotals = days.map(() => 0); let grand = 0;
       const rows = data.users.map(u => {
@@ -117,13 +159,19 @@
         }).join("");
         grand += u.total;
         const open = u.open ? `<span class="pill">running</span>` : "";
-        return `<tr><td class="name"><b>${esc(u.name)}</b>${open}<div class="muted">${esc(u.username)}</div></td>${cells}<td class="total">${hm(u.total)}</td></tr>`;
+        return `<tr><td class="name"><b>${esc(u.name)}</b>${open}<div class="muted">${esc(u.username)}</div></td>${cells}<td class="total">${hm(u.total)}</td>`
+          + `<td class="actcell"><button class="editbtn" data-edit="${esc(u.username)}">✏️ Edit</button></td></tr>`;
       }).join("");
 
       const grandCells = dayTotals.map(s => `<td>${hm(s)}</td>`).join("");
-      const grandRow = `<tr class="grand"><td class="name">All office staff</td>${grandCells}<td class="total">${hm(grand)}</td></tr>`;
+      const grandRow = `<tr class="grand"><td class="name">All office staff</td>${grandCells}<td class="total">${hm(grand)}</td><td></td></tr>`;
       g("body").innerHTML = rows + grandRow;
     }
+
+    g("body").addEventListener("click", e => {
+      const t = e.target.closest("[data-edit]");
+      if (t) openEditor(t.dataset.edit);
+    });
 
     g("prev").onclick = () => { monday = addDays(monday, -7); load(); };
     g("next").onclick = () => { monday = addDays(monday, 7); load(); };
@@ -144,6 +192,91 @@
       a.download = `office-timesheet_${current.monday}.csv`;
       a.click(); URL.revokeObjectURL(a.href);
     };
+
+    // ── Edit a user's clocked times ───────────────────────────────────────────
+    // Times are entered/shown in the admin's local timezone (UK office = London).
+    let editUser = null, editDetail = null, editDirty = false;
+    function pad(n){ return String(n).padStart(2,"0"); }
+    function toLocalInput(iso){ if(!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+    function inputToIso(v){ if(!v) return ""; const t = Date.parse(v); return isNaN(t) ? "" : new Date(t).toISOString(); }
+    function sameInstant(a, b){ if(!a && !b) return true; if(!a || !b) return false; return Date.parse(a) === Date.parse(b); }
+    function clock(iso){ return iso ? new Date(iso).toLocaleTimeString("en-GB",{timeZone:"Europe/London",hour:"2-digit",minute:"2-digit"}) : "…"; }
+
+    async function openEditor(username){
+      editUser = username; editDirty = false;
+      g("editTitle").textContent = "Edit hours";
+      g("editBody").innerHTML = `<div class="eseg-none">Loading…</div>`;
+      g("editOverlay").classList.add("open");
+      await loadEditor();
+    }
+    async function loadEditor(){
+      let d;
+      try { d = await (await authFetch(`/office/user-week?u=${encodeURIComponent(editUser)}&week=${monday}`)).json(); }
+      catch(e){ g("editBody").innerHTML = `<div class="eseg-none">Couldn't load this person's hours.</div>`; return; }
+      if(!d.ok){ g("editBody").innerHTML = `<div class="eseg-none">${esc(d.error||"Error")}</div>`; return; }
+      editDetail = d;
+      g("editTitle").textContent = `Edit hours — ${esc(d.name)}`;
+      renderEditor(d);
+    }
+    function segEditHtml(s){
+      const badge = s.voided ? `<span class="badge void">voided</span>`
+        : s.open ? `<span class="badge run">running</span>`
+        : s.edited ? `<span class="badge edit">edited</span>` : "";
+      const orig = `Auto: <s>${clock(s.originalIn)} → ${clock(s.originalOut)}</s>${badge}`;
+      return `<div class="eseg${s.voided?" voided":""}" data-id="${s.id}">
+        <div class="eseg-orig">${orig}</div>
+        <div class="eseg-inputs">
+          <label>Start<input type="datetime-local" data-f="in" value="${toLocalInput(s.in)}"></label>
+          <label>End<input type="datetime-local" data-f="out" value="${toLocalInput(s.out)}"></label>
+        </div>
+        <div class="eseg-actions">
+          <button class="save" data-act="save">Save</button>
+          <button class="reset" data-act="reset">Reset to auto</button>
+          <button class="void" data-act="void">${s.voided?"Restore":"Void"}</button>
+          <span class="eseg-msg"></span>
+        </div>
+      </div>`;
+    }
+    function renderEditor(d){
+      const html = d.days.map((date,i) => {
+        const info = d.byDay[date] || { segments:[] };
+        if(!info.segments.length) return "";
+        return `<div class="eday"><h4>${DOW[i]} · ${fmtDayLabel(date)}</h4>${info.segments.map(segEditHtml).join("")}</div>`;
+      }).join("");
+      g("editBody").innerHTML = html || `<div class="eseg-none">No clocked sessions this week.</div>`;
+    }
+    function findSeg(id){ if(!editDetail) return null; for(const date of editDetail.days){ const info = editDetail.byDay[date]; if(info) for(const s of info.segments) if(String(s.id)===String(id)) return s; } return null; }
+
+    g("editBody").addEventListener("click", async e => {
+      const btn = e.target.closest("[data-act]"); if(!btn) return;
+      const row = btn.closest(".eseg"); const id = row.dataset.id;
+      const seg = findSeg(id); if(!seg) return;
+      const msg = row.querySelector(".eseg-msg"); msg.className = "eseg-msg"; msg.textContent = "Saving…";
+      let body = { id: Number(id) };
+      if(btn.dataset.act === "reset") body.clear = true;
+      else if(btn.dataset.act === "void") body.void = !seg.voided;
+      else {
+        const inV = inputToIso(row.querySelector('[data-f="in"]').value);
+        const outV = inputToIso(row.querySelector('[data-f="out"]').value);
+        if(!inV){ msg.className = "eseg-msg err"; msg.textContent = "Start time required."; return; }
+        if(outV && Date.parse(outV) < Date.parse(inV)){ msg.className = "eseg-msg err"; msg.textContent = "End is before start."; return; }
+        // Only send a field as an override when it differs from the auto time.
+        body.editedIn = sameInstant(inV, seg.originalIn) ? "" : inV;
+        body.editedOut = sameInstant(outV, seg.originalOut) ? "" : outV;
+      }
+      try {
+        const res = await authFetch("/office/segment", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+        const r = await res.json();
+        if(!res.ok || !r.ok){ msg.className = "eseg-msg err"; msg.textContent = r.error || "Save failed."; return; }
+        editDirty = true;
+        await loadEditor();
+      } catch(e){ msg.className = "eseg-msg err"; msg.textContent = "Network error."; }
+    });
+
+    function closeEditor(){ g("editOverlay").classList.remove("open"); if(editDirty){ editDirty = false; load(); } }
+    g("editClose").onclick = closeEditor;
+    g("editDone").onclick = closeEditor;
+    g("editOverlay").addEventListener("click", e => { if(e.target === g("editOverlay")) closeEditor(); });
 
     guardAndLoad();
   </script>
