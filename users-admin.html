@@ -17,10 +17,22 @@
     .bar input { flex:1; min-width:180px; padding:10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; }
     .btn { background:#0066cc; color:#fff; border:none; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; }
     .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.small { padding:6px 10px; font-size:13px; }
-    table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.06); }
-    th,td { text-align:left; padding:10px 12px; border-bottom:1px solid #eef2f6; font-size:14px; }
-    th { background:#f6f8fa; color:#003366; font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
-    tr:last-child td { border-bottom:none; }
+    /* Office / Field zones + draggable people rows */
+    .zone { margin-bottom:16px; }
+    .zonehead { display:flex; align-items:center; gap:8px; font-size:12px; text-transform:uppercase; letter-spacing:.5px; color:#003366; font-weight:700; margin:0 2px 8px; }
+    .zonehead .count { color:#8a97a6; font-weight:600; }
+    .uhead, .urow { display:grid; grid-template-columns:26px minmax(150px,1.8fr) 1.6fr .9fr .8fr .9fr auto; align-items:center; gap:12px; }
+    .uhead { padding:6px 14px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#667085; }
+    .ulist { background:#fff; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.06); overflow:hidden; min-height:46px; }
+    .ulist.empty { display:flex; align-items:center; justify-content:center; }
+    .ulist.empty::after { content:"Drag people here"; padding:16px; color:#9aa6b2; font-size:13px; }
+    .urow { padding:10px 14px; border-bottom:1px solid #eef2f6; background:#fff; font-size:14px; }
+    .urow:last-child { border-bottom:none; }
+    .urow .grip { cursor:grab; color:#b3c0cf; font-size:18px; line-height:1; text-align:center; touch-action:none; user-select:none; }
+    .urow .grip:active { cursor:grabbing; }
+    .urow .uname b { color:#0f1b2d; }
+    .urow.dragging { box-shadow:0 14px 34px rgba(6,24,54,.22); border-radius:10px; border-bottom:none; opacity:.98; }
+    .drop-ph { background:#eaf1fb; border:1px dashed #9dbdf0; border-radius:8px; margin:4px 8px; }
     .pill { font-size:11px; padding:2px 8px; border-radius:999px; }
     .pill.active { background:#e3f6e8; color:#0c7d27; } .pill.disabled { background:#fde8ea; color:#b00020; }
     .pill.pending { background:#fff3cd; color:#7a5b00; }
@@ -65,22 +77,21 @@
       .wrap{ padding:0 10px; }
       .grid2{ grid-template-columns:1fr; }
 
-      /* Users list → stacked cards (the 6-col table doesn't fit a phone) */
-      table{ background:transparent; box-shadow:none; border-radius:0; }
-      thead{ display:none; }
-      tbody, tr, td{ display:block; }
-      tr{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 2px 8px rgba(6,24,54,.06); margin-bottom:12px; padding:4px 14px; }
-      td{ border-bottom:1px solid #f2f5f8; padding:9px 0; }
-      tr td:last-child{ border-bottom:none; }
-      td[data-label]{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; text-align:right; }
-      td[data-label]::before{ content:attr(data-label); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; font-weight:700; text-align:left; flex:0 0 auto; }
-      td[data-label="User"]{ display:block; text-align:left; padding-top:12px; }
-      td[data-label="User"]::before{ display:none; }
-      td[data-label="User"] b{ font-size:16px; color:#003366; }
-      td[data-label="Actions"]{ display:block; text-align:left; padding-top:12px; }
-      td[data-label="Actions"]::before{ display:none; }
-      td[data-label="Actions"] .actions{ gap:6px; }
-      td[data-label="Actions"] .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
+      /* People rows → stacked cards (the 6-col grid doesn't fit a phone) */
+      .uhead{ display:none; }
+      .ulist{ background:transparent; box-shadow:none; border-radius:0; overflow:visible; min-height:0; }
+      .ulist.empty::after{ padding:10px; }
+      .urow{ display:block; position:relative; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 2px 8px rgba(6,24,54,.06); margin-bottom:12px; padding:6px 14px 10px; }
+      .ucell{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; text-align:right; padding:8px 0; border-bottom:1px solid #f2f5f8; font-size:14px; }
+      .ucell::before{ content:attr(data-label); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; font-weight:700; text-align:left; flex:0 0 auto; }
+      .ucell.uname{ display:block; text-align:left; border-bottom:none; padding:10px 40px 8px 0; }
+      .ucell.uname::before{ display:none; }
+      .ucell.uname b{ font-size:16px; color:#003366; }
+      .ucell.uactions{ display:block; text-align:left; border-bottom:none; padding-top:10px; }
+      .ucell.uactions::before{ display:none; }
+      .ucell.uactions .actions{ gap:6px; }
+      .ucell.uactions .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
+      .urow .grip{ position:absolute; top:8px; right:8px; font-size:22px; padding:4px 6px; }
 
       /* Editor modal → full-width, comfortable tap targets */
       .overlay{ padding:8px; }
@@ -108,14 +119,30 @@
     <div class="bar">
       <input id="search" placeholder="Search by name, username or email…" />
       <button class="btn" id="addBtn">+ Add user</button>
+      <button class="btn grey" id="saveOrderBtn" style="display:none;">Save order</button>
     </div>
 
-    <table>
-      <thead>
-        <tr><th>User</th><th>Email</th><th>Type</th><th>Status</th><th>Access</th><th>Actions</th></tr>
-      </thead>
-      <tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-    </table>
+    <p class="muted" id="orderHint" style="margin:2px 2px 12px; line-height:1.5;">
+      Drag the <b>⠿</b> handle to reorder. <b>Office</b> staff show first everywhere, then <b>Field</b> staff.
+      Drag a person between the two lists to change their type, then press <b>Save order</b>.
+    </p>
+
+    <div id="listMsg" class="muted" style="display:none; margin:8px 2px;">Loading…</div>
+
+    <div class="uhead">
+      <span></span><span>User</span><span>Email</span><span>Type</span><span>Status</span><span>Access</span><span>Actions</span>
+    </div>
+
+    <div id="listWrap">
+      <div class="zone">
+        <div class="zonehead">Office staff <span class="count" id="cntOffice"></span></div>
+        <div class="ulist" id="listOffice" data-staff="office"></div>
+      </div>
+      <div class="zone">
+        <div class="zonehead">Field staff <span class="count" id="cntField"></span></div>
+        <div class="ulist" id="listField" data-staff="field"></div>
+      </div>
+    </div>
   </div>
 
   <div class="overlay" id="overlay">
@@ -154,6 +181,10 @@
           <div>
             <label>Status</label>
             <select id="f_status"><option>Active</option><option>Pending</option><option>Disabled</option></select>
+          </div>
+          <div>
+            <label>Staff type</label>
+            <select id="f_staff"><option value="field">Field</option><option value="office">Office</option></select>
           </div>
         </div>
       </div>
@@ -342,7 +373,8 @@
         }
         await loadUsers();
       } catch (e) {
-        g("rows").innerHTML = `<tr><td colspan="6" class="muted">Could not reach the portal API.</td></tr>`;
+        g("listMsg").style.display = "block";
+        g("listMsg").textContent = "Could not reach the portal API.";
       }
     }
 
@@ -358,28 +390,127 @@
       return n ? n + " area" + (n === 1 ? "" : "s") : "None";
     }
 
+    function userRow(u) {
+      const name = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
+      return `<div class="urow" data-user="${esc(u.Username)}">
+        <span class="grip" title="Drag to reorder">⠿</span>
+        <div class="ucell uname" data-label="User"><b>${esc(name)}</b><div class="muted">${esc(u.Username)}</div></div>
+        <div class="ucell" data-label="Email">${esc(u.Email || "—")}</div>
+        <div class="ucell" data-label="Type">${esc(u.EmploymentType || "—")}</div>
+        <div class="ucell" data-label="Status"><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></div>
+        <div class="ucell" data-label="Access">${esc(accessSummary(u))}</div>
+        <div class="ucell uactions" data-label="Actions"><div class="actions">
+          <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
+          ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
+          <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
+          <button class="btn small red" data-del="${esc(u.Username)}">Delete</button>
+        </div></div>
+      </div>`;
+    }
     function render() {
+      g("listMsg").style.display = "none";
       const q = g("search").value.trim().toLowerCase();
-      const list = allUsers.filter(u => !q ||
-        [u.Username, u.FirstName, u.LastName, u.Email].some(v => String(v || "").toLowerCase().includes(q)));
-      const rows = g("rows");
-      if (!list.length) { rows.innerHTML = `<tr><td colspan="6" class="muted">No users.</td></tr>`; return; }
-      rows.innerHTML = list.map(u => `
-        <tr>
-          <td data-label="User"><b>${esc((u.FirstName||"") + " " + (u.LastName||""))}</b><div class="muted">${esc(u.Username)}</div></td>
-          <td data-label="Email">${esc(u.Email||"—")}</td>
-          <td data-label="Type">${esc(u.EmploymentType||"—")}</td>
-          <td data-label="Status"><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></td>
-          <td data-label="Access">${esc(accessSummary(u))}</td>
-          <td data-label="Actions"><div class="actions">
-            <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
-            ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
-            <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
-            <button class="btn small red" data-del="${esc(u.Username)}">Delete</button>
-          </div></td>
-        </tr>`).join("");
+      // allUsers arrives already in canonical order (office first, then field,
+      // each by manual drag order) from the server — keep that order per zone.
+      const office = allUsers.filter(u => u.StaffType === "office");
+      const field  = allUsers.filter(u => u.StaffType !== "office");
+      g("listOffice").innerHTML = office.map(userRow).join("");
+      g("listField").innerHTML  = field.map(userRow).join("");
+      const match = u => !q || [u.Username, u.FirstName, u.LastName, u.Email]
+        .some(v => String(v || "").toLowerCase().includes(q));
+      document.querySelectorAll(".urow").forEach(r => {
+        const u = allUsers.find(x => x.Username === r.dataset.user);
+        r.style.display = (u && match(u)) ? "" : "none";
+      });
+      refreshCounts();
+    }
+    function refreshCounts() {
+      const nO = g("listOffice").querySelectorAll(".urow").length;
+      const nF = g("listField").querySelectorAll(".urow").length;
+      g("cntOffice").textContent = nO ? `(${nO})` : "";
+      g("cntField").textContent  = nF ? `(${nF})` : "";
+      g("listOffice").classList.toggle("empty", !nO);
+      g("listField").classList.toggle("empty", !nF);
     }
     g("search").addEventListener("input", render);
+
+    // ── Drag to reorder (pointer-based → works on mouse and touch) ──────────
+    let orderDirty = false, drag = null;
+    function setDirty(d) { orderDirty = d; g("saveOrderBtn").style.display = d ? "" : "none"; }
+    function flashHint(m) {
+      const h = g("orderHint"), old = h.innerHTML;
+      h.textContent = m; h.style.color = "#b00020";
+      setTimeout(() => { h.innerHTML = old; h.style.color = ""; }, 2200);
+    }
+    function onPointerDown(e) {
+      const grip = e.target.closest(".grip"); if (!grip) return;
+      if (g("search").value.trim()) { flashHint("Clear the search box to reorder people."); return; }
+      const row = grip.closest(".urow"); if (!row) return;
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const ph = document.createElement("div");
+      ph.className = "drop-ph"; ph.style.height = rect.height + "px";
+      drag = { row, ph, offX: e.clientX - rect.left, offY: e.clientY - rect.top };
+      row.parentNode.insertBefore(ph, row.nextSibling);
+      row.classList.add("dragging");
+      Object.assign(row.style, { position: "fixed", zIndex: "9999", width: rect.width + "px",
+        left: rect.left + "px", top: rect.top + "px", pointerEvents: "none", margin: "0" });
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onPointerMove, { passive: false });
+      window.addEventListener("pointerup", onPointerUp, { once: true });
+    }
+    function onPointerMove(e) {
+      if (!drag) return;
+      e.preventDefault();
+      drag.row.style.left = (e.clientX - drag.offX) + "px";
+      drag.row.style.top  = (e.clientY - drag.offY) + "px";
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      let list = under && under.closest ? under.closest(".ulist") : null;
+      if (!list) {
+        const lo = g("listOffice").getBoundingClientRect();
+        list = (e.clientY < lo.bottom) ? g("listOffice") : g("listField");
+      }
+      const rows = [...list.querySelectorAll(".urow")].filter(r => r !== drag.row && r.style.display !== "none");
+      let before = null;
+      for (const r of rows) { const rc = r.getBoundingClientRect(); if (e.clientY < rc.top + rc.height / 2) { before = r; break; } }
+      if (before) list.insertBefore(drag.ph, before); else list.appendChild(drag.ph);
+    }
+    function onPointerUp() {
+      if (!drag) return;
+      window.removeEventListener("pointermove", onPointerMove);
+      const { row, ph } = drag;
+      ph.parentNode.insertBefore(row, ph); ph.remove();
+      row.classList.remove("dragging");
+      ["position","zIndex","width","left","top","pointerEvents","margin"].forEach(p => row.style[p] = "");
+      document.body.style.userSelect = "";
+      drag = null;
+      refreshCounts();
+      setDirty(true);
+    }
+    function collectOrder() {
+      const order = [];
+      [["listOffice","office"],["listField","field"]].forEach(([id, t]) => {
+        [...g(id).querySelectorAll(".urow")].forEach((r, i) => order.push({ Username: r.dataset.user, StaffType: t, SortOrder: i }));
+      });
+      return order;
+    }
+    g("saveOrderBtn").onclick = async () => {
+      const btn = g("saveOrderBtn"); btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        const order = collectOrder();
+        const res = await api("/users/reorder", { method: "POST", body: JSON.stringify({ order }) });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok || !r.ok) throw new Error();
+        order.forEach(o => { const u = allUsers.find(x => x.Username === o.Username);
+          if (u) { u.StaffType = o.StaffType; u.SortOrder = o.SortOrder;
+            if (u.Profile) { u.Profile.staffType = o.StaffType; u.Profile.sortOrder = o.SortOrder; } } });
+        allUsers.sort((a, b) => ((a.StaffType==="office"?0:1) - (b.StaffType==="office"?0:1)) || ((a.SortOrder ?? 9999) - (b.SortOrder ?? 9999)));
+        setDirty(false);
+        btn.textContent = "Saved ✓"; setTimeout(() => { btn.textContent = "Save order"; }, 1600);
+      } catch (_) { btn.textContent = "Save failed — retry"; }
+      finally { btn.disabled = false; }
+    };
+    g("listWrap").addEventListener("pointerdown", onPointerDown);
 
     function openEditor(user) {
       // reset to first tab
@@ -395,6 +526,7 @@
       g("f_vehicle").value = user?.VehicleAssigned || "";
       g("f_emp").value = user?.EmploymentType || "Employed";
       g("f_status").value = user?.Status || "Active";
+      g("f_staff").value = user?.StaffType || user?.Profile?.staffType || "field";
       g("f_sp").value = user?.SharePointPath || "";
       g("f_pw").value = "";
       const prof = user?.Profile || {};
@@ -415,7 +547,7 @@
     g("addBtn").onclick = () => openEditor(null);
     g("cancelBtn").onclick = closeEditor;
 
-    g("rows").addEventListener("click", async (e) => {
+    g("listWrap").addEventListener("click", async (e) => {
       const t = e.target;
       if (t.dataset.edit) openEditor(allUsers.find(u => u.Username === t.dataset.edit));
       else if (t.dataset.welcome) await resendWelcome(t.dataset.welcome);
@@ -442,6 +574,7 @@
         const el = g("p_" + k); if (!el) return;
         if (el.value !== "") profile[k] = el.value; else delete profile[k];
       });
+      profile.staffType = g("f_staff").value;   // office / field — preserves sortOrder from editingProfile
       body.Profile = profile;
       // Full access + Story Mode read straight from their switches. Area
       // permissions use the remembered underlying state while Full access has
