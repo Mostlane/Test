@@ -218,7 +218,8 @@ export async function handle(request, env, ctx, url) {
     const all = await listHolidayRequestsForYear();
     let approvedHoliday = 0;
     for (const h of all) {
-      if (h.username === user && h.status === "Approved") approvedHoliday += (h.days || 0);
+      // Approved "Other" leave is agreed as NOT coming off the allowance.
+      if (h.username === user && h.status === "Approved" && h.type !== "Other") approvedHoliday += (h.days || 0);
     }
     const sys = await listSystemRecordsForYear();
     let sysDeducted = 0, sysCredited = 0;
@@ -229,7 +230,12 @@ export async function handle(request, env, ctx, url) {
       else sysDeducted += (s.days || 1);
     }
     const used = approvedHoliday + sysDeducted - sysCredited;
-    return json({ allowance, used, remaining: allowance - used, breakdown: { approvedHoliday, sysDeducted, sysCredited } });
+    const cfg = await getYearConfig();
+    return json({
+      allowance, used, remaining: allowance - used,
+      accrualMode: !!cfg.accrualMode,
+      breakdown: { approvedHoliday, sysDeducted, sysCredited }
+    });
   }
 
   // GET /holiday/all  (admin)
@@ -239,17 +245,21 @@ export async function handle(request, env, ctx, url) {
   }
 
   // POST /holiday/approve | /holiday/reject  (admin)
+  // Approve accepts an optional {type} so an "Other" request can be
+  // reclassified on approval: Other (not off allowance) / Holiday / Unpaid.
   if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
-    const { id } = await request.json();
+    const body = await request.json();
+    const { id } = body;
     if (!id) return text("Missing id", 400);
     const record = await getHolidayById(id);
     if (!record) return text("Not found", 404);
     const status = path.endsWith("approve") ? "Approved" : "Rejected";
+    const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
     await env.DB.prepare(
-      "UPDATE holidays SET status=?, approved_by=?, decision_at=? WHERE id=?"
-    ).bind(status, user, new Date().toISOString(), id).run();
-    await logAction(id, status, user);
+      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE id=?"
+    ).bind(status, user, new Date().toISOString(), newType, id).run();
+    await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
     return json({ success: true });
   }
 
@@ -258,7 +268,7 @@ export async function handle(request, env, ctx, url) {
     if (!isAdmin) return text("Forbidden", 403);
     const cfg = await getYearConfig();
     const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
-    return json({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), bankholidays: bank, shutdown: shut, allowances });
+    return json({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
   }
 
   // POST /holiday/set-year-config  (admin)
@@ -267,7 +277,11 @@ export async function handle(request, env, ctx, url) {
     const body = await request.json();
     const defaultAllowance = Number(body.defaultAllowance);
     if (!Number.isFinite(defaultAllowance)) return text("Bad payload", 400);
-    await cfgPut(`holiday:config:${year}`, { defaultAllowance });
+    const prev = await getYearConfig();
+    await cfgPut(`holiday:config:${year}`, {
+      defaultAllowance,
+      accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
+    });
     return json({ success: true });
   }
 
@@ -341,7 +355,7 @@ export async function handle(request, env, ctx, url) {
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
       const allowance = await getUserAllowance(u);
       let approvedHoliday = 0;
-      for (const h of all) if (h.username === u && h.status === "Approved") approvedHoliday += (h.days || 0);
+      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other") approvedHoliday += (h.days || 0);
       let sysDeducted = 0, sysCredited = 0;
       for (const s of sys) {
         if (s.username !== u) continue;

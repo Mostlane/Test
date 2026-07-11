@@ -85,6 +85,22 @@
     .addrow input[type=date] { flex:0 0 150px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; font-family:inherit; }
     .addrow input[type=text] { flex:1 1 140px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; font-family:inherit; }
 
+    /* Year calendar (12 mini months, whole team) */
+    .calgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(235px, 1fr)); gap:14px; }
+    .mm { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:12px 10px 10px; }
+    .mm h4 { margin:0 0 7px; text-align:center; font-size:13.5px; color:#003366; }
+    .mm table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .mm th { font-size:9px; color:#9aa6b2; font-weight:600; padding-bottom:3px; }
+    .mm td { text-align:center; font-size:11.5px; height:27px; border-radius:7px; color:#334155; }
+    .mm td.we { background:#f3f5f8; color:#94a3b8; }
+    .mm td.today { outline:2px solid #1a4f8f; outline-offset:-2px; font-weight:700; }
+    .mm td.hol { background:#18a558; color:#fff; font-weight:700; }
+    .mm td.oth { background:#0d9488; color:#fff; font-weight:700; }
+    .mm td.pend { background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px); color:#7a5b00; font-weight:700; }
+    .mm td.bank { background:#4d8bff; color:#fff; font-weight:700; }
+    .mm td.shut { background:#8b5cf6; color:#fff; font-weight:700; }
+    .accrualtag { color:#8a5a00; font-weight:700; font-size:12px; display:block; margin-top:2px; }
+
     /* Settings */
     .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
     @media (max-width:760px){ .setgrid { grid-template-columns:1fr; } }
@@ -131,8 +147,10 @@
         <button class="nav" id="wcPrev">‹</button>
         <h2 id="wcTitle" style="text-align:center; flex:1;">…</h2>
         <button class="nav" id="wcNext">›</button>
+        <button class="nav" id="wcMode" title="Year calendar" style="width:auto; padding:0 10px;">📅</button>
       </div>
-      <div class="wcscroll"><table class="wall" id="wallTbl"></table></div>
+      <div class="wcscroll" id="wallScroll"><table class="wall" id="wallTbl"></table></div>
+      <div id="yearWrap" style="display:none;"><div class="calgrid" id="admCalGrid"></div></div>
       <div class="legend">
         <span><i style="background:#18a558"></i> Approved holiday</span>
         <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 4px,#ffe1a0 4px,#ffe1a0 8px)"></i> Pending</span>
@@ -160,6 +178,10 @@
         <p class="muted" style="margin:0 0 8px;">Days per person for <span class="yearRef"></span> (individual overrides in Balances).</p>
         <input type="number" class="num" id="defAllow" min="0" max="60">
         <button class="btn" id="saveDef" style="margin-left:8px;">Save</button>
+        <label style="display:flex; gap:9px; align-items:flex-start; margin-top:14px; font-size:13.5px; color:#27313a; cursor:pointer;">
+          <input type="checkbox" id="accrualChk" style="width:auto; margin-top:2px;">
+          <span><b>Accrual mode</b> — allowance builds up 1/12th per month. Bookings beyond what's accrued by the holiday's month show a ⚠ warning to the person booking and here on approvals (they're warned, not blocked).</span>
+        </label>
         <p class="msg" id="defMsg"></p>
       </div>
       <div class="setgrid">
@@ -203,6 +225,24 @@
     let ORDER = {};           // username -> canonical index (office first, then field)
     let NAMES = {};           // username -> display name
     let ALL = [];             // all requests for the year
+    let CFGDATA = {};         // year config (accrualMode etc)
+    let BALMAP = {};          // username -> {allowance, used}
+    const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+
+    // Wall-chart view preference: month wall or year calendar, per user.
+    const AVIEW_KEY = "mostlaneHolAdminView:" + meUser;
+    let AVIEW = localStorage.getItem(AVIEW_KEY) === "year" ? "year" : "month";
+    function applyAView() {
+      const yearMode = AVIEW === "year";
+      g("wallScroll").style.display = yearMode ? "none" : "";
+      g("yearWrap").style.display = yearMode ? "" : "none";
+      g("wcPrev").style.display = yearMode ? "none" : "";
+      g("wcNext").style.display = yearMode ? "none" : "";
+      g("wcMode").textContent = yearMode ? "📊" : "📅";
+      g("wcMode").title = yearMode ? "Month wall chart" : "Year calendar";
+      if (yearMode) { g("wcTitle").textContent = YEAR + " — whole team"; renderYearAdmin(); }
+      else loadWall();
+    }
 
     // Guard: admins only.
     (async () => {
@@ -246,10 +286,9 @@
         ALL = await authFetch(`/holiday/all?year=${YEAR}`).then(r => r.json());
         if (!Array.isArray(ALL)) ALL = [];
       } catch (e) { ALL = []; }
+      await Promise.all([loadSettings(), loadBalances()]);   // approvals need config + balances (accrual tags)
       renderApprovals();
-      loadWall();
-      loadBalances();
-      loadSettings();
+      applyAView();
     }
 
     // ── Approvals ──
@@ -257,16 +296,35 @@
       const pend = ALL.filter(h => h.status === "Pending").sort((a, b) => (a.start || "").localeCompare(b.start || ""));
       g("pendCnt").style.display = pend.length ? "" : "none";
       g("pendCnt").textContent = pend.length;
+      // Accrual: allowance builds 1/12th per month — tag pending requests that
+      // would exceed the person's accrued days by the month of the holiday.
+      function accrualTag(h) {
+        if (!CFGDATA.accrualMode || h.type === "Other") return "";
+        const b = BALMAP[h.username];
+        if (!b || !h.start) return "";
+        const m = Number(h.start.slice(5, 7));
+        const accrued = Math.round((b.allowance * m / 12) * 10) / 10;
+        const after = (b.used || 0) + (h.days || 0);
+        if (after <= accrued) return "";
+        const monthName = new Date(h.start + "T00:00:00").toLocaleDateString("en-GB", { month:"long" });
+        return `<span class="accrualtag">⚠ Over accrual — ${accrued} day${accrued === 1 ? "" : "s"} accrued by ${monthName}, this takes them to ${after}</span>`;
+      }
       const row = (h, acts) => `
         <div class="apr">
           <div class="dateblock"><b>${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}</b><span>${h.days} day${h.days === 1 ? "" : "s"}</span></div>
           <div class="who"><b>${esc(NAMES[h.username] || h.engineer || h.username)}</b>
-            <span class="muted">${esc(h.type || "Annual Leave")}${h.notes ? " · “" + esc(h.notes) + "”" : ""}</span></div>
+            <span class="muted">${esc(h.type || "Holiday")}${h.notes ? " · “" + esc(h.notes) + "”" : ""}</span>${accrualTag(h)}</div>
           ${acts}
         </div>`;
       g("pendList").innerHTML = pend.length ? pend.map(h => row(h,
-        `<div class="acts"><button class="btn green small" data-approve="${esc(h.id)}">Approve</button>
-         <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`)).join("")
+        h.type === "Other"
+          ? `<div class="acts" style="flex-wrap:wrap;">
+               <button class="btn green small" data-approve="${esc(h.id)}" data-astype="Other" title="Approved as Other — NOT off their allowance">✓ as Other</button>
+               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Holiday" title="Approve but count it as Holiday (off allowance)">✓ as Holiday</button>
+               <button class="btn small" data-approve="${esc(h.id)}" data-astype="Unpaid" style="background:#5b6b78;" title="Approve as Unpaid (off allowance)">✓ as Unpaid</button>
+               <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`
+          : `<div class="acts"><button class="btn green small" data-approve="${esc(h.id)}">Approve</button>
+             <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`)).join("")
         : "<p class='muted'>Nothing waiting — all caught up. 🎉</p>";
 
       const done = ALL.filter(h => ["Approved", "Rejected", "Cancelled"].includes(h.status))
@@ -290,7 +348,7 @@
     document.addEventListener("click", async e => {
       const t = e.target;
       const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-      if (t.dataset.approve) { await post("/holiday/approve", { id: t.dataset.approve }); loadAll(); }
+      if (t.dataset.approve) { await post("/holiday/approve", { id: t.dataset.approve, type: t.dataset.astype || undefined }); loadAll(); }
       else if (t.dataset.reject) { if (confirm("Reject this request?")) { await post("/holiday/reject", { id: t.dataset.reject }); loadAll(); } }
       else if (t.dataset.revoke) { if (confirm("Cancel this APPROVED holiday? The days go back to their allowance.")) { await post("/holiday/cancel-approved", { id: t.dataset.revoke }); loadAll(); } }
     });
@@ -298,6 +356,61 @@
     // ── Wall chart ──
     g("wcPrev").onclick = () => { MONTH--; if (MONTH < 1) { MONTH = 12; YEAR--; g("yearSel").value = String(YEAR); } loadWall(); };
     g("wcNext").onclick = () => { MONTH++; if (MONTH > 12) { MONTH = 1; YEAR++; g("yearSel").value = String(YEAR); } loadWall(); };
+    g("wcMode").onclick = () => {
+      AVIEW = AVIEW === "year" ? "month" : "year";
+      try { localStorage.setItem(AVIEW_KEY, AVIEW); } catch (e) {}
+      applyAView();
+    };
+
+    // ── Year calendar: whole team at a glance ──
+    function renderYearAdmin() {
+      const off = {};    // date -> {hol:[names], oth:[names], pend:[names]}
+      for (const h of ALL) {
+        if (!h.start || !["Approved", "Pending"].includes(h.status)) continue;
+        const key = h.status === "Pending" ? "pend" : (h.type === "Other" ? "oth" : "hol");
+        const s = new Date(h.start + "T00:00:00Z"), e = new Date(h.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+          const di = d.toISOString().slice(0, 10);
+          if (di.slice(0, 4) !== String(YEAR)) continue;
+          (off[di] || (off[di] = { hol: [], oth: [], pend: [] }))[key].push(NAMES[h.username] || h.username);
+        }
+      }
+      const sysMark = {};
+      for (const b of bankDays) sysMark[b.date] = { cls: "bank", label: b.label || "Bank holiday" };
+      for (const s of shutDays) sysMark[s.date] = { cls: "shut", label: s.label || "Shutdown" };
+      const today = new Date().toISOString().slice(0, 10);
+      const pad = n => String(n).padStart(2, "0");
+      let html = "";
+      for (let m = 1; m <= 12; m++) {
+        const first = new Date(Date.UTC(YEAR, m - 1, 1));
+        const dim = new Date(Date.UTC(YEAR, m, 0)).getUTCDate();
+        const lead = (first.getUTCDay() + 6) % 7;
+        let cells = "";
+        for (let i = 0; i < lead; i++) cells += "<td></td>";
+        for (let d = 1; d <= dim; d++) {
+          const di = `${YEAR}-${pad(m)}-${pad(d)}`;
+          const dow = new Date(Date.UTC(YEAR, m - 1, d)).getUTCDay();
+          const we = dow === 0 || dow === 6;
+          const o = off[di], sys = sysMark[di];
+          let cls = "", title = "";
+          if (o && (o.hol.length + o.oth.length)) {
+            cls = o.hol.length ? "hol" : "oth";
+            title = "Off: " + o.hol.concat(o.oth).join(", ") + (o.pend.length ? " · Pending: " + o.pend.join(", ") : "");
+          } else if (o && o.pend.length) {
+            cls = "pend"; title = "Pending: " + o.pend.join(", ");
+          } else if (sys && !we) {
+            cls = sys.cls; title = sys.label;
+          } else if (we) cls = "we";
+          if (di === today) cls += " today";
+          cells += `<td class="${cls}"${title ? ` title="${esc(title)}"` : ""}>${d}</td>`;
+          if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
+        }
+        html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
+          <table><tr><th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th><th>S</th></tr><tr>${cells}</tr></table></div>`;
+      }
+      g("admCalGrid").innerHTML = html;
+    }
 
     async function loadWall() {
       g("wcTitle").textContent = new Date(YEAR, MONTH - 1, 1).toLocaleDateString("en-GB", { month:"long", year:"numeric" });
@@ -381,6 +494,8 @@
       try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}`).then(r => r.json()); }
       catch (e) { g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
+      BALMAP = {};
+      list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used }; });
       g("balBody").innerHTML = list.map(e => `
         <tr>
           <td>${esc(NAMES[e.username] || e.name || e.username)}</td>
@@ -478,18 +593,23 @@
     async function loadSettings() {
       try {
         const c = await authFetch(`/holiday/config?year=${YEAR}`).then(r => r.json());
+        CFGDATA = c || {};
         g("defAllow").value = c.defaultAllowance ?? 28;
+        g("accrualChk").checked = !!c.accrualMode;
         bankDays = Array.isArray(c.bankholidays) ? c.bankholidays.slice() : [];
         shutDays = Array.isArray(c.shutdown) ? c.shutdown.slice() : [];
         renderDays("bankRows", bankDays, "bank");
         renderDays("shutRows", shutDays, "shut");
       } catch (e) {}
     }
-    g("saveDef").onclick = async () => {
+    async function saveYearConfig() {
       const r = await authFetch(`/holiday/set-year-config?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ defaultAllowance: Number(g("defAllow").value) }) });
-      flash("defMsg", r.ok, r.ok ? "Saved ✓" : "Save failed"); if (r.ok) loadBalances();
-    };
+        body: JSON.stringify({ defaultAllowance: Number(g("defAllow").value), accrualMode: g("accrualChk").checked }) });
+      flash("defMsg", r.ok, r.ok ? "Saved ✓" : "Save failed");
+      if (r.ok) { CFGDATA.accrualMode = g("accrualChk").checked; CFGDATA.defaultAllowance = Number(g("defAllow").value); loadBalances().then(renderApprovals); }
+    }
+    g("saveDef").onclick = saveYearConfig;
+    g("accrualChk").onchange = saveYearConfig;
 
     loadAll();
   </script>

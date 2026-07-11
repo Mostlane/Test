@@ -68,7 +68,28 @@
     .panel .acts { display:flex; gap:10px; margin-top:16px; }
     .panel .acts .btn { flex:1; padding:12px; }
     .msg { font-size:13.5px; margin-top:10px; } .msg.err { color:#b00020; }
-    @media (max-width:560px){ .tiles{flex-basis:100%;} }
+    .warnbox { background:#fff6e0; border:1px solid #f3ce9c; color:#8a5a00; border-radius:10px; padding:10px 13px; margin-top:10px; font-size:13px; display:none; }
+
+    /* Year calendar view (Timetastic-style mini months) */
+    .calgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(235px, 1fr)); gap:14px; }
+    .mm { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:12px 10px 10px; }
+    .mm h4 { margin:0 0 7px; text-align:center; font-size:13.5px; color:#003366; }
+    .mm table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .mm th { font-size:9px; color:#9aa6b2; font-weight:600; padding-bottom:3px; }
+    .mm td { text-align:center; font-size:11.5px; height:27px; border-radius:7px; color:#334155; }
+    .mm td.we { background:#f3f5f8; color:#94a3b8; }
+    .mm td.today { outline:2px solid #1a4f8f; outline-offset:-2px; font-weight:700; }
+    .mm td.hol { background:#18a558; color:#fff; font-weight:700; }
+    .mm td.oth { background:#0d9488; color:#fff; font-weight:700; }
+    .mm td.pend { background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px); color:#7a5b00; font-weight:700; }
+    .mm td.bank { background:#4d8bff; color:#fff; font-weight:700; }
+    .mm td.shut { background:#8b5cf6; color:#fff; font-weight:700; }
+    .mm td.wrk { background:#b9e5c8; color:#0c7d27; font-weight:700; }
+    .callegend { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:#475569; }
+    .callegend span { display:inline-flex; align-items:center; gap:5px; }
+    .callegend i { width:13px; height:13px; border-radius:4px; display:inline-block; }
+    @media (max-width:560px){ .tiles{flex-basis:100%;} .calgrid{grid-template-columns:1fr 1fr;} }
+    @media (max-width:430px){ .calgrid{grid-template-columns:1fr;} }
   </style>
   <script>
     if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") location.href = "login.html";
@@ -106,13 +127,27 @@
     <div class="bookbar">
       <h2>My time off</h2>
       <select class="yearsel" id="yearSel"></select>
+      <button class="btn grey" id="viewToggle" title="Switch view" style="padding:9px 12px;">📅</button>
       <button class="btn" id="bookBtn">+ Book time off</button>
     </div>
 
-    <div class="list" id="reqList"><div class="row"><span class="muted">Loading…</span></div></div>
+    <div id="listWrap">
+      <div class="list" id="reqList"><div class="row"><span class="muted">Loading…</span></div></div>
+      <div class="secttl">Bank holidays &amp; company shutdown</div>
+      <div class="list" id="sysList"><div class="row"><span class="muted">Loading…</span></div></div>
+    </div>
 
-    <div class="secttl">Bank holidays &amp; company shutdown</div>
-    <div class="list" id="sysList"><div class="row"><span class="muted">Loading…</span></div></div>
+    <div id="calWrap" style="display:none;">
+      <div class="calgrid" id="calGrid"></div>
+      <div class="callegend">
+        <span><i style="background:#18a558"></i> Holiday</span>
+        <span><i style="background:#0d9488"></i> Other (agreed)</span>
+        <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px)"></i> Pending</span>
+        <span><i style="background:#4d8bff"></i> Bank holiday</span>
+        <span><i style="background:#8b5cf6"></i> Shutdown</span>
+        <span><i style="background:#b9e5c8"></i> Worked (credited)</span>
+      </div>
+    </div>
   </div>
 
   <!-- Booking modal -->
@@ -124,10 +159,11 @@
         <div><label>Last day</label><input type="date" id="bEnd"></div>
       </div>
       <label>Type</label>
-      <select id="bType"><option>Annual Leave</option><option>Unpaid Leave</option><option>Other</option></select>
-      <label>Reminder note (required)</label>
+      <select id="bType"><option>Holiday</option><option>Unpaid</option><option>Other</option></select>
+      <label id="bNoteLbl">Reminder note (required)</label>
       <input id="bNote" placeholder="e.g. Family trip, wedding…">
       <div class="daycount" id="bCount"></div>
+      <div class="warnbox" id="bAccrual"></div>
       <p class="msg" id="bMsg"></p>
       <div class="acts">
         <button class="btn grey" onclick="closeBook()">Cancel</button>
@@ -145,6 +181,24 @@
       return fetch(API + path, opts);
     }
     let YEAR = new Date().getFullYear();
+    const me = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+    let LAST_SUM = {};   // latest /holiday/summary (for the accrual warning)
+
+    // ── View preference (list / year calendar), remembered per user ──
+    const VIEW_KEY = "mostlaneHolView:" + me;
+    let VIEW = localStorage.getItem(VIEW_KEY) === "cal" ? "cal" : "list";
+    function applyView() {
+      g("listWrap").style.display = VIEW === "cal" ? "none" : "";
+      g("calWrap").style.display = VIEW === "cal" ? "" : "none";
+      g("viewToggle").textContent = VIEW === "cal" ? "📋" : "📅";
+      g("viewToggle").title = VIEW === "cal" ? "List view" : "Calendar view";
+    }
+    document.getElementById("viewToggle").onclick = () => {
+      VIEW = VIEW === "cal" ? "list" : "cal";
+      try { localStorage.setItem(VIEW_KEY, VIEW); } catch (e) {}
+      applyView();
+    };
+    applyView();
 
     // Year picker: this year and next (book ahead), plus last year for reference.
     (function () {
@@ -172,6 +226,7 @@
     }
 
     function renderSummary(sum, mine) {
+      LAST_SUM = sum || {};
       const rem = Math.max(0, sum.remaining ?? 0);
       g("statRemaining").textContent = sum.remaining ?? "–";
       g("statUsed").textContent = sum.used ?? "–";
@@ -210,6 +265,7 @@
         (past.length ? past.map(row).join("") : "") ||
         '<div class="row"><span class="muted">No time off booked for ' + YEAR + ' yet — tap “Book time off”.</span></div>';
 
+      renderCalendar(items);
       g("sysList").innerHTML = sys.length ? sys.sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(s => `
         <div class="row">
           <div class="dateblock"><b>${fmtD(s.date)}</b><span>${new Date(s.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"})}</span></div>
@@ -232,6 +288,47 @@
       }
     });
 
+    // ── Year calendar (Timetastic-style 12 mini months) ──
+    function renderCalendar(items) {
+      const marks = {};   // "YYYY-MM-DD" -> {cls, label}
+      const put = (di, cls, label, force) => { if (force || !marks[di]) marks[di] = { cls, label }; };
+      for (const r of items.filter(i => i.start)) {
+        if (!["Approved", "Pending"].includes(r.status)) continue;
+        const cls = r.status === "Pending" ? "pend" : (r.type === "Other" ? "oth" : "hol");
+        const s = new Date(r.start + "T00:00:00Z"), e = new Date(r.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+          put(d.toISOString().slice(0, 10), cls, (r.type || "Holiday") + (r.notes ? " · " + r.notes : ""), r.status === "Approved");
+        }
+      }
+      for (const s of items.filter(i => i.date)) {
+        const cls = (s.worked || s.status === "Credited") ? "wrk" : (s.category === "Shutdown" ? "shut" : "bank");
+        put(s.date, cls, s.label || s.category, false);
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const pad = n => String(n).padStart(2, "0");
+      let html = "";
+      for (let m = 1; m <= 12; m++) {
+        const first = new Date(Date.UTC(YEAR, m - 1, 1));
+        const dim = new Date(Date.UTC(YEAR, m, 0)).getUTCDate();
+        const lead = (first.getUTCDay() + 6) % 7;   // Monday-first
+        let cells = "";
+        for (let i = 0; i < lead; i++) cells += "<td></td>";
+        for (let d = 1; d <= dim; d++) {
+          const di = `${YEAR}-${pad(m)}-${pad(d)}`;
+          const dow = new Date(Date.UTC(YEAR, m - 1, d)).getUTCDay();
+          const we = dow === 0 || dow === 6;
+          const mk = marks[di];
+          const cls = [(we && !mk) ? "we" : "", mk ? mk.cls : "", di === today ? "today" : ""].filter(Boolean).join(" ");
+          cells += `<td class="${cls}"${mk ? ` title="${esc(mk.label)}"` : ""}>${d}</td>`;
+          if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
+        }
+        html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
+          <table><tr><th>M</th><th>T</th><th>W</th><th>T</th><th>F</th><th>S</th><th>S</th></tr><tr>${cells}</tr></table></div>`;
+      }
+      g("calGrid").innerHTML = html;
+    }
+
     // ── Booking ──
     function weekdays(start, end) {
       let n = 0;
@@ -243,14 +340,35 @@
       return n;
     }
     function updateCount() {
-      const s = g("bStart").value, e = g("bEnd").value, box = g("bCount");
+      const s = g("bStart").value, e = g("bEnd").value, box = g("bCount"), warn = g("bAccrual");
+      warn.style.display = "none";
       if (!s || !e || new Date(e) < new Date(s)) { box.style.display = "none"; return; }
       const n = weekdays(s, e);
+      const isOther = g("bType").value === "Other";
       box.style.display = "block";
       box.innerHTML = n > 0
-        ? `This will use <b>${n} day${n === 1 ? "" : "s"}</b> of your allowance (weekends not counted).`
+        ? (isOther
+            ? `This is <b>${n} day${n === 1 ? "" : "s"}</b> — if approved as “Other” it won't come off your allowance.`
+            : `This will use <b>${n} day${n === 1 ? "" : "s"}</b> of your allowance (weekends not counted).`)
         : "No weekdays in that range — pick different dates.";
+      // Accrual warning: allowance builds up 1/12th per month through the year.
+      if (LAST_SUM.accrualMode && !isOther && n > 0 && Number.isFinite(LAST_SUM.allowance)) {
+        const m = Number(s.slice(5, 7));
+        const accrued = Math.round((LAST_SUM.allowance * m / 12) * 10) / 10;
+        const after = (LAST_SUM.used || 0) + n;
+        if (after > accrued) {
+          const monthName = new Date(s + "T00:00:00").toLocaleDateString("en-GB", { month:"long" });
+          warn.style.display = "block";
+          warn.innerHTML = `⚠️ By ${monthName} you'll have accrued <b>${accrued}</b> day${accrued === 1 ? "" : "s"} — this booking takes you to <b>${after}</b> used. It can still be requested; the office will see the same warning.`;
+        }
+      }
     }
+    g("bType").addEventListener("change", () => {
+      const other = g("bType").value === "Other";
+      g("bNoteLbl").textContent = other ? "Reason (required — the office reviews this)" : "Reminder note (required)";
+      g("bNote").placeholder = other ? "e.g. Medical appointment, jury duty…" : "e.g. Family trip, wedding…";
+      updateCount();
+    });
     g("bStart").addEventListener("change", () => { if (!g("bEnd").value || g("bEnd").value < g("bStart").value) g("bEnd").value = g("bStart").value; updateCount(); });
     g("bEnd").addEventListener("change", updateCount);
 
