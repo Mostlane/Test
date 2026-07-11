@@ -201,8 +201,8 @@
           <div class="dateblock"><b>${fmtD(r.start)}${r.start !== r.end ? " – " + fmtD(r.end) : ""}</b><span>${r.days} day${r.days === 1 ? "" : "s"}</span></div>
           <div class="what"><b>${esc(r.type || "Annual Leave")}</b><div class="muted">${esc(r.notes || "")}${r.status === "Approved" && r.approvedBy ? " · approved by " + esc(r.approvedBy) : ""}${r.status === "Rejected" && r.approvedBy ? " · by " + esc(r.approvedBy) : ""}</div></div>
           <span class="pill ${r.status}">${r.status}</span>
-          ${r.status === "Pending" ? `<button class="btn red small" data-cancel="${esc(r.id)}">Cancel</button>` : ""}
-          ${["Cancelled", "Rejected"].includes(r.status) ? `<button class="btn grey small" data-del="${esc(r.id)}">Remove</button>` : ""}
+          ${r.status === "Pending" || (r.status === "Approved" && r.end >= today)
+            ? `<button class="btn red small" data-cancel="${esc(r.id)}" data-approved="${r.status === "Approved" ? 1 : 0}">Cancel</button>` : ""}
         </div>`;
 
       g("reqList").innerHTML =
@@ -222,11 +222,12 @@
     document.addEventListener("click", async e => {
       const t = e.target;
       if (t.dataset.cancel) {
-        if (!confirm("Cancel this pending request?")) return;
-        await authFetch(`/holiday/cancel?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: t.dataset.cancel }) });
-        loadAll();
-      } else if (t.dataset.del) {
-        await authFetch(`/holiday/delete-own?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: t.dataset.del }) });
+        const wasApproved = t.dataset.approved === "1";
+        if (!confirm(wasApproved
+          ? "This holiday is APPROVED. Cancelling gives the days back to your allowance and notifies the office. Cancel it?"
+          : "Cancel this pending request?")) return;
+        const res = await authFetch(`/holiday/cancel?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: t.dataset.cancel }) });
+        if (!res.ok) alert(await res.text().catch(() => "Couldn't cancel — try again."));
         loadAll();
       }
     });
