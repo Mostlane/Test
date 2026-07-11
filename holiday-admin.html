@@ -303,14 +303,28 @@
       } catch (e) {}
     }
 
+    // Calendar responses cached per month — month arrows are instant, and the
+    // cache is cleared whenever data changes (approvals, worked toggles, days).
+    let CAL_CACHE = {};
+    function fetchCal(y, m) {
+      const k = y + "-" + m;
+      if (!CAL_CACHE[k]) CAL_CACHE[k] = authFetch(`/holiday/calendar?year=${y}&month=${m}`).then(r => r.json());
+      return CAL_CACHE[k];
+    }
+
     async function loadAll() {
       document.querySelectorAll(".yearRef").forEach(el => el.textContent = YEAR);
-      if (!Object.keys(ORDER).length) await loadOrder();
-      try {
-        ALL = await authFetch(`/holiday/all?year=${YEAR}`).then(r => r.json());
-        if (!Array.isArray(ALL)) ALL = [];
-      } catch (e) { ALL = []; }
-      await Promise.all([loadSettings(), loadBalances()]);   // approvals need config + balances (accrual tags)
+      CAL_CACHE = {};
+      // Everything in PARALLEL — one round trip instead of four in a row.
+      const tasks = [
+        authFetch(`/holiday/all?year=${YEAR}`).then(r => r.json()).catch(() => []),
+        loadSettings(),
+        loadBalances()
+      ];
+      if (!Object.keys(ORDER).length) tasks.push(loadOrder());
+      if (AVIEW === "month") fetchCal(YEAR, MONTH);   // warm the wall chart alongside
+      const [allData] = await Promise.all(tasks);
+      ALL = Array.isArray(allData) ? allData : [];
       renderApprovals();
       applyAView();
     }
@@ -482,8 +496,8 @@
     async function loadWall() {
       g("wcTitle").textContent = new Date(YEAR, MONTH - 1, 1).toLocaleDateString("en-GB", { month:"long", year:"numeric" });
       let cal;
-      try { cal = await authFetch(`/holiday/calendar?year=${YEAR}&month=${MONTH}`).then(r => r.json()); }
-      catch (e) { g("wallTbl").innerHTML = "<tr><td class='muted' style='padding:14px'>Couldn't load the calendar.</td></tr>"; return; }
+      try { cal = await fetchCal(YEAR, MONTH); }
+      catch (e) { delete CAL_CACHE[YEAR + "-" + MONTH]; g("wallTbl").innerHTML = "<tr><td class='muted' style='padding:14px'>Couldn't load the calendar.</td></tr>"; return; }
       const days = cal.daysInMonth || 30;
       const pad = n => String(n).padStart(2, "0");
       const today = new Date().toISOString().slice(0, 10);
@@ -550,6 +564,7 @@
         const goingTo = t.dataset.worked !== "1";
         if (confirm(goingTo ? "Mark this day as WORKED? It credits the day back to them." : "Revert to not worked? The day is deducted again.")) {
           await post("/holiday/toggle-worked", { kind: t.dataset.kind, username: t.dataset.wcWork, date: t.dataset.date, worked: goingTo });
+          CAL_CACHE = {};
           loadWall(); loadBalances();
         }
       }
@@ -607,7 +622,7 @@
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ days: isBank ? bankDays : shutDays }) });
       flash(isBank ? "bankMsg" : "shutMsg", r.ok, r.ok ? "Saved ✓" : "Save failed — try again");
-      if (r.ok) { renderDays(isBank ? "bankRows" : "shutRows", isBank ? bankDays : shutDays, kind); loadWall(); loadBalances(); }
+      if (r.ok) { renderDays(isBank ? "bankRows" : "shutRows", isBank ? bankDays : shutDays, kind); CAL_CACHE = {}; loadWall(); loadBalances(); }
       return r.ok;
     }
     function addDay(kind) {
