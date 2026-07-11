@@ -512,14 +512,26 @@
         return;
       }
 
+      let lastType = null;
       filteredRecords.forEach(rec => {
+        // Zone divider whenever we cross from office staff to field staff.
+        const t = rec.staffType === "office" ? "office" : "field";
+        if (t !== lastType) {
+          lastType = t;
+          const div = document.createElement("div");
+          div.textContent = t === "office" ? "Office staff" : "Field staff";
+          div.style.cssText = "padding:9px 12px 4px;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#667085;";
+          container.appendChild(div);
+        }
+
         const row = document.createElement("div");
         row.className = "user-row";
         if (rec.username === selectedUsername) row.classList.add("active");
 
         const nameSpan = document.createElement("span");
         nameSpan.className = "user-row-name";
-        nameSpan.textContent = rec.username || "(unknown)";
+        nameSpan.textContent = rec.name || rec.username || "(unknown)";
+        nameSpan.title = rec.username || "";
 
         const tagSpan = document.createElement("span");
         const devCount = (rec.devices || []).length;
@@ -547,14 +559,13 @@
     }
 
     function filterUserList() {
+      // Keep the server's canonical order (office first, then field, in the
+      // drag order set in Users admin) — never re-sort alphabetically.
       const q = (document.getElementById("userSearch").value || "").toLowerCase();
-      if (!q) {
-        filteredRecords = [...allRecords].sort((a, b) => (a.username || "").localeCompare(b.username || ""));
-      } else {
-        filteredRecords = allRecords
-          .filter(r => (r.username || "").toLowerCase().includes(q))
-          .sort((a, b) => (a.username || "").localeCompare(b.username || ""));
-      }
+      filteredRecords = !q ? [...allRecords]
+        : allRecords.filter(r =>
+            (r.username || "").toLowerCase().includes(q) ||
+            (r.name || "").toLowerCase().includes(q));
       renderUserList();
     }
 
@@ -831,8 +842,8 @@
       document.getElementById("forceResetBtn").addEventListener("click", forceResetUserDevices);
 
       try {
-        allRecords      = await fetchAllRecords();
-        filteredRecords = [...allRecords].sort((a, b) => (a.username || "").localeCompare(b.username || ""));
+        allRecords      = await fetchAllRecords();   // already in canonical portal order
+        filteredRecords = [...allRecords];
         renderUserList();
       } catch (err) {
         console.error(err);
