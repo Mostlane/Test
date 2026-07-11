@@ -459,25 +459,46 @@
       window.addEventListener("pointermove", onPointerMove, { passive: false });
       window.addEventListener("pointerup", onPointerUp, { once: true });
     }
-    function onPointerMove(e) {
-      if (!drag) return;
-      e.preventDefault();
-      drag.row.style.left = (e.clientX - drag.offX) + "px";
-      drag.row.style.top  = (e.clientY - drag.offY) + "px";
-      const under = document.elementFromPoint(e.clientX, e.clientY);
+    let lastX = 0, lastY = 0, scrollRAF = null, scrollVel = 0;
+    function positionPlaceholder(x, y) {
+      const under = document.elementFromPoint(x, y);
       let list = under && under.closest ? under.closest(".ulist") : null;
       if (!list) {
         const lo = g("listOffice").getBoundingClientRect();
-        list = (e.clientY < lo.bottom) ? g("listOffice") : g("listField");
+        list = (y < lo.bottom) ? g("listOffice") : g("listField");
       }
       const rows = [...list.querySelectorAll(".urow")].filter(r => r !== drag.row && r.style.display !== "none");
       let before = null;
-      for (const r of rows) { const rc = r.getBoundingClientRect(); if (e.clientY < rc.top + rc.height / 2) { before = r; break; } }
+      for (const r of rows) { const rc = r.getBoundingClientRect(); if (y < rc.top + rc.height / 2) { before = r; break; } }
       if (before) list.insertBefore(drag.ph, before); else list.appendChild(drag.ph);
+    }
+    // While the finger is held near the top/bottom edge, keep scrolling the page
+    // and re-placing the drop marker — so a whole move (e.g. last → first) is one
+    // pickup on a phone, without lifting.
+    function autoScrollTick() {
+      if (!drag || !scrollVel) { scrollRAF = null; return; }
+      window.scrollBy(0, scrollVel);
+      positionPlaceholder(lastX, lastY);
+      scrollRAF = requestAnimationFrame(autoScrollTick);
+    }
+    function onPointerMove(e) {
+      if (!drag) return;
+      e.preventDefault();
+      lastX = e.clientX; lastY = e.clientY;
+      drag.row.style.left = (lastX - drag.offX) + "px";
+      drag.row.style.top  = (lastY - drag.offY) + "px";
+      positionPlaceholder(lastX, lastY);
+      const EDGE = 90, MAX = 30, vh = window.innerHeight;
+      let v = 0;
+      if (lastY < EDGE) v = -MAX * (1 - lastY / EDGE);
+      else if (lastY > vh - EDGE) v = MAX * (1 - (vh - lastY) / EDGE);
+      scrollVel = v;
+      if (v && !scrollRAF) scrollRAF = requestAnimationFrame(autoScrollTick);
     }
     function onPointerUp() {
       if (!drag) return;
       window.removeEventListener("pointermove", onPointerMove);
+      scrollVel = 0; if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
       const { row, ph } = drag;
       ph.parentNode.insertBefore(row, ph); ph.remove();
       row.classList.remove("dragging");
