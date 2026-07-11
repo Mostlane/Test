@@ -1419,6 +1419,164 @@ async function handle5(request, env, ctx, url) {
       return json2({ error: "Failed to delete asset", details: err.message }, 500);
     }
   }
+  if (method === "GET" && pathname === "/asset/transfers/pending-count") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE lower(to_user)=lower(?) AND status='pending'"
+    ).bind(sess.user.username).first();
+    return json2({ ok: true, count: Number(row?.n || 0) });
+  }
+  if (method === "GET" && pathname === "/asset/transfers/pending") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
+    ).bind(me, me).all();
+    const shaped = [];
+    for (const r of results || []) {
+      const asset = await getAsset(env, r.asset_id);
+      shaped.push({
+        id: r.id,
+        assetId: r.asset_id,
+        from: r.from_user,
+        to: r.to_user,
+        note: r.note || "",
+        requestedAt: r.requested_at,
+        assetName: asset?.name || r.asset_id,
+        serial: asset?.serial || "",
+        category: asset?.category || "",
+        value: asset?.value || "",
+        image: (asset?.images || [])[0] || null,
+        direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
+      });
+    }
+    return json2({
+      ok: true,
+      incoming: shaped.filter((s) => s.direction === "incoming"),
+      outgoing: shaped.filter((s) => s.direction === "outgoing")
+    });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-request") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.assetId || !b.to) return json2({ ok: false, error: "assetId and to required" }, 400);
+    const asset = await getAsset(env, b.assetId);
+    if (!asset) return json2({ ok: false, error: "Asset not found" }, 404);
+    const me = sess.user.username;
+    const holder = String(asset.assignedTo || "");
+    if (holder.toLowerCase() !== me.toLowerCase()) {
+      const perms = await permissionsFor(env, me);
+      if (perms.FullAccess !== "Yes") return json2({ ok: false, error: "Only the current holder can transfer this item" }, 403);
+    }
+    if (String(b.to).toLowerCase() === holder.toLowerCase())
+      return json2({ ok: false, error: "That person already holds this item" }, 400);
+    const dup = await env.DB.prepare(
+      "SELECT id FROM asset_transfer_requests WHERE asset_id=? AND status='pending'"
+    ).bind(b.assetId).first();
+    if (dup) return json2({ ok: false, error: "This item already has a transfer pending" }, 409);
+    const res = await env.DB.prepare(
+      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note) VALUES (?,?,?,?)"
+    ).bind(b.assetId, holder || me, b.to, b.note || null).run();
+    return json2({ ok: true, id: res.meta.last_row_id });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-accept") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id || !b.signature) return json2({ ok: false, error: "id and signature required" }, 400);
+    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    if (!req) return json2({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
+    const me = sess.user.username;
+    if (req.to_user.toLowerCase() !== me.toLowerCase())
+      return json2({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.signature);
+    if (!m) return json2({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+    await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const asset = await getAsset(env, req.asset_id);
+    const note = {
+      type: "TRANSFER_NOTE",
+      transferId: req.id,
+      assetID: req.asset_id,
+      assetName: asset?.name || req.asset_id,
+      serial: asset?.serial || "",
+      category: asset?.category || "",
+      value: asset?.value || "",
+      from: req.from_user,
+      to: req.to_user,
+      message: req.note || "",
+      requestedAt: req.requested_at,
+      acceptedAt: now,
+      acceptedBy: me,
+      signatureKey: sigKey,
+      statement: `I, ${me}, accept this item and take responsibility for it from ${now}.`
+    };
+    await putTransfer(env, { ...note, timestamp: now });
+    if (asset) {
+      asset.assignedTo = req.to_user;
+      asset.lastTransfer = now;
+      await putAsset(env, asset);
+    }
+    await env.DB.prepare(
+      "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE id=?"
+    ).bind(now, sigKey, req.id).run();
+    note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
+    return json2({ ok: true, note });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-reject") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    if (!req) return json2({ ok: false, error: "Transfer not found" }, 404);
+    const me = sess.user.username;
+    if (req.to_user.toLowerCase() !== me.toLowerCase())
+      return json2({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    await env.DB.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE id=?").bind(now, req.id).run();
+    await putTransfer(env, {
+      type: "TRANSFER_REJECTED",
+      transferId: req.id,
+      assetID: req.asset_id,
+      from: req.from_user,
+      to: req.to_user,
+      reason: b.reason || "",
+      timestamp: now
+    });
+    return json2({ ok: true });
+  }
+  if (method === "POST" && pathname === "/asset/transfer-cancel") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    if (!req) return json2({ ok: false, error: "Transfer not found" }, 404);
+    const me = sess.user.username;
+    if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
+      const perms = await permissionsFor(env, me);
+      if (perms.FullAccess !== "Yes") return json2({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
+    }
+    await env.DB.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE id=?").bind((/* @__PURE__ */ new Date()).toISOString(), req.id).run();
+    return json2({ ok: true });
+  }
+  if (method === "GET" && pathname === "/asset/transfer-note") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const id = searchParams.get("id");
+    if (!id) return json2({ ok: false, error: "Missing id" }, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT data FROM asset_transfers WHERE json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
+    ).bind(Number(id)).all();
+    if (!results || !results.length) return json2({ ok: false, error: "Note not found" }, 404);
+    const note = JSON.parse(results[0].data);
+    if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
+    return json2({ ok: true, note });
+  }
   return json2({ error: "Not found" }, 404);
 }
 async function getAsset(env, id) {
