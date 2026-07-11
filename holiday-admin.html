@@ -95,11 +95,21 @@
     .mm td.we { background:#f3f5f8; color:#94a3b8; }
     .mm td.today { outline:2px solid #1a4f8f; outline-offset:-2px; font-weight:700; }
     .mm td.hol { background:#18a558; color:#fff; font-weight:700; }
+    /* Headcount shades: light = 1 person off, darker = more */
+    .mm td.hol1 { background:#a9e3c2; color:#0c5a2c; font-weight:700; }
+    .mm td.hol2 { background:#57c186; color:#fff; font-weight:700; }
+    .mm td.hol3 { background:#128a47; color:#fff; font-weight:700; }
     .mm td.oth { background:#0d9488; color:#fff; font-weight:700; }
     .mm td.pend { background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px); color:#7a5b00; font-weight:700; }
     .mm td.bank { background:#4d8bff; color:#fff; font-weight:700; }
     .mm td.shut { background:#8b5cf6; color:#fff; font-weight:700; }
+    .mm td[data-pop] { cursor:pointer; }
     .accrualtag { color:#8a5a00; font-weight:700; font-size:12px; display:block; margin-top:2px; }
+    .daypop { position:fixed; z-index:1200; background:#fff; border:1px solid #d7dee6; border-radius:12px; box-shadow:0 10px 30px rgba(6,24,54,.28); padding:12px 14px; max-width:280px; font-size:13px; display:none; }
+    .daypop h5 { margin:0 0 5px; font-size:13.5px; color:#003366; }
+    .daypop p { margin:3px 0; color:#334155; }
+    .yearlegend { display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:#475569; align-items:center; }
+    .yearlegend i { width:13px; height:13px; border-radius:4px; display:inline-block; }
 
     /* Settings */
     .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -150,7 +160,19 @@
         <button class="nav" id="wcMode" title="Year calendar" style="width:auto; padding:0 10px;">📅</button>
       </div>
       <div class="wcscroll" id="wallScroll"><table class="wall" id="wallTbl"></table></div>
-      <div id="yearWrap" style="display:none;"><div class="calgrid" id="admCalGrid"></div></div>
+      <div id="yearWrap" style="display:none;">
+        <div class="calgrid" id="admCalGrid"></div>
+        <div class="yearlegend">
+          <span>People off:</span>
+          <span><i style="background:#a9e3c2"></i> 1</span>
+          <span><i style="background:#57c186"></i> 2</span>
+          <span><i style="background:#128a47"></i> 3+</span>
+          <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 3px,#ffe1a0 3px,#ffe1a0 6px)"></i> Pending only</span>
+          <span><i style="background:#4d8bff"></i> Bank holiday</span>
+          <span><i style="background:#8b5cf6"></i> Shutdown</span>
+          <span class="muted">· tap a day to see who's off</span>
+        </div>
+      </div>
       <div class="legend">
         <span><i style="background:#18a558"></i> Approved holiday</span>
         <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 4px,#ffe1a0 4px,#ffe1a0 8px)"></i> Pending</span>
@@ -170,6 +192,8 @@
         </table>
       </div>
     </div>
+
+    <div class="daypop" id="dayPop"></div>
 
     <!-- SETTINGS -->
     <div class="sect" data-sec="settings">
@@ -363,8 +387,11 @@
     };
 
     // ── Year calendar: whole team at a glance ──
+    // Green shades scale with how many people are off; tap a day to list them.
+    let DAYDATA = {};    // date -> {hol:[names], oth:[names], pend:[names], sys:{cls,label}|null}
     function renderYearAdmin() {
-      const off = {};    // date -> {hol:[names], oth:[names], pend:[names]}
+      const off = DAYDATA = {};
+      const bucket = di => (off[di] || (off[di] = { hol: [], oth: [], pend: [], sys: null }));
       for (const h of ALL) {
         if (!h.start || !["Approved", "Pending"].includes(h.status)) continue;
         const key = h.status === "Pending" ? "pend" : (h.type === "Other" ? "oth" : "hol");
@@ -373,12 +400,11 @@
           if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
           const di = d.toISOString().slice(0, 10);
           if (di.slice(0, 4) !== String(YEAR)) continue;
-          (off[di] || (off[di] = { hol: [], oth: [], pend: [] }))[key].push(NAMES[h.username] || h.username);
+          bucket(di)[key].push(NAMES[h.username] || h.username);
         }
       }
-      const sysMark = {};
-      for (const b of bankDays) sysMark[b.date] = { cls: "bank", label: b.label || "Bank holiday" };
-      for (const s of shutDays) sysMark[s.date] = { cls: "shut", label: s.label || "Shutdown" };
+      for (const b of bankDays) bucket(b.date).sys = { cls: "bank", label: b.label || "Bank holiday" };
+      for (const s of shutDays) bucket(s.date).sys = { cls: "shut", label: s.label || "Shutdown" };
       const today = new Date().toISOString().slice(0, 10);
       const pad = n => String(n).padStart(2, "0");
       let html = "";
@@ -392,18 +418,20 @@
           const di = `${YEAR}-${pad(m)}-${pad(d)}`;
           const dow = new Date(Date.UTC(YEAR, m - 1, d)).getUTCDay();
           const we = dow === 0 || dow === 6;
-          const o = off[di], sys = sysMark[di];
-          let cls = "", title = "";
-          if (o && (o.hol.length + o.oth.length)) {
-            cls = o.hol.length ? "hol" : "oth";
-            title = "Off: " + o.hol.concat(o.oth).join(", ") + (o.pend.length ? " · Pending: " + o.pend.join(", ") : "");
-          } else if (o && o.pend.length) {
-            cls = "pend"; title = "Pending: " + o.pend.join(", ");
-          } else if (sys && !we) {
-            cls = sys.cls; title = sys.label;
-          } else if (we) cls = "we";
+          const o = off[di];
+          let cls = "", hasInfo = false;
+          if (o) {
+            const nOff = o.hol.length + o.oth.length;
+            if (nOff >= 3) cls = "hol3";
+            else if (nOff === 2) cls = "hol2";
+            else if (nOff === 1) cls = o.hol.length ? "hol1" : "oth";
+            else if (o.pend.length) cls = "pend";
+            else if (o.sys && !we) cls = o.sys.cls;
+            hasInfo = !!(nOff || o.pend.length || (o.sys && !we));
+          }
+          if (!cls && we) cls = "we";
           if (di === today) cls += " today";
-          cells += `<td class="${cls}"${title ? ` title="${esc(title)}"` : ""}>${d}</td>`;
+          cells += `<td class="${cls}"${hasInfo ? ` data-pop="${di}"` : ""}>${d}</td>`;
           if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
         }
         html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
@@ -411,6 +439,33 @@
       }
       g("admCalGrid").innerHTML = html;
     }
+
+    // Day popover — who's off, pending, and any bank holiday / shutdown label.
+    function showDayPop(target, html) {
+      const pop = g("dayPop");
+      pop.innerHTML = html;
+      pop.style.display = "block";
+      const r = target.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let x = r.left + r.width / 2 - pw / 2, y = r.top - ph - 8;
+      x = Math.max(8, Math.min(x, window.innerWidth - pw - 8));
+      if (y < 8) y = r.bottom + 8;
+      pop.style.left = x + "px"; pop.style.top = y + "px";
+    }
+    document.addEventListener("click", e => {
+      const pop = g("dayPop");
+      const t = e.target.closest("[data-pop]");
+      if (!t) { if (!pop.contains(e.target)) pop.style.display = "none"; return; }
+      const o = DAYDATA[t.dataset.pop];
+      if (!o) return;
+      const dd = new Date(t.dataset.pop + "T00:00:00").toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" });
+      let html = `<h5>${esc(dd)}</h5>`;
+      const offNames = o.hol.concat(o.oth);
+      if (offNames.length) html += `<p><b>Off (${offNames.length}):</b> ${esc(offNames.join(", "))}</p>`;
+      if (o.pend.length) html += `<p><b>Pending:</b> ${esc(o.pend.join(", "))}</p>`;
+      if (o.sys) html += `<p><b>${o.sys.cls === "shut" ? "Shutdown" : "Bank holiday"}:</b> ${esc(o.sys.label)}</p>`;
+      if (!offNames.length && !o.pend.length && !o.sys) html += `<p class="muted">Nothing on this day.</p>`;
+      showDayPop(t, html);
+    });
 
     async function loadWall() {
       g("wcTitle").textContent = new Date(YEAR, MONTH - 1, 1).toLocaleDateString("en-GB", { month:"long", year:"numeric" });
