@@ -595,7 +595,7 @@
 
       if (!isUnlimited) {
         const allowedDevices = typeof selectedRecord.allowedDevices === "number"
-          ? selectedRecord.allowedDevices : 1;
+          ? selectedRecord.allowedDevices : 2;
         document.getElementById("allowedDevicesInput").value = allowedDevices;
       }
 
@@ -606,7 +606,7 @@
         if (isUnlimited) {
           usageEl.textContent = "Devices registered: " + used + " (no limit)";
         } else {
-          const cap = typeof selectedRecord.allowedDevices === "number" ? selectedRecord.allowedDevices : 1;
+          const cap = typeof selectedRecord.allowedDevices === "number" ? selectedRecord.allowedDevices : 2;
           usageEl.textContent = "Devices used: " + used + " of " + cap;
         }
       }

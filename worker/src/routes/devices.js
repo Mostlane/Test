@@ -67,7 +67,7 @@ export async function handle(request, env, ctx, url) {
     const capOf = {};
     for (const u of users || []) {
       let p = {}; try { p = u.profile ? JSON.parse(u.profile) : {}; } catch {}
-      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1, unlimited: !!p.deviceUnlimited };
+      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2, unlimited: !!p.deviceUnlimited };
     }
     const byUser = {};
     for (const d of devs || []) {
@@ -160,12 +160,12 @@ async function requireDeviceAdmin(env, request) {
   return null;
 }
 
-// A user's device cap, from their profile (default 1 device, not unlimited).
+// A user's device cap, from their profile (default 2 devices, not unlimited).
 async function deviceSettings(env, username) {
   const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
   let p = {}; try { p = row && row.profile ? JSON.parse(row.profile) : {}; } catch {}
   return {
-    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1,
+    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
     unlimited: !!p.deviceUnlimited
   };
 }
