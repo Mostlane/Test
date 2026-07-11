@@ -1,1112 +1,430 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
   <script src="/portal-config.js"></script>
+  <script src="auth.js"></script>
   <meta charset="UTF-8">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Asset Administration</title>
-
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center;
-      background-size: 180%;
-      font-family: Arial, sans-serif;
-    }
-
-    .content {
-      background: rgba(255,255,255,0.4);
-      backdrop-filter: blur(6px);
-      margin: 40px auto;
-      padding: 20px;
-      border-radius: 12px;
-      max-width: 1200px;
-      width: 100%;
-      box-sizing: border-box;
-      overflow-x: auto;
-    }
-
-    h1 {
-      background: rgba(0,74,153,0.6);
-      color: white;
-      text-align: center;
-      padding: 12px;
-      border-radius: 12px 12px 0 0;
-      margin: 0 0 16px 0;
-    }
-
-    .button {
-      display: inline-block;
-      padding: 8px 16px;
-      font-size: 14px;
-      border-radius: 6px;
-      background: rgba(0,74,153,0.6);
-      color: white;
-      text-decoration: none;
-      margin: 5px 5px 15px 0;
-      cursor: pointer;
-      border: none;
-    }
-
-    .button:hover {
-      background: rgba(0,74,153,0.8);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: rgba(255,255,255,0.6);
-      backdrop-filter: blur(4px);
-      font-size: 14px;
-      display: block;
-      overflow-x: auto;
-    }
-
-    th, td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: center;
-      vertical-align: middle;
-    }
-
-    th {
-      background: rgba(243,244,246,0.6);
-      backdrop-filter: blur(4px);
-    }
-
-    .actions button {
-      margin-right: 5px;
-      padding: 4px 8px;
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      background: #fff;
-    }
-
-    .actions button:hover {
-      background: #f0f0f0;
-    }
-
-    .thumb-img {
-      height: 40px;
-      width: 40px;
-      object-fit: cover;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    /* ── MODALS ── */
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 999;
-      left: 0; top: 0;
-      width: 100%; height: 100%;
-      background: rgba(0,0,0,0.7);
-      justify-content: center;
-      align-items: center;
-    }
-
-    .modal-content {
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      width: 90%;
-      max-width: 500px;
-      position: relative;
-      max-height: 85vh;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .modal-content input,
-    .modal-content select {
-      width: 100%;
-      margin: 6px 0;
-      padding: 8px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      box-sizing: border-box;
-    }
-
-    .modal-content label {
-      font-size: 13px;
-      font-weight: bold;
-      margin-top: 8px;
-      display: block;
-    }
-
-    .close-btn {
-      position: absolute;
-      top: 10px; right: 12px;
-      font-size: 20px;
-      font-weight: bold;
-      cursor: pointer;
-      color: #333;
-      background: none;
-      border: none;
-      line-height: 1;
-    }
-
-    .disabled {
-      opacity: 0.4;
-      pointer-events: none;
-    }
-
-    /* ── GALLERY ── */
-    .gallery-container {
-      margin: 10px 0;
-      overflow-x: auto;
-      white-space: nowrap;
-    }
-
-    .gallery-item {
-      position: relative;
-      display: inline-block;
-      margin-right: 8px;
-    }
-
-    .gallery-item img {
-      height: 70px;
-      width: auto;
-      border-radius: 6px;
-      object-fit: cover;
-      cursor: pointer;
-    }
-
-    .gallery-delete {
-      position: absolute;
-      top: -6px; right: -6px;
-      background: #dc2626;
-      color: #fff;
-      border: none;
-      border-radius: 999px;
-      width: 20px; height: 20px;
-      font-size: 12px;
-      line-height: 20px;
-      text-align: center;
-      cursor: pointer;
-    }
-
-    /* ── IMAGE VIEWER ── */
-    .image-viewer-overlay {
-      display: none;
-      position: fixed;
-      z-index: 1000;
-      inset: 0;
-      background: rgba(0,0,0,0.9);
-      justify-content: center;
-      align-items: center;
-    }
-
-    .image-viewer-overlay img {
-      max-width: 90%;
-      max-height: 90%;
-      border-radius: 8px;
-    }
-
-    .image-viewer-close {
-      position: absolute;
-      top: 12px; right: 16px;
-      font-size: 28px;
-      color: #fff;
-      cursor: pointer;
-      font-weight: bold;
-      background: none;
-      border: none;
-    }
-
-    .img-nav-btn {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      background: rgba(255,255,255,0.75);
-      border: none;
-      border-radius: 999px;
-      width: 40px; height: 40px;
-      font-size: 20px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      outline: none;
-    }
-
-    #imgPrev { left: 20px; }
-    #imgNext { right: 20px; }
-
-    /* ── SUMMARY ── */
-    #valueSummary {
-      width: 100%;
-      display: block;
-      box-sizing: border-box;
-      margin: 15px 0;
-      padding: 15px;
-      background: rgba(255,255,255,0.5);
-      backdrop-filter: blur(6px);
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      font-size: 15px;
-    }
-
-    .summary-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 4px 0;
-      border-bottom: 1px solid #eee;
-      font-size: 13px;
-    }
-
-    .summary-row.highlight {
-      background: rgba(16,185,129,0.08);
-    }
-
-    .summary-name {
-      flex: 0 0 35%;
-      text-align: left;
-      font-weight: bold;
-      word-break: break-word;
-    }
-
-    .summary-value {
-      flex: 0 0 18%;
-      text-align: right;
-      white-space: nowrap;
-    }
-
-    .summary-count {
-      flex: 0 0 12%;
-      text-align: right;
-      font-size: 12px;
-      color: #555;
-    }
-
-    .summary-bar-outer {
-      flex: 1;
-      height: 8px;
-      background: #e5e7eb;
-      border-radius: 999px;
-      overflow: hidden;
-      min-width: 30px;
-    }
-
-    .summary-bar-inner {
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, rgba(0,74,153,0.8), rgba(0,148,255,0.9));
-    }
-
-    .summary-controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin: 10px 0 20px 0;
-    }
-
-    .summary-legend {
-      font-size: 11px;
-      color: #444;
-      margin-top: 6px;
-      font-style: italic;
-    }
-
-    /* ── LOADING / ERROR STATES ── */
-    .table-status-row td {
-      text-align: center;
-      padding: 20px;
-      color: #555;
-      font-style: italic;
-    }
-
-    /* ── LOADING OVERLAY for export ── */
-    #exportOverlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 2000;
-      background: rgba(0,0,0,0.5);
-      justify-content: center;
-      align-items: center;
-      color: white;
-      font-size: 18px;
-      font-family: Arial, sans-serif;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    #exportOverlay .spinner {
-      width: 40px; height: 40px;
-      border: 4px solid rgba(255,255,255,0.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    /* ── RESPONSIVE: hide bar chart on very small screens ── */
-    @media (max-width: 360px) {
-      .summary-bar-outer { display: none; }
-      .summary-name { flex: 0 0 50%; }
-      .summary-value { flex: 0 0 30%; }
-    }
-  </style>
-
+  <title>All Assets (Admin) — Mostlane Portal</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:1200px; margin:16px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .btn { background:#0066cc; color:#fff; border:none; border-radius:9px; padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.green { background:#0c7d27; }
+    .btn.small { padding:7px 11px; font-size:13px; font-weight:500; }
+    .btn:disabled, .btn.disabled { opacity:.5; cursor:default; pointer-events:none; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
 
+    /* Value summary */
+    .kpis { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+    .kpi { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px 18px; flex:1; min-width:150px; }
+    .kpi b { display:block; font-size:26px; color:#003366; }
+    .kpi span { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; }
+    .sumrow { display:grid; grid-template-columns:minmax(120px,1.4fr) 90px 54px 2fr; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid #f0f3f7; font-size:13.5px; }
+    .sumrow:last-child { border-bottom:none; }
+    .sumrow.head { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#667085; font-weight:700; }
+    .sumrow.hot .sname { color:#0c7d3f; font-weight:700; }
+    .sbar { height:9px; background:#eef1f5; border-radius:999px; overflow:hidden; }
+    .sbar > i { display:block; height:100%; background:linear-gradient(90deg,#1A4F8F,#4d8bff); }
+
+    .bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .bar h2 { margin:0; font-size:17px; color:#003366; }
+    .bar input.search { flex:1; min-width:180px; padding:10px 12px; border:1px solid #ccd5dd; border-radius:9px; font-size:14px; font-family:inherit; }
+
+    /* Asset table (desktop) */
+    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e8f0; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(6,24,54,.06); }
+    thead th { background:#f6f8fa; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#667085; padding:10px 12px; }
+    td { padding:10px 12px; border-top:1px solid #f0f3f7; font-size:13.5px; vertical-align:middle; }
+    tr:hover td { background:#fafcff; }
+    td .thumb { width:46px; height:46px; object-fit:cover; border-radius:8px; cursor:pointer; background:#f2f5f8; }
+    .pill { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; }
+    .pill.shared { background:#e2edff; color:#1a4f8f; } .pill.no { background:#eef1f4; color:#8a97a6; }
+    td.acts { white-space:nowrap; } td.acts .btn { margin-left:4px; }
+
+    /* Mobile cards */
+    .mcards { display:none; }
+    @media (max-width:820px){
+      table { display:none; }
+      .mcards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+      .acard { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; }
+      .acard .top { display:flex; gap:10px; }
+      .acard img { width:52px; height:52px; object-fit:cover; border-radius:9px; background:#f2f5f8; flex:none; }
+      .acard h3 { margin:0 0 2px; font-size:15px; color:#003366; }
+      .acard p { margin:2px 0; font-size:13px; }
+      .acard .acts { margin-top:10px; display:flex; gap:6px; }
+      .acard .acts .btn { flex:1; }
+      .sumrow { grid-template-columns:1fr 74px 40px; }
+      .sumrow .sbar { display:none; }
+    }
+
+    /* Modal */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-start; justify-content:center; padding:16px; overflow:auto; z-index:500; }
+    .overlay.open { display:flex; }
+    .panel { background:#fff; border-radius:16px; width:100%; max-width:520px; padding:20px; margin-top:4vh; }
+    .panel h2 { margin:0 0 12px; font-size:17px; color:#003366; }
+    .panel label { font-size:12px; color:#667085; display:block; margin:10px 0 3px; }
+    .panel input, .panel select { width:100%; padding:10px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .panel .acts { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+    .gallery { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+    .gitem { position:relative; }
+    .gitem img { width:66px; height:66px; object-fit:cover; border-radius:9px; border:1px solid #e2e8f0; cursor:pointer; }
+    .gitem .del { position:absolute; top:-7px; right:-7px; width:20px; height:20px; border-radius:50%; background:#b00020; color:#fff; border:none; font-size:12px; line-height:20px; cursor:pointer; padding:0; }
+
+    .viewer { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.88); justify-content:center; align-items:center; }
+    .viewer img { max-width:92%; max-height:88%; border-radius:8px; }
+    .viewer .close { position:absolute; top:14px; right:22px; color:#fff; font-size:34px; cursor:pointer; }
+    .viewer .arrow { position:absolute; top:50%; transform:translateY(-50%); color:#fff; font-size:42px; cursor:pointer; padding:8px 16px; background:rgba(0,0,0,.35); border-radius:8px; user-select:none; }
+    .viewer .left { left:12px; } .viewer .right { right:12px; }
+
+    #exportOverlay { display:none; position:fixed; inset:0; z-index:1100; background:rgba(255,255,255,.85); flex-direction:column; align-items:center; justify-content:center; gap:14px; color:#003366; font-weight:600; }
+    .spinner { width:38px; height:38px; border:4px solid #cfe0f5; border-top-color:#1A4F8F; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .msg { font-size:13.5px; margin-top:8px; } .msg.err { color:#b00020; }
+  </style>
 </head>
-
 <body>
+  <div id="exportOverlay"><div class="spinner"></div><span>Building export…</span></div>
 
-  <!-- Export loading overlay -->
-
-  <div id="exportOverlay">
-    <div class="spinner"></div>
-    <span>Building export…</span>
-  </div>
-
-  <div class="content">
+  <header class="page">
+    <h1>📦 All Assets</h1>
     <a class="ml-back" data-role="home" href="main.html">← Menu</a>
-    <button class="button" onclick="openAddModal()">Add Asset</button>
-    <h1>Asset Administration</h1>
+  </header>
 
-```
-<div id="valueSummary"><strong>Loading asset summary…</strong></div>
+  <div class="wrap">
+    <div class="kpis">
+      <div class="kpi"><b id="kpiCount">–</b><span>Total assets</span></div>
+      <div class="kpi"><b id="kpiValue">–</b><span>Total value held</span></div>
+    </div>
 
-<div class="summary-controls">
-  <button class="button" type="button" onclick="setSummarySort('value')">Sort by Value (High → Low)</button>
-  <button class="button" type="button" onclick="setSummarySort('name')">Sort by Name (A → Z)</button>
-  <button class="button" type="button" onclick="exportFullExcel()">Export Asset Report</button>
-  <span class="summary-legend">Bar length shows relative value held. Rows highlighted green are holding more than £5,000 of assets.</span>
-</div>
+    <div class="card" style="padding:14px 16px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+        <h2 style="margin:0; font-size:15px; color:#003366; flex:1;">Value per person</h2>
+        <button class="btn grey small" id="sortValue">Value ↓</button>
+        <button class="btn grey small" id="sortName">Name A–Z</button>
+        <button class="btn small" id="exportBtn">⬇ Export report</button>
+      </div>
+      <div id="summary"><span class="muted">Loading summary…</span></div>
+    </div>
 
-<table id="assetTable">
-  <thead>
-    <tr>
-      <th>ID</th><th>Name</th><th>Image</th><th>Category</th><th>Serial</th>
-      <th>Value</th><th>Assigned To</th><th>Shared</th><th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    <!-- Loading state -->
-    <tr class="table-status-row"><td colspan="9">Loading assets…</td></tr>
-  </tbody>
-</table>
-```
+    <div class="bar">
+      <h2>Assets</h2>
+      <span class="muted" id="assetCount"></span>
+      <input class="search" id="search" placeholder="Search name, serial, category, person…">
+      <button class="btn" id="addBtn">+ Add asset</button>
+    </div>
 
+    <table>
+      <thead><tr><th>ID</th><th>Item</th><th></th><th>Category</th><th>Serial</th><th>Value</th><th>Assigned to</th><th>Shared</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="9" class="muted">Loading assets…</td></tr></tbody>
+    </table>
+    <div class="mcards" id="mrows"></div>
   </div>
 
-  <!-- ── ADD / EDIT MODAL ── -->
-
-  <div id="assetModal" class="modal">
-    <div class="modal-content">
-      <button class="close-btn" onclick="closeModal()" aria-label="Close">×</button>
-
-```
-  <h3 id="modalTitle">Add/Edit Asset</h3>
-
-  <label for="idField">Asset ID</label>
-  <input id="idField" placeholder="Asset ID">
-
-  <label for="nameField">Name</label>
-  <input id="nameField" placeholder="Name">
-
-  <label for="categoryField">Category</label>
-  <input id="categoryField" placeholder="Category">
-
-  <label for="serialField">Serial</label>
-  <input id="serialField" placeholder="Serial">
-
-  <label for="valueField">Value (£)</label>
-  <input id="valueField" placeholder="Value (£)" type="number" min="0" step="0.01">
-
-  <label for="assignedField">Assigned To</label>
-  <select id="assignedField">
-    <option value="">-- Select User --</option>
-  </select>
-
-  <!-- FIX #9: was free-text "yes/no" — now a proper select -->
-  <label for="sharedField">Shared</label>
-  <select id="sharedField">
-    <option value="no">No</option>
-    <option value="yes">Yes</option>
-  </select>
-
-  <!-- FIX #6: Transfer Date now shows stored value, not always today -->
-  <label for="transferDateField">Transfer Date</label>
-  <input id="transferDateField" type="date" readonly>
-
-  <h4 style="margin-top:15px;">Images</h4>
-  <div id="imageGallery" class="gallery-container"></div>
-  <button class="button" type="button" onclick="uploadImage()">Upload Image</button>
-
-  <div style="text-align:right; margin-top:10px;">
-    <button id="saveBtn" class="button" onclick="saveAsset()">Save</button>
-    <button class="button" onclick="closeModal()">Cancel</button>
-  </div>
-</div>
-```
-
+  <!-- Add / edit modal -->
+  <div class="overlay" id="assetModal">
+    <div class="panel">
+      <h2 id="modalTitle">Add asset</h2>
+      <div class="grid2">
+        <div><label>Asset ID *</label><input id="f_id" placeholder="e.g. AST-101"></div>
+        <div><label>Name *</label><input id="f_name" placeholder="e.g. Makita Drill"></div>
+        <div><label>Category *</label><input id="f_category" placeholder="e.g. Power tools"></div>
+        <div><label>Serial</label><input id="f_serial"></div>
+        <div><label>Value (£)</label><input id="f_value" type="number" min="0" step="0.01"></div>
+        <div><label>Transfer date</label><input id="f_date" type="date"></div>
+        <div><label>Assigned to *</label><select id="f_assigned"></select></div>
+        <div><label>Shared pool</label><select id="f_shared"><option value="no">No</option><option value="yes">Yes</option></select></div>
+      </div>
+      <label style="margin-top:12px;">Images</label>
+      <div class="gallery" id="gallery"></div>
+      <button class="btn grey small" id="uploadBtn" type="button" style="margin-top:8px;">📷 Upload image</button>
+      <p class="msg muted" id="uploadHint" style="display:none;">Save the asset first, then re-open it to add images.</p>
+      <p class="msg" id="modalMsg"></p>
+      <div class="acts">
+        <button class="btn grey" onclick="closeM('assetModal')">Cancel</button>
+        <button class="btn" id="saveBtn">Save</button>
+      </div>
+    </div>
   </div>
 
-  <!-- ── IMAGE VIEWER ── -->
-
-  <div id="imageViewer" class="image-viewer-overlay">
-    <button class="image-viewer-close" onclick="closeImageViewer()" aria-label="Close">×</button>
-    <button id="imgPrev" class="img-nav-btn" onclick="prevImage()" aria-label="Previous">&#8592;</button>
-    <img id="imageViewerImg" src="" alt="Asset image">
-    <button id="imgNext" class="img-nav-btn" onclick="nextImage()" aria-label="Next">&#8594;</button>
+  <!-- Image viewer -->
+  <div id="viewer" class="viewer">
+    <span class="close" onclick="closeViewer()">&times;</span>
+    <span class="arrow left" onclick="stepImg(-1)">&#10094;</span>
+    <img id="viewerImg">
+    <span class="arrow right" onclick="stepImg(1)">&#10095;</span>
   </div>
 
   <script>
-    // ─────────────────────────────────────────────
-    // FIX #1 — auth and access check deferred to
-    // DOMContentLoaded so auth.js has fully run,
-    // and <meta charset> is now first in <head>.
-    // ─────────────────────────────────────────────
-    document.addEventListener("DOMContentLoaded", () => {
-      // Load auth.js logic first if needed, then check access
-      checkAccess();
-    });
-
-    const ALLOWED_USERS = ["joe.line", "greg.line", "jamie.line"];
-
-    function checkAccess() {
-      const user = sessionStorage.getItem("mostlaneUser");
-      if (!user) {
-        alert("You are not logged in.");
-        window.location.href = "login.html";
-        return;
-      }
-
-      if (!ALLOWED_USERS.includes(user.toLowerCase().trim())) {
-        alert("Access denied. You do not have permission to view this page.");
-        window.location.href = "main.html";
-      }
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
     }
+    const openM = id => g(id).classList.add("open");
+    const closeM = id => g(id).classList.remove("open");
+    function thumbUrl(u) { const m = /[?&]key=([^&]+)/.exec(u || ""); return m ? API + "/asset-thumb?key=" + m[1] : u; }
+    const HIGH_VALUE = 5000;
 
-    // ─────────────────────────────────────────────
-    // CONSTANTS
-    // FIX #3 — PIN removed from client-side entirely.
-    // PIN validation now happens in the worker.
-    // The worker endpoint /asset/delete expects
-    // { id, pin } and validates server-side.
-    // ─────────────────────────────────────────────
-    const apiBase = "https://mostlane-assets.jamie-def.workers.dev";
-    const HIGH_VALUE_THRESHOLD = 5000;
+    let ASSETS = [], USERS = [], sortMode = "value";
+    let editId = null, editAsset = null, viewList = [], viewIdx = 0;
 
-    let currentEditId   = null;
-    let currentAsset    = null;
-    let portalUsers     = [];
-    let currentAssets   = [];
-    let currentImageList = [];
-    let currentImageIndex = 0;
-    let lastSummarySort = "value";
-
-    // ─────────────────────────────────────────────
-    // PORTAL USERS
-    // ─────────────────────────────────────────────
-    async function loadPortalUsers() {
-      const res = await fetch("https://mostlane-users.jamie-def.workers.dev/users");
-      const raw = await res.text();
-      let data;
-      try { data = JSON.parse(raw); } catch { data = { Users: [] }; }
-
-      portalUsers = (data.Users || [])
-        .filter(u =>
-          u.Username && u.Username.trim() !== "" &&
-          u.FirstName && u.LastName &&
-          u.Status !== "Not Active"
-        )
-        .sort(window.mlUserCmp);   // office first, then field, in the portal order
-    }
-
-    // ─────────────────────────────────────────────
-    // IMAGE NAV VISIBILITY
-    // ─────────────────────────────────────────────
-    function updateImageNavVisibility() {
-      const prevBtn = document.getElementById("imgPrev");
-      const nextBtn = document.getElementById("imgNext");
-      const show = currentImageList && currentImageList.length > 1;
-      prevBtn.style.display = show ? "flex" : "none";
-      nextBtn.style.display = show ? "flex" : "none";
-    }
-
-    // ─────────────────────────────────────────────
-    // USER DROPDOWN
-    // ─────────────────────────────────────────────
-    function populateUserDropdown(selected = "") {
-      const sel = document.getElementById("assignedField");
-      sel.innerHTML = `<option value="">-- Select User --</option>`;
-
-      portalUsers.forEach(u => {
-        const opt = document.createElement("option");
-        opt.value = u.Username;
-        opt.textContent = u.FirstName + " " + u.LastName;
-        if (u.Username === selected) opt.selected = true;
-        sel.appendChild(opt);
-      });
-
-      const sharedOpt = document.createElement("option");
-      sharedOpt.value = "Shared";
-      sharedOpt.textContent = "Shared";
-      if (selected === "Shared") sharedOpt.selected = true;
-      sel.appendChild(sharedOpt);
-    }
-
-    function validateSaveButton() {
-      const saveBtn  = document.getElementById("saveBtn");
-      const assigned = document.getElementById("assignedField").value;
-      saveBtn.classList.toggle("disabled", assigned === "");
-    }
-
-    // ─────────────────────────────────────────────
-    // ADD MODAL
-    // ─────────────────────────────────────────────
-    function openAddModal() {
-      currentEditId = null;
-      currentAsset  = null;
-
-      document.getElementById("modalTitle").textContent = "Add Asset";
-      document.querySelectorAll("#assetModal input").forEach(i => i.value = "");
-
-      // Reset shared select
-      document.getElementById("sharedField").value = "no";
-
-      document.getElementById("imageGallery").innerHTML = "";
-      currentImageList = [];
-
-      populateUserDropdown("");
-      validateSaveButton();
-      document.getElementById("assignedField").onchange = validateSaveButton;
-
-      // Default transfer date to today for new assets
-      document.getElementById("transferDateField").value =
-        new Date().toISOString().slice(0, 10);
-
-      document.getElementById("assetModal").style.display = "flex";
-    }
-
-    // ─────────────────────────────────────────────
-    // EDIT MODAL
-    // FIX #6 — Transfer Date now shows asset's stored
-    // value instead of always resetting to today.
-    // ─────────────────────────────────────────────
-    function openEditModal(asset) {
-      currentEditId = asset.id;
-      currentAsset  = asset;
-
-      document.getElementById("modalTitle").textContent = "Edit Asset";
-
-      document.getElementById("idField").value       = asset.id       || "";
-      document.getElementById("nameField").value     = asset.name     || "";
-      document.getElementById("categoryField").value = asset.category || "";
-      document.getElementById("serialField").value   = asset.serial   || "";
-      document.getElementById("valueField").value    = asset.value    || "";
-
-      // FIX #9 — use select, normalise stored value to lowercase
-      const sharedSel = document.getElementById("sharedField");
-      sharedSel.value = (asset.shared || "no").toLowerCase();
-
-      // FIX #6 — show stored transfer date; fall back to today only if missing
-      document.getElementById("transferDateField").value =
-        asset.calibrationDate || new Date().toISOString().slice(0, 10);
-
-      populateUserDropdown(asset.assignedTo);
-      validateSaveButton();
-      document.getElementById("assignedField").onchange = validateSaveButton;
-
-      loadImageGallery(asset);
-
-      document.getElementById("assetModal").style.display = "flex";
-    }
-
-    function closeModal() {
-      document.getElementById("assetModal").style.display = "none";
-    }
-
-    // ─────────────────────────────────────────────
-    // IMAGE GALLERY
-    // ─────────────────────────────────────────────
-    function loadImageGallery(asset) {
-      const gallery = document.getElementById("imageGallery");
-      gallery.innerHTML = "";
-
-      currentImageList = asset.images || [];
-      currentAsset.images = currentImageList;
-
-      currentImageList.forEach(url => {
-        const wrapper = document.createElement("div");
-        wrapper.className = "gallery-item";
-
-        const img = document.createElement("img");
-        img.src = url;
-        img.onclick = () => openImageViewer(url);
-
-        const del = document.createElement("button");
-        del.className = "gallery-delete";
-        del.type = "button";
-        del.textContent = "×";
-        del.onclick = (e) => { e.stopPropagation(); deleteImage(url); };
-
-        wrapper.appendChild(img);
-        wrapper.appendChild(del);
-        gallery.appendChild(wrapper);
-      });
-    }
-
-    function openImageViewer(url) {
-      const idx = currentImageList.indexOf(url);
-      currentImageIndex = idx >= 0 ? idx : 0;
-      document.getElementById("imageViewerImg").src = url;
-      document.getElementById("imageViewer").style.display = "flex";
-      updateImageNavVisibility();
-    }
-
-    function openImageViewerFromTable(images) {
-      if (!images || !images.length) return;
-      currentImageList  = images;
-      currentImageIndex = 0;
-      document.getElementById("imageViewerImg").src = images[0];
-      document.getElementById("imageViewer").style.display = "flex";
-      updateImageNavVisibility();
-    }
-
-    function closeImageViewer() {
-      document.getElementById("imageViewer").style.display = "none";
-      document.getElementById("imageViewerImg").src = "";
-    }
-
-    function showImageAt(index) {
-      if (!currentImageList || !currentImageList.length) return;
-      currentImageIndex = (index + currentImageList.length) % currentImageList.length;
-      document.getElementById("imageViewerImg").src = currentImageList[currentImageIndex];
-    }
-
-    function nextImage() { showImageAt(currentImageIndex + 1); }
-    function prevImage() { showImageAt(currentImageIndex - 1); }
-
-    // Swipe support
-    (function () {
-      const viewerEl = document.getElementById("imageViewer");
-      let touchStartX = null;
-
-      viewerEl.addEventListener("touchstart", e => {
-        if (e.changedTouches && e.changedTouches.length)
-          touchStartX = e.changedTouches[0].clientX;
-      }, { passive: true });
-
-      viewerEl.addEventListener("touchend", e => {
-        if (touchStartX === null) return;
-        if (!e.changedTouches || !e.changedTouches.length) return;
-        const dx = e.changedTouches[0].clientX - touchStartX;
-        if (Math.abs(dx) > 40) dx < 0 ? nextImage() : prevImage();
-        touchStartX = null;
-      }, { passive: true });
+    // Access: FullAccess or AssetAdmin only.
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.AssetAdmin === "Yes")) {
+          alert("This page needs Plant & Equipment admin rights."); location.href = "main.html"; return;
+        }
+      } catch (e) { location.href = "main.html"; return; }
+      loadUsers();
+      loadAssets();
     })();
 
-    // ─────────────────────────────────────────────
-    // DELETE IMAGE
-    // ─────────────────────────────────────────────
-    async function deleteImage(url) {
-      if (!currentAsset) return;
-
-      if (!confirm("Are you sure you want to delete this image? This cannot be recovered.")) return;
-
-      const key = url.split("key=")[1];
-      if (!key) { alert("Image key missing — cannot delete."); return; }
-
+    async function loadUsers() {
       try {
-        const res = await fetch(`${apiBase}/delete-asset-image`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assetId: currentAsset.id, key })
-        });
+        const d = await authFetch("/users").then(r => r.json());
+        USERS = (d.Users || []).filter(u => u.Username && u.Status !== "Not Active");  // already office→field order
+      } catch (e) {}
+    }
 
-        const data = await res.json();
-        if (!data.ok) { alert(data.error || "Failed to delete image"); return; }
-
-        currentAsset.images = (currentAsset.images || []).filter(u => u !== url);
-        loadImageGallery(currentAsset);
-      } catch {
-        alert("Failed to delete image. Please try again.");
+    async function loadAssets() {
+      try {
+        const d = await authFetch("/assets").then(r => r.json());
+        ASSETS = (d && d.assets) || [];
+        renderSummary(); renderTable();
+      } catch (e) {
+        g("rows").innerHTML = "<tr><td colspan='9' class='muted'>⚠️ Couldn't load assets — try again.</td></tr>";
+        g("summary").innerHTML = "<span class='muted'>Summary unavailable.</span>";
       }
     }
 
-    // ─────────────────────────────────────────────
-    // UPLOAD IMAGE
-    // ─────────────────────────────────────────────
-    async function uploadImage() {
-      if (!currentAsset) {
-        alert("Please save the asset before uploading images.");
+    const numVal = a => { let v = parseFloat(String(a.value || "0").replace(/[£,]/g, "").trim()); return isNaN(v) ? 0 : v; };
+    const nameOf = uname => { const u = USERS.find(x => x.Username === uname); return u ? ((u.FirstName || "") + " " + (u.LastName || "")).trim() : (uname || ""); };
+
+    function renderSummary() {
+      const total = ASSETS.reduce((t, a) => t + numVal(a), 0);
+      g("kpiCount").textContent = ASSETS.length;
+      g("kpiValue").textContent = "£" + total.toLocaleString();
+      const per = {};
+      ASSETS.forEach(a => {
+        const h = a.assignedTo;
+        if (!h || h === "Shared") return;
+        (per[h] || (per[h] = { total: 0, count: 0 }));
+        per[h].total += numVal(a); per[h].count++;
+      });
+      let data = Object.entries(per).map(([u, i]) => ({ u, name: nameOf(u) || u, total: i.total, count: i.count }));
+      data.sort(sortMode === "name" ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.total - a.total);
+      const max = data.length ? Math.max(...data.map(d => d.total)) : 0;
+      g("summary").innerHTML =
+        `<div class="sumrow head"><div>Person</div><div>Total £</div><div>Items</div><div>Relative value</div></div>` +
+        (data.map(d => `
+          <div class="sumrow ${d.total >= HIGH_VALUE ? "hot" : ""}">
+            <div class="sname">${esc(d.name)}</div>
+            <div>£${d.total.toLocaleString()}</div>
+            <div>${d.count}</div>
+            <div class="sbar"><i style="width:${max > 0 ? (d.total / max * 100) : 0}%"></i></div>
+          </div>`).join("") || `<div class="muted" style="padding:6px 0;">No assets assigned to people yet.</div>`);
+    }
+    g("sortValue").onclick = () => { sortMode = "value"; renderSummary(); };
+    g("sortName").onclick = () => { sortMode = "name"; renderSummary(); };
+
+    function renderTable() {
+      const q = g("search").value.trim().toLowerCase();
+      const list = ASSETS.filter(a => !q ||
+        [a.id, a.name, a.serial, a.category, a.assignedTo, nameOf(a.assignedTo)].some(v => String(v || "").toLowerCase().includes(q)));
+      g("assetCount").textContent = ASSETS.length ? ASSETS.length + " item" + (ASSETS.length === 1 ? "" : "s") : "";
+      if (!list.length) {
+        g("rows").innerHTML = "<tr><td colspan='9' class='muted'>" + (ASSETS.length ? "No matches." : "No assets yet — tap “Add asset”.") + "</td></tr>";
+        g("mrows").innerHTML = ASSETS.length ? "<p class='muted'>No matches.</p>" : "";
         return;
       }
-
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "image/*";
-
-      input.onchange = async () => {
-        const file = input.files[0];
-        if (!file) return;
-
-        const form = new FormData();
-        form.append("file", file);
-        form.append("assetId", currentAsset.id);
-
-        try {
-          const res  = await fetch(`${apiBase}/upload-asset-image`, { method: "POST", body: form });
-          const data = await res.json();
-
-          if (!data.ok) { alert("Upload failed"); return; }
-
-          if (!Array.isArray(currentAsset.images)) currentAsset.images = [];
-          currentAsset.images.push(data.url);
-
-          await fetch(`${apiBase}/asset/update`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(currentAsset)
-          });
-
-          loadImageGallery(currentAsset);
-        } catch {
-          alert("Image upload failed. Please try again.");
-        }
+      const holderCell = a => {
+        const h = String(a.assignedTo || "").trim();
+        if (!h || h.toLowerCase() === "shared") return `<span class="pill shared">Shared pool</span>`;
+        return esc(nameOf(h) || h);
       };
-
-      input.click();
-    }
-
-    // ─────────────────────────────────────────────
-    // SUMMARY
-    // ─────────────────────────────────────────────
-    function renderValueSummary(assets) {
-      const summaryEl = document.getElementById("valueSummary");
-      if (!summaryEl) return;
-
-      let totalValue = 0;
-      const totalCount = assets.length;
-      const perUser = {};
-
-      assets.forEach(a => {
-        let val = parseFloat(
-          String(a.value || "0").replace(/£/g, "").replace(/,/g, "").trim()
-        );
-        if (isNaN(val)) val = 0;
-
-        totalValue += val;
-
-        if (a.assignedTo && a.assignedTo !== "Shared") {
-          if (!perUser[a.assignedTo]) perUser[a.assignedTo] = { total: 0, count: 0 };
-          perUser[a.assignedTo].total += val;
-          perUser[a.assignedTo].count += 1;
-        }
-      });
-
-      // FIX #7 — display names with spaces in the summary
-      let data = Object.entries(perUser).map(([username, info]) => ({
-        username,
-        displayName: username.replace(/\./g, " "),
-        totalValue:  info.total,
-        count:       info.count
-      }));
-
-      if (lastSummarySort === "name") {
-        data.sort((a, b) => a.displayName.localeCompare(b.displayName));
-      } else {
-        data.sort((a, b) => b.totalValue - a.totalValue);
-      }
-
-      const maxVal = data.length ? Math.max(...data.map(d => d.totalValue)) : 0;
-
-      let rowsHtml = "";
-      data.forEach(d => {
-        const pct = maxVal > 0 ? (d.totalValue / maxVal) * 100 : 0;
-        const highlight = d.totalValue >= HIGH_VALUE_THRESHOLD ? " highlight" : "";
-        rowsHtml += `
-          <div class="summary-row${highlight}">
-            <div class="summary-name">${d.displayName}</div>
-            <div class="summary-value">£${d.totalValue.toLocaleString()}</div>
-            <div class="summary-count">${d.count}</div>
-            <div class="summary-bar-outer">
-              <div class="summary-bar-inner" style="width:${pct}%;"></div>
-            </div>
-          </div>`;
-      });
-
-      summaryEl.innerHTML = `
-        <div style="margin-bottom:10px;">
-          <strong>Total Assets:</strong> ${totalCount}<br>
-          <strong>Total Asset Value:</strong> £${totalValue.toLocaleString()}
-        </div>
-        <hr style="margin:10px 0;">
-        <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">Value per Engineer</div>
-        <div class="summary-row" style="font-weight:bold;border-bottom:2px solid #ddd;">
-          <div class="summary-name">Engineer</div>
-          <div class="summary-value">Total £</div>
-          <div class="summary-count">Count</div>
-          <div class="summary-bar-outer" style="background:transparent;height:auto;">
-            <span style="font-size:11px;color:#555;">Relative Value</span>
+      const thumb = a => (a.images && a.images.length)
+        ? `<img class="thumb" src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : "";
+      g("rows").innerHTML = list.map(a => `
+        <tr>
+          <td>${esc(a.id)}</td>
+          <td><b>${esc(a.name || "")}</b></td>
+          <td>${thumb(a)}</td>
+          <td>${esc(a.category || "")}</td>
+          <td>${esc(a.serial || "")}</td>
+          <td>${a.value ? "£" + esc(String(a.value).replace(/£/g, "")) : "—"}</td>
+          <td>${holderCell(a)}</td>
+          <td><span class="pill ${String(a.shared).toLowerCase() === "yes" ? "shared" : "no"}">${String(a.shared).toLowerCase() === "yes" ? "Yes" : "No"}</span></td>
+          <td class="acts"><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></td>
+        </tr>`).join("");
+      g("mrows").innerHTML = list.map(a => `
+        <div class="acard">
+          <div class="top">
+            ${(a.images && a.images.length) ? `<img src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : `<img alt="" style="background:#f2f5f8">`}
+            <div><h3>${esc(a.name || a.id)}</h3><p class="muted">${esc(a.id)} · ${esc(a.category || "—")}</p></div>
           </div>
-        </div>
-        ${rowsHtml || `<div style="font-size:13px;color:#555;margin-top:4px;">No assets currently assigned to engineers.</div>`}
-      `;
+          <p><b>Serial:</b> ${esc(a.serial || "—")}</p>
+          <p><b>Value:</b> ${a.value ? "£" + esc(String(a.value).replace(/£/g, "")) : "—"}</p>
+          <p><b>Held by:</b> ${holderCell(a)}</p>
+          <div class="acts"><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></div>
+        </div>`).join("");
     }
+    g("search").addEventListener("input", renderTable);
 
-    function setSummarySort(mode) {
-      if (mode !== "value" && mode !== "name") return;
-      lastSummarySort = mode;
-      if (currentAssets && currentAssets.length) renderValueSummary(currentAssets);
+    document.addEventListener("click", e => {
+      const t = e.target;
+      if (t.dataset.edit) { const a = ASSETS.find(x => x.id === t.dataset.edit); if (a) openEdit(a); }
+      else if (t.dataset.del) delAsset(t.dataset.del);
+      else if (t.dataset.view) { const a = ASSETS.find(x => x.id === t.dataset.view); if (a) openViewer(a.images || [], 0); }
+    });
+
+    // ── Add / edit ──
+    function fillUsers(selected) {
+      g("f_assigned").innerHTML = `<option value="">— Select person —</option>`
+        + USERS.map(u => `<option value="${esc(u.Username)}"${u.Username === selected ? " selected" : ""}>${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("")
+        + `<option value="Shared"${selected === "Shared" ? " selected" : ""}>🌐 Shared pool</option>`;
     }
+    function openAdd() {
+      editId = null; editAsset = null;
+      g("modalTitle").textContent = "Add asset";
+      ["f_id","f_name","f_category","f_serial","f_value"].forEach(i => g(i).value = "");
+      g("f_id").disabled = false;
+      g("f_shared").value = "no";
+      g("f_date").value = new Date().toISOString().slice(0, 10);
+      g("gallery").innerHTML = ""; g("uploadHint").style.display = "block"; g("modalMsg").textContent = "";
+      fillUsers("");
+      openM("assetModal");
+    }
+    function openEdit(a) {
+      editId = a.id; editAsset = a;
+      g("modalTitle").textContent = "Edit asset";
+      g("f_id").value = a.id || ""; g("f_id").disabled = true;
+      g("f_name").value = a.name || ""; g("f_category").value = a.category || "";
+      g("f_serial").value = a.serial || ""; g("f_value").value = String(a.value || "").replace(/£/g, "");
+      g("f_shared").value = String(a.shared || "no").toLowerCase();
+      g("f_date").value = a.calibrationDate || new Date().toISOString().slice(0, 10);
+      g("uploadHint").style.display = "none"; g("modalMsg").textContent = "";
+      fillUsers(a.assignedTo || "");
+      renderGallery();
+      openM("assetModal");
+    }
+    g("addBtn").onclick = openAdd;
 
-    // ─────────────────────────────────────────────
-    // EXPORT
-    // FIX #5 — parallel fetches via Promise.all
-    //          + loading overlay while building
-    // ─────────────────────────────────────────────
-    async function exportFullExcel() {
-      if (!currentAssets || !currentAssets.length) {
-        alert("No asset data available.");
-        return;
-      }
-
-      const overlay = document.getElementById("exportOverlay");
-      overlay.style.display = "flex";
-
+    g("saveBtn").onclick = async () => {
+      const msg = g("modalMsg"); msg.className = "msg";
+      const id = g("f_id").value.trim(), name = g("f_name").value.trim(), category = g("f_category").value.trim();
+      if (!id || !name || !category) { msg.className = "msg err"; msg.textContent = "ID, name and category are required."; return; }
+      const assigned = g("f_assigned").value;
+      if (!assigned) { msg.className = "msg err"; msg.textContent = "Choose who it's assigned to (or Shared pool)."; return; }
+      const body = {
+        id, name, category,
+        serial: g("f_serial").value.trim(),
+        value: g("f_value").value.trim(),
+        assignedTo: assigned,
+        shared: g("f_shared").value,
+        calibrationDate: g("f_date").value.trim(),
+        images: (editAsset && editAsset.images) || []
+      };
+      g("saveBtn").disabled = true; msg.textContent = "Saving…";
       try {
-        // Fetch all transfer histories in parallel
-        const histories = await Promise.all(
-          currentAssets.map(asset =>
-            fetch(`${apiBase}/transfer-log?assetID=${asset.id}`)
-              .then(r => r.json())
-              .catch(() => [])
-          )
-        );
+        const r = await authFetch(editId ? "/asset/update" : "/asset/add", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        }).then(r => r.json());
+        if (r.error && !r.ok) throw new Error(r.error);
+        closeM("assetModal"); loadAssets();
+      } catch (err) { msg.className = "msg err"; msg.textContent = err.message || "Save failed."; }
+      finally { g("saveBtn").disabled = false; }
+    };
 
-        const engineerTabs = {};
+    async function delAsset(id) {
+      if (!confirm(`Delete asset ${id}? This can't be undone.`)) return;
+      try {
+        const r = await authFetch("/asset/delete?id=" + encodeURIComponent(id), { method: "DELETE" }).then(r => r.json());
+        if (r.error && !r.ok) { alert(r.error); return; }
+        loadAssets();
+      } catch (e) { alert("Delete failed — try again."); }
+    }
 
-        currentAssets.forEach((asset, i) => {
-          const engineer = asset.assignedTo || "Unassigned";
-          if (!engineerTabs[engineer]) engineerTabs[engineer] = [];
+    // ── Image gallery in the editor ──
+    function renderGallery() {
+      const imgs = (editAsset && editAsset.images) || [];
+      g("gallery").innerHTML = imgs.map(u => `
+        <div class="gitem"><img src="${esc(thumbUrl(u))}" data-full="${esc(u)}"><button class="del" data-delimg="${esc(u)}">×</button></div>`).join("");
+    }
+    g("gallery").addEventListener("click", e => {
+      const t = e.target;
+      if (t.dataset.delimg) delImage(t.dataset.delimg);
+      else if (t.dataset.full) openViewer((editAsset.images || []), (editAsset.images || []).indexOf(t.dataset.full));
+    });
+    g("uploadBtn").onclick = () => {
+      if (!editAsset) { alert("Save the asset first, then re-open it to add images."); return; }
+      const input = document.createElement("input");
+      input.type = "file"; input.accept = "image/*"; input.capture = "environment";
+      input.onchange = async () => {
+        const file = input.files[0]; if (!file) return;
+        const form = new FormData(); form.append("file", file); form.append("assetId", editAsset.id);
+        g("uploadBtn").disabled = true; g("uploadBtn").textContent = "Uploading…";
+        try {
+          const data = await authFetch("/upload-asset-image", { method: "POST", body: form }).then(r => r.json());
+          if (!data.ok) throw new Error();
+          editAsset.images = editAsset.images || []; editAsset.images.push(data.url);
+          await authFetch("/asset/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(editAsset) });
+          renderGallery();
+        } catch (e) { alert("Upload failed — try again."); }
+        finally { g("uploadBtn").disabled = false; g("uploadBtn").textContent = "📷 Upload image"; }
+      };
+      input.click();
+    };
+    async function delImage(url) {
+      if (!editAsset || !confirm("Delete this image?")) return;
+      const key = (url.split("key=")[1] || "").split("&")[0];
+      try {
+        const data = await authFetch("/delete-asset-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetId: editAsset.id, key }) }).then(r => r.json());
+        if (!data.ok) { alert(data.error || "Couldn't delete image."); return; }
+        editAsset.images = (editAsset.images || []).filter(u => u !== url);
+        renderGallery();
+      } catch (e) { alert("Couldn't delete image."); }
+    }
 
-          const history = histories[i] || [];
+    // ── Image viewer ──
+    function openViewer(list, idx) { if (!list || !list.length) return; viewList = list; viewIdx = Math.max(0, idx); g("viewerImg").src = viewList[viewIdx]; g("viewer").style.display = "flex"; }
+    function closeViewer() { g("viewer").style.display = "none"; g("viewerImg").src = ""; }
+    function stepImg(d) { if (!viewList.length) return; viewIdx = (viewIdx + d + viewList.length) % viewList.length; g("viewerImg").src = viewList[viewIdx]; }
+    window.addEventListener("keydown", e => { if (e.key === "Escape") closeViewer(); if (e.key === "ArrowRight") stepImg(1); if (e.key === "ArrowLeft") stepImg(-1); });
 
-          engineerTabs[engineer].push({
-            "Asset ID":         asset.id,
-            "Name":             asset.name,
-            "Category":         asset.category,
-            "Serial":           asset.serial,
-            "Value (£)":        asset.value,
-            "Transfer Date":    asset.calibrationDate || "",
-            "Images":           (asset.images || []).join("\n"),
-            "History":          history.length
-              ? history.map(h =>
-                  `FROM: ${h.from}\nTO: ${h.to}\nDATE: ${h.timestamp}\nPDF: ${h.pdfURL || "—"}`
-                ).join("\n\n")
+    // ── Excel export (per-person tabs with transfer history) ──
+    g("exportBtn").onclick = async () => {
+      if (!ASSETS.length) { alert("No assets to export."); return; }
+      g("exportOverlay").style.display = "flex";
+      try {
+        const histories = await Promise.all(ASSETS.map(a =>
+          authFetch("/transfer-log?assetID=" + encodeURIComponent(a.id)).then(r => r.json()).catch(() => [])));
+        const tabs = {};
+        ASSETS.forEach((a, i) => {
+          const who = nameOf(a.assignedTo) || a.assignedTo || "Unassigned";
+          (tabs[who] || (tabs[who] = [])).push({
+            "Asset ID": a.id, "Name": a.name, "Category": a.category, "Serial": a.serial,
+            "Value (£)": a.value, "Transfer Date": a.calibrationDate || "",
+            "Images": (a.images || []).join("\n"),
+            "History": (histories[i] || []).length
+              ? histories[i].map(h => `FROM: ${h.from}\nTO: ${h.to}\nDATE: ${h.timestamp || h.acceptedAt || ""}`).join("\n\n")
               : "No transfer history"
           });
         });
-
         const wb = XLSX.utils.book_new();
-
-        for (const engineer in engineerTabs) {
-          const ws = XLSX.utils.json_to_sheet(engineerTabs[engineer]);
-          XLSX.utils.book_append_sheet(wb, ws, engineer.replace(/\./g, "_").slice(0, 31));
-        }
-
-        XLSX.writeFile(wb, "Asset_History_Report.xlsx");
-      } catch (e) {
-        alert("Export failed. Please try again.");
-      } finally {
-        overlay.style.display = "none";
-      }
-    }
-
-    // ─────────────────────────────────────────────
-    // LOAD ASSETS
-    // FIX #4 — try/catch with user-facing error
-    // FIX #7 — assignedTo shown with spaces in table
-    // FIX #8 — onerror fallback on thumbnails
-    // FIX #10 — loading state shown before fetch
-    // ─────────────────────────────────────────────
-    async function loadAssets() {
-      await loadPortalUsers();
-
-      const tbody = document.querySelector("#assetTable tbody");
-      tbody.innerHTML = `<tr class="table-status-row"><td colspan="9">Loading assets…</td></tr>`;
-
-      let data;
-      try {
-        const res = await fetch(`${apiBase}/assets`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
-      } catch (e) {
-        tbody.innerHTML = `<tr class="table-status-row"><td colspan="9">
-          ⚠️ Failed to load assets. Please refresh the page or try again later.
-        </td></tr>`;
-        document.getElementById("valueSummary").innerHTML = "<strong>Summary unavailable.</strong>";
-        return;
-      }
-
-      currentAssets = data.assets || [];
-      renderValueSummary(currentAssets);
-
-      tbody.innerHTML = "";
-
-      if (!currentAssets.length) {
-        tbody.innerHTML = `<tr class="table-status-row"><td colspan="9">No assets found.</td></tr>`;
-        return;
-      }
-
-      currentAssets.forEach(a => {
-        // FIX #8 — thumb with onerror fallback to full image
-        let thumb = "—";
-        if (a.images && a.images.length) {
-          const thumbUrl = a.images[0].replace("asset-image", "asset-thumb");
-          const fullUrl  = a.images[0];
-          const imagesJson = JSON.stringify(a.images).replace(/'/g, "&#39;");
-          thumb = `<img loading="lazy"
-                        src="${thumbUrl}"
-                        class="thumb-img"
-                        onerror="this.src='${fullUrl}'"
-                        onclick='openImageViewerFromTable(${imagesJson})'>`;
-        }
-
-        // FIX #7 — display name with spaces
-        const displayName = (a.assignedTo || "").replace(/\./g, " ");
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${a.id}</td>
-          <td>${a.name}</td>
-          <td>${thumb}</td>
-          <td>${a.category}</td>
-          <td>${a.serial}</td>
-          <td>${a.value}</td>
-          <td>${displayName}</td>
-          <td>${a.shared}</td>
-          <td class="actions">
-            <button class="editBtn">Edit</button>
-            <button class="deleteBtn">Delete</button>
-          </td>
-        `;
-
-        tr.querySelector(".editBtn").onclick   = () => openEditModal(a);
-        tr.querySelector(".deleteBtn").onclick = () => deleteAsset(a.id);
-
-        tbody.appendChild(tr);
-      });
-    }
-
-    // ─────────────────────────────────────────────
-    // SAVE
-    // FIX #11 — validates required fields before POST
-    // ─────────────────────────────────────────────
-    async function saveAsset() {
-      const assigned = document.getElementById("assignedField").value;
-      if (assigned === "") {
-        alert("Please select a user before saving.");
-        return;
-      }
-
-      const id       = document.getElementById("idField").value.trim();
-      const name     = document.getElementById("nameField").value.trim();
-      const category = document.getElementById("categoryField").value.trim();
-
-      // FIX #11 — basic required-field validation
-      if (!id) { alert("Asset ID is required."); return; }
-      if (!name) { alert("Asset Name is required."); return; }
-      if (!category) { alert("Category is required."); return; }
-
-      const body = {
-        id,
-        name,
-        category,
-        serial:          document.getElementById("serialField").value.trim(),
-        value:           document.getElementById("valueField").value.trim(),
-        assignedTo:      assigned,
-        shared:          document.getElementById("sharedField").value,
-        calibrationDate: document.getElementById("transferDateField").value.trim(),
-        images:          currentAsset?.images || []
-      };
-
-      const route = currentEditId ? "/asset/update" : "/asset/add";
-
-      try {
-        const res = await fetch(`${apiBase}${route}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-
-        const r = await res.json();
-        alert(r.message || r.error);
-        closeModal();
-        loadAssets();
-      } catch {
-        alert("Save failed. Please try again.");
-      }
-    }
-
-    // ─────────────────────────────────────────────
-    // DELETE ASSET
-    // FIX #3 — PIN collected in browser and sent to
-    // worker for server-side validation. The worker
-    // at /asset/delete must validate the PIN before
-    // performing deletion. PIN is never stored or
-    // checked client-side.
-    // ─────────────────────────────────────────────
-    async function deleteAsset(id) {
-      if (!confirm(`Are you sure you want to delete asset ${id}?`)) return;
-
-      const enteredPin = prompt("Enter PIN to confirm deletion:");
-      if (enteredPin === null) return; // user cancelled
-
-      try {
-        const res = await fetch(`${apiBase}/asset/delete`, {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, pin: enteredPin })
-        });
-
-        const r = await res.json();
-
-        // Worker returns { ok: false, error: "Invalid PIN" } if PIN wrong
-        if (!r.ok && r.error) {
-          alert(r.error);
-          return;
-        }
-
-        alert(r.message || "Asset deleted.");
-        loadAssets();
-      } catch {
-        alert("Delete failed. Please try again.");
-      }
-    }
-
-    // ─────────────────────────────────────────────
-    // INIT — deferred to DOMContentLoaded
-    // ─────────────────────────────────────────────
-    document.addEventListener("DOMContentLoaded", () => {
-      loadAssets();
-    });
+        for (const who in tabs) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tabs[who]), who.replace(/[^\w ]/g, "").slice(0, 31) || "Sheet");
+        XLSX.writeFile(wb, "Mostlane_Assets_Report.xlsx");
+      } catch (e) { alert("Export failed — try again."); }
+      finally { g("exportOverlay").style.display = "none"; }
+    };
   </script>
-
-  <!-- auth.js loaded last so it has finished executing
-       before the DOMContentLoaded callbacks fire -->
-
-  <script src="auth.js"></script>
-
 </body>
 </html>
