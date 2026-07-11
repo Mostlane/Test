@@ -348,7 +348,7 @@ if (!CURRENT) { window.location.href = "login.html"; }
 let USERS_RAW=[],ENGINEERS=[],VEHICLE_SET=new Set();let HOURS_LOG_CACHE={};let LOG_COUNTER=0;
 const $=id=>document.getElementById(id);
 // Hardcoded exclusions — directors and test accounts should never appear in engineer hours
-const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie.Line", "Joe.Line", "Greg.Line", "Test.Account"]);
+const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie Line", "Joe Line", "Greg Line", "Test Account"]);
 function timeToMin(t){if(!t||!t.includes(":"))return null;const[h,m]=t.split(":").map(Number);return h*60+m;}
 function minsToHr(m){return Math.round((m/60)*100)/100;}
 function fmtDate(d){return d.toISOString().split("T")[0];}

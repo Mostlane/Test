@@ -56,12 +56,12 @@ export async function handle(request, env, ctx, url) {
 
   // ── View As: the portal owner can open a real session as any user ─────────
   // Locked server-side to the owner account (env.OWNER_USERNAME, default
-  // Jamie.Line) — permissions alone are NOT enough. Every use is written to
+  // "Jamie Line") — permissions alone are NOT enough. Every use is written to
   // login_history (outcome 'viewas') as an audit trail.
   if (path === "/auth/impersonate" && request.method === "POST") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+    const OWNER = env.OWNER_USERNAME || "Jamie Line";
     if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
     const { username } = await request.json().catch(() => ({}));
     if (!username) return error("username required", 400, env, request);

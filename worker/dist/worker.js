@@ -262,7 +262,7 @@ async function handle(request, env, ctx, url) {
   if (path === "/auth/impersonate" && request.method === "POST") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+    const OWNER = env.OWNER_USERNAME || "Jamie Line";
     if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
     const { username } = await request.json().catch(() => ({}));
     if (!username) return error("username required", 400, env, request);
@@ -686,7 +686,7 @@ function orderUsers(a, b) {
 // src/routes/devices.js
 async function handle3(request, env, ctx, url) {
   const path = url.pathname;
-  const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
   if (path === "/device/check-device" && request.method === "POST") {
     const { username, deviceId } = await request.json().catch(() => ({}));
     if (!username || !deviceId) return error("username and deviceId required", 400, env, request);

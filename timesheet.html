@@ -119,7 +119,7 @@ const CURRENT = sessionStorage.getItem("mostlaneUser");
 if (!CURRENT) { window.location.href = "login.html"; }
 
 // Hardcoded exclusions — directors and test accounts should never appear in engineer timesheets
-const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie.Line", "Joe.Line", "Greg.Line", "Test.Account"]);
+const HARDCODED_EXCLUDE_USERNAMES = new Set(["Jamie Line", "Joe Line", "Greg Line", "Test Account"]);
 
 const $ = (id)=>document.getElementById(id);
 
