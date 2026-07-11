@@ -54,13 +54,26 @@
     .sighint { font-size:12px; color:#667085; margin-top:4px; display:flex; justify-content:space-between; align-items:center; }
     .statement { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:9px; padding:10px 12px; font-size:13px; margin-top:10px; }
 
-    /* Transfer note */
-    .note-sheet { border:1px solid #d7dee6; border-radius:12px; padding:16px; }
-    .note-sheet h3 { margin:0 0 2px; color:#003366; font-size:16px; }
-    .note-sheet table { width:100%; border-collapse:collapse; margin-top:10px; }
-    .note-sheet td { padding:6px 4px; font-size:13.5px; border-bottom:1px solid #f0f3f7; vertical-align:top; }
-    .note-sheet td:first-child { color:#667085; width:38%; }
-    .note-sheet img.sig { max-width:240px; max-height:110px; border:1px solid #e2e8f0; border-radius:8px; margin-top:6px; background:#fff; }
+    /* Transfer note — formal agreement document */
+    #noteModal .panel { max-width:640px; }
+    .doc { border:1px solid #d7dee6; border-radius:4px; padding:26px 28px; background:#fff; font-size:13.5px; line-height:1.65; color:#1a2433; }
+    .doc .dochead { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; border-bottom:3px solid #003366; padding-bottom:14px; }
+    .doc .dochead img.logo { height:44px; width:auto; }
+    .doc .dochead .ref { text-align:right; font-size:12px; color:#5a6b82; line-height:1.5; }
+    .doc h3.doctitle { margin:18px 0 2px; font-size:17px; color:#003366; letter-spacing:.02em; }
+    .doc .docsub { font-size:12px; color:#5a6b82; text-transform:uppercase; letter-spacing:.08em; margin-bottom:14px; }
+    .doc .itembox { border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin:10px 0 14px; }
+    .doc .itembox b.iname { font-size:15px; color:#0f1b2d; }
+    .doc .itembox .imeta { color:#5a6b82; font-size:12.5px; margin-top:2px; }
+    .doc .photos { display:flex; gap:8px; margin:12px 0 4px; flex-wrap:wrap; }
+    .doc .photos img { height:92px; width:92px; object-fit:cover; border-radius:6px; border:1px solid #e2e8f0; }
+    .doc p.para { margin:10px 0; text-align:justify; }
+    .doc .sigblock { margin-top:22px; border-top:1px solid #d7dee6; padding-top:14px; display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    .doc .sigblock .who { font-size:13px; }
+    .doc .sigblock .who b { display:block; font-size:14.5px; }
+    .doc .sigblock img.sig { max-width:230px; max-height:96px; display:block; margin-bottom:4px; }
+    .doc .sigline { border-top:1.5px solid #1a2433; padding-top:4px; min-width:230px; font-size:11.5px; color:#5a6b82; }
+    .doc .docfoot { margin-top:18px; font-size:10.5px; color:#8a97a6; border-top:1px solid #eef2f6; padding-top:8px; }
 
     /* Image gallery */
     .gmodal { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.88); justify-content:center; align-items:center; }
@@ -139,10 +152,10 @@
     </div>
   </div>
 
-  <!-- Transfer note modal -->
+  <!-- Transfer note modal (formal agreement document) -->
   <div class="overlay" id="noteModal">
     <div class="panel">
-      <div class="note-sheet" id="noteSheet"></div>
+      <div class="doc" id="noteSheet"></div>
       <div class="acts">
         <button class="btn grey" onclick="closeM('noteModal')">Close</button>
         <button class="btn" onclick="window.print()">Print / save PDF</button>
@@ -334,23 +347,54 @@
       loadAll();
     }
 
-    // ── Transfer note ──
+    // ── Transfer note: formal agreement document ──
+    function ordWhen(iso) {
+      const d = new Date(iso);
+      const parts = new Intl.DateTimeFormat("en-GB", { timeZone:"Europe/London", day:"numeric", month:"long", year:"numeric", hour:"2-digit", minute:"2-digit", hour12:false }).formatToParts(d);
+      const get = t => (parts.find(p => p.type === t) || {}).value || "";
+      const day = Number(get("day"));
+      const suf = day%10===1&&day!==11?"st":day%10===2&&day!==12?"nd":day%10===3&&day!==13?"rd":"th";
+      return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
+    }
     function showNote(n) {
+      const when = n.acceptedAtText || ordWhen(n.acceptedAt);
+      // Older notes predate the formal wording — rebuild both clauses so every
+      // note renders as the same formal agreement.
+      const declaration = (n.statement && /repair or replace/.test(n.statement)) ? n.statement
+        : `I, ${n.acceptedBy}, accept this item and take responsibility for it from ${when}. ` +
+          `I accept responsibility for the cost to repair or replace this item at any point as required ` +
+          `whilst this item remains allocated to myself. This includes if the item is left unattended ` +
+          `at any point in time. This also includes any and all accessories.`;
+      const release = n.releaseStatement ||
+        (n.from && n.from !== "Unassigned"
+          ? `Upon this acceptance, custody of the item passed from ${n.from}. ${n.from}'s responsibility for this item and all of its accessories ended on ${when}, when ${n.acceptedBy} accepted the item and signed this note.`
+          : `This item was previously unassigned; custody was issued directly to ${n.acceptedBy} on ${when}.`);
+      const photos = (n.images || []).map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("");
       g("noteSheet").innerHTML = `
-        <h3>Plant &amp; Equipment Transfer Note</h3>
-        <span class="muted">Mostlane · Note #${esc(n.transferId)}</span>
-        <table>
-          <tr><td>Item</td><td><b>${esc(n.assetName)}</b></td></tr>
-          <tr><td>Serial</td><td>${esc(n.serial || "—")}</td></tr>
-          <tr><td>Category</td><td>${esc(n.category || "—")}</td></tr>
-          <tr><td>From</td><td>${esc(n.from || "Unassigned")}</td></tr>
-          <tr><td>To</td><td><b>${esc(n.to)}</b></td></tr>
-          ${n.message ? `<tr><td>Note</td><td>${esc(n.message)}</td></tr>` : ""}
-          <tr><td>Offered</td><td>${new Date(n.requestedAt).toLocaleString("en-GB")}</td></tr>
-          <tr><td>Accepted</td><td><b>${new Date(n.acceptedAt).toLocaleString("en-GB")}</b> by ${esc(n.acceptedBy)}</td></tr>
-          <tr><td>Declaration</td><td>${esc(n.statement)}</td></tr>
-          <tr><td>Signature</td><td>${n.signatureUrl ? `<img class="sig" src="${esc(n.signatureUrl)}" alt="signature">` : "—"}</td></tr>
-        </table>`;
+        <div class="dochead">
+          <img class="logo" src="/mostlane-logo.jpg" alt="Mostlane">
+          <div class="ref">Transfer Note <b>#${esc(n.transferId)}</b><br>${esc(when)}</div>
+        </div>
+        <h3 class="doctitle">Plant &amp; Equipment — Transfer of Responsibility</h3>
+        <div class="docsub">Formal record of custody and responsibility</div>
+        <div class="itembox">
+          <b class="iname">${esc(n.assetName)}</b>
+          <div class="imeta">${esc(n.serial ? "Serial " + n.serial : "")}${n.category ? " · " + esc(n.category) : ""}${n.value ? " · Value " + esc(n.value) : ""}</div>
+          ${photos ? `<div class="photos">${photos}</div>` : ""}
+        </div>
+        <p class="para">This note records the transfer of the item described above from
+          <b>${esc(n.from || "Unassigned")}</b> to <b>${esc(n.to)}</b>, offered on
+          ${new Date(n.requestedAt).toLocaleDateString("en-GB")} and accepted on ${esc(when)}.${n.message ? " Handover note: “" + esc(n.message) + "”." : ""}</p>
+        <p class="para"><b>Declaration by the receiving party.</b> ${esc(declaration)}</p>
+        <p class="para"><b>Release of the previous holder.</b> ${esc(release)}</p>
+        <div class="sigblock">
+          <div class="who"><b>${esc(n.acceptedBy)}</b>Accepted ${esc(when)}</div>
+          <div>
+            ${n.signatureUrl ? `<img class="sig" src="${esc(n.signatureUrl)}" alt="signature">` : ""}
+            <div class="sigline">Signature of receiving party</div>
+          </div>
+        </div>
+        <div class="docfoot">Generated by the Mostlane Portal · Transfer #${esc(n.transferId)} · Asset ${esc(n.assetID)} · This document is stored permanently against the item's history.</div>`;
       openM("noteModal");
     }
     async function showNoteById(transferId) {
