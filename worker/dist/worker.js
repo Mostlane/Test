@@ -1443,6 +1443,11 @@ async function handle5(request, env, ctx, url) {
     const shaped = [];
     for (const r of results || []) {
       const asset = await getAsset(env, r.asset_id);
+      let cond = {};
+      try {
+        cond = r.condition_photos ? JSON.parse(r.condition_photos) : {};
+      } catch {
+      }
       shaped.push({
         id: r.id,
         assetId: r.asset_id,
@@ -1455,6 +1460,7 @@ async function handle5(request, env, ctx, url) {
         category: asset?.category || "",
         value: asset?.value || "",
         image: (asset?.images || [])[0] || null,
+        senderPhotos: (cond.sender || []).map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`),
         direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
       });
     }
@@ -1486,7 +1492,12 @@ async function handle5(request, env, ctx, url) {
     const res = await env.DB.prepare(
       "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note) VALUES (?,?,?,?)"
     ).bind(b.assetId, holder || me, b.to, b.note || null).run();
-    return json2({ ok: true, id: res.meta.last_row_id });
+    const reqId = res.meta.last_row_id;
+    const senderKeys = await saveConditionPhotos(env, reqId, "sender", b.photos);
+    if (senderKeys.length) {
+      await env.DB.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE id=?").bind(JSON.stringify({ sender: senderKeys, recipient: [] }), reqId).run();
+    }
+    return json2({ ok: true, id: reqId });
   }
   if (method === "POST" && pathname === "/asset/transfer-accept") {
     const sess = await requireSession(env, request);
@@ -1506,6 +1517,15 @@ async function handle5(request, env, ctx, url) {
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const asset = await getAsset(env, req.asset_id);
     const when = londonWhen(now);
+    let cond = {};
+    try {
+      cond = req.condition_photos ? JSON.parse(req.condition_photos) : {};
+    } catch {
+    }
+    const recipientKeys = await saveConditionPhotos(env, req.id, "recipient", b.photos);
+    cond = { sender: cond.sender || [], recipient: recipientKeys };
+    await env.DB.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE id=?").bind(JSON.stringify(cond), req.id).run();
+    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
     const note = {
       type: "TRANSFER_NOTE",
       transferId: req.id,
@@ -1523,6 +1543,8 @@ async function handle5(request, env, ctx, url) {
       acceptedAtText: when,
       acceptedBy: me,
       signatureKey: sigKey,
+      conditionSender: (cond.sender || []).map(toUrl),
+      conditionRecipient: (cond.recipient || []).map(toUrl),
       statement: `I, ${me}, accept this item and take responsibility for it from ${when}. I accept responsibility for the cost to repair or replace this item at any point as required whilst this item remains allocated to myself. This includes if the item is left unattended at any point in time. This also includes any and all accessories.`,
       releaseStatement: req.from_user && req.from_user !== "Unassigned" ? `Upon this acceptance, custody of the item passed from ${req.from_user}. ${req.from_user}'s responsibility for this item and all of its accessories ended on ${when}, when ${me} accepted the item and signed this note.` : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
     };
@@ -1603,6 +1625,19 @@ async function putTransfer(env, log) {
   await env.DB.prepare(
     "INSERT INTO asset_transfers (asset_id, at, data) VALUES (?,?,?)"
   ).bind(log.assetID, log.timestamp || (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify(log)).run();
+}
+async function saveConditionPhotos(env, reqId, who, photos) {
+  const keys = [];
+  for (const p of (Array.isArray(photos) ? photos : []).slice(0, 6)) {
+    const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
+    if (!m) continue;
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    if (bytes.length > 4 * 1024 * 1024) continue;
+    const key = `transfers/${reqId}/${who}-${keys.length + 1}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+    await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
+    keys.push(key);
+  }
+  return keys;
 }
 function londonWhen(iso) {
   const parts = new Intl.DateTimeFormat("en-GB", {

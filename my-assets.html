@@ -49,6 +49,15 @@
     .panel .acts .btn { flex:1; }
     .msg { font-size:13.5px; margin-top:10px; } .msg.err { color:#b00020; }
 
+    /* Condition photo pickers */
+    .pstrip { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .pstrip .ph { position:relative; }
+    .pstrip img { width:64px; height:64px; object-fit:cover; border-radius:8px; border:1px solid #d7dee6; display:block; }
+    .pstrip .rm { position:absolute; top:-7px; right:-7px; width:20px; height:20px; border-radius:50%; background:#b00020; color:#fff; border:none; font-size:12px; line-height:20px; text-align:center; cursor:pointer; padding:0; }
+    .pendrow .cond { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; width:100%; }
+    .pendrow .cond img { width:44px; height:44px; object-fit:cover; border-radius:7px; border:1px solid #e8d9b8; cursor:pointer; }
+    .pendrow .cond .clbl { font-size:11px; color:#8a5a00; width:100%; }
+
     /* Signature */
     #sigCanvas { width:100%; height:170px; border:2px dashed #9dbdf0; border-radius:10px; background:#fff; touch-action:none; cursor:crosshair; }
     .sighint { font-size:12px; color:#667085; margin-top:4px; display:flex; justify-content:space-between; align-items:center; }
@@ -127,6 +136,11 @@
       <select id="txTo"></select>
       <label>Note (optional)</label>
       <textarea id="txNote" rows="2" placeholder="e.g. Handed over at the yard"></textarea>
+      <label>Condition photos (optional)</label>
+      <p class="muted" style="margin:0;font-size:12px;">Photograph the item as you hand it over — the photos are stamped onto the transfer note, so its condition at drop-off is on record.</p>
+      <div class="pstrip" id="txStrip"></div>
+      <button type="button" class="btn grey small" id="txAddPh" style="margin-top:8px;">📷 Add photo</button>
+      <input type="file" id="txFile" accept="image/*" multiple hidden>
       <p class="msg" id="txMsg"></p>
       <div class="acts">
         <button class="btn grey" onclick="closeM('txModal')">Cancel</button>
@@ -141,6 +155,11 @@
       <h2>Accept transfer</h2>
       <div id="sigAsset" class="muted"></div>
       <div class="statement" id="sigStatement"></div>
+      <label>Condition photos (optional)</label>
+      <p class="muted" style="margin:0;font-size:12px;">Photograph the item as you receive it — your record of its condition goes on the note too.</p>
+      <div class="pstrip" id="sigStrip"></div>
+      <button type="button" class="btn grey small" id="sigAddPh" style="margin-top:8px;">📷 Add photo</button>
+      <input type="file" id="sigFile" accept="image/*" multiple hidden>
       <label>Sign below to accept responsibility</label>
       <canvas id="sigCanvas"></canvas>
       <div class="sighint"><span>Draw your signature with your finger or mouse.</span><button class="btn grey small" id="sigClear" type="button">Clear</button></div>
@@ -229,6 +248,7 @@
             <button class="btn green small" data-accept="${r.id}">Accept &amp; sign</button>
             <button class="btn red small" data-reject="${r.id}">Reject</button>
           </div>
+          ${(r.senderPhotos && r.senderPhotos.length) ? `<div class="cond"><span class="clbl">Condition photos from ${esc(r.from || "sender")} — tap to inspect:</span>${r.senderPhotos.map((u, i) => `<img src="${esc(thumbUrl(u))}" data-cview="${r.id}" data-ci="${i}" alt="">`).join("")}</div>` : ""}
         </div>`).join("");
 
       // My items grid
@@ -263,8 +283,42 @@
       else if (t.dataset.cancel) doCancel(Number(t.dataset.cancel));
       else if (t.dataset.hist) openHistory(t.dataset.hist);
       else if (t.dataset.gallery) { const a = myAssets.find(x => x.id === t.dataset.gallery); if (a) gOpen(a.images || []); }
+      else if (t.dataset.cview) { const r = pending.incoming.find(x => x.id === Number(t.dataset.cview)); if (r) gOpen(r.senderPhotos, Number(t.dataset.ci)); }
       else if (t.dataset.note) showNoteById(Number(t.dataset.note));
     });
+
+    // ── Condition photos: shared picker (camera on phones, compressed) ──
+    async function shrink(file) {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.72);
+    }
+    function photoPicker(btnId, fileId, stripId) {
+      const store = [];
+      const strip = g(stripId), input = g(fileId), btn = g(btnId);
+      function draw() {
+        strip.innerHTML = store.map((d, i) =>
+          `<span class="ph"><img src="${d}" alt=""><button type="button" class="rm" data-i="${i}">×</button></span>`).join("");
+        btn.style.display = store.length >= 6 ? "none" : "";
+      }
+      btn.addEventListener("click", () => input.click());
+      input.addEventListener("change", async () => {
+        for (const f of [...input.files].slice(0, 6 - store.length)) {
+          try { store.push(await shrink(f)); } catch (e) {}
+        }
+        input.value = ""; draw();
+      });
+      strip.addEventListener("click", e => {
+        const rm = e.target.closest(".rm");
+        if (rm) { store.splice(Number(rm.dataset.i), 1); draw(); }
+      });
+      return { store, reset() { store.length = 0; draw(); } };
+    }
+    const txPix = photoPicker("txAddPh", "txFile", "txStrip");
+    const sigPix = photoPicker("sigAddPh", "sigFile", "sigStrip");
 
     // ── Send a transfer ──
     let txAssetId = null;
@@ -272,7 +326,7 @@
       txAssetId = assetId;
       const a = myAssets.find(x => x.id === assetId);
       g("txAsset").innerHTML = `<b>${esc(a?.name || assetId)}</b>${a?.serial ? " · Serial " + esc(a.serial) : ""}`;
-      g("txMsg").textContent = ""; g("txNote").value = "";
+      g("txMsg").textContent = ""; g("txNote").value = ""; txPix.reset();
       if (!userList.length) {
         try {
           const d = await authFetch("/users").then(r => r.json());
@@ -290,7 +344,7 @@
       g("txSend").disabled = true;
       try {
         const r = await authFetch("/asset/transfer-request", { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ assetId: txAssetId, to, note: g("txNote").value.trim() }) }).then(r => r.json());
+          body: JSON.stringify({ assetId: txAssetId, to, note: g("txNote").value.trim(), photos: txPix.store }) }).then(r => r.json());
         if (!r.ok) throw new Error(r.error || "Failed");
         closeM("txModal"); await loadAll();
       } catch (err) { g("txMsg").className = "msg err"; g("txMsg").textContent = err.message; }
@@ -318,7 +372,7 @@
       const r = pending.incoming.find(x => x.id === reqId);
       g("sigAsset").innerHTML = `<b>${esc(r.assetName)}</b>${r.serial ? " · Serial " + esc(r.serial) : ""} — from ${esc(r.from || "Unassigned")}`;
       g("sigStatement").textContent = `I confirm I am taking responsibility for this item from today, and will report loss or damage to the office.`;
-      g("sigMsg").textContent = "";
+      g("sigMsg").textContent = ""; sigPix.reset();
       openM("sigModal");
       requestAnimationFrame(sigSetup);
     }
@@ -327,7 +381,7 @@
       g("sigAccept").disabled = true; g("sigMsg").className = "msg"; g("sigMsg").textContent = "Signing…";
       try {
         const r = await authFetch("/asset/transfer-accept", { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ id: signReqId, signature: canvas.toDataURL("image/png") }) }).then(r => r.json());
+          body: JSON.stringify({ id: signReqId, signature: canvas.toDataURL("image/png"), photos: sigPix.store }) }).then(r => r.json());
         if (!r.ok) throw new Error(r.error || "Failed");
         closeM("sigModal");
         showNote(r.note);
@@ -387,6 +441,8 @@
           ${new Date(n.requestedAt).toLocaleDateString("en-GB")} and accepted on ${esc(when)}.${n.message ? " Handover note: “" + esc(n.message) + "”." : ""}</p>
         <p class="para"><b>Declaration by the receiving party.</b> ${esc(declaration)}</p>
         <p class="para"><b>Release of the previous holder.</b> ${esc(release)}</p>
+        ${(n.conditionSender || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at handover</b> — photographed by ${esc(n.from || "the sender")}:</p><div class="photos">${n.conditionSender.map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
+        ${(n.conditionRecipient || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at acceptance</b> — photographed by ${esc(n.acceptedBy)}:</p><div class="photos">${n.conditionRecipient.map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
         <div class="sigblock">
           <div class="who"><b>${esc(n.acceptedBy)}</b>Accepted ${esc(when)}</div>
           <div>
@@ -421,7 +477,7 @@
 
     // ── Gallery ──
     let gImgs = [], gIdx = 0;
-    function gOpen(urls) { if (!urls.length) return; gImgs = urls; gIdx = 0; g("gImg").src = urls[0]; g("gModal").style.display = "flex"; }
+    function gOpen(urls, start = 0) { if (!urls || !urls.length) return; gImgs = urls; gIdx = Math.min(start, urls.length - 1); g("gImg").src = urls[gIdx]; g("gModal").style.display = "flex"; }
     function gClose() { g("gModal").style.display = "none"; }
     function gNext() { gIdx = (gIdx + 1) % gImgs.length; g("gImg").src = gImgs[gIdx]; }
     function gPrev() { gIdx = (gIdx - 1 + gImgs.length) % gImgs.length; g("gImg").src = gImgs[gIdx]; }
