@@ -13,3 +13,7 @@
   Cache-Control: no-cache
 /main.html
   Cache-Control: no-cache
+/holiday.html
+  Cache-Control: no-cache
+/holiday-admin.html
+  Cache-Control: no-cache
