@@ -133,9 +133,12 @@ export async function handle(request, env, ctx, url) {
 export async function loginHistory(request, env, ctx, url) {
   const sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
-  const { results } = await env.DB.prepare(
-    "SELECT username, device_id, ip, outcome, at FROM login_history ORDER BY at DESC LIMIT 200"
-  ).all();
+  const username = url.searchParams.get("username");
+  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history";
+  const stmt = username
+    ? env.DB.prepare(cols + " WHERE username = ? ORDER BY at DESC LIMIT 200").bind(username)
+    : env.DB.prepare(cols + " ORDER BY at DESC LIMIT 200");
+  const { results } = await stmt.all();
   return json({ ok: true, history: results || [] }, {}, env, request);
 }
 

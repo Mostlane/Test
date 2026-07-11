@@ -316,9 +316,10 @@ async function handle(request, env, ctx, url) {
 async function loginHistory(request, env, ctx, url) {
   const sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
-  const { results } = await env.DB.prepare(
-    "SELECT username, device_id, ip, outcome, at FROM login_history ORDER BY at DESC LIMIT 200"
-  ).all();
+  const username = url.searchParams.get("username");
+  const cols = "SELECT username, device_id, ip, user_agent, outcome, at FROM login_history";
+  const stmt = username ? env.DB.prepare(cols + " WHERE username = ? ORDER BY at DESC LIMIT 200").bind(username) : env.DB.prepare(cols + " ORDER BY at DESC LIMIT 200");
+  const { results } = await stmt.all();
   return json({ ok: true, history: results || [] }, {}, env, request);
 }
 function safeEqual(a, b) {
@@ -680,11 +681,84 @@ async function handle3(request, env, ctx, url) {
     const existing = await env.DB.prepare("SELECT * FROM devices WHERE device_id = ?").bind(deviceId).first();
     if (existing && existing.username !== username)
       return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
+    if (!existing) {
+      const s = await deviceSettings(env, username);
+      if (!s.unlimited) {
+        const { count } = await env.DB.prepare("SELECT COUNT(*) AS count FROM devices WHERE username=?").bind(username).first();
+        if (Number(count) >= s.allowedDevices)
+          return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
+      }
+    }
     await env.DB.prepare(`
       INSERT INTO devices (device_id, username, label) VALUES (?,?,?)
       ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
     `).bind(deviceId, username, label || null).run();
     return json({ status: "OK" }, {}, env, request);
+  }
+  if (path === "/device/admin-list" && request.method === "GET") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { results: devs } = await env.DB.prepare("SELECT * FROM devices ORDER BY registered_at DESC").all();
+    const { results: users } = await env.DB.prepare("SELECT username, profile FROM users").all();
+    const capOf = {};
+    for (const u of users || []) {
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1, unlimited: !!p.deviceUnlimited };
+    }
+    const byUser = {};
+    for (const d of devs || []) {
+      (byUser[d.username] || (byUser[d.username] = [])).push({
+        deviceId: d.device_id,
+        label: d.label || "",
+        firstSeen: d.registered_at,
+        lastSeen: d.registered_at,
+        office_clock: d.office_clock ? 1 : 0
+      });
+    }
+    const records = Object.keys(byUser).map((username) => ({
+      username,
+      devices: byUser[username],
+      history: [],
+      allowedDevices: (capOf[username] || {}).allowedDevices ?? 1,
+      unlimited: (capOf[username] || {}).unlimited ?? false
+    }));
+    return json({ ok: true, records }, {}, env, request);
+  }
+  if (path === "/device/allowed" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+    if (!row) return error("Unknown user", 404, env, request);
+    let p = {};
+    try {
+      p = row.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    p.deviceUnlimited = !!unlimited;
+    let cap = parseInt(allowedDevices, 10);
+    if (!Number.isFinite(cap) || cap < 1) cap = 1;
+    if (cap > 5) cap = 5;
+    p.allowedDevices = cap;
+    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?").bind(JSON.stringify(p), username).run();
+    return json({ ok: true, allowedDevices: cap, unlimited: !!unlimited }, {}, env, request);
+  }
+  if (path === "/device/reset" && request.method === "POST") {
+    const gate = await requireDeviceAdmin(env, request);
+    if (gate) return gate;
+    let username = url.searchParams.get("username");
+    if (!username) {
+      const b = await request.json().catch(() => ({}));
+      username = b.username;
+    }
+    if (!username) return error("username required", 400, env, request);
+    await env.DB.prepare("DELETE FROM devices WHERE username=?").bind(username).run();
+    return json({ ok: true, username }, {}, env, request);
   }
   if (path === "/device/list" && request.method === "GET") {
     const sess = await requireSession(env, request);
@@ -713,6 +787,26 @@ async function handle3(request, env, ctx, url) {
     return json({ ok: true }, {}, env, request);
   }
   return error("Unknown device route", 404, env, request);
+}
+async function requireDeviceAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
+    return error("Forbidden", 403, env, request);
+  return null;
+}
+async function deviceSettings(env, username) {
+  const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+  let p = {};
+  try {
+    p = row && row.profile ? JSON.parse(row.profile) : {};
+  } catch {
+  }
+  return {
+    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1,
+    unlimited: !!p.deviceUnlimited
+  };
 }
 
 // src/routes/holidays.js
