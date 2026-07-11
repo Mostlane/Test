@@ -88,6 +88,11 @@
     .callegend { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:#475569; }
     .callegend span { display:inline-flex; align-items:center; gap:5px; }
     .callegend i { width:13px; height:13px; border-radius:4px; display:inline-block; }
+    .mm td[data-pop] { cursor:pointer; }
+    .daypop { position:fixed; z-index:1200; background:#fff; border:1px solid #d7dee6; border-radius:12px; box-shadow:0 10px 30px rgba(6,24,54,.28); padding:12px 14px; max-width:270px; font-size:13px; display:none; }
+    .daypop h5 { margin:0 0 4px; font-size:13.5px; color:#003366; }
+    .daypop p { margin:3px 0; color:#334155; }
+    .daypop .muted { font-size:12.5px; }
     @media (max-width:560px){ .tiles{flex-basis:100%;} .calgrid{grid-template-columns:1fr 1fr;} }
     @media (max-width:430px){ .calgrid{grid-template-columns:1fr;} }
   </style>
@@ -149,6 +154,8 @@
       </div>
     </div>
   </div>
+
+  <div class="daypop" id="dayPop"></div>
 
   <!-- Booking modal -->
   <div class="overlay" id="bookModal">
@@ -289,21 +296,25 @@
     });
 
     // ── Year calendar (Timetastic-style 12 mini months) ──
+    let CAL_MARKS = {};   // "YYYY-MM-DD" -> {cls, label, info}
     function renderCalendar(items) {
-      const marks = {};   // "YYYY-MM-DD" -> {cls, label}
-      const put = (di, cls, label, force) => { if (force || !marks[di]) marks[di] = { cls, label }; };
+      const marks = CAL_MARKS = {};
+      const put = (di, cls, label, info, force) => { if (force || !marks[di]) marks[di] = { cls, label, info }; };
       for (const r of items.filter(i => i.start)) {
         if (!["Approved", "Pending"].includes(r.status)) continue;
         const cls = r.status === "Pending" ? "pend" : (r.type === "Other" ? "oth" : "hol");
         const s = new Date(r.start + "T00:00:00Z"), e = new Date(r.end + "T00:00:00Z");
         for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
           if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
-          put(d.toISOString().slice(0, 10), cls, (r.type || "Holiday") + (r.notes ? " · " + r.notes : ""), r.status === "Approved");
+          put(d.toISOString().slice(0, 10), cls, (r.type || "Holiday") + (r.notes ? " · " + r.notes : ""),
+            { kind: "req", type: r.type || "Holiday", status: r.status, start: r.start, end: r.end, days: r.days, notes: r.notes || "" },
+            r.status === "Approved");
         }
       }
       for (const s of items.filter(i => i.date)) {
         const cls = (s.worked || s.status === "Credited") ? "wrk" : (s.category === "Shutdown" ? "shut" : "bank");
-        put(s.date, cls, s.label || s.category, false);
+        put(s.date, cls, s.label || s.category,
+          { kind: "sys", label: s.label || s.category, category: s.category, worked: !!(s.worked || s.status === "Credited") }, false);
       }
       const today = new Date().toISOString().slice(0, 10);
       const pad = n => String(n).padStart(2, "0");
@@ -320,7 +331,7 @@
           const we = dow === 0 || dow === 6;
           const mk = marks[di];
           const cls = [(we && !mk) ? "we" : "", mk ? mk.cls : "", di === today ? "today" : ""].filter(Boolean).join(" ");
-          cells += `<td class="${cls}"${mk ? ` title="${esc(mk.label)}"` : ""}>${d}</td>`;
+          cells += `<td class="${cls}"${mk ? ` title="${esc(mk.label)}" data-pop="${di}"` : ""}>${d}</td>`;
           if ((lead + d) % 7 === 0 && d !== dim) cells += "</tr><tr>";
         }
         html += `<div class="mm"><h4>${first.toLocaleDateString("en-GB", { month:"long", timeZone:"UTC" })}</h4>
@@ -328,6 +339,37 @@
       }
       g("calGrid").innerHTML = html;
     }
+
+    // ── Day popover: tap a coloured day for the details ──
+    function showDayPop(target, html) {
+      const pop = g("dayPop");
+      pop.innerHTML = html;
+      pop.style.display = "block";
+      const r = target.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let x = r.left + r.width / 2 - pw / 2, y = r.top - ph - 8;
+      x = Math.max(8, Math.min(x, window.innerWidth - pw - 8));
+      if (y < 8) y = r.bottom + 8;
+      pop.style.left = x + "px"; pop.style.top = y + "px";
+    }
+    document.addEventListener("click", e => {
+      const t = e.target.closest("[data-pop]");
+      const pop = g("dayPop");
+      if (!t) { if (!pop.contains(e.target)) pop.style.display = "none"; return; }
+      const mk = CAL_MARKS[t.dataset.pop];
+      if (!mk) return;
+      const dd = new Date(t.dataset.pop + "T00:00:00").toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" });
+      let html;
+      if (mk.info.kind === "req") {
+        const i = mk.info;
+        html = `<h5>${esc(i.type)} — ${esc(i.status)}</h5>
+          <p>${fmtD(i.start)}${i.start !== i.end ? " – " + fmtD(i.end) : ""} · ${i.days} day${i.days === 1 ? "" : "s"}</p>
+          ${i.notes ? `<p class="muted">“${esc(i.notes)}”</p>` : ""}`;
+      } else {
+        html = `<h5>${esc(mk.info.label)}</h5>
+          <p class="muted">${dd}${mk.info.worked ? " — worked, credited back" : ""}</p>`;
+      }
+      showDayPop(t, html);
+    });
 
     // ── Booking ──
     function weekdays(start, end) {
