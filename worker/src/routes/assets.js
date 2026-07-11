@@ -202,6 +202,54 @@ export async function handle(request, env, ctx, url) {
     }
   }
 
+  // ── Photo repair: rebuild each asset's images[] from what's actually in the
+  // R2 bucket (keys are "<assetId>/imageN.ext"). Fixes records that lost their
+  // image links, and tells you if the bucket is simply empty. Admin only.
+  if (method === "POST" && pathname === "/asset/r2-relink") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
+
+    // List the whole bucket (paginated).
+    let cursor, objects = [];
+    try {
+      do {
+        const l = await env.ASSET_BUCKET.list({ cursor, limit: 1000 });
+        objects.push(...(l.objects || []));
+        cursor = l.truncated ? l.cursor : null;
+      } while (cursor);
+    } catch (e) {
+      return json({ ok: false, error: "Couldn't read the image bucket — check the ASSET_BUCKET binding.", details: e.message }, 500);
+    }
+
+    const byAsset = {};
+    for (const o of objects) {
+      const pfx = String(o.key).split("/")[0];
+      (byAsset[pfx] || (byAsset[pfx] = [])).push(o.key);
+    }
+
+    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    let updated = 0;
+    for (const row of results || []) {
+      let asset; try { asset = JSON.parse(row.data); } catch { continue; }
+      const keys = byAsset[asset.id];
+      if (!keys || !keys.length) continue;
+      const urls = keys.sort().map(k => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`);
+      if (JSON.stringify(asset.images || []) === JSON.stringify(urls)) continue;
+      asset.images = urls;
+      await putAsset(env, asset);
+      updated++;
+    }
+    return json({
+      ok: true,
+      bucketObjects: objects.length,
+      assetsInBucket: Object.keys(byAsset).length,
+      assetsUpdated: updated,
+      sampleKeys: objects.slice(0, 6).map(o => o.key)
+    });
+  }
+
   // ═══ Pending transfer workflow ══════════════════════════════════════════
   // User 1 offers an item -> request sits 'pending' -> User 2 accepts (signing
   // a transfer note, logged in asset_transfers) or rejects. The recipient's
