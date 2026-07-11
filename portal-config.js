@@ -111,9 +111,12 @@
   (function portalNav() {
     try {
       var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      // Skip auth pages, the guided day, and the portal ROOT index (a redirect
+      // shell) — but NOT sub-app index files like /hs-plan/index.html.
+      var isRootIndex = (location.pathname === "/" || location.pathname === "/index.html");
       var SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
-        "reset-password.html", "change-password.html", "index.html", "my-day.html", "hash.html", ""];
-      if (SKIP.indexOf(page) !== -1) return;
+        "reset-password.html", "change-password.html", "my-day.html", "hash.html"];
+      if (isRootIndex || SKIP.indexOf(page) !== -1) return;
       var token = localStorage.getItem(TOKEN_KEY);
       if (!token) return;
 
