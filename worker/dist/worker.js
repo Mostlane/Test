@@ -1202,6 +1202,18 @@ async function handle4(request, env, ctx, url) {
     }
     return json2({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
   }
+  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    try {
+      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
+      if (!resp.ok) return text("GOV.UK unavailable", 502);
+      const data = await resp.json();
+      const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
+      return json2({ year, events });
+    } catch (e) {
+      return text("GOV.UK unavailable", 502);
+    }
+  }
   if (path === "/holiday/debug-users" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const activeUsers = await getActiveUsers();
