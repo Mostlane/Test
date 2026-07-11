@@ -256,6 +256,24 @@
 </head>
 <body>
 
+<!-- Portal-matching top bar (consistent with the Mostlane portal header) -->
+<style>
+  .ml-portalbar{ position:sticky; top:0; z-index:20; margin:-12px -14px 14px; padding:12px 18px;
+    background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; display:flex; align-items:center; gap:12px;
+    box-shadow:0 2px 8px rgba(0,0,0,.14); }
+  .ml-portalbar .ml-pb-logo{ height:26px; width:auto; background:#fff; border-radius:5px; padding:3px 5px; display:block; }
+  .ml-portalbar .ml-pb-title{ font:700 17px/1 "Segoe UI",system-ui,-apple-system,sans-serif; flex:1; }
+  .ml-portalbar .ml-pb-back{ background:#fff; color:#003366; border:1px solid #d7dee6; border-radius:999px;
+    padding:8px 15px; font:600 14px/1 "Segoe UI",system-ui,-apple-system,sans-serif; cursor:pointer; }
+  .ml-portalbar .ml-pb-back:hover{ background:#f4f7fb; }
+  #libMain, #btnMainMenu{ display:none !important; }   /* replaced by the portal bar's back button */
+</style>
+<div class="ml-portalbar no-print">
+  <img class="ml-pb-logo" src="/mostlane-logo.jpg" alt="Mostlane">
+  <span class="ml-pb-title">H&amp;S Planner</span>
+  <button class="ml-pb-back" onclick="(window.top||window).location.href='/main.html'">&larr; Menu</button>
+</div>
+
 <!-- ============ LIBRARY / HOME SCREEN ============ -->
 <div id="library" class="library">
   <div class="lib-inner">
