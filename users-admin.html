@@ -61,7 +61,37 @@
     .panel-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
     .msg { font-size:14px; margin-top:10px; } .msg.err { color:#b00020; } .msg.ok { color:#0c7d27; }
     .notice { background:#fff3cd; color:#7a5b00; padding:12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
-    @media (max-width:560px){ .grid2{ grid-template-columns:1fr; } }
+    @media (max-width:640px){
+      .wrap{ padding:0 10px; }
+      .grid2{ grid-template-columns:1fr; }
+
+      /* Users list → stacked cards (the 6-col table doesn't fit a phone) */
+      table{ background:transparent; box-shadow:none; border-radius:0; }
+      thead{ display:none; }
+      tbody, tr, td{ display:block; }
+      tr{ background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 2px 8px rgba(6,24,54,.06); margin-bottom:12px; padding:4px 14px; }
+      td{ border-bottom:1px solid #f2f5f8; padding:9px 0; }
+      tr td:last-child{ border-bottom:none; }
+      td[data-label]{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; text-align:right; }
+      td[data-label]::before{ content:attr(data-label); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; font-weight:700; text-align:left; flex:0 0 auto; }
+      td[data-label="User"]{ display:block; text-align:left; padding-top:12px; }
+      td[data-label="User"]::before{ display:none; }
+      td[data-label="User"] b{ font-size:16px; color:#003366; }
+      td[data-label="Actions"]{ display:block; text-align:left; padding-top:12px; }
+      td[data-label="Actions"]::before{ display:none; }
+      td[data-label="Actions"] .actions{ gap:6px; }
+      td[data-label="Actions"] .btn.small{ flex:1 1 calc(50% - 4px); text-align:center; padding:10px; font-size:13px; }
+
+      /* Editor modal → full-width, comfortable tap targets */
+      .overlay{ padding:8px; }
+      .panel{ padding:16px; border-radius:14px; }
+      .tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; margin:10px -2px 14px; padding-bottom:4px; }
+      .tabs button{ flex:0 0 auto; }
+      .panel input, .panel select{ font-size:16px; }   /* 16px stops iOS zoom-on-focus */
+      .panel-actions .btn{ flex:1; padding:12px; font-size:15px; }
+      .togrow{ gap:10px; }
+      .togrow .tlabel small{ max-width:none; }
+    }
   </style>
 </head>
 <body>
@@ -336,12 +366,12 @@
       if (!list.length) { rows.innerHTML = `<tr><td colspan="6" class="muted">No users.</td></tr>`; return; }
       rows.innerHTML = list.map(u => `
         <tr>
-          <td><b>${esc((u.FirstName||"") + " " + (u.LastName||""))}</b><div class="muted">${esc(u.Username)}</div></td>
-          <td>${esc(u.Email||"")}</td>
-          <td>${esc(u.EmploymentType||"")}</td>
-          <td><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></td>
-          <td>${esc(accessSummary(u))}</td>
-          <td><div class="actions">
+          <td data-label="User"><b>${esc((u.FirstName||"") + " " + (u.LastName||""))}</b><div class="muted">${esc(u.Username)}</div></td>
+          <td data-label="Email">${esc(u.Email||"—")}</td>
+          <td data-label="Type">${esc(u.EmploymentType||"—")}</td>
+          <td data-label="Status"><span class="pill ${u.Status==='Disabled'?'disabled':(u.Status==='Pending'?'pending':'active')}">${esc(u.Status||'Active')}</span></td>
+          <td data-label="Access">${esc(accessSummary(u))}</td>
+          <td data-label="Actions"><div class="actions">
             <button class="btn small" data-edit="${esc(u.Username)}">Edit</button>
             ${u.Email ? `<button class="btn small grey" data-welcome="${esc(u.Username)}">Resend welcome</button>` : ``}
             <button class="btn small grey" data-reset="${esc(u.Username)}">Reset PW</button>
