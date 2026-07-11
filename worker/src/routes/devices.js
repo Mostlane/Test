@@ -13,9 +13,14 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 export async function handle(request, env, ctx, url) {
   const path = url.pathname;
 
+  // The portal owner is exempt from device locking entirely — any device,
+  // no registration, no caps. (Matches the View As owner account.)
+  const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+
   if (path === "/device/check-device" && request.method === "POST") {
     const { username, deviceId } = await request.json().catch(() => ({}));
     if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
 
     const dev = await env.DB.prepare("SELECT * FROM devices WHERE device_id = ?")
       .bind(deviceId).first();
@@ -33,6 +38,9 @@ export async function handle(request, env, ctx, url) {
   if (path === "/device/register-device" && request.method === "POST") {
     const { username, deviceId, label } = await request.json().catch(() => ({}));
     if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
+    // Owner devices are never tracked — nothing to register, and no row that
+    // could later block someone else logging in on the same machine.
+    if (username === OWNER) return json({ status: "OK" }, {}, env, request);
 
     const existing = await env.DB.prepare("SELECT * FROM devices WHERE device_id = ?")
       .bind(deviceId).first();
