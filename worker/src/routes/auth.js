@@ -54,6 +54,26 @@ export async function handle(request, env, ctx, url) {
     }, {}, env, request);
   }
 
+  // ── View As: the portal owner can open a real session as any user ─────────
+  // Locked server-side to the owner account (env.OWNER_USERNAME, default
+  // Jamie.Line) — permissions alone are NOT enough. Every use is written to
+  // login_history (outcome 'viewas') as an audit trail.
+  if (path === "/auth/impersonate" && request.method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+    if (sess.user.username !== OWNER) return error("Not allowed", 403, env, request);
+    const { username } = await request.json().catch(() => ({}));
+    if (!username) return error("username required", 400, env, request);
+    if (username === OWNER) return error("You are already yourself", 400, env, request);
+    const user = await env.DB.prepare("SELECT * FROM users WHERE username = ?").bind(username).first();
+    if (!user) return error("Unknown user", 404, env, request);
+    await logLogin(env, request, username, "viewas");
+    const { token, expires } = await createSession(env, username, null);
+    const perms = await permissionsFor(env, username);
+    return json({ ok: true, token, expires, user: shapeUser(user, perms) }, {}, env, request);
+  }
+
   if (path === "/auth/logout" && request.method === "POST") {
     const auth = request.headers.get("Authorization") || "";
     if (auth.startsWith("Bearer ")) await destroySession(env, auth.slice(7));

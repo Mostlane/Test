@@ -124,6 +124,138 @@
     }
   } catch (e) {}
 
+  // ── View As (owner only) ────────────────────────────────────────────────────
+  // Jamie can open a real session as any user to see exactly what they see.
+  // The server locks /auth/impersonate to the owner account and audits each use.
+  // While viewing, a purple bottom bar on every page returns him to himself,
+  // and the device lock is bypassed for the session (it's still his device).
+  (function viewAs() {
+    try {
+      var OWNER = "Jamie.Line";
+      var vaPage = (location.pathname.split("/").pop() || "").toLowerCase();
+      var VA_SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
+        "reset-password.html", "change-password.html", "hash.html"];
+      if (VA_SKIP.indexOf(vaPage) !== -1) return;
+
+      function setBoth(k, v) { try { localStorage.setItem(k, v); sessionStorage.setItem(k, v); } catch (e) {} }
+      function applySession(d) {
+        var u = d.user || {};
+        localStorage.setItem(TOKEN_KEY, d.token);
+        setBoth("mostlaneUser", u.Username || "");
+        setBoth("mostlaneUsername", u.Username || "");
+        var pj = JSON.stringify(u);
+        setBoth("mostlanePermissions", pj);
+        setBoth("mostlaneLoggedIn", "true");
+        sessionStorage.setItem("mostlaneFolder", u.SharePointPath || "");
+        sessionStorage.setItem("mostlaneVehicle", u.VehicleAssigned || "");
+        sessionStorage.setItem("mostlaneEmployment", u.EmploymentType || "");
+        sessionStorage.setItem("mostlaneMasterLogin", "1");   // bypass device lock while viewing
+      }
+
+      // Owner-only picker, callable from the sidebar and main.html.
+      window.mlViewAsPicker = function () {
+        if (document.getElementById("mlVaPick")) return;
+        var token = localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        var wrap = document.createElement("div");
+        wrap.id = "mlVaPick";
+        wrap.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;";
+        var card = document.createElement("div");
+        card.style.cssText = "background:#fff;border-radius:14px;max-width:340px;width:100%;padding:18px;font-family:'Segoe UI',system-ui,sans-serif;";
+        card.innerHTML = '<h3 style="margin:0 0 4px;color:#003366;font-size:16px;">👁 View portal as…</h3>'
+          + '<p style="margin:0 0 10px;color:#667085;font-size:12.5px;">You will see exactly what they see. Use the purple bar at the bottom to return to your own account.</p>';
+        var sel = document.createElement("select");
+        sel.style.cssText = "width:100%;padding:10px;border:1px solid #ccd5dd;border-radius:8px;font-size:16px;";
+        sel.innerHTML = "<option>Loading…</option>";
+        var row = document.createElement("div");
+        row.style.cssText = "display:flex;gap:8px;margin-top:12px;";
+        var go = document.createElement("button");
+        go.textContent = "View as";
+        go.style.cssText = "flex:1;background:#0066cc;color:#fff;border:none;border-radius:9px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;";
+        var no = document.createElement("button");
+        no.textContent = "Cancel";
+        no.style.cssText = "flex:1;background:#5b6b78;color:#fff;border:none;border-radius:9px;padding:11px;font-size:14px;cursor:pointer;";
+        row.appendChild(go); row.appendChild(no);
+        card.appendChild(sel); card.appendChild(row);
+        wrap.appendChild(card);
+        document.body.appendChild(wrap);
+        no.onclick = function () { wrap.remove(); };
+
+        nativeFetch(API + "/users", { headers: { "Authorization": "Bearer " + token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            sel.innerHTML = "";
+            (d.Users || []).filter(function (u) { return u.Username !== OWNER; }).forEach(function (u) {
+              var o = document.createElement("option");
+              o.value = u.Username;
+              o.textContent = (((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)
+                + (u.Status && u.Status !== "Active" ? " (" + u.Status + ")" : "");
+              sel.appendChild(o);
+            });
+          }).catch(function () { sel.innerHTML = "<option>Couldn't load users</option>"; });
+
+        go.onclick = function () {
+          if (!sel.value) return;
+          go.disabled = true; go.textContent = "Switching…";
+          nativeFetch(API + "/auth/impersonate", {
+            method: "POST",
+            headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+            body: JSON.stringify({ username: sel.value })
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            if (!d || !d.ok) { alert((d && d.error) || "Couldn't switch user."); go.disabled = false; go.textContent = "View as"; return; }
+            // Stash the real session so the bottom bar can restore it.
+            localStorage.setItem("mostlaneViewAsReal", JSON.stringify({
+              token: token,
+              user: localStorage.getItem("mostlaneUser") || OWNER,
+              perms: localStorage.getItem("mostlanePermissions") || "{}",
+              master: sessionStorage.getItem("mostlaneMasterLogin") || ""
+            }));
+            applySession(d);
+            location.href = "main.html";
+          }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
+        };
+      };
+
+      // The return bar, shown on every page while a view-as session is active.
+      var stash = null;
+      try { stash = JSON.parse(localStorage.getItem("mostlaneViewAsReal") || "null"); } catch (e) {}
+      if (stash && stash.token) {
+        var addBar = function () {
+          if (document.getElementById("mlVaBar")) return;
+          var bar = document.createElement("div");
+          bar.id = "mlVaBar";
+          bar.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:100001;background:#4a1d96;color:#fff;display:flex;align-items:center;gap:10px;padding:10px 14px;font:600 13px 'Segoe UI',system-ui,sans-serif;box-shadow:0 -2px 12px rgba(0,0,0,.3);";
+          var who = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+          var lbl = document.createElement("span");
+          lbl.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+          lbl.innerHTML = "👁 Viewing as <b></b>";
+          lbl.querySelector("b").textContent = who;
+          var btn = document.createElement("button");
+          btn.textContent = "Return to my account";
+          btn.style.cssText = "background:#fff;color:#4a1d96;border:none;border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;flex:none;";
+          btn.onclick = function () {
+            var impTok = localStorage.getItem(TOKEN_KEY);
+            try { nativeFetch(API + "/auth/logout", { method: "POST", headers: { "Authorization": "Bearer " + impTok } }); } catch (e) {}
+            localStorage.setItem(TOKEN_KEY, stash.token);
+            setBoth("mostlaneUser", stash.user || "");
+            setBoth("mostlaneUsername", stash.user || "");
+            setBoth("mostlanePermissions", stash.perms || "{}");
+            setBoth("mostlaneLoggedIn", "true");
+            if (stash.master) sessionStorage.setItem("mostlaneMasterLogin", stash.master);
+            else sessionStorage.removeItem("mostlaneMasterLogin");
+            localStorage.removeItem("mostlaneViewAsReal");
+            location.href = "main.html";
+          };
+          bar.appendChild(lbl); bar.appendChild(btn);
+          document.body.appendChild(bar);
+          document.body.style.paddingBottom = "56px";
+        };
+        if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", addBar);
+        else addBar();
+      }
+    } catch (e) { console.error("[view-as]", e); }
+  })();
+
   // ── Desktop navigation sidebar (permission-aware) ──────────────────────────
   // Injected on every portal page; shown only on desktop (CSS ≥1000px). Mobile
   // keeps the existing tile menu + back buttons untouched. Story Mode users are
@@ -174,7 +306,8 @@
         devices: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>',
         forms: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
         compliance: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
-        settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/>'
+        settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/>',
+        eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'
       };
       function svg(name) { return '<svg viewBox="0 0 24 24">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -207,11 +340,16 @@
           { label: "Devices", href: "device-admin.html", icon: "devices", perms: ["DeviceAdmin"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
-          { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] }
+          { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
+          { label: "View as user…", launch: "viewas", icon: "eye", ownerOnly: true }
         ]}
       ];
 
       function allowed(item) {
+        if (item.ownerOnly) {
+          var uu = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
+          return uu === "Jamie.Line" && !localStorage.getItem("mostlaneViewAsReal");
+        }
         if (item.always) return true;
         if (yes(perms.FullAccess)) return true;
         if (!item.perms || !item.perms.length) return true;
@@ -326,6 +464,8 @@
             if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token);
             else alert("The H&S planner isn't available for your account yet.");
           }).catch(function () { alert("Couldn't open the H&S planner."); });
+        } else if (kind === "viewas") {
+          if (window.mlViewAsPicker) window.mlViewAsPicker();
         }
       }
 
