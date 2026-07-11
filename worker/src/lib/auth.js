@@ -28,7 +28,14 @@ export async function hashPassword(password) {
 }
 
 export async function verifyPbkdf2(password, stored) {
-  const [, iterStr, saltHex, hashHex] = stored.split("$");
+  let [, iterStr, saltHex, hashHex] = String(stored || "").split("$");
+  // Repair hashes written by a corrupted historic deploy where the template's
+  // "$$" separators were eaten (stored as pbkdf2$100000<salt><hash>).
+  if (!saltHex && /^100000[0-9a-f]{96}$/.test(iterStr || "")) {
+    saltHex = iterStr.slice(6, 38); hashHex = iterStr.slice(38); iterStr = "100000";
+  }
+  // Malformed hash -> fail the login cleanly instead of crashing the worker.
+  if (!iterStr || !saltHex || !hashHex || saltHex.length % 2) return false;
   const salt = Uint8Array.from(saltHex.match(/.{2}/g).map(h => parseInt(h, 16)));
   const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
