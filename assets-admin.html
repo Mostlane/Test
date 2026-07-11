@@ -108,6 +108,7 @@
         <button class="btn grey small" id="sortValue">Value ↓</button>
         <button class="btn grey small" id="sortName">Name A–Z</button>
         <button class="btn small" id="exportBtn">⬇ Export report</button>
+        <button class="btn grey small" id="relinkBtn" title="Rebuild photo links from the image storage bucket">🔗 Re-link photos</button>
       </div>
       <div id="summary"><span class="muted">Loading summary…</span></div>
     </div>
@@ -399,6 +400,24 @@
     function closeViewer() { g("viewer").style.display = "none"; g("viewerImg").src = ""; }
     function stepImg(d) { if (!viewList.length) return; viewIdx = (viewIdx + d + viewList.length) % viewList.length; g("viewerImg").src = viewList[viewIdx]; }
     window.addEventListener("keydown", e => { if (e.key === "Escape") closeViewer(); if (e.key === "ArrowRight") stepImg(1); if (e.key === "ArrowLeft") stepImg(-1); });
+
+    // ── Re-link photos from R2 storage (recovers lost image links) ──
+    g("relinkBtn").onclick = async () => {
+      if (!confirm("Scan the image storage bucket and rebuild photo links on all assets?")) return;
+      const btn = g("relinkBtn"); btn.disabled = true; btn.textContent = "Scanning…";
+      try {
+        const r = await authFetch("/asset/r2-relink", { method: "POST" }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Failed");
+        if (r.bucketObjects === 0) {
+          alert("The image bucket is empty — there are no photos stored for these assets.\n\nThese look like assets that never had photos uploaded (or a different set of assets).");
+        } else {
+          alert(`Found ${r.bucketObjects} photo(s) in storage across ${r.assetsInBucket} asset(s).\nRe-linked ${r.assetsUpdated} asset(s).` +
+            (r.assetsUpdated === 0 ? "\n\n(Every matching asset already had its links.)" : ""));
+          loadAssets();
+        }
+      } catch (err) { alert("Re-link failed: " + err.message); }
+      finally { btn.disabled = false; btn.textContent = "🔗 Re-link photos"; }
+    };
 
     // ── Excel export (per-person tabs with transfer history) ──
     g("exportBtn").onclick = async () => {

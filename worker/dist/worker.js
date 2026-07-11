@@ -1489,6 +1489,51 @@ async function handle5(request, env, ctx, url) {
       return json2({ error: "Failed to delete asset", details: err.message }, 500);
     }
   }
+  if (method === "POST" && pathname === "/asset/r2-relink") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    let cursor, objects = [];
+    try {
+      do {
+        const l = await env.ASSET_BUCKET.list({ cursor, limit: 1e3 });
+        objects.push(...l.objects || []);
+        cursor = l.truncated ? l.cursor : null;
+      } while (cursor);
+    } catch (e) {
+      return json2({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
+    }
+    const byAsset = {};
+    for (const o of objects) {
+      const pfx = String(o.key).split("/")[0];
+      (byAsset[pfx] || (byAsset[pfx] = [])).push(o.key);
+    }
+    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    let updated = 0;
+    for (const row of results || []) {
+      let asset;
+      try {
+        asset = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      const keys = byAsset[asset.id];
+      if (!keys || !keys.length) continue;
+      const urls = keys.sort().map((k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`);
+      if (JSON.stringify(asset.images || []) === JSON.stringify(urls)) continue;
+      asset.images = urls;
+      await putAsset(env, asset);
+      updated++;
+    }
+    return json2({
+      ok: true,
+      bucketObjects: objects.length,
+      assetsInBucket: Object.keys(byAsset).length,
+      assetsUpdated: updated,
+      sampleKeys: objects.slice(0, 6).map((o) => o.key)
+    });
+  }
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess = await requireSession(env, request);
     if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
