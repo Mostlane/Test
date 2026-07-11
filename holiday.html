@@ -218,6 +218,15 @@
     const fmtDY = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
 
     async function loadAll() {
+      const CK = "mostlaneHolCache:" + me + ":" + YEAR;
+      // 1) INSTANT paint from the last-seen data — the page fills immediately,
+      //    the network refresh happens behind it.
+      let painted = false;
+      try {
+        const c = JSON.parse(localStorage.getItem(CK) || "null");
+        if (c && c.sum) { renderSummary(c.sum, c.mine || []); renderLists(c.mine || []); painted = true; }
+      } catch (e) {}
+      // 2) Fresh copy in parallel, then re-render + re-cache.
       try {
         const [sum, mine] = await Promise.all([
           authFetch(`/holiday/summary?year=${YEAR}`).then(r => r.json()),
@@ -225,10 +234,11 @@
         ]);
         renderSummary(sum, mine);
         renderLists(Array.isArray(mine) ? mine : []);
+        try { localStorage.setItem(CK, JSON.stringify({ sum, mine })); } catch (e) {}
         // Decisions are now seen — clears the red badge on the menu/sidebar.
         try { localStorage.setItem("mostlaneHolSeen", new Date().toISOString()); } catch (e) {}
       } catch (e) {
-        g("reqList").innerHTML = '<div class="row"><span class="muted">Couldn\'t load your holiday info.</span></div>';
+        if (!painted) g("reqList").innerHTML = '<div class="row"><span class="muted">Couldn\'t load your holiday info.</span></div>';
       }
     }
 
