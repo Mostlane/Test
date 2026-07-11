@@ -303,6 +303,7 @@ const PERMISSION_KEYS = [
   "SiteLog",       // access to SiteLog (site check-in/attendance)
   "OfficeClock",   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",// view the weekly master office timesheet (all staff)
+  "AssetAdmin",    // plant & equipment admin: sees ALL transfer documents + All Assets
 ];
 
 function shapeUser(u, perms) {

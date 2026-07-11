@@ -641,8 +641,10 @@ var PERMISSION_KEYS = [
   // access to SiteLog (site check-in/attendance)
   "OfficeClock",
   // opt-in: desktop clock in/out timer for office staff
-  "OfficeTimesheet"
+  "OfficeTimesheet",
   // view the weekly master office timesheet (all staff)
+  "AssetAdmin"
+  // plant & equipment admin: sees ALL transfer documents + All Assets
 ];
 function shapeUser2(u, perms) {
   let profile = {};
@@ -1624,8 +1626,48 @@ async function handle5(request, env, ctx, url) {
     ).bind(Number(id)).all();
     if (!results || !results.length) return json2({ ok: false, error: "Note not found" }, 404);
     const note = JSON.parse(results[0].data);
+    const me = sess.user.username, meL = me.toLowerCase();
+    const perms = await permissionsFor(env, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!admin) {
+      const isFrom = String(note.from || "").toLowerCase() === meL;
+      let isCurrentTo = false;
+      if (String(note.to || "").toLowerCase() === meL) {
+        const a = await getAsset(env, note.assetID);
+        isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
+      }
+      if (!isFrom && !isCurrentTo)
+        return json2({ ok: false, error: "This document isn't linked to you" }, 403);
+    }
     if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
     return json2({ ok: true, note });
+  }
+  if (method === "GET" && pathname === "/asset/my-documents") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username, meL = me.toLowerCase();
+    const { results } = await env.DB.prepare(
+      "SELECT data FROM asset_transfers WHERE json_extract(data,'$.type')='TRANSFER_NOTE' AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
+    ).bind(meL, meL).all();
+    const { results: held } = await env.DB.prepare("SELECT id FROM assets WHERE lower(assigned_to)=?").bind(meL).all();
+    const heldSet = new Set((held || []).map((h) => h.id));
+    const acceptance = [], releases = [], seen = /* @__PURE__ */ new Set();
+    for (const row of results || []) {
+      let n;
+      try {
+        n = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      if (n.signatureKey) n.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(n.signatureKey)}`;
+      if (String(n.to || "").toLowerCase() === meL && heldSet.has(n.assetID) && !seen.has(n.assetID)) {
+        seen.add(n.assetID);
+        acceptance.push(n);
+      } else if (String(n.from || "").toLowerCase() === meL) {
+        releases.push(n);
+      }
+    }
+    return json2({ ok: true, acceptance, releases });
   }
   return json2({ error: "Not found" }, 404);
 }

@@ -118,11 +118,13 @@
       <div id="pendList"></div>
     </div>
 
-    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <h2 style="margin:0; font-size:17px; color:#003366;">My items</h2>
       <span class="muted" id="countLbl"></span>
       <span style="flex:1"></span>
+      <button class="btn grey small" id="myDocsBtn">📄 My documents</button>
       <a class="btn grey small" href="shared-assets.html" style="text-decoration:none;">Shared assets</a>
+      <a class="btn small" href="assets-admin.html" id="allAssetsBtn" style="text-decoration:none; display:none;">All assets</a>
     </div>
     <div id="assetGrid" class="grid"><p class="muted">Loading…</p></div>
   </div>
@@ -139,8 +141,8 @@
       <label>Condition photos (optional)</label>
       <p class="muted" style="margin:0;font-size:12px;">Photograph the item as you hand it over — the photos are stamped onto the transfer note, so its condition at drop-off is on record.</p>
       <div class="pstrip" id="txStrip"></div>
-      <button type="button" class="btn grey small" id="txAddPh" style="margin-top:8px;">📷 Add photo</button>
-      <input type="file" id="txFile" accept="image/*" multiple hidden>
+      <button type="button" class="btn grey small" id="txAddPh" style="margin-top:8px;">📷 Take photo</button>
+      <input type="file" id="txFile" accept="image/*" capture="environment" hidden>
       <p class="msg" id="txMsg"></p>
       <div class="acts">
         <button class="btn grey" onclick="closeM('txModal')">Cancel</button>
@@ -158,8 +160,8 @@
       <label>Condition photos (optional)</label>
       <p class="muted" style="margin:0;font-size:12px;">Photograph the item as you receive it — your record of its condition goes on the note too.</p>
       <div class="pstrip" id="sigStrip"></div>
-      <button type="button" class="btn grey small" id="sigAddPh" style="margin-top:8px;">📷 Add photo</button>
-      <input type="file" id="sigFile" accept="image/*" multiple hidden>
+      <button type="button" class="btn grey small" id="sigAddPh" style="margin-top:8px;">📷 Take photo</button>
+      <input type="file" id="sigFile" accept="image/*" capture="environment" hidden>
       <label>Sign below to accept responsibility</label>
       <canvas id="sigCanvas"></canvas>
       <div class="sighint"><span>Draw your signature with your finger or mouse.</span><button class="btn grey small" id="sigClear" type="button">Clear</button></div>
@@ -191,6 +193,15 @@
     </div>
   </div>
 
+  <!-- My documents modal -->
+  <div class="overlay" id="docsModal">
+    <div class="panel">
+      <h2>📄 My transfer documents</h2>
+      <div id="docsList" class="muted">Loading…</div>
+      <div class="acts"><button class="btn grey" onclick="closeM('docsModal')">Close</button></div>
+    </div>
+  </div>
+
   <!-- Image gallery -->
   <div id="gModal" class="gmodal">
     <span class="close" onclick="gClose()">&times;</span>
@@ -210,6 +221,12 @@
     }
     const openM = id => g(id).classList.add("open");
     const closeM = id => g(id).classList.remove("open");
+
+    // P&E admins (or Full access) see every document + the All Assets page.
+    let cachedPerms = {};
+    try { cachedPerms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+    const isAdmin = cachedPerms.FullAccess === "Yes" || cachedPerms.AssetAdmin === "Yes";
+    if (isAdmin) g("allAssetsBtn").style.display = "";
 
     // Full-size image URL -> fast 200px thumbnail (huge speed-up on the grid).
     function thumbUrl(u) {
@@ -285,6 +302,7 @@
       else if (t.dataset.gallery) { const a = myAssets.find(x => x.id === t.dataset.gallery); if (a) gOpen(a.images || []); }
       else if (t.dataset.cview) { const r = pending.incoming.find(x => x.id === Number(t.dataset.cview)); if (r) gOpen(r.senderPhotos, Number(t.dataset.ci)); }
       else if (t.dataset.note) showNoteById(Number(t.dataset.note));
+      else if (t.dataset.mydoc) { const n = myDocs[Number(t.dataset.mydoc)]; if (n) showNote(n); }
     });
 
     // ── Condition photos: shared picker (camera on phones, compressed) ──
@@ -460,7 +478,12 @@
       } catch (e) {}
     }
 
-    // ── History ──
+    // ── History ── (the timeline is visible; documents open only for the
+    // people on them — the server enforces the same rule.)
+    function canViewNote(l) {
+      const meL = me.toLowerCase();
+      return isAdmin || String(l.from || "").toLowerCase() === meL || String(l.to || "").toLowerCase() === meL;
+    }
     async function openHistory(assetId) {
       g("histList").textContent = "Loading…"; openM("histModal");
       try {
@@ -468,12 +491,35 @@
         const rows = (Array.isArray(log) ? log : []).slice().reverse();
         g("histList").innerHTML = rows.length ? rows.map(l => {
           const when = l.timestamp ? new Date(l.timestamp).toLocaleString("en-GB") : "";
-          if (l.type === "TRANSFER_NOTE") return `<p>📝 <b>${esc(l.from || "?")} → ${esc(l.to || "?")}</b> · ${when} <button class="btn small" style="margin-left:6px" data-note="${l.transferId}">View note</button></p>`;
+          if (l.type === "TRANSFER_NOTE") return `<p>📝 <b>${esc(l.from || "?")} → ${esc(l.to || "?")}</b> · ${when}${canViewNote(l) ? ` <button class="btn small" style="margin-left:6px" data-note="${l.transferId}">View note</button>` : ""}</p>`;
           if (l.type === "TRANSFER_REJECTED") return `<p>❌ Rejected by ${esc(l.to || "?")} · ${when}</p>`;
           return `<p>↔️ ${esc(l.from || "?")} → ${esc(l.to || "?")} · ${when}</p>`;
         }).join("") : "<p>No history recorded for this item.</p>";
       } catch (e) { g("histList").textContent = "Couldn't load history."; }
     }
+
+    // ── My documents: live acceptance notes + release notes ──
+    let myDocs = [];
+    g("myDocsBtn").onclick = async () => {
+      g("docsList").textContent = "Loading…"; openM("docsModal");
+      try {
+        const d = await authFetch("/asset/my-documents").then(r => r.json());
+        if (!d.ok) throw new Error();
+        myDocs = [...(d.acceptance || []), ...(d.releases || [])];
+        const row = (n, i) => `<p>${esc(n.assetName)} <span class="muted">· ${new Date(n.acceptedAt).toLocaleDateString("en-GB")}${n.from && n.from !== "Unassigned" ? " · " + esc(n.from) + " → " + esc(n.to) : ""}</span>
+          <button class="btn small" style="margin-left:6px" data-mydoc="${i}">View</button></p>`;
+        let html = "";
+        if ((d.acceptance || []).length) {
+          html += `<h4 style="margin:6px 0 4px;color:#003366;font-size:13px;">Items I currently hold — acceptance notes</h4>`
+            + d.acceptance.map((n, i) => row(n, i)).join("");
+        }
+        if ((d.releases || []).length) {
+          html += `<h4 style="margin:14px 0 4px;color:#003366;font-size:13px;">Responsibility ended — release notes</h4>`
+            + d.releases.map((n, i) => row(n, (d.acceptance || []).length + i)).join("");
+        }
+        g("docsList").innerHTML = html || "<p>No transfer documents yet.</p>";
+      } catch (e) { g("docsList").textContent = "Couldn't load your documents."; }
+    };
 
     // ── Gallery ──
     let gImgs = [], gIdx = 0;

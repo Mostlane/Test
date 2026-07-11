@@ -319,7 +319,7 @@
           { label: "Sites", href: "sites.html", icon: "sites", perms: ["Sites", "AddSite"] },
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
-          { label: "Plant & Equipment", href: "asset-menu.html", icon: "assets", perms: ["Assets"], match: ["asset-menu.html", "assets-admin.html", "my-assets.html", "shared-assets.html"] },
+          { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
           { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects"] },
           { label: "Projects Admin", href: "projects-admin.html", icon: "projects", perms: ["ProjectsAdmin"] },
           { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
@@ -436,7 +436,7 @@
       // ── Red badge: pending plant/equipment transfers on "Plant & Equipment".
       var badgeCount = 0;
       function applyBadges() {
-        var item = document.querySelector('#pnav a.pn-item[href="asset-menu.html"]');
+        var item = document.querySelector('#pnav a.pn-item[href="my-assets.html"]');
         if (!item) return;
         var old = item.querySelector(".pn-badge");
         if (old) old.remove();
@@ -479,7 +479,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}

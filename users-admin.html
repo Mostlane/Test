@@ -274,7 +274,7 @@
     const token = localStorage.getItem("mostlaneToken");
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
-      "Assets","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
+      "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
       "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog","OfficeTimesheet"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
@@ -286,7 +286,8 @@
       CheckInOut:"Check in / out", Vehicles:"Vehicles", Holiday:"Holiday",
       HolidayAdmin:"Holiday admin", EngineersHoursMenu:"Engineers’ hours menu",
       HoursDashboard:"Hours dashboard", PurchaseOrders:"Purchase orders",
-      Sites:"Sites", AddSite:"Add site", Assets:"Assets", MyDocuments:"My documents",
+      Sites:"Sites", AddSite:"Add site", Assets:"Assets",
+      AssetAdmin:"P&E admin — all transfer documents", MyDocuments:"My documents",
       Weekly:"Weekly", Forms:"Forms", Compliance:"Compliance", Projects:"Projects",
       ProjectsAdmin:"Projects admin", TimesheetAdmin:"Timesheet admin",
       LabourPlanning:"Labour planning", SLA:"SLA", HSPlan:"H&S planner", SiteLog:"SiteLog",
@@ -297,7 +298,7 @@
     // appears here exactly once.
     const PERM_GROUPS = [
       { title:"Administration",       perms:["Users","DeviceAdmin"] },
-      { title:"Sites & assets",       perms:["Sites","AddSite","Assets","SiteLog"] },
+      { title:"Sites & assets",       perms:["Sites","AddSite","Assets","AssetAdmin","SiteLog"] },
       { title:"Jobs & SLA",           perms:["SLA","Forms"] },
       { title:"Time & hours",         perms:["CheckInOut","EngineersHoursMenu","HoursDashboard","TimesheetAdmin","OfficeTimesheet","Weekly"] },
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
