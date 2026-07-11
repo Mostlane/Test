@@ -481,7 +481,7 @@ const MAP = {
     // only the owner account can actually impersonate.
     (function () {
       var u = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-      if (u !== "Jamie.Line" || localStorage.getItem("mostlaneViewAsReal")) return;
+      if (u !== "Jamie Line" || localStorage.getItem("mostlaneViewAsReal")) return;
       var b = document.getElementById("viewAsBtn");
       if (!b) return;
       b.style.display = "block";

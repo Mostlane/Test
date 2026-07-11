@@ -15,7 +15,7 @@ export async function handle(request, env, ctx, url) {
 
   // The portal owner is exempt from device locking entirely — any device,
   // no registration, no caps. (Matches the View As owner account.)
-  const OWNER = env.OWNER_USERNAME || "Jamie.Line";
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
 
   if (path === "/device/check-device" && request.method === "POST") {
     const { username, deviceId } = await request.json().catch(() => ({}));

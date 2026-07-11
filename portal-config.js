@@ -131,7 +131,7 @@
   // and the device lock is bypassed for the session (it's still his device).
   (function viewAs() {
     try {
-      var OWNER = "Jamie.Line";
+      var OWNER = "Jamie Line";
       var vaPage = (location.pathname.split("/").pop() || "").toLowerCase();
       var VA_SKIP = ["login.html", "onboard.html", "confirmation.html", "forgot-password.html",
         "reset-password.html", "change-password.html", "hash.html"];
@@ -348,7 +348,7 @@
       function allowed(item) {
         if (item.ownerOnly) {
           var uu = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-          return uu === "Jamie.Line" && !localStorage.getItem("mostlaneViewAsReal");
+          return uu === "Jamie Line" && !localStorage.getItem("mostlaneViewAsReal");
         }
         if (item.always) return true;
         if (yes(perms.FullAccess)) return true;
