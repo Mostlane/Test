@@ -199,7 +199,7 @@
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },
           { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
-          { label: "Labour Planning", href: "labour-planning.html", icon: "labour", perms: ["LabourPlanning"] },
+          // Labour Planning unlinked on request (legacy, unused) — page file kept.
           { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"] }
         ]},
         { title: "Admin", items: [
