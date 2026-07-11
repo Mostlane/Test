@@ -405,6 +405,23 @@ export async function handle(request, env, ctx, url) {
     return json({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
   }
 
+  // GET /holiday/uk-bank-holidays  (admin) — official GOV.UK feed, proxied
+  // server-side so the browser never depends on gov.uk CORS. Cached for a day.
+  if (path === "/holiday/uk-bank-holidays" && method === "GET") {
+    if (!isAdmin) return text("Forbidden", 403);
+    try {
+      const resp = await fetch("https://www.gov.uk/bank-holidays.json", { cf: { cacheTtl: 86400, cacheEverything: true } });
+      if (!resp.ok) return text("GOV.UK unavailable", 502);
+      const data = await resp.json();
+      const events = ((data["england-and-wales"] || {}).events || [])
+        .filter(e => e.date && e.date.startsWith(String(year)))
+        .map(e => ({ date: e.date, title: e.title }));
+      return json({ year, events });
+    } catch (e) {
+      return text("GOV.UK unavailable", 502);
+    }
+  }
+
   // GET /holiday/debug-users  (admin)
   if (path === "/holiday/debug-users" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);

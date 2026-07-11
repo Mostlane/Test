@@ -433,24 +433,49 @@
         applyBadges();
       }
 
-      // ── Red badge: pending plant/equipment transfers on "Plant & Equipment".
-      var badgeCount = 0;
+      // ── Red badges on sidebar items ─────────────────────────────────────
+      //   Plant & Equipment — pending transfers addressed to me
+      //   Holiday           — decisions on MY requests I haven't seen yet
+      //   Holiday Admin     — requests waiting for approval (admins only)
+      var badgeCounts = {};   // nav href -> count
       function applyBadges() {
-        var item = document.querySelector('#pnav a.pn-item[href="my-assets.html"]');
-        if (!item) return;
-        var old = item.querySelector(".pn-badge");
-        if (old) old.remove();
-        if (badgeCount > 0) {
-          var b = document.createElement("span");
-          b.className = "pn-badge";
-          b.textContent = badgeCount > 9 ? "9+" : badgeCount;
-          item.appendChild(b);
-        }
+        Object.keys(badgeCounts).forEach(function (href) {
+          var item = document.querySelector('#pnav a.pn-item[href="' + href + '"]');
+          if (!item) return;
+          var old = item.querySelector(".pn-badge");
+          if (old) old.remove();
+          var n = badgeCounts[href];
+          if (n > 0) {
+            var b = document.createElement("span");
+            b.className = "pn-badge";
+            b.textContent = n > 9 ? "9+" : n;
+            item.appendChild(b);
+          }
+        });
       }
+      function setNavBadge(href, n) { badgeCounts[href] = Number(n) || 0; applyBadges(); }
       function updateBadges() {
         fetchAuthed("/asset/transfers/pending-count").then(function (d) {
-          if (d && d.ok) { badgeCount = Number(d.count || 0); applyBadges(); }
+          if (d && d.ok) setNavBadge("my-assets.html", d.count);
         }).catch(function () {});
+        var yr = new Date().getFullYear();
+        // Unseen decisions on my own requests (seen marker set when holiday.html opens).
+        fetchAuthed("/holiday/my?year=" + yr).then(function (list) {
+          var seen = localStorage.getItem("mostlaneHolSeen") || "";
+          var meL = (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").toLowerCase();
+          var n = (Array.isArray(list) ? list : []).filter(function (h) {
+            return h.start && h.decisionAt && (!seen || h.decisionAt > seen)
+              && ["Approved", "Rejected", "Cancelled"].indexOf(h.status) !== -1
+              && String(h.cancelledBy || "").toLowerCase() !== meL;   // not my own cancellation
+          }).length;
+          setNavBadge("holiday.html", n);
+        }).catch(function () {});
+        if (yes(perms.FullAccess) || yes(perms.HolidayAdmin)) {
+          fetchAuthed("/holiday/all?year=" + yr).then(function (list) {
+            var n = (Array.isArray(list) ? list : []).filter(function (h) { return h.status === "Pending"; }).length;
+            setNavBadge("holiday-admin.html", n);
+          }).catch(function () {});
+        }
       }
 
       function doLaunch(kind) {
@@ -485,6 +510,7 @@
             } catch (e) {}
             if (yes(perms.StoryMode)) { var n = document.getElementById("pnav"); if (n) n.remove(); document.body.classList.remove("pnav-on"); return; }
             rebuild();
+            updateBadges();   // re-run with fresh perms (admin-only badges)
           }
         }).catch(function () {});
       }

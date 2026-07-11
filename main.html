@@ -497,25 +497,52 @@ const MAP = {
   </script>
 
   <script>
-    // 🔴 Pending plant/equipment transfers — red badge on the Plant & Equipment
-    // button (mobile menu tile). The desktop sidebar badge is handled centrally
-    // in portal-config.js from the same endpoint.
+    // 🔴 Red badges on the menu tiles (mobile). Sidebar badges are handled
+    // centrally in portal-config.js from the same endpoints.
+    //   Plant & Equipment — transfers waiting for me
+    //   Holiday           — unseen decisions on my requests
+    //   Holiday Admin     — requests waiting for approval (admins)
     (function () {
       var token = localStorage.getItem("mostlaneToken");
-      var btn = document.getElementById("Assets");
-      if (!token || !btn) return;
-      fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", { headers: { "Authorization": "Bearer " + token } })
+      if (!token) return;
+      var H = { headers: { "Authorization": "Bearer " + token } };
+      function dot(id, n) {
+        var btn = document.getElementById(id);
+        if (!btn || !(n > 0)) return;
+        btn.style.position = "relative";
+        var b = document.createElement("span");
+        b.textContent = n > 9 ? "9+" : n;
+        b.style.cssText = "position:absolute;top:-7px;right:-7px;min-width:22px;height:22px;padding:0 5px;" +
+          "background:#e11900;color:#fff;border-radius:999px;font:700 12px/22px system-ui,sans-serif;" +
+          "text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);";
+        btn.appendChild(b);
+      }
+      fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
         .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d || !d.ok || !d.count) return;
-          btn.style.position = "relative";
-          var b = document.createElement("span");
-          b.textContent = d.count > 9 ? "9+" : d.count;
-          b.style.cssText = "position:absolute;top:-7px;right:-7px;min-width:22px;height:22px;padding:0 5px;" +
-            "background:#e11900;color:#fff;border-radius:999px;font:700 12px/22px system-ui,sans-serif;" +
-            "text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);";
-          btn.appendChild(b);
+        .then(function (d) { if (d && d.ok) dot("Assets", d.count); }).catch(function () {});
+      var yr = new Date().getFullYear();
+      fetch(window.MOSTLANE_API + "/holiday/my?year=" + yr, H)
+        .then(function (r) { return r.json(); })
+        .then(function (list) {
+          var seen = localStorage.getItem("mostlaneHolSeen") || "";
+          var meL = (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").toLowerCase();
+          var n = (Array.isArray(list) ? list : []).filter(function (h) {
+            return h.start && h.decisionAt && (!seen || h.decisionAt > seen)
+              && ["Approved", "Rejected", "Cancelled"].indexOf(h.status) !== -1
+              && String(h.cancelledBy || "").toLowerCase() !== meL;
+          }).length;
+          dot("Holiday", n);
         }).catch(function () {});
+      var perms = {};
+      try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+      if (perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes") {
+        fetch(window.MOSTLANE_API + "/holiday/all?year=" + yr, H)
+          .then(function (r) { return r.json(); })
+          .then(function (list) {
+            var n = (Array.isArray(list) ? list : []).filter(function (h) { return h.status === "Pending"; }).length;
+            dot("HolidayAdmin", n);
+          }).catch(function () {});
+      }
     })();
   </script>
 

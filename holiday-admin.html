@@ -66,7 +66,24 @@
     table.bal tr:last-child td { border-bottom:none; }
     table.bal .low { color:#d97706; font-weight:700; }
     table.bal .neg { color:#b00020; font-weight:700; }
-    table.bal button.edit { background:none; border:1px solid #d7dee6; border-radius:7px; padding:3px 9px; cursor:pointer; font-size:12.5px; color:#1a4f8f; }
+    table.bal button.edit { background:none; border:1px solid #d7dee6; border-radius:7px; padding:3px 9px; cursor:pointer; font-size:12.5px; color:#1a4f8f; white-space:nowrap; }
+    .balscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    @media (max-width:640px){
+      table.bal th, table.bal td { padding:8px 6px; font-size:13px; }
+      table.bal th:nth-child(2), table.bal td:nth-child(2) { display:none; }  /* hide Allowance col — the edit button shows it */
+      table.bal button.edit .elbl { display:none; }                            /* icon-only edit button */
+      table.bal button.edit { font-size:15px; padding:4px 9px; }
+    }
+
+    /* Bank holiday / shutdown day editors */
+    .dayrow { display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px solid #f0f3f7; font-size:13.5px; }
+    .dayrow:last-child { border-bottom:none; }
+    .dayrow .dd { background:#f0f6ff; border-radius:8px; padding:5px 9px; font-size:12.5px; color:#003366; font-weight:600; flex:none; min-width:96px; text-align:center; }
+    .dayrow .lbl { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dayrow .rmday { background:none; border:none; color:#b00020; font-size:17px; cursor:pointer; padding:2px 6px; flex:none; }
+    .addrow { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    .addrow input[type=date] { flex:0 0 150px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; font-family:inherit; }
+    .addrow input[type=text] { flex:1 1 140px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; font-family:inherit; }
 
     /* Settings */
     .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -128,7 +145,7 @@
 
     <!-- BALANCES -->
     <div class="sect" data-sec="balances">
-      <div class="card" style="padding:6px 8px;">
+      <div class="card balscroll" style="padding:6px 8px;">
         <table class="bal">
           <thead><tr><th>Person</th><th>Allowance</th><th>Used</th><th>Remaining</th><th></th></tr></thead>
           <tbody id="balBody"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
@@ -148,16 +165,25 @@
       <div class="setgrid">
         <div class="card">
           <h3>Bank holidays — <span class="yearRef"></span></h3>
-          <p class="muted" style="margin:0 0 8px;">One per line: <code>YYYY-MM-DD Label</code></p>
-          <textarea class="days" id="bankTxt" spellcheck="false"></textarea>
-          <button class="btn" id="saveBank" style="margin-top:10px;">Save bank holidays</button>
+          <div id="bankRows" class="muted">Loading…</div>
+          <div class="addrow">
+            <input type="date" id="bankDate">
+            <input type="text" id="bankLbl" placeholder="Description (e.g. Boxing Day)">
+            <button class="btn small" id="bankAdd">Add</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+            <button class="btn grey" id="ukImport">🇬🇧 Add official UK bank holidays</button>
+          </div>
           <p class="msg" id="bankMsg"></p>
         </div>
         <div class="card">
           <h3>Company shutdown — <span class="yearRef"></span></h3>
-          <p class="muted" style="margin:0 0 8px;">One per line: <code>YYYY-MM-DD Label</code></p>
-          <textarea class="days" id="shutTxt" spellcheck="false"></textarea>
-          <button class="btn" id="saveShut" style="margin-top:10px;">Save shutdown days</button>
+          <div id="shutRows" class="muted">Loading…</div>
+          <div class="addrow">
+            <input type="date" id="shutDate">
+            <input type="text" id="shutLbl" placeholder="Description (e.g. Christmas shutdown)">
+            <button class="btn small" id="shutAdd">Add</button>
+          </div>
           <p class="msg" id="shutMsg"></p>
         </div>
       </div>
@@ -350,12 +376,12 @@
           <td>${e.allowance}</td>
           <td>${e.used}</td>
           <td class="${e.remaining < 0 ? "neg" : e.remaining <= 2 ? "low" : ""}">${e.remaining}</td>
-          <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">Edit allowance</button></td>
+          <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">✎<span class="elbl"> Edit allowance</span></button></td>
         </tr>`).join("") || "<tr><td colspan='5' class='muted'>No active users.</td></tr>";
     }
     document.addEventListener("click", async e => {
-      const t = e.target;
-      if (!t.dataset.allow) return;
+      const t = e.target.closest("[data-allow]") || e.target;
+      if (!t.dataset || !t.dataset.allow) return;
       const v = prompt(`Allowance for ${NAMES[t.dataset.allow] || t.dataset.allow} in ${YEAR}:`, t.dataset.cur);
       if (v === null) return;
       const n = Number(v);
@@ -366,36 +392,92 @@
     });
 
     // ── Settings ──
-    const daysToText = days => (days || []).map(d => `${d.date} ${d.label || ""}`.trim()).join("\n");
-    function textToDays(txt) {
-      return txt.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
-        const m = /^(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(l);
-        return m ? { date: m[1], label: m[2] || "" } : null;
-      }).filter(Boolean);
+    // Bank holidays & shutdown are edited as lists (date picker + description);
+    // every add/remove saves immediately. UK bank holidays can be pulled from
+    // the official GOV.UK feed in one tap.
+    let bankDays = [], shutDays = [];
+    const fmtFull = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" });
+    function renderDays(elId, arr, kind) {
+      const el = g(elId);
+      el.classList.remove("muted");
+      el.innerHTML = arr.length ? arr.slice().sort((a,b) => a.date.localeCompare(b.date)).map(d => `
+        <div class="dayrow">
+          <span class="dd">${fmtFull(d.date)}</span>
+          <span class="lbl">${esc(d.label || "")}</span>
+          <button class="rmday" data-rmday="${d.date}" data-kind="${kind}" title="Remove">×</button>
+        </div>`).join("") : "<p class='muted' style='margin:6px 0;'>None set for " + YEAR + " yet.</p>";
     }
+    function flash(id, ok, txt) { const m = g(id); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = txt; setTimeout(() => m.textContent = "", 3000); }
+    async function saveDays(kind) {
+      const isBank = kind === "bank";
+      const r = await authFetch(`/holiday/set-${isBank ? "bankholidays" : "shutdown"}?year=${YEAR}`, {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ days: isBank ? bankDays : shutDays }) });
+      flash(isBank ? "bankMsg" : "shutMsg", r.ok, r.ok ? "Saved ✓" : "Save failed — try again");
+      if (r.ok) { renderDays(isBank ? "bankRows" : "shutRows", isBank ? bankDays : shutDays, kind); loadWall(); loadBalances(); }
+      return r.ok;
+    }
+    function addDay(kind) {
+      const isBank = kind === "bank";
+      const date = g(isBank ? "bankDate" : "shutDate").value;
+      const label = g(isBank ? "bankLbl" : "shutLbl").value.trim();
+      if (!date) { flash(isBank ? "bankMsg" : "shutMsg", false, "Pick a date first."); return; }
+      const arr = isBank ? bankDays : shutDays;
+      if (arr.some(d => d.date === date)) { flash(isBank ? "bankMsg" : "shutMsg", false, "That date is already in the list."); return; }
+      if (date.slice(0, 4) !== String(YEAR)) { flash(isBank ? "bankMsg" : "shutMsg", false, `That date isn't in ${YEAR} — switch year first.`); return; }
+      arr.push({ date, label: label || (isBank ? "Bank Holiday" : "Company Shutdown") });
+      g(isBank ? "bankDate" : "shutDate").value = ""; g(isBank ? "bankLbl" : "shutLbl").value = "";
+      saveDays(kind);
+    }
+    g("bankAdd").onclick = () => addDay("bank");
+    g("shutAdd").onclick = () => addDay("shut");
+    document.addEventListener("click", e => {
+      const t = e.target;
+      if (!t.dataset || !t.dataset.rmday) return;
+      const isBank = t.dataset.kind === "bank";
+      if (!confirm("Remove this day? It's credited back to everyone's balance.")) return;
+      if (isBank) bankDays = bankDays.filter(d => d.date !== t.dataset.rmday);
+      else shutDays = shutDays.filter(d => d.date !== t.dataset.rmday);
+      saveDays(t.dataset.kind);
+    });
+
+    // Official UK bank holidays (England & Wales) from GOV.UK — merged in, duplicates skipped.
+    g("ukImport").onclick = async () => {
+      const btn = g("ukImport"); btn.disabled = true; btn.textContent = "Fetching…";
+      try {
+        // Direct from GOV.UK; if the browser blocks it, fall back to our worker proxy.
+        let events = [];
+        try {
+          const feed = await fetch("https://www.gov.uk/bank-holidays.json").then(r => r.json());
+          events = ((feed["england-and-wales"] || {}).events || []).filter(e => e.date && e.date.startsWith(String(YEAR)));
+        } catch (_) {
+          const d = await authFetch(`/holiday/uk-bank-holidays?year=${YEAR}`).then(r => { if (!r.ok) throw new Error("GOV.UK unavailable"); return r.json(); });
+          events = d.events || [];
+        }
+        if (!events.length) throw new Error("GOV.UK has no dates for " + YEAR + " yet.");
+        const have = new Set(bankDays.map(d => d.date));
+        let added = 0;
+        for (const ev of events) if (!have.has(ev.date)) { bankDays.push({ date: ev.date, label: ev.title }); added++; }
+        if (added) { await saveDays("bank"); flash("bankMsg", true, `Added ${added} UK bank holiday${added === 1 ? "" : "s"} ✓`); }
+        else flash("bankMsg", true, "All UK bank holidays are already in the list ✓");
+      } catch (err) { flash("bankMsg", false, err.message || "Couldn't reach GOV.UK — add them manually."); }
+      finally { btn.disabled = false; btn.textContent = "🇬🇧 Add official UK bank holidays"; }
+    };
+
     async function loadSettings() {
       try {
         const c = await authFetch(`/holiday/config?year=${YEAR}`).then(r => r.json());
         g("defAllow").value = c.defaultAllowance ?? 28;
-        g("bankTxt").value = daysToText(c.bankholidays);
-        g("shutTxt").value = daysToText(c.shutdown);
+        bankDays = Array.isArray(c.bankholidays) ? c.bankholidays.slice() : [];
+        shutDays = Array.isArray(c.shutdown) ? c.shutdown.slice() : [];
+        renderDays("bankRows", bankDays, "bank");
+        renderDays("shutRows", shutDays, "shut");
       } catch (e) {}
     }
-    function flash(id, ok, txt) { const m = g(id); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = txt; setTimeout(() => m.textContent = "", 2500); }
     g("saveDef").onclick = async () => {
       const r = await authFetch(`/holiday/set-year-config?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ defaultAllowance: Number(g("defAllow").value) }) });
       flash("defMsg", r.ok, r.ok ? "Saved ✓" : "Save failed"); if (r.ok) loadBalances();
-    };
-    g("saveBank").onclick = async () => {
-      const days = textToDays(g("bankTxt").value);
-      const r = await authFetch(`/holiday/set-bankholidays?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ days }) });
-      flash("bankMsg", r.ok, r.ok ? `Saved ${days.length} day(s) ✓` : "Save failed"); if (r.ok) { loadWall(); loadBalances(); }
-    };
-    g("saveShut").onclick = async () => {
-      const days = textToDays(g("shutTxt").value);
-      const r = await authFetch(`/holiday/set-shutdown?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ days }) });
-      flash("shutMsg", r.ok, r.ok ? `Saved ${days.length} day(s) ✓` : "Save failed"); if (r.ok) { loadWall(); loadBalances(); }
     };
 
     loadAll();

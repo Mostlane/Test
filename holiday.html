@@ -164,6 +164,8 @@
         ]);
         renderSummary(sum, mine);
         renderLists(Array.isArray(mine) ? mine : []);
+        // Decisions are now seen — clears the red badge on the menu/sidebar.
+        try { localStorage.setItem("mostlaneHolSeen", new Date().toISOString()); } catch (e) {}
       } catch (e) {
         g("reqList").innerHTML = '<div class="row"><span class="muted">Couldn\'t load your holiday info.</span></div>';
       }
