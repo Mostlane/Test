@@ -465,9 +465,14 @@ async function handle2(request, env, ctx, url) {
     return json({ found: true, user: shapeUser2(user, perms) }, {}, env, request);
   }
   if (path === "/users" && request.method === "GET") {
-    const { results } = await env.DB.prepare("SELECT * FROM users ORDER BY username").all();
+    const [{ results }, { results: permRows }] = await Promise.all([
+      env.DB.prepare("SELECT * FROM users ORDER BY username").all(),
+      env.DB.prepare("SELECT username, permission, value FROM user_permissions").all()
+    ]);
+    const permMap = {};
+    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
     const out = [];
-    for (const u of results || []) out.push(shapeUser2(u, await permissionsFor(env, u.username)));
+    for (const u of results || []) out.push(shapeUser2(u, permMap[u.username] || {}));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }

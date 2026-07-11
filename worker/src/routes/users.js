@@ -123,9 +123,17 @@ export async function handle(request, env, ctx, url) {
   // first, then field, each by the manual drag order set in Users admin) so
   // every page and dropdown that reads /users shows people the same way.
   if (path === "/users" && request.method === "GET") {
-    const { results } = await env.DB.prepare("SELECT * FROM users ORDER BY username").all();
+    // Two queries total (was 1 + one-per-user): grab the users and ALL
+    // permission rows, then group the permissions in memory. The old N+1
+    // pattern made this endpoint — and every page that loads it — ~3s slow.
+    const [{ results }, { results: permRows }] = await Promise.all([
+      env.DB.prepare("SELECT * FROM users ORDER BY username").all(),
+      env.DB.prepare("SELECT username, permission, value FROM user_permissions").all()
+    ]);
+    const permMap = {};
+    for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
     const out = [];
-    for (const u of results || []) out.push(shapeUser(u, await permissionsFor(env, u.username)));
+    for (const u of results || []) out.push(shapeUser(u, permMap[u.username] || {}));
     out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
   }
