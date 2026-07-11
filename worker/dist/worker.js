@@ -1534,6 +1534,27 @@ async function handle5(request, env, ctx, url) {
       sampleKeys: objects.slice(0, 6).map((o) => o.key)
     });
   }
+  if (method === "POST" && pathname === "/asset/r2-unlink") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    let cleared = 0;
+    for (const row of results || []) {
+      let asset;
+      try {
+        asset = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      if (!asset.images || !asset.images.length) continue;
+      delete asset.images;
+      await putAsset(env, asset);
+      cleared++;
+    }
+    return json2({ ok: true, cleared });
+  }
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess = await requireSession(env, request);
     if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);

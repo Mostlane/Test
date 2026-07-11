@@ -109,6 +109,7 @@
         <button class="btn grey small" id="sortName">Name A–Z</button>
         <button class="btn small" id="exportBtn">⬇ Export report</button>
         <button class="btn grey small" id="relinkBtn" title="Rebuild photo links from the image storage bucket">🔗 Re-link photos</button>
+        <button class="btn grey small" id="unlinkBtn" title="Remove all photo links (photos stay safe in storage)">✖ Clear photo links</button>
       </div>
       <div id="summary"><span class="muted">Loading summary…</span></div>
     </div>
@@ -417,6 +418,18 @@
         }
       } catch (err) { alert("Re-link failed: " + err.message); }
       finally { btn.disabled = false; btn.textContent = "🔗 Re-link photos"; }
+    };
+
+    g("unlinkBtn").onclick = async () => {
+      if (!confirm("Remove ALL photo links from every asset?\n\nThe photos stay safe in storage — this just un-attaches them (use it to undo a re-link that matched the wrong photos).")) return;
+      const btn = g("unlinkBtn"); btn.disabled = true; btn.textContent = "Clearing…";
+      try {
+        const r = await authFetch("/asset/r2-unlink", { method: "POST" }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Failed");
+        alert(`Cleared photo links from ${r.cleared} asset(s). The photos are still in storage.`);
+        loadAssets();
+      } catch (err) { alert("Clear failed: " + err.message); }
+      finally { btn.disabled = false; btn.textContent = "✖ Clear photo links"; }
     };
 
     // ── Excel export (per-person tabs with transfer history) ──

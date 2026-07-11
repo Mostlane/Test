@@ -250,6 +250,25 @@ export async function handle(request, env, ctx, url) {
     });
   }
 
+  // Undo the re-link: strip images[] off every asset record (the photos stay
+  // safe in R2 — this only removes the links). Admin only.
+  if (method === "POST" && pathname === "/asset/r2-unlink") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
+    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    let cleared = 0;
+    for (const row of results || []) {
+      let asset; try { asset = JSON.parse(row.data); } catch { continue; }
+      if (!asset.images || !asset.images.length) continue;
+      delete asset.images;
+      await putAsset(env, asset);
+      cleared++;
+    }
+    return json({ ok: true, cleared });
+  }
+
   // ═══ Pending transfer workflow ══════════════════════════════════════════
   // User 1 offers an item -> request sits 'pending' -> User 2 accepts (signing
   // a transfer note, logged in asset_transfers) or rejects. The recipient's
