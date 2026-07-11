@@ -918,26 +918,35 @@ async function handle4(request, env, ctx, url) {
       "INSERT INTO holiday_log (request_id, action, by_user, at) VALUES (?,?,?,?)"
     ).bind(requestId, action, by, (/* @__PURE__ */ new Date()).toISOString()).run();
   }
-  async function ensureSystemDaysForUser(username) {
+  async function ensureSystemDaysBulk(usernames) {
+    if (!usernames.length) return;
     const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
+    if (!bank.length && !shut.length) return;
+    const { results } = await env.DB.prepare(
+      "SELECT kind, date, username FROM holiday_system_days WHERE year = ?"
+    ).bind(year).all();
+    const have = new Set((results || []).map((r) => `${r.kind}|${r.date}|${r.username}`));
     const now = (/* @__PURE__ */ new Date()).toISOString();
-    const eng = username.replace(".", " ");
-    for (const b of bank) {
-      if (!b?.date) continue;
-      await env.DB.prepare(`
-        INSERT INTO holiday_system_days (kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
-        VALUES ('bankholiday', ?, ?, ?, ?, ?, ?, 1, 'BankHoliday', 0, 'Deducted', ?)
-        ON CONFLICT(kind, year, date, username) DO NOTHING
-      `).bind(year, b.date, username, `BH-${year}-${b.date}-${username}`, eng, b.label || "Bank Holiday", now).run();
+    const stmts = [];
+    const ins = env.DB.prepare(`
+      INSERT INTO holiday_system_days (kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
+      ON CONFLICT(kind, year, date, username) DO NOTHING
+    `);
+    for (const u of usernames) {
+      for (const b of bank) {
+        if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
+        stmts.push(ins.bind("bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
+      }
+      for (const s of shut) {
+        if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
+        stmts.push(ins.bind("shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
+      }
     }
-    for (const s of shut) {
-      if (!s?.date) continue;
-      await env.DB.prepare(`
-        INSERT INTO holiday_system_days (kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
-        VALUES ('shutdown', ?, ?, ?, ?, ?, ?, 1, 'Shutdown', 0, 'Deducted', ?)
-        ON CONFLICT(kind, year, date, username) DO NOTHING
-      `).bind(year, s.date, username, `SD-${year}-${s.date}-${username}`, eng, s.label || "Company Shutdown", now).run();
-    }
+    if (stmts.length) await env.DB.batch(stmts);
+  }
+  async function ensureSystemDaysForUser(username) {
+    return ensureSystemDaysBulk([username]);
   }
   async function listHolidayRequestsForYear() {
     const { results } = await env.DB.prepare("SELECT * FROM holidays WHERE year = ?").bind(year).all();
@@ -1138,12 +1147,16 @@ async function handle4(request, env, ctx, url) {
   if (path === "/holiday/admin-summary" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const usernames = await getActiveUsers();
-    for (const u of usernames) await ensureSystemDaysForUser(u);
-    const all = await listHolidayRequestsForYear();
-    const sys = await listSystemRecordsForYear();
+    await ensureSystemDaysBulk(usernames);
+    const [all, sys, allowMap, dflt] = await Promise.all([
+      listHolidayRequestsForYear(),
+      listSystemRecordsForYear(),
+      listAllowancesMap(),
+      getDefaultAllowance()
+    ]);
     const list = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
-      const allowance = await getUserAllowance(u);
+      const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
       let approvedHoliday = 0;
       for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other") approvedHoliday += h.days || 0;
       let sysDeducted = 0, sysCredited = 0;
@@ -1165,9 +1178,8 @@ async function handle4(request, env, ctx, url) {
     const monthEnd = new Date(Date.UTC(year, month, 0));
     const daysInMonth = monthEnd.getUTCDate();
     const usernames = await getActiveUsers();
-    for (const u of usernames) await ensureSystemDaysForUser(u);
-    const all = await listHolidayRequestsForYear();
-    const sys = await listSystemRecordsForYear();
+    await ensureSystemDaysBulk(usernames);
+    const [all, sys] = await Promise.all([listHolidayRequestsForYear(), listSystemRecordsForYear()]);
     const engineers = [];
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
       const cells = {};
