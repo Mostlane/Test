@@ -707,7 +707,7 @@ async function handle3(request, env, ctx, url) {
         p = u.profile ? JSON.parse(u.profile) : {};
       } catch {
       }
-      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1, unlimited: !!p.deviceUnlimited };
+      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2, unlimited: !!p.deviceUnlimited };
     }
     const byUser = {};
     for (const d of devs || []) {
@@ -804,7 +804,7 @@ async function deviceSettings(env, username) {
   } catch {
   }
   return {
-    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 1,
+    allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
     unlimited: !!p.deviceUnlimited
   };
 }
