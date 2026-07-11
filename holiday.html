@@ -2,513 +2,283 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js"></script>
-<script src="auth.js"></script>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Holiday Booking</title>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Holiday — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:860px; margin:18px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .btn { background:#0066cc; color:#fff; border:none; border-radius:10px; padding:11px 16px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.small { padding:7px 11px; font-size:13px; font-weight:500; }
+    .btn:disabled { opacity:.5; cursor:default; }
 
-<style>
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: #e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
-    background-size: 180%;
-    margin: 0;
-    padding: 40px 20px;
-  }
-  .container { max-width: 1000px; margin: auto; }
-  .form-section, .summary-section {
-    background: rgba(255,255,255,0.6);
-    padding: 30px;
-    border-radius: 8px;
-    margin-bottom: 20px;
-  }
-  h2 { text-align: center; color: #003366; margin-top: 0; }
-  label { display: block; margin-top: 15px; font-weight: bold; }
-  input, select {
-    width: 100%;
-    padding: 10px;
-    font-size: 16px;
-    margin-top: 5px;
-    border-radius: 6px;
-    border: 1px solid #cbd5e1;
-    box-sizing: border-box;
-  }
-  button {
-    margin-top: 30px;
-    padding: 12px;
-    width: 100%;
-    background-color: rgba(0, 74, 153, 0.6);
-    color: white;
-    font-size: 18px;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  ul { padding-left: 18px; font-size: 14px; }
-  li { margin-bottom: 8px; line-height: 1.5; }
-  .approved { color: #15803d; }
-  .pending  { color: #b45309; }
-  .rejected { color: #b00020; }
-  .system   { color: #0f172a; }
+    /* Stats row */
+    .stats { display:flex; gap:12px; align-items:stretch; flex-wrap:wrap; margin-bottom:16px; }
+    .ring-card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px 20px; display:flex; align-items:center; gap:16px; flex:2 1 260px; }
+    .ring { width:104px; height:104px; flex:none; position:relative; }
+    .ring svg { transform:rotate(-90deg); }
+    .ring .num { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+    .ring .num b { font-size:30px; line-height:1; color:#0c7d3f; }
+    .ring .num span { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#667085; margin-top:2px; }
+    .ring-card .info h2 { margin:0 0 4px; font-size:16px; color:#003366; }
+    .tiles { display:flex; gap:12px; flex:1 1 220px; }
+    .tile { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; flex:1; text-align:center; display:flex; flex-direction:column; justify-content:center; }
+    .tile b { font-size:24px; color:#003366; }
+    .tile span { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; margin-top:3px; }
 
-  .chip { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:8px; background:rgba(255,255,255,0.7); border:1px solid rgba(0,0,0,0.08); }
-  .chip-ok   { color:#15803d; border-color:rgba(21,128,61,0.25); }
-  .chip-warn { color:#b45309; border-color:rgba(180,83,9,0.25); }
-  .chip-bad  { color:#b00020; border-color:rgba(176,0,32,0.25); }
+    .bookbar { display:flex; align-items:center; gap:10px; margin:0 0 16px; flex-wrap:wrap; }
+    .bookbar h2 { margin:0; font-size:17px; color:#003366; flex:1; }
+    select.yearsel { padding:8px 10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; background:#fff; font-family:inherit; }
 
-  .tinyBtn {
-    margin-left: 8px;
-    width: auto;
-    padding: 5px 10px;
-    font-size: 12px;
-    border-radius: 6px;
-    background: rgba(0,74,153,0.75);
-    margin-top: 0;
-    vertical-align: middle;
-  }
-  .tinyBtnDanger {
-    background: rgba(176,0,32,0.8);
-  }
+    /* Time-off list */
+    .list { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); overflow:hidden; }
+    .row { display:flex; align-items:center; gap:12px; padding:13px 16px; border-bottom:1px solid #f0f3f7; flex-wrap:wrap; }
+    .row:last-child { border-bottom:none; }
+    .dateblock { background:#f0f6ff; border-radius:10px; padding:7px 10px; text-align:center; min-width:86px; flex:none; }
+    .dateblock b { display:block; font-size:13px; color:#003366; }
+    .dateblock span { font-size:11px; color:#667085; }
+    .row .what { flex:1; min-width:150px; }
+    .row .what b { font-size:14px; }
+    .row .what .muted { margin-top:1px; }
+    .pill { font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; flex:none; }
+    .pill.Pending { background:#fff3cd; color:#7a5b00; }
+    .pill.Approved { background:#e3f6e8; color:#0c7d27; }
+    .pill.Rejected { background:#fde8ea; color:#b00020; }
+    .pill.Cancelled { background:#eef1f4; color:#667085; }
+    .pill.bank { background:#e2edff; color:#1a4f8f; }
+    .pill.shut { background:#efe6ff; color:#5b21b6; }
+    .pill.worked { background:#e3f6e8; color:#0c7d27; }
+    .secttl { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:#667085; font-weight:700; margin:20px 2px 8px; }
 
-  /* ── Large stat cards ── */
-  .summary-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    margin-bottom: 16px;
-  }
-  .summary-header h2 {
-    margin: 0;
-  }
-  .refresh-btn {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background: rgba(0,74,153,0.12);
-    border: 1px solid rgba(0,74,153,0.20);
-    color: #003366;
-    font-size: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 0;
-    margin: 0;
-    margin-top: 0;
-    line-height: 1;
-    transition: background 0.15s, transform 0.15s;
-  }
-  .refresh-btn:hover {
-    background: rgba(0,74,153,0.20);
-  }
-  .refresh-btn:active {
-    transform: translateY(-50%) scale(0.92);
-  }
-  .refresh-btn.spinning svg {
-    animation: spin 0.6s linear infinite;
-  }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
-
-  .stat-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
-    margin-bottom: 10px;
-  }
-  .stat-card {
-    background: rgba(255,255,255,0.85);
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 12px;
-    padding: 18px 12px;
-    text-align: center;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  }
-  .stat-card .stat-num {
-    font-size: 48px;
-    font-weight: 800;
-    line-height: 1;
-    color: #003366;
-  }
-  .stat-card .stat-num.good { color: #15803d; }
-  .stat-card .stat-num.warn { color: #b45309; }
-  .stat-card .stat-label {
-    font-size: 13px;
-    color: #64748b;
-    font-weight: 600;
-    margin-top: 6px;
-  }
-
-  @media(max-width:600px){
-    body { padding: 16px 10px; }
-    .form-section, .summary-section { padding: 20px 16px; }
-    .stat-grid { gap: 8px; }
-    .stat-card { padding: 14px 8px; border-radius: 10px; }
-    .stat-card .stat-num { font-size: 36px; }
-    .stat-card .stat-label { font-size: 11px; }
-  }
-  @media(max-width:400px){
-    .stat-card .stat-num { font-size: 28px; }
-  }
-</style>
+    /* Booking modal */
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-start; justify-content:center; padding:16px; overflow:auto; z-index:500; }
+    .overlay.open { display:flex; }
+    .panel { background:#fff; border-radius:16px; width:100%; max-width:440px; padding:20px; margin-top:5vh; }
+    .panel h2 { margin:0 0 12px; font-size:17px; color:#003366; }
+    .panel label { font-size:12px; color:#667085; display:block; margin:10px 0 3px; }
+    .panel input, .panel select, .panel textarea { width:100%; padding:10px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .daycount { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:10px; padding:11px 13px; margin-top:12px; font-size:13.5px; display:none; }
+    .daycount b { color:#003366; }
+    .panel .acts { display:flex; gap:10px; margin-top:16px; }
+    .panel .acts .btn { flex:1; padding:12px; }
+    .msg { font-size:13.5px; margin-top:10px; } .msg.err { color:#b00020; }
+    @media (max-width:560px){ .tiles{flex-basis:100%;} }
+  </style>
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") location.href = "login.html";
+  </script>
 </head>
-
 <body>
+  <header class="page">
+    <h1>🌴 Holiday</h1>
+    <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+  </header>
 
-<div style="margin-bottom:20px;">
-  <a class="ml-back" data-role="home" href="main.html">← Menu</a>
-</div>
-
-<div class="container">
-
-  <!-- REQUEST FORM -->
-  <div class="form-section">
-    <h2>Holiday Request</h2>
-    <form id="holidayForm">
-      <label>Engineer Name</label>
-      <input id="engineer" readonly>
-
-      <label>Start Date</label>
-      <input type="date" id="start" required>
-
-      <label>End Date</label>
-      <input type="date" id="end" required>
-
-      <label>Leave Type</label>
-      <select id="type">
-        <option>Annual Leave</option>
-        <option>Sick Leave</option>
-        <option>Compulsory Leave</option>
-        <option>Unpaid Leave</option>
-      </select>
-
-      <label>Reminder Note (required)</label>
-      <input id="notes" placeholder="e.g. Ben's wedding, Half term, Family trip" required>
-
-      <button type="submit" id="submitBtn">Submit</button>
-    </form>
-  </div>
-
-  <!-- SUMMARY -->
-  <div class="summary-section">
-    <div class="summary-header">
-      <h2>Holiday Summary</h2>
-      <button class="refresh-btn" id="summaryRefreshBtn" title="Refresh summary" onclick="refreshSummary()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2.5"
-             stroke-linecap="round" stroke-linejoin="round">
-          <path d="M23 4v6h-6"/>
-          <path d="M1 20v-6h6"/>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
-          <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
-        </svg>
-      </button>
-    </div>
-
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-num" id="allowance">—</div>
-        <div class="stat-label">Allowance</div>
+  <div class="wrap">
+    <div class="stats">
+      <div class="ring-card">
+        <div class="ring">
+          <svg width="104" height="104" viewBox="0 0 104 104">
+            <circle cx="52" cy="52" r="45" fill="none" stroke="#e8edf4" stroke-width="10"/>
+            <circle id="ringArc" cx="52" cy="52" r="45" fill="none" stroke="#18a558" stroke-width="10"
+                    stroke-linecap="round" stroke-dasharray="283" stroke-dashoffset="283"/>
+          </svg>
+          <div class="num"><b id="statRemaining">–</b><span>days left</span></div>
+        </div>
+        <div class="info">
+          <h2 id="helloLbl">My holiday</h2>
+          <div class="muted" id="allowLbl">Loading…</div>
+          <div class="muted" id="sysLbl" style="margin-top:3px;"></div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-num warn" id="used">—</div>
-        <div class="stat-label">Used</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num good" id="remaining">—</div>
-        <div class="stat-label">Remaining</div>
+      <div class="tiles">
+        <div class="tile"><b id="statUsed">–</b><span>days used</span></div>
+        <div class="tile"><b id="statPending">–</b><span>days pending</span></div>
       </div>
     </div>
-    <p style="font-size:13px;color:#475569;margin-top:10px;text-align:center;">
-      Includes bank holidays + company shutdown (credited back if marked as worked).
-    </p>
+
+    <div class="bookbar">
+      <h2>My time off</h2>
+      <select class="yearsel" id="yearSel"></select>
+      <button class="btn" id="bookBtn">+ Book time off</button>
+    </div>
+
+    <div class="list" id="reqList"><div class="row"><span class="muted">Loading…</span></div></div>
+
+    <div class="secttl">Bank holidays &amp; company shutdown</div>
+    <div class="list" id="sysList"><div class="row"><span class="muted">Loading…</span></div></div>
   </div>
 
-  <!-- SYSTEM DAYS -->
-  <div class="summary-section">
-    <h2>Bank Holidays &amp; Company Shutdown</h2>
-    <ul id="systemList"><li class="system" style="color:#94a3b8;">Loading…</li></ul>
+  <!-- Booking modal -->
+  <div class="overlay" id="bookModal">
+    <div class="panel">
+      <h2>Book time off</h2>
+      <div class="grid2">
+        <div><label>First day</label><input type="date" id="bStart"></div>
+        <div><label>Last day</label><input type="date" id="bEnd"></div>
+      </div>
+      <label>Type</label>
+      <select id="bType"><option>Annual Leave</option><option>Unpaid Leave</option><option>Other</option></select>
+      <label>Reminder note (required)</label>
+      <input id="bNote" placeholder="e.g. Family trip, wedding…">
+      <div class="daycount" id="bCount"></div>
+      <p class="msg" id="bMsg"></p>
+      <div class="acts">
+        <button class="btn grey" onclick="closeBook()">Cancel</button>
+        <button class="btn" id="bSubmit">Request</button>
+      </div>
+    </div>
   </div>
 
-  <!-- APPROVED -->
-  <div class="summary-section">
-    <h2>Approved Holidays</h2>
-    <ul id="approvedList"><li class="approved" style="color:#94a3b8;">Loading…</li></ul>
-  </div>
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    let YEAR = new Date().getFullYear();
 
-  <!-- PENDING / OTHER -->
-  <div class="summary-section">
-    <h2>Pending / Other</h2>
-    <ul id="pendingList"><li class="pending" style="color:#94a3b8;">Loading…</li></ul>
-  </div>
+    // Year picker: this year and next (book ahead), plus last year for reference.
+    (function () {
+      const y = new Date().getFullYear();
+      g("yearSel").innerHTML = [y - 1, y, y + 1].map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("");
+      g("yearSel").onchange = () => { YEAR = Number(g("yearSel").value); loadAll(); };
+    })();
 
-</div>
+    const fmtD = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" });
+    const fmtDY = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
 
-<script>
-const API  = "https://mostlane-holidays.jamie-def.workers.dev";
-const user = sessionStorage.getItem("mostlaneUser");
-const role = sessionStorage.getItem("mostlaneRole") || "Engineer";
+    async function loadAll() {
+      try {
+        const [sum, mine] = await Promise.all([
+          authFetch(`/holiday/summary?year=${YEAR}`).then(r => r.json()),
+          authFetch(`/holiday/my?year=${YEAR}`).then(r => r.json())
+        ]);
+        renderSummary(sum, mine);
+        renderLists(Array.isArray(mine) ? mine : []);
+      } catch (e) {
+        g("reqList").innerHTML = '<div class="row"><span class="muted">Couldn\'t load your holiday info.</span></div>';
+      }
+    }
 
-if (!user) {
-  alert("Your session has expired. Please log in again.");
-  window.location.href = "login.html";
-}
+    function renderSummary(sum, mine) {
+      const rem = Math.max(0, sum.remaining ?? 0);
+      g("statRemaining").textContent = sum.remaining ?? "–";
+      g("statUsed").textContent = sum.used ?? "–";
+      const pending = (Array.isArray(mine) ? mine : []).filter(h => h.status === "Pending" && h.start).reduce((t, h) => t + (h.days || 0), 0);
+      g("statPending").textContent = pending;
+      g("allowLbl").textContent = `${sum.allowance ?? "–"} day allowance for ${YEAR}`;
+      const b = sum.breakdown || {};
+      g("sysLbl").textContent = `Incl. bank holidays & shutdown: ${b.sysDeducted || 0} deducted${b.sysCredited ? `, ${b.sysCredited} credited back (worked)` : ""}`;
+      // Ring: remaining as a share of allowance.
+      const frac = sum.allowance > 0 ? Math.max(0, Math.min(1, rem / sum.allowance)) : 0;
+      const arc = g("ringArc");
+      arc.style.strokeDashoffset = String(283 - 283 * frac);
+      arc.style.stroke = rem <= 2 ? "#d97706" : "#18a558";
+      const rn = g("statRemaining"); rn.style.color = rem <= 2 ? "#d97706" : "#0c7d3f";
+    }
 
-const year = new Date().getFullYear();
-document.getElementById("engineer").value = user.replace(".", " ");
+    function renderLists(items) {
+      const reqs = items.filter(i => i.start);                 // my requests
+      const sys = items.filter(i => i.date);                   // bank hols / shutdown
+      const today = new Date().toISOString().slice(0, 10);
+      reqs.sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+      const upcoming = reqs.filter(r => r.end >= today && ["Pending", "Approved"].includes(r.status)).sort((a,b) => a.start.localeCompare(b.start));
+      const past = reqs.filter(r => !(r.end >= today && ["Pending", "Approved"].includes(r.status)));
 
-function $(id) { return document.getElementById(id); }
+      const row = r => `
+        <div class="row">
+          <div class="dateblock"><b>${fmtD(r.start)}${r.start !== r.end ? " – " + fmtD(r.end) : ""}</b><span>${r.days} day${r.days === 1 ? "" : "s"}</span></div>
+          <div class="what"><b>${esc(r.type || "Annual Leave")}</b><div class="muted">${esc(r.notes || "")}${r.status === "Approved" && r.approvedBy ? " · approved by " + esc(r.approvedBy) : ""}${r.status === "Rejected" && r.approvedBy ? " · by " + esc(r.approvedBy) : ""}</div></div>
+          <span class="pill ${r.status}">${r.status}</span>
+          ${r.status === "Pending" ? `<button class="btn red small" data-cancel="${esc(r.id)}">Cancel</button>` : ""}
+          ${["Cancelled", "Rejected"].includes(r.status) ? `<button class="btn grey small" data-del="${esc(r.id)}">Remove</button>` : ""}
+        </div>`;
 
-function formatDatePretty(iso) {
-  if (!iso) return "";
-  const parts = iso.split("-");
-  if (parts.length !== 3) return iso;
-  const y = Number(parts[0]), m = Number(parts[1]) - 1, d = Number(parts[2]);
-  const date    = new Date(Date.UTC(y, m, d));
-  const day     = date.getUTCDate();
-  const yr      = String(date.getUTCFullYear()).slice(-2);
-  const weekday = date.toLocaleDateString("en-GB", { weekday:"short", timeZone:"UTC" });
-  const month   = date.toLocaleDateString("en-GB", { month:"short",   timeZone:"UTC" });
-  const suffix  = day > 3 && day < 21 ? "th"
-    : day % 10 === 1 ? "st"
-    : day % 10 === 2 ? "nd"
-    : day % 10 === 3 ? "rd" : "th";
-  return `${weekday} ${day}${suffix} ${month} ${yr}`;
-}
+      g("reqList").innerHTML =
+        (upcoming.length ? upcoming.map(row).join("") : "") +
+        (past.length ? past.map(row).join("") : "") ||
+        '<div class="row"><span class="muted">No time off booked for ' + YEAR + ' yet — tap “Book time off”.</span></div>';
 
-// ─── Summary refresh button ───────────────────────────────────
-async function refreshSummary() {
-  const btn = $("summaryRefreshBtn");
-  btn.classList.add("spinning");
-  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
-  btn.classList.remove("spinning");
-}
+      g("sysList").innerHTML = sys.length ? sys.sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(s => `
+        <div class="row">
+          <div class="dateblock"><b>${fmtD(s.date)}</b><span>${new Date(s.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"})}</span></div>
+          <div class="what"><b>${esc(s.label || s.category)}</b></div>
+          <span class="pill ${s.category === "Shutdown" ? "shut" : "bank"}">${s.category === "Shutdown" ? "Shutdown" : "Bank holiday"}</span>
+          ${s.worked || s.status === "Credited" ? '<span class="pill worked">Worked — credited</span>' : ""}
+        </div>`).join("") : '<div class="row"><span class="muted">None recorded for ' + YEAR + '.</span></div>';
+    }
 
-// ─── Summary ──────────────────────────────────────────────────
-async function loadSummary() {
-  try {
-    const res = await fetch(`${API}/holiday/summary?year=${year}&t=${Date.now()}`, {
-      headers: { "X-User": user, "X-Role": role },
-      cache: "no-store"
+    document.addEventListener("click", async e => {
+      const t = e.target;
+      if (t.dataset.cancel) {
+        if (!confirm("Cancel this pending request?")) return;
+        await authFetch(`/holiday/cancel?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: t.dataset.cancel }) });
+        loadAll();
+      } else if (t.dataset.del) {
+        await authFetch(`/holiday/delete-own?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: t.dataset.del }) });
+        loadAll();
+      }
     });
-    if (!res.ok) throw new Error(await res.text());
-    let raw = await res.json();
-    const s = raw.data ?? raw;
 
-    const allowance = Number(s.allowance ?? 0);
-    const used      = Number(s.used      ?? 0);
-    const remaining = Number(s.remaining ?? 0);
-
-    $("allowance").textContent = allowance;
-    $("used").textContent      = used;
-    $("remaining").textContent = remaining;
-
-    const remEl = $("remaining");
-    remEl.className = "stat-num " + (remaining <= 0 ? "warn" : "good");
-  } catch(e) {
-    console.error("loadSummary error:", e);
-    $("allowance").textContent = "?";
-    $("used").textContent      = "?";
-    $("remaining").textContent = "?";
-  }
-}
-
-// ─── Cancel pending request ───────────────────────────────────
-async function cancelRequest(id) {
-  if (!confirm("Cancel this pending holiday request?")) return;
-  const res = await fetch(`${API}/holiday/cancel?year=${year}`, {
-    method: "POST",
-    headers: { "Content-Type":"application/json", "X-User":user, "X-Role":role },
-    body: JSON.stringify({ id })
-  });
-  if (!res.ok) { alert(await res.text()); return; }
-  await new Promise(r => setTimeout(r, 600));
-  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
-}
-
-// ─── Delete cancelled/rejected request ───────────────────────
-async function deleteRequest(id) {
-  if (!confirm("Permanently delete this request from your history?")) return;
-
-  const res = await fetch(`${API}/holiday/delete-own?year=${year}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-User": user, "X-Role": role },
-    body: JSON.stringify({ id })
-  });
-
-  if (!res.ok) {
-    alert(await res.text());
-    return;
-  }
-
-  await new Promise(r => setTimeout(r, 600));
-  await Promise.allSettled([loadSummary(), loadMyHolidays()]);
-}
-
-// ─── Load holidays + system days ─────────────────────────────
-async function loadMyHolidays() {
-  $("systemList").innerHTML   = "<li class='system'   style='color:#94a3b8;'>Loading…</li>";
-  $("approvedList").innerHTML = "<li class='approved' style='color:#94a3b8;'>Loading…</li>";
-  $("pendingList").innerHTML  = "<li class='pending'  style='color:#94a3b8;'>Loading…</li>";
-
-  let data;
-  try {
-    const res = await fetch(`${API}/holiday/my?year=${year}&t=${Date.now()}`, {
-      headers: { "X-User":user, "X-Role":role },
-      cache: "no-store"
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const raw = await res.json();
-    data = Array.isArray(raw) ? raw : (Array.isArray(raw.data) ? raw.data : []);
-  } catch(e) {
-    console.error("loadMyHolidays error:", e);
-    $("systemList").innerHTML   = "<li class='system'>Could not load system days.</li>";
-    $("approvedList").innerHTML = "<li class='approved'>Could not load approved holidays.</li>";
-    $("pendingList").innerHTML  = "<li class='pending'>Could not load pending requests.</li>";
-    return;
-  }
-
-  $("approvedList").innerHTML = "";
-  $("pendingList").innerHTML  = "";
-  $("systemList").innerHTML   = "";
-
-  for (const h of data) {
-
-    // SYSTEM DAYS
-    if (h.category === "BankHoliday" || h.category === "Shutdown") {
-      const li  = document.createElement("li");
-      const lbl = h.label || (h.category === "BankHoliday" ? "Bank Holiday" : "Company Shutdown");
-      const chip = h.worked
-        ? `<span class="chip chip-ok">Worked (credited)</span>`
-        : `<span class="chip chip-warn">Deducted</span>`;
-      li.className = "system";
-      li.innerHTML = `${formatDatePretty(h.date)} — ${lbl} ${chip}`;
-      $("systemList").appendChild(li);
-      continue;
+    // ── Booking ──
+    function weekdays(start, end) {
+      let n = 0;
+      const s = new Date(start + "T00:00:00Z"), e = new Date(end + "T00:00:00Z");
+      for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+        const day = d.getUTCDay();
+        if (day !== 0 && day !== 6) n++;
+      }
+      return n;
     }
-
-    // HOLIDAY REQUESTS
-    if (!h.start || !h.end || !h.status) continue;
-
-    const li   = document.createElement("li");
-    const days = Number(h.days ?? 0);
-    const note = h.notes
-      ? ` — <span style="color:#475569;">${String(h.notes).replace(/</g,"&lt;")}</span>`
-      : "";
-
-    li.innerHTML = `${formatDatePretty(h.start)} → ${formatDatePretty(h.end)} `
-      + `(${days} day${days === 1 ? "" : "s"}) — ${h.type || "Annual Leave"}${note}`;
-
-    // APPROVED
-    if (h.status === "Approved") {
-      li.className = "approved";
-      $("approvedList").appendChild(li);
-      continue;
+    function updateCount() {
+      const s = g("bStart").value, e = g("bEnd").value, box = g("bCount");
+      if (!s || !e || new Date(e) < new Date(s)) { box.style.display = "none"; return; }
+      const n = weekdays(s, e);
+      box.style.display = "block";
+      box.innerHTML = n > 0
+        ? `This will use <b>${n} day${n === 1 ? "" : "s"}</b> of your allowance (weekends not counted).`
+        : "No weekdays in that range — pick different dates.";
     }
+    g("bStart").addEventListener("change", () => { if (!g("bEnd").value || g("bEnd").value < g("bStart").value) g("bEnd").value = g("bStart").value; updateCount(); });
+    g("bEnd").addEventListener("change", updateCount);
 
-    // PENDING — can cancel
-    if (h.status === "Pending") {
-      li.className = "pending";
-      li.innerHTML += ` <span class="chip chip-warn">Pending</span>`;
-      const btn = document.createElement("button");
-      btn.className   = "tinyBtn";
-      btn.textContent = "Cancel";
-      btn.onclick     = () => cancelRequest(h.id);
-      li.appendChild(btn);
-      $("pendingList").appendChild(li);
-      continue;
-    }
+    g("bookBtn").onclick = () => {
+      g("bStart").value = ""; g("bEnd").value = ""; g("bNote").value = ""; g("bType").selectedIndex = 0;
+      g("bMsg").textContent = ""; g("bCount").style.display = "none";
+      g("bookModal").classList.add("open");
+    };
+    function closeBook() { g("bookModal").classList.remove("open"); }
 
-    // REJECTED — can delete
-    if (h.status === "Rejected") {
-      li.className = "rejected";
-      li.innerHTML += ` <span class="chip chip-bad">Declined</span>`;
-      const btn = document.createElement("button");
-      btn.className   = "tinyBtn tinyBtnDanger";
-      btn.textContent = "Delete";
-      btn.onclick     = () => deleteRequest(h.id);
-      li.appendChild(btn);
-      $("pendingList").appendChild(li);
-      continue;
-    }
+    g("bSubmit").onclick = async () => {
+      const s = g("bStart").value, e = g("bEnd").value, note = g("bNote").value.trim();
+      const msg = g("bMsg");
+      if (!s || !e) { msg.className = "msg err"; msg.textContent = "Pick your first and last day."; return; }
+      if (new Date(e) < new Date(s)) { msg.className = "msg err"; msg.textContent = "Last day is before first day."; return; }
+      if (!note) { msg.className = "msg err"; msg.textContent = "Add a short reminder note."; return; }
+      if (weekdays(s, e) <= 0) { msg.className = "msg err"; msg.textContent = "No weekdays in that range."; return; }
+      g("bSubmit").disabled = true; msg.className = "msg"; msg.textContent = "Sending…";
+      try {
+        const bookYear = new Date(s + "T00:00:00").getFullYear();
+        const res = await authFetch(`/holiday/request?year=${bookYear}`, { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ start: s, end: e, type: g("bType").value, notes: note }) });
+        if (!res.ok) throw new Error(await res.text());
+        closeBook();
+        if (bookYear !== YEAR) { YEAR = bookYear; g("yearSel").value = String(bookYear); }
+        loadAll();
+      } catch (err) { msg.className = "msg err"; msg.textContent = err.message || "Couldn't send the request."; }
+      finally { g("bSubmit").disabled = false; }
+    };
 
-    // CANCELLED — can delete
-    if (h.status === "Cancelled") {
-      li.className = "rejected";
-      li.innerHTML += ` <span class="chip chip-bad">Cancelled</span>`;
-      const btn = document.createElement("button");
-      btn.className   = "tinyBtn tinyBtnDanger";
-      btn.textContent = "Delete";
-      btn.onclick     = () => deleteRequest(h.id);
-      li.appendChild(btn);
-      $("pendingList").appendChild(li);
-      continue;
-    }
-  }
-
-  // Empty states
-  if (!$("systemList").children.length)
-    $("systemList").innerHTML = "<li class='system'>No bank holidays or shutdown days recorded.</li>";
-  if (!$("approvedList").children.length)
-    $("approvedList").innerHTML = "<li class='approved'>No approved holidays yet.</li>";
-  if (!$("pendingList").children.length)
-    $("pendingList").innerHTML = "<li class='pending'>No pending or other requests.</li>";
-}
-
-// ─── Submit request ───────────────────────────────────────────
-document.getElementById("holidayForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  const submitBtn = $("submitBtn");
-  submitBtn.disabled = true;
-
-  if (new Date($("end").value) < new Date($("start").value)) {
-    alert("End date cannot be before start date");
-    submitBtn.disabled = false;
-    return;
-  }
-
-  const reminder = $("notes").value.trim();
-  if (!reminder) {
-    alert("Please add a reminder note.");
-    submitBtn.disabled = false;
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API}/holiday/request?year=${year}`, {
-      method: "POST",
-      headers: { "Content-Type":"application/json", "X-User":user, "X-Role":role },
-      body: JSON.stringify({
-        start: $("start").value,
-        end:   $("end").value,
-        type:  $("type").value,
-        notes: reminder
-      })
-    });
-    if (!res.ok) { alert(await res.text()); submitBtn.disabled = false; return; }
-    alert("Holiday request submitted successfully.");
-    document.getElementById("holidayForm").reset();
-    document.getElementById("engineer").value = user.replace(".", " ");
-    await new Promise(r => setTimeout(r, 600));
-    await Promise.allSettled([loadSummary(), loadMyHolidays()]);
-  } catch(e) {
-    alert("Submission failed. Please try again.");
-  }
-
-  submitBtn.disabled = false;
-});
-
-// ─── Initial load ─────────────────────────────────────────────
-loadSummary();
-loadMyHolidays();
-</script>
-
+    loadAll();
+  </script>
 </body>
 </html>

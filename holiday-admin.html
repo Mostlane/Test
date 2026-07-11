@@ -3,1032 +3,402 @@
 <head>
   <script src="/portal-config.js"></script>
   <script src="auth.js"></script>
-  <meta charset="UTF-8" />
-  <title>Holiday Admin – Mostlane</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Holiday Admin — Mostlane Portal</title>
   <style>
-    :root{
-      --ml-blue:#003366;
-      --ml-accent:#1a73e8;
-      --ml-bg:#e6e8eb;
-      --ink:#0f172a;
-      --muted:#64748b;
-      --card:rgba(255,255,255,0.9);
-      --border:#e5e7eb;
-      --good:#15803d;
-      --warn:#b45309;
-      --bad:#b00020;
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:1200px; margin:16px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .btn { background:#0066cc; color:#fff; border:none; border-radius:9px; padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.green { background:#0c7d27; }
+    .btn.small { padding:6px 10px; font-size:13px; font-weight:500; }
+    .btn:disabled { opacity:.5; cursor:default; }
 
-      --cell:28px;
-      --nameCol:220px;
-      --dayCol:28px;
-    }
+    .tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; }
+    .tabs button { background:#fff; border:1px solid #d7dee6; border-radius:999px; padding:9px 15px; font-size:13.5px; cursor:pointer; color:#27313a; font-family:inherit; flex:none; display:flex; align-items:center; gap:7px; }
+    .tabs button.active { background:#0066cc; color:#fff; border-color:#0066cc; }
+    .tabs .cnt { background:#e11900; color:#fff; border-radius:999px; min-width:18px; height:18px; font:700 11px/18px system-ui; text-align:center; padding:0 4px; }
+    .sect { display:none; } .sect.active { display:block; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
 
-    *{box-sizing:border-box;}
-    html,body{width:100%;max-width:100%;overflow-x:hidden;}
-    body{
-      margin:0;
-      padding:22px;
-      font-family:"Segoe UI",system-ui,Roboto,Arial,sans-serif;
-      background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
-      background-size:180% auto;
-      color:var(--ink);
-    }
+    /* Approvals */
+    .apr { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid #f0f3f7; flex-wrap:wrap; }
+    .apr:last-child { border-bottom:none; }
+    .apr .who b { display:block; font-size:14.5px; }
+    .apr .who { flex:1; min-width:180px; }
+    .apr .acts { display:flex; gap:8px; }
+    .dateblock { background:#f0f6ff; border-radius:10px; padding:7px 10px; text-align:center; min-width:86px; flex:none; }
+    .dateblock b { display:block; font-size:13px; color:#003366; }
+    .dateblock span { font-size:11px; color:#667085; }
 
-    .shell{
-      max-width:1400px;
-      margin:0 auto;
-      background:rgba(255,255,255,0.92);
-      border-radius:14px;
-      box-shadow:0 12px 28px rgba(0,0,0,0.12);
-      overflow:hidden;
-      border:1px solid rgba(0,0,0,0.06);
-    }
+    /* Wall chart */
+    .wcbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    .wcbar h2 { margin:0; font-size:16px; color:#003366; flex:1; }
+    .wcbar button.nav { background:#fff; border:1px solid #d7dee6; border-radius:8px; width:34px; height:34px; font-size:16px; cursor:pointer; }
+    .wcscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
+    table.wall { border-collapse:collapse; width:max-content; min-width:100%; }
+    table.wall th, table.wall td { border-right:1px solid #f0f3f7; border-bottom:1px solid #f0f3f7; padding:0; }
+    table.wall thead th { background:#f6f8fa; font-size:10.5px; color:#667085; padding:5px 0 4px; min-width:26px; text-align:center; font-weight:600; position:sticky; top:0; }
+    table.wall thead th.dow { font-size:9px; color:#9aa6b2; font-weight:500; }
+    table.wall td.name, table.wall th.name { position:sticky; left:0; background:#fff; z-index:2; min-width:130px; max-width:160px; padding:7px 10px; font-size:13px; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-shadow:2px 0 4px rgba(0,0,0,.04); }
+    table.wall thead th.name { background:#f6f8fa; z-index:3; }
+    table.wall td.day { height:34px; min-width:26px; }
+    td.day.wkend { background:#f3f5f8; }
+    td.day.today { outline:2px solid #1a4f8f; outline-offset:-2px; }
+    td.day .blk { width:100%; height:100%; display:block; border:none; padding:0; cursor:pointer; }
+    .blk.hol { background:#18a558; }
+    .blk.pend { background:repeating-linear-gradient(45deg,#f4b942,#f4b942 4px,#ffe1a0 4px,#ffe1a0 8px); }
+    .blk.bank { background:#4d8bff; }
+    .blk.shut { background:#8b5cf6; }
+    .blk.worked { background:repeating-linear-gradient(45deg,#b9e5c8,#b9e5c8 4px,#e9f8ee 4px,#e9f8ee 8px); }
+    .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:12px; color:#475569; }
+    .legend span { display:inline-flex; align-items:center; gap:6px; }
+    .legend i { width:14px; height:14px; border-radius:4px; display:inline-block; }
 
-    header{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      flex-wrap:wrap;
-      padding:16px 18px;
-      border-bottom:1px solid var(--border);
-      background:linear-gradient(90deg,#fff,#f7f9fc);
-    }
-    header h1{margin:0;font-size:20px;color:var(--ml-blue);}
-    .btn{
-      border:1px solid rgba(0,0,0,0.08);
-      background:#eef2f9;
-      color:#0f172a;
-      padding:10px 12px;
-      border-radius:10px;
-      cursor:pointer;
-      font-weight:700;
-      font-size:14px;
-      white-space:nowrap;
-    }
-    .btnPrimary{background:rgba(0,74,153,0.85);color:#fff;border:none}
-    .btnSmall{padding:6px 10px;font-size:12px;border-radius:8px;font-weight:700}
-    .btnDanger{background:rgba(176,0,32,0.9);color:#fff;border:none}
-    .btnOk{background:rgba(21,128,61,0.9);color:#fff;border:none}
-    .btn:hover{filter:brightness(0.98)}
-    .btn:active{transform:scale(0.98)}
+    /* Balances */
+    table.bal { width:100%; border-collapse:collapse; }
+    table.bal th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#667085; padding:8px 10px; border-bottom:1px solid #e6ebf1; }
+    table.bal td { padding:9px 10px; border-bottom:1px solid #f0f3f7; font-size:14px; }
+    table.bal tr:last-child td { border-bottom:none; }
+    table.bal .low { color:#d97706; font-weight:700; }
+    table.bal .neg { color:#b00020; font-weight:700; }
+    table.bal button.edit { background:none; border:1px solid #d7dee6; border-radius:7px; padding:3px 9px; cursor:pointer; font-size:12.5px; color:#1a4f8f; }
 
-    .content{padding:18px;}
-    .row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
-    .panel{
-      background:var(--card);
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:14px;
-      box-shadow:0 6px 18px rgba(0,0,0,0.06);
-      width:100%;
-    }
-
-    .panel h2{margin:0 0 10px 0;font-size:16px;color:var(--ml-blue);}
-
-    .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    select,input{
-      height:40px;
-      padding:8px 12px;
-      border-radius:10px;
-      border:1px solid #cbd5e1;
-      background:#fff;
-      font-size:14px;
-      min-width:0;
-    }
-    .pill{
-      display:inline-flex;align-items:center;gap:8px;
-      padding:8px 12px;border-radius:999px;
-      background:#f8fbff;border:1px solid var(--border);
-      font-weight:700;color:#0f172a;
-    }
-    .muted{color:var(--muted)}
-
-    .tableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-    table{
-      width:100%;
-      min-width:500px;
-      border-collapse:separate;
-      border-spacing:0;
-      overflow:hidden;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:#fff;
-    }
-    th,td{padding:10px 10px;border-bottom:1px solid #eef2f7;font-size:13px;text-align:left;vertical-align:middle}
-    thead th{background:#f7f9fc;color:#0f172a;font-weight:800;white-space:nowrap}
-    .tag{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:800;border:1px solid rgba(0,0,0,0.08)}
-    .tagPending{color:var(--warn);background:rgba(180,83,9,0.1)}
-    .tagApproved{color:var(--good);background:rgba(21,128,61,0.1)}
-    .tagRejected{color:var(--bad);background:rgba(176,0,32,0.08)}
-
-    .calWrap{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:14px;background:#fff}
-
-    .calHeader, .calRow{
-      display:grid;
-      grid-template-columns: var(--nameCol) repeat(31, var(--dayCol));
-      min-width: calc(var(--nameCol) + 31 * var(--dayCol));
-      border-bottom:1px solid #eef2f7;
-    }
-
-    .calHeader{position:sticky;top:0;z-index:5;background:#f7f9fc}
-
-    .nameCell{
-      padding:8px 10px;font-weight:800;color:#0f172a;border-right:1px solid #eef2f7;
-      display:flex;align-items:center;gap:8px;background:inherit;position:sticky;left:0;z-index:6;
-    }
-    .dayCell{
-      width:var(--dayCol);height:var(--cell);display:flex;align-items:center;justify-content:center;
-      font-size:12px;color:#334155;border-right:1px solid #f1f5f9;
-      position:relative;
-    }
-    .calRow .dayCell{background:#fff}
-    .dayCell.weekend{background:#f8fafc;color:#94a3b8}
-
-    .dayCell.evHoliday{background:rgba(0,74,153,0.20)}
-    .dayCell.evSick{background:rgba(180,83,9,0.18)}
-    .dayCell.evUnpaid{background:rgba(176,0,32,0.15)}
-    .dayCell.evCompulsory{background:rgba(15,23,42,0.10)}
-    .dayCell.evBank{background:rgba(26,115,232,0.18)}
-    .dayCell.evShutdown{background:rgba(0,0,0,0.10)}
-    .dayCell.evWorked{outline:2px solid rgba(21,128,61,0.55);outline-offset:-2px}
-
-    /* Tappable indicator — bank/shutdown cells */
-    .dayCell.evBank,
-    .dayCell.evShutdown {
-      cursor: pointer;
-    }
-    .dayCell.evBank::after,
-    .dayCell.evShutdown::after {
-      content:'';
-      position:absolute;
-      inset:0;
-      border-radius:3px;
-      border:2px solid rgba(0,74,153,0.35);
-      pointer-events:none;
-    }
-    .dayCell.evBank.evWorked::after,
-    .dayCell.evShutdown.evWorked::after {
-      border-color:rgba(21,128,61,0.55);
-    }
-
-    /* Tappable indicator — approved holiday cells */
-    .dayCell.evHoliday,
-    .dayCell.evSick,
-    .dayCell.evUnpaid,
-    .dayCell.evCompulsory {
-      cursor: pointer;
-    }
-    .dayCell.evHoliday::after,
-    .dayCell.evSick::after,
-    .dayCell.evUnpaid::after,
-    .dayCell.evCompulsory::after {
-      content:'';
-      position:absolute;
-      inset:0;
-      border-radius:3px;
-      border:2px solid rgba(176,0,32,0.30);
-      pointer-events:none;
-    }
-
-    /* Active/tap feedback */
-    .dayCell.evBank:active,
-    .dayCell.evShutdown:active,
-    .dayCell.evHoliday:active,
-    .dayCell.evSick:active,
-    .dayCell.evUnpaid:active,
-    .dayCell.evCompulsory:active {
-      filter:brightness(0.92);
-      transform:scale(0.92);
-    }
-
-    .tooltip{
-      position:fixed;z-index:9999;background:rgba(15,23,42,0.95);color:#fff;
-      padding:10px 12px;border-radius:10px;font-size:12px;max-width:260px;
-      pointer-events:none;transform:translate(10px,10px);display:none;
-    }
-
-    .split{display:flex;gap:14px;flex-wrap:wrap}
-    .col{flex:1;min-width:280px}
-    .listRow{display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap}
-    .listRow input{flex:1;min-width:120px}
-    .listRow .btnSmall{flex:0 0 auto}
-    .actionBtns{display:flex;gap:6px;flex-wrap:wrap}
-
-    /* ── Bottom sheet ── */
-    .sheet-backdrop{
-      display:none;position:fixed;inset:0;z-index:8000;
-      background:rgba(0,0,0,0.45);
-    }
-    .sheet-backdrop.open{display:block;}
-    .sheet{
-      position:fixed;bottom:0;left:0;right:0;z-index:8001;
-      background:#fff;border-radius:18px 18px 0 0;
-      padding:22px 20px 32px;
-      box-shadow:0 -8px 32px rgba(0,0,0,0.18);
-      transform:translateY(100%);
-      transition:transform 0.22s ease;
-    }
-    .sheet.open{transform:translateY(0);}
-    .sheet-title{font-size:17px;font-weight:800;color:var(--ml-blue);margin-bottom:4px;}
-    .sheet-date{font-size:13px;color:var(--muted);margin-bottom:10px;}
-    .sheet-body{font-size:14px;color:var(--ink);margin-bottom:18px;line-height:1.5;}
-    .sheet-btns{display:flex;gap:10px;}
-    .sheet-btns .btn{flex:1;text-align:center;padding:13px;}
-
-    @media(max-width:900px){
-      body{padding:14px}
-      :root{ --nameCol:180px; --dayCol:26px; }
-      .panel{min-width:0 !important;}
-      header{flex-direction:column;align-items:stretch;gap:10px}
-      header h1{text-align:center}
-      .controls{justify-content:center}
-    }
-
-    @media(max-width:600px){
-      body{padding:8px}
-      :root{ --nameCol:120px; --dayCol:24px; --cell:24px; }
-      .shell{border-radius:10px}
-      header{padding:12px}
-      header h1{font-size:18px}
-      .content{padding:10px}
-      .row{gap:10px}
-      .panel{padding:10px;border-radius:10px}
-      .panel h2{font-size:14px}
-      .btn{padding:8px 10px;font-size:13px}
-      .btnSmall{padding:6px 8px;font-size:11px}
-      .controls{gap:6px}
-      .controls .btn{padding:8px 10px}
-      .pill{padding:6px 10px;font-size:13px}
-      select,input{height:36px;padding:6px 10px;font-size:13px}
-      table{min-width:400px}
-      th,td{padding:8px 6px;font-size:12px}
-      .nameCell{padding:6px 8px;font-size:12px}
-      .nameCell .tag{display:none}
-      .dayCell{font-size:10px}
-      .split{flex-direction:column}
-      .col{min-width:100%}
-      .listRow{gap:6px}
-      .listRow input{min-width:80px}
-      .muted{font-size:12px}
-      .actionBtns{flex-direction:column;gap:4px}
-      .actionBtns .btn{width:100%}
-    }
-
-    @media(max-width:400px){
-      :root{ --nameCol:100px; --dayCol:20px; --cell:20px; }
-      body{padding:4px}
-      .content{padding:6px}
-      header{padding:10px}
-      header h1{font-size:16px}
-      .panel{padding:8px}
-      table{min-width:320px}
-      th,td{padding:6px 4px;font-size:11px}
-    }
+    /* Settings */
+    .setgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:760px){ .setgrid { grid-template-columns:1fr; } }
+    .card h3 { margin:0 0 8px; font-size:15px; color:#003366; }
+    textarea.days { width:100%; min-height:130px; border:1px solid #ccd5dd; border-radius:9px; padding:10px; font:13px/1.6 ui-monospace,Menlo,monospace; }
+    input.num { width:90px; padding:9px; border:1px solid #ccd5dd; border-radius:8px; font-size:15px; }
+    .msg { font-size:13px; margin-top:8px; } .msg.ok { color:#0c7d27; } .msg.err { color:#b00020; }
+    select.yearsel { padding:8px 10px; border:1px solid #ccd5dd; border-radius:8px; font-size:14px; background:#fff; font-family:inherit; }
   </style>
+  <script>
+    if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") location.href = "login.html";
+  </script>
 </head>
-
 <body>
-  <div class="shell">
-    <header>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
-        <h1>Holiday Admin</h1>
-      </div>
-      <div class="controls">
-        <button id="prevMonth" class="btn">◀</button>
-        <div class="pill"><span id="monthLabel">—</span></div>
-        <button id="nextMonth" class="btn">▶</button>
-        <select id="yearSel"></select>
-        <button id="refreshBtn" class="btn btnPrimary">Refresh</button>
-      </div>
-    </header>
+  <header class="page">
+    <h1>🗓 Holiday Admin</h1>
+    <select class="yearsel" id="yearSel" style="margin-right:4px;"></select>
+    <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+  </header>
 
-    <div class="content">
-      <div class="row">
-        <div class="panel" style="flex:1;">
-          <h2>Pending Approvals</h2>
-          <div class="muted" id="pendingHint" style="margin-bottom:8px;">—</div>
-          <div class="tableWrap">
-            <table>
-              <thead><tr><th>Engineer</th><th>Dates</th><th>Days</th><th>Type</th><th>Note</th><th>Actions</th></tr></thead>
-              <tbody id="pendingTbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:14px;">
-        <div class="panel" style="flex:1;">
-          <h2>Allowance Overview</h2>
-          <div class="muted" id="allowanceHint" style="margin-bottom:8px;">Year totals (includes bank holidays + shutdown; credited back if worked).</div>
-          <div class="tableWrap" style="max-height:420px;">
-            <table>
-              <thead><tr><th>Engineer</th><th>Allowance</th><th>Used</th><th>Remaining</th><th>Edit</th></tr></thead>
-              <tbody id="allowTbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:14px;">
-        <div class="panel" style="flex:1;">
-          <h2>Month View</h2>
-          <div class="muted" id="calHint" style="margin-bottom:10px;">
-            Tap a bank holiday or shutdown cell to toggle worked status. Tap an approved holiday cell to cancel it.
-          </div>
-          <div class="calWrap" id="calWrap"></div>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:14px;">
-        <div class="panel" style="flex:1;">
-          <h2>Bank Holidays &amp; Company Shutdown</h2>
-          <div class="split">
-            <div class="col">
-              <div class="muted" style="margin-bottom:6px;">Bank Holidays</div>
-              <div class="listRow">
-                <input type="date" id="bhDate">
-                <input type="text" id="bhLabel" placeholder="Label">
-                <button class="btn btnSmall btnPrimary" id="addBH">Add</button>
-              </div>
-              <div id="bhList"></div>
-            </div>
-            <div class="col">
-              <div class="muted" style="margin-bottom:6px;">Company Shutdown</div>
-              <div class="listRow">
-                <input type="date" id="sdDate">
-                <input type="text" id="sdLabel" placeholder="Label">
-                <button class="btn btnSmall btnPrimary" id="addSD">Add</button>
-              </div>
-              <div id="sdList"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="status" class="muted" style="margin-top:12px;"></div>
+  <div class="wrap">
+    <div class="tabs" id="tabs">
+      <button data-tab="approvals" class="active">Approvals <span class="cnt" id="pendCnt" style="display:none;">0</span></button>
+      <button data-tab="wall">Wall chart</button>
+      <button data-tab="balances">Balances</button>
+      <button data-tab="settings">Settings</button>
     </div>
-  </div>
 
-  <!-- Tooltip (desktop hover) -->
-  <div class="tooltip" id="tooltip"></div>
+    <!-- APPROVALS -->
+    <div class="sect active" data-sec="approvals">
+      <div class="card">
+        <h3>Waiting for a decision</h3>
+        <div id="pendList" class="muted">Loading…</div>
+      </div>
+      <div class="card">
+        <h3>Recent decisions</h3>
+        <div id="doneList" class="muted">Loading…</div>
+      </div>
+    </div>
 
-  <!-- Bottom sheet -->
-  <div class="sheet-backdrop" id="sheetBackdrop">
-    <div class="sheet" id="sheet">
-      <div class="sheet-title" id="sheetTitle">—</div>
-      <div class="sheet-date"  id="sheetDate">—</div>
-      <div class="sheet-body"  id="sheetBody">—</div>
-      <div class="sheet-btns">
-        <button class="btn btnDanger" id="sheetConfirm">Confirm</button>
-        <button class="btn"           id="sheetCancel">Cancel</button>
+    <!-- WALL CHART -->
+    <div class="sect" data-sec="wall">
+      <div class="wcbar">
+        <button class="nav" id="wcPrev">‹</button>
+        <h2 id="wcTitle" style="text-align:center; flex:1;">…</h2>
+        <button class="nav" id="wcNext">›</button>
+      </div>
+      <div class="wcscroll"><table class="wall" id="wallTbl"></table></div>
+      <div class="legend">
+        <span><i style="background:#18a558"></i> Approved holiday</span>
+        <span><i style="background:repeating-linear-gradient(45deg,#f4b942,#f4b942 4px,#ffe1a0 4px,#ffe1a0 8px)"></i> Pending</span>
+        <span><i style="background:#4d8bff"></i> Bank holiday</span>
+        <span><i style="background:#8b5cf6"></i> Shutdown</span>
+        <span><i style="background:repeating-linear-gradient(45deg,#b9e5c8,#b9e5c8 4px,#e9f8ee 4px,#e9f8ee 8px)"></i> Worked (credited)</span>
+      </div>
+      <p class="muted" style="margin-top:8px;">Tap a green block to cancel an approved holiday · tap a blue/purple block to mark that day worked (credits it back).</p>
+    </div>
+
+    <!-- BALANCES -->
+    <div class="sect" data-sec="balances">
+      <div class="card" style="padding:6px 8px;">
+        <table class="bal">
+          <thead><tr><th>Person</th><th>Allowance</th><th>Used</th><th>Remaining</th><th></th></tr></thead>
+          <tbody id="balBody"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="sect" data-sec="settings">
+      <div class="card" style="max-width:420px;">
+        <h3>Default allowance</h3>
+        <p class="muted" style="margin:0 0 8px;">Days per person for <span class="yearRef"></span> (individual overrides in Balances).</p>
+        <input type="number" class="num" id="defAllow" min="0" max="60">
+        <button class="btn" id="saveDef" style="margin-left:8px;">Save</button>
+        <p class="msg" id="defMsg"></p>
+      </div>
+      <div class="setgrid">
+        <div class="card">
+          <h3>Bank holidays — <span class="yearRef"></span></h3>
+          <p class="muted" style="margin:0 0 8px;">One per line: <code>YYYY-MM-DD Label</code></p>
+          <textarea class="days" id="bankTxt" spellcheck="false"></textarea>
+          <button class="btn" id="saveBank" style="margin-top:10px;">Save bank holidays</button>
+          <p class="msg" id="bankMsg"></p>
+        </div>
+        <div class="card">
+          <h3>Company shutdown — <span class="yearRef"></span></h3>
+          <p class="muted" style="margin:0 0 8px;">One per line: <code>YYYY-MM-DD Label</code></p>
+          <textarea class="days" id="shutTxt" spellcheck="false"></textarea>
+          <button class="btn" id="saveShut" style="margin-top:10px;">Save shutdown days</button>
+          <p class="msg" id="shutMsg"></p>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-const API = "https://mostlane-holidays.jamie-def.workers.dev";
-const user = sessionStorage.getItem("mostlaneUser");
-
-const HOLIDAY_ADMINS = [
-  "Jamie Line",
-  "Joe Line",
-  "Greg Line",
-  "Megan Line"
-];
-
-if (!user) {
-  alert("Session expired. Please log in again.");
-  location.href = "login.html";
-}
-
-if (!HOLIDAY_ADMINS.includes(user)) {
-  alert("You are not authorised to access Holiday Admin.");
-  location.href = "main.html";
-}
-
-const $ = (id) => document.getElementById(id);
-
-let state = {
-  year:  new Date().getFullYear(),
-  month: new Date().getMonth() + 1,
-  config: { bankholidays: [], shutdown: [], defaultAllowance: 28, allowances: {} },
-  allRequests: [],
-  summary:  null,
-  calendar: null
-};
-
-const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function fmtMonthLabel() {
-  $("monthLabel").textContent = `${monthNames[state.month - 1]} ${state.year}`;
-}
-function setStatus(msg) { $("status").textContent = msg || ""; }
-
-async function apiGET(path) {
-  const role = HOLIDAY_ADMINS.includes(user) ? "Admin" : "Engineer";
-  const res = await fetch(`${API}${path}`, {
-    headers: { "X-User": user, "X-Role": role },
-    cache: "no-store"
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-async function apiPOST(path, body) {
-  const role = HOLIDAY_ADMINS.includes(user) ? "Admin" : "Engineer";
-  const res = await fetch(`${API}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-User": user, "X-Role": role },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-// ─── Bottom sheet ─────────────────────────────────────────────
-let sheetResolve = null;
-
-function openSheet({ title, date, body, confirmLabel = "Confirm", confirmClass = "btnDanger" }) {
-  return new Promise(resolve => {
-    sheetResolve = resolve;
-    $("sheetTitle").textContent = title;
-    $("sheetDate").textContent  = date;
-    $("sheetBody").innerHTML    = body;
-    const confirmBtn = $("sheetConfirm");
-    confirmBtn.className   = `btn ${confirmClass}`;
-    confirmBtn.textContent = confirmLabel;
-    $("sheetBackdrop").classList.add("open");
-    requestAnimationFrame(() => $("sheet").classList.add("open"));
-  });
-}
-
-function closeSheet(confirmed) {
-  $("sheet").classList.remove("open");
-  $("sheetBackdrop").classList.remove("open");
-  if (sheetResolve) { sheetResolve(confirmed); sheetResolve = null; }
-}
-
-$("sheetConfirm").onclick = () => closeSheet(true);
-$("sheetCancel").onclick  = () => closeSheet(false);
-$("sheetBackdrop").addEventListener("click", (e) => {
-  if (e.target === $("sheetBackdrop")) closeSheet(false);
-});
-
-// ─── Year selector ────────────────────────────────────────────
-function buildYearOptions() {
-  const sel = $("yearSel");
-  sel.innerHTML = "";
-  const now = new Date().getFullYear();
-  for (let y = now - 1; y <= now + 2; y++) {
-    const opt = document.createElement("option");
-    opt.value = y; opt.textContent = y;
-    if (y === state.year) opt.selected = true;
-    sel.appendChild(opt);
-  }
-  sel.onchange = () => { state.year = parseInt(sel.value, 10); refreshAll(); };
-}
-
-// ─── buildCells ───────────────────────────────────────────────
-// Priority: pre-keyed API cells (most complete, include requestId)
-// then eng.holidays[] expansion for any gaps,
-// then bank holidays and shutdown from config.
-function buildCells(eng, year, month) {
-  const cells = {};
-
-  // 1. Copy pre-keyed cells from API — these are authoritative and include
-  //    requestId, rangeStart, rangeEnd, days on holiday cells
-  if (eng.cells && typeof eng.cells === "object" && !Array.isArray(eng.cells)) {
-    Object.assign(cells, eng.cells);
-  }
-
-  // 2. Expand eng.holidays[] — only fills days NOT already set by the API
-  //    so we never overwrite requestId with an incomplete fallback cell
-  for (const h of (eng.holidays || [])) {
-    if (h.status !== "Approved") continue;
-    const start = new Date(h.start + "T00:00:00Z");
-    const end   = new Date(h.end   + "T00:00:00Z");
-    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-      const iso = d.toISOString().slice(0, 10);
-      const [y, m] = iso.split("-").map(Number);
-      if (y !== year || m !== month) continue;
-      if (!cells[iso]) {
-        // Fallback cell — carries requestId from the holiday object
-        cells[iso] = {
-          kind:       "holiday",
-          type:       h.type   || "Annual Leave",
-          note:       h.notes  || "",
-          status:     h.status,
-          requestId:  h.id,
-          rangeStart: h.start,
-          rangeEnd:   h.end,
-          days:       h.days
-        };
-      }
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
     }
-  }
+    let YEAR = new Date().getFullYear();
+    let MONTH = new Date().getMonth() + 1;
+    let ORDER = {};           // username -> canonical index (office first, then field)
+    let NAMES = {};           // username -> display name
+    let ALL = [];             // all requests for the year
 
-  // 3. Overlay bank holidays from config
-  for (const bh of (state.config.bankholidays || [])) {
-    const [y, m] = (bh.date || "").split("-").map(Number);
-    if (y !== year || m !== month) continue;
-    if (!cells[bh.date]) {
-      cells[bh.date] = {
-        kind:   "bankholiday",
-        label:  bh.label || "Bank Holiday",
-        worked: bh.worked || false
-      };
-    }
-  }
-
-  // 4. Overlay shutdown days from config
-  for (const sd of (state.config.shutdown || [])) {
-    const [y, m] = (sd.date || "").split("-").map(Number);
-    if (y !== year || m !== month) continue;
-    if (!cells[sd.date]) {
-      cells[sd.date] = {
-        kind:   "shutdown",
-        label:  sd.label || "Company Shutdown",
-        worked: sd.worked || false
-      };
-    }
-  }
-
-  return cells;
-}
-
-// ─── Pending approvals ────────────────────────────────────────
-function renderPending() {
-  const tbody = $("pendingTbody");
-  tbody.innerHTML = "";
-
-  const pending = state.allRequests
-    .filter(r => (r.year ?? state.year) === state.year && r.status === "Pending")
-    .sort((a, b) => (a.submittedAt || "").localeCompare(b.submittedAt || ""));
-
-  $("pendingHint").textContent = pending.length
-    ? `${pending.length} pending request(s).`
-    : "No pending requests.";
-
-  for (const r of pending) {
-    const tr   = document.createElement("tr");
-    const name = (r.username || "").replace(".", " ");
-    const note = (r.notes    || "").replace(/</g, "&lt;");
-    tr.innerHTML = `
-      <td><b>${name}</b><div class="muted" style="font-size:11px;">${r.username}</div></td>
-      <td style="white-space:nowrap">${r.start} → ${r.end}</td>
-      <td>${Number(r.days || 0).toFixed(0)}</td>
-      <td>${r.type || "Annual Leave"}</td>
-      <td>${note || "<span class='muted'>—</span>"}</td>
-      <td>
-        <div class="actionBtns">
-          <button class="btn btnSmall btnOk"    data-act="approve" data-id="${r.id}">Approve</button>
-          <button class="btn btnSmall btnDanger" data-act="reject"  data-id="${r.id}">Decline</button>
-        </div>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  }
-
-  tbody.querySelectorAll("button[data-act]").forEach(btn => {
-    btn.onclick = async () => {
-      const id  = btn.getAttribute("data-id");
-      const act = btn.getAttribute("data-act");
+    // Guard: admins only.
+    (async () => {
       try {
-        setStatus("Saving…");
-        await apiPOST(
-          act === "approve"
-            ? `/holiday/approve?year=${state.year}`
-            : `/holiday/reject?year=${state.year}`,
-          { id }
-        );
-        await refreshAll();
-        setStatus("");
-      } catch (e) {
-        alert("Action failed: " + e.message);
-        setStatus("");
-      }
-    };
-  });
-}
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.HolidayAdmin === "Yes")) {
+          alert("Holiday admin needs the Holiday Admin permission."); location.href = "main.html";
+        }
+      } catch (e) {}
+    })();
 
-// ─── Allowance table ──────────────────────────────────────────
-function renderAllowance() {
-  const tbody = $("allowTbody");
-  tbody.innerHTML = "";
-  if (!state.summary?.engineers) return;
+    (function () {
+      const y = new Date().getFullYear();
+      g("yearSel").innerHTML = [y - 1, y, y + 1].map(v => `<option ${v === y ? "selected" : ""}>${v}</option>`).join("");
+      g("yearSel").onchange = () => { YEAR = Number(g("yearSel").value); loadAll(); };
+      document.querySelectorAll(".yearRef").forEach(el => el.textContent = YEAR);
+    })();
 
-  for (const e of state.summary.engineers) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><b>${e.name}</b><div class="muted" style="font-size:11px;">${e.username}</div></td>
-      <td>${Number(e.allowance  || 0).toFixed(0)}</td>
-      <td>${Number(e.used       || 0).toFixed(0)}</td>
-      <td><b>${Number(e.remaining || 0).toFixed(0)}</b></td>
-      <td><button class="btn btnSmall" data-edit="${e.username}">Edit</button></td>
-    `;
-    tbody.appendChild(tr);
-  }
-
-  tbody.querySelectorAll("button[data-edit]").forEach(b => {
-    b.onclick = async () => {
-      const username = b.getAttribute("data-edit");
-      const current  = state.summary.engineers.find(x => x.username === username)?.allowance ?? 28;
-      const val = prompt(`Set allowance for ${username} (${state.year})`, String(current));
-      if (val === null) return;
-      const num = Number(val);
-      if (!Number.isFinite(num)) { alert("Invalid number"); return; }
-      try {
-        setStatus("Saving allowance…");
-        await apiPOST(`/holiday/set-allowance?year=${state.year}`, { username, allowance: num });
-        await refreshAll();
-        setStatus("");
-      } catch (e) {
-        alert("Save failed: " + e.message);
-        setStatus("");
-      }
-    };
-  });
-}
-
-// ─── Calendar helpers ─────────────────────────────────────────
-function dayIsWeekend(year, month, day) {
-  const d  = new Date(`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00Z`);
-  const wd = d.getUTCDay();
-  return wd === 0 || wd === 6;
-}
-function isoForDay(year, month, day) {
-  return `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-}
-function classForCell(cell) {
-  if (!cell) return "";
-  if (cell.kind === "holiday") {
-    const t = (cell.type || "").toLowerCase();
-    if (t.includes("sick"))       return "evSick";
-    if (t.includes("unpaid"))     return "evUnpaid";
-    if (t.includes("compulsory")) return "evCompulsory";
-    return "evHoliday";
-  }
-  if (cell.kind === "bankholiday") return "evBank"     + (cell.worked ? " evWorked" : "");
-  if (cell.kind === "shutdown")    return "evShutdown" + (cell.worked ? " evWorked" : "");
-  return "";
-}
-
-function tooltipShow(html, x, y) {
-  const t = $("tooltip");
-  t.innerHTML = html;
-  t.style.left    = Math.min(x, window.innerWidth  - 270) + "px";
-  t.style.top     = Math.min(y, window.innerHeight - 150) + "px";
-  t.style.display = "block";
-}
-function tooltipHide() { $("tooltip").style.display = "none"; }
-
-// ─── Calendar render ──────────────────────────────────────────
-function renderCalendar() {
-  const wrap = $("calWrap");
-  wrap.innerHTML = "";
-
-  const cal = state.calendar;
-  if (!cal) return;
-
-  const daysInMonth = cal.daysInMonth;
-
-  // Header
-  const head = document.createElement("div");
-  head.className = "calHeader";
-  head.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
-  head.innerHTML = `<div class="nameCell">Engineer</div>` +
-    Array.from({ length: daysInMonth }, (_, i) => {
-      const day = i + 1;
-      const wk  = dayIsWeekend(state.year, state.month, day) ? " weekend" : "";
-      return `<div class="dayCell${wk}">${day}</div>`;
-    }).join("");
-  wrap.appendChild(head);
-
-  // Engineer rows
-  for (const eng of cal.engineers) {
-    eng.cells = buildCells(eng, state.year, state.month);
-
-    const row = document.createElement("div");
-    row.className = "calRow";
-    row.style.gridTemplateColumns = `var(--nameCol) repeat(${daysInMonth}, var(--dayCol))`;
-
-    const remaining = (state.summary?.engineers || []).find(x => x.username === eng.username)?.remaining;
-    const remTxt = Number.isFinite(remaining)
-      ? `<span class="tag" style="margin-left:auto;background:#eef2f9;">${remaining}</span>`
-      : "";
-
-    row.innerHTML = `
-      <div class="nameCell"><span>${eng.name}</span>${remTxt}</div>
-    ` + Array.from({ length: daysInMonth }, (_, i) => {
-      const day  = i + 1;
-      const di   = isoForDay(state.year, state.month, day);
-      const wk   = dayIsWeekend(state.year, state.month, day) ? " weekend" : "";
-      const cell = eng.cells?.[di];
-      const cls  = classForCell(cell);
-      const data = cell
-        ? encodeURIComponent(JSON.stringify({ ...cell, date: di, username: eng.username }))
-        : "";
-      return `<div class="dayCell${wk} ${cls}" data-cell="${data}"></div>`;
-    }).join("");
-
-    wrap.appendChild(row);
-  }
-
-  // Event listeners
-  wrap.querySelectorAll(".dayCell").forEach(el => {
-    const raw = el.getAttribute("data-cell");
-    if (!raw) return;
-
-    let cell;
-    try { cell = JSON.parse(decodeURIComponent(raw)); } catch { return; }
-
-    const isSystemDay = cell.kind === "bankholiday" || cell.kind === "shutdown";
-    const isHoliday   = cell.kind === "holiday";
-
-    if (!isSystemDay && !isHoliday) return;
-
-    // Desktop tooltip
-    el.addEventListener("mousemove", (ev) => {
-      let title, sub, extra;
-      if (isHoliday) {
-        title = cell.type || "Annual Leave";
-        sub   = cell.note
-          ? `<div style="margin-top:6px;color:#cbd5e1;">${String(cell.note).replace(/</g,"&lt;")}</div>`
-          : "";
-        extra = `<div style="margin-top:6px;color:#cbd5e1;">
-                   ${cell.rangeStart || "?"} → ${cell.rangeEnd || "?"} (${cell.days ?? "?"} day${cell.days===1?"":"s"})<br>
-                   <span style="opacity:0.85;">Tap to cancel this approval</span>
-                 </div>`;
-      } else {
-        title = cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown";
-        sub   = `<div style="margin-top:6px;color:#cbd5e1;">${cell.label || ""}</div>`;
-        extra = `<div style="margin-top:6px;color:#cbd5e1;">
-                   Status: <b>${cell.worked ? "Worked (credited)" : "Deducted"}</b><br>
-                   <span style="opacity:0.85;">Tap to toggle</span>
-                 </div>`;
-      }
-      tooltipShow(
-        `<b>${title}</b><div style="margin-top:4px;opacity:0.9;">${cell.date}</div>${sub}${extra}`,
-        ev.clientX, ev.clientY
-      );
+    g("tabs").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x === b));
+      document.querySelectorAll(".sect").forEach(s => s.classList.toggle("active", s.dataset.sec === b.dataset.tab));
     });
-    el.addEventListener("mouseleave", tooltipHide);
 
-    // Tap / click
-    el.addEventListener("click", async (ev) => {
-      tooltipHide();
+    const fmtD = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" });
 
-      const isTouch = ev.sourceCapabilities?.firesTouchEvents
-        || window.matchMedia("(hover:none)").matches;
-
-      // ── Approved holiday: cancel ──
-      if (isHoliday) {
-        if (!cell.requestId) {
-          console.error("Holiday cell missing requestId:", cell);
-          alert("Cannot cancel — request ID missing. Please refresh and try again.");
-          return;
-        }
-
-        const engName  = (cell.username || "").replace(".", " ");
-        const days     = cell.days ?? "?";
-        const bodyText = `<b>${engName}</b> — ${cell.type || "Annual Leave"}<br>`
-          + `${cell.rangeStart} → ${cell.rangeEnd} (${days} day${days === 1 ? "" : "s"})<br><br>`
-          + `This will cancel the approval and credit the days back to their allowance.`;
-
-        let confirmed;
-        if (isTouch) {
-          confirmed = await openSheet({
-            title:        "Cancel Approved Holiday?",
-            date:         cell.date,
-            body:         bodyText,
-            confirmLabel: "Cancel Holiday",
-            confirmClass: "btnDanger"
-          });
-        } else {
-          confirmed = confirm(
-            `Cancel approved holiday for ${engName}?\n`
-            + `${cell.rangeStart} → ${cell.rangeEnd} (${days} days)\n\n`
-            + `This will cancel the full request and credit days back.`
-          );
-        }
-
-        if (!confirmed) return;
-
-        try {
-          setStatus("Cancelling holiday…");
-          await apiPOST(`/holiday/cancel-approved?year=${state.year}`, { id: cell.requestId });
-          await refreshAll();
-          setStatus("");
-        } catch (e) {
-          alert("Cancel failed: " + e.message);
-          setStatus("");
-        }
-        return;
-      }
-
-      // ── System day: toggle worked ──
-      const label        = cell.label || (cell.kind === "bankholiday" ? "Bank Holiday" : "Company Shutdown");
-      const currentState = cell.worked ? "Worked (credited)" : "Deducted from allowance";
-      const newState     = cell.worked ? "Deducted from allowance" : "Worked (credited)";
-
-      let confirmed;
-      if (isTouch) {
-        confirmed = await openSheet({
-          title:        label,
-          date:         cell.date + (cell.username ? ` — ${cell.username.replace(".", " ")}` : ""),
-          body:         `Currently: <b>${currentState}</b><br>Change to: <b>${newState}</b>`,
-          confirmLabel: "Confirm",
-          confirmClass: "btnPrimary"
-        });
-      } else {
-        confirmed = confirm(
-          `${label} — ${cell.date}\n\nCurrently: ${currentState}\nChange to: ${newState}?`
-        );
-      }
-
-      if (!confirmed) return;
-
+    async function loadOrder() {
       try {
-        setStatus("Updating worked status…");
-        await apiPOST(`/holiday/toggle-worked?year=${state.year}`, {
-          kind:     cell.kind,
-          username: cell.username,
-          date:     cell.date,
-          worked:   !cell.worked
+        const d = await authFetch("/users").then(r => r.json());
+        (d.Users || []).forEach((u, i) => {
+          ORDER[u.Username] = i;
+          NAMES[u.Username] = ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username;
         });
-        await refreshAll();
-        setStatus("");
-      } catch (e) {
-        alert("Toggle failed: " + e.message);
-        setStatus("");
+      } catch (e) {}
+    }
+
+    async function loadAll() {
+      document.querySelectorAll(".yearRef").forEach(el => el.textContent = YEAR);
+      if (!Object.keys(ORDER).length) await loadOrder();
+      try {
+        ALL = await authFetch(`/holiday/all?year=${YEAR}`).then(r => r.json());
+        if (!Array.isArray(ALL)) ALL = [];
+      } catch (e) { ALL = []; }
+      renderApprovals();
+      loadWall();
+      loadBalances();
+      loadSettings();
+    }
+
+    // ── Approvals ──
+    function renderApprovals() {
+      const pend = ALL.filter(h => h.status === "Pending").sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+      g("pendCnt").style.display = pend.length ? "" : "none";
+      g("pendCnt").textContent = pend.length;
+      const row = (h, acts) => `
+        <div class="apr">
+          <div class="dateblock"><b>${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}</b><span>${h.days} day${h.days === 1 ? "" : "s"}</span></div>
+          <div class="who"><b>${esc(NAMES[h.username] || h.engineer || h.username)}</b>
+            <span class="muted">${esc(h.type || "Annual Leave")}${h.notes ? " · “" + esc(h.notes) + "”" : ""}</span></div>
+          ${acts}
+        </div>`;
+      g("pendList").innerHTML = pend.length ? pend.map(h => row(h,
+        `<div class="acts"><button class="btn green small" data-approve="${esc(h.id)}">Approve</button>
+         <button class="btn red small" data-reject="${esc(h.id)}">Reject</button></div>`)).join("")
+        : "<p class='muted'>Nothing waiting — all caught up. 🎉</p>";
+
+      const done = ALL.filter(h => ["Approved", "Rejected", "Cancelled"].includes(h.status))
+        .sort((a, b) => (b.decisionAt || b.submittedAt || "").localeCompare(a.decisionAt || a.submittedAt || "")).slice(0, 12);
+      g("doneList").innerHTML = done.length ? done.map(h => row(h,
+        `<span class="muted" style="flex:none;">${esc(h.status)}${h.approvedBy ? " · " + esc(h.approvedBy) : ""}${h.status === "Approved" ? ` <button class="btn grey small" data-revoke="${esc(h.id)}" style="margin-left:6px;">Cancel</button>` : ""}</span>`)).join("")
+        : "<p class='muted'>No decisions yet this year.</p>";
+    }
+
+    document.addEventListener("click", async e => {
+      const t = e.target;
+      const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      if (t.dataset.approve) { await post("/holiday/approve", { id: t.dataset.approve }); loadAll(); }
+      else if (t.dataset.reject) { if (confirm("Reject this request?")) { await post("/holiday/reject", { id: t.dataset.reject }); loadAll(); } }
+      else if (t.dataset.revoke) { if (confirm("Cancel this APPROVED holiday? The days go back to their allowance.")) { await post("/holiday/cancel-approved", { id: t.dataset.revoke }); loadAll(); } }
+    });
+
+    // ── Wall chart ──
+    g("wcPrev").onclick = () => { MONTH--; if (MONTH < 1) { MONTH = 12; YEAR--; g("yearSel").value = String(YEAR); } loadWall(); };
+    g("wcNext").onclick = () => { MONTH++; if (MONTH > 12) { MONTH = 1; YEAR++; g("yearSel").value = String(YEAR); } loadWall(); };
+
+    async function loadWall() {
+      g("wcTitle").textContent = new Date(YEAR, MONTH - 1, 1).toLocaleDateString("en-GB", { month:"long", year:"numeric" });
+      let cal;
+      try { cal = await authFetch(`/holiday/calendar?year=${YEAR}&month=${MONTH}`).then(r => r.json()); }
+      catch (e) { g("wallTbl").innerHTML = "<tr><td class='muted' style='padding:14px'>Couldn't load the calendar.</td></tr>"; return; }
+      const days = cal.daysInMonth || 30;
+      const pad = n => String(n).padStart(2, "0");
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Pending overlay from the year's requests.
+      const pendCells = {};   // username -> {date: request}
+      for (const h of ALL) {
+        if (h.status !== "Pending" || !h.start) continue;
+        const s = new Date(h.start + "T00:00:00Z"), e = new Date(h.end + "T00:00:00Z");
+        for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
+          if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+          const di = d.toISOString().slice(0, 10);
+          if (di.slice(0, 7) !== `${YEAR}-${pad(MONTH)}`) continue;
+          (pendCells[h.username] || (pendCells[h.username] = {}))[di] = h;
+        }
+      }
+
+      const engineers = (cal.engineers || []).slice()
+        .sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
+
+      let thead = "<thead><tr><th class='name'>Person</th>";
+      let dow = "";
+      for (let d = 1; d <= days; d++) {
+        const dt = new Date(Date.UTC(YEAR, MONTH - 1, d));
+        thead += `<th>${d}</th>`;
+        dow += `<th class="dow">${["S","M","T","W","T","F","S"][dt.getUTCDay()]}</th>`;
+      }
+      thead += `</tr><tr><th class='name dow' style='font-weight:500;'></th>${dow}</tr></thead>`;
+
+      let body = "<tbody>";
+      for (const eng of engineers) {
+        body += `<tr><td class="name" title="${esc(eng.username)}">${esc(NAMES[eng.username] || eng.name || eng.username)}</td>`;
+        for (let d = 1; d <= days; d++) {
+          const di = `${YEAR}-${pad(MONTH)}-${pad(d)}`;
+          const dt = new Date(Date.UTC(YEAR, MONTH - 1, d));
+          const wkend = dt.getUTCDay() === 0 || dt.getUTCDay() === 6;
+          const cell = (eng.cells || {})[di];
+          const pendR = (pendCells[eng.username] || {})[di];
+          let inner = "";
+          if (cell && cell.kind === "holiday") {
+            inner = `<button class="blk hol" data-wc-revoke="${esc(cell.requestId)}" title="${esc((NAMES[eng.username]||eng.username) + " — " + (cell.type||"Holiday") + (cell.note ? " · " + cell.note : "") + " (" + cell.rangeStart + " → " + cell.rangeEnd + ") — tap to cancel")}"></button>`;
+          } else if (cell && (cell.kind === "bankholiday" || cell.kind === "shutdown")) {
+            const cls = cell.worked ? "worked" : (cell.kind === "shutdown" ? "shut" : "bank");
+            inner = `<button class="blk ${cls}" data-wc-work="${esc(eng.username)}" data-kind="${cell.kind}" data-date="${di}" data-worked="${cell.worked ? 1 : 0}" title="${esc(cell.label + " — " + (cell.worked ? "worked (credited); tap to revert" : "tap if they worked this day"))}"></button>`;
+          } else if (pendR && !wkend) {
+            inner = `<span class="blk pend" title="${esc((NAMES[eng.username]||eng.username) + " — PENDING " + pendR.start + " → " + pendR.end)}"></span>`;
+          }
+          body += `<td class="day${wkend ? " wkend" : ""}${di === today ? " today" : ""}">${inner}</td>`;
+        }
+        body += "</tr>";
+      }
+      body += "</tbody>";
+      g("wallTbl").innerHTML = thead + body;
+    }
+
+    document.addEventListener("click", async e => {
+      const t = e.target;
+      const post = (p, body) => authFetch(`${p}?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+      if (t.dataset.wcRevoke) {
+        if (confirm("Cancel this approved holiday? The days go back to their allowance.")) {
+          await post("/holiday/cancel-approved", { id: t.dataset.wcRevoke }); loadAll();
+        }
+      } else if (t.dataset.wcWork) {
+        const goingTo = t.dataset.worked !== "1";
+        if (confirm(goingTo ? "Mark this day as WORKED? It credits the day back to them." : "Revert to not worked? The day is deducted again.")) {
+          await post("/holiday/toggle-worked", { kind: t.dataset.kind, username: t.dataset.wcWork, date: t.dataset.date, worked: goingTo });
+          loadWall(); loadBalances();
+        }
       }
     });
-  });
-}
 
-// ─── Config lists ─────────────────────────────────────────────
-function renderConfigLists() {
-  const bhDiv = $("bhList");
-  bhDiv.innerHTML = "";
-  const bank = (state.config.bankholidays || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  for (const b of bank) {
-    const row = document.createElement("div");
-    row.className = "listRow";
-    row.innerHTML = `
-      <input type="date" value="${b.date}">
-      <input type="text"  value="${(b.label||"").replace(/"/g,"&quot;")}">
-      <button class="btn btnSmall btnDanger">Del</button>
-      <button class="btn btnSmall btnPrimary">Save</button>
-    `;
-    const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
-    delBtn.onclick = async () => {
-      state.config.bankholidays = state.config.bankholidays.filter(
-        x => !(x.date === b.date && (x.label||"") === (b.label||""))
-      );
-      await saveBank();
+    // ── Balances ──
+    async function loadBalances() {
+      let d;
+      try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}`).then(r => r.json()); }
+      catch (e) { g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
+      const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
+      g("balBody").innerHTML = list.map(e => `
+        <tr>
+          <td>${esc(NAMES[e.username] || e.name || e.username)}</td>
+          <td>${e.allowance}</td>
+          <td>${e.used}</td>
+          <td class="${e.remaining < 0 ? "neg" : e.remaining <= 2 ? "low" : ""}">${e.remaining}</td>
+          <td><button class="edit" data-allow="${esc(e.username)}" data-cur="${e.allowance}">Edit allowance</button></td>
+        </tr>`).join("") || "<tr><td colspan='5' class='muted'>No active users.</td></tr>";
+    }
+    document.addEventListener("click", async e => {
+      const t = e.target;
+      if (!t.dataset.allow) return;
+      const v = prompt(`Allowance for ${NAMES[t.dataset.allow] || t.dataset.allow} in ${YEAR}:`, t.dataset.cur);
+      if (v === null) return;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) { alert("Enter a number of days."); return; }
+      await authFetch(`/holiday/set-allowance?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ username: t.dataset.allow, allowance: n }) });
+      loadBalances();
+    });
+
+    // ── Settings ──
+    const daysToText = days => (days || []).map(d => `${d.date} ${d.label || ""}`.trim()).join("\n");
+    function textToDays(txt) {
+      return txt.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+        const m = /^(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(l);
+        return m ? { date: m[1], label: m[2] || "" } : null;
+      }).filter(Boolean);
+    }
+    async function loadSettings() {
+      try {
+        const c = await authFetch(`/holiday/config?year=${YEAR}`).then(r => r.json());
+        g("defAllow").value = c.defaultAllowance ?? 28;
+        g("bankTxt").value = daysToText(c.bankholidays);
+        g("shutTxt").value = daysToText(c.shutdown);
+      } catch (e) {}
+    }
+    function flash(id, ok, txt) { const m = g(id); m.className = "msg " + (ok ? "ok" : "err"); m.textContent = txt; setTimeout(() => m.textContent = "", 2500); }
+    g("saveDef").onclick = async () => {
+      const r = await authFetch(`/holiday/set-year-config?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ defaultAllowance: Number(g("defAllow").value) }) });
+      flash("defMsg", r.ok, r.ok ? "Saved ✓" : "Save failed"); if (r.ok) loadBalances();
     };
-    saveBtn.onclick = async () => {
-      const nd = dateEl.value, nl = labelEl.value.trim();
-      if (!nd) return alert("Date required");
-      const idx = state.config.bankholidays.findIndex(
-        x => x.date === b.date && (x.label||"") === (b.label||"")
-      );
-      if (idx >= 0) state.config.bankholidays[idx] = { date:nd, label:nl||"Bank Holiday" };
-      await saveBank();
+    g("saveBank").onclick = async () => {
+      const days = textToDays(g("bankTxt").value);
+      const r = await authFetch(`/holiday/set-bankholidays?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ days }) });
+      flash("bankMsg", r.ok, r.ok ? `Saved ${days.length} day(s) ✓` : "Save failed"); if (r.ok) { loadWall(); loadBalances(); }
     };
-    bhDiv.appendChild(row);
-  }
-
-  const sdDiv = $("sdList");
-  sdDiv.innerHTML = "";
-  const shut = (state.config.shutdown || []).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  for (const s of shut) {
-    const row = document.createElement("div");
-    row.className = "listRow";
-    row.innerHTML = `
-      <input type="date" value="${s.date}">
-      <input type="text"  value="${(s.label||"").replace(/"/g,"&quot;")}">
-      <button class="btn btnSmall btnDanger">Del</button>
-      <button class="btn btnSmall btnPrimary">Save</button>
-    `;
-    const [dateEl, labelEl, delBtn, saveBtn] = row.querySelectorAll("input,button");
-    delBtn.onclick = async () => {
-      state.config.shutdown = state.config.shutdown.filter(
-        x => !(x.date === s.date && (x.label||"") === (s.label||""))
-      );
-      await saveShutdown();
+    g("saveShut").onclick = async () => {
+      const days = textToDays(g("shutTxt").value);
+      const r = await authFetch(`/holiday/set-shutdown?year=${YEAR}`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ days }) });
+      flash("shutMsg", r.ok, r.ok ? `Saved ${days.length} day(s) ✓` : "Save failed"); if (r.ok) { loadWall(); loadBalances(); }
     };
-    saveBtn.onclick = async () => {
-      const nd = dateEl.value, nl = labelEl.value.trim();
-      if (!nd) return alert("Date required");
-      const idx = state.config.shutdown.findIndex(
-        x => x.date === s.date && (x.label||"") === (s.label||"")
-      );
-      if (idx >= 0) state.config.shutdown[idx] = { date:nd, label:nl||"Company Shutdown" };
-      await saveShutdown();
-    };
-    sdDiv.appendChild(row);
-  }
-}
 
-async function saveBank() {
-  try {
-    setStatus("Saving bank holidays…");
-    await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days: state.config.bankholidays });
-    await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
-}
-
-async function saveShutdown() {
-  try {
-    setStatus("Saving shutdown days…");
-    await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days: state.config.shutdown });
-    await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
-}
-
-$("addBH").onclick = async () => {
-  const d = $("bhDate").value;
-  const l = $("bhLabel").value.trim() || "Bank Holiday";
-  if (!d) return alert("Choose a date");
-  if ((state.config.bankholidays||[]).some(x=>x.date===d)) return alert("That date is already listed.");
-  try {
-    setStatus("Saving bank holiday…");
-    const next = [...(state.config.bankholidays||[]), { date:d, label:l }];
-    await apiPOST(`/holiday/set-bankholidays?year=${state.year}`, { days:next });
-    $("bhDate").value=""; $("bhLabel").value="";
-    await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
-};
-
-$("addSD").onclick = async () => {
-  const d = $("sdDate").value;
-  const l = $("sdLabel").value.trim() || "Company Shutdown";
-  if (!d) return alert("Choose a date");
-  if ((state.config.shutdown||[]).some(x=>x.date===d)) return alert("That date is already listed.");
-  try {
-    setStatus("Saving shutdown…");
-    const next = [...(state.config.shutdown||[]), { date:d, label:l }];
-    await apiPOST(`/holiday/set-shutdown?year=${state.year}`, { days:next });
-    $("sdDate").value=""; $("sdLabel").value="";
-    await loadConfig(); await refreshAll(); setStatus("");
-  } catch(e) { alert("Save failed: "+e.message); setStatus(""); }
-};
-
-// ─── Data loaders ─────────────────────────────────────────────
-async function loadConfig() {
-  const fresh = await apiGET(`/holiday/config?year=${state.year}&t=${Date.now()}`);
-  state.config = {
-    ...fresh,
-    bankholidays: Array.isArray(fresh.bankholidays) ? [...fresh.bankholidays] : [],
-    shutdown:     Array.isArray(fresh.shutdown)     ? [...fresh.shutdown]     : []
-  };
-  renderConfigLists();
-}
-async function loadRequests() {
-  state.allRequests = await apiGET(`/holiday/all?year=${state.year}&t=${Date.now()}`);
-}
-async function loadSummary() {
-  state.summary = await apiGET(`/holiday/admin-summary?year=${state.year}&t=${Date.now()}`);
-}
-async function loadCalendar() {
-  state.calendar = await apiGET(`/holiday/calendar?year=${state.year}&month=${state.month}&t=${Date.now()}`);
-}
-
-async function refreshAll() {
-  fmtMonthLabel();
-  try {
-    setStatus("Loading…");
-    await Promise.all([loadConfig(), loadRequests(), loadSummary(), loadCalendar()]);
-    renderPending();
-    renderAllowance();
-    renderCalendar();
-    setStatus("");
-  } catch(e) {
-    setStatus("");
-    alert("Load failed: " + e.message);
-  }
-}
-
-$("prevMonth").onclick = () => {
-  state.month--;
-  if (state.month < 1) { state.month=12; state.year--; $("yearSel").value=state.year; }
-  refreshAll();
-};
-$("nextMonth").onclick = () => {
-  state.month++;
-  if (state.month > 12) { state.month=1; state.year++; $("yearSel").value=state.year; }
-  refreshAll();
-};
-$("refreshBtn").onclick = refreshAll;
-
-buildYearOptions();
-fmtMonthLabel();
-refreshAll();
+    loadAll();
   </script>
 </body>
 </html>
