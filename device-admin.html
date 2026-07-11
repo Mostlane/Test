@@ -420,7 +420,15 @@
   </div>
 
   <script>
-    const DEVICE_WORKER_BASE = "https://userdevicekv.jamie-def.workers.dev";
+    // Device data now lives in the central D1, served by the mostlane-api
+    // /device/* routes. Direct calls to MOSTLANE_API need the Bearer token added
+    // by hand (portal-config only auto-attaches it to migrated legacy hosts).
+    const API = window.MOSTLANE_API;
+    function authFetch(path, opts = {}) {
+      const token = localStorage.getItem("mostlaneToken");
+      opts.headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
 
     let allRecords = [];
     let filteredRecords = [];
@@ -486,7 +494,7 @@
     // DATA FETCH
     // -------------------------------------------------------
     async function fetchAllRecords() {
-      const res = await fetch(DEVICE_WORKER_BASE + "/list", { method: "GET" });
+      const res = await authFetch("/device/admin-list", { method: "GET" });
       if (!res.ok) throw new Error("Failed to load device records");
       const data = await res.json();
       return data.records || [];
@@ -708,10 +716,10 @@
       if (val > 5) val = 5;
 
       try {
-        const res = await fetch(DEVICE_WORKER_BASE + "/admin/update-allowed-devices", {
+        const res = await authFetch("/device/allowed", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: selectedUsername, allowedDevices: val })
+          body: JSON.stringify({ username: selectedUsername, allowedDevices: val, unlimited: !!selectedRecord.unlimited })
         });
         if (!res.ok) throw new Error("Failed to save settings");
 
@@ -737,7 +745,7 @@
       }
 
       try {
-        const res = await fetch(DEVICE_WORKER_BASE + "/reset?username=" + encodeURIComponent(selectedUsername), {
+        const res = await authFetch("/device/reset?username=" + encodeURIComponent(selectedUsername), {
           method: "POST"
         });
         if (!res.ok) throw new Error("Failed to reset devices");
@@ -767,9 +775,7 @@
       content.innerHTML   = "Loading login history…";
 
       try {
-        const res = await fetch(
-          `https://login.jamie-def.workers.dev/admin/login-history?username=${encodeURIComponent(username)}`
-        );
+        const res = await authFetch("/admin/login-history?username=" + encodeURIComponent(username));
         if (!res.ok) throw new Error("Failed to load login history");
 
         const data    = await res.json();
@@ -797,7 +803,7 @@
             <tr>
               <td>${formatDate(e.at)}</td>
               <td>${e.ip || "–"}</td>
-              <td style="max-width:500px; word-break:break-all;">${e.userAgent || "–"}</td>
+              <td style="max-width:500px; word-break:break-all;">${e.user_agent || e.userAgent || "–"}</td>
             </tr>
           `;
         });
