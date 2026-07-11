@@ -169,7 +169,7 @@
           { label: "Plant & Equipment", href: "asset-menu.html", icon: "assets", perms: ["Assets"], match: ["asset-menu.html", "assets-admin.html", "my-assets.html", "shared-assets.html"] },
           { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects"] },
           { label: "Projects Admin", href: "projects-admin.html", icon: "projects", perms: ["ProjectsAdmin"] },
-          { label: "PO System", launch: "po", icon: "po", perms: ["PurchaseOrders"] },
+          { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [

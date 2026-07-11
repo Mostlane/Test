@@ -190,7 +190,7 @@ a.button {
     <a class="button" href="sites.html" id="Sites"><span class="emoji">📍</span> Manage Sites</a>
     <a class="button" href="customers.html" id="Customers"><span class="emoji">🏢</span> Customers</a>
     <a class="button" href="#" id="HSPlan"><span class="emoji">🦺</span> H&amp;S Plans</a>
-    <a class="button" href="#" id="PurchaseOrders2"><span class="emoji">🧾</span> PO System</a>
+    <a class="button" href="po.html" id="PurchaseOrders2"><span class="emoji">🧾</span> PO System</a>
     <a class="button" href="sitelog.html" id="SiteLog"><span class="emoji">📍</span> SiteLog</a>
     <a class="button" href="asset-menu.html" id="Assets"><span class="emoji">⚙️</span> Plant & Equipment</a>
     <a class="button" href="timesheet-admin.html" id="TimesheetAdmin">
@@ -312,23 +312,9 @@ const MAP = {
   });
 })();
 
-// PO system launch: opens THIS user's personal PO link (stored on their user
-// record, released only to logged-in users with the PurchaseOrders permission).
-(async function(){
-  const b = document.getElementById("PurchaseOrders2");
-  if (!b) return;
-  try{
-    const t = localStorage.getItem("mostlaneToken");
-    const r = await fetch(window.MOSTLANE_API + "/po-config",
-      { headers: t ? { "Authorization": "Bearer " + t } : {} });
-    const c = await r.json().catch(() => ({}));
-    if (r.ok && c.ok && c.url) { b.href = c.url; return; }
-  }catch(e){}
-  b.addEventListener("click", e => {
-    e.preventDefault();
-    alert("No PO link is set on your account yet — ask the office to add your personal PO URL in Users admin.");
-  });
-})();
+// PO system now opens the po.html wrapper (sidebar + embedded PO on desktop;
+// straight to the user's personal PO link on mobile). The wrapper handles the
+// /po-config lookup and the "no PO link" message.
       Object.entries(MAP).forEach(([buttonID, keyList]) => {
 
         const btn = document.getElementById(buttonID);
