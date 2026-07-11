@@ -699,16 +699,7 @@ async function handle3(request, env, ctx, url) {
     const gate = await requireDeviceAdmin(env, request);
     if (gate) return gate;
     const { results: devs } = await env.DB.prepare("SELECT * FROM devices ORDER BY registered_at DESC").all();
-    const { results: users } = await env.DB.prepare("SELECT username, profile FROM users").all();
-    const capOf = {};
-    for (const u of users || []) {
-      let p = {};
-      try {
-        p = u.profile ? JSON.parse(u.profile) : {};
-      } catch {
-      }
-      capOf[u.username] = { allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2, unlimited: !!p.deviceUnlimited };
-    }
+    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users").all();
     const byUser = {};
     for (const d of devs || []) {
       (byUser[d.username] || (byUser[d.username] = [])).push({
@@ -719,13 +710,38 @@ async function handle3(request, env, ctx, url) {
         office_clock: d.office_clock ? 1 : 0
       });
     }
-    const records = Object.keys(byUser).map((username) => ({
-      username,
-      devices: byUser[username],
-      history: [],
-      allowedDevices: (capOf[username] || {}).allowedDevices ?? 1,
-      unlimited: (capOf[username] || {}).unlimited ?? false
-    }));
+    const records = (users || []).map((u) => {
+      let p = {};
+      try {
+        p = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      return {
+        username: u.username,
+        name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
+        staffType: p.staffType === "office" ? "office" : "field",
+        sortOrder: Number.isFinite(p.sortOrder) ? p.sortOrder : 9999,
+        devices: byUser[u.username] || [],
+        history: [],
+        allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,
+        unlimited: !!p.deviceUnlimited
+      };
+    });
+    for (const uname of Object.keys(byUser)) {
+      if (!records.some((r) => r.username === uname)) {
+        records.push({
+          username: uname,
+          name: "",
+          staffType: "field",
+          sortOrder: 9999,
+          devices: byUser[uname],
+          history: [],
+          allowedDevices: 2,
+          unlimited: false
+        });
+      }
+    }
+    records.sort((a, b) => (a.staffType === "office" ? 0 : 1) - (b.staffType === "office" ? 0 : 1) || a.sortOrder - b.sortOrder || (a.name || a.username).localeCompare(b.name || b.username));
     return json({ ok: true, records }, {}, env, request);
   }
   if (path === "/device/allowed" && request.method === "POST") {
