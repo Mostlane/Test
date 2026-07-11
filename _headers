@@ -1,0 +1,15 @@
+# Cloudflare Pages cache rules.
+# The shared runtime + the two highest-traffic pages must always revalidate,
+# so phones can't run a stale portal-config against a fresh page (or vice
+# versa). no-cache still allows fast 304s — it forces a freshness check, not
+# a full re-download.
+/portal-config.js
+  Cache-Control: no-cache
+/auth.js
+  Cache-Control: no-cache
+/device-auth.js
+  Cache-Control: no-cache
+/login.html
+  Cache-Control: no-cache
+/main.html
+  Cache-Control: no-cache

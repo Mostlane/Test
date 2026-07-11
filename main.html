@@ -485,7 +485,14 @@ const MAP = {
       var b = document.getElementById("viewAsBtn");
       if (!b) return;
       b.style.display = "block";
-      b.onclick = function () { if (window.mlViewAsPicker) window.mlViewAsPicker(); };
+      b.onclick = function () {
+        if (window.mlViewAsPicker) return window.mlViewAsPicker();
+        // Stale cached portal-config.js — refetch it fresh, then reload once.
+        b.textContent = "Updating…";
+        fetch("/portal-config.js", { cache: "reload" })
+          .catch(function () {})
+          .finally(function () { location.reload(); });
+      };
     })();
   </script>
 
