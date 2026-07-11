@@ -472,8 +472,15 @@
         }).catch(function () {});
         if (yes(perms.FullAccess) || yes(perms.HolidayAdmin)) {
           fetchAuthed("/holiday/all?year=" + yr).then(function (list) {
-            var n = (Array.isArray(list) ? list : []).filter(function (h) { return h.status === "Pending"; }).length;
-            setNavBadge("holiday-admin.html", n);
+            var arr = Array.isArray(list) ? list : [];
+            var pending = arr.filter(function (h) { return h.status === "Pending"; }).length;
+            // Staff cancelling their own (incl. approved) leave — unseen by admin.
+            var seenA = localStorage.getItem("mostlaneHolAdminSeen") || "";
+            var cancels = arr.filter(function (h) {
+              return h.status === "Cancelled" && h.cancelledBy && h.cancelledBy === h.username
+                && h.decisionAt && (!seenA || h.decisionAt > seenA);
+            }).length;
+            setNavBadge("holiday-admin.html", pending + cancels);
           }).catch(function () {});
         }
       }

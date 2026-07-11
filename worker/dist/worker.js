@@ -974,12 +974,14 @@ async function handle4(request, env, ctx, url) {
     const record = await getHolidayById(id);
     if (!record) return text("Not found", 404);
     if (record.username !== user) return text("Forbidden", 403);
-    if (record.status !== "Pending") return text("Only pending requests can be self-cancelled", 409);
+    if (!["Pending", "Approved"].includes(record.status))
+      return text("Only pending or approved requests can be cancelled", 409);
+    const wasApproved = record.status === "Approved";
     await env.DB.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=? WHERE id=?"
-    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), id).run();
-    await logAction(id, "Cancelled by engineer", user);
-    return json2({ success: true });
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE id=?"
+    ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, id).run();
+    await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
+    return json2({ success: true, wasApproved });
   }
   if (path === "/holiday/delete-own" && method === "POST") {
     const { id } = await request.json();

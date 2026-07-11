@@ -271,9 +271,20 @@
 
       const done = ALL.filter(h => ["Approved", "Rejected", "Cancelled"].includes(h.status))
         .sort((a, b) => (b.decisionAt || b.submittedAt || "").localeCompare(a.decisionAt || a.submittedAt || "")).slice(0, 12);
-      g("doneList").innerHTML = done.length ? done.map(h => row(h,
-        `<span class="muted" style="flex:none;">${esc(h.status)}${h.approvedBy ? " · " + esc(h.approvedBy) : ""}${h.status === "Approved" ? ` <button class="btn grey small" data-revoke="${esc(h.id)}" style="margin-left:6px;">Cancel</button>` : ""}</span>`)).join("")
-        : "<p class='muted'>No decisions yet this year.</p>";
+      g("doneList").innerHTML = done.length ? done.map(h => {
+        let lbl;
+        if (h.status === "Cancelled") {
+          const byStaff = h.cancelledBy && h.cancelledBy === h.username;
+          lbl = byStaff
+            ? `<b style="color:#b00020;">Cancelled by ${esc(NAMES[h.cancelledBy] || h.cancelledBy)}</b>${h.approvedBy ? " (was approved)" : ""}`
+            : `Cancelled${h.cancelledBy ? " · " + esc(h.cancelledBy) : ""}`;
+        } else {
+          lbl = `${esc(h.status)}${h.approvedBy ? " · " + esc(h.approvedBy) : ""}${h.status === "Approved" ? ` <button class="btn grey small" data-revoke="${esc(h.id)}" style="margin-left:6px;">Cancel</button>` : ""}`;
+        }
+        return row(h, `<span class="muted" style="flex:none;">${lbl}</span>`);
+      }).join("") : "<p class='muted'>No decisions yet this year.</p>";
+      // Admin has now seen the current state — clears the cancellation part of the badge.
+      try { localStorage.setItem("mostlaneHolAdminSeen", new Date().toISOString()); } catch (e) {}
     }
 
     document.addEventListener("click", async e => {
