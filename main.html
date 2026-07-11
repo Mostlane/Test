@@ -234,29 +234,16 @@ a.button {
   </div>
 
   <script>
-    document.addEventListener("DOMContentLoaded", async () => {
+    document.addEventListener("DOMContentLoaded", () => {
 
-      // 🔐 Extra safety: enforce device lock on main menu as well
+      // 🔐 Device lock runs in the BACKGROUND — it can still bounce an unknown
+      // device, but it no longer delays the menu paint.
       if (window.DeviceAuth && typeof DeviceAuth.enforceOnPage === "function") {
-        try {
-          await DeviceAuth.enforceOnPage();
-        } catch (e) {
-          console.error("Device enforcement failed:", e);
-        }
+        try { Promise.resolve(DeviceAuth.enforceOnPage()).catch(e => console.error("Device enforcement failed:", e)); }
+        catch (e) { console.error("Device enforcement failed:", e); }
       }
 
-      const username = sessionStorage.getItem("mostlaneUser");
-      if (!username) return;
-
-      const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
-      const data = await res.json();
-      if (!data.found) return;
-
-      const user = data.user;
-      const fullAccess = (user.FullAccess || "").toLowerCase() === "yes";
-
       // Permission mapping
-     
 
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
@@ -322,58 +309,64 @@ const MAP = {
 // PO system now opens the po.html wrapper (sidebar + embedded PO on desktop;
 // straight to the user's personal PO link on mobile). The wrapper handles the
 // /po-config lookup and the "no PO link" message.
-      Object.entries(MAP).forEach(([buttonID, keyList]) => {
-
-        const btn = document.getElementById(buttonID);
-        if (!btn) return;
-
-        let allowed = false;
-
-        if (fullAccess) {
-          allowed = true;
-        } else {
-          for (let k of keyList) {
-            if (String(user[k] || "").toLowerCase() === "yes") {
-              allowed = true;
-              break;
-            }
-          }
-        }
-
-        if (allowed) {
-  btn.classList.add("visible");
-
-  if (buttonID === "MyDocuments" && user.SharePointPath) {
-    btn.href = user.SharePointPath;
-  }
-}
-      });
-
-      // Story Mode: the guided day is home. Limit the menu to day-relevant
-      // areas (whatever their permissions allow within this set) and pin a
-      // "Back to My Day" button at the top so they can always jump straight back.
+      // Apply the menu gating for a given permission set. Idempotent, so it can
+      // run twice: instantly from the cached permissions, then again with the
+      // fresh server copy.
       const STORY_ALLOWED = new Set(["HSPlan", "PurchaseOrders2", "SiteLog", "Holiday", "MyDocuments", "Assets", "Forms", "Compliance"]);
-      if (String(user.StoryMode || "").toLowerCase() === "yes") {
-        document.querySelectorAll("#menuGrid .button").forEach(b => {
-          if (!STORY_ALLOWED.has(b.id)) b.classList.remove("visible");
+      function applyGate(user) {
+        const fullAccess = String(user.FullAccess || "").toLowerCase() === "yes";
+        const isStory = String(user.StoryMode || "").toLowerCase() === "yes";
+
+        Object.entries(MAP).forEach(([buttonID, keyList]) => {
+          const btn = document.getElementById(buttonID);
+          if (!btn) return;
+          let allowed = fullAccess || keyList.some(k => String(user[k] || "").toLowerCase() === "yes");
+          if (isStory && !STORY_ALLOWED.has(buttonID)) allowed = false;
+          btn.classList.toggle("visible", allowed);
+          if (allowed && buttonID === "MyDocuments" && user.SharePointPath) btn.href = user.SharePointPath;
         });
-        const back = document.createElement("a");
-        back.className = "button visible";
-        back.id = "backToMyDay";
-        back.href = "my-day.html";
-        back.innerHTML = '<span class="emoji">⚡</span> Back to My Day';
-        back.style.cssText = "background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;font-weight:700;grid-column:1 / -1;";
-        const grid = document.getElementById("menuGrid");
-        grid.insertBefore(back, grid.firstChild);
+
+        // Story Mode: guided users get a pinned "Back to My Day" at the top.
+        const existing = document.getElementById("backToMyDay");
+        if (isStory && !existing) {
+          const back = document.createElement("a");
+          back.className = "button visible";
+          back.id = "backToMyDay";
+          back.href = "my-day.html";
+          back.innerHTML = '<span class="emoji">⚡</span> Back to My Day';
+          back.style.cssText = "background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;font-weight:700;grid-column:1 / -1;";
+          const grid = document.getElementById("menuGrid");
+          grid.insertBefore(back, grid.firstChild);
+        } else if (!isStory && existing) existing.remove();
+
+        setTimeout(() => {
+          const buttons = [...document.querySelectorAll(".button.visible")];
+          buttons.forEach(b => b.classList.remove("full-width"));
+          if (buttons.length % 2 === 1) buttons[buttons.length - 1].classList.add("full-width");
+        }, 10);
       }
 
-      setTimeout(() => {
-        const buttons = [...document.querySelectorAll(".button.visible")];
-        buttons.forEach(b => b.classList.remove("full-width"));
-        if (buttons.length % 2 === 1) {
-          buttons[buttons.length - 1].classList.add("full-width");
-        }
-      }, 10);
+      // 1) INSTANT paint from the cached permission set (written at login and
+      //    refreshed by portal-config on every page) — no network wait.
+      let cached = null;
+      try { cached = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "null"); } catch (e) {}
+      if (cached && typeof cached === "object") applyGate(cached);
+
+      // 2) BACKGROUND refresh from the server — re-applies only if different,
+      //    and keeps the cache current for next time.
+      (async () => {
+        const username = sessionStorage.getItem("mostlaneUser");
+        if (!username) return;
+        try {
+          const res = await fetch("https://mostlane-users.jamie-def.workers.dev/user?u=" + encodeURIComponent(username));
+          const data = await res.json();
+          if (!data.found) return;
+          const pj = JSON.stringify(data.user);
+          if (pj !== JSON.stringify(cached)) applyGate(data.user);
+          sessionStorage.setItem("mostlanePermissions", pj);
+          localStorage.setItem("mostlanePermissions", pj);
+        } catch (e) {}
+      })();
 
     });
   </script>
