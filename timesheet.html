@@ -193,8 +193,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     ENGINEERS = users
       .filter(u => u.Status === "Active")
       .filter(u => !HARDCODED_EXCLUDE_USERNAMES.has(u.Username))
-      .map(u => `${u.FirstName} ${u.LastName}`.trim())
-      .sort((a,b) => a.localeCompare(b));
+      .sort(window.mlUserCmp)   // portal order: office first, then field
+      .map(u => `${u.FirstName} ${u.LastName}`.trim());
   }catch(err){
     console.error("Failed to load users from directory:", err);
     // Fallback: scrape from hours data so the page isn't totally broken if users API is down
