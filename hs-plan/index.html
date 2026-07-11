@@ -2,6 +2,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
+<script src="/portal-config.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mostlane &mdash; Construction Phase H&amp;S Plan Builder</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -266,11 +267,20 @@
   .ml-portalbar .ml-pb-back{ background:#fff; color:#003366; border:1px solid #d7dee6; border-radius:999px;
     padding:8px 15px; font:600 14px/1 "Segoe UI",system-ui,-apple-system,sans-serif; cursor:pointer; }
   .ml-portalbar .ml-pb-back:hover{ background:#f4f7fb; }
-  /* Offset content so the fixed bar never covers it — the form view (normal flow)
-     and the library, which is a full-screen fixed overlay (inset:0, z-index:900). */
+  /* Mobile / no-sidebar: fixed top bar, offset content below it. The library is
+     a full-screen fixed overlay (inset:0, z-index:900) so it needs its own top. */
   @media screen {
     body{ padding-top:54px; }
     .library{ top:54px !important; }
+  }
+  /* Desktop with the portal sidebar present: hide the mobile top bar (the
+     sidebar replaces it) and shift content right of the sidebar. portal-config
+     sets body.pnav-on padding-left; the library overlay needs its own left. */
+  @media (min-width:1000px){
+    body.pnav-on .ml-portalbar{ display:none; }
+    body.pnav-on{ padding-top:0; }
+    body.pnav-on .library{ top:0 !important; left:248px !important; }
+    html.pnav-collapsed body.pnav-on .library{ left:64px !important; }
   }
   #libMain, #btnMainMenu{ display:none !important; }   /* replaced by the portal bar's back button */
 </style>
