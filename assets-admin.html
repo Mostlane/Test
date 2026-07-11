@@ -528,9 +528,7 @@
           u.FirstName && u.LastName &&
           u.Status !== "Not Active"
         )
-        .sort((a, b) =>
-          (a.FirstName + " " + a.LastName).localeCompare(b.FirstName + " " + b.LastName)
-        );
+        .sort(window.mlUserCmp);   // office first, then field, in the portal order
     }
 
     // ─────────────────────────────────────────────

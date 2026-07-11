@@ -19,6 +19,26 @@
   // ⬇️ The deployed API worker (separate from the site worker).
   window.MOSTLANE_API = "https://mostlane-api.jamie-def.workers.dev";
 
+  // ── Canonical people order, shared by every page/dropdown ────────────────
+  // Office staff first, then field, each by the manual drag order set in Users
+  // admin (StaffType + SortOrder from /users), name as a fallback. Pages that
+  // build a user/engineer dropdown should sort with mlUserCmp (or mlOrderUsers)
+  // instead of an alphabetical compare, so the whole portal lists people alike.
+  window.mlUserCmp = function (a, b) {
+    var ra = (a && a.StaffType === "office") ? 0 : 1;
+    var rb = (b && b.StaffType === "office") ? 0 : 1;
+    if (ra !== rb) return ra - rb;
+    var sa = (a && isFinite(a.SortOrder)) ? Number(a.SortOrder) : 9999;
+    var sb = (b && isFinite(b.SortOrder)) ? Number(b.SortOrder) : 9999;
+    if (sa !== sb) return sa - sb;
+    var na = (((a && a.FirstName) || "") + " " + ((a && a.LastName) || "")).trim().toLowerCase();
+    var nb = (((b && b.FirstName) || "") + " " + ((b && b.LastName) || "")).trim().toLowerCase();
+    return na.localeCompare(nb);
+  };
+  window.mlOrderUsers = function (list) {
+    return (Array.isArray(list) ? list.slice() : []).sort(window.mlUserCmp);
+  };
+
   const API = window.MOSTLANE_API.replace(/\/$/, "");
   const CONFIGURED = !/REPLACE-ME/.test(API);
 

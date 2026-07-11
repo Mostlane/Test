@@ -382,9 +382,7 @@ async function populateUsersDropdown() {
     const res = await fetchJSON(USERS_API);
     const users = res.Users || [];
 
-    const sorted = users.sort((a,b) =>
-      (a.FirstName + a.LastName).localeCompare(b.FirstName + b.LastName)
-    );
+    const sorted = users.slice().sort(window.mlUserCmp);   // office first, then field, in the portal order
 
     sel.innerHTML = `<option value="">Select engineer…</option>`;
 

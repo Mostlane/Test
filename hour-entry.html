@@ -381,12 +381,12 @@ async function init(){
   ENGINEERS = USERS_RAW
     .filter(u => u.Status === "Active")
     .filter(u => !HARDCODED_EXCLUDE_USERNAMES.has(u.Username))
+    .sort(window.mlUserCmp)   // portal order: office first, then field
     .map(u => ({
       name: `${u.FirstName} ${u.LastName}`.trim(),
       username: u.Username,
       vehicle: u.VehicleAssigned || ""
-    }))
-    .sort((a,b) => a.name.localeCompare(b.name));
+    }));
 
   USERS_RAW.forEach(u => { if (u.VehicleAssigned) VEHICLE_SET.add(u.VehicleAssigned); });
 
