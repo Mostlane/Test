@@ -290,7 +290,8 @@ CREATE TABLE IF NOT EXISTS asset_transfer_requests (
   note          TEXT,
   requested_at  TEXT DEFAULT (datetime('now')),
   decided_at    TEXT,
-  signature_key TEXT                      -- R2 key of the acceptance signature image
+  signature_key TEXT,                     -- R2 key of the acceptance signature image
+  condition_photos TEXT                   -- JSON {sender:[R2 keys], recipient:[R2 keys]}
 );
 CREATE INDEX IF NOT EXISTS idx_atr_to ON asset_transfer_requests(to_user, status);
 CREATE INDEX IF NOT EXISTS idx_atr_asset ON asset_transfer_requests(asset_id, status);
