@@ -264,6 +264,7 @@
       g("wcNext").style.display = yearMode ? "none" : "";
       g("wcMode").textContent = yearMode ? "📊" : "📅";
       g("wcMode").title = yearMode ? "Month wall chart" : "Year calendar";
+      wallLoaded = true;
       if (yearMode) { g("wcTitle").textContent = YEAR + " — whole team"; renderYearAdmin(); }
       else loadWall();
     }
@@ -289,6 +290,7 @@
       const b = e.target.closest("button"); if (!b) return;
       document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("active", x === b));
       document.querySelectorAll(".sect").forEach(s => s.classList.toggle("active", s.dataset.sec === b.dataset.tab));
+      ensureTab(b.dataset.tab);
     });
 
     const fmtD = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" });
@@ -312,21 +314,30 @@
       return CAL_CACHE[k];
     }
 
+    // Wall chart + Balances load lazily on first tab open, so the default
+    // Approvals view only pays for what it shows.
+    let wallLoaded = false, balLoaded = false;
+    function ensureTab(tab) {
+      if (tab === "wall" && !wallLoaded) applyAView();          // sets wallLoaded
+      else if (tab === "balances" && !balLoaded) loadBalances(); // sets balLoaded
+    }
+
     async function loadAll() {
       document.querySelectorAll(".yearRef").forEach(el => el.textContent = YEAR);
-      CAL_CACHE = {};
-      // Everything in PARALLEL — one round trip instead of four in a row.
+      CAL_CACHE = {}; wallLoaded = false; balLoaded = false;
+      // Critical path = only what Approvals needs, in parallel.
       const tasks = [
         authFetch(`/holiday/all?year=${YEAR}`).then(r => r.json()).catch(() => []),
-        loadSettings(),
-        loadBalances()
+        loadSettings()          // config gives the accrual flag + settings tab
       ];
       if (!Object.keys(ORDER).length) tasks.push(loadOrder());
-      if (AVIEW === "month") fetchCal(YEAR, MONTH);   // warm the wall chart alongside
       const [allData] = await Promise.all(tasks);
       ALL = Array.isArray(allData) ? allData : [];
+      // Accrual tags on pending requests need balances — fetch only if accrual's on.
+      if (CFGDATA.accrualMode) await loadBalances();
       renderApprovals();
-      applyAView();
+      // Render whatever tab is actually showing (Approvals on first load).
+      ensureTab(document.querySelector("#tabs button.active")?.dataset.tab);
     }
 
     // ── Approvals ──
@@ -572,9 +583,10 @@
 
     // ── Balances ──
     async function loadBalances() {
+      balLoaded = true;
       let d;
       try { d = await authFetch(`/holiday/admin-summary?year=${YEAR}`).then(r => r.json()); }
-      catch (e) { g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
+      catch (e) { balLoaded = false; g("balBody").innerHTML = "<tr><td colspan='5' class='muted'>Couldn't load balances.</td></tr>"; return; }
       const list = (d.engineers || []).slice().sort((a, b) => (ORDER[a.username] ?? 999) - (ORDER[b.username] ?? 999));
       BALMAP = {};
       list.forEach(e => { BALMAP[e.username] = { allowance: e.allowance, used: e.used }; });
