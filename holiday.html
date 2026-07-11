@@ -89,7 +89,7 @@
     .callegend span { display:inline-flex; align-items:center; gap:5px; }
     .callegend i { width:13px; height:13px; border-radius:4px; display:inline-block; }
     .mm td[data-pop] { cursor:pointer; }
-    .daypop { position:fixed; z-index:1200; background:#fff; border:1px solid #d7dee6; border-radius:12px; box-shadow:0 10px 30px rgba(6,24,54,.28); padding:12px 14px; max-width:270px; font-size:13px; display:none; }
+    .daypop { position:absolute; z-index:1200; background:#fff; border:1px solid #d7dee6; border-radius:12px; box-shadow:0 10px 30px rgba(6,24,54,.28); padding:12px 14px; max-width:270px; font-size:13px; display:none; }
     .daypop h5 { margin:0 0 4px; font-size:13.5px; color:#003366; }
     .daypop p { margin:3px 0; color:#334155; }
     .daypop .muted { font-size:12.5px; }
@@ -345,12 +345,19 @@
       const pop = g("dayPop");
       pop.innerHTML = html;
       pop.style.display = "block";
+      // Document coordinates, so the popover stays glued to its date when scrolling.
       const r = target.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
-      let x = r.left + r.width / 2 - pw / 2, y = r.top - ph - 8;
-      x = Math.max(8, Math.min(x, window.innerWidth - pw - 8));
-      if (y < 8) y = r.bottom + 8;
+      let x = r.left + r.width / 2 - pw / 2;
+      x = Math.max(8, Math.min(x, document.documentElement.clientWidth - pw - 8)) + window.scrollX;
+      let y = (r.top - ph - 8 >= 8 ? r.top - ph - 8 : r.bottom + 8) + window.scrollY;
       pop.style.left = x + "px"; pop.style.top = y + "px";
     }
+    // Dismiss on ANY tap outside (pointerdown fires reliably on touch, unlike click).
+    document.addEventListener("pointerdown", e => {
+      const pop = g("dayPop");
+      if (pop.style.display === "block" && !pop.contains(e.target) && !e.target.closest("[data-pop]"))
+        pop.style.display = "none";
+    });
     document.addEventListener("click", e => {
       const t = e.target.closest("[data-pop]");
       const pop = g("dayPop");
