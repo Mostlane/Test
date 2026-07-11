@@ -1505,6 +1505,7 @@ async function handle5(request, env, ctx, url) {
     await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const asset = await getAsset(env, req.asset_id);
+    const when = londonWhen(now);
     const note = {
       type: "TRANSFER_NOTE",
       transferId: req.id,
@@ -1513,14 +1514,17 @@ async function handle5(request, env, ctx, url) {
       serial: asset?.serial || "",
       category: asset?.category || "",
       value: asset?.value || "",
+      images: (asset?.images || []).slice(0, 4),
       from: req.from_user,
       to: req.to_user,
       message: req.note || "",
       requestedAt: req.requested_at,
       acceptedAt: now,
+      acceptedAtText: when,
       acceptedBy: me,
       signatureKey: sigKey,
-      statement: `I, ${me}, accept this item and take responsibility for it from ${now}.`
+      statement: `I, ${me}, accept this item and take responsibility for it from ${when}. I accept responsibility for the cost to repair or replace this item at any point as required whilst this item remains allocated to myself. This includes if the item is left unattended at any point in time. This also includes any and all accessories.`,
+      releaseStatement: req.from_user && req.from_user !== "Unassigned" ? `Upon this acceptance, custody of the item passed from ${req.from_user}. ${req.from_user}'s responsibility for this item and all of its accessories ended on ${when}, when ${me} accepted the item and signed this note.` : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
     };
     await putTransfer(env, { ...note, timestamp: now });
     if (asset) {
@@ -1599,6 +1603,21 @@ async function putTransfer(env, log) {
   await env.DB.prepare(
     "INSERT INTO asset_transfers (asset_id, at, data) VALUES (?,?,?)"
   ).bind(log.assetID, log.timestamp || (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify(log)).run();
+}
+function londonWhen(iso) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(iso));
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value || "";
+  const day = Number(get("day"));
+  const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
+  return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
 }
 
 // src/routes/sla.js
