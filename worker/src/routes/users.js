@@ -119,12 +119,37 @@ export async function handle(request, env, ctx, url) {
     return json({ found: true, user: shapeUser(user, perms) }, {}, env, request);
   }
 
-  // GET /users  (list)
+  // GET /users  (list) — returned in the canonical people order (office staff
+  // first, then field, each by the manual drag order set in Users admin) so
+  // every page and dropdown that reads /users shows people the same way.
   if (path === "/users" && request.method === "GET") {
     const { results } = await env.DB.prepare("SELECT * FROM users ORDER BY username").all();
     const out = [];
     for (const u of results || []) out.push(shapeUser(u, await permissionsFor(env, u.username)));
+    out.sort(orderUsers);
     return json({ Users: out }, {}, env, request);
+  }
+
+  // POST /users/reorder  (admin) — persist staff type + manual order in one go.
+  // Body: { order: [{ Username, StaffType:"office"|"field", SortOrder:int }] }.
+  // Only touches staffType/sortOrder inside each profile; other keys survive.
+  if (path === "/users/reorder" && request.method === "POST") {
+    const gate = await requireAdmin(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const list = Array.isArray(b.order) ? b.order : [];
+    for (const item of list) {
+      if (!item || !item.Username) continue;
+      const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(item.Username).first();
+      if (!row) continue;
+      let profile = {};
+      try { profile = row.profile ? JSON.parse(row.profile) : {}; } catch { profile = {}; }
+      profile.staffType = item.StaffType === "office" ? "office" : "field";
+      profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
+      await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?")
+        .bind(JSON.stringify(profile), item.Username).run();
+    }
+    return json({ ok: true, count: list.length }, {}, env, request);
   }
 
   // POST /users  (create or update — admin only)
@@ -293,7 +318,25 @@ function shapeUser(u, perms) {
     EmploymentType: u.employment_type,
     Status: u.status,
     SharePointPath: u.sharepoint_path,
+    // Office/field split + manual drag order (set in Users admin, stored in the
+    // profile blob so no schema change is needed). Everything sorts by these.
+    StaffType: profile.staffType === "office" ? "office" : "field",
+    SortOrder: Number.isFinite(profile.sortOrder) ? profile.sortOrder : 9999,
     Profile: profile,
     ...perms,
   };
+}
+
+// Canonical people order: office staff first, then field, each by their manual
+// drag order, then alphabetical as a stable fallback.
+function orderUsers(a, b) {
+  const rank = t => (t === "office" ? 0 : 1);
+  const ra = rank(a.StaffType), rb = rank(b.StaffType);
+  if (ra !== rb) return ra - rb;
+  const sa = Number.isFinite(a.SortOrder) ? a.SortOrder : 9999;
+  const sb = Number.isFinite(b.SortOrder) ? b.SortOrder : 9999;
+  if (sa !== sb) return sa - sb;
+  const na = ((a.FirstName || "") + " " + (a.LastName || "")).trim().toLowerCase();
+  const nb = ((b.FirstName || "") + " " + (b.LastName || "")).trim().toLowerCase();
+  return na.localeCompare(nb);
 }
