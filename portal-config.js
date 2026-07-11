@@ -314,7 +314,7 @@
         var css =
           "@media (min-width:1000px){ body.pnav-on{ padding-left:248px !important; } html.pnav-collapsed body.pnav-on{ padding-left:64px !important; } }"
           + "@media (max-width:999px){ #pnav{ display:none !important; } }"
-          + "#pnav{ position:fixed; left:0; top:0; height:100vh; width:248px; z-index:1000; background:linear-gradient(185deg,#1A4F8F 0%,#003468 100%); color:#fff; display:flex; flex-direction:column; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; transition:width .16s ease; }"
+          + "#pnav{ position:fixed; left:0; top:0; height:100vh; width:248px; z-index:1000; background:linear-gradient(185deg,#1A4F8F 0%,#003468 100%); color:#fff; display:flex; flex-direction:column; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; transition:width .16s ease; text-align:left; }"
           + "html.pnav-collapsed #pnav{ width:64px; }"
           + "#pnav *{ box-sizing:border-box; }"
           + "#pnav .pn-brand{ padding:14px 14px 12px; }"
@@ -341,7 +341,19 @@
           // a sub-page back and always stays).
           + ".ml-back{ display:inline-flex; align-items:center; gap:6px; text-decoration:none; font:600 14px/1 -apple-system,system-ui,'Segoe UI',sans-serif; padding:8px 13px; border-radius:999px; background:#fff; border:1px solid #d7dee6; color:#003366; box-shadow:0 1px 2px rgba(0,0,0,.06); cursor:pointer; }"
           + ".ml-back:hover{ background:#f4f7fb; }"
-          + "@media (min-width:1000px){ body.pnav-on .ml-back[data-role='home']{ display:none !important; } }";
+          + "@media (min-width:1000px){ body.pnav-on .ml-back[data-role='home']{ display:none !important; } }"
+          // ===== Portal shared theme (Batch 3) — one look across every page.
+          // Injected after each page parses, so it wins at EQUAL specificity;
+          // bespoke, more-specific page rules (e.g. a red delete button) still
+          // survive. Only colour / type / surface are unified — never layout.
+          + ":root{ --ml-navy:#003468; --ml-blue:#1a4f8f; --ml-ink:#16202e; --ml-blue-ink:#003366; --ml-accent:#5fa0ff; --ml-bg:#eef1f5; --ml-card:#ffffff; --ml-line:#e2e8f0; --ml-muted:#5a6b82; --ml-radius:14px; --ml-shadow:0 2px 10px rgba(6,24,54,.06); }"
+          + "body{ background:#eef1f5; color:#16202e; font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif; }"
+          // Only the heading FONT is unified — not colour: many pages put white
+          // headings on dark header bands, and recolouring them broke contrast.
+          + "h1,h2,h3{ font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif; }"
+          + ".card{ background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); }"
+          + ".btn, .button{ font-family:inherit; border-radius:10px; cursor:pointer; }"
+          + "input, select, textarea{ font-family:inherit; }";
         var st = document.createElement("style");
         st.id = "pnav-style";
         st.textContent = css;
