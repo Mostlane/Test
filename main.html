@@ -474,6 +474,29 @@ const MAP = {
   </script>
 
   <script>
+    // 🔴 Pending plant/equipment transfers — red badge on the Plant & Equipment
+    // button (mobile menu tile). The desktop sidebar badge is handled centrally
+    // in portal-config.js from the same endpoint.
+    (function () {
+      var token = localStorage.getItem("mostlaneToken");
+      var btn = document.getElementById("Assets");
+      if (!token || !btn) return;
+      fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", { headers: { "Authorization": "Bearer " + token } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || !d.count) return;
+          btn.style.position = "relative";
+          var b = document.createElement("span");
+          b.textContent = d.count > 9 ? "9+" : d.count;
+          b.style.cssText = "position:absolute;top:-7px;right:-7px;min-width:22px;height:22px;padding:0 5px;" +
+            "background:#e11900;color:#fff;border-radius:999px;font:700 12px/22px system-ui,sans-serif;" +
+            "text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);";
+          btn.appendChild(b);
+        }).catch(function () {});
+    })();
+  </script>
+
+  <script>
     // ✅ PWA Push – Service Worker registration (STEP 2)
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/service-worker.js")

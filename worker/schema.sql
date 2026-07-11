@@ -278,6 +278,23 @@ CREATE TABLE IF NOT EXISTS asset_transfers (
 );
 CREATE INDEX IF NOT EXISTS idx_asset_tx_asset ON asset_transfers(asset_id);
 
+-- Pending plant/equipment transfers: User 1 offers an item to User 2, who must
+-- accept (signing a transfer note — logged in asset_transfers) or reject it.
+-- The recipient's pending count drives the red badge on Plant & Equipment.
+CREATE TABLE IF NOT EXISTS asset_transfer_requests (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id      TEXT NOT NULL,
+  from_user     TEXT,
+  to_user       TEXT NOT NULL,
+  status        TEXT DEFAULT 'pending',   -- pending | accepted | rejected | cancelled
+  note          TEXT,
+  requested_at  TEXT DEFAULT (datetime('now')),
+  decided_at    TEXT,
+  signature_key TEXT                      -- R2 key of the acceptance signature image
+);
+CREATE INDEX IF NOT EXISTS idx_atr_to ON asset_transfer_requests(to_user, status);
+CREATE INDEX IF NOT EXISTS idx_atr_asset ON asset_transfer_requests(asset_id, status);
+
 -- ── SLA jobs (replaces mostlane-sla Worker's SLA_JOBS KV) ───────────────────
 -- Indexed columns drive the list filters; `data` holds the full job object
 -- (events, statusHistory, signature, etc.) exactly as the front end expects.

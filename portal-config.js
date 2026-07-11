@@ -292,6 +292,27 @@
         if (whoB) whoB.textContent = name;
         if (whoS) whoS.textContent = yes(perms.FullAccess) ? "Full access" : "Team member";
         if (av) av.textContent = initials(name);
+        applyBadges();
+      }
+
+      // ── Red badge: pending plant/equipment transfers on "Plant & Equipment".
+      var badgeCount = 0;
+      function applyBadges() {
+        var item = document.querySelector('#pnav a.pn-item[href="asset-menu.html"]');
+        if (!item) return;
+        var old = item.querySelector(".pn-badge");
+        if (old) old.remove();
+        if (badgeCount > 0) {
+          var b = document.createElement("span");
+          b.className = "pn-badge";
+          b.textContent = badgeCount > 9 ? "9+" : badgeCount;
+          item.appendChild(b);
+        }
+      }
+      function updateBadges() {
+        fetchAuthed("/asset/transfers/pending-count").then(function (d) {
+          if (d && d.ok) { badgeCount = Number(d.count || 0); applyBadges(); }
+        }).catch(function () {});
       }
 
       function doLaunch(kind) {
@@ -311,6 +332,7 @@
       injectStyles();
       function start() {
         build();
+        updateBadges();
         // Refresh from the server so gating is correct even if the cached perms
         // are stale/incomplete (older logins) — then re-render.
         fetchAuthed("/auth/me").then(function (d) {
@@ -347,6 +369,8 @@
           + "#pnav a.pn-item{ display:flex; align-items:center; gap:12px; padding:9px 11px; border-radius:9px; color:#dbe7f6; text-decoration:none; font-size:14px; font-weight:500; position:relative; margin-bottom:1px; white-space:nowrap; }"
           + "#pnav a.pn-item svg{ width:19px; height:19px; flex:none; stroke:currentColor; stroke-width:1.9; fill:none; }"
           + "#pnav a.pn-item:hover{ background:rgba(255,255,255,.09); color:#fff; } #pnav a.pn-item.active{ background:rgba(255,255,255,.15); color:#fff; font-weight:600; }"
+          + "#pnav .pn-badge{ margin-left:auto; background:#e11900; color:#fff; border-radius:999px; min-width:19px; height:19px; padding:0 5px; font:700 11px/19px system-ui,sans-serif; text-align:center; flex:none; }"
+          + "html.pnav-collapsed #pnav .pn-badge{ position:absolute; top:3px; right:5px; margin:0; }"
           + "#pnav a.pn-item.active::before{ content:''; position:absolute; left:-10px; top:7px; bottom:7px; width:4px; border-radius:0 4px 4px 0; background:#5fa0ff; }"
           + "html.pnav-collapsed #pnav a.pn-item{ justify-content:center; padding:10px 0; } html.pnav-collapsed #pnav a.pn-item .pn-label{ display:none; } html.pnav-collapsed #pnav a.pn-item.active::before{ left:0; }"
           + "#pnav .pn-foot{ border-top:1px solid rgba(255,255,255,.12); padding:11px 12px; display:flex; align-items:center; gap:10px; }"
