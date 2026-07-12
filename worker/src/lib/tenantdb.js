@@ -23,7 +23,7 @@ export const TENANT_TABLES = new Set([
   "password_resets", "devices", "login_history", "holidays",
   "holiday_system_days", "holiday_allowance", "holiday_log", "assets",
   "asset_transfers", "asset_transfer_requests", "sla_jobs", "app_config",
-  "portal_keys", "key_log", "notify_log", "audit_log",
+  "portal_keys", "key_log", "notify_log", "audit_log", "hs_documents",
 ]);
 
 // Today there is exactly one tenant, so anything that arrives before a session

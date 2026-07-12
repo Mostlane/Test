@@ -288,27 +288,12 @@ const MAP = {
   Personalise: ["ThemeColour", "ThemeBackground"]
 };
 
-// H&S planner launch. The app token lives as a secret on the API worker;
-// it's fetched here only for users with the HSPlan permission, and goes in
-// the URL #hash so it never reaches server logs.
-(async function(){
+// H&S button now opens the H&S Documents hub (inductions, permits, RAMS,
+// incident reports). The hub also launches the existing Construction Phase
+// Plan app from a tile (it does the /hs-plan-config token lookup there).
+(function(){
   const b = document.getElementById("HSPlan");
-  if (!b) return;
-  try{
-    const t = localStorage.getItem("mostlaneToken");
-    const r = await fetch(window.MOSTLANE_API + "/hs-plan-config",
-      { headers: t ? { "Authorization": "Bearer " + t } : {} });
-    const c = await r.json().catch(() => ({}));
-    if (r.ok && c.ok && c.token) {
-      b.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) +
-               "&token=" + encodeURIComponent(c.token);
-      return;
-    }
-  }catch(e){}
-  b.addEventListener("click", e => {
-    e.preventDefault();
-    alert("The H&S planner isn't available for your account yet (or its token isn't configured on the server).");
-  });
+  if (b) b.href = "hs-docs.html";
 })();
 
 // PO system now opens the po.html wrapper (sidebar + embedded PO on desktop;

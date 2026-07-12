@@ -615,10 +615,9 @@
             else alert("No PO link is set on your account yet — ask the office to add your personal PO URL in Users admin.");
           }).catch(function () { alert("Couldn't open the PO system."); });
         } else if (kind === "hs") {
-          fetchAuthed("/hs-plan-config").then(function (c) {
-            if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token);
-            else alert("The H&S planner isn't available for your account yet.");
-          }).catch(function () { alert("Couldn't open the H&S planner."); });
+          // H&S now opens the documents hub (inductions, permits, RAMS,
+          // incidents); the Construction Phase Plan app launches from a tile there.
+          location.href = "hs-docs.html";
         } else if (kind === "viewas") {
           if (window.mlViewAsPicker) window.mlViewAsPicker();
         }

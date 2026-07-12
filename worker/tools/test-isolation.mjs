@@ -20,6 +20,7 @@ import * as sites from "../src/routes/sites.js";
 import * as keys from "../src/routes/keys.js";
 import * as portal from "../src/routes/portal.js";
 import * as office from "../src/routes/office.js";
+import * as hs from "../src/routes/hs.js";
 
 const TABLE_RE = /\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)/gi;
 function tablesIn(sql) {
@@ -86,6 +87,8 @@ const CASES = [
   ["keys    GET /keys",               keys,     "/keys"],
   ["portal  GET /audit/log",          portal,   "/audit/log"],
   ["office  GET /office/timesheet",   office,   "/office/timesheet?week=2026-07-06"],
+  ["hs      GET /hs/docs",            hs,       "/hs/docs"],
+  ["hs      GET /hs/docs?type=induction", hs,   "/hs/docs?type=induction"],
 ];
 
 let failures = 0, checkedQueries = 0, drove = 0;

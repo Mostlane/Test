@@ -423,5 +423,24 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username, id);
 CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
 
+-- ── H&S documents (inductions, permits, RAMS, incident reports) ──────────────
+-- One generic table serves every document type: doc_type says which, and the
+-- full form (fields + inline signature data URLs) lives in `data`. ref is the
+-- human-facing number (IND-0001, HWP-<site>-<date>-<n>, ...). The 🦺 H&S
+-- Documents hub reads/writes these via /hs/*. Tenant-scoped like everything else.
+CREATE TABLE IF NOT EXISTS hs_documents (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  id         TEXT PRIMARY KEY,          -- internal id (HSD-<ts>-<rand>)
+  doc_type   TEXT NOT NULL,             -- 'induction' | 'hotworks' | 'rams' | 'incident'
+  ref        TEXT,                      -- human reference, e.g. IND-0001
+  site       TEXT,                      -- site / project name
+  status     TEXT DEFAULT 'open',       -- open | closed
+  data       TEXT NOT NULL,             -- full document JSON (fields + signatures)
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_hs_tenant ON hs_documents(tenant_id, doc_type, id);
+
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.
