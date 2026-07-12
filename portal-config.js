@@ -417,7 +417,7 @@
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
-          { label: "Personalise", href: "theme.html", icon: "paint", perms: ["ThemeColour", "ThemeBackground"] },
+          { label: "Personalise", href: "personalise.html", icon: "paint", perms: ["ThemeColour", "ThemeBackground"], match: ["personalise.html", "theme.html"] },
           { label: "View as user…", launch: "viewas", icon: "eye", ownerOnly: true }
         ]}
       ];
