@@ -78,7 +78,7 @@ function generateTempPassword() {
 }
 async function createSession(env, username, deviceId) {
   const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
-  const ttlH = Number(env.SESSION_TTL_HOURS || 12);
+  const ttlH = Number(env.SESSION_TTL_HOURS || 2160);
   const expires = new Date(Date.now() + ttlH * 3600 * 1e3).toISOString();
   await env.DB.prepare(
     "INSERT INTO sessions (token, username, device_id, expires_at) VALUES (?,?,?,?)"

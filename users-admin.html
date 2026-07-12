@@ -233,7 +233,13 @@
 
       <!-- ACCOUNT -->
       <div class="section" data-sec="account">
-        <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" />
+        <div><label id="pwLabel">Set password (leave blank to keep current)</label>
+          <div style="position:relative;">
+            <input id="f_pw" type="password" placeholder="••••••••" style="padding-right:44px;" autocomplete="new-password" />
+            <button type="button" id="f_pwEye" aria-label="Show password"
+              style="position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:17px; cursor:pointer; padding:4px; opacity:.65;">👁</button>
+          </div>
+          <p class="muted" id="pwHint" style="margin:4px 0 0; font-size:12px;">Minimum 8 characters, with at least one letter and one number.</p>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px;color:#3a4a5c;cursor:pointer;">
             <input type="checkbox" id="f_pwForce" checked style="width:auto;margin:0;"> They must change it at next login
           </label>
@@ -325,6 +331,20 @@
     // switches when Full access is turned off, and to save the admin's real
     // selection rather than the forced-on visual state.
     let faSnapshot = null;
+
+    // Mirrors the server's password rule so bad ones are rejected before saving.
+    function pwProblem(pw) {
+      if (typeof pw !== "string" || pw.length < 8) return "Password must be at least 8 characters.";
+      if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return "Password must include a letter and a number.";
+      return null;
+    }
+    document.getElementById("f_pwEye").addEventListener("click", function () {
+      const inp = document.getElementById("f_pw");
+      const show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+      this.textContent = show ? "🙈" : "👁";
+      this.style.opacity = show ? "1" : ".65";
+    });
 
     function api(path, opts = {}) {
       opts.headers = Object.assign({ "Authorization": "Bearer " + token }, opts.headers || {});
@@ -548,6 +568,7 @@
       g("panelTitle").textContent = user ? "Edit user" : "Add user";
       g("pwLabel").textContent = user ? "Set password (leave blank to keep current)" : "Initial password";
       g("f_pwForce").checked = true;   // default: passwords set by admin are temporary
+      g("f_pw").type = "password"; g("f_pwEye").textContent = "👁"; g("f_pwEye").style.opacity = ".65";
       g("f_username").value = user?.Username || "";
       g("f_username").disabled = !!user;
       g("f_engno").value = user?.EngineerNumber || "";
@@ -597,7 +618,11 @@
       };
       if (!body.Username) { msg.className = "msg err"; msg.textContent = "Username is required."; return; }
       const pw = g("f_pw").value;
-      if (pw) { body.Password = pw; body.ForceChange = g("f_pwForce").checked; }
+      if (pw) {
+        const bad = pwProblem(pw);
+        if (bad) { msg.className = "msg err"; msg.textContent = bad; return; }
+        body.Password = pw; body.ForceChange = g("f_pwForce").checked;
+      }
       // Start from the profile we loaded so unmanaged keys (home geofence,
       // onboarding capture, …) are preserved; overlay the managed fields.
       const profile = Object.assign({}, editingProfile);
