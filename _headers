@@ -25,3 +25,5 @@
   Cache-Control: no-cache
 /activity-log.html
   Cache-Control: no-cache
+/hs-docs.html
+  Cache-Control: no-cache

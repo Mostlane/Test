@@ -139,7 +139,8 @@ var TENANT_TABLES = /* @__PURE__ */ new Set([
   "portal_keys",
   "key_log",
   "notify_log",
-  "audit_log"
+  "audit_log",
+  "hs_documents"
 ]);
 var DEFAULT_TENANT_ID = 1;
 async function resolveTenantId(env, request) {
@@ -3547,6 +3548,82 @@ async function handle12(request, env, ctx, url, sess) {
   return json2({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
+// src/routes/hs.js
+var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
+async function handle13(request, env, ctx, url, sess) {
+  if (!sess) sess = await requireSession(env, request);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
+  if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
+    return error("This needs H&S access.", 403, env, request);
+  const db = tenantDB(env, sess.tenantId);
+  const path = url.pathname;
+  const method = request.method.toUpperCase();
+  if (path === "/hs/docs" && method === "GET") {
+    const type = url.searchParams.get("type");
+    const stmt = type ? db.prepare("SELECT id, doc_type, ref, site, status, created_by, created_at, updated_at FROM hs_documents WHERE tenant_id=? AND doc_type=? ORDER BY created_at DESC LIMIT 500").bind(db.tenantId, type) : db.prepare("SELECT id, doc_type, ref, site, status, created_by, created_at, updated_at FROM hs_documents WHERE tenant_id=? ORDER BY created_at DESC LIMIT 500").bind(db.tenantId);
+    const { results } = await stmt.all();
+    return json({ ok: true, docs: results || [] }, {}, env, request);
+  }
+  if (path === "/hs/doc" && method === "GET") {
+    const id = url.searchParams.get("id");
+    if (!id) return error("Missing id", 400, env, request);
+    const row = await db.prepare("SELECT * FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, id).first();
+    if (!row) return error("Document not found", 404, env, request);
+    let data = {};
+    try {
+      data = row.data ? JSON.parse(row.data) : {};
+    } catch {
+    }
+    return json({ ok: true, doc: { id: row.id, doc_type: row.doc_type, ref: row.ref, site: row.site, status: row.status, created_by: row.created_by, created_at: row.created_at, updated_at: row.updated_at, data } }, {}, env, request);
+  }
+  if (path === "/hs/doc" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const docType = String(b.doc_type || "");
+    if (!PREFIX[docType]) return error("Unknown document type", 400, env, request);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const site = String(b.site || "").trim();
+    const status = b.status === "closed" ? "closed" : "open";
+    const data = b.data && typeof b.data === "object" ? b.data : {};
+    if (b.id) {
+      const existing = await db.prepare("SELECT id FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).first();
+      if (!existing) return error("Document not found", 404, env, request);
+      await db.prepare("UPDATE hs_documents SET site=?, status=?, data=?, updated_at=? WHERE tenant_id=? AND id=?").bind(site, status, JSON.stringify(data), now, db.tenantId, b.id).run();
+      return json({ ok: true, id: b.id }, {}, env, request);
+    }
+    const id = "HSD-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    const ref = await mintRef(db, docType, site);
+    await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
+    return json({ ok: true, id, ref }, {}, env, request);
+  }
+  if (path === "/hs/doc/delete" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return error("Missing id", 400, env, request);
+    await db.prepare("DELETE FROM hs_documents WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  return error("Unknown H&S route", 404, env, request);
+}
+async function mintRef(db, docType, site) {
+  const prefix = PREFIX[docType];
+  if (docType === "hotworks") {
+    const code = (site.replace(/[^A-Za-z0-9]/g, "").toUpperCase() + "SITE").slice(0, 6);
+    const d = /* @__PURE__ */ new Date();
+    const ymd = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
+    const n = String(Math.floor(100 + Math.random() * 900));
+    return `${prefix}-${code}-${ymd}-${n}`;
+  }
+  const { results } = await db.prepare(
+    "SELECT ref FROM hs_documents WHERE tenant_id=? AND doc_type=? AND ref IS NOT NULL"
+  ).bind(db.tenantId, docType).all();
+  let max = 0;
+  for (const r of results || []) {
+    const m = /(\d+)\s*$/.exec(String(r.ref || ""));
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${prefix}-${String(max + 1).padStart(4, "0")}`;
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -3590,8 +3667,10 @@ var ROUTES = [
   // office clock in/out + weekly timesheet
   ["*", "/key", handle11],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle12]
+  ["*", "/theme", handle12],
   // per-user colour theme + background
+  ["*", "/hs/", handle13]
+  // H&S documents hub (inductions, permits, RAMS, incidents)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

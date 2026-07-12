@@ -30,6 +30,7 @@ import * as sitelog from "./routes/sitelog.js";    // DONE  (server-side proxy t
 import * as office from "./routes/office.js";      // DONE  (office clock in/out + weekly timesheet)
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
+import * as hs from "./routes/hs.js";               // DONE  (H&S documents: inductions, permits, RAMS, incidents)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -66,6 +67,7 @@ const ROUTES = [
   ["*", "/office",     office.handle],   // office clock in/out + weekly timesheet
   ["*", "/key",        keys.handle],     // /keys, /key/* (key register)
   ["*", "/theme",      theme.handle],    // per-user colour theme + background
+  ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

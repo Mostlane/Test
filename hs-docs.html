@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>H&amp;S Documents</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:1000px; margin:16px auto 60px; padding:0 14px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:10px 14px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.red { background:#b00020; } .btn.small { padding:6px 10px; font-size:13px; }
+    .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    /* Hub tiles */
+    .tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; margin-top:8px; }
+    .tile { background:#fff; border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 2px 10px rgba(6,24,54,.06); cursor:pointer; text-align:left; }
+    .tile:hover { border-color:var(--brand); }
+    .tile .emoji { font-size:30px; } .tile h3 { margin:8px 0 4px; font-size:16px; } .tile p { margin:0; font-size:13px; }
+    /* Cards / forms */
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:16px; margin-bottom:14px; }
+    label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],input[type=tel],input[type=date],input[type=time],textarea,select {
+      width:100%; padding:10px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    textarea { min-height:70px; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    @media (max-width:640px){ .grid2 { grid-template-columns:1fr; } }
+    .brief label.chk { display:flex; align-items:flex-start; gap:8px; font-weight:400; margin:6px 0; }
+    .brief input { width:auto; margin-top:3px; }
+    .sub { border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; position:relative; }
+    .sub .rm { position:absolute; top:8px; right:8px; }
+    .sigwrap { border:1px dashed #9fb0c3; border-radius:10px; background:#fbfdff; }
+    canvas.sig { width:100%; height:130px; touch-action:none; display:block; border-radius:10px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    table.list { width:100%; border-collapse:collapse; background:#fff; }
+    table.list td, table.list th { padding:10px; border-top:1px solid #f0f3f7; font-size:13.5px; text-align:left; }
+    .msg { margin:8px 0; font-size:14px; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
+    /* Printable document */
+    .doc { background:#fff; color:#111; padding:26px; border:1px solid var(--line); border-radius:10px; max-width:800px; margin:0 auto; }
+    .doc h2 { text-align:center; margin:0 0 2px; } .doc .ref { text-align:center; color:#334; margin:0 0 16px; font-weight:700; }
+    .doc h3 { background:#eef2f7; padding:6px 10px; border-radius:6px; margin:16px 0 8px; font-size:14px; }
+    .doc .kv { display:grid; grid-template-columns:1fr 1fr; gap:6px 18px; font-size:14px; }
+    .doc .kv div b { color:#334; }
+    .doc ul { margin:6px 0; padding-left:20px; font-size:14px; } .doc ul li { margin:3px 0; }
+    .doc .sig img { max-height:70px; border-bottom:1px solid #333; }
+    .doc .foot { margin-top:18px; font-size:12px; color:#556; border-top:1px solid #ddd; padding-top:8px; }
+    @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; } }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <button class="btn grey small" onclick="location.href='main.html'">🏠</button>
+    <h1>🦺 H&amp;S Documents</h1>
+    <button class="btn grey small hide" id="backHub" onclick="showHub()">← All documents</button>
+  </header>
+  <div class="wrap">
+
+    <!-- HUB -->
+    <div id="hub">
+      <p class="muted">Create and store your site health &amp; safety paperwork. Tap a type to see existing documents or start a new one.</p>
+      <div class="tiles" id="tiles"></div>
+    </div>
+
+    <!-- LIST (per type) -->
+    <div id="list" class="hide">
+      <div class="row" style="justify-content:space-between; margin-bottom:10px;">
+        <h2 id="listTitle" style="margin:0;"></h2>
+        <button class="btn" id="newBtn">+ New</button>
+      </div>
+      <div class="card" style="padding:0; overflow:hidden;">
+        <table class="list"><tbody id="listRows"></tbody></table>
+      </div>
+    </div>
+
+    <!-- FORM: Induction -->
+    <div id="formInduction" class="hide">
+      <h2 id="indFormTitle">New Site Induction</h2>
+      <div class="card">
+        <h3 style="margin-top:0;">Site details</h3>
+        <div class="grid2">
+          <div><label>Project *</label><input type="text" id="i_project"></div>
+          <div><label>Site address</label><input type="text" id="i_addr"></div>
+          <div><label>Site manager</label><input type="text" id="i_mgr"></div>
+          <div><label>Start date</label><input type="date" id="i_date"></div>
+        </div>
+      </div>
+      <div class="card brief">
+        <h3 style="margin-top:0;">Induction briefing includes</h3>
+        <div id="i_brief"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Contractor details</h3>
+        <div id="i_contractors"></div>
+        <button class="btn ghost small" type="button" onclick="addContractor()">+ Add contractor</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Induction given by</h3>
+        <label>Print name</label><input type="text" id="i_byname">
+        <label>Signature</label><div class="sigwrap"><canvas class="sig" id="i_bysig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('i_bysig')">Clear signature</button>
+      </div>
+      <p class="msg" id="indMsg"></p>
+      <div class="row">
+        <button class="btn" id="indSave">Save induction</button>
+        <button class="btn ghost" id="indSaveView">Save &amp; open document</button>
+        <button class="btn grey" onclick="showList('induction')">Cancel</button>
+      </div>
+    </div>
+
+    <!-- DOCUMENT VIEW (printable) -->
+    <div id="docView" class="hide">
+      <div class="row noprint" style="margin-bottom:10px; justify-content:flex-end;">
+        <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
+      </div>
+      <div class="doc" id="docBody"></div>
+    </div>
+
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  const fmtDate = s => { if(!s) return ""; const d=new Date(s); return isNaN(d)? s : d.toLocaleDateString("en-GB"); };
+
+  const BRIEFING = [
+    "Site rules and expected conduct",
+    "PPE requirements (hi-vis, boots, gloves, etc.)",
+    "Welfare arrangements (toilets, mess area)",
+    "Emergency procedures and muster point",
+    "Location of fire extinguishers and first aid kit",
+    "Site hazards (asbestos, live services, etc.)",
+    "Requirement to follow RAMS and safe systems of work",
+    "Permit-to-work systems (hot works, roof access, confined space)",
+    "Working at height procedures",
+    "Housekeeping and material storage",
+    "Accident / near miss reporting procedure",
+  ];
+
+  // Document types shown in the hub.
+  const TYPES = [
+    { key:"induction", emoji:"📋", title:"Site Inductions", desc:"Contractor / visitor site inductions", ready:true },
+    { key:"hotworks",  emoji:"🔥", title:"Permits (Hot Works…)", desc:"Hot works & permit-to-work", ready:false },
+    { key:"rams",      emoji:"⚠️", title:"Risk Assessments / RAMS", desc:"Standalone RAMS", ready:false },
+    { key:"incident",  emoji:"🚑", title:"Incident / Near-miss", desc:"Accident & near-miss reports", ready:false },
+  ];
+
+  let ME = null;
+  (async () => {
+    try {
+      const me = await authFetch("/auth/me").then(r => r.json());
+      if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.HSPlan === "Yes")) {
+        alert("This page needs H&S access."); location.href = "main.html"; return;
+      }
+      ME = me.user;
+    } catch (e) { location.href = "main.html"; return; }
+    buildHub();
+    showHub();
+  })();
+
+  function buildHub() {
+    g("tiles").innerHTML = TYPES.map(t => `
+      <button class="tile" onclick="showList('${t.key}')">
+        <div class="emoji">${t.emoji}</div>
+        <h3>${esc(t.title)}</h3>
+        <p class="muted">${esc(t.desc)}${t.ready ? "" : " · coming soon"}</p>
+      </button>`).join("")
+      + `<button class="tile" onclick="openPlan()">
+           <div class="emoji">🏗️</div><h3>Construction Phase Plan</h3>
+           <p class="muted">Full project H&amp;S plan (existing tool)</p>
+         </button>`;
+  }
+  function showHub(){ ["list","formInduction","docView"].forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
+  function show(id){ ["hub","list","formInduction","docView"].forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
+
+  // Open the existing Construction Phase Plan app (unchanged) via its launch config.
+  async function openPlan() {
+    try {
+      const c = await authFetch("/hs-plan-config").then(r => r.json());
+      if (c && c.ok && c.token) location.href = "hs-plan/#worker=" + encodeURIComponent(c.worker) + "&token=" + encodeURIComponent(c.token);
+      else alert("Construction Phase Plan isn't configured for your account.");
+    } catch (e) { alert("Couldn't open the Construction Phase Plan tool."); }
+  }
+
+  // ── List view ──────────────────────────────────────────────────────────────
+  let curType = null;
+  async function showList(type) {
+    curType = type;
+    const meta = TYPES.find(t => t.key === type);
+    show("list");
+    g("listTitle").textContent = meta.title;
+    g("newBtn").classList.toggle("hide", !meta.ready);
+    g("listRows").innerHTML = `<tr><td class="muted">Loading…</td></tr>`;
+    if (!meta.ready) { g("listRows").innerHTML = `<tr><td class="muted">This document type is coming next — the ${esc(meta.title)} form isn't built yet.</td></tr>`; return; }
+    try {
+      const d = await authFetch("/hs/docs?type=" + encodeURIComponent(type)).then(r => r.json());
+      const docs = (d && d.docs) || [];
+      if (!docs.length) { g("listRows").innerHTML = `<tr><td class="muted">No documents yet — tap “+ New”.</td></tr>`; return; }
+      g("listRows").innerHTML = docs.map(x => `
+        <tr>
+          <td><b>${esc(x.ref || "—")}</b><br><span class="muted">${esc(x.site || "")}</span></td>
+          <td class="muted">${esc(fmtDate(x.created_at))}<br>${esc(x.created_by || "")}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            <button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
+            <button class="btn grey small" onclick="editDoc('${x.id}')">Edit</button>
+            <button class="btn red small" onclick="delDoc('${x.id}')">✕</button>
+          </td>
+        </tr>`).join("");
+    } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
+  }
+  g("newBtn").onclick = () => { if (curType === "induction") newInduction(); };
+
+  // ── Signature pads ───────────────────────────────────────────────────────────
+  const pads = {};
+  function initSig(canvasId, existing) {
+    const c = g(canvasId); if (!c) return;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * ratio; c.height = 130 * ratio;
+    const ctx = c.getContext("2d"); ctx.scale(ratio, ratio); ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#111";
+    let drawing = false, dirty = false;
+    if (existing) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, rect.width, 130); img.src = existing; dirty = true; }
+    const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+    const start = e => { drawing = true; dirty = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); };
+    const move = e => { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); e.preventDefault(); };
+    const end = () => { drawing = false; };
+    c.addEventListener("mousedown", start); c.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+    c.addEventListener("touchstart", start, {passive:false}); c.addEventListener("touchmove", move, {passive:false}); c.addEventListener("touchend", end);
+    pads[canvasId] = { get: () => dirty ? c.toDataURL("image/png") : "", clear: () => { ctx.clearRect(0,0,c.width,c.height); dirty = false; } };
+  }
+  function clearSig(id){ pads[id] && pads[id].clear(); }
+  const sigVal = id => pads[id] ? pads[id].get() : "";
+
+  // ── Induction form ───────────────────────────────────────────────────────────
+  let editId = null;
+  function renderBriefing(checked) {
+    g("i_brief").innerHTML = BRIEFING.map((t,i) =>
+      `<label class="chk"><input type="checkbox" data-brief="${i}" ${(!checked || checked.includes(t)) ? "checked" : ""}> ${esc(t)}</label>`).join("");
+  }
+  function contractorRow(c = {}) {
+    const idx = g("i_contractors").children.length;
+    const div = document.createElement("div");
+    div.className = "sub";
+    div.innerHTML = `
+      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
+      <div class="grid2">
+        <div><label>Full name *</label><input type="text" data-c="fullName" value="${esc(c.fullName||"")}"></div>
+        <div><label>Company</label><input type="text" data-c="company" value="${esc(c.company||"")}"></div>
+        <div><label>Trade / role</label><input type="text" data-c="trade" value="${esc(c.trade||"")}"></div>
+        <div><label>Contact number</label><input type="tel" data-c="contact" value="${esc(c.contact||"")}"></div>
+        <div><label>CSCS No.</label><input type="text" data-c="cscs" value="${esc(c.cscs||"")}"></div>
+        <div><label>Date</label><input type="date" data-c="date" value="${esc(c.date||"")}"></div>
+      </div>
+      <label>Contractor signature</label>
+      <div class="sigwrap"><canvas class="sig" id="csig${idx}"></canvas></div>
+      <button class="btn grey small noprint" type="button" onclick="clearSig('csig${idx}')">Clear signature</button>`;
+    g("i_contractors").appendChild(div);
+    initSig("csig" + idx, c.signature || "");
+    div.dataset.sig = "csig" + idx;
+  }
+  function addContractor(){ contractorRow(); }
+
+  function newInduction() {
+    editId = null;
+    g("indFormTitle").textContent = "New Site Induction";
+    ["i_project","i_addr","i_mgr","i_byname"].forEach(i => g(i).value = "");
+    g("i_date").value = new Date().toISOString().slice(0,10);
+    renderBriefing(null);
+    g("i_contractors").innerHTML = "";
+    g("indMsg").textContent = "";
+    show("formInduction");
+    setTimeout(() => { initSig("i_bysig",""); contractorRow(); }, 30);
+  }
+  async function editDoc(id) {
+    if (curType !== "induction") return;
+    const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
+    if (!d.ok) return alert("Couldn't load that document.");
+    const x = d.doc.data || {};
+    editId = id;
+    g("indFormTitle").textContent = "Edit Site Induction — " + (d.doc.ref || "");
+    g("i_project").value = x.project || d.doc.site || ""; g("i_addr").value = x.siteAddress || "";
+    g("i_mgr").value = x.siteManager || ""; g("i_date").value = x.startDate || "";
+    g("i_byname").value = x.inductorName || "";
+    renderBriefing(x.briefing || null);
+    g("i_contractors").innerHTML = "";
+    show("formInduction");
+    setTimeout(() => {
+      initSig("i_bysig", x.inductorSignature || "");
+      (x.contractors && x.contractors.length ? x.contractors : [{}]).forEach(c => contractorRow(c));
+    }, 30);
+  }
+
+  function collectInduction() {
+    const briefing = BRIEFING.filter((_,i) => g("i_brief").querySelector(`[data-brief="${i}"]`).checked);
+    const contractors = [...g("i_contractors").children].map(div => {
+      const get = k => { const el = div.querySelector(`[data-c="${k}"]`); return el ? el.value.trim() : ""; };
+      return { fullName:get("fullName"), company:get("company"), trade:get("trade"), contact:get("contact"), cscs:get("cscs"), date:get("date"), signature: sigVal(div.dataset.sig) };
+    }).filter(c => c.fullName || c.company);
+    return {
+      project:g("i_project").value.trim(), siteAddress:g("i_addr").value.trim(),
+      siteManager:g("i_mgr").value.trim(), startDate:g("i_date").value,
+      briefing, contractors, inductorName:g("i_byname").value.trim(), inductorSignature: sigVal("i_bysig"),
+    };
+  }
+
+  async function saveInduction(openAfter) {
+    const data = collectInduction();
+    const msg = g("indMsg"); msg.className = "msg";
+    if (!data.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    g("indSave").disabled = g("indSaveView").disabled = true; msg.textContent = "Saving…";
+    try {
+      const body = { doc_type:"induction", site:data.project, data, ...(editId ? { id: editId } : {}) };
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      const id = editId || r.id;
+      msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
+      if (openAfter) openDoc(id); else showList("induction");
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }
+    finally { g("indSave").disabled = g("indSaveView").disabled = false; }
+  }
+  g("indSave").onclick = () => saveInduction(false);
+  g("indSaveView").onclick = () => saveInduction(true);
+
+  async function delDoc(id) {
+    if (!confirm("Delete this document? This can't be undone.")) return;
+    await authFetch("/hs/doc/delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) });
+    showList(curType);
+  }
+
+  // ── Printable document view ──────────────────────────────────────────────────
+  async function openDoc(id) {
+    const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
+    if (!d.ok) return alert("Couldn't load that document.");
+    show("docView");
+    if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
+    else g("docBody").innerHTML = `<p class="muted">Viewer for this type is coming soon.</p>`;
+  }
+  const sigImg = s => s ? `<img src="${s}" alt="signature">` : `<span class="muted">(not signed)</span>`;
+  function renderInduction(doc) {
+    const x = doc.data || {};
+    const contractors = (x.contractors || []).map((c,i) => `
+      <div style="margin:10px 0; padding:10px 0; border-top:1px solid #eee;">
+        <b>CONTRACTOR ${i+1}: ${esc((c.fullName||"").toUpperCase())}</b>
+        <div class="kv" style="margin-top:6px;">
+          <div><b>Full name:</b> ${esc(c.fullName||"")}</div><div><b>Company:</b> ${esc(c.company||"")}</div>
+          <div><b>Trade / role:</b> ${esc(c.trade||"")}</div><div><b>Contact:</b> ${esc(c.contact||"")}</div>
+          <div><b>CSCS No.:</b> ${esc(c.cscs||"N/A")}</div><div><b>Date:</b> ${esc(fmtDate(c.date))}</div>
+        </div>
+        <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(c.signature)}</div>
+      </div>`).join("") || `<p class="muted">No contractors recorded.</p>`;
+    return `
+      <h2>Contractor Site Induction Form</h2>
+      <p class="ref">Document No: ${esc(doc.ref || "—")}</p>
+      <h3>SITE DETAILS</h3>
+      <div class="kv">
+        <div><b>Project:</b> ${esc(x.project||"")}</div><div><b>Site address:</b> ${esc(x.siteAddress||"")}</div>
+        <div><b>Site manager:</b> ${esc(x.siteManager||"")}</div><div><b>Start date:</b> ${esc(fmtDate(x.startDate))}</div>
+      </div>
+      <h3>SITE INDUCTION BRIEFING INCLUDES</h3>
+      <ul>${(x.briefing||BRIEFING).map(b => `<li>${esc(b)}</li>`).join("")}</ul>
+      <h3>CONTRACTOR DETAILS</h3>
+      ${contractors}
+      <h3>INDUCTION GIVEN BY</h3>
+      <div class="kv"><div><b>Print name:</b> ${esc(x.inductorName||"")}</div></div>
+      <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(x.inductorSignature)}</div>
+      <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
+  }
+</script>
+</body>
+</html>
