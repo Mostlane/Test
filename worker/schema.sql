@@ -360,5 +360,21 @@ CREATE TABLE IF NOT EXISTS notify_log (
 );
 CREATE INDEX IF NOT EXISTS idx_notify_log_user ON notify_log(username, id);
 
+-- ── Activity log ─────────────────────────────────────────────────────────────
+-- Every state-changing API request (who/what/when, written automatically by
+-- the middleware in index.js) plus page views (method 'VIEW', posted by
+-- portal-config). Pruned automatically to 12 months.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  method   TEXT NOT NULL,            -- POST | PUT | PATCH | DELETE | VIEW
+  path     TEXT NOT NULL,            -- endpoint (+ query) or /page.html for views
+  detail   TEXT,                     -- key fields extracted from the payload
+  status   INTEGER,                  -- HTTP outcome of the action
+  at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username, id);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Activity Log — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:1000px; margin:16px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .bar select, .bar input { padding:9px 10px; border:1px solid #ccd5dd; border-radius:9px; font-size:14px; font-family:inherit; background:#fff; }
+    .bar input { flex:1; min-width:140px; }
+    .card { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); overflow:hidden; }
+    .row { display:flex; gap:12px; align-items:flex-start; padding:10px 14px; border-top:1px solid #f0f3f7; font-size:13.5px; }
+    .row:first-child { border-top:none; }
+    .row .when { flex:none; width:132px; color:#667085; font-size:12.5px; line-height:1.5; }
+    .row .who { font-weight:700; color:#003366; }
+    .kind { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+    .kind.action { background:#e2edff; color:#1a4f8f; }
+    .kind.view { background:#eef1f4; color:#667085; }
+    .kind.fail { background:#fdeaea; color:#b00020; }
+    .what { color:#16202e; margin-top:2px; }
+    .det { color:#8a97a6; font-size:12px; margin-top:2px; word-break:break-word; }
+    @media (max-width:640px){ .row { flex-direction:column; gap:4px; } .row .when { width:auto; } }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>📜 Activity Log</h1>
+    <a class="ml-back" data-role="up" href="users-admin.html">← Users Admin</a>
+  </header>
+
+  <div class="wrap">
+    <p class="muted" style="margin:0 0 12px;">Everything done on the portal, with timestamps — every action is recorded automatically at the moment it happens,
+      plus which pages people opened. Kept for 12 months.</p>
+    <div class="bar">
+      <select id="fUser"><option value="">Everyone</option></select>
+      <select id="fType">
+        <option value="">Actions + page views</option>
+        <option value="action" selected>Actions only</option>
+        <option value="view">Page views only</option>
+      </select>
+      <select id="fDays">
+        <option value="1">Today</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 12 months</option>
+      </select>
+      <input id="fSearch" placeholder="Filter… e.g. key, holiday, A1003">
+      <span class="muted" id="countLbl"></span>
+    </div>
+    <div class="card" id="list"><div class="row muted">Loading…</div></div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+
+    let USERS = [], LOG = [];
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || me.user.FullAccess !== "Yes") { alert("This page needs Full Access."); location.href = "main.html"; return; }
+      } catch (e) { location.href = "main.html"; return; }
+      try {
+        const d = await authFetch("/users").then(r => r.json());
+        USERS = (d.Users || []).filter(u => u.Username);
+        g("fUser").innerHTML = '<option value="">Everyone</option>' + USERS.map(u =>
+          `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+      } catch (e) {}
+      load();
+    })();
+
+    const nameOf = uname => { const u = USERS.find(x => x.Username === uname); return u ? ((u.FirstName || "") + " " + (u.LastName || "")).trim() : (uname || ""); };
+
+    // Friendly names for the common endpoints; anything unmapped shows its raw path.
+    const FRIENDLY = [
+      [/^POST \/holiday\/request/,        "🌴 Requested time off"],
+      [/^POST \/holiday\/approve/,        "✅ Approved a holiday request"],
+      [/^POST \/holiday\/reject/,         "❌ Rejected a holiday request"],
+      [/^POST \/holiday\/cancel/,         "🔁 Cancelled a holiday"],
+      [/^POST \/holiday\/delete-own/,     "🗑️ Removed an old holiday entry"],
+      [/^POST \/holiday\/set-allowance/,  "⚖️ Changed a holiday allowance"],
+      [/^POST \/holiday\/set-/,           "⚖️ Changed holiday settings"],
+      [/^POST \/asset\/transfer-request/, "📤 Offered an item transfer"],
+      [/^POST \/asset\/transfer-accept/,  "✍️ Accepted & signed for an item"],
+      [/^POST \/asset\/transfer-reject/,  "🚫 Rejected an item transfer"],
+      [/^POST \/asset\/transfer-cancel/,  "↩️ Cancelled an item transfer"],
+      [/^POST \/asset\/add/,              "📦 Added an asset"],
+      [/^POST \/asset\/update/,           "🛠️ Updated an asset"],
+      [/^DELETE \/asset\/delete/,         "🗑️ Deleted an asset"],
+      [/^POST \/upload-asset-image/,      "📷 Uploaded an asset photo"],
+      [/^POST \/delete-asset-image/,      "🗑️ Removed an asset photo"],
+      [/^POST \/transfer\b/,              "↔️ Recorded an asset transfer"],
+      [/^POST \/key\/add/,                "➕ Added a key"],
+      [/^POST \/key\/update/,             "🛠️ Updated a key"],
+      [/^POST \/key\/sign-out/,           "🗝️ Signed a key out"],
+      [/^POST \/key\/sign-in/,            "🔑 Signed a key back in"],
+      [/^DELETE \/key\/delete/,           "🗑️ Deleted a key"],
+      [/^POST \/users\/reset-password/,   "🔐 Reset a user's password"],
+      [/^POST \/users\/resend-welcome/,   "📧 Re-sent a welcome email"],
+      [/^POST \/users\/reorder/,          "↕️ Reordered the user list"],
+      [/^POST \/users\b/,                 "👥 Saved a user"],
+      [/^POST \/user\b/,                  "👥 Saved a user"],
+      [/^DELETE \/user/,                  "🗑️ Deleted a user"],
+      [/^POST \/auth\/change-password/,   "🔒 Changed their password"],
+      [/^POST \/auth\/logout/,            "🚪 Logged out"],
+      [/^POST \/auth\/impersonate/,       "👁 Viewed the portal as another user"],
+      [/^POST \/theme\/background/,       "🖼️ Uploaded a menu background"],
+      [/^POST \/theme/,                   "🎨 Changed their personalisation"],
+      [/^POST \/office\/clock-in/,        "🕐 Clocked in (office)"],
+      [/^POST \/office\/clock-out/,       "🕔 Clocked out (office)"],
+      [/^POST \/office\/segment/,         "✏️ Edited a timesheet segment"],
+      [/^POST \/oncall/,                  "📞 Updated the on-call rota"],
+      [/^POST \/daily-logs/,              "📔 Submitted a daily log"],
+      [/^POST \/sla\/jobs/,               "🚨 SLA job created/updated"],
+      [/^POST \/sla\/shift/,              "🕐 SLA shift clock action"],
+      [/^POST \/sla\/vehicle-check/,      "🚐 Submitted a vehicle check"],
+      [/^POST \/sla/,                     "🚨 SLA action"],
+      [/^POST \/(add|update)-site/,       "📍 Saved a site"],
+      [/^POST \/sites\/street-images/,    "🖼️ Refreshed site photos"],
+      [/^POST \/import-sites/,            "📥 Imported sites"],
+      [/^POST \/customers\/delete/,       "🗑️ Deleted a customer"],
+      [/^POST \/customers/,               "🏢 Saved a customer"],
+      [/^POST \/device\/register-device/, "📱 Registered a new device"],
+      [/^POST \/device\/reset/,           "📱 Removed someone's device"],
+      [/^POST \/device\/allowed/,         "📱 Changed a device allowance"],
+      [/^POST \/settings/,                "⚙️ Changed portal settings"],
+      [/^POST \/sitelog/,                 "🛰️ SiteLog admin action"],
+    ];
+    const PAGE_NAMES = {
+      "main.html": "the Menu", "holiday.html": "Holiday", "holiday-admin.html": "Holiday Admin",
+      "my-assets.html": "Plant & Equipment", "assets-admin.html": "All Assets", "shared-assets.html": "Shared Assets",
+      "keys.html": "the Key Register", "users-admin.html": "Users Admin", "device-admin.html": "Device Management",
+      "personalise.html": "Personalise", "help.html": "Help", "notify-log.html": "the Notification Log",
+      "activity-log.html": "the Activity Log", "sites.html": "Site Manager", "customers.html": "Customers",
+      "vehicles.html": "Vehicles", "office-my-hours.html": "My Hours", "office-timesheet.html": "Office Timesheet",
+      "my-day.html": "My Day", "sla-menu.html": "the SLA Menu", "sla-main.html": "the SLA Board",
+      "sitelog.html": "SiteLog", "projects.html": "Projects", "forms.html": "Forms", "compliance.html": "Compliance",
+    };
+    function describe(r) {
+      if (r.method === "VIEW") {
+        const page = r.path.slice(1);
+        return "Opened " + (PAGE_NAMES[page] || page);
+      }
+      const key = r.method + " " + r.path;
+      for (const [re, label] of FRIENDLY) if (re.test(key)) return label;
+      return r.method + " " + r.path;
+    }
+
+    async function load() {
+      g("list").innerHTML = "<div class='row muted'>Loading…</div>";
+      const q = "?days=" + g("fDays").value
+        + (g("fUser").value ? "&user=" + encodeURIComponent(g("fUser").value) : "")
+        + (g("fType").value ? "&type=" + g("fType").value : "");
+      try {
+        const d = await authFetch("/audit/log" + q).then(r => r.json());
+        if (!d.ok) throw new Error(d.error || "Failed");
+        LOG = d.log || [];
+        render();
+      } catch (e) { g("list").innerHTML = "<div class='row muted'>Couldn't load the log — is the latest portal API deployed?</div>"; }
+    }
+
+    function render() {
+      const q = g("fSearch").value.trim().toLowerCase();
+      const rows = LOG.filter(r => !q ||
+        (describe(r) + " " + r.path + " " + (r.detail || "") + " " + r.username + " " + nameOf(r.username)).toLowerCase().includes(q));
+      g("countLbl").textContent = rows.length ? rows.length + (rows.length === 1000 ? "+ events (newest 1000)" : " event" + (rows.length === 1 ? "" : "s")) : "";
+      if (!rows.length) { g("list").innerHTML = "<div class='row muted'>Nothing recorded for these filters.</div>"; return; }
+      g("list").innerHTML = rows.map(r => {
+        const when = r.at ? new Date(r.at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "";
+        const failed = r.method !== "VIEW" && r.status >= 400;
+        const kind = r.method === "VIEW"
+          ? '<span class="kind view">viewed</span>'
+          : failed ? '<span class="kind fail">failed (' + r.status + ")</span>" : '<span class="kind action">action</span>';
+        return `<div class="row">
+          <div class="when">${esc(when)}</div>
+          <div style="flex:1;">
+            <span class="who">${esc(nameOf(r.username) || r.username)}</span> ${kind}
+            <div class="what">${esc(describe(r))}</div>
+            ${r.detail ? `<div class="det">${esc(r.detail)}</div>` : ""}
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    g("fUser").addEventListener("change", load);
+    g("fDays").addEventListener("change", load);
+    g("fType").addEventListener("change", load);
+    g("fSearch").addEventListener("input", render);
+  </script>
+</body>
+</html>

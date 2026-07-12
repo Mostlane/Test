@@ -124,6 +124,24 @@
     }
   })();
 
+  // ── Activity log: page views ──────────────────────────────────────────────
+  // One tiny beacon per page open (logged-in users only). Actions themselves
+  // are recorded server-side by the API, so this just adds "who opened what,
+  // when" to the activity log in Users admin.
+  (function pageView() {
+    try {
+      var tok = localStorage.getItem("mostlaneToken");
+      if (!tok) return;
+      var page = (location.pathname.split("/").pop() || "index.html").toLowerCase();
+      if (["login.html", "onboard.html", "forgot-password.html", "reset-password.html", "confirmation.html"].indexOf(page) !== -1) return;
+      fetch(window.MOSTLANE_API + "/audit/pageview", {
+        method: "POST", keepalive: true,
+        headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json" },
+        body: JSON.stringify({ page: page })
+      }).catch(function () {});
+    } catch (e) {}
+  })();
+
   const API = window.MOSTLANE_API.replace(/\/$/, "");
   const CONFIGURED = !/REPLACE-ME/.test(API);
 
