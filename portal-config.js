@@ -69,7 +69,8 @@
         css += "header.page{background:linear-gradient(180deg," + acc.c1 + "," + acc.c2 + ")!important;}"
           + "#pnav{background:linear-gradient(185deg," + acc.c1 + " 0%," + acc.c2 + " 100%)!important;}"
           + ".menu-grid a.button{background:linear-gradient(180deg," + acc.c1 + " 0%," + acc.c2 + " 100%)!important;}"
-          + ".btn:not(.grey):not(.red):not(.green){background:" + acc.a + "!important;}";
+          + ".btn:not(.grey):not(.red):not(.green){background:" + acc.a + "!important;}"
+          + "#mlNotify .mln-head{background:linear-gradient(180deg," + acc.c1 + "," + acc.c2 + ")!important;}";
       }
       // The background choice applies to the main menu page (where the
       // embossed Mostlane picture lives).
@@ -96,6 +97,15 @@
     var cached = null;
     try { cached = JSON.parse(localStorage.getItem("mostlaneTheme") || "null"); } catch (e) {}
     if (cached) apply(cached);
+
+    // Re-apply when iOS restores a page from the back/forward cache — the
+    // theme may have been changed on the page the user is coming back from.
+    window.addEventListener("pageshow", function (e) {
+      if (!e.persisted) return;
+      var t = null;
+      try { t = JSON.parse(localStorage.getItem("mostlaneTheme") || "null"); } catch (err) {}
+      apply(t || {});
+    });
 
     // 2) Background refresh from the server — the server strips anything the
     // user is no longer allowed (permission changes win over stale caches).
