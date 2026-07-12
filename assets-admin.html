@@ -108,7 +108,7 @@
         <button class="btn grey small" id="sortValue">Value ↓</button>
         <button class="btn grey small" id="sortName">Name A–Z</button>
         <button class="btn small" id="exportBtn">⬇ Export report</button>
-        <button class="btn grey small" id="repairBtn" title="Match photos to the right assets using the old system's records">🩹 Repair photo matching</button>
+        <button class="btn grey small" id="repairBtn" title="Overwrite each record's details with the original text from the old system's KV (matched by asset ID) — photos then line up">🩹 Restore original details</button>
         <button class="btn grey small" id="relinkBtn" title="Rebuild photo links from the image storage bucket (by ID only)">🔗 Re-link photos</button>
         <button class="btn grey small" id="unlinkBtn" title="Remove all photo links (photos stay safe in storage)">✖ Clear photo links</button>
       </div>
@@ -155,17 +155,18 @@
     </div>
   </div>
 
-  <!-- Photo repair preview -->
+  <!-- Restore-original-details preview -->
   <div class="overlay" id="repairModal">
     <div class="panel" style="max-width:640px;">
-      <h2>🩹 Repair photo matching</h2>
-      <p class="muted" style="margin:0 0 10px;">Matched by serial number against the original records from the old asset system.
+      <h2>🩹 Restore original details</h2>
+      <p class="muted" style="margin:0 0 10px;">Replaces each record's text (name, category, serial, value, holder…) with the
+        original from the old system's storage, matched by asset ID — the photos are filed by those IDs, so they line up again.
         Nothing changes until you press Apply.</p>
       <div id="repairList" class="muted" style="max-height:50vh; overflow:auto;">Loading…</div>
       <p class="msg" id="repairMsg"></p>
       <div class="acts">
         <button class="btn grey" onclick="closeM('repairModal')">Cancel</button>
-        <button class="btn green" id="repairApply" disabled>Apply matching</button>
+        <button class="btn green" id="repairApply" disabled>Apply restore</button>
       </div>
     </div>
   </div>
@@ -455,60 +456,80 @@
       });
     }
     const keyOf = u => (String(u || "").split("key=")[1] || "").split("&")[0];
+    // Old records use the pre-rename dotted usernames; map them onto today's.
+    function migrateUser(s) {
+      let v = String(s || "").replace(/\./g, " ").trim();
+      if (v === "Chloe Line") v = "Chloe Molloy";
+      return v;
+    }
     let repairPlan = [];
 
     g("repairBtn").onclick = async () => {
-      g("repairList").textContent = "Fetching original records from the old system…";
+      g("repairList").textContent = "Fetching original records from the old system's storage…";
       g("repairMsg").textContent = ""; g("repairApply").disabled = true; repairPlan = [];
       openM("repairModal");
       let oldAssets;
       try { oldAssets = await fetchOldAssets(); }
       catch (err) { g("repairList").textContent = err.message; return; }
-      if (!oldAssets.length) { g("repairList").textContent = "The old system has no asset records — nothing to match against."; return; }
+      if (!oldAssets.length) { g("repairList").textContent = "The old system has no asset records — nothing to restore from."; return; }
 
-      const norm = s => String(s || "").trim().toLowerCase();
-      const bySerial = {}, byName = {};
+      const curById = {};
+      for (const c of ASSETS) curById[c.id] = c;
+      const oldIds = new Set();
+      const rows = []; let renames = 0, creates = 0;
+
       for (const o of oldAssets) {
-        const s = norm(o.serial); if (s) (bySerial[s] = bySerial[s] === undefined ? o : null);   // null = ambiguous
-        const n = norm(o.name); if (n) (byName[n] = byName[n] === undefined ? o : null);
-      }
-
-      const rows = []; let matched = 0, moved = 0;
-      for (const cur of ASSETS) {
-        let old = bySerial[norm(cur.serial)] || null;
-        let via = "serial";
-        if (!old) { old = byName[norm(cur.name)] || null; via = "name"; }
-        const imgs = old ? (old.images || []).map(keyOf).filter(Boolean) : [];
-        if (old && imgs.length) {
-          matched++; if (old.id !== cur.id) moved++;
-          repairPlan.push({ cur, keys: imgs, oldId: old.id });
-          rows.push(`<p style="margin:7px 0;">✅ <b>${esc(cur.name)}</b> <span class="muted">(${esc(cur.serial || "no serial")})</span><br>
-            <span class="muted">gets ${imgs.length} photo(s) from old record ${esc(old.id)}${old.id !== cur.id ? " — currently mis-filed under " + esc(cur.id) : ""} · matched by ${via}</span></p>`);
+        if (!o || !o.id) continue;
+        oldIds.add(o.id);
+        const cur = curById[o.id];
+        const keys = (o.images || []).map(keyOf).filter(Boolean);
+        const rec = {
+          id: o.id,
+          name: o.name || "",
+          category: o.category || "",
+          serial: o.serial || "",
+          value: o.value || "",
+          assignedTo: migrateUser(o.assignedTo),
+          shared: String(o.shared || "no").toLowerCase() === "yes" ? "yes" : "no",
+          calibrationDate: o.calibrationDate || "",
+          lastTransfer: o.lastTransfer || (cur && cur.lastTransfer) || "",
+          images: keys.map(k => API + "/asset-image?key=" + k)
+        };
+        repairPlan.push(rec);
+        if (cur && String(cur.name || "").trim() !== String(o.name || "").trim()) {
+          renames++;
+          rows.push(`<p style="margin:7px 0;">✏️ <b>${esc(o.id)}</b>: “${esc(cur.name)}” → <b>“${esc(o.name)}”</b>
+            <span class="muted">· serial ${esc(o.serial || "—")} · ${keys.length} photo(s) · ${esc(rec.assignedTo || "Unassigned")}</span></p>`);
+        } else if (cur) {
+          rows.push(`<p style="margin:7px 0;">✅ <b>${esc(o.id)}</b>: “${esc(o.name)}” <span class="muted">already matches · ${keys.length} photo(s)</span></p>`);
         } else {
-          repairPlan.push({ cur, keys: [], oldId: null });
-          rows.push(`<p style="margin:7px 0;">⚪ <b>${esc(cur.name)}</b> <span class="muted">(${esc(cur.serial || "no serial")}) — ${old ? "old record has no photos" : "no match in the old system"}; photo links will be cleared</span></p>`);
+          creates++;
+          rows.push(`<p style="margin:7px 0;">➕ <b>${esc(o.id)}</b>: “${esc(o.name)}” <span class="muted">missing from the new system — will be added · ${keys.length} photo(s)</span></p>`);
         }
       }
+      const extras = ASSETS.filter(c => !oldIds.has(c.id));
+      for (const c of extras) {
+        rows.push(`<p style="margin:7px 0;">⚠️ <b>${esc(c.id)}</b>: “${esc(c.name)}” <span class="muted">isn't in the old system — left untouched</span></p>`);
+      }
       g("repairList").innerHTML =
-        `<p style="margin:0 0 8px;"><b>${matched}</b> of ${ASSETS.length} assets matched (${moved} currently wearing the wrong photos).</p>` + rows.join("");
+        `<p style="margin:0 0 8px;"><b>${renames}</b> record(s) get their original text back${creates ? `, <b>${creates}</b> will be re-added` : ""}${extras.length ? `, ${extras.length} unknown to the old system` : ""}.</p>` + rows.join("");
       g("repairList").classList.remove("muted");
-      g("repairApply").disabled = matched === 0;
+      g("repairApply").disabled = repairPlan.length === 0;
     };
 
     g("repairApply").onclick = async () => {
-      const btn = g("repairApply"); btn.disabled = true; btn.textContent = "Applying…";
+      const btn = g("repairApply"); btn.disabled = true; btn.textContent = "Restoring…";
       let done = 0, failed = 0;
-      for (const p of repairPlan) {
-        const body = Object.assign({}, p.cur, { images: p.keys.map(k => API + "/asset-image?key=" + k) });
+      for (const rec of repairPlan) {
         try {
-          const r = await authFetch("/asset/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+          const r = await authFetch("/asset/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).then(r => r.json());
           if (r.error && !r.ok) throw new Error(r.error);
           done++;
         } catch (e) { failed++; }
       }
-      btn.textContent = "Apply matching";
-      g("repairMsg").textContent = `Updated ${done} asset(s)` + (failed ? `, ${failed} failed — run it again` : " ✓");
-      if (!failed) { setTimeout(() => closeM("repairModal"), 1200); }
+      btn.textContent = "Apply restore";
+      g("repairMsg").textContent = `Restored ${done} asset(s)` + (failed ? `, ${failed} failed — run it again` : " ✓");
+      if (!failed) setTimeout(() => closeM("repairModal"), 1200);
       loadAssets();
     };
 
