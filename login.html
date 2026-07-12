@@ -66,7 +66,11 @@
 
     <form id="loginForm">
       <input type="text" id="username" placeholder="Username" required />
-      <input type="password" id="password" placeholder="Password" required />
+      <div style="position:relative;">
+        <input type="password" id="password" placeholder="Password" required style="padding-right:44px;" />
+        <button type="button" id="pwEye" aria-label="Show password"
+          style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; cursor:pointer; padding:4px; opacity:.65;">👁</button>
+      </div>
       <button type="submit">Sign in</button>
       <p id="error"></p>
     </form>
@@ -109,6 +113,15 @@
         window.location.href = nextPage();
       }
     }
+
+    // Password eye: click to show (stays visible until clicked again).
+    document.getElementById('pwEye').addEventListener('click', function () {
+      const inp = document.getElementById('password');
+      const show = inp.type === 'password';
+      inp.type = show ? 'text' : 'password';
+      this.textContent = show ? '🙈' : '👁';
+      this.style.opacity = show ? '1' : '.65';
+    });
 
     // Your original login logic — unchanged
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -163,8 +176,9 @@ const user = result.user;
         if (result.master) sessionStorage.setItem("mostlaneMasterLogin", "1");
         else sessionStorage.removeItem("mostlaneMasterLogin");
 
-        // Stored session — unchanged
-        const EXPIRY = Date.now() + (12 * 60 * 60 * 1000);
+        // Stored session — 90 days, matching the server session token, so a
+        // logged-in device stays logged in.
+        const EXPIRY = Date.now() + (90 * 24 * 60 * 60 * 1000);
 
         function set(key, value) {
           sessionStorage.setItem(key, value);
@@ -201,10 +215,10 @@ const user = result.user;
         set('roleType', user.EmploymentType || '');
         set('assignedUser', user.Username);
 
-        // ✅ 30-DAY LOGIN BYPASS (PWA SAFE, NO OTHER SIDE EFFECTS)
+        // ✅ 90-DAY LOGIN BYPASS (PWA SAFE, NO OTHER SIDE EFFECTS)
 localStorage.setItem(
   "mostlaneBypassUntil",
-  String(Date.now() + 30 * 24 * 60 * 60 * 1000)
+  String(Date.now() + 90 * 24 * 60 * 60 * 1000)
 );
         // ⭐ THE ONLY CHANGE: run device check here instead of redirecting
         runDeviceCheckAndContinue(user.Username);
