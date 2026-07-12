@@ -346,5 +346,19 @@ CREATE TABLE IF NOT EXISTS key_log (
 );
 CREATE INDEX IF NOT EXISTS idx_key_log_key ON key_log(key_id, id);
 
+-- ── Notification audit log ───────────────────────────────────────────────────
+-- One row every time the attention gate / desktop panel is shown to someone
+-- (action 'shown'), plus 'snoozed' / 'dismissed' / 'opened'. `items` is the
+-- JSON list of what was on screen. Proof against "mine never showed that".
+CREATE TABLE IF NOT EXISTS notify_log (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  action   TEXT NOT NULL,            -- 'shown' | 'snoozed' | 'dismissed' | 'opened'
+  surface  TEXT,                     -- 'mobile' | 'desktop'
+  items    TEXT,                     -- JSON of the items on screen
+  at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notify_log_user ON notify_log(username, id);
+
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.

@@ -2795,6 +2795,36 @@ async function handle8(request, env, ctx, url) {
     const { results } = await env.DB.prepare(sql).bind(...binds).all();
     return json({ ok: true, logs: results || [] }, {}, env, request);
   }
+  if (path === "/notify/log" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const action = String(b.action || "");
+    if (["shown", "snoozed", "dismissed", "opened"].indexOf(action) === -1)
+      return error("Bad action", 400, env, request);
+    const surface = String(b.surface || "").slice(0, 20);
+    const items = JSON.stringify(Array.isArray(b.items) ? b.items : []).slice(0, 4e3);
+    await env.DB.prepare(
+      "INSERT INTO notify_log (username, action, surface, items, at) VALUES (?,?,?,?,?)"
+    ).bind(sess.user.username, action, surface, items, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/notify/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(90, Math.max(1, Number(q.get("days")) || 14));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["at >= ?"], binds = [since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    const { results } = await env.DB.prepare(
+      "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
   return error("Unknown portal route", 404, env, request);
 }
 function num(v) {
@@ -3268,6 +3298,8 @@ var ROUTES = [
   ["*", "/settings", handle8],
   ["*", "/oncall", handle8],
   ["*", "/daily-logs", handle8],
+  ["*", "/notify", handle8],
+  // notification audit log
   ["*", "/sitelog", handle9],
   ["*", "/sitelog-launch", handle9],
   ["*", "/office", handle10],

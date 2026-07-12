@@ -575,12 +575,52 @@ const MAP = {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
       });
 
+      // Server-side audit trail: every show/snooze/dismiss/open is recorded
+      // with a timestamp, so "mine never showed that" can be checked.
+      function report(action, surface, items) {
+        try {
+          fetch(window.MOSTLANE_API + "/notify/log", {
+            method: "POST", keepalive: true,
+            headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+            body: JSON.stringify({ action: action, surface: surface, items: items.map(function (i) {
+              return { href: i.href, n: i.n, title: i.title, snoozes: i.snoozes || 0 };
+            }) })
+          }).catch(function () {});
+        } catch (e) {}
+      }
+
+      // "Remind me later" works twice per notification, then it's enforced.
+      // A notification is identified by page + count, so a NEW transfer or
+      // request resets the allowance (it's genuinely new information).
+      var SNOOZE_MAX = 2, SNOOZE_MS = 4 * 3600 * 1000;   // 4-hour snooze
+      function snoozeStore() { try { return JSON.parse(localStorage.getItem("mlNotifySnooze") || "{}"); } catch (e) { return {}; } }
+      function saveSnooze(st) { try { localStorage.setItem("mlNotifySnooze", JSON.stringify(st)); } catch (e) {} }
+
       function show(items) {
         var mobile = window.matchMedia("(max-width:999px)").matches;
+        var surface = mobile ? "mobile" : "desktop";
         var sig = items.map(function (i) { return i.href + ":" + i.n; }).join("|");
         // Desktop panel: once dismissed, stays away for the session unless
-        // the outstanding items change. The phone gate never skips.
+        // the outstanding items change.
         if (!mobile && sessionStorage.getItem("mlNotifySeen") === sig) return;
+
+        var canSnooze = false;
+        if (mobile) {
+          var st = snoozeStore(), now = Date.now(), keep = {};
+          items.forEach(function (i) {
+            i.key = i.href + ":" + i.n;
+            if (st[i.key]) keep[i.key] = st[i.key];
+          });
+          saveSnooze(keep);   // prune entries for notifications that no longer exist
+          items.forEach(function (i) {
+            var e = keep[i.key] || { c: 0, until: 0 };
+            i.snoozes = e.c;
+            i.snoozedNow = e.until > now;
+          });
+          items = items.filter(function (i) { return !i.snoozedNow; });
+          if (!items.length) return;   // everything snoozed — back when it expires
+          canSnooze = items.every(function (i) { return i.snoozes < SNOOZE_MAX; });
+        }
 
         var rows = items.map(function (i) {
           return '<a class="mln-item" href="' + i.href + '">' +
@@ -602,14 +642,20 @@ const MAP = {
           "#mlNotify .mln-txt{flex:1;min-width:0;} #mlNotify .mln-txt b{display:block;font-size:14.5px;color:#003366;} #mlNotify .mln-txt span{font-size:12.5px;color:#667085;}" +
           "#mlNotify .mln-go{font-size:24px;color:#9fb2c8;flex:none;}" +
           "#mlNotify .mln-x{position:absolute;top:10px;right:12px;background:none;border:none;color:#cfe0f5;font-size:22px;cursor:pointer;line-height:1;padding:4px;}" +
+          "#mlNotify .mln-snz{display:block;width:calc(100% - 32px);margin:4px 16px 0;background:none;border:1.5px solid #ccd5dd;border-radius:9px;color:#5b6b78;font:600 13.5px 'Segoe UI',system-ui,sans-serif;padding:10px;cursor:pointer;}" +
+          "#mlNotify .mln-snz:active{background:#f4f8ff;}" +
           (mobile
             ? "#mlNotify{inset:0;background:rgba(3,12,28,.78);display:flex;align-items:center;justify-content:center;padding:20px;}" +
               "#mlNotify .mln-card{width:100%;max-width:420px;}" +
-              "#mlNotify .mln-foot{padding:12px 16px;border-top:1px solid #eef1f5;font-size:12px;color:#8a97a6;text-align:center;}"
+              "#mlNotify .mln-foot{padding:12px 16px;font-size:12px;color:#8a97a6;text-align:center;}" +
+              "#mlNotify .mln-item:first-of-type{border-top:none;}" +
+              "#mlNotify .mln-snz + .mln-foot{padding-top:8px;}" +
+              "#mlNotify .mln-hr{border-top:1px solid #eef1f5;margin:0;}"
             : "#mlNotify{top:16px;right:16px;width:min(360px,calc(100vw - 32px));}" +
               "#mlNotify .mln-card{position:relative;}");
         document.head.appendChild(css);
 
+        var left = SNOOZE_MAX - Math.max.apply(null, [0].concat(items.map(function (i) { return i.snoozes || 0; })));
         var el = document.createElement("div");
         el.id = "mlNotify";
         el.innerHTML = '<div class="mln-card">' +
@@ -617,13 +663,41 @@ const MAP = {
           "<h2>🔔 Needs your attention</h2>" +
           "<p>" + (mobile ? "Sort these before you carry on — tap one to open it." : "Outstanding items around the portal.") + "</p></div>" +
           rows +
-          (mobile ? '<div class="mln-foot">The menu unlocks once these are dealt with.</div>' : "") +
+          (mobile
+            ? '<div class="mln-hr"></div>' +
+              (canSnooze
+                ? '<button class="mln-snz" id="mlnSnooze">💤 Remind me later</button>' +
+                  '<div class="mln-foot">Puts this off for 4 hours — you can do that ' + (left > 1 ? left + " more times." : "once more.") + "</div>"
+                : '<div class="mln-foot"><b>Reminders used up</b> — these have to be dealt with now.</div>')
+            : "") +
           "</div>";
         document.body.appendChild(el);
 
+        report("shown", surface, items);
+
+        // Record which item they went into (keepalive survives the navigation).
+        el.addEventListener("click", function (e) {
+          var a = e.target.closest ? e.target.closest(".mln-item") : null;
+          if (a) report("opened", surface, items.filter(function (i) { return i.href === a.getAttribute("href"); }));
+        });
+
+        if (mobile && canSnooze) {
+          document.getElementById("mlnSnooze").addEventListener("click", function () {
+            var st = snoozeStore();
+            items.forEach(function (i) {
+              var e2 = st[i.key] || { c: 0, until: 0 };
+              e2.c++; e2.until = Date.now() + SNOOZE_MS;
+              st[i.key] = e2; i.snoozes = e2.c;
+            });
+            saveSnooze(st);
+            report("snoozed", surface, items);
+            el.remove();
+          });
+        }
         if (!mobile) {
           el.querySelector(".mln-x").addEventListener("click", function () {
             try { sessionStorage.setItem("mlNotifySeen", sig); } catch (e) {}
+            report("dismissed", surface, items);
             el.remove();
           });
         }
