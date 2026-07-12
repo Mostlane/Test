@@ -124,7 +124,9 @@
           <div><label>Date</label><input type="date" id="h_date"></div>
           <div><label>Issued by</label><input type="text" id="h_issuedby"></div>
           <div><label>Valid from</label><input type="time" id="h_validfrom"></div>
+          <div><label>Valid until *</label><input type="time" id="h_validuntil"></div>
         </div>
+        <p class="muted" style="margin:8px 0 0; font-size:12.5px;">Once “Valid until” passes and the permit hasn’t been closed out, it’s flagged for close-out (red alert on the H&amp;S tile; office are alerted too).</p>
       </div>
       <div class="card">
         <h3 style="margin-top:0;">1. Description of hot works</h3>
@@ -154,20 +156,31 @@
         <label>Signature</label><div class="sigwrap"><canvas class="sig" id="h_bysig"></canvas></div>
         <button class="btn grey small noprint" type="button" onclick="clearSig('h_bysig')">Clear signature</button>
       </div>
-      <div class="card">
-        <h3 style="margin-top:0;">Close out</h3>
-        <div class="grid2">
-          <div><label>Completion time</label><input type="time" id="h_completion"></div>
-          <div><label class="chk" style="margin-top:26px;"><input type="checkbox" id="h_safe"> Final area declared SAFE</label></div>
-        </div>
-        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="h_mgrsig"></canvas></div>
-        <button class="btn grey small noprint" type="button" onclick="clearSig('h_mgrsig')">Clear signature</button>
-      </div>
+      <p class="muted" style="font-size:12.5px;">The permit is issued as <b>OPEN</b>. Close it out (completion time, area safe, manager signature) from the permit document when the works are finished.</p>
       <p class="msg" id="hwMsg"></p>
       <div class="row">
         <button class="btn" id="hwSave">Save permit</button>
         <button class="btn ghost" id="hwSaveView">Save &amp; open document</button>
         <button class="btn grey" onclick="showList('hotworks')">Cancel</button>
+      </div>
+    </div>
+
+    <!-- FORM: Hot Works close-out -->
+    <div id="formHwClose" class="hide">
+      <h2 id="hwCloseTitle">Close out Hot Works Permit</h2>
+      <div class="card">
+        <p class="muted" id="hwClosePermit"></p>
+        <div class="grid2">
+          <div><label>Completion time</label><input type="time" id="c_completion"></div>
+          <div><label class="chk" style="margin-top:26px;"><input type="checkbox" id="c_safe"> Final area declared SAFE</label></div>
+        </div>
+        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="c_mgrsig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('c_mgrsig')">Clear signature</button>
+      </div>
+      <p class="msg" id="hwCloseMsg"></p>
+      <div class="row">
+        <button class="btn" id="hwCloseSave">Close out &amp; save</button>
+        <button class="btn grey" id="hwCloseCancel">Cancel</button>
       </div>
     </div>
 
@@ -289,7 +302,8 @@
 
     <!-- DOCUMENT VIEW (printable) -->
     <div id="docView" class="hide">
-      <div class="row noprint" style="margin-bottom:10px; justify-content:flex-end;">
+      <div class="row noprint" style="margin-bottom:10px; justify-content:space-between;">
+        <button class="btn hide" id="docCloseBtn" style="background:#0a7d33;">✅ Close out permit</button>
         <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
       </div>
       <div class="doc" id="docBody"></div>
@@ -377,7 +391,7 @@
            <p class="muted">Full project H&amp;S plan (existing tool)</p>
          </button>`;
   }
-  const VIEWS = ["hub","list","formInduction","formHotworks","formRams","formIncident","docView"];
+  const VIEWS = ["hub","list","formInduction","formHotworks","formHwClose","formRams","formIncident","docView"];
   function showHub(){ VIEWS.forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
   function show(id){ VIEWS.forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
 
@@ -404,16 +418,20 @@
       const d = await authFetch("/hs/docs?type=" + encodeURIComponent(type)).then(r => r.json());
       const docs = (d && d.docs) || [];
       if (!docs.length) { g("listRows").innerHTML = `<tr><td class="muted">No documents yet — tap “+ New”.</td></tr>`; return; }
-      g("listRows").innerHTML = docs.map(x => `
+      g("listRows").innerHTML = docs.map(x => {
+        const isHw = x.doc_type === "hotworks", closed = x.status === "closed";
+        const status = isHw ? `<br><span style="font-size:12px; font-weight:700; color:${closed?'#0a7d33':'#b00020'};">● ${closed?'Closed':'Open'}</span>` : "";
+        const closeBtn = (isHw && !closed) ? `<button class="btn small" style="background:#0a7d33;" onclick="closeOutPermit('${x.id}')">Close out</button> ` : "";
+        return `
         <tr>
-          <td><b>${esc(x.ref || "—")}</b><br><span class="muted">${esc(x.site || "")}</span></td>
+          <td><b>${esc(x.ref || "—")}</b>${status}<br><span class="muted">${esc(x.site || "")}</span></td>
           <td class="muted">${esc(fmtDate(x.created_at))}<br>${esc(x.created_by || "")}</td>
           <td style="text-align:right; white-space:nowrap;">
-            <button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
+            ${closeBtn}<button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
             <button class="btn grey small" onclick="editDoc('${x.id}')">Edit</button>
             <button class="btn red small" onclick="delDoc('${x.id}')">✕</button>
           </td>
-        </tr>`).join("");
+        </tr>`; }).join("");
     } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
   }
   g("newBtn").onclick = () => {
@@ -445,7 +463,7 @@
   const sigVal = id => pads[id] ? pads[id].get() : "";
 
   // ── Induction form ───────────────────────────────────────────────────────────
-  let editId = null;
+  let editId = null, curDocData = null, curEditStatus = "open";
   function renderBriefing(checked) {
     g("i_brief").innerHTML = BRIEFING.map((t,i) =>
       `<label class="chk"><input type="checkbox" data-brief="${i}" ${(!checked || checked.includes(t)) ? "checked" : ""}> ${esc(t)}</label>`).join("");
@@ -564,57 +582,67 @@
   function addOperative(){ hwOperativeRow(); }
 
   function newHotworks() {
-    editId = null;
+    editId = null; curDocData = null; curEditStatus = "open";
     g("hwFormTitle").textContent = "New Hot Works Permit";
-    ["h_project","h_site","h_client","h_issuedby","h_validfrom","h_location","h_nature","h_equipment","h_watchname","h_byname","h_completion"].forEach(i => g(i).value = "");
+    ["h_project","h_site","h_client","h_issuedby","h_validfrom","h_validuntil","h_location","h_nature","h_equipment","h_watchname","h_byname"].forEach(i => g(i).value = "");
     g("h_date").value = new Date().toISOString().slice(0,10);
-    g("h_safe").checked = false;
     renderChecks("h_fire", HW_FIRE, null);
     renderChecks("h_watch", HW_WATCH, null);
     g("h_operatives").innerHTML = "";
     g("hwMsg").textContent = "";
     show("formHotworks");
-    setTimeout(() => { initSig("h_bysig",""); initSig("h_mgrsig",""); hwOperativeRow(); }, 30);
+    setTimeout(() => { initSig("h_bysig",""); hwOperativeRow(); }, 30);
   }
   function fillHotworks(doc) {
     const x = doc.data || {};
+    curDocData = x; curEditStatus = doc.status || "open";
     g("hwFormTitle").textContent = "Edit Hot Works Permit — " + (doc.ref || "");
     g("h_project").value = x.project || doc.site || ""; g("h_site").value = x.site || "";
     g("h_client").value = x.client || ""; g("h_date").value = x.date || "";
-    g("h_issuedby").value = x.issuedBy || ""; g("h_validfrom").value = x.validFrom || "";
+    g("h_issuedby").value = x.issuedBy || ""; g("h_validfrom").value = x.validFrom || ""; g("h_validuntil").value = x.validUntil || "";
     g("h_location").value = x.location || ""; g("h_nature").value = x.nature || ""; g("h_equipment").value = x.equipment || "";
     g("h_watchname").value = x.watchName || ""; g("h_byname").value = x.issuedByName || "";
-    g("h_completion").value = x.completionTime || ""; g("h_safe").checked = !!x.finalSafe;
     renderChecks("h_fire", HW_FIRE, x.fire || null);
     renderChecks("h_watch", HW_WATCH, x.watch || null);
     g("h_operatives").innerHTML = "";
     show("formHotworks");
     setTimeout(() => {
-      initSig("h_bysig", x.issuedBySignature || ""); initSig("h_mgrsig", x.managerSignature || "");
+      initSig("h_bysig", x.issuedBySignature || "");
       (x.operatives && x.operatives.length ? x.operatives : [{}]).forEach(o => hwOperativeRow(o));
     }, 30);
+  }
+  // Turn the date + "valid until" time into an ISO expiry timestamp.
+  function computeExpiry(dateStr, untilTime) {
+    if (!dateStr || !untilTime) return "";
+    const d = new Date(dateStr + "T" + untilTime);
+    return isNaN(d) ? "" : d.toISOString();
   }
   function collectHotworks() {
     const operatives = [...g("h_operatives").children].map(div => {
       const get = k => { const el = div.querySelector(`[data-o="${k}"]`); return el ? el.value.trim() : ""; };
       return { name:get("name"), company:get("company"), signature: sigVal(div.dataset.sig) };
     }).filter(o => o.name || o.company);
+    const validUntil = g("h_validuntil").value, date = g("h_date").value;
     return {
       project:g("h_project").value.trim(), site:g("h_site").value.trim(), client:g("h_client").value.trim(),
-      date:g("h_date").value, issuedBy:g("h_issuedby").value.trim(), validFrom:g("h_validfrom").value,
+      date, issuedBy:g("h_issuedby").value.trim(), validFrom:g("h_validfrom").value,
+      validUntil, expiresAt: computeExpiry(date, validUntil),
       location:g("h_location").value.trim(), nature:g("h_nature").value.trim(), equipment:g("h_equipment").value.trim(),
       fire: collectChecks("h_fire", HW_FIRE), watch: collectChecks("h_watch", HW_WATCH), watchName:g("h_watchname").value.trim(),
       operatives, issuedByName:g("h_byname").value.trim(), issuedBySignature: sigVal("h_bysig"),
-      completionTime:g("h_completion").value, finalSafe:g("h_safe").checked, managerSignature: sigVal("h_mgrsig"),
     };
   }
   async function saveHotworks(openAfter) {
-    const data = collectHotworks();
+    const collected = collectHotworks();
     const msg = g("hwMsg"); msg.className = "msg";
-    if (!data.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    if (!collected.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    if (!collected.validUntil) { msg.className = "msg err"; msg.textContent = "“Valid until” is required so the permit can be chased for close-out."; return; }
+    // Merge over any existing data (e.g. keep close-out fields if this permit
+    // was already closed) and preserve its current status.
+    const data = { ...(curDocData || {}), ...collected };
     g("hwSave").disabled = g("hwSaveView").disabled = true; msg.textContent = "Saving…";
     try {
-      const body = { doc_type:"hotworks", site:(data.site || data.project), data, ...(editId ? { id: editId } : {}) };
+      const body = { doc_type:"hotworks", site:(data.site || data.project), status: curEditStatus, data, ...(editId ? { id: editId } : {}) };
       const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
       const id = editId || r.id;
@@ -625,6 +653,34 @@
   }
   g("hwSave").onclick = () => saveHotworks(false);
   g("hwSaveView").onclick = () => saveHotworks(true);
+
+  // ── Hot Works close-out (distinct step → status closed, updated document) ─────
+  let closeDocId = null, closeDocData = null;
+  async function closeOutPermit(id) {
+    const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
+    if (!d.ok) return alert("Couldn't load that permit.");
+    closeDocId = id; closeDocData = d.doc.data || {};
+    g("hwCloseTitle").textContent = "Close out — " + (d.doc.ref || "");
+    g("hwClosePermit").textContent = "Permit " + (d.doc.ref || "") + (closeDocData.site ? " · " + closeDocData.site : "");
+    const now = new Date();
+    g("c_completion").value = String(now.getHours()).padStart(2,"0") + ":" + String(now.getMinutes()).padStart(2,"0");
+    g("c_safe").checked = true;
+    g("hwCloseMsg").textContent = "";
+    show("formHwClose");
+    setTimeout(() => initSig("c_mgrsig", closeDocData.managerSignature || ""), 30);
+  }
+  g("hwCloseCancel").onclick = () => openDoc(closeDocId);
+  g("hwCloseSave").onclick = async () => {
+    const msg = g("hwCloseMsg"); msg.className = "msg";
+    const data = { ...closeDocData, completionTime:g("c_completion").value, finalSafe:g("c_safe").checked, managerSignature: sigVal("c_mgrsig"), closedAt: new Date().toISOString() };
+    g("hwCloseSave").disabled = true; msg.textContent = "Saving…";
+    try {
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: closeDocId, doc_type:"hotworks", site:(data.site||data.project), status:"closed", data }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      openDoc(closeDocId);
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't close out — " + e.message; }
+    finally { g("hwCloseSave").disabled = false; }
+  };
 
   // ── RAMS form ────────────────────────────────────────────────────────────────
   const riskOpts = sel => RISK.map(r => `<option ${r===sel?"selected":""}>${r}</option>`).join("");
@@ -799,6 +855,8 @@
     const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
     if (!d.ok) return alert("Couldn't load that document.");
     show("docView");
+    const cb = g("docCloseBtn"); cb.classList.add("hide");
+    if (d.doc.doc_type === "hotworks" && d.doc.status !== "closed") { cb.classList.remove("hide"); cb.onclick = () => closeOutPermit(id); }
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
     else if (d.doc.doc_type === "hotworks") g("docBody").innerHTML = renderHotworks(d.doc);
     else if (d.doc.doc_type === "rams") g("docBody").innerHTML = renderRams(d.doc);
@@ -837,6 +895,11 @@
   }
   function renderHotworks(doc) {
     const x = doc.data || {};
+    const closed = doc.status === "closed";
+    const expired = !closed && x.expiresAt && Date.parse(x.expiresAt) < Date.now();
+    const banner = closed
+      ? `<div style="background:#e6f6ec;color:#0a7d33;border:1px solid #b6e3c6;padding:8px 12px;border-radius:8px;text-align:center;font-weight:700;margin-bottom:12px;">✅ CLOSED OUT${x.closedAt ? " — " + esc(new Date(x.closedAt).toLocaleString("en-GB")) : ""}</div>`
+      : `<div style="background:${expired?"#fdecea":"#fff6e5"};color:${expired?"#b00020":"#8a5a00"};border:1px solid ${expired?"#f5c2c0":"#f0d9a6"};padding:8px 12px;border-radius:8px;text-align:center;font-weight:700;margin-bottom:12px;">${expired?"⚠️ OPEN — CLOSE-OUT OVERDUE":"🟠 OPEN — not yet closed out"}${x.validUntil ? " · valid until " + esc(x.validUntil) : ""}</div>`;
     const ticks = (all, chosen) => `<div style="font-family:monospace; font-size:13px; line-height:1.7;">` +
       all.map(t => `<div>[${(chosen||[]).includes(t) ? "X" : "&nbsp;"}] ${esc(t)}</div>`).join("") + `</div>`;
     const operatives = (x.operatives || []).map((o,i) => `
@@ -847,11 +910,13 @@
     return `
       <h2>Hot Works Permit</h2>
       <p class="ref">Permit No: ${esc(doc.ref || "—")}</p>
+      ${banner}
       <h3>PROJECT DETAILS</h3>
       <div class="kv">
         <div><b>Project:</b> ${esc(x.project||"")}</div><div><b>Site:</b> ${esc(x.site||"")}</div>
         <div><b>Client / PC:</b> ${esc(x.client||"")}</div><div><b>Date:</b> ${esc(fmtDate(x.date))}</div>
         <div><b>Issued by:</b> ${esc(x.issuedBy||"")}</div><div><b>Valid from:</b> ${esc(x.validFrom||"")}</div>
+        <div><b>Valid until:</b> ${esc(x.validUntil||"")}</div>
       </div>
       <h3>1. DESCRIPTION OF HOT WORKS</h3>
       <div class="kv"><div><b>Location:</b> ${esc(x.location||"")}</div><div><b>Nature of works:</b> ${esc(x.nature||"")}</div><div><b>Equipment:</b> ${esc(x.equipment||"")}</div></div>
@@ -866,8 +931,10 @@
       <div class="kv"><div><b>Print name:</b> ${esc(x.issuedByName||"")}</div></div>
       <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(x.issuedBySignature)}</div>
       <h3>CLOSE OUT</h3>
+      ${closed ? `
       <div class="kv"><div><b>Completion time:</b> ${esc(x.completionTime||"")}</div><div><b>Final area:</b> ${x.finalSafe ? "Area declared SAFE" : "—"}</div></div>
-      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>
+      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>`
+      : `<p class="muted">Not yet closed out.</p>`}
       <div class="foot"><b>${esc(HW_FOOTER)}</b><br>Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
   function renderRams(doc) {

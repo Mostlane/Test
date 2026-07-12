@@ -89,6 +89,7 @@ const CASES = [
   ["office  GET /office/timesheet",   office,   "/office/timesheet?week=2026-07-06"],
   ["hs      GET /hs/docs",            hs,       "/hs/docs"],
   ["hs      GET /hs/docs?type=induction", hs,   "/hs/docs?type=induction"],
+  ["hs      GET /hs/attention",       hs,       "/hs/attention"],
 ];
 
 let failures = 0, checkedQueries = 0, drove = 0;
