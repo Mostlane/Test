@@ -60,6 +60,7 @@ const ROUTES = [
   ["*", "/daily-logs", portal.handle],
   ["*", "/notify",     portal.handle],  // notification audit log
   ["*", "/prefs",      portal.handle],  // per-user cross-device markers
+  ["*", "/audit",      portal.handle],  // activity log (page views + viewer)
   ["*", "/sitelog",    sitelog.handle],
   ["*", "/sitelog-launch", sitelog.handle],
   ["*", "/office",     office.handle],   // office clock in/out + weekly timesheet
@@ -86,8 +87,9 @@ export default {
     // below. This closes the "no token needed" hole on the data APIs while
     // leaving open the routes that browsers / <img> tags / native deep-links
     // hit without an Authorization header.
+    let sess = null;
     if (!isPublic(request.method, url.pathname)) {
-      const sess = await requireSession(env, request);
+      sess = await requireSession(env, request);
       if (!sess) return error("Not authenticated", 401, env, request);
     }
 
@@ -98,14 +100,68 @@ export default {
 
     if (!match) return error("Not found: " + url.pathname, 404, env, request);
 
+    // Keep a copy of the body for the audit trail (the handler consumes the original).
+    const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
+
     try {
-      return await match[2](request, env, ctx, url);
+      const resp = await match[2](request, env, ctx, url);
+      auditAction(env, ctx, sess, request, url, resp.status, auditClone);
+      return resp;
     } catch (err) {
       console.error("Handler error:", err);
+      auditAction(env, ctx, sess, request, url, 500, auditClone);
       return error("Server error: " + err.message, 500, env, request);
     }
   },
 };
+
+// ── Audit trail ───────────────────────────────────────────────────────────────
+// Every state-changing request (POST/PUT/PATCH/DELETE) by a logged-in user is
+// recorded: who, what, a snippet of the payload, the outcome and the exact
+// time. Reads (GET) aren't logged here — page views arrive separately via
+// /audit/pageview. Chatty housekeeping endpoints are excluded.
+const AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
+const AUDIT_SKIP = [
+  "/notify/log",          // the notification log logging itself
+  "/prefs",               // seen/snooze marker churn
+  "/device/check-device", // runs on every page load — a check, not an action
+  "/audit",               // this system's own endpoints
+  "/auth/refresh",        // token rotation, not a user action
+];
+function auditAction(env, ctx, sess, request, url, status, clone) {
+  try {
+    if (!sess) return;
+    const m = request.method.toUpperCase();
+    if (!AUDIT_METHODS.includes(m)) return;
+    const p = url.pathname;
+    if (AUDIT_SKIP.some(s => p === s || p.startsWith(s + "/"))) return;
+    ctx.waitUntil((async () => {
+      let detail = "";
+      try {
+        const ct = (clone && clone.headers.get("Content-Type")) || "";
+        if (clone && ct.includes("application/json")) {
+          const b = await clone.json();
+          const KEYS = ["id", "assetId", "assetID", "username", "u", "to", "toUser", "keyID",
+            "label", "name", "Username", "start", "end", "status", "type", "action", "page"];
+          detail = KEYS.filter(k => b && b[k] !== undefined && b[k] !== null && typeof b[k] !== "object")
+            .map(k => k + "=" + String(b[k]).slice(0, 40)).join(" ").slice(0, 300);
+        } else if (ct.includes("multipart")) {
+          detail = "(file upload)";
+        }
+      } catch { /* body unreadable — log without detail */ }
+      const qs = url.search ? decodeURIComponent(url.search).slice(0, 120) : "";
+      const res = await env.DB.prepare(
+        "INSERT INTO audit_log (username, method, path, detail, status, at) VALUES (?,?,?,?,?,?)"
+      ).bind(sess.user.username, m, p + qs, detail, status, new Date().toISOString()).run();
+      // Occasional pruning: keep 12 months.
+      const rowId = res.meta ? res.meta.last_row_id : 0;
+      if (rowId && rowId % 500 === 0) {
+        const cutoff = new Date(Date.now() - 365 * 86400000).toISOString();
+        await env.DB.prepare("DELETE FROM audit_log WHERE at < ?").bind(cutoff).run();
+      }
+    })().catch(() => {}));
+  } catch { /* auditing must never break the request */ }
+}
 
 // Routes reachable WITHOUT a session token.
 const PUBLIC_ROUTES = [

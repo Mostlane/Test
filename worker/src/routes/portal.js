@@ -136,6 +136,38 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true, prefs }, {}, env, request);
   }
 
+  /* ── Activity log ──────────────────────────────────────────────────── */
+  // Actions are written automatically by the middleware in index.js; this
+  // adds page views (posted by portal-config on every page open) and the
+  // admin read endpoint for the viewer page.
+  if (path === "/audit/pageview" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const page = String(b.page || "").slice(0, 80);
+    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
+    await env.DB.prepare(
+      "INSERT INTO audit_log (username, method, path, detail, status, at) VALUES (?,?,?,?,?,?)"
+    ).bind(sess.user.username, "VIEW", "/" + page, "", 200, new Date().toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/audit/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const conds = ["at >= ?"], binds = [since];
+    if (q.get("user")) { conds.push("username = ?"); binds.push(q.get("user")); }
+    if (q.get("type") === "view") conds.push("method = 'VIEW'");
+    if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    const { results } = await env.DB.prepare(
+      "SELECT username, method, path, detail, status, at FROM audit_log WHERE " + conds.join(" AND ") +
+      " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+
   /* ── Notification audit log ────────────────────────────────────────── */
   // Every time the attention gate / desktop panel shows (or is snoozed,
   // dismissed, or an item is opened) the page reports it here, so there is

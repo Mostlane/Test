@@ -23,3 +23,5 @@
   Cache-Control: no-cache
 /help.html
   Cache-Control: no-cache
+/activity-log.html
+  Cache-Control: no-cache

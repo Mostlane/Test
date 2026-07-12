@@ -2849,6 +2849,35 @@ async function handle8(request, env, ctx, url) {
     await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?").bind(JSON.stringify(profile), sess.user.username).run();
     return json({ ok: true, prefs }, {}, env, request);
   }
+  if (path === "/audit/pageview" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => ({}));
+    const page = String(b.page || "").slice(0, 80);
+    if (!/^[\w.-]+\.html$/.test(page)) return error("Bad page", 400, env, request);
+    await env.DB.prepare(
+      "INSERT INTO audit_log (username, method, path, detail, status, at) VALUES (?,?,?,?,?,?)"
+    ).bind(sess.user.username, "VIEW", "/" + page, "", 200, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true }, {}, env, request);
+  }
+  if (path === "/audit/log" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const q = url.searchParams;
+    const days = Math.min(365, Math.max(1, Number(q.get("days")) || 7));
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const conds = ["at >= ?"], binds = [since];
+    if (q.get("user")) {
+      conds.push("username = ?");
+      binds.push(q.get("user"));
+    }
+    if (q.get("type") === "view") conds.push("method = 'VIEW'");
+    if (q.get("type") === "action") conds.push("method != 'VIEW'");
+    const { results } = await env.DB.prepare(
+      "SELECT username, method, path, detail, status, at FROM audit_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
+    ).bind(...binds).all();
+    return json({ ok: true, log: results || [] }, {}, env, request);
+  }
   if (path === "/notify/log" && method === "POST") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -3437,6 +3466,8 @@ var ROUTES = [
   // notification audit log
   ["*", "/prefs", handle8],
   // per-user cross-device markers
+  ["*", "/audit", handle8],
+  // activity log (page views + viewer)
   ["*", "/sitelog", handle9],
   ["*", "/sitelog-launch", handle9],
   ["*", "/office", handle10],
@@ -3456,20 +3487,90 @@ var index_default = {
     if (url.pathname === "/" || url.pathname === "/health") {
       return json({ ok: true, service: "mostlane-portal", time: (/* @__PURE__ */ new Date()).toISOString() }, {}, env, request);
     }
+    let sess = null;
     if (!isPublic(request.method, url.pathname)) {
-      const sess = await requireSession(env, request);
+      sess = await requireSession(env, request);
       if (!sess) return error("Not authenticated", 401, env, request);
     }
     const match = ROUTES.filter(([, prefix]) => url.pathname === prefix || url.pathname.startsWith(prefix + "/") || url.pathname.startsWith(prefix)).sort((a, b) => b[1].length - a[1].length)[0];
     if (!match) return error("Not found: " + url.pathname, 404, env, request);
+    const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
     try {
-      return await match[2](request, env, ctx, url);
+      const resp = await match[2](request, env, ctx, url);
+      auditAction(env, ctx, sess, request, url, resp.status, auditClone);
+      return resp;
     } catch (err) {
       console.error("Handler error:", err);
+      auditAction(env, ctx, sess, request, url, 500, auditClone);
       return error("Server error: " + err.message, 500, env, request);
     }
   }
 };
+var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
+var AUDIT_SKIP = [
+  "/notify/log",
+  // the notification log logging itself
+  "/prefs",
+  // seen/snooze marker churn
+  "/device/check-device",
+  // runs on every page load — a check, not an action
+  "/audit",
+  // this system's own endpoints
+  "/auth/refresh"
+  // token rotation, not a user action
+];
+function auditAction(env, ctx, sess, request, url, status, clone) {
+  try {
+    if (!sess) return;
+    const m = request.method.toUpperCase();
+    if (!AUDIT_METHODS.includes(m)) return;
+    const p = url.pathname;
+    if (AUDIT_SKIP.some((s) => p === s || p.startsWith(s + "/"))) return;
+    ctx.waitUntil((async () => {
+      let detail = "";
+      try {
+        const ct = clone && clone.headers.get("Content-Type") || "";
+        if (clone && ct.includes("application/json")) {
+          const b = await clone.json();
+          const KEYS = [
+            "id",
+            "assetId",
+            "assetID",
+            "username",
+            "u",
+            "to",
+            "toUser",
+            "keyID",
+            "label",
+            "name",
+            "Username",
+            "start",
+            "end",
+            "status",
+            "type",
+            "action",
+            "page"
+          ];
+          detail = KEYS.filter((k) => b && b[k] !== void 0 && b[k] !== null && typeof b[k] !== "object").map((k) => k + "=" + String(b[k]).slice(0, 40)).join(" ").slice(0, 300);
+        } else if (ct.includes("multipart")) {
+          detail = "(file upload)";
+        }
+      } catch {
+      }
+      const qs = url.search ? decodeURIComponent(url.search).slice(0, 120) : "";
+      const res = await env.DB.prepare(
+        "INSERT INTO audit_log (username, method, path, detail, status, at) VALUES (?,?,?,?,?,?)"
+      ).bind(sess.user.username, m, p + qs, detail, status, (/* @__PURE__ */ new Date()).toISOString()).run();
+      const rowId = res.meta ? res.meta.last_row_id : 0;
+      if (rowId && rowId % 500 === 0) {
+        const cutoff = new Date(Date.now() - 365 * 864e5).toISOString();
+        await env.DB.prepare("DELETE FROM audit_log WHERE at < ?").bind(cutoff).run();
+      }
+    })().catch(() => {
+    }));
+  } catch {
+  }
+}
 var PUBLIC_ROUTES = [
   ["POST", "/auth/login"],
   ["POST", "/auth/forgot-password"],
