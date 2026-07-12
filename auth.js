@@ -2,7 +2,20 @@
 (function(){
   const EXPIRY_HOURS = 12;
   const now = Date.now();
-  // ✅ 30-DAY PWA LOGIN BYPASS
+
+  // ✅ Restore the sessionStorage mirrors from localStorage FIRST. iOS wipes
+  // sessionStorage whenever it kills the PWA, and device-auth.js needs
+  // mostlaneUsername from sessionStorage — without this restore, every
+  // relaunch of the installed app bounced to the login screen.
+  if (localStorage.getItem("mostlaneLoggedIn") === "true") {
+    if (!sessionStorage.getItem("mostlaneLoggedIn")) sessionStorage.setItem("mostlaneLoggedIn", "true");
+    if (!sessionStorage.getItem("mostlaneUser"))
+      sessionStorage.setItem("mostlaneUser", localStorage.getItem("mostlaneUser") || "");
+    if (!sessionStorage.getItem("mostlaneUsername"))
+      sessionStorage.setItem("mostlaneUsername", localStorage.getItem("mostlaneUsername") || localStorage.getItem("mostlaneUser") || "");
+  }
+
+  // ✅ 90-DAY PWA LOGIN BYPASS
   const bypassUntil = Number(localStorage.getItem("mostlaneBypassUntil") || 0);
 if (
   bypassUntil &&
@@ -19,14 +32,8 @@ if (
   const path = window.location.pathname.toLowerCase();
   if (openPages.some(p => path.endsWith(p))) return;
 
-  // Restore session from localStorage if still valid
+  // Restore check: boot expired sessions
   const expiry = localStorage.getItem("mostlaneExpiry");
-  if (localStorage.getItem("mostlaneLoggedIn") === "true" && expiry && now < parseInt(expiry)) {
-    if (!sessionStorage.getItem("mostlaneLoggedIn")) {
-      sessionStorage.setItem("mostlaneLoggedIn", "true");
-      sessionStorage.setItem("mostlaneUser", localStorage.getItem("mostlaneUser"));
-    }
-  }
 
   // Check expiry or missing login
   if (!localStorage.getItem("mostlaneLoggedIn") || !expiry || now > parseInt(expiry)) {
