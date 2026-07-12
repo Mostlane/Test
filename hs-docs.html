@@ -171,6 +171,122 @@
       </div>
     </div>
 
+    <!-- FORM: RAMS -->
+    <div id="formRams" class="hide">
+      <h2 id="ramsFormTitle">New Risk Assessment / Method Statement</h2>
+      <div class="card">
+        <h3 style="margin-top:0;">Details</h3>
+        <div class="grid2">
+          <div><label>Task / activity *</label><input type="text" id="r_task"></div>
+          <div><label>Project / site</label><input type="text" id="r_site"></div>
+          <div><label>Assessor</label><input type="text" id="r_assessor"></div>
+          <div><label>Date</label><input type="date" id="r_date"></div>
+          <div><label>Review date</label><input type="date" id="r_review"></div>
+        </div>
+      </div>
+      <div class="card brief">
+        <h3 style="margin-top:0;">Persons at risk</h3>
+        <div id="r_persons"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Hazards &amp; controls</h3>
+        <div id="r_hazards"></div>
+        <button class="btn ghost small" type="button" onclick="addHazard()">+ Add hazard</button>
+      </div>
+      <div class="card brief">
+        <h3 style="margin-top:0;">PPE required</h3>
+        <div id="r_ppe"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Method statement</h3>
+        <label>Sequence of works / order of operations</label><textarea id="r_method"></textarea>
+        <label>Equipment / plant needed</label><textarea id="r_equipment"></textarea>
+        <label>Emergency arrangements</label><textarea id="r_emergency"></textarea>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Prepared by</h3>
+        <label>Print name</label><input type="text" id="r_byname">
+        <label>Signature</label><div class="sigwrap"><canvas class="sig" id="r_bysig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('r_bysig')">Clear signature</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Operative sign-off <span class="muted" style="font-weight:400;">— "I have read and understood this RAMS"</span></h3>
+        <div id="r_acks"></div>
+        <button class="btn ghost small" type="button" onclick="addAck()">+ Add operative</button>
+      </div>
+      <p class="msg" id="ramsMsg"></p>
+      <div class="row">
+        <button class="btn" id="ramsSave">Save RAMS</button>
+        <button class="btn ghost" id="ramsSaveView">Save &amp; open document</button>
+        <button class="btn grey" onclick="showList('rams')">Cancel</button>
+      </div>
+    </div>
+
+    <!-- FORM: Incident / near-miss -->
+    <div id="formIncident" class="hide">
+      <h2 id="incFormTitle">New Incident / Near-miss Report</h2>
+      <div class="card">
+        <h3 style="margin-top:0;">Report details</h3>
+        <div class="grid2">
+          <div><label>Type *</label><select id="n_type"></select></div>
+          <div><label>Site / location</label><input type="text" id="n_site"></div>
+          <div><label>Date &amp; time of incident</label><input type="datetime-local" id="n_when"></div>
+          <div><label>Reported by</label><input type="text" id="n_reporter"></div>
+          <div><label>Date reported</label><input type="date" id="n_reported"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Person involved</h3>
+        <div class="grid2">
+          <div><label>Name</label><input type="text" id="n_pname"></div>
+          <div><label>Company</label><input type="text" id="n_pcompany"></div>
+          <div><label>Role</label><input type="text" id="n_prole"></div>
+          <div><label>Contact number</label><input type="tel" id="n_pcontact"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">What happened</h3>
+        <label>Description of incident</label><textarea id="n_desc"></textarea>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Injury details (if any)</h3>
+        <div class="grid2">
+          <div><label>Nature of injury</label><input type="text" id="n_injury"></div>
+          <div><label>Body part affected</label><input type="text" id="n_bodypart"></div>
+        </div>
+        <label class="chk" style="margin-top:8px;"><input type="checkbox" id="n_firstaid"> First aid given</label>
+        <label class="chk"><input type="checkbox" id="n_hospital"> Person sent to hospital</label>
+        <label class="chk"><input type="checkbox" id="n_riddor"> Potentially RIDDOR reportable</label>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Causes &amp; actions</h3>
+        <label>Immediate cause / contributing factors</label><textarea id="n_cause"></textarea>
+        <label>Immediate action taken</label><textarea id="n_action"></textarea>
+        <label>Root cause &amp; preventive actions</label><textarea id="n_root"></textarea>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Witnesses</h3>
+        <div id="n_witnesses"></div>
+        <button class="btn ghost small" type="button" onclick="addWitness()">+ Add witness</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Reporting &amp; sign-off</h3>
+        <label class="chk"><input type="checkbox" id="n_reportedhse"> Reported to HSE / RIDDOR</label>
+        <label>Date reported to HSE</label><input type="date" id="n_hsedate">
+        <label>Reported by — signature</label><div class="sigwrap"><canvas class="sig" id="n_repsig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('n_repsig')">Clear signature</button>
+        <label style="margin-top:12px;">Manager review — print name</label><input type="text" id="n_mgrname">
+        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="n_mgrsig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('n_mgrsig')">Clear signature</button>
+      </div>
+      <p class="msg" id="incMsg"></p>
+      <div class="row">
+        <button class="btn" id="incSave">Save report</button>
+        <button class="btn ghost" id="incSaveView">Save &amp; open document</button>
+        <button class="btn grey" onclick="showList('incident')">Cancel</button>
+      </div>
+    </div>
+
     <!-- DOCUMENT VIEW (printable) -->
     <div id="docView" class="hide">
       <div class="row noprint" style="margin-bottom:10px; justify-content:flex-end;">
@@ -223,12 +339,17 @@
   ];
   const HW_FOOTER = "Permit valid for one shift only. Must be displayed at work location. Void if works stop for more than 2 hours. All works must comply with CDM Regulations and approved RAMS.";
 
+  const RAMS_PERSONS = ["Operatives","Visitors","Members of the public","Other contractors","Site staff"];
+  const RAMS_PPE = ["Hi-vis vest / clothing","Safety boots","Hard hat","Gloves","Eye protection","Ear protection","Dust mask / RPE","Fall protection / harness"];
+  const RISK = ["Low","Medium","High"];
+  const INCIDENT_TYPES = ["Accident (injury)","Near miss","Dangerous occurrence","Property / equipment damage","Environmental"];
+
   // Document types shown in the hub.
   const TYPES = [
     { key:"induction", emoji:"📋", title:"Site Inductions", desc:"Contractor / visitor site inductions", ready:true },
     { key:"hotworks",  emoji:"🔥", title:"Hot Works Permit", desc:"Hot works permit-to-work", ready:true },
-    { key:"rams",      emoji:"⚠️", title:"Risk Assessments / RAMS", desc:"Standalone RAMS", ready:false },
-    { key:"incident",  emoji:"🚑", title:"Incident / Near-miss", desc:"Accident & near-miss reports", ready:false },
+    { key:"rams",      emoji:"⚠️", title:"Risk Assessment / RAMS", desc:"Standalone RAMS", ready:true },
+    { key:"incident",  emoji:"🚑", title:"Incident / Near-miss", desc:"Accident & near-miss reports", ready:true },
   ];
 
   let ME = null;
@@ -256,7 +377,7 @@
            <p class="muted">Full project H&amp;S plan (existing tool)</p>
          </button>`;
   }
-  const VIEWS = ["hub","list","formInduction","formHotworks","docView"];
+  const VIEWS = ["hub","list","formInduction","formHotworks","formRams","formIncident","docView"];
   function showHub(){ VIEWS.forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
   function show(id){ VIEWS.forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
 
@@ -295,7 +416,12 @@
         </tr>`).join("");
     } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
   }
-  g("newBtn").onclick = () => { if (curType === "induction") newInduction(); else if (curType === "hotworks") newHotworks(); };
+  g("newBtn").onclick = () => {
+    if (curType === "induction") newInduction();
+    else if (curType === "hotworks") newHotworks();
+    else if (curType === "rams") newRams();
+    else if (curType === "incident") newIncident();
+  };
 
   // ── Signature pads ───────────────────────────────────────────────────────────
   const pads = {};
@@ -364,6 +490,8 @@
     editId = id;
     if (d.doc.doc_type === "induction") fillInduction(d.doc);
     else if (d.doc.doc_type === "hotworks") fillHotworks(d.doc);
+    else if (d.doc.doc_type === "rams") fillRams(d.doc);
+    else if (d.doc.doc_type === "incident") fillIncident(d.doc);
   }
   function fillInduction(doc) {
     const x = doc.data || {};
@@ -498,6 +626,168 @@
   g("hwSave").onclick = () => saveHotworks(false);
   g("hwSaveView").onclick = () => saveHotworks(true);
 
+  // ── RAMS form ────────────────────────────────────────────────────────────────
+  const riskOpts = sel => RISK.map(r => `<option ${r===sel?"selected":""}>${r}</option>`).join("");
+  function ramsHazardRow(h = {}) {
+    const div = document.createElement("div");
+    div.className = "sub";
+    div.innerHTML = `
+      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
+      <label>Hazard</label><input type="text" data-h="hazard" value="${esc(h.hazard||"")}">
+      <div class="grid2">
+        <div><label>Who is at risk</label><input type="text" data-h="who" value="${esc(h.who||"")}"></div>
+        <div><label>Initial risk</label><select data-h="initial">${riskOpts(h.initial||"Medium")}</select></div>
+      </div>
+      <label>Control measures</label><textarea data-h="controls">${esc(h.controls||"")}</textarea>
+      <div style="max-width:200px;"><label>Residual risk</label><select data-h="residual">${riskOpts(h.residual||"Low")}</select></div>`;
+    g("r_hazards").appendChild(div);
+  }
+  function addHazard(){ ramsHazardRow(); }
+  function ramsAckRow(a = {}) {
+    const idx = g("r_acks").children.length;
+    const div = document.createElement("div");
+    div.className = "sub";
+    div.innerHTML = `
+      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
+      <label>Operative name</label><input type="text" data-a="name" value="${esc(a.name||"")}">
+      <label>Signature</label><div class="sigwrap"><canvas class="sig" id="asig${idx}"></canvas></div>
+      <button class="btn grey small noprint" type="button" onclick="clearSig('asig${idx}')">Clear signature</button>`;
+    g("r_acks").appendChild(div);
+    initSig("asig" + idx, a.signature || "");
+    div.dataset.sig = "asig" + idx;
+  }
+  function addAck(){ ramsAckRow(); }
+  function newRams() {
+    editId = null;
+    g("ramsFormTitle").textContent = "New Risk Assessment / Method Statement";
+    ["r_task","r_site","r_assessor","r_review","r_method","r_equipment","r_emergency","r_byname"].forEach(i => g(i).value = "");
+    g("r_date").value = new Date().toISOString().slice(0,10);
+    renderChecks("r_persons", RAMS_PERSONS, null);
+    renderChecks("r_ppe", RAMS_PPE, null);
+    g("r_hazards").innerHTML = ""; g("r_acks").innerHTML = "";
+    g("ramsMsg").textContent = "";
+    show("formRams");
+    setTimeout(() => { initSig("r_bysig",""); ramsHazardRow(); }, 30);
+  }
+  function fillRams(doc) {
+    const x = doc.data || {};
+    g("ramsFormTitle").textContent = "Edit RAMS — " + (doc.ref || "");
+    g("r_task").value = x.task || doc.site || ""; g("r_site").value = x.site || "";
+    g("r_assessor").value = x.assessor || ""; g("r_date").value = x.date || ""; g("r_review").value = x.reviewDate || "";
+    g("r_method").value = x.method || ""; g("r_equipment").value = x.equipment || ""; g("r_emergency").value = x.emergency || "";
+    g("r_byname").value = x.preparedByName || "";
+    renderChecks("r_persons", RAMS_PERSONS, x.persons || null);
+    renderChecks("r_ppe", RAMS_PPE, x.ppe || null);
+    g("r_hazards").innerHTML = ""; g("r_acks").innerHTML = "";
+    (x.hazards && x.hazards.length ? x.hazards : [{}]).forEach(h => ramsHazardRow(h));
+    show("formRams");
+    setTimeout(() => { initSig("r_bysig", x.preparedBySignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
+  }
+  function collectRams() {
+    const hazards = [...g("r_hazards").children].map(div => {
+      const get = k => { const el = div.querySelector(`[data-h="${k}"]`); return el ? el.value.trim() : ""; };
+      return { hazard:get("hazard"), who:get("who"), initial:get("initial"), controls:get("controls"), residual:get("residual") };
+    }).filter(h => h.hazard);
+    const acks = [...g("r_acks").children].map(div => ({ name: (div.querySelector('[data-a="name"]')||{}).value?.trim()||"", signature: sigVal(div.dataset.sig) })).filter(a => a.name);
+    return {
+      task:g("r_task").value.trim(), site:g("r_site").value.trim(), assessor:g("r_assessor").value.trim(),
+      date:g("r_date").value, reviewDate:g("r_review").value,
+      persons: collectChecks("r_persons", RAMS_PERSONS), ppe: collectChecks("r_ppe", RAMS_PPE), hazards,
+      method:g("r_method").value.trim(), equipment:g("r_equipment").value.trim(), emergency:g("r_emergency").value.trim(),
+      preparedByName:g("r_byname").value.trim(), preparedBySignature: sigVal("r_bysig"), acks,
+    };
+  }
+  async function saveRams(openAfter) {
+    const data = collectRams();
+    const msg = g("ramsMsg"); msg.className = "msg";
+    if (!data.task) { msg.className = "msg err"; msg.textContent = "Task / activity is required."; return; }
+    g("ramsSave").disabled = g("ramsSaveView").disabled = true; msg.textContent = "Saving…";
+    try {
+      const body = { doc_type:"rams", site:(data.site || data.task), data, ...(editId ? { id: editId } : {}) };
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      const id = editId || r.id;
+      msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
+      if (openAfter) openDoc(id); else showList("rams");
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }
+    finally { g("ramsSave").disabled = g("ramsSaveView").disabled = false; }
+  }
+  g("ramsSave").onclick = () => saveRams(false);
+  g("ramsSaveView").onclick = () => saveRams(true);
+
+  // ── Incident / near-miss form ────────────────────────────────────────────────
+  function witnessRow(w = {}) {
+    const div = document.createElement("div");
+    div.className = "sub";
+    div.innerHTML = `
+      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
+      <div class="grid2">
+        <div><label>Witness name</label><input type="text" data-w="name" value="${esc(w.name||"")}"></div>
+        <div><label>Contact</label><input type="text" data-w="contact" value="${esc(w.contact||"")}"></div>
+      </div>`;
+    g("n_witnesses").appendChild(div);
+  }
+  function addWitness(){ witnessRow(); }
+  function newIncident() {
+    editId = null;
+    g("incFormTitle").textContent = "New Incident / Near-miss Report";
+    g("n_type").innerHTML = INCIDENT_TYPES.map(t => `<option>${esc(t)}</option>`).join("");
+    ["n_site","n_when","n_reporter","n_pname","n_pcompany","n_prole","n_pcontact","n_desc","n_injury","n_bodypart","n_cause","n_action","n_root","n_hsedate","n_mgrname"].forEach(i => g(i).value = "");
+    g("n_reported").value = new Date().toISOString().slice(0,10);
+    ["n_firstaid","n_hospital","n_riddor","n_reportedhse"].forEach(i => g(i).checked = false);
+    g("n_witnesses").innerHTML = "";
+    g("incMsg").textContent = "";
+    show("formIncident");
+    setTimeout(() => { initSig("n_repsig",""); initSig("n_mgrsig",""); }, 30);
+  }
+  function fillIncident(doc) {
+    const x = doc.data || {};
+    g("incFormTitle").textContent = "Edit Incident Report — " + (doc.ref || "");
+    g("n_type").innerHTML = INCIDENT_TYPES.map(t => `<option ${t===x.type?"selected":""}>${esc(t)}</option>`).join("");
+    g("n_site").value = x.site || ""; g("n_when").value = x.when || ""; g("n_reporter").value = x.reporter || "";
+    g("n_reported").value = x.dateReported || ""; g("n_pname").value = x.personName || ""; g("n_pcompany").value = x.personCompany || "";
+    g("n_prole").value = x.personRole || ""; g("n_pcontact").value = x.personContact || "";
+    g("n_desc").value = x.description || ""; g("n_injury").value = x.injury || ""; g("n_bodypart").value = x.bodyPart || "";
+    g("n_cause").value = x.cause || ""; g("n_action").value = x.action || ""; g("n_root").value = x.root || "";
+    g("n_hsedate").value = x.hseDate || ""; g("n_mgrname").value = x.managerName || "";
+    g("n_firstaid").checked = !!x.firstAid; g("n_hospital").checked = !!x.hospital; g("n_riddor").checked = !!x.riddor; g("n_reportedhse").checked = !!x.reportedHse;
+    g("n_witnesses").innerHTML = "";
+    (x.witnesses || []).forEach(w => witnessRow(w));
+    show("formIncident");
+    setTimeout(() => { initSig("n_repsig", x.reporterSignature || ""); initSig("n_mgrsig", x.managerSignature || ""); }, 30);
+  }
+  function collectIncident() {
+    const witnesses = [...g("n_witnesses").children].map(div => ({
+      name: (div.querySelector('[data-w="name"]')||{}).value?.trim()||"", contact: (div.querySelector('[data-w="contact"]')||{}).value?.trim()||""
+    })).filter(w => w.name);
+    return {
+      type:g("n_type").value, site:g("n_site").value.trim(), when:g("n_when").value, reporter:g("n_reporter").value.trim(), dateReported:g("n_reported").value,
+      personName:g("n_pname").value.trim(), personCompany:g("n_pcompany").value.trim(), personRole:g("n_prole").value.trim(), personContact:g("n_pcontact").value.trim(),
+      description:g("n_desc").value.trim(), injury:g("n_injury").value.trim(), bodyPart:g("n_bodypart").value.trim(),
+      firstAid:g("n_firstaid").checked, hospital:g("n_hospital").checked, riddor:g("n_riddor").checked,
+      cause:g("n_cause").value.trim(), action:g("n_action").value.trim(), root:g("n_root").value.trim(),
+      witnesses, reportedHse:g("n_reportedhse").checked, hseDate:g("n_hsedate").value,
+      reporterSignature: sigVal("n_repsig"), managerName:g("n_mgrname").value.trim(), managerSignature: sigVal("n_mgrsig"),
+    };
+  }
+  async function saveIncident(openAfter) {
+    const data = collectIncident();
+    const msg = g("incMsg"); msg.className = "msg";
+    if (!data.description) { msg.className = "msg err"; msg.textContent = "Please describe what happened."; return; }
+    g("incSave").disabled = g("incSaveView").disabled = true; msg.textContent = "Saving…";
+    try {
+      const body = { doc_type:"incident", site:(data.site || data.type), data, ...(editId ? { id: editId } : {}) };
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      const id = editId || r.id;
+      msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
+      if (openAfter) openDoc(id); else showList("incident");
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }
+    finally { g("incSave").disabled = g("incSaveView").disabled = false; }
+  }
+  g("incSave").onclick = () => saveIncident(false);
+  g("incSaveView").onclick = () => saveIncident(true);
+
   async function delDoc(id) {
     if (!confirm("Delete this document? This can't be undone.")) return;
     await authFetch("/hs/doc/delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) });
@@ -511,6 +801,8 @@
     show("docView");
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
     else if (d.doc.doc_type === "hotworks") g("docBody").innerHTML = renderHotworks(d.doc);
+    else if (d.doc.doc_type === "rams") g("docBody").innerHTML = renderRams(d.doc);
+    else if (d.doc.doc_type === "incident") g("docBody").innerHTML = renderIncident(d.doc);
     else g("docBody").innerHTML = `<p class="muted">Viewer for this type is coming soon.</p>`;
   }
   const sigImg = s => s ? `<img src="${s}" alt="signature">` : `<span class="muted">(not signed)</span>`;
@@ -577,6 +869,88 @@
       <div class="kv"><div><b>Completion time:</b> ${esc(x.completionTime||"")}</div><div><b>Final area:</b> ${x.finalSafe ? "Area declared SAFE" : "—"}</div></div>
       <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>
       <div class="foot"><b>${esc(HW_FOOTER)}</b><br>Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
+  }
+  function renderRams(doc) {
+    const x = doc.data || {};
+    const rows = (x.hazards || []).map(h => `
+      <tr>
+        <td>${esc(h.hazard||"")}</td><td>${esc(h.who||"")}</td>
+        <td style="text-align:center;">${esc(h.initial||"")}</td>
+        <td>${esc(h.controls||"")}</td>
+        <td style="text-align:center;">${esc(h.residual||"")}</td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted">No hazards recorded.</td></tr>`;
+    const acks = (x.acks || []).map((a,i) => `
+      <div style="display:inline-block; width:48%; margin:6px 1%; vertical-align:top;">
+        <b>${esc(a.name||"")}</b><br>${sigImg(a.signature)}</div>`).join("") || `<p class="muted">No operative sign-offs.</p>`;
+    return `
+      <h2>Risk Assessment &amp; Method Statement</h2>
+      <p class="ref">Ref: ${esc(doc.ref || "—")}</p>
+      <h3>DETAILS</h3>
+      <div class="kv">
+        <div><b>Task / activity:</b> ${esc(x.task||"")}</div><div><b>Project / site:</b> ${esc(x.site||"")}</div>
+        <div><b>Assessor:</b> ${esc(x.assessor||"")}</div><div><b>Date:</b> ${esc(fmtDate(x.date))}</div>
+        <div><b>Review date:</b> ${esc(fmtDate(x.reviewDate))}</div>
+      </div>
+      <h3>PERSONS AT RISK</h3><ul>${(x.persons||[]).map(p=>`<li>${esc(p)}</li>`).join("")||"<li class='muted'>None specified</li>"}</ul>
+      <h3>HAZARDS &amp; CONTROLS</h3>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead><tr style="background:#eef2f7;">
+          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Hazard</th>
+          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Who at risk</th>
+          <th style="padding:6px; border:1px solid #ddd;">Initial</th>
+          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Control measures</th>
+          <th style="padding:6px; border:1px solid #ddd;">Residual</th>
+        </tr></thead>
+        <tbody>${rows.replace(/<td/g,'<td style="padding:6px; border:1px solid #ddd;"')}</tbody>
+      </table>
+      <h3>PPE REQUIRED</h3><ul>${(x.ppe||[]).map(p=>`<li>${esc(p)}</li>`).join("")||"<li class='muted'>None specified</li>"}</ul>
+      <h3>METHOD STATEMENT</h3>
+      <p><b>Sequence of works:</b><br>${esc(x.method||"").replace(/\n/g,"<br>")}</p>
+      <p><b>Equipment / plant:</b><br>${esc(x.equipment||"").replace(/\n/g,"<br>")}</p>
+      <p><b>Emergency arrangements:</b><br>${esc(x.emergency||"").replace(/\n/g,"<br>")}</p>
+      <h3>PREPARED BY</h3>
+      <div class="kv"><div><b>Print name:</b> ${esc(x.preparedByName||"")}</div></div>
+      <div class="sig" style="margin-top:6px;">${sigImg(x.preparedBySignature)}</div>
+      <h3>OPERATIVE SIGN-OFF <span style="font-weight:400; font-size:12px;">— read &amp; understood</span></h3>
+      ${acks}
+      <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
+  }
+  function renderIncident(doc) {
+    const x = doc.data || {};
+    const yn = v => v ? "Yes" : "No";
+    const witnesses = (x.witnesses || []).map(w => `<li>${esc(w.name||"")}${w.contact?` — ${esc(w.contact)}`:""}</li>`).join("") || "<li class='muted'>None</li>";
+    return `
+      <h2>Incident / Near-miss Report</h2>
+      <p class="ref">Ref: ${esc(doc.ref || "—")}</p>
+      <h3>REPORT DETAILS</h3>
+      <div class="kv">
+        <div><b>Type:</b> ${esc(x.type||"")}</div><div><b>Site / location:</b> ${esc(x.site||"")}</div>
+        <div><b>Date &amp; time of incident:</b> ${esc(x.when ? new Date(x.when).toLocaleString("en-GB") : "")}</div>
+        <div><b>Reported by:</b> ${esc(x.reporter||"")}</div><div><b>Date reported:</b> ${esc(fmtDate(x.dateReported))}</div>
+      </div>
+      <h3>PERSON INVOLVED</h3>
+      <div class="kv">
+        <div><b>Name:</b> ${esc(x.personName||"")}</div><div><b>Company:</b> ${esc(x.personCompany||"")}</div>
+        <div><b>Role:</b> ${esc(x.personRole||"")}</div><div><b>Contact:</b> ${esc(x.personContact||"")}</div>
+      </div>
+      <h3>WHAT HAPPENED</h3><p>${esc(x.description||"").replace(/\n/g,"<br>")}</p>
+      <h3>INJURY DETAILS</h3>
+      <div class="kv">
+        <div><b>Nature of injury:</b> ${esc(x.injury||"—")}</div><div><b>Body part:</b> ${esc(x.bodyPart||"—")}</div>
+        <div><b>First aid given:</b> ${yn(x.firstAid)}</div><div><b>Sent to hospital:</b> ${yn(x.hospital)}</div>
+        <div><b>Potentially RIDDOR reportable:</b> ${yn(x.riddor)}</div>
+      </div>
+      <h3>CAUSES &amp; ACTIONS</h3>
+      <p><b>Immediate cause / contributing factors:</b><br>${esc(x.cause||"").replace(/\n/g,"<br>")}</p>
+      <p><b>Immediate action taken:</b><br>${esc(x.action||"").replace(/\n/g,"<br>")}</p>
+      <p><b>Root cause &amp; preventive actions:</b><br>${esc(x.root||"").replace(/\n/g,"<br>")}</p>
+      <h3>WITNESSES</h3><ul>${witnesses}</ul>
+      <h3>REPORTING &amp; SIGN-OFF</h3>
+      <div class="kv"><div><b>Reported to HSE / RIDDOR:</b> ${yn(x.reportedHse)}</div><div><b>Date reported to HSE:</b> ${esc(fmtDate(x.hseDate))}</div></div>
+      <div class="sig" style="margin-top:6px;"><b>Reported by:</b><br>${sigImg(x.reporterSignature)}</div>
+      <div class="kv" style="margin-top:8px;"><div><b>Manager review:</b> ${esc(x.managerName||"")}</div></div>
+      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>
+      <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
 </script>
 </body>
