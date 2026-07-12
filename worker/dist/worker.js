@@ -2808,6 +2808,38 @@ async function handle8(request, env, ctx, url) {
     const { results } = await env.DB.prepare(sql).bind(...binds).all();
     return json({ ok: true, logs: results || [] }, {}, env, request);
   }
+  if (path === "/prefs" && method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(sess.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(sess.user.username).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    const prefs = profile.prefs || {};
+    for (const k of Object.keys(b)) {
+      if (b[k] === null) delete prefs[k];
+      else prefs[k] = b[k];
+    }
+    if (JSON.stringify(prefs).length > 8e3) return error("Preferences too large", 400, env, request);
+    profile.prefs = prefs;
+    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?").bind(JSON.stringify(profile), sess.user.username).run();
+    return json({ ok: true, prefs }, {}, env, request);
+  }
   if (path === "/notify/log" && method === "POST") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
@@ -3394,6 +3426,8 @@ var ROUTES = [
   ["*", "/daily-logs", handle8],
   ["*", "/notify", handle8],
   // notification audit log
+  ["*", "/prefs", handle8],
+  // per-user cross-device markers
   ["*", "/sitelog", handle9],
   ["*", "/sitelog-launch", handle9],
   ["*", "/office", handle10],

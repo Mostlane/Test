@@ -519,6 +519,17 @@ const MAP = {
 
       var notes = [], jobs = [];
 
+      // Per-USER markers from the server (/prefs): what's been seen and what's
+      // been snoozed follows the account, not the device — dealing with an
+      // alert on one phone clears it on every other login too. localStorage is
+      // kept as a mirror/fallback; the newer timestamp wins.
+      function later(a, b) { return String(a || "") > String(b || "") ? (a || "") : (b || ""); }
+      var PREFS = {};
+      var prefsP = fetch(window.MOSTLANE_API + "/prefs", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) { PREFS = (d && d.ok && d.prefs) || {}; return PREFS; })
+        .catch(function () { return {}; });
+
       jobs.push(fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -532,10 +543,10 @@ const MAP = {
         }).catch(function () {}));
 
       var yr = new Date().getFullYear();
-      jobs.push(fetch(window.MOSTLANE_API + "/holiday/my?year=" + yr, H)
-        .then(function (r) { return r.json(); })
-        .then(function (list) {
-          var seen = localStorage.getItem("mostlaneHolSeen") || "";
+      jobs.push(Promise.all([fetch(window.MOSTLANE_API + "/holiday/my?year=" + yr, H).then(function (r) { return r.json(); }), prefsP])
+        .then(function (res) {
+          var list = res[0];
+          var seen = later(localStorage.getItem("mostlaneHolSeen"), res[1].holSeen);
           var meL = (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").toLowerCase();
           var n = (Array.isArray(list) ? list : []).filter(function (h) {
             return h.start && h.decisionAt && (!seen || h.decisionAt > seen)
@@ -553,12 +564,11 @@ const MAP = {
       var perms = {};
       try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
       if (perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes") {
-        jobs.push(fetch(window.MOSTLANE_API + "/holiday/all?year=" + yr, H)
-          .then(function (r) { return r.json(); })
-          .then(function (list) {
-            var arr = Array.isArray(list) ? list : [];
+        jobs.push(Promise.all([fetch(window.MOSTLANE_API + "/holiday/all?year=" + yr, H).then(function (r) { return r.json(); }), prefsP])
+          .then(function (res) {
+            var arr = Array.isArray(res[0]) ? res[0] : [];
             var pending = arr.filter(function (h) { return h.status === "Pending"; }).length;
-            var seenA = localStorage.getItem("mostlaneHolAdminSeen") || "";
+            var seenA = later(localStorage.getItem("mostlaneHolAdminSeen"), res[1].holAdminSeen);
             var cancels = arr.filter(function (h) {
               return h.status === "Cancelled" && h.cancelledBy && h.cancelledBy === h.username
                 && h.decisionAt && (!seenA || h.decisionAt > seenA);
@@ -575,6 +585,7 @@ const MAP = {
       }
 
       var ORDER = { "my-assets.html": 1, "holiday-admin.html": 2, "holiday.html": 3 };
+      jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
       });
@@ -596,9 +607,31 @@ const MAP = {
       // "Remind me later" works twice per notification, then it's enforced.
       // A notification is identified by page + count, so a NEW transfer or
       // request resets the allowance (it's genuinely new information).
+      // The snooze state is merged with the server copy (per user), so using
+      // a reminder on one device counts on every device.
       var SNOOZE_MAX = 2, SNOOZE_MS = 4 * 3600 * 1000;   // 4-hour snooze
-      function snoozeStore() { try { return JSON.parse(localStorage.getItem("mlNotifySnooze") || "{}"); } catch (e) { return {}; } }
-      function saveSnooze(st) { try { localStorage.setItem("mlNotifySnooze", JSON.stringify(st)); } catch (e) {} }
+      function snoozeStore() {
+        var local = {};
+        try { local = JSON.parse(localStorage.getItem("mlNotifySnooze") || "{}"); } catch (e) {}
+        var remote = (PREFS && PREFS.notifySnooze) || {};
+        var out = {};
+        Object.keys(local).concat(Object.keys(remote)).forEach(function (k) {
+          var a = local[k] || { c: 0, until: 0 }, b = remote[k] || { c: 0, until: 0 };
+          out[k] = { c: Math.max(a.c || 0, b.c || 0), until: Math.max(a.until || 0, b.until || 0) };
+        });
+        return out;
+      }
+      function saveSnooze(st) {
+        try { localStorage.setItem("mlNotifySnooze", JSON.stringify(st)); } catch (e) {}
+        PREFS.notifySnooze = st;
+        try {
+          fetch(window.MOSTLANE_API + "/prefs", {
+            method: "POST", keepalive: true,
+            headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+            body: JSON.stringify({ notifySnooze: st })
+          }).catch(function () {});
+        } catch (e) {}
+      }
 
       function show(items) {
         var mobile = window.matchMedia("(max-width:999px)").matches;

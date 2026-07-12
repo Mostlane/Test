@@ -541,14 +541,30 @@
         });
       }
       function setNavBadge(href, n) { badgeCounts[href] = Number(n) || 0; applyBadges(); }
+      // "Seen" markers live server-side per USER (/prefs) so an alert dealt
+      // with on one device clears on all of them; localStorage is just a
+      // mirror/fallback. The newer of the two timestamps wins.
+      function mlLater(a, b) { return String(a || "") > String(b || "") ? (a || "") : (b || ""); }
+      function mlPrefs() {
+        return fetchAuthed("/prefs").then(function (d) {
+          var p = (d && d.ok && d.prefs) || {};
+          try {
+            if (p.holSeen) localStorage.setItem("mostlaneHolSeen", mlLater(p.holSeen, localStorage.getItem("mostlaneHolSeen")));
+            if (p.holAdminSeen) localStorage.setItem("mostlaneHolAdminSeen", mlLater(p.holAdminSeen, localStorage.getItem("mostlaneHolAdminSeen")));
+          } catch (e) {}
+          return p;
+        }).catch(function () { return {}; });
+      }
       function updateBadges() {
         fetchAuthed("/asset/transfers/pending-count").then(function (d) {
           if (d && d.ok) setNavBadge("my-assets.html", d.count);
         }).catch(function () {});
         var yr = new Date().getFullYear();
+        var prefsP = mlPrefs();
         // Unseen decisions on my own requests (seen marker set when holiday.html opens).
-        fetchAuthed("/holiday/my?year=" + yr).then(function (list) {
-          var seen = localStorage.getItem("mostlaneHolSeen") || "";
+        Promise.all([fetchAuthed("/holiday/my?year=" + yr), prefsP]).then(function (res) {
+          var list = res[0], prefs = res[1];
+          var seen = mlLater(localStorage.getItem("mostlaneHolSeen"), prefs.holSeen);
           var meL = (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").toLowerCase();
           var n = (Array.isArray(list) ? list : []).filter(function (h) {
             return h.start && h.decisionAt && (!seen || h.decisionAt > seen)
@@ -558,11 +574,11 @@
           setNavBadge("holiday.html", n);
         }).catch(function () {});
         if (yes(perms.FullAccess) || yes(perms.HolidayAdmin)) {
-          fetchAuthed("/holiday/all?year=" + yr).then(function (list) {
-            var arr = Array.isArray(list) ? list : [];
+          Promise.all([fetchAuthed("/holiday/all?year=" + yr), prefsP]).then(function (res) {
+            var arr = Array.isArray(res[0]) ? res[0] : [];
             var pending = arr.filter(function (h) { return h.status === "Pending"; }).length;
             // Staff cancelling their own (incl. approved) leave — unseen by admin.
-            var seenA = localStorage.getItem("mostlaneHolAdminSeen") || "";
+            var seenA = mlLater(localStorage.getItem("mostlaneHolAdminSeen"), res[1].holAdminSeen);
             var cancels = arr.filter(function (h) {
               return h.status === "Cancelled" && h.cancelledBy && h.cancelledBy === h.username
                 && h.decisionAt && (!seenA || h.decisionAt > seenA);

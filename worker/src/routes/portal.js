@@ -105,6 +105,37 @@ export async function handle(request, env, ctx, url) {
     return json({ ok: true, logs: results || [] }, {}, env, request);
   }
 
+  /* ── Per-user cross-device preferences/markers ─────────────────────── */
+  // Small JSON blob in users.profile.prefs — e.g. holSeen / holAdminSeen
+  // ("I've seen these notifications", so alerts don't reappear on another
+  // device) and notifySnooze (remind-me-later state). POST shallow-merges;
+  // send null for a key to delete it.
+  if (path === "/prefs" && method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(sess.user.username).first();
+    let profile = {}; try { profile = row?.profile ? JSON.parse(row.profile) : {}; } catch {}
+    return json({ ok: true, prefs: profile.prefs || {} }, {}, env, request);
+  }
+  if (path === "/prefs" && method === "POST") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    const b = await request.json().catch(() => null);
+    if (!b || typeof b !== "object" || Array.isArray(b)) return error("Send an object of keys to merge", 400, env, request);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(sess.user.username).first();
+    let profile = {}; try { profile = row?.profile ? JSON.parse(row.profile) : {}; } catch {}
+    const prefs = profile.prefs || {};
+    for (const k of Object.keys(b)) {
+      if (b[k] === null) delete prefs[k];
+      else prefs[k] = b[k];
+    }
+    if (JSON.stringify(prefs).length > 8000) return error("Preferences too large", 400, env, request);
+    profile.prefs = prefs;
+    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?")
+      .bind(JSON.stringify(profile), sess.user.username).run();
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+
   /* ── Notification audit log ────────────────────────────────────────── */
   // Every time the attention gate / desktop panel shows (or is snoozed,
   // dismissed, or an item is opened) the page reports it here, so there is

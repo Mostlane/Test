@@ -236,7 +236,11 @@
         renderLists(Array.isArray(mine) ? mine : []);
         try { localStorage.setItem(CK, JSON.stringify({ sum, mine })); } catch (e) {}
         // Decisions are now seen — clears the red badge on the menu/sidebar.
-        try { localStorage.setItem("mostlaneHolSeen", new Date().toISOString()); } catch (e) {}
+        // Stored server-side too, so it clears on every device this user uses.
+        const seenAt = new Date().toISOString();
+        try { localStorage.setItem("mostlaneHolSeen", seenAt); } catch (e) {}
+        authFetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ holSeen: seenAt }) }).catch(() => {});
       } catch (e) {
         if (!painted) g("reqList").innerHTML = '<div class="row"><span class="muted">Couldn\'t load your holiday info.</span></div>';
       }
