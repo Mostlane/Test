@@ -312,6 +312,8 @@ const PERMISSION_KEYS = [
   "OfficeClock",   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",// view the weekly master office timesheet (all staff)
   "AssetAdmin",    // plant & equipment admin: sees ALL transfer documents + All Assets
+  "ThemeColour",     // personalisation: may pick a portal colour theme
+  "ThemeBackground", // personalisation: may change the menu background
 ];
 
 function shapeUser(u, perms) {

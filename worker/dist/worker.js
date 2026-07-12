@@ -652,8 +652,12 @@ var PERMISSION_KEYS = [
   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",
   // view the weekly master office timesheet (all staff)
-  "AssetAdmin"
+  "AssetAdmin",
   // plant & equipment admin: sees ALL transfer documents + All Assets
+  "ThemeColour",
+  // personalisation: may pick a portal colour theme
+  "ThemeBackground"
+  // personalisation: may change the menu background
 ];
 function shapeUser2(u, perms) {
   let profile = {};
@@ -3276,6 +3280,87 @@ async function handle11(request, env, ctx, url) {
   return json2({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
+// src/routes/theme.js
+var ACCENTS = ["blue", "teal", "green", "purple", "burgundy", "orange", "slate", "midnight"];
+var BG_COLOURS = ["sky", "sand", "sage", "blush", "lavender", "steel"];
+async function caps(env, username) {
+  const perms = await permissionsFor(env, username);
+  const full = perms.FullAccess === "Yes";
+  return {
+    colour: full || perms.ThemeColour === "Yes",
+    background: full || perms.ThemeBackground === "Yes"
+  };
+}
+function filterTheme(theme, can) {
+  const t = {};
+  if (can.colour && ACCENTS.includes(theme.accent)) t.accent = theme.accent;
+  if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
+  return t;
+}
+async function handle12(request, env, ctx, url) {
+  const cors = corsHeaders(env, request);
+  const { pathname } = url;
+  const method = request.method.toUpperCase();
+  const json2 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const sess = await requireSession(env, request);
+  if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+  const me = sess.user.username;
+  if (method === "GET" && pathname === "/theme") {
+    const can = await caps(env, me);
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(me).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    return json2({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
+  }
+  if (method === "POST" && pathname === "/theme") {
+    const can = await caps(env, me);
+    if (!can.colour && !can.background) return json2({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(me).first();
+    let profile = {};
+    try {
+      profile = row?.profile ? JSON.parse(row.profile) : {};
+    } catch {
+    }
+    const t = profile.theme || {};
+    if (b.accent !== void 0 && can.colour) {
+      if (!ACCENTS.includes(b.accent)) return json2({ ok: false, error: "Unknown colour theme" }, 400);
+      t.accent = b.accent;
+    }
+    if (b.bg !== void 0 && can.background) {
+      const bg = b.bg || {};
+      if (bg.type === "emboss" || !bg.type) delete t.bg;
+      else if (bg.type === "colour" && BG_COLOURS.includes(bg.value)) t.bg = { type: "colour", value: bg.value };
+      else if (bg.type === "image" && typeof bg.value === "string" && bg.value.startsWith(`theme/${me}/`)) t.bg = { type: "image", value: bg.value };
+      else return json2({ ok: false, error: "Unknown background choice" }, 400);
+    }
+    profile.theme = t;
+    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?").bind(JSON.stringify(profile), me).run();
+    return json2({ ok: true, theme: filterTheme(t, can), can });
+  }
+  if (method === "POST" && pathname === "/theme/background") {
+    const can = await caps(env, me);
+    if (!can.background) return json2({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
+    const form = await request.formData().catch(() => null);
+    const file = form && form.get("file");
+    if (!file || typeof file === "string") return json2({ ok: false, error: "Missing file" }, 400);
+    if (!/^image\//.test(file.type || "")) return json2({ ok: false, error: "That isn't an image" }, 400);
+    const bytes = await file.arrayBuffer();
+    if (bytes.byteLength > 4 * 1024 * 1024) return json2({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
+    const prefix = `theme/${me}/`;
+    const old = await env.ASSET_BUCKET.list({ prefix });
+    for (const o of old.objects || []) await env.ASSET_BUCKET.delete(o.key);
+    const ext = file.type === "image/png" ? "png" : "jpg";
+    const key = `${prefix}bg-${Date.now()}.${ext}`;
+    await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: file.type || "image/jpeg" } });
+    return json2({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
+  }
+  return json2({ ok: false, error: "Not found: " + pathname }, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -3313,8 +3398,10 @@ var ROUTES = [
   ["*", "/sitelog-launch", handle9],
   ["*", "/office", handle10],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle11]
+  ["*", "/key", handle11],
   // /keys, /key/* (key register)
+  ["*", "/theme", handle12]
+  // per-user colour theme + background
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

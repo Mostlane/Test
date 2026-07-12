@@ -226,6 +226,8 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
 -->
+    <a class="button" href="theme.html" id="Personalise"><span class="emoji">🎨</span> Personalise</a>
+
     <!-- FIXED -->
     <a class="button visible" href="javascript:void(0)" onclick="localStorage.removeItem('mostlaneToken'); sessionStorage.clear(); window.location.href='login.html';">
       <span class="emoji">🚪</span> Logout
@@ -280,7 +282,9 @@ const MAP = {
   SiteLog: ["SiteLog"],
   // Weekly master office timesheet — visible to holders of the OfficeTimesheet
   // permission (and FullAccess, which unlocks every button).
-  OfficeTimesheet: ["OfficeTimesheet"]
+  OfficeTimesheet: ["OfficeTimesheet"],
+  // Personal theming — visible with either personalisation permission.
+  Personalise: ["ThemeColour", "ThemeBackground"]
 };
 
 // H&S planner launch. The app token lives as a secret on the API worker;
