@@ -17,6 +17,7 @@
 
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
 // Local calendar day in the UK, regardless of the server's UTC clock.
 function londonDate(d = new Date()) {
@@ -48,28 +49,31 @@ function shapeSeg(r) {
   };
 }
 
-async function hasOfficePerm(env, username) {
-  const row = await env.DB.prepare(
-    "SELECT value FROM user_permissions WHERE username=? AND permission='OfficeClock'"
-  ).bind(username).first();
+async function hasOfficePerm(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare(
+    "SELECT value FROM user_permissions WHERE tenant_id=? AND username=? AND permission='OfficeClock'"
+  ).bind(tenantId, username).first();
   return !!(row && Number(row.value) === 1);
 }
-async function deviceEnabled(env, username, deviceId) {
+async function deviceEnabled(env, tenantId, username, deviceId) {
   if (!deviceId) return false;
-  const dev = await env.DB.prepare(
-    "SELECT office_clock FROM devices WHERE device_id=? AND username=?"
-  ).bind(deviceId, username).first();
+  const db = tenantDB(env, tenantId);
+  const dev = await db.prepare(
+    "SELECT office_clock FROM devices WHERE tenant_id=? AND device_id=? AND username=?"
+  ).bind(tenantId, deviceId, username).first();
   return !!(dev && Number(dev.office_clock) === 1);
 }
-async function isTimesheetAdmin(env, username) {
-  const p = await permissionsFor(env, username);
+async function isTimesheetAdmin(env, tenantId, username) {
+  const p = await permissionsFor(env, tenantId, username);
   return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
 }
 // Most recent segment with no effective clock-out and not voided.
-async function openSegmentRow(env, username) {
-  return env.DB.prepare(
-    "SELECT * FROM office_shifts WHERE username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0) ORDER BY clock_in DESC LIMIT 1"
-  ).bind(username).first();
+async function openSegmentRow(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  return db.prepare(
+    "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0) ORDER BY clock_in DESC LIMIT 1"
+  ).bind(tenantId, username).first();
 }
 
 function mondayOf(dateStr) {
@@ -86,13 +90,14 @@ function weekDays(monday) {
 }
 
 // One user's week: per-day segments (with original + effective + edit flags).
-async function weekDetail(env, username, week) {
+async function weekDetail(env, tenantId, username, week) {
+  const db = tenantDB(env, tenantId);
   const monday = mondayOf(isDateStr(week) ? week : londonDate());
   const days = weekDays(monday);
   const sunday = days[6];
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM office_shifts WHERE username=? AND date>=? AND date<=? ORDER BY clock_in"
-  ).bind(username, monday, sunday).all();
+  const { results } = await db.prepare(
+    "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND date>=? AND date<=? ORDER BY clock_in"
+  ).bind(tenantId, username, monday, sunday).all();
   const byDay = {};
   for (const d of days) byDay[d] = { date: d, seconds: 0, open: false, segments: [] };
   let weekTotal = 0;
@@ -106,22 +111,23 @@ async function weekDetail(env, username, week) {
   return { monday, sunday, days, byDay, weekTotal };
 }
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
-  const sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
   const me = sess.user.username;
 
   // ── GET /office/config ────────────────────────────────────────────────────
   if (path === "/office/config" && request.method === "GET") {
     const deviceId = url.searchParams.get("device") || sess.session.device_id || "";
-    const perm = await hasOfficePerm(env, me);
-    const enabled = perm && await deviceEnabled(env, me, deviceId);
+    const perm = await hasOfficePerm(env, tenantId, me);
+    const enabled = perm && await deviceEnabled(env, tenantId, me, deviceId);
     const today = londonDate();
-    const open = await openSegmentRow(env, me);
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM office_shifts WHERE username=? AND date=?"
-    ).bind(me, today).all();
+    const open = await openSegmentRow(env, tenantId, me);
+    const { results } = await db.prepare(
+      "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND date=?"
+    ).bind(db.tenantId, me, today).all();
     let todayClosedSeconds = 0;
     for (const r of results || []) if (!isOpenRow(r)) todayClosedSeconds += segSeconds(r);
     return json({
@@ -135,64 +141,64 @@ export async function handle(request, env, ctx, url) {
   if (path === "/office/clock-in" && request.method === "POST") {
     const b = await request.json().catch(() => ({}));
     const deviceId = b.deviceId || sess.session.device_id || "";
-    if (!(await hasOfficePerm(env, me)))
+    if (!(await hasOfficePerm(env, tenantId, me)))
       return error("Office clock isn't enabled for your account.", 403, env, request);
-    if (!(await deviceEnabled(env, me, deviceId)))
+    if (!(await deviceEnabled(env, tenantId, me, deviceId)))
       return error("This device isn't set up for the office clock.", 403, env, request);
-    const open = await openSegmentRow(env, me);
+    const open = await openSegmentRow(env, tenantId, me);
     if (open) return json({ ok: true, already: true, open: { id: open.id, date: open.date, clockIn: effIn(open) } }, {}, env, request);
     const now = new Date();
     const iso = now.toISOString();
     const date = londonDate(now);
-    const res = await env.DB.prepare(
-      "INSERT INTO office_shifts (username, date, clock_in, device_id, updated_at) VALUES (?,?,?,?,?)"
-    ).bind(me, date, iso, deviceId, iso).run();
+    const res = await db.prepare(
+      "INSERT INTO office_shifts (username, tenant_id, date, clock_in, device_id, updated_at) VALUES (?,?,?,?,?,?)"
+    ).bind(me, db.tenantId, date, iso, deviceId, iso).run();
     return json({ ok: true, open: { id: res.meta ? res.meta.last_row_id : undefined, date, clockIn: iso } }, {}, env, request);
   }
 
   // ── POST /office/clock-out ────────────────────────────────────────────────
   if (path === "/office/clock-out" && request.method === "POST") {
-    const open = await openSegmentRow(env, me);
+    const open = await openSegmentRow(env, tenantId, me);
     if (!open) return json({ ok: true, closed: false }, {}, env, request);
     const iso = new Date().toISOString();
-    await env.DB.prepare("UPDATE office_shifts SET clock_out=?, updated_at=? WHERE id=?")
-      .bind(iso, iso, open.id).run();
+    await db.prepare("UPDATE office_shifts SET clock_out=?, updated_at=? WHERE id=? AND tenant_id=?")
+      .bind(iso, iso, open.id, db.tenantId).run();
     return json({ ok: true, closed: true, seconds: secondsBetween(effIn(open), iso), date: open.date }, {}, env, request);
   }
 
   // ── GET /office/my — the caller's OWN week ────────────────────────────────
   if (path === "/office/my" && request.method === "GET") {
-    const detail = await weekDetail(env, me, url.searchParams.get("week") || "");
+    const detail = await weekDetail(env, tenantId, me, url.searchParams.get("week") || "");
     return json({ ok: true, ...detail }, {}, env, request);
   }
 
   // ── GET /office/user-week?u= — a user's week (admin, for editing) ─────────
   if (path === "/office/user-week" && request.method === "GET") {
-    if (!(await isTimesheetAdmin(env, me))) return error("Forbidden", 403, env, request);
+    if (!(await isTimesheetAdmin(env, tenantId, me))) return error("Forbidden", 403, env, request);
     const u = url.searchParams.get("u");
     if (!u) return error("Missing ?u=", 400, env, request);
-    const detail = await weekDetail(env, u, url.searchParams.get("week") || "");
-    const row = await env.DB.prepare("SELECT first_name, last_name FROM users WHERE username=?").bind(u).first();
+    const detail = await weekDetail(env, tenantId, u, url.searchParams.get("week") || "");
+    const row = await db.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, u).first();
     const name = row ? (`${row.first_name || ""} ${row.last_name || ""}`.trim() || u) : u;
     return json({ ok: true, username: u, name, ...detail }, {}, env, request);
   }
 
   // ── POST /office/segment — edit / void / reset a segment (admin) ──────────
   if (path === "/office/segment" && request.method === "POST") {
-    if (!(await isTimesheetAdmin(env, me))) return error("Forbidden", 403, env, request);
+    if (!(await isTimesheetAdmin(env, tenantId, me))) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
     if (!b.id) return error("Segment id required", 400, env, request);
-    const row = await env.DB.prepare("SELECT * FROM office_shifts WHERE id=?").bind(b.id).first();
+    const row = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
     if (!row) return error("Segment not found", 404, env, request);
     const nowIso = new Date().toISOString();
 
     // Reset back to the auto-captured times.
     if (b.clear) {
       const date = londonDate(new Date(row.clock_in));
-      await env.DB.prepare(
-        "UPDATE office_shifts SET edited_in=NULL, edited_out=NULL, edit_note=NULL, voided=0, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=?"
-      ).bind(me, nowIso, date, nowIso, b.id).run();
-      const fresh = await env.DB.prepare("SELECT * FROM office_shifts WHERE id=?").bind(b.id).first();
+      await db.prepare(
+        "UPDATE office_shifts SET edited_in=NULL, edited_out=NULL, edit_note=NULL, voided=0, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=? AND tenant_id=?"
+      ).bind(me, nowIso, date, nowIso, b.id, db.tenantId).run();
+      const fresh = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
       return json({ ok: true, segment: shapeSeg(fresh) }, {}, env, request);
     }
 
@@ -207,27 +213,27 @@ export async function handle(request, env, ctx, url) {
       return error("End time can't be before the start time.", 400, env, request);
 
     const date = londonDate(new Date(fIn));   // regroup by the effective start day
-    await env.DB.prepare(
-      "UPDATE office_shifts SET edited_in=?, edited_out=?, edit_note=?, voided=?, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=?"
-    ).bind(editedIn, editedOut, b.note || null, voided, me, nowIso, date, nowIso, b.id).run();
-    const fresh = await env.DB.prepare("SELECT * FROM office_shifts WHERE id=?").bind(b.id).first();
+    await db.prepare(
+      "UPDATE office_shifts SET edited_in=?, edited_out=?, edit_note=?, voided=?, edited_by=?, edited_at=?, date=?, updated_at=? WHERE id=? AND tenant_id=?"
+    ).bind(editedIn, editedOut, b.note || null, voided, me, nowIso, date, nowIso, b.id, db.tenantId).run();
+    const fresh = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(b.id, db.tenantId).first();
     return json({ ok: true, segment: shapeSeg(fresh) }, {}, env, request);
   }
 
   // ── GET /office/timesheet?week= — weekly master timesheet (admin) ─────────
   if (path === "/office/timesheet" && request.method === "GET") {
-    if (!(await isTimesheetAdmin(env, me))) return error("Forbidden", 403, env, request);
+    if (!(await isTimesheetAdmin(env, tenantId, me))) return error("Forbidden", 403, env, request);
     const monday = mondayOf(isDateStr(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
     const days = weekDays(monday);
     const sunday = days[6];
 
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM office_shifts WHERE date >= ? AND date <= ? ORDER BY username, clock_in"
-    ).bind(monday, sunday).all();
-    const { results: permUsers } = await env.DB.prepare(
-      "SELECT username FROM user_permissions WHERE permission='OfficeClock' AND value=1"
-    ).all();
-    const { results: userRows } = await env.DB.prepare("SELECT username, first_name, last_name FROM users").all();
+    const { results } = await db.prepare(
+      "SELECT * FROM office_shifts WHERE tenant_id=? AND date >= ? AND date <= ? ORDER BY username, clock_in"
+    ).bind(db.tenantId, monday, sunday).all();
+    const { results: permUsers } = await db.prepare(
+      "SELECT username FROM user_permissions WHERE tenant_id=? AND permission='OfficeClock' AND value=1"
+    ).bind(db.tenantId).all();
+    const { results: userRows } = await db.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(db.tenantId).all();
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
 

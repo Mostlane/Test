@@ -19,9 +19,14 @@
 
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
+  // Tenant is always server-derived (session, or request host for the
+  // not-yet-reached public case) — NEVER from the X-User header or the body.
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
   const json = (data, status = 200) =>
     new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
   const text = (msg, status = 200) => new Response(msg, { status, headers });
@@ -36,7 +41,7 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (sess) {
       user = sess.user.username;
-      const perms = await permissionsFor(env, user);
+      const perms = await permissionsFor(env, tenantId, user);
       role = (perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes") ? "Admin" : "Engineer";
     }
   }
@@ -47,13 +52,13 @@ export async function handle(request, env, ctx, url) {
 
   // ─── app_config helpers ──────────────────────────────────────────
   async function cfgGet(key) {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key = ?").bind(key).first();
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
     return row ? JSON.parse(row.value) : null;
   }
   async function cfgPut(key, val) {
-    await env.DB.prepare(
-      "INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).bind(key, JSON.stringify(val)).run();
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).bind(db.tenantId, key, JSON.stringify(val)).run();
   }
 
   async function getYearConfig() { return (await cfgGet(`holiday:config:${year}`)) || { defaultAllowance: 28 }; }
@@ -62,33 +67,33 @@ export async function handle(request, env, ctx, url) {
   async function getShutdownDays() { return (await cfgGet(`holiday:shutdown:${year}`)) || []; }
 
   async function getUserAllowance(username) {
-    const row = await env.DB.prepare(
-      "SELECT allowance FROM holiday_allowance WHERE year = ? AND username = ?"
-    ).bind(year, username).first();
+    const row = await db.prepare(
+      "SELECT allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ? AND username = ?"
+    ).bind(db.tenantId, year, username).first();
     if (row && Number.isFinite(Number(row.allowance))) return Number(row.allowance);
     return getDefaultAllowance();
   }
 
   async function listAllowancesMap() {
-    const { results } = await env.DB.prepare(
-      "SELECT username, allowance FROM holiday_allowance WHERE year = ?"
-    ).bind(year).all();
+    const { results } = await db.prepare(
+      "SELECT username, allowance FROM holiday_allowance WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
     const out = {};
     for (const r of results || []) if (Number.isFinite(Number(r.allowance))) out[r.username] = Number(r.allowance);
     return out;
   }
 
   async function getActiveUsers() {
-    const { results } = await env.DB.prepare(
-      "SELECT username FROM users WHERE status = 'Active'"
-    ).all();
+    const { results } = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND status = 'Active'"
+    ).bind(db.tenantId).all();
     return (results || []).map(r => r.username).filter(Boolean);
   }
 
   async function logAction(requestId, action, by) {
-    await env.DB.prepare(
-      "INSERT INTO holiday_log (request_id, action, by_user, at) VALUES (?,?,?,?)"
-    ).bind(requestId, action, by, new Date().toISOString()).run();
+    await db.prepare(
+      "INSERT INTO holiday_log (tenant_id, request_id, action, by_user, at) VALUES (?,?,?,?,?)"
+    ).bind(db.tenantId, requestId, action, by, new Date().toISOString()).run();
   }
 
   // Idempotently create per-user bank-holiday / shutdown rows (preserves worked
@@ -98,41 +103,41 @@ export async function handle(request, env, ctx, url) {
     if (!usernames.length) return;
     const [bank, shut] = await Promise.all([getBankHolidays(), getShutdownDays()]);
     if (!bank.length && !shut.length) return;
-    const { results } = await env.DB.prepare(
-      "SELECT kind, date, username FROM holiday_system_days WHERE year = ?"
-    ).bind(year).all();
+    const { results } = await db.prepare(
+      "SELECT kind, date, username FROM holiday_system_days WHERE tenant_id = ? AND year = ?"
+    ).bind(db.tenantId, year).all();
     const have = new Set((results || []).map(r => `${r.kind}|${r.date}|${r.username}`));
     const now = new Date().toISOString();
     const stmts = [];
-    const ins = env.DB.prepare(`
-      INSERT INTO holiday_system_days (kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
+    const ins = db.prepare(`
+      INSERT INTO holiday_system_days (tenant_id, kind, year, date, username, id, engineer, label, days, category, worked, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, 'Deducted', ?)
       ON CONFLICT(kind, year, date, username) DO NOTHING
     `);
     for (const u of usernames) {
       for (const b of bank) {
         if (!b?.date || have.has(`bankholiday|${b.date}|${u}`)) continue;
-        stmts.push(ins.bind("bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
+        stmts.push(ins.bind(db.tenantId, "bankholiday", year, b.date, u, `BH-${year}-${b.date}-${u}`, u, b.label || "Bank Holiday", "BankHoliday", now));
       }
       for (const s of shut) {
         if (!s?.date || have.has(`shutdown|${s.date}|${u}`)) continue;
-        stmts.push(ins.bind("shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
+        stmts.push(ins.bind(db.tenantId, "shutdown", year, s.date, u, `SD-${year}-${s.date}-${u}`, u, s.label || "Company Shutdown", "Shutdown", now));
       }
     }
-    if (stmts.length) await env.DB.batch(stmts);
+    if (stmts.length) await db.batch(stmts);
   }
   async function ensureSystemDaysForUser(username) { return ensureSystemDaysBulk([username]); }
 
   async function listHolidayRequestsForYear() {
-    const { results } = await env.DB.prepare("SELECT * FROM holidays WHERE year = ?").bind(year).all();
+    const { results } = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
     return (results || []).map(reqOut);
   }
   async function getHolidayById(id) {
-    const row = await env.DB.prepare("SELECT * FROM holidays WHERE id = ?").bind(id).first();
+    const row = await db.prepare("SELECT * FROM holidays WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).first();
     return row ? reqOut(row) : null;
   }
   async function listSystemRecordsForYear() {
-    const { results } = await env.DB.prepare("SELECT * FROM holiday_system_days WHERE year = ?").bind(year).all();
+    const { results } = await db.prepare("SELECT * FROM holiday_system_days WHERE tenant_id = ? AND year = ?").bind(db.tenantId, year).all();
     return (results || []).map(sysOut);
   }
 
@@ -149,10 +154,10 @@ export async function handle(request, env, ctx, url) {
     if (!note) return text("Notes (reminder) required", 400);
     const days = countWeekdaysInclusive(start, end);
     if (days <= 0) return text("No weekdays in range", 400);
-    await env.DB.prepare(`
-      INSERT INTO holidays (id, engineer, username, year, start_date, end_date, days, type, notes, status, submitted_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'Pending',?)
-    `).bind(id, user.replace(".", " "), user, year, start, end, days, body.type || null, note, new Date().toISOString()).run();
+    await db.prepare(`
+      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, type, notes, status, submitted_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'Pending',?)
+    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, body.type || null, note, new Date().toISOString()).run();
     await logAction(id, "Submitted", user);
     return json({ success: true, id });
   }
@@ -169,9 +174,9 @@ export async function handle(request, env, ctx, url) {
     if (!["Pending", "Approved"].includes(record.status))
       return text("Only pending or approved requests can be cancelled", 409);
     const wasApproved = record.status === "Approved";
-    await env.DB.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE id=?"
-    ).bind(user, new Date().toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, id).run();
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, new Date().toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
     await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
     return json({ success: true, wasApproved });
   }
@@ -186,7 +191,7 @@ export async function handle(request, env, ctx, url) {
     if (!["Cancelled", "Rejected"].includes(record.status)) {
       return text("Can only delete cancelled or rejected requests", 409);
     }
-    await env.DB.prepare("DELETE FROM holidays WHERE id=?").bind(id).run();
+    await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
     await logAction(id, "Deleted by engineer", user);
     return json({ success: true });
   }
@@ -199,9 +204,9 @@ export async function handle(request, env, ctx, url) {
     const record = await getHolidayById(id);
     if (!record) return text("Not found", 404);
     if (record.status !== "Approved") return text("Only approved holidays can be cancelled here", 409);
-    await env.DB.prepare(
-      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE id=?"
-    ).bind(user, new Date().toISOString(), "Cancelled by admin after approval", id).run();
+    await db.prepare(
+      "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
+    ).bind(user, new Date().toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
     await logAction(id, "Approval cancelled by admin", user);
     return json({ success: true });
   }
@@ -265,9 +270,9 @@ export async function handle(request, env, ctx, url) {
     if (!record) return text("Not found", 404);
     const status = path.endsWith("approve") ? "Approved" : "Rejected";
     const newType = ["Holiday", "Unpaid", "Other"].includes(body.type) ? body.type : null;
-    await env.DB.prepare(
-      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE id=?"
-    ).bind(status, user, new Date().toISOString(), newType, id).run();
+    await db.prepare(
+      "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
+    ).bind(status, user, new Date().toISOString(), newType, db.tenantId, id).run();
     await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
     return json({ success: true });
   }
@@ -301,9 +306,9 @@ export async function handle(request, env, ctx, url) {
     const username = body.username;
     const allowance = Number(body.allowance);
     if (!username || !Number.isFinite(allowance)) return text("Bad payload", 400);
-    await env.DB.prepare(
-      "INSERT INTO holiday_allowance (year, username, allowance) VALUES (?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
-    ).bind(year, username, allowance).run();
+    await db.prepare(
+      "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
+    ).bind(db.tenantId, year, username, allowance).run();
     return json({ success: true });
   }
 
@@ -316,7 +321,7 @@ export async function handle(request, env, ctx, url) {
     const oldDays = await getBankHolidays();
     const newDates = new Set(days.map(d => d.date));
     const removed = oldDays.filter(b => !newDates.has(b.date)).map(b => b.date);
-    if (removed.length) await deleteSystemDays(env, "bankholiday", year, removed);
+    if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
     await cfgPut(`holiday:bankholidays:${year}`, days);
     return json({ success: true });
   }
@@ -330,7 +335,7 @@ export async function handle(request, env, ctx, url) {
     const oldDays = await getShutdownDays();
     const newDates = new Set(days.map(d => d.date));
     const removed = oldDays.filter(s => !newDates.has(s.date)).map(s => s.date);
-    if (removed.length) await deleteSystemDays(env, "shutdown", year, removed);
+    if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
     await cfgPut(`holiday:shutdown:${year}`, days);
     return json({ success: true });
   }
@@ -342,13 +347,13 @@ export async function handle(request, env, ctx, url) {
     const kind = body.kind, username = body.username, date = body.date, worked = !!body.worked;
     if (!["bankholiday", "shutdown"].includes(kind) || !username || !date) return text("Bad payload", 400);
     await ensureSystemDaysForUser(username);
-    const row = await env.DB.prepare(
-      "SELECT id FROM holiday_system_days WHERE kind=? AND year=? AND date=? AND username=?"
-    ).bind(kind, year, date, username).first();
+    const row = await db.prepare(
+      "SELECT id FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(db.tenantId, kind, year, date, username).first();
     if (!row) return text("Not found", 404);
-    await env.DB.prepare(
-      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE kind=? AND year=? AND date=? AND username=?"
-    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, new Date().toISOString(), kind, year, date, username).run();
+    await db.prepare(
+      "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
+    ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, new Date().toISOString(), db.tenantId, kind, year, date, username).run();
     await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
     return json({ success: true });
   }
@@ -480,11 +485,12 @@ function sysOut(r) {
   };
 }
 
-async function deleteSystemDays(env, kind, year, dates) {
+async function deleteSystemDays(env, tenantId, kind, year, dates) {
+  const db = tenantDB(env, tenantId);
   const placeholders = dates.map(() => "?").join(",");
-  await env.DB.prepare(
-    `DELETE FROM holiday_system_days WHERE kind=? AND year=? AND date IN (${placeholders})`
-  ).bind(kind, year, ...dates).run();
+  await db.prepare(
+    `DELETE FROM holiday_system_days WHERE tenant_id=? AND kind=? AND year=? AND date IN (${placeholders})`
+  ).bind(db.tenantId, kind, year, ...dates).run();
 }
 
 /* ================= PURE HELPERS (unchanged from original) ================= */

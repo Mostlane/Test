@@ -65,7 +65,13 @@ export function generateTempPassword() {
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
-export async function createSession(env, username, deviceId) {
+// A session is bound to the tenant its user belongs to. That tenant travels
+// with every request (requireSession returns it) and is the ONLY source of
+// truth for isolation — it is never read from a request body or query string.
+export async function createSession(env, username, deviceId, tenantId) {
+  if (tenantId === undefined || tenantId === null) {
+    throw new Error("createSession: tenantId is required");
+  }
   const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
   // 90 days by default — a logged-in device stays valid without re-login.
   // Admin password resets still kill sessions immediately (users.js deletes
@@ -73,12 +79,14 @@ export async function createSession(env, username, deviceId) {
   const ttlH = Number(env.SESSION_TTL_HOURS || 2160);
   const expires = new Date(Date.now() + ttlH * 3600 * 1000).toISOString();
   await env.DB.prepare(
-    "INSERT INTO sessions (token, username, device_id, expires_at) VALUES (?,?,?,?)"
-  ).bind(token, username, deviceId || null, expires).run();
+    "INSERT INTO sessions (token, username, device_id, tenant_id, expires_at) VALUES (?,?,?,?,?)"
+  ).bind(token, username, deviceId || null, tenantId, expires).run();
   return { token, expires };
 }
 
-// Returns the session row + user, or null. Use to guard protected routes.
+// Returns { session, user, tenantId }, or null. Use to guard protected routes.
+// The token is a global secret (the sessions PK), so it's looked up directly;
+// the tenant then comes from the matched session row.
 export async function requireSession(env, request) {
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -87,10 +95,10 @@ export async function requireSession(env, request) {
     "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')"
   ).bind(token).first();
   if (!row) return null;
-  const user = await env.DB.prepare("SELECT * FROM users WHERE username = ?")
-    .bind(row.username).first();
+  const user = await env.DB.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?")
+    .bind(row.tenant_id, row.username).first();
   if (!user) return null;
-  return { session: row, user };
+  return { session: row, user, tenantId: row.tenant_id };
 }
 
 export async function destroySession(env, token) {
@@ -98,10 +106,12 @@ export async function destroySession(env, token) {
 }
 
 // Compose the flat permission object the existing front-end expects from /user.
-export async function permissionsFor(env, username) {
+// Scoped to the tenant so a username can only ever resolve permissions within
+// its own company.
+export async function permissionsFor(env, tenantId, username) {
   const { results } = await env.DB.prepare(
-    "SELECT permission, value FROM user_permissions WHERE username = ?"
-  ).bind(username).all();
+    "SELECT permission, value FROM user_permissions WHERE tenant_id = ? AND username = ?"
+  ).bind(tenantId, username).all();
   const perms = {};
   for (const r of results || []) perms[r.permission] = r.value ? "Yes" : "No";
   return perms;

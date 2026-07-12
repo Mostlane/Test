@@ -10,6 +10,7 @@
 
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor, hashPassword, validatePassword, generateTempPassword } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { sendEmail, welcomeEmail, issuePasswordToken, appBase } from "../lib/email.js";
 
 // How long a new user's "set your password" welcome link stays valid.
@@ -19,14 +20,16 @@ const WELCOME_TOKEN_HOURS = 72;
 async function requireAdmin(env, request) {
   const sess = await requireSession(env, request);
   if (!sess) return { err: error("Not authenticated", 401, env, request) };
-  const perms = await permissionsFor(env, sess.user.username);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   if (perms.FullAccess !== "Yes" && perms.Users !== "Yes")
     return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
 
   // POST /onboard — PUBLIC self-registration (the login page "Sign up" form).
   // Files the new starter as a Pending account for an admin to review; no
@@ -45,17 +48,17 @@ export async function handle(request, env, ctx, url) {
 
     // If someone with this email already exists, don't create a duplicate — and
     // don't reveal that it exists. Respond success without touching the account.
-    const existingEmail = await env.DB.prepare(
-      "SELECT username FROM users WHERE email IS NOT NULL AND lower(email)=lower(?)"
-    ).bind(email).first();
+    const existingEmail = await db.prepare(
+      "SELECT username FROM users WHERE tenant_id = ? AND email IS NOT NULL AND lower(email)=lower(?)"
+    ).bind(db.tenantId, email).first();
     if (existingEmail) return json({ ok: true, pending: true }, {}, env, request);
 
     // Pick a free username: first.last, then first.last2, first.last3, …
     const base = `${firstName}.${lastName}`.replace(/\s+/g, "").toLowerCase()
       .replace(/[^a-z0-9._-]/g, "") || "user";
     let username = base;
-    for (let n = 2; await env.DB.prepare("SELECT username FROM users WHERE username=?")
-        .bind(username).first(); n++) {
+    for (let n = 2; await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?")
+        .bind(db.tenantId, username).first(); n++) {
       username = base + n;
     }
 
@@ -71,10 +74,10 @@ export async function handle(request, env, ctx, url) {
       },
     };
 
-    await env.DB.prepare(`
-      INSERT INTO users (first_name, last_name, username, email, status, profile)
-      VALUES (?,?,?,?, 'Pending', ?)
-    `).bind(firstName, lastName, username, email, JSON.stringify(profile)).run();
+    await db.prepare(`
+      INSERT INTO users (first_name, last_name, username, email, status, profile, tenant_id)
+      VALUES (?,?,?,?, 'Pending', ?, ?)
+    `).bind(firstName, lastName, username, email, JSON.stringify(profile), db.tenantId).run();
 
     return json({ ok: true, pending: true, username }, {}, env, request);
   }
@@ -84,7 +87,7 @@ export async function handle(request, env, ctx, url) {
   if (path === "/po-config" && request.method === "GET") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
     if (perms.PurchaseOrders !== "Yes" && perms.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
     let profile = {};
@@ -98,7 +101,7 @@ export async function handle(request, env, ctx, url) {
   if (path === "/hs-plan-config" && request.method === "GET") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
     if (perms.HSPlan !== "Yes" && perms.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
     return json({
@@ -112,10 +115,10 @@ export async function handle(request, env, ctx, url) {
   if (path === "/user" && request.method === "GET") {
     const username = url.searchParams.get("u");
     if (!username) return error("Missing ?u=", 400, env, request);
-    const user = await env.DB.prepare("SELECT * FROM users WHERE username = ?")
-      .bind(username).first();
+    const user = await db.prepare("SELECT * FROM users WHERE tenant_id = ? AND username = ?")
+      .bind(db.tenantId, username).first();
     if (!user) return json({ found: false }, {}, env, request);
-    const perms = await permissionsFor(env, username);
+    const perms = await permissionsFor(env, tenantId, username);
     return json({ found: true, user: shapeUser(user, perms) }, {}, env, request);
   }
 
@@ -127,8 +130,8 @@ export async function handle(request, env, ctx, url) {
     // permission rows, then group the permissions in memory. The old N+1
     // pattern made this endpoint — and every page that loads it — ~3s slow.
     const [{ results }, { results: permRows }] = await Promise.all([
-      env.DB.prepare("SELECT * FROM users ORDER BY username").all(),
-      env.DB.prepare("SELECT username, permission, value FROM user_permissions").all()
+      db.prepare("SELECT * FROM users WHERE tenant_id = ? ORDER BY username").bind(db.tenantId).all(),
+      db.prepare("SELECT username, permission, value FROM user_permissions WHERE tenant_id = ?").bind(db.tenantId).all()
     ]);
     const permMap = {};
     for (const r of permRows || []) (permMap[r.username] || (permMap[r.username] = {}))[r.permission] = r.value ? "Yes" : "No";
@@ -148,14 +151,14 @@ export async function handle(request, env, ctx, url) {
     const list = Array.isArray(b.order) ? b.order : [];
     for (const item of list) {
       if (!item || !item.Username) continue;
-      const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(item.Username).first();
+      const row = await db.prepare("SELECT profile FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, item.Username).first();
       if (!row) continue;
       let profile = {};
       try { profile = row.profile ? JSON.parse(row.profile) : {}; } catch { profile = {}; }
       profile.staffType = item.StaffType === "office" ? "office" : "field";
       profile.sortOrder = Number.isFinite(+item.SortOrder) ? +item.SortOrder : 9999;
-      await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?")
-        .bind(JSON.stringify(profile), item.Username).run();
+      await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id = ? AND username=?")
+        .bind(JSON.stringify(profile), db.tenantId, item.Username).run();
     }
     return json({ ok: true, count: list.length }, {}, env, request);
   }
@@ -169,15 +172,15 @@ export async function handle(request, env, ctx, url) {
     if (!b.Username) return error("Username required", 400, env, request);
 
     // Is this a brand-new account (vs. an edit)? Decides whether to send a welcome email.
-    const already = await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(b.Username).first();
+    const already = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.Username).first();
     const isNewUser = !already;
 
     const profileJson = b.Profile && typeof b.Profile === "object" ? JSON.stringify(b.Profile) : null;
 
-    await env.DB.prepare(`
+    await db.prepare(`
       INSERT INTO users (engineer_number, first_name, last_name, username, email,
-                         vehicle_assigned, employment_type, status, sharepoint_path, profile)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+                         vehicle_assigned, employment_type, status, sharepoint_path, profile, tenant_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(username) DO UPDATE SET
         engineer_number=excluded.engineer_number, first_name=excluded.first_name,
         last_name=excluded.last_name, email=excluded.email,
@@ -188,7 +191,7 @@ export async function handle(request, env, ctx, url) {
     `).bind(
       b.EngineerNumber || null, b.FirstName || null, b.LastName || null,
       b.Username, b.Email || null, b.VehicleAssigned || null,
-      b.EmploymentType || null, b.Status || "Active", b.SharePointPath || null, profileJson
+      b.EmploymentType || null, b.Status || "Active", b.SharePointPath || null, profileJson, db.tenantId
     ).run();
 
     if (b.Password) {
@@ -197,18 +200,18 @@ export async function handle(request, env, ctx, url) {
       const hash = await hashPassword(b.Password);
       // Force a change on first login unless the admin explicitly opts out.
       const force = b.ForceChange === false ? 0 : 1;
-      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE username=?")
-        .bind(hash, force, b.Username).run();
+      await db.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=? WHERE tenant_id = ? AND username=?")
+        .bind(hash, force, db.tenantId, b.Username).run();
     }
 
     // Upsert permission flags supplied in the body.
     for (const key of PERMISSION_KEYS) {
       if (key in b) {
         const val = String(b[key]).toLowerCase() === "yes" ? 1 : 0;
-        await env.DB.prepare(`
-          INSERT INTO user_permissions (username, permission, value) VALUES (?,?,?)
+        await db.prepare(`
+          INSERT INTO user_permissions (username, permission, value, tenant_id) VALUES (?,?,?,?)
           ON CONFLICT(username, permission) DO UPDATE SET value=excluded.value
-        `).bind(b.Username, key, val).run();
+        `).bind(b.Username, key, val, db.tenantId).run();
       }
     }
 
@@ -216,7 +219,7 @@ export async function handle(request, env, ctx, url) {
     // onboarding needs no manual credential hand-off.
     let welcomeEmailed = false;
     if (isNewUser && b.Email) {
-      const token = await issuePasswordToken(env, b.Username, WELCOME_TOKEN_HOURS);
+      const token = await issuePasswordToken(env, tenantId, b.Username, WELCOME_TOKEN_HOURS);
       const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
       const msg = welcomeEmail({
         name: b.FirstName || b.Username,
@@ -238,7 +241,7 @@ export async function handle(request, env, ctx, url) {
     if (gate.err) return gate.err;
     const b = await request.json().catch(() => ({}));
     if (!b.username) return error("username required", 400, env, request);
-    const exists = await env.DB.prepare("SELECT username FROM users WHERE username=?").bind(b.username).first();
+    const exists = await db.prepare("SELECT username FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).first();
     if (!exists) return error("User not found", 404, env, request);
 
     const tempProvided = !!b.newPassword;
@@ -247,11 +250,11 @@ export async function handle(request, env, ctx, url) {
     if (bad) return error(bad, 400, env, request);
 
     const hash = await hashPassword(newPassword);
-    await env.DB.prepare(
-      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE username=?"
-    ).bind(hash, b.username).run();
+    await db.prepare(
+      "UPDATE users SET password_hash=?, password_algo='pbkdf2', must_change_password=1, updated_at=datetime('now') WHERE tenant_id = ? AND username=?"
+    ).bind(hash, db.tenantId, b.username).run();
     // Invalidate any existing sessions for that user.
-    await env.DB.prepare("DELETE FROM sessions WHERE username=?").bind(b.username).run();
+    await db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username).run();
 
     // Return the temp password so the admin can relay it (only if we generated it).
     return json({ ok: true, tempPassword: tempProvided ? undefined : newPassword }, {}, env, request);
@@ -263,12 +266,12 @@ export async function handle(request, env, ctx, url) {
     if (gate.err) return gate.err;
     const b = await request.json().catch(() => ({}));
     if (!b.username) return error("username required", 400, env, request);
-    const user = await env.DB.prepare("SELECT username, first_name, email FROM users WHERE username=?")
-      .bind(b.username).first();
+    const user = await db.prepare("SELECT username, first_name, email FROM users WHERE tenant_id = ? AND username=?")
+      .bind(db.tenantId, b.username).first();
     if (!user) return error("User not found", 404, env, request);
     if (!user.email) return error("That user has no email address on file.", 400, env, request);
 
-    const token = await issuePasswordToken(env, user.username, WELCOME_TOKEN_HOURS);
+    const token = await issuePasswordToken(env, tenantId, user.username, WELCOME_TOKEN_HOURS);
     const setUrl = `${appBase(env)}/reset-password.html?token=${token}`;
     const msg = welcomeEmail({
       name: user.first_name || user.username,
@@ -289,11 +292,11 @@ export async function handle(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     if (!b.username) return error("username required", 400, env, request);
     if (b.username === gate.sess.user.username) return error("You cannot delete your own account.", 400, env, request);
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM users WHERE username=?").bind(b.username),
-      env.DB.prepare("DELETE FROM user_permissions WHERE username=?").bind(b.username),
-      env.DB.prepare("DELETE FROM sessions WHERE username=?").bind(b.username),
-      env.DB.prepare("DELETE FROM devices WHERE username=?").bind(b.username),
+    await db.batch([
+      db.prepare("DELETE FROM users WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM user_permissions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM sessions WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
+      db.prepare("DELETE FROM devices WHERE tenant_id = ? AND username=?").bind(db.tenantId, b.username),
     ]);
     return json({ ok: true }, {}, env, request);
   }

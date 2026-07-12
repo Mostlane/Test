@@ -104,7 +104,10 @@ export default {
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
 
     try {
-      const resp = await match[2](request, env, ctx, url);
+      // Handlers receive the verified session (with its tenantId) as the 5th
+      // argument. For public routes sess is null and the handler resolves the
+      // tenant from the request host via resolveTenantId().
+      const resp = await match[2](request, env, ctx, url, sess);
       auditAction(env, ctx, sess, request, url, resp.status, auditClone);
       return resp;
     } catch (err) {
@@ -151,9 +154,9 @@ function auditAction(env, ctx, sess, request, url, status, clone) {
       } catch { /* body unreadable — log without detail */ }
       const qs = url.search ? decodeURIComponent(url.search).slice(0, 120) : "";
       const res = await env.DB.prepare(
-        "INSERT INTO audit_log (username, method, path, detail, status, at) VALUES (?,?,?,?,?,?)"
-      ).bind(sess.user.username, m, p + qs, detail, status, new Date().toISOString()).run();
-      // Occasional pruning: keep 12 months.
+        "INSERT INTO audit_log (username, tenant_id, method, path, detail, status, at) VALUES (?,?,?,?,?,?,?)"
+      ).bind(sess.user.username, sess.tenantId, m, p + qs, detail, status, new Date().toISOString()).run();
+      // Occasional pruning: keep 12 months (all tenants; time-based, tenant-agnostic).
       const rowId = res.meta ? res.meta.last_row_id : 0;
       if (rowId && rowId % 500 === 0) {
         const cutoff = new Date(Date.now() - 365 * 86400000).toISOString();

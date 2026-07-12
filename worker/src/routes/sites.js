@@ -15,13 +15,16 @@
 //   POST /import-sites             -> one-time pull from the old worker into D1
 
 import { json, error } from "../lib/http.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
 const OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
 
   /* ── Sites (old API, ported) ─────────────────────────────────────────── */
 
@@ -29,9 +32,9 @@ export async function handle(request, env, ctx, url) {
     const cat = (q.get("category") || "all").toLowerCase();
     let rows;
     if (cat === "all") {
-      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites ORDER BY client, site_number").all());
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
     } else {
-      ({ results: rows } = await env.DB.prepare("SELECT data FROM sites WHERE client=? ORDER BY site_number").bind(cat).all());
+      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
     }
     return json((rows || []).map(r => JSON.parse(r.data)), {}, env, request);
   }
@@ -46,22 +49,22 @@ export async function handle(request, env, ctx, url) {
     // Renamed site number: drop the old row.
     const oldNum = q.get("oldSiteNumber");
     if (path === "/update-site" && oldNum && oldNum !== siteNumber) {
-      await env.DB.prepare("DELETE FROM sites WHERE client=? AND site_number=?").bind(client, oldNum).run();
+      await db.prepare("DELETE FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, oldNum).run();
     }
 
     // Projects get an auto job number if they don't have one.
     if (path === "/add-site" && client === "projects" && !site.jobNumber) {
-      site.jobNumber = await nextProjectNumber(env);
+      site.jobNumber = await nextProjectNumber(env, tenantId);
     }
 
-    await saveSite(env, site);
-    await ensureCustomer(env, client);
+    await saveSite(env, tenantId, site);
+    await ensureCustomer(env, tenantId, client);
     await pushSiteToSiteLog(env, site);
     return json({ success: true, site }, {}, env, request);
   }
 
   if (path === "/next-project-job-number" && method === "GET") {
-    return json({ next: await nextProjectNumber(env) }, {}, env, request);
+    return json({ next: await nextProjectNumber(env, tenantId) }, {}, env, request);
   }
 
   if (path === "/upload-image" && method === "POST") {
@@ -80,10 +83,10 @@ export async function handle(request, env, ctx, url) {
   /* ── Customers (new) ─────────────────────────────────────────────────── */
 
   if (path === "/customers" && method === "GET") {
-    const { results } = await env.DB.prepare(`
-      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.client = c.id) AS site_count
-      FROM customers c ORDER BY c.name COLLATE NOCASE
-    `).all();
+    const { results } = await db.prepare(`
+      SELECT c.*, (SELECT COUNT(*) FROM sites s WHERE s.tenant_id = ? AND s.client = c.id) AS site_count
+      FROM customers c WHERE c.tenant_id = ? ORDER BY c.name COLLATE NOCASE
+    `).bind(db.tenantId, db.tenantId).all();
     return json({ customers: results || [] }, {}, env, request);
   }
 
@@ -91,14 +94,14 @@ export async function handle(request, env, ctx, url) {
     const b = await request.json().catch(() => ({}));
     const id = slug(b.id || b.name);
     if (!id) return error("name required", 400, env, request);
-    await env.DB.prepare(`
-      INSERT INTO customers (id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,datetime('now'))
+    await db.prepare(`
+      INSERT INTO customers (tenant_id, id, name, contact_name, email, phone, invoice_email, billing_address, notes, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name, contact_name=excluded.contact_name, email=excluded.email,
         phone=excluded.phone, invoice_email=excluded.invoice_email,
         billing_address=excluded.billing_address, notes=excluded.notes, updated_at=datetime('now')
-    `).bind(id, b.name || id, b.contactName || null, b.email || null, b.phone || null,
+    `).bind(db.tenantId, id, b.name || id, b.contactName || null, b.email || null, b.phone || null,
             b.invoiceEmail || null, b.billingAddress || null, b.notes || null).run();
     return json({ ok: true, id }, {}, env, request);
   }
@@ -106,9 +109,9 @@ export async function handle(request, env, ctx, url) {
   if (path === "/customers/delete" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     if (!b.id) return error("id required", 400, env, request);
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM sites WHERE client=?").bind(b.id).first();
+    const n = await db.prepare("SELECT COUNT(*) AS n FROM sites WHERE tenant_id=? AND client=?").bind(db.tenantId, b.id).first();
     if (n && n.n > 0) return error(`Customer has ${n.n} site(s) — move or delete them first.`, 400, env, request);
-    await env.DB.prepare("DELETE FROM customers WHERE id=?").bind(b.id).run();
+    await db.prepare("DELETE FROM customers WHERE tenant_id=? AND id=?").bind(db.tenantId, b.id).run();
     return json({ ok: true }, {}, env, request);
   }
 
@@ -126,7 +129,7 @@ export async function handle(request, env, ctx, url) {
     const limit = Math.min(Number(b.limit) || 8, 10);  // stay under subrequest caps (up to 5 fetches/site)
     const size = b.size || "640x400";
 
-    const { results } = await env.DB.prepare("SELECT data FROM sites").all();
+    const { results } = await db.prepare("SELECT data FROM sites WHERE tenant_id=?").bind(db.tenantId).all();
     const all = (results || []).map(r => JSON.parse(r.data));
     const locOf = s => (s.lat != null && s.lon != null)
       ? `${s.lat},${s.lon}`
@@ -185,12 +188,12 @@ export async function handle(request, env, ctx, url) {
         site.imageURL = `${(env.R2_PUBLIC_BASE || "").replace(/\/$/, "")}/${r2key}`;
         site._svAt = now;
         delete site._noImagery;
-        await saveSite(env, site);
+        await saveSite(env, tenantId, site);
         updated++;
       } else {
         site._noImagery = true;   // both sources failed — don't retry every run
         site._svAt = now;
-        await saveSite(env, site);
+        await saveSite(env, tenantId, site);
         failed.push(String(site.siteNumber));
       }
     }
@@ -225,21 +228,21 @@ export async function handle(request, env, ctx, url) {
       if (!siteNumber) continue;
       if (imagesOnly) {
         if (!site.imageURL) continue;
-        const row = await env.DB.prepare("SELECT data FROM sites WHERE client=? AND site_number=?")
-          .bind(client, siteNumber).first();
+        const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+          .bind(db.tenantId, client, siteNumber).first();
         if (!row) continue;
         const cur = JSON.parse(row.data);
         cur.imageURL = site.imageURL;   // original hand-uploaded photo wins
-        await saveSite(env, cur);
+        await saveSite(env, tenantId, cur);
         imported++;
         continue;
       }
       site.client = client;
-      await saveSite(env, site);
+      await saveSite(env, tenantId, site);
       clients.add(client);
       imported++;
     }
-    for (const c of clients) await ensureCustomer(env, c);
+    for (const c of clients) await ensureCustomer(env, tenantId, c);
     return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
   }
 
@@ -248,24 +251,26 @@ export async function handle(request, env, ctx, url) {
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
-async function saveSite(env, site) {
-  await env.DB.prepare(`
-    INSERT INTO sites (client, site_number, site_name, postcode, active, job_number, data, updated_at)
-    VALUES (?,?,?,?,?,?,?,datetime('now'))
+async function saveSite(env, tenantId, site) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, job_number, data, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
     ON CONFLICT(client, site_number) DO UPDATE SET
       site_name=excluded.site_name, postcode=excluded.postcode, active=excluded.active,
       job_number=excluded.job_number, data=excluded.data, updated_at=datetime('now')
   `).bind(
-    site.client, String(site.siteNumber).trim(), site.siteName || null, site.postcode || null,
+    db.tenantId, site.client, String(site.siteNumber).trim(), site.siteName || null, site.postcode || null,
     site.active === false ? 0 : 1, site.jobNumber || null, JSON.stringify(site)
   ).run();
 }
 
-async function ensureCustomer(env, id) {
+async function ensureCustomer(env, tenantId, id) {
   if (!id) return;
-  await env.DB.prepare(
-    "INSERT INTO customers (id, name) VALUES (?,?) ON CONFLICT(id) DO NOTHING"
-  ).bind(id, prettify(id)).run();
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO customers (tenant_id, id, name) VALUES (?,?,?) ON CONFLICT(id) DO NOTHING"
+  ).bind(db.tenantId, id, prettify(id)).run();
 }
 
 // Keep SiteLog's geofences in step: any portal site with coordinates is pushed
@@ -289,10 +294,11 @@ async function pushSiteToSiteLog(env, site) {
   } catch (e) { /* sync is best-effort; the portal save must never fail on it */ }
 }
 
-async function nextProjectNumber(env) {
-  const { results } = await env.DB.prepare(
-    "SELECT job_number FROM sites WHERE client='projects' AND job_number IS NOT NULL"
-  ).all();
+async function nextProjectNumber(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT job_number FROM sites WHERE tenant_id=? AND client='projects' AND job_number IS NOT NULL"
+  ).bind(db.tenantId).all();
   let max = 0;
   for (const r of results || []) {
     const m = String(r.job_number).match(/(\d+)\s*$/);

@@ -16,14 +16,14 @@ import { requireSession, permissionsFor } from "../lib/auth.js";
 const SITELOG_API = "https://api.site-log.co.uk";
 const SCAN_URL = "https://site-log.co.uk/scan.html";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
 
   /* ── Launch: signed identity hand-off for the scanner ─────────────────── */
   if (path === "/sitelog-launch" && request.method === "GET") {
-    const sess = await requireSession(env, request);
+    if (!sess) sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
     if (perms.SiteLog !== "Yes" && perms.FullAccess !== "Yes")
       return error("Forbidden", 403, env, request);
 
@@ -43,9 +43,9 @@ export async function handle(request, env, ctx, url) {
   }
 
   /* ── Admin proxy ──────────────────────────────────────────────────────── */
-  const sess = await requireSession(env, request);
+  if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
-  const perms = await permissionsFor(env, sess.user.username);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   if (perms.FullAccess !== "Yes")
     return error("Forbidden — SiteLog admin data needs Full Access", 403, env, request);
   if (!env.SITELOG_ADMIN_SECRET)
