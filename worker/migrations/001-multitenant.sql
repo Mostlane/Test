@@ -35,6 +35,11 @@ INSERT OR IGNORE INTO tenants (id, slug, company_name, status)
 VALUES (1, 'mostlane', 'Mostlane', 'active');
 
 -- ── Add tenant_id to every data table (existing rows default to Tenant 1) ────
+-- NOTE: the live `mostlane` DB does NOT contain oncall_log, daily_logs or
+-- vehicle_checks (those features were never activated in D1), so their ALTERs
+-- are omitted here — SQLite has no "ALTER TABLE IF EXISTS" and a missing table
+-- aborts the batch. They remain in schema.sql for fresh installs; if those
+-- features are later activated live, create the tables (with tenant_id) then.
 ALTER TABLE users                    ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE user_permissions         ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE sessions                 ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
@@ -42,9 +47,6 @@ ALTER TABLE shifts                   ADD COLUMN tenant_id INTEGER NOT NULL DEFAU
 ALTER TABLE office_shifts            ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE customers                ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE sites                    ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE oncall_log               ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE daily_logs               ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE vehicle_checks           ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE password_resets          ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE devices                  ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE login_history            ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1;
