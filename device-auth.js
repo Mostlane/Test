@@ -60,6 +60,7 @@ function showRegisterPopup(username, callback) {
 
   if (!label) {
     alert("Device registration cancelled.");
+    clearLoginState();
     window.location.href = "login.html";
     return;
   }
@@ -75,13 +76,26 @@ function showRegisterPopup(username, callback) {
       callback();
     } else {
       alert("Unable to register device. Please contact the office.");
+      clearLoginState();
       window.location.href = "login.html";
     }
   });
 }
 
+// Clear the login markers when sending someone back to the login screen —
+// otherwise login.html's "already logged in" skip bounces them straight back
+// here in an endless loop. The device ID is kept.
+function clearLoginState() {
+  try {
+    ["mostlaneLoggedIn", "mostlaneExpiry", "mostlaneBypassUntil", "mostlaneToken"].forEach(k => localStorage.removeItem(k));
+    sessionStorage.removeItem("mostlaneLoggedIn");
+    sessionStorage.removeItem("mostlaneMasterLogin");
+  } catch (e) {}
+}
+
 function showBlock(message) {
   alert(message);
+  clearLoginState();
   window.location.href = "login.html";
 }
 
@@ -137,6 +151,7 @@ window.DeviceAuth = {
     if (isMasterSession()) return;
     const username = sessionStorage.getItem(USERNAME_SESSION_KEY);
     if (!username) {
+      clearLoginState();
       window.location.href = "login.html";
       return;
     }

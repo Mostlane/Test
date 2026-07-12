@@ -115,19 +115,25 @@
     }
 
     // Already logged in? (PWA relaunches and old bookmarks land here.)
-    // Skip the form and go straight in — the session is still valid.
-    (function () {
+    // IMPORTANT: verify the token with the SERVER before skipping the form.
+    // Trusting the phone's stored flags alone caused a login↔menu redirect
+    // loop when the server session had actually expired. If the server says
+    // the session is dead, the stale flags are cleared so nothing bounces.
+    (async function () {
       try {
-        var exp = Number(localStorage.getItem("mostlaneExpiry") || 0);
-        var byp = Number(localStorage.getItem("mostlaneBypassUntil") || 0);
-        var ok = localStorage.getItem("mostlaneToken")
-          && localStorage.getItem("mostlaneLoggedIn") === "true"
-          && (Date.now() < exp || Date.now() < byp);
-        if (!ok) return;
-        var perms = {};
-        try { perms = JSON.parse(localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
-        location.replace(perms.StoryMode === "Yes" ? "my-day.html" : "main.html");
-      } catch (e) {}
+        var token = localStorage.getItem("mostlaneToken");
+        if (!token || localStorage.getItem("mostlaneLoggedIn") !== "true") return;
+        var r = await fetch(window.MOSTLANE_API + "/auth/me", { headers: { "Authorization": "Bearer " + token } });
+        var d = await r.json().catch(function () { return {}; });
+        if (r.ok && d.ok) {
+          var story = (d.user && d.user.StoryMode === "Yes");
+          location.replace(story ? "my-day.html" : "main.html");
+        } else {
+          ["mostlaneLoggedIn", "mostlaneExpiry", "mostlaneBypassUntil", "mostlaneToken"].forEach(function (k) { localStorage.removeItem(k); });
+          sessionStorage.removeItem("mostlaneLoggedIn");
+          sessionStorage.removeItem("mostlaneMasterLogin");
+        }
+      } catch (e) { /* offline — just show the form */ }
     })();
 
     // Password eye: click to show (stays visible until clicked again).
