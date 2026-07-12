@@ -490,11 +490,13 @@ const MAP = {
   </script>
 
   <script>
-    // 🔴 Red badges on the menu tiles (mobile). Sidebar badges are handled
-    // centrally in portal-config.js from the same endpoints.
+    // 🔴 Red badges on the menu tiles + the attention gate. Sidebar badges are
+    // handled centrally in portal-config.js from the same endpoints.
     //   Plant & Equipment — transfers waiting for me
     //   Holiday           — unseen decisions on my requests
     //   Holiday Admin     — requests waiting for approval (admins)
+    // On phones anything outstanding blocks the menu until it's opened;
+    // on desktop the same list appears as a dismissible corner panel.
     (function () {
       var token = localStorage.getItem("mostlaneToken");
       if (!token) return;
@@ -510,11 +512,23 @@ const MAP = {
           "text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);";
         btn.appendChild(b);
       }
-      fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
+
+      var notes = [], jobs = [];
+
+      jobs.push(fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
         .then(function (r) { return r.json(); })
-        .then(function (d) { if (d && d.ok) dot("Assets", d.count); }).catch(function () {});
+        .then(function (d) {
+          if (!d || !d.ok) return;
+          dot("Assets", d.count);
+          if (d.count > 0) notes.push({
+            n: d.count, icon: "📦", href: "my-assets.html",
+            title: d.count > 1 ? d.count + " asset transfers waiting" : "An asset transfer is waiting",
+            text: "Accept & sign, or reject — items stay in limbo until you do."
+          });
+        }).catch(function () {}));
+
       var yr = new Date().getFullYear();
-      fetch(window.MOSTLANE_API + "/holiday/my?year=" + yr, H)
+      jobs.push(fetch(window.MOSTLANE_API + "/holiday/my?year=" + yr, H)
         .then(function (r) { return r.json(); })
         .then(function (list) {
           var seen = localStorage.getItem("mostlaneHolSeen") || "";
@@ -525,11 +539,17 @@ const MAP = {
               && String(h.cancelledBy || "").toLowerCase() !== meL;
           }).length;
           dot("Holiday", n);
-        }).catch(function () {});
+          if (n > 0) notes.push({
+            n: n, icon: "🌴", href: "holiday.html",
+            title: n > 1 ? n + " holiday decisions to see" : "A holiday request has been decided",
+            text: "Open Holiday to see the outcome of your request" + (n > 1 ? "s" : "") + "."
+          });
+        }).catch(function () {}));
+
       var perms = {};
       try { perms = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
       if (perms.FullAccess === "Yes" || perms.HolidayAdmin === "Yes") {
-        fetch(window.MOSTLANE_API + "/holiday/all?year=" + yr, H)
+        jobs.push(fetch(window.MOSTLANE_API + "/holiday/all?year=" + yr, H)
           .then(function (r) { return r.json(); })
           .then(function (list) {
             var arr = Array.isArray(list) ? list : [];
@@ -540,7 +560,73 @@ const MAP = {
                 && h.decisionAt && (!seenA || h.decisionAt > seenA);
             }).length;
             dot("HolidayAdmin", pending + cancels);
-          }).catch(function () {});
+            if (pending + cancels > 0) notes.push({
+              n: pending + cancels, icon: "🗓️", href: "holiday-admin.html",
+              title: "Holiday requests need a decision",
+              text: (pending ? pending + " waiting for approval" : "") +
+                    (pending && cancels ? ", " : "") +
+                    (cancels ? cancels + " cancelled by staff" : "") + "."
+            });
+          }).catch(function () {}));
+      }
+
+      var ORDER = { "my-assets.html": 1, "holiday-admin.html": 2, "holiday.html": 3 };
+      Promise.all(jobs).then(function () {
+        if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
+      });
+
+      function show(items) {
+        var mobile = window.matchMedia("(max-width:999px)").matches;
+        var sig = items.map(function (i) { return i.href + ":" + i.n; }).join("|");
+        // Desktop panel: once dismissed, stays away for the session unless
+        // the outstanding items change. The phone gate never skips.
+        if (!mobile && sessionStorage.getItem("mlNotifySeen") === sig) return;
+
+        var rows = items.map(function (i) {
+          return '<a class="mln-item" href="' + i.href + '">' +
+            '<span class="mln-ico">' + i.icon + '</span>' +
+            '<span class="mln-txt"><b>' + i.title + '</b><span>' + i.text + '</span></span>' +
+            '<span class="mln-go">›</span></a>';
+        }).join("");
+
+        var css = document.createElement("style");
+        css.textContent =
+          "#mlNotify{position:fixed;z-index:2200;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;}" +
+          "#mlNotify .mln-card{background:#fff;border-radius:18px;box-shadow:0 12px 40px rgba(3,12,28,.35);overflow:hidden;}" +
+          "#mlNotify .mln-head{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:16px 18px;}" +
+          "#mlNotify .mln-head h2{margin:0;font-size:17px;color:#fff;}" +
+          "#mlNotify .mln-head p{margin:4px 0 0;font-size:13px;color:#cfe0f5;}" +
+          "#mlNotify .mln-item{display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #eef1f5;text-decoration:none;color:#16202e;}" +
+          "#mlNotify .mln-item:active,#mlNotify .mln-item:hover{background:#f4f8ff;}" +
+          "#mlNotify .mln-ico{font-size:24px;flex:none;}" +
+          "#mlNotify .mln-txt{flex:1;min-width:0;} #mlNotify .mln-txt b{display:block;font-size:14.5px;color:#003366;} #mlNotify .mln-txt span{font-size:12.5px;color:#667085;}" +
+          "#mlNotify .mln-go{font-size:24px;color:#9fb2c8;flex:none;}" +
+          "#mlNotify .mln-x{position:absolute;top:10px;right:12px;background:none;border:none;color:#cfe0f5;font-size:22px;cursor:pointer;line-height:1;padding:4px;}" +
+          (mobile
+            ? "#mlNotify{inset:0;background:rgba(3,12,28,.78);display:flex;align-items:center;justify-content:center;padding:20px;}" +
+              "#mlNotify .mln-card{width:100%;max-width:420px;}" +
+              "#mlNotify .mln-foot{padding:12px 16px;border-top:1px solid #eef1f5;font-size:12px;color:#8a97a6;text-align:center;}"
+            : "#mlNotify{top:16px;right:16px;width:min(360px,calc(100vw - 32px));}" +
+              "#mlNotify .mln-card{position:relative;}");
+        document.head.appendChild(css);
+
+        var el = document.createElement("div");
+        el.id = "mlNotify";
+        el.innerHTML = '<div class="mln-card">' +
+          '<div class="mln-head">' + (mobile ? "" : '<button class="mln-x" title="Dismiss">×</button>') +
+          "<h2>🔔 Needs your attention</h2>" +
+          "<p>" + (mobile ? "Sort these before you carry on — tap one to open it." : "Outstanding items around the portal.") + "</p></div>" +
+          rows +
+          (mobile ? '<div class="mln-foot">The menu unlocks once these are dealt with.</div>' : "") +
+          "</div>";
+        document.body.appendChild(el);
+
+        if (!mobile) {
+          el.querySelector(".mln-x").addEventListener("click", function () {
+            try { sessionStorage.setItem("mlNotifySeen", sig); } catch (e) {}
+            el.remove();
+          });
+        }
       }
     })();
   </script>
