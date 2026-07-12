@@ -69,7 +69,7 @@
       <div style="position:relative;">
         <input type="password" id="password" placeholder="Password" required style="padding-right:44px;" />
         <button type="button" id="pwEye" aria-label="Show password"
-          style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; cursor:pointer; padding:4px; opacity:.65;">👁</button>
+          style="position:absolute; width:auto; margin:0; right:2px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; cursor:pointer; padding:4px 10px; opacity:.65; line-height:1;">👁</button>
       </div>
       <button type="submit">Sign in</button>
       <p id="error"></p>
@@ -113,6 +113,22 @@
         window.location.href = nextPage();
       }
     }
+
+    // Already logged in? (PWA relaunches and old bookmarks land here.)
+    // Skip the form and go straight in — the session is still valid.
+    (function () {
+      try {
+        var exp = Number(localStorage.getItem("mostlaneExpiry") || 0);
+        var byp = Number(localStorage.getItem("mostlaneBypassUntil") || 0);
+        var ok = localStorage.getItem("mostlaneToken")
+          && localStorage.getItem("mostlaneLoggedIn") === "true"
+          && (Date.now() < exp || Date.now() < byp);
+        if (!ok) return;
+        var perms = {};
+        try { perms = JSON.parse(localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+        location.replace(perms.StoryMode === "Yes" ? "my-day.html" : "main.html");
+      } catch (e) {}
+    })();
 
     // Password eye: click to show (stays visible until clicked again).
     document.getElementById('pwEye').addEventListener('click', function () {
