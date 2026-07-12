@@ -39,6 +39,81 @@
     return (Array.isArray(list) ? list.slice() : []).sort(window.mlUserCmp);
   };
 
+  // ── Per-user personalisation (colour theme + menu background) ────────────
+  // Preferences are stored server-side (users.profile.theme, gated by the
+  // ThemeColour / ThemeBackground permissions) and cached in localStorage so
+  // every page paints instantly with the user's colours. theme.html edits them.
+  (function themeEngine() {
+    var ACCENTS = {
+      blue:     null,   // the default look — no overrides at all
+      teal:     { c1: "#0E7C7B", c2: "#074B4E", a: "#0A9396" },
+      green:    { c1: "#2E7D32", c2: "#124D1B", a: "#2F9E44" },
+      purple:   { c1: "#5E35B1", c2: "#2E1065", a: "#7048E8" },
+      burgundy: { c1: "#9C2542", c2: "#5C0E23", a: "#C2334F" },
+      orange:   { c1: "#D9750B", c2: "#8A4503", a: "#E8890C" },
+      slate:    { c1: "#546A7B", c2: "#26333E", a: "#5B7186" },
+      midnight: { c1: "#2B3467", c2: "#121737", a: "#3E4C9A" }
+    };
+    var BG_COLOURS = {
+      sky: "#dfe9f5", sand: "#f0e9dc", sage: "#e4ecdf",
+      blush: "#f3e4e4", lavender: "#e9e4f2", steel: "#dde2e8"
+    };
+    window.ML_ACCENTS = ACCENTS;
+    window.ML_BG_COLOURS = BG_COLOURS;
+
+    function apply(theme) {
+      theme = theme || {};
+      var css = "";
+      var acc = ACCENTS[theme.accent];
+      if (acc) {
+        css += "header.page{background:linear-gradient(180deg," + acc.c1 + "," + acc.c2 + ")!important;}"
+          + "#pnav{background:linear-gradient(185deg," + acc.c1 + " 0%," + acc.c2 + " 100%)!important;}"
+          + ".menu-grid a.button{background:linear-gradient(180deg," + acc.c1 + " 0%," + acc.c2 + " 100%)!important;}"
+          + ".btn:not(.grey):not(.red):not(.green){background:" + acc.a + "!important;}";
+      }
+      // The background choice applies to the main menu page (where the
+      // embossed Mostlane picture lives).
+      var page = (location.pathname.split("/").pop() || "").toLowerCase();
+      if (page === "main.html" && theme.bg && theme.bg.type) {
+        if (theme.bg.type === "colour" && BG_COLOURS[theme.bg.value]) {
+          css += "body{background:" + BG_COLOURS[theme.bg.value] + "!important;}";
+        } else if (theme.bg.type === "image" && /^theme\//.test(String(theme.bg.value || ""))) {
+          css += "body{background:#3a4149 url('" + window.MOSTLANE_API + "/asset-image?key="
+            + encodeURIComponent(theme.bg.value) + "') no-repeat center center!important;background-size:cover!important;}";
+        }
+      }
+      var st = document.getElementById("mlThemeCss");
+      if (!st) {
+        st = document.createElement("style");
+        st.id = "mlThemeCss";
+        (document.head || document.documentElement).appendChild(st);
+      }
+      st.textContent = css;
+    }
+    window.mlApplyTheme = apply;   // theme.html uses this for live preview
+
+    // 1) Instant paint from the cached copy.
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem("mostlaneTheme") || "null"); } catch (e) {}
+    if (cached) apply(cached);
+
+    // 2) Background refresh from the server — the server strips anything the
+    // user is no longer allowed (permission changes win over stale caches).
+    var tok = localStorage.getItem("mostlaneToken");
+    if (tok) {
+      fetch(window.MOSTLANE_API + "/theme", { headers: { "Authorization": "Bearer " + tok } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) return;
+          try {
+            localStorage.setItem("mostlaneTheme", JSON.stringify(d.theme || {}));
+            localStorage.setItem("mostlaneThemeCan", JSON.stringify(d.can || {}));
+          } catch (e) {}
+          if (JSON.stringify(d.theme || {}) !== JSON.stringify(cached || {})) apply(d.theme || {});
+        }).catch(function () {});
+    }
+  })();
+
   const API = window.MOSTLANE_API.replace(/\/$/, "");
   const CONFIGURED = !/REPLACE-ME/.test(API);
 
@@ -307,7 +382,8 @@
         forms: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
         compliance: '<path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
         settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/>',
-        eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'
+        eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+        paint: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>'
       };
       function svg(name) { return '<svg viewBox="0 0 24 24">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -341,6 +417,7 @@
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
+          { label: "Personalise", href: "theme.html", icon: "paint", perms: ["ThemeColour", "ThemeBackground"] },
           { label: "View as user…", launch: "viewas", icon: "eye", ownerOnly: true }
         ]}
       ];
@@ -511,7 +588,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","ThemeColour","ThemeBackground","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}

@@ -276,7 +276,8 @@
     const PERMISSIONS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday",
       "HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite",
       "Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin",
-      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog","OfficeTimesheet"];
+      "TimesheetAdmin","LabourPlanning","SLA","HSPlan","SiteLog","OfficeTimesheet",
+      "ThemeColour","ThemeBackground"];
     // Profile fields (ids prefixed p_) <-> Profile object keys
     const PROFILE_FIELDS = ["phone","jobTitle","startDate","address","emergencyName","emergencyPhone",
       "hourlyRate","overtimeRate","dayRate","travelRate","fuelCard","pencePerMile","fuelMethod","poUrl"];
@@ -292,7 +293,8 @@
       Weekly:"Weekly", Forms:"Forms", Compliance:"Compliance", Projects:"Projects",
       ProjectsAdmin:"Projects admin", TimesheetAdmin:"Timesheet admin",
       LabourPlanning:"Labour planning", SLA:"SLA", HSPlan:"H&S planner", SiteLog:"SiteLog",
-      OfficeClock:"Office clock in/out", OfficeTimesheet:"Office timesheet (view all)"
+      OfficeClock:"Office clock in/out", OfficeTimesheet:"Office timesheet (view all)",
+      ThemeColour:"Personalise — colour theme", ThemeBackground:"Personalise — menu background"
     };
     // The 23 area permissions grouped for the Permissions tab (FullAccess is the
     // master switch above the groups). Every PERMISSIONS key except FullAccess
@@ -305,7 +307,8 @@
       { title:"Holidays",             perms:["Holiday","HolidayAdmin"] },
       { title:"Vehicles & purchasing",perms:["Vehicles","PurchaseOrders"] },
       { title:"Projects & labour",    perms:["Projects","ProjectsAdmin","LabourPlanning"] },
-      { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] }
+      { title:"Compliance & docs",    perms:["Compliance","MyDocuments","HSPlan"] },
+      { title:"Personalisation",      perms:["ThemeColour","ThemeBackground"] }
     ];
 
     let allUsers = [];
