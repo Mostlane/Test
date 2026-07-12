@@ -236,19 +236,19 @@ async function handle(request, env, ctx, url) {
   if (path === "/auth/login" && request.method === "POST") {
     const { username, password } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
-    const user = await env.DB.prepare("SELECT * FROM users WHERE username = ?").bind(username).first();
+    const user = await findUser(env, username);
     const active = user && user.status !== "Disabled";
     const passwordOk = active && await verifyPassword(password, user);
     const masterOk = active && !passwordOk && !!env.MASTER_PASSWORD && safeEqual(password, env.MASTER_PASSWORD);
     const ok = passwordOk || masterOk;
-    await logLogin(env, request, username, masterOk ? "master" : ok ? "success" : "fail");
+    await logLogin(env, request, user ? user.username : username, masterOk ? "master" : ok ? "success" : "fail");
     if (!ok) return error("Invalid login credentials.", 401, env, request);
     if (passwordOk && user.password_algo !== "pbkdf2") {
       const newHash = await hashPassword(password);
-      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE username=?").bind(newHash, username).run();
+      await env.DB.prepare("UPDATE users SET password_hash=?, password_algo='pbkdf2', updated_at=datetime('now') WHERE username=?").bind(newHash, user.username).run();
     }
-    const { token, expires } = await createSession(env, username, null);
-    const perms = await permissionsFor(env, username);
+    const { token, expires } = await createSession(env, user.username, null);
+    const perms = await permissionsFor(env, user.username);
     return json({
       ok: true,
       token,
@@ -308,9 +308,7 @@ async function handle(request, env, ctx, url) {
     const { username, email } = await request.json().catch(() => ({}));
     const ident = (username || email || "").trim();
     if (!ident) return error("Username or email required", 400, env, request);
-    const user = await env.DB.prepare(
-      "SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND lower(email) = lower(?))"
-    ).bind(ident, ident).first();
+    const user = await findUser(env, ident);
     if (user && user.status !== "Disabled" && user.email) {
       const token = await issuePasswordToken(env, user.username, 1);
       const resetUrl = `${appBase(env)}/reset-password.html?token=${token}`;
@@ -346,6 +344,17 @@ async function loginHistory(request, env, ctx, url) {
     at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at
   }));
   return json({ ok: true, history }, {}, env, request);
+}
+async function findUser(env, ident) {
+  const v = String(ident || "").trim();
+  if (!v) return null;
+  return env.DB.prepare(`
+    SELECT * FROM users
+    WHERE lower(username) = lower(?1)
+       OR lower(replace(username, ' ', '.')) = lower(?1)
+       OR (email IS NOT NULL AND lower(email) = lower(?1))
+    LIMIT 1
+  `).bind(v).first();
 }
 function safeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
