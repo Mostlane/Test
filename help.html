@@ -235,28 +235,59 @@
           ["Open <b>Device Management</b> and select the person.", "deviceadmin.png"],
           ["Remove their old device. At their next login on the new phone they'll be prompted to register it — done."],
         ]},
-        { icon: "💼", title: "Office clock & timesheet", perms: ["OfficeClock", "OfficeTimesheet"], steps: [
-          ["With <b>Office clock</b> enabled on your account and marked on for your office computer (Users → Devices tab), the clock in/out bar appears at the top of the main menu."],
-          ["Tap <b>Start</b> when you arrive and <b>Stop</b> when you leave — <b>My Hours</b> shows your week."],
-          ["<b>Office Timesheet</b> (permission needed) shows the whole team's weekly hours in one table."],
+        { icon: "🕐", title: "Clock in/out & My Hours", perms: ["OfficeClock"], steps: [
+          ["With <b>Office clock</b> enabled on your account and switched on for your office computer (Users → Devices tab), the clock in/out bar appears at the top of the main menu — tap it when you arrive and when you leave. Break for lunch and clock back in; the day adds the pieces up."],
+          ["<b>My Hours</b> (sidebar or menu) shows your week: each day's clock times and total, plus the week total at the top. Use <b>← Prev / Next →</b> to look at other weeks.", "myhours.png"],
+        ]},
+        { icon: "💼", title: "The office timesheet (admin)", perms: ["OfficeTimesheet"], steps: [
+          ["<b>Office Timesheet</b> shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
+          ["A <b>running</b> tag means they're still clocked in — that open session isn't counted until they clock out (or you close it)."],
+          ["<b>✏️ Edit</b> a person to correct clock times — the original automatic times are kept and shown struck through, so edits are always visible. Voided segments count as zero."],
+          ["<b>Download CSV</b> exports the week for payroll; <b>Print</b> makes a paper copy."],
         ]},
       ]},
 
       { title: "Jobs & sites", arts: [
-        { icon: "🚨", title: "SLA jobs", perms: ["SLA"], steps: [
-          ["Open <b>SLA</b> for the job board. Jobs carry the site's details, priority and response target."],
-          ["Engineers: your assigned jobs are under <b>My jobs</b>. Clock on when you start; complete the <b>risk assessment</b> when prompted — you can't complete a job without it."],
-          ["To finish: add your work note, photos and signature. Can't finish? Use <b>quote / order / hold</b> so the office knows why it's paused — everything stays on the job's history."],
+        { icon: "🚨", title: "The SLA menu", perms: ["SLA"], steps: [
+          ["Tap <b>SLA</b> on the portal menu. You get four areas:", "slamenu.png"],
+          ["<b>Dashboard</b> — the live job board and tracker (see the next guide)."],
+          ["<b>Scheduler</b> — plan which engineer takes which job on which day."],
+          ["<b>Jobs</b> — create and manage jobs directly."],
+          ["<b>Settings</b> — SLA targets and system options (admin)."],
         ]},
-        { icon: "📍", title: "Sites & customers", perms: ["Sites", "AddSite"], steps: [
-          ["<b>Manage Sites</b> holds every site with photos, addresses and contacts; <b>Customers</b> groups them by client."],
-          ["To add a site: tap <b>Add site</b>, fill in the address and customer, save. The site's photo is fetched automatically if you don't upload one."],
-          ["Saved sites are pushed to <b>SiteLog</b> automatically as check-in locations — no separate setup."],
+        { icon: "📋", title: "The SLA job board", perms: ["SLA"], steps: [
+          ["The board opens with live counters — <b>Open Jobs, Due Today, Overdue, SLA at Risk</b> — then the tracker below.", "slaboard.png"],
+          ["Filter with the <b>P1–P4 priority chips</b>, the <b>status</b> dropdown, or the search box (ref, site or description)."],
+          ["Each job card shows the helpdesk ref, priority badge, site, who's assigned, when it was raised and a <b>live countdown to its SLA target</b>."],
+          ["<b>+ Create Job</b> raises a new job; the buttons on a card open the job, its engineer and its paperwork. <b>£ Financials</b> and <b>📊 SLA Performance</b> give office-side reporting; <b>Day Sessions</b> shows engineers' clocked job time."],
+          ["Engineers: open your job, clock on when you start, complete the <b>risk assessment</b> when prompted (you can't complete without it), then finish with a note, photos and signature — or use <b>quote / order / hold</b> if it can't be completed, so the office knows why."],
+        ]},
+        { icon: "📍", title: "Site Manager", perms: ["Sites", "AddSite"], steps: [
+          ["<b>Manage Sites</b> lists every site. Use the <b>Active / Inactive</b> chips, the type dropdown, or search by name, number, postcode or phone.", "sites.png"],
+          ["<b>Add Site</b> creates one — fill in the address, postcode and customer. A photo of the site is fetched automatically if you don't upload one."],
+          ["<b>Edit</b> changes a site's details; <b>View</b> opens its full record; the <b>Active</b> tick takes dead sites out of everyday lists without deleting their history."],
+          ["Saved sites are pushed to <b>SiteLog automatically</b> as check-in locations — no separate setup. <b>Recalculate All</b> refreshes the distance/round-trip figures shown on each site."],
+        ]},
+        { icon: "🏢", title: "Customers", perms: ["Sites", "AddSite"], steps: [
+          ["<b>Customers</b> groups your sites by client and holds their contact and invoicing details.", "customers.png"],
+          ["<b>+ Add customer</b>: name, contact, phone, invoice email and billing address — these feed quoting and invoicing."],
+          ["The <b>Sites</b> count shows how many sites each customer owns; tap through to see them."],
+          ["<b>Set site images from Google Street View</b> fills in photos for any sites that don't have one (it never overwrites photos you've uploaded by hand)."],
+        ]},
+        { icon: "🚐", title: "Vehicles", perms: ["Vehicles"], steps: [
+          ["<b>Vehicles</b> shows the whole fleet — who drives what, with live MOT, tax and service dates.", "vehicles.png"],
+          ["Green date badges are fine; the countdown shows days remaining. <b>Service</b> and <b>issues</b> flags show what needs booking in."],
+          ["<b>Edit</b> updates a vehicle's details (driver, dates, notes); <b>Details →</b> opens its full record. Search by reg, driver or model."],
         ]},
         { icon: "🛰️", title: "Check in to a site (SiteLog)", perms: ["SiteLog"], steps: [
           ["Open <b>SiteLog</b> from the menu and tap <b>Scan in / out of site</b> when you arrive or leave.", "sitelog.png"],
           ["The first time, your phone links itself to your name automatically — no separate login."],
           ["The office can see who's on which site — used for fire roll-call and lone-working checks, so scan every time."],
+        ]},
+        { icon: "📁", title: "Projects", perms: ["Projects", "ProjectsAdmin"], steps: [
+          ["<b>Projects</b> holds the drawings, documents and files for each job you're working on.", "projects.png"],
+          ["Tap a project to open its file list, then tap a file to view or download it on site."],
+          ["<b>Projects Admin</b> (separate permission) is where the office creates projects and uploads or replaces the files."],
         ]},
         { icon: "🧾", title: "Raise a purchase order", perms: ["PurchaseOrders"], steps: [
           ["Tap <b>PO System</b> on the menu — it opens on your personal link, so your orders are already under your name."],
@@ -264,12 +295,24 @@
           ["Use the <b>🏠 button</b> inside the PO system to come back to the portal."],
         ]},
         { icon: "🦺", title: "H&S plans", perms: ["HSPlan"], steps: [
-          ["Tap <b>H&amp;S Plans</b> on the menu — it signs you straight into the planner."],
-          ["Pick the site and job to view or complete the health &amp; safety plan before starting work."],
+          ["Tap <b>H&amp;S Plans</b> on the menu — it signs you straight into the planner.", "hsplan.png"],
+          ["Work down the numbered sections (project details, hazards, controls…) — the finished document builds itself as you type, and your answers save automatically."],
+          ["<b>Save to cloud</b> stores the plan so the office can see it; <b>Save / Print PDF</b> makes the copy for site. <b>← Library</b> lists your saved plans."],
+        ]},
+        { icon: "📝", title: "Forms", perms: ["Forms"], steps: [
+          ["<b>Forms</b> is the launcher for the paperwork forms — van checks, van handover, tools and compliance.", "forms.png"],
+          ["Pick the form, fill it in and submit — the office receives it automatically."],
+        ]},
+        { icon: "✔️", title: "Compliance", perms: ["Compliance"], steps: [
+          ["<b>Compliance</b> holds the client-specific compliance paperwork, grouped by client.", "compliance.png"],
+          ["Pick the client, then follow the form for the work you're doing. Use <b>Other</b> for anything that doesn't fit a listed client."],
         ]},
         { icon: "⚡", title: "My Day (guided mode)", perms: ["StoryMode"], steps: [
-          ["Your day runs from the <b>My Day</b> screen: start your day (vehicle check on Wednesdays, mileage), then take jobs one at a time — travel, risk assessment, then complete with a note, photo and signature."],
-          ["End your day from the same screen to log your finish. The ⚡ button floating on other pages always brings you back to My Day."],
+          ["Your whole day runs from <b>My Day</b> — three tabs across the top: <b>1 · Start</b>, <b>2 · Jobs</b>, <b>3 · Finish</b>.", "myday.png"],
+          ["<b>Start:</b> on Wednesdays complete the weekly vehicle check (tick each item, note any defects), enter your van's mileage, and tap <b>▶ Start my day</b> — your start time and location are recorded."],
+          ["<b>Jobs:</b> you get one job at a time — travel to site, complete the <b>risk assessment</b>, do the work, then close it with a note, photo and signature (or quote / order / hold if it can't be finished)."],
+          ["<b>Finish:</b> end your day from the third tab to log your finish time and see your day's summary."],
+          ["The floating <b>⚡ button</b> on any other page always brings you back to My Day."],
         ]},
       ]},
     ];
