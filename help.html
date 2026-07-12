@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Help — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:860px; margin:16px auto 60px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    input.search { width:100%; padding:12px 14px; border:1px solid #ccd5dd; border-radius:11px; font-size:15px; font-family:inherit; margin-bottom:16px; }
+
+    .grp { margin:22px 0 8px; }
+    .grp h2 { font-size:13px; text-transform:uppercase; letter-spacing:.8px; color:#667085; margin:0 0 8px 4px; }
+    .art { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); margin-bottom:10px; overflow:hidden; }
+    .art > button.head { display:flex; align-items:center; gap:12px; width:100%; background:none; border:none; padding:14px 16px; font-family:inherit; font-size:15px; font-weight:600; color:#003366; cursor:pointer; text-align:left; }
+    .art > button.head .ico { font-size:22px; flex:none; }
+    .art > button.head .chev { margin-left:auto; color:#9fb2c8; font-size:20px; transition:transform .15s; flex:none; }
+    .art.open > button.head .chev { transform:rotate(90deg); }
+    .art .body { display:none; padding:0 18px 16px; }
+    .art.open .body { display:block; }
+    .art .body p.intro { margin:0 0 10px; font-size:14px; color:#3a4a5c; }
+    .art .body ol { margin:0; padding-left:22px; }
+    .art .body li { margin:0 0 12px; font-size:14px; line-height:1.6; }
+    .art .body li b { color:#003366; }
+    .art .body img.shot { display:block; max-width:250px; width:100%; border:1px solid #d7dee6; border-radius:12px; margin:8px 0 2px; cursor:zoom-in; box-shadow:0 2px 8px rgba(6,24,54,.10); }
+    .art .body img.shot.wide { max-width:100%; }
+    .tip { background:#f0f6ff; border:1px solid #cfe0f5; border-radius:9px; padding:9px 12px; font-size:13px; margin:10px 0 0; }
+
+    .lightbox { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.9); justify-content:center; align-items:center; cursor:zoom-out; }
+    .lightbox img { max-width:94%; max-height:92%; border-radius:10px; }
+    #noneMsg { background:#fff; border:1px dashed #ccd5dd; border-radius:12px; padding:16px; color:#667085; font-size:14px; display:none; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>❓ Help &amp; guides</h1>
+    <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+  </header>
+
+  <div class="wrap">
+    <p class="muted" style="margin:0 0 12px;">Step-by-step guides for your portal. You only see guides for the areas you can use — if a section you need is missing, ask the office to check your permissions.</p>
+    <input class="search" id="search" placeholder="Search the guides… e.g. transfer, holiday, password">
+    <div id="list"><p class="muted">Loading your guides…</p></div>
+    <div id="noneMsg">No guides match your search.</div>
+  </div>
+
+  <div class="lightbox" id="lightbox"><img id="lightImg" alt=""></div>
+
+  <script>
+    const g = id => document.getElementById(id);
+    const shot = (f, wide) => ({ img: "help-img/" + f, wide: !!wide });
+
+    // Every guide, tagged with the permission(s) that make it relevant.
+    // perms:"always" = everyone. Otherwise shown if the user has ANY listed
+    // permission (Full access sees everything).
+    const GROUPS = [
+      { title: "Getting started", arts: [
+        { icon: "🔑", title: "Logging in & staying logged in", perms: "always", intro: "One login lasts 90 days per device.", steps: [
+          ["Open the portal and type your <b>name</b> and <b>password</b>. Old-style names (like <i>jamie.line</i>), capital letters or your email address all work.", "login.png"],
+          ["Tap the <b>👁 eye</b> to see what you've typed — tap it again to hide it."],
+          ["Tap <b>Login</b>. If it's a new phone or computer you'll be asked to give the device a name — that registers it to you."],
+          ["That's it for 90 days on that device. If you're asked to log in much sooner than that, tell the office."],
+          ["Forgotten your password? Tap <b>Forgot password?</b> on the login screen — you'll get an email link to set a new one. Passwords need at least 8 characters with a letter and a number."],
+        ]},
+        { icon: "🧭", title: "Finding your way around", perms: "always", steps: [
+          ["On your <b>phone</b>, the menu is a grid of buttons. You only see buttons for the areas you're allowed to use.", "menu.png"],
+          ["On a <b>desktop</b>, the same areas appear in the blue sidebar on the left. Tap <b>Minimise</b> at the bottom to shrink it to icons.", "sidebar.png"],
+          ["Every page has a <b>← Menu</b> button (top right) to get back to the start."],
+        ]},
+        { icon: "🔔", title: "Notifications you must deal with", perms: "always", intro: "Red number bubbles show where something is waiting for you.", steps: [
+          ["When you open the menu with something outstanding, a <b>Needs your attention</b> screen appears in front of it. Tap an item to go and deal with it.", "gate.png"],
+          ["On your phone you can tap <b>💤 Remind me later</b> to put it off for 4 hours — but only <b>twice</b> per notification. After that it has to be dealt with before the menu unlocks."],
+          ["Dealing with something on one device clears it on all your devices. On desktop the same list appears as a small panel in the corner instead — it can be dismissed with the ✕."],
+        ]},
+        { icon: "🔒", title: "Changing your password", perms: "always", steps: [
+          ["If the office resets your password you'll be handed a temporary one — the portal makes you choose your own the next time you log in."],
+          ["To change it yourself any time: log out, tap <b>Forgot password?</b>, and follow the emailed link."],
+          ["New passwords need <b>at least 8 characters, with a letter and a number</b>. When your phone offers to save the new password — say yes, so autofill stays current."],
+        ]},
+        { icon: "🎨", title: "Personalising your portal", perms: ["ThemeColour", "ThemeBackground"], intro: "Make the portal yours — colours follow you onto any device.", steps: [
+          ["Open <b>🎨 Personalise</b> from the menu (or the sidebar on desktop).", "personalise.png"],
+          ["Tap a <b>colour theme</b> circle — headers, menus and buttons recolour everywhere, instantly. It saves automatically."],
+          ["Pick a <b>menu background</b>: the embossed Mostlane picture, a plain colour, or tap <b>📷 Upload photo</b> to use your own picture."],
+          ["Only you see your choices. What you're allowed to change is set by the office."],
+        ]},
+      ]},
+
+      { title: "Plant & Equipment", arts: [
+        { icon: "⚙️", title: "Your items and keys", perms: ["Assets"], steps: [
+          ["Open <b>Plant &amp; Equipment</b> from the menu. Everything currently signed to you is listed with photos, serial numbers and how long you've held each item.", "myassets.png"],
+          ["Any <b>keys</b> the office has signed out to you show in a strip at the top — hand them back to the office when you're done with them."],
+          ["<b>📄 My documents</b> holds your signed transfer notes: proof of what you hold and proof of what you've handed over."],
+        ]},
+        { icon: "📤", title: "Transferring an item to someone", perms: ["Assets"], steps: [
+          ["On your item, tap <b>Transfer</b> and choose who's taking it.", "transfer.png"],
+          ["<b>📷 Take photos of the item's condition</b> as you hand it over — they're stamped onto the transfer note, so there's no argument later about scratches or missing accessories."],
+          ["Tap <b>Send transfer</b>. The item stays your responsibility until the other person accepts and signs — you'll see <i>“Waiting for … to accept”</i> and can cancel it any time before then."],
+        ]},
+        { icon: "✍️", title: "Accepting a transfer (signing for an item)", perms: ["Assets"], steps: [
+          ["When someone sends you an item, it appears at the top of your Plant &amp; Equipment page (and in your notifications). <b>Inspect their condition photos first</b> — tap to enlarge."],
+          ["Tap <b>Accept &amp; sign</b>. Add your own photos of the condition as you receive it if you want your own record.", "sign.png"],
+          ["Sign the box with your finger and tap <b>Sign &amp; accept</b>. From that moment the item — and responsibility for it — is yours, and the previous holder is released."],
+          ["A formal <b>transfer note</b> is created with both sets of photos and your signature. It's stored permanently under My documents."],
+          ["Not right? Tap <b>Reject</b> instead and the item stays with the sender."],
+        ]},
+        { icon: "🌐", title: "Shared assets", perms: ["Assets"], steps: [
+          ["<b>Shared assets</b> (button on your Plant &amp; Equipment page) lists pool equipment anyone can use."],
+          ["Tap <b>History</b> on any item to see where it's been and who had it last."],
+        ]},
+      ]},
+
+      { title: "Plant & Equipment — admin", arts: [
+        { icon: "📦", title: "Managing all assets", perms: ["AssetAdmin"], steps: [
+          ["<b>All assets</b> (from your Plant &amp; Equipment page) lists every item, who holds it, and the value held per person.", "assetsadmin.png"],
+          ["<b>+ Add asset</b> to create one — give it an ID, name, category and holder. Save it first, then re-open it to add photos with your phone camera."],
+          ["<b>⬇ Export report</b> builds an Excel file with a tab per person, including full transfer history for every item."],
+        ]},
+        { icon: "📷", title: "Condition photo history", perms: ["AssetAdmin"], steps: [
+          ["On any asset, tap the <b>📷 button</b> to see every condition photo ever taken during its transfers.", "condphotos.png"],
+          ["Each photo says <b>who took it, when</b>, and whether they were <b>handing the item over or receiving it</b> — your evidence trail for damage disputes."],
+        ]},
+        { icon: "🗝️", title: "The key register", perms: ["AssetAdmin"], steps: [
+          ["Open <b>🔑 Keys</b> from the All Assets toolbar. Every site key, van key and office key is listed as In office or Out.", "keys.png"],
+          ["<b>Sign out:</b> tap Sign out on a key, choose the engineer, add a note (e.g. “PPM visit, back Friday”). The key shows against their name — and on their own portal page."],
+          ["<b>Sign in:</b> one tap when the key comes back."],
+          ["<b>History</b> keeps every movement forever, even if the key is later deleted."],
+        ]},
+      ]},
+
+      { title: "Holiday", arts: [
+        { icon: "🌴", title: "Booking time off", perms: ["Holiday"], steps: [
+          ["Open <b>Holiday</b>. The ring shows your days left; below it are your bookings for the year.", "holiday.png"],
+          ["Tap <b>+ Book time off</b>, pick your dates (weekends aren't counted) and send it. It shows as <b>Pending</b> until the office decides."],
+          ["You'll get a red notification when it's been approved or rejected."],
+          ["Need to cancel? Tap <b>Cancel</b> on the booking — even approved ones. Cancelled days go straight back into your allowance and the office is notified."],
+        ]},
+        { icon: "🗓️", title: "Approving holiday (admin)", perms: ["HolidayAdmin"], steps: [
+          ["Open <b>Holiday Admin</b>. The <b>Approvals</b> tab shows every request waiting for a decision — Approve or Reject with one tap.", "holadmin.png"],
+          ["The <b>Wall chart</b> tab shows the whole team's year at a glance, so you can spot clashes before approving."],
+          ["When staff cancel their own approved leave you're notified here too — that's the red bubble on Holiday Admin."],
+          ["<b>Settings</b> (in Holiday Admin) holds each person's allowance, bank holidays and company shutdown days."],
+        ]},
+      ]},
+
+      { title: "Office & admin", arts: [
+        { icon: "👥", title: "Managing users", perms: ["Users"], steps: [
+          ["Open <b>Users</b>. Drag the ⠿ handle to set the order people appear in across the whole portal (office staff first, then field).", "usersadmin.png"],
+          ["<b>+ Add user</b>: fill in their details on the tabs. If you give them an email, they're sent a welcome link to set their own password."],
+          ["<b>Permissions tab</b>: switches control exactly which menu buttons and guides each person sees. <b>Full access</b> is the master switch that opens everything."],
+          ["<b>Account tab</b>: set a password (the rules are shown; weak ones are refused). Tick <b>“They must change it at next login”</b> for temporary passwords — untick it to set a permanent one."],
+          ["<b>Reset password</b> generates a temporary password AND logs that person out of every device instantly — use it if a phone is lost or someone leaves."],
+          ["<b>🔔 Notification log</b> (top of the page) shows who was shown which alerts and when — including when they used Remind-me-later."],
+        ]},
+        { icon: "🔐", title: "Device management", perms: ["DeviceAdmin"], steps: [
+          ["Each account is locked to registered devices — a stolen password alone isn't enough to get in from a strange phone."],
+          ["Open <b>Device Management</b> to see everyone's registered devices."],
+          ["Moving someone to a new phone: remove their old device, and they'll be prompted to register the new one at their next login."],
+        ]},
+        { icon: "💼", title: "Office clock & timesheet", perms: ["OfficeClock", "OfficeTimesheet"], steps: [
+          ["With <b>Office clock</b> enabled on your account and your office computer, the clock in/out bar appears at the top of the main menu — tap to start and end your day."],
+          ["<b>My Hours</b> shows your own week. <b>Office Timesheet</b> (permission needed) shows the whole team's weekly hours."],
+        ]},
+      ]},
+
+      { title: "Jobs & sites", arts: [
+        { icon: "🚨", title: "SLA jobs", perms: ["SLA"], steps: [
+          ["Open <b>SLA</b> to see the job board. Jobs carry the site's details, priority and response target."],
+          ["Engineers: your assigned jobs are under <b>My jobs</b>. Clock on when you start, complete the risk assessment when prompted, and close out with a note, photos and a signature."],
+          ["Can't finish? Use <b>quote / order / hold</b> so the office knows why the job is paused — everything is kept on the job's history."],
+        ]},
+        { icon: "📍", title: "Sites & customers", perms: ["Sites", "AddSite"], steps: [
+          ["<b>Manage Sites</b> holds every site with photos, addresses and contact details; <b>Customers</b> groups them by client."],
+          ["Adding or updating a site pushes it automatically to SiteLog as a check-in location — no separate setup."],
+        ]},
+        { icon: "🛰️", title: "SiteLog (site attendance)", perms: ["SiteLog"], steps: [
+          ["Open <b>SiteLog</b> and tap <b>Scan</b> on arrival — the portal signs you in to the site automatically (first time links your phone, no separate login)."],
+          ["The <b>on-site list</b> shows who's currently at which site — useful for fire-roll-call and lone-working checks."],
+        ]},
+        { icon: "🧾", title: "PO system", perms: ["PurchaseOrders"], steps: [
+          ["Tap <b>PO System</b> on the menu — it opens with your personal link, so your orders are already under your name."],
+          ["Raise the PO before you buy; the office sees it immediately. Use the 🏠 button inside the PO system to come back to the portal."],
+        ]},
+        { icon: "🦺", title: "H&S plans", perms: ["HSPlan"], steps: [
+          ["Tap <b>H&amp;S Plans</b> on the menu — it signs you straight into the planner."],
+          ["Pick the site and job to view or complete the health &amp; safety plan before starting work."],
+        ]},
+        { icon: "⚡", title: "My Day (guided mode)", perms: ["StoryMode"], steps: [
+          ["Your day runs from the <b>My Day</b> screen: start your day (vehicle check on Wednesdays, mileage), then take jobs one at a time — travel, risk assessment, then complete with a note, photo and signature."],
+          ["End your day from the same screen to log your finish. The ⚡ button floating on other pages always brings you back to My Day."],
+        ]},
+      ]},
+    ];
+
+    // ── Permission gate: FullAccess sees all; otherwise any-of. ──
+    function allowed(a, perms) {
+      if (a.perms === "always") return true;
+      if (String(perms.FullAccess) === "Yes") return true;
+      return a.perms.some(k => String(perms[k]) === "Yes");
+    }
+
+    function render(perms) {
+      const q = g("search").value.trim().toLowerCase();
+      let html = "", shown = 0;
+      GROUPS.forEach(grp => {
+        const arts = grp.arts.filter(a => allowed(a, perms)).filter(a => {
+          if (!q) return true;
+          const text = (a.title + " " + (a.intro || "") + " " + a.steps.map(s => s[0]).join(" ")).toLowerCase();
+          return text.includes(q);
+        });
+        if (!arts.length) return;
+        html += `<div class="grp"><h2>${grp.title}</h2>` + arts.map(a => {
+          shown++;
+          const steps = a.steps.map(s =>
+            `<li>${s[0]}${s[1] ? `<img class="shot${s[2] ? " wide" : ""}" src="help-img/${s[1]}" alt="" loading="lazy">` : ""}</li>`).join("");
+          return `<div class="art" data-art>
+            <button class="head"><span class="ico">${a.icon}</span>${a.title}<span class="chev">›</span></button>
+            <div class="body">${a.intro ? `<p class="intro">${a.intro}</p>` : ""}<ol>${steps}</ol></div>
+          </div>`;
+        }).join("") + "</div>";
+      });
+      g("list").innerHTML = html;
+      g("noneMsg").style.display = shown ? "none" : "block";
+      if (q && shown) document.querySelectorAll(".art").forEach(el => el.classList.add("open"));
+    }
+
+    // Instant paint from cached permissions, then refresh from the server.
+    let PERMS = {};
+    try { PERMS = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); } catch (e) {}
+    render(PERMS);
+    (async () => {
+      try {
+        const r = await fetch(window.MOSTLANE_API + "/auth/me", { headers: { "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") } });
+        const d = await r.json();
+        if (d && d.ok && d.user && JSON.stringify(d.user) !== JSON.stringify(PERMS)) { PERMS = d.user; render(PERMS); }
+      } catch (e) {}
+    })();
+
+    g("search").addEventListener("input", () => render(PERMS));
+    document.addEventListener("click", e => {
+      const head = e.target.closest(".art > .head");
+      if (head) { head.parentElement.classList.toggle("open"); return; }
+      const img = e.target.closest("img.shot");
+      if (img) { g("lightImg").src = img.src; g("lightbox").style.display = "flex"; }
+    });
+    g("lightbox").addEventListener("click", () => { g("lightbox").style.display = "none"; g("lightImg").src = ""; });
+    window.addEventListener("keydown", e => { if (e.key === "Escape") { g("lightbox").style.display = "none"; } });
+  </script>
+</body>
+</html>
