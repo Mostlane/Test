@@ -19,3 +19,5 @@
   Cache-Control: no-cache
 /theme.html
   Cache-Control: no-cache
+/personalise.html
+  Cache-Control: no-cache
