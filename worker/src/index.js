@@ -59,6 +59,7 @@ const ROUTES = [
   ["*", "/oncall",     portal.handle],
   ["*", "/daily-logs", portal.handle],
   ["*", "/notify",     portal.handle],  // notification audit log
+  ["*", "/prefs",      portal.handle],  // per-user cross-device markers
   ["*", "/sitelog",    sitelog.handle],
   ["*", "/sitelog-launch", sitelog.handle],
   ["*", "/office",     office.handle],   // office clock in/out + weekly timesheet

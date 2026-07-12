@@ -390,8 +390,12 @@
         }
         return row(h, `<span class="muted" style="flex:none;">${lbl}</span>`);
       }).join("") : "<p class='muted'>No decisions yet this year.</p>";
-      // Admin has now seen the current state — clears the cancellation part of the badge.
-      try { localStorage.setItem("mostlaneHolAdminSeen", new Date().toISOString()); } catch (e) {}
+      // Admin has now seen the current state — clears the cancellation part of
+      // the badge, server-side too so it clears on every device.
+      const adminSeenAt = new Date().toISOString();
+      try { localStorage.setItem("mostlaneHolAdminSeen", adminSeenAt); } catch (e) {}
+      authFetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ holAdminSeen: adminSeenAt }) }).catch(() => {});
     }
 
     document.addEventListener("click", async e => {
