@@ -326,5 +326,25 @@ CREATE TABLE IF NOT EXISTS app_config (
   value TEXT NOT NULL
 );
 
+-- ── Key register (site keys, van keys, office keys) ─────────────────────────
+-- Full key JSON in `data` (id, label, type site|van|other, ref, notes,
+-- holder — "" = in the office, outSince, createdAt). key_log is the
+-- append-only sign-out/sign-in audit trail; rows are kept even if the key
+-- record is later deleted.
+CREATE TABLE IF NOT EXISTS portal_keys (
+  id   TEXT PRIMARY KEY,
+  data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS key_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_id  TEXT NOT NULL,
+  action  TEXT NOT NULL,            -- 'out' | 'in'
+  holder  TEXT,                     -- who it was signed to / returned by
+  by_user TEXT,                     -- who recorded the movement
+  note    TEXT,
+  at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_key_log_key ON key_log(key_id, id);
+
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.
