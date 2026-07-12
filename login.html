@@ -121,11 +121,18 @@
     // the session is dead, the stale flags are cleared so nothing bounces.
     (async function () {
       try {
+        // Circuit-breaker: if we auto-skipped in the last 20 seconds and got
+        // sent back here, DON'T skip again — show the form. Makes a fast
+        // login↔menu loop physically impossible, whatever the cause.
+        var lastSkip = Number(sessionStorage.getItem("mlAutoSkipAt") || 0);
+        if (Date.now() - lastSkip < 20000) return;
+
         var token = localStorage.getItem("mostlaneToken");
         if (!token || localStorage.getItem("mostlaneLoggedIn") !== "true") return;
         var r = await fetch(window.MOSTLANE_API + "/auth/me", { headers: { "Authorization": "Bearer " + token } });
         var d = await r.json().catch(function () { return {}; });
         if (r.ok && d.ok) {
+          try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
           var story = (d.user && d.user.StoryMode === "Yes");
           location.replace(story ? "my-day.html" : "main.html");
         } else {
