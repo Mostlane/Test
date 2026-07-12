@@ -78,6 +78,30 @@
     };
     const BG_LABELS = { sky: "Sky", sand: "Sand", sage: "Sage", blush: "Blush", lavender: "Lavender", steel: "Steel" };
 
+    // Own copies of the palettes: the page must work even if the phone is
+    // still running a cached older portal-config.js (which is also where the
+    // shared window.ML_* copies come from).
+    const ACCENTS = window.ML_ACCENTS || {
+      blue:     null,
+      teal:     { c1: "#0E7C7B", c2: "#074B4E", a: "#0A9396" },
+      green:    { c1: "#2E7D32", c2: "#124D1B", a: "#2F9E44" },
+      purple:   { c1: "#5E35B1", c2: "#2E1065", a: "#7048E8" },
+      burgundy: { c1: "#9C2542", c2: "#5C0E23", a: "#C2334F" },
+      orange:   { c1: "#D9750B", c2: "#8A4503", a: "#E8890C" },
+      slate:    { c1: "#546A7B", c2: "#26333E", a: "#5B7186" },
+      midnight: { c1: "#2B3467", c2: "#121737", a: "#3E4C9A" }
+    };
+    const BGCOLS = window.ML_BG_COLOURS || {
+      sky: "#dfe9f5", sand: "#f0e9dc", sage: "#e4ecdf",
+      blush: "#f3e4e4", lavender: "#e9e4f2", steel: "#dde2e8"
+    };
+    // Live preview fallback for the same reason (recolours this page's header).
+    function applyLocal(theme) {
+      const acc = ACCENTS[(theme || {}).accent];
+      document.querySelector("header.page").style.background =
+        acc ? "linear-gradient(180deg," + acc.c1 + "," + acc.c2 + ")" : "";
+    }
+
     let THEME = {}, CAN = {};
 
     (async () => {
@@ -97,6 +121,7 @@
     function cacheAndApply() {
       try { localStorage.setItem("mostlaneTheme", JSON.stringify(THEME)); } catch (e) {}
       if (window.mlApplyTheme) window.mlApplyTheme(THEME);
+      else applyLocal(THEME);
     }
     async function save(body, msgEl) {
       const m = g(msgEl); m.className = "msg"; m.textContent = "Saving…";
@@ -114,8 +139,8 @@
     // ── Colour theme ──
     function renderSwatches() {
       const cur = THEME.accent || "blue";
-      g("swatches").innerHTML = Object.keys(window.ML_ACCENTS).map(k => {
-        const a = window.ML_ACCENTS[k] || { c1: "#1A4F8F", c2: "#003468" };
+      g("swatches").innerHTML = Object.keys(ACCENTS).map(k => {
+        const a = ACCENTS[k] || { c1: "#1A4F8F", c2: "#003468" };
         return `<button class="sw ${k === cur ? "sel" : ""}" data-accent="${k}">
           <span class="chip" style="background:linear-gradient(160deg,${a.c1},${a.c2});"></span>
           <span>${esc(ACCENT_LABELS[k] || k)}</span>
@@ -137,9 +162,9 @@
       let html = `<button class="bgopt ${cur === "emboss:" ? "sel" : ""}" data-bg="emboss">
         <span class="tile" style="background-image:url('Mostlane_Embossed.png');background-color:#e6e8eb;"></span>
         <span>Mostlane</span></button>`;
-      html += Object.keys(window.ML_BG_COLOURS).map(k =>
+      html += Object.keys(BGCOLS).map(k =>
         `<button class="bgopt ${cur === "colour:" + k ? "sel" : ""}" data-bg="colour" data-val="${k}">
-          <span class="tile" style="background:${window.ML_BG_COLOURS[k]};"></span>
+          <span class="tile" style="background:${BGCOLS[k]};"></span>
           <span>${esc(BG_LABELS[k] || k)}</span></button>`).join("");
       const isImg = THEME.bg && THEME.bg.type === "image";
       html += `<button class="bgopt ${isImg ? "sel" : ""}" id="bgUpload">
