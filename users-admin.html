@@ -233,7 +233,11 @@
 
       <!-- ACCOUNT -->
       <div class="section" data-sec="account">
-        <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" /></div>
+        <div><label id="pwLabel">Set password (leave blank to keep current)</label><input id="f_pw" type="text" placeholder="••••••••" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:6px;color:#3a4a5c;cursor:pointer;">
+            <input type="checkbox" id="f_pwForce" checked style="width:auto;margin:0;"> They must change it at next login
+          </label>
+        </div>
         <div><label>SharePoint path</label><input id="f_sp" /></div>
         <div><label>PO system personal link</label><input id="p_poUrl" placeholder="e.g. https://…workers.dev/o/jamie or /e/david-molloy" /></div>
         <div style="margin-top:14px;padding:12px;border:1px solid #d7dee6;border-radius:8px;background:#f7faff;">
@@ -542,7 +546,8 @@
       // reset to first tab
       document.querySelector('#tabs button[data-tab="details"]').click();
       g("panelTitle").textContent = user ? "Edit user" : "Add user";
-      g("pwLabel").textContent = user ? "Set password (leave blank to keep current)" : "Initial password (user must change on first login)";
+      g("pwLabel").textContent = user ? "Set password (leave blank to keep current)" : "Initial password";
+      g("f_pwForce").checked = true;   // default: passwords set by admin are temporary
       g("f_username").value = user?.Username || "";
       g("f_username").disabled = !!user;
       g("f_engno").value = user?.EngineerNumber || "";
@@ -592,7 +597,7 @@
       };
       if (!body.Username) { msg.className = "msg err"; msg.textContent = "Username is required."; return; }
       const pw = g("f_pw").value;
-      if (pw) body.Password = pw;
+      if (pw) { body.Password = pw; body.ForceChange = g("f_pwForce").checked; }
       // Start from the profile we loaded so unmanaged keys (home geofence,
       // onboarding capture, …) are preserved; overlay the managed fields.
       const profile = Object.assign({}, editingProfile);
