@@ -54,137 +54,214 @@
 
   <script>
     const g = id => document.getElementById(id);
-    const shot = (f, wide) => ({ img: "help-img/" + f, wide: !!wide });
 
     // Every guide, tagged with the permission(s) that make it relevant.
     // perms:"always" = everyone. Otherwise shown if the user has ANY listed
-    // permission (Full access sees everything).
+    // permission (Full access sees everything). Step format: [text, image?].
     const GROUPS = [
       { title: "Getting started", arts: [
-        { icon: "🔑", title: "Logging in & staying logged in", perms: "always", intro: "One login lasts 90 days per device.", steps: [
+        { icon: "🔑", title: "Log in", perms: "always", intro: "One login lasts 90 days per device.", steps: [
           ["Open the portal and type your <b>name</b> and <b>password</b>. Old-style names (like <i>jamie.line</i>), capital letters or your email address all work.", "login.png"],
           ["Tap the <b>👁 eye</b> to see what you've typed — tap it again to hide it."],
-          ["Tap <b>Login</b>. If it's a new phone or computer you'll be asked to give the device a name — that registers it to you."],
-          ["That's it for 90 days on that device. If you're asked to log in much sooner than that, tell the office."],
-          ["Forgotten your password? Tap <b>Forgot password?</b> on the login screen — you'll get an email link to set a new one. Passwords need at least 8 characters with a letter and a number."],
+          ["Tap <b>Login</b>. On a new phone or computer you'll be asked to give the device a name — that registers it to you."],
+          ["That's it for 90 days on that device. If you're asked to log in much sooner, tell the office."],
         ]},
-        { icon: "🧭", title: "Finding your way around", perms: "always", steps: [
+        { icon: "📧", title: "Reset a forgotten password", perms: "always", steps: [
+          ["On the login screen tap <b>Forgot password?</b> and enter your name or email.", "forgot.png"],
+          ["Check your email (and junk folder) for the reset link — it's valid for 1 hour."],
+          ["The link opens the <b>Set a new password</b> page. Type your new password twice — the rules are shown, and the 👁 eye lets you check your typing.", "resetpw.png"],
+          ["Tap <b>Save password</b>, then log in with it. When your phone offers to save the new password, say yes — that keeps autofill current."],
+        ]},
+        { icon: "🧭", title: "Find your way around", perms: "always", steps: [
           ["On your <b>phone</b>, the menu is a grid of buttons. You only see buttons for the areas you're allowed to use.", "menu.png"],
           ["On a <b>desktop</b>, the same areas appear in the blue sidebar on the left. Tap <b>Minimise</b> at the bottom to shrink it to icons.", "sidebar.png"],
           ["Every page has a <b>← Menu</b> button (top right) to get back to the start."],
         ]},
-        { icon: "🔔", title: "Notifications you must deal with", perms: "always", intro: "Red number bubbles show where something is waiting for you.", steps: [
-          ["When you open the menu with something outstanding, a <b>Needs your attention</b> screen appears in front of it. Tap an item to go and deal with it.", "gate.png"],
-          ["On your phone you can tap <b>💤 Remind me later</b> to put it off for 4 hours — but only <b>twice</b> per notification. After that it has to be dealt with before the menu unlocks."],
-          ["Dealing with something on one device clears it on all your devices. On desktop the same list appears as a small panel in the corner instead — it can be dismissed with the ✕."],
+        { icon: "🔒", title: "Change your password", perms: "always", steps: [
+          ["If the office gives you a temporary password, the portal makes you choose your own the next time you log in — just follow the screen."],
+          ["To change it yourself any time: log out, tap <b>Forgot password?</b>, and follow the emailed link (see “Reset a forgotten password” above)."],
+          ["New passwords need <b>at least 8 characters, with a letter and a number</b> — anything less is refused."],
         ]},
-        { icon: "🔒", title: "Changing your password", perms: "always", steps: [
-          ["If the office resets your password you'll be handed a temporary one — the portal makes you choose your own the next time you log in."],
-          ["To change it yourself any time: log out, tap <b>Forgot password?</b>, and follow the emailed link."],
-          ["New passwords need <b>at least 8 characters, with a letter and a number</b>. When your phone offers to save the new password — say yes, so autofill stays current."],
-        ]},
-        { icon: "🎨", title: "Personalising your portal", perms: ["ThemeColour", "ThemeBackground"], intro: "Make the portal yours — colours follow you onto any device.", steps: [
+        { icon: "🎨", title: "Personalise your portal", perms: ["ThemeColour", "ThemeBackground"], intro: "Your choices follow you onto any device and only change what YOU see.", steps: [
           ["Open <b>🎨 Personalise</b> from the menu (or the sidebar on desktop).", "personalise.png"],
           ["Tap a <b>colour theme</b> circle — headers, menus and buttons recolour everywhere, instantly. It saves automatically."],
           ["Pick a <b>menu background</b>: the embossed Mostlane picture, a plain colour, or tap <b>📷 Upload photo</b> to use your own picture."],
-          ["Only you see your choices. What you're allowed to change is set by the office."],
+          ["What you're allowed to change is set by the office — if a section is missing here, that's why."],
+        ]},
+      ]},
+
+      { title: "Notifications", arts: [
+        { icon: "🔴", title: "What the red bubbles mean", perms: "always", steps: [
+          ["A red number on a menu button (or sidebar item) means something in that area is waiting for you — transfers to accept, holiday decisions to see, or requests to approve.", "badges.png"],
+          ["The bubble clears itself once you've dealt with the item — on <b>any</b> of your devices."],
+        ]},
+        { icon: "🚦", title: "The “Needs your attention” screen", perms: "always", steps: [
+          ["If anything is outstanding when you open the menu on your phone, this screen appears in front of it.", "gate.png"],
+          ["<b>Tap an item</b> to go straight to where it's dealt with. Once everything is cleared, the screen stops appearing."],
+        ]},
+        { icon: "💤", title: "Put a notification off (Remind me later)", perms: "always", steps: [
+          ["Can't deal with it right now? Tap <b>💤 Remind me later</b> at the bottom of the attention screen — it goes away for <b>4 hours</b>."],
+          ["You can do that <b>twice per notification</b> (across all your devices). After that the button disappears and the item has to be dealt with."],
+          ["Something genuinely new (another transfer, another request) always alerts fresh."],
+        ]},
+        { icon: "🖥️", title: "Notifications on desktop", perms: "always", steps: [
+          ["On a desktop the same list appears as a panel in the top-right corner instead of blocking the screen.", "gatedesk.png"],
+          ["Click an item to open it, or the <b>✕</b> to dismiss the panel — it stays away until something new arrives."],
         ]},
       ]},
 
       { title: "Plant & Equipment", arts: [
-        { icon: "⚙️", title: "Your items and keys", perms: ["Assets"], steps: [
+        { icon: "⚙️", title: "See your items and keys", perms: ["Assets"], steps: [
           ["Open <b>Plant &amp; Equipment</b> from the menu. Everything currently signed to you is listed with photos, serial numbers and how long you've held each item.", "myassets.png"],
-          ["Any <b>keys</b> the office has signed out to you show in a strip at the top — hand them back to the office when you're done with them."],
-          ["<b>📄 My documents</b> holds your signed transfer notes: proof of what you hold and proof of what you've handed over."],
+          ["Any <b>keys</b> the office has signed out to you show in a strip at the top — hand them back to the office when you're done."],
         ]},
-        { icon: "📤", title: "Transferring an item to someone", perms: ["Assets"], steps: [
+        { icon: "📤", title: "Send an item to someone", perms: ["Assets"], steps: [
           ["On your item, tap <b>Transfer</b> and choose who's taking it.", "transfer.png"],
-          ["<b>📷 Take photos of the item's condition</b> as you hand it over — they're stamped onto the transfer note, so there's no argument later about scratches or missing accessories."],
-          ["Tap <b>Send transfer</b>. The item stays your responsibility until the other person accepts and signs — you'll see <i>“Waiting for … to accept”</i> and can cancel it any time before then."],
+          ["Tap <b>📷 Take photo</b> and photograph the item's condition as you hand it over (up to 6 photos). They're stamped onto the transfer note — no arguments later about scratches or missing accessories."],
+          ["Tap <b>Send transfer</b>. The item stays <b>your responsibility</b> until the other person accepts and signs."],
+          ["While it's waiting you'll see <i>“⏳ Waiting for … to accept”</i> on the item — tap <b>Cancel</b> there if you change your mind.", "outgoing.png"],
         ]},
-        { icon: "✍️", title: "Accepting a transfer (signing for an item)", perms: ["Assets"], steps: [
-          ["When someone sends you an item, it appears at the top of your Plant &amp; Equipment page (and in your notifications). <b>Inspect their condition photos first</b> — tap to enlarge."],
-          ["Tap <b>Accept &amp; sign</b>. Add your own photos of the condition as you receive it if you want your own record.", "sign.png"],
+        { icon: "✍️", title: "Accept &amp; sign for an item", perms: ["Assets"], steps: [
+          ["When someone sends you an item it appears at the top of your Plant &amp; Equipment page (and in your notifications). <b>Look at their condition photos first</b> — tap to enlarge.", "myassets.png"],
+          ["Tap <b>Accept &amp; sign</b>. Add your own condition photos if you want your own record of how it arrived.", "sign.png"],
           ["Sign the box with your finger and tap <b>Sign &amp; accept</b>. From that moment the item — and responsibility for it — is yours, and the previous holder is released."],
-          ["A formal <b>transfer note</b> is created with both sets of photos and your signature. It's stored permanently under My documents."],
-          ["Not right? Tap <b>Reject</b> instead and the item stays with the sender."],
+          ["A formal <b>transfer note</b> is created with both sets of photos and your signature, stored permanently.", "note.png"],
         ]},
-        { icon: "🌐", title: "Shared assets", perms: ["Assets"], steps: [
-          ["<b>Shared assets</b> (button on your Plant &amp; Equipment page) lists pool equipment anyone can use."],
-          ["Tap <b>History</b> on any item to see where it's been and who had it last."],
+        { icon: "🚫", title: "Reject a transfer", perms: ["Assets"], steps: [
+          ["Sent something you didn't agree to take, or the condition isn't right? On the waiting transfer, tap <b>Reject</b> instead of accepting."],
+          ["The item stays with the sender (it never becomes your responsibility) and the rejection is recorded in the item's history."],
+        ]},
+        { icon: "🕓", title: "Check an item's history", perms: ["Assets"], steps: [
+          ["On any of your items tap <b>History</b> to see every hand-over it's ever had — who, to whom, and when.", "history.png"],
+          ["Transfers you were part of show a <b>View note</b> button that opens the signed paperwork."],
+        ]},
+        { icon: "📄", title: "Find your transfer documents", perms: ["Assets"], steps: [
+          ["Tap <b>📄 My documents</b> at the top of your Plant &amp; Equipment page.", "mydocs.png"],
+          ["<b>Items I currently hold</b> — the acceptance note for each item you're responsible for right now."],
+          ["<b>Responsibility ended</b> — your proof for every item you've handed over. These are kept forever."],
+          ["Tap <b>View</b> on any of them to open the signed note; use <b>Print / save PDF</b> to keep a copy."],
+        ]},
+        { icon: "🌐", title: "Use the shared pool", perms: ["Assets"], steps: [
+          ["Tap <b>Shared assets</b> on your Plant &amp; Equipment page to see pool equipment anyone can use.", "shared.png"],
+          ["Tap <b>History</b> on an item to see where it's been and who used it last."],
         ]},
       ]},
 
       { title: "Plant & Equipment — admin", arts: [
-        { icon: "📦", title: "Managing all assets", perms: ["AssetAdmin"], steps: [
-          ["<b>All assets</b> (from your Plant &amp; Equipment page) lists every item, who holds it, and the value held per person.", "assetsadmin.png"],
-          ["<b>+ Add asset</b> to create one — give it an ID, name, category and holder. Save it first, then re-open it to add photos with your phone camera."],
-          ["<b>⬇ Export report</b> builds an Excel file with a tab per person, including full transfer history for every item."],
+        { icon: "📦", title: "Add a new asset", perms: ["AssetAdmin"], steps: [
+          ["Open <b>All assets</b> (from the Plant &amp; Equipment page), then tap <b>+ Add asset</b>."],
+          ["Give it an <b>ID</b>, <b>name</b> and <b>category</b>, its value, and who it's assigned to (or the Shared pool).", "addasset.png"],
+          ["Tap <b>Save</b>, then re-open the asset to add photos — the 📷 button uses your phone camera."],
         ]},
-        { icon: "📷", title: "Condition photo history", perms: ["AssetAdmin"], steps: [
-          ["On any asset, tap the <b>📷 button</b> to see every condition photo ever taken during its transfers.", "condphotos.png"],
-          ["Each photo says <b>who took it, when</b>, and whether they were <b>handing the item over or receiving it</b> — your evidence trail for damage disputes."],
+        { icon: "🛠️", title: "Edit, photograph or delete an asset", perms: ["AssetAdmin"], steps: [
+          ["On <b>All assets</b>, use the search box to find the item, then tap <b>Edit</b>.", "assetsadmin.png"],
+          ["Change any detail and <b>Save</b>. In the images row: tap a photo to view it, the <b>×</b> to remove it, or <b>📷 Upload image</b> to add one."],
+          ["<b>Delete</b> removes the asset from the register (its transfer history is kept). You'll be asked to confirm — this can't be undone."],
         ]},
-        { icon: "🗝️", title: "The key register", perms: ["AssetAdmin"], steps: [
-          ["Open <b>🔑 Keys</b> from the All Assets toolbar. Every site key, van key and office key is listed as In office or Out.", "keys.png"],
-          ["<b>Sign out:</b> tap Sign out on a key, choose the engineer, add a note (e.g. “PPM visit, back Friday”). The key shows against their name — and on their own portal page."],
-          ["<b>Sign in:</b> one tap when the key comes back."],
-          ["<b>History</b> keeps every movement forever, even if the key is later deleted."],
+        { icon: "⬇️", title: "Export the asset report", perms: ["AssetAdmin"], steps: [
+          ["On <b>All assets</b>, tap <b>⬇ Export report</b>."],
+          ["You get an Excel file with a tab per person: every item they hold, its value, photos and the full transfer history — ready for audits or insurance."],
+          ["The <b>Value per person</b> table on screen shows the same totals at a glance; people holding over £5,000 are highlighted."],
+        ]},
+        { icon: "📷", title: "Check an item's condition photos", perms: ["AssetAdmin"], steps: [
+          ["On <b>All assets</b>, tap the <b>📷 button</b> on any item.", "condphotos.png"],
+          ["Every condition photo from every transfer is listed — <b>who took it, when</b>, and whether they were <b>handing over or receiving</b>. Tap a photo to see it full-size."],
+          ["Photos from a transfer still awaiting acceptance are marked <b>Transfer pending</b>."],
+        ]},
+        { icon: "🗝️", title: "Sign a key out and back in", perms: ["AssetAdmin"], steps: [
+          ["Open <b>🔑 Keys</b> from the All assets toolbar. Green = in the office, red = out with someone.", "keys.png"],
+          ["<b>Signing out:</b> tap <b>Sign out</b> on the key, pick the person, add a note like “PPM visit, back Friday”.", "keyout.png"],
+          ["The key now shows against their name here <b>and on their own portal page</b>, so they can't say they didn't know they had it."],
+          ["<b>Signing in:</b> when it comes back, tap <b>↩ Sign in</b> — one tap, done."],
+        ]},
+        { icon: "➕", title: "Add a key & check its history", perms: ["AssetAdmin"], steps: [
+          ["On the Key Register, tap <b>+ Add key</b>. Give it a label people will recognise, its type (site / van / other) and the site name or van reg.", "keyadd.png"],
+          ["Tap <b>History</b> on any key to see every movement — who took it, who booked it out, when it came back. History is kept forever, even if the key is later deleted.", "keyhist.png"],
         ]},
       ]},
 
       { title: "Holiday", arts: [
-        { icon: "🌴", title: "Booking time off", perms: ["Holiday"], steps: [
-          ["Open <b>Holiday</b>. The ring shows your days left; below it are your bookings for the year.", "holiday.png"],
-          ["Tap <b>+ Book time off</b>, pick your dates (weekends aren't counted) and send it. It shows as <b>Pending</b> until the office decides."],
-          ["You'll get a red notification when it's been approved or rejected."],
-          ["Need to cancel? Tap <b>Cancel</b> on the booking — even approved ones. Cancelled days go straight back into your allowance and the office is notified."],
+        { icon: "🌴", title: "Book time off", perms: ["Holiday"], steps: [
+          ["Open <b>Holiday</b>. The ring shows your days left; below are your bookings for the year.", "holiday.png"],
+          ["Tap <b>+ Book time off</b>. Pick your first and last day (weekends aren't counted) and add the reminder note.", "book.png"],
+          ["Tap <b>Request</b>. It shows as <b>Pending</b> until the office decides — you'll get a red notification when it's approved or rejected."],
         ]},
-        { icon: "🗓️", title: "Approving holiday (admin)", perms: ["HolidayAdmin"], steps: [
-          ["Open <b>Holiday Admin</b>. The <b>Approvals</b> tab shows every request waiting for a decision — Approve or Reject with one tap.", "holadmin.png"],
-          ["The <b>Wall chart</b> tab shows the whole team's year at a glance, so you can spot clashes before approving."],
-          ["When staff cancel their own approved leave you're notified here too — that's the red bubble on Holiday Admin."],
-          ["<b>Settings</b> (in Holiday Admin) holds each person's allowance, bank holidays and company shutdown days."],
+        { icon: "🔁", title: "Cancel a booking", perms: ["Holiday"], steps: [
+          ["On the Holiday page, tap <b>Cancel</b> on the booking — pending or approved."],
+          ["Cancelled days go straight back into your allowance, and the office gets a notification that you've cancelled."],
+        ]},
+        { icon: "✅", title: "Approve or reject requests", perms: ["HolidayAdmin"], steps: [
+          ["Open <b>Holiday Admin</b>. The <b>Approvals</b> tab lists every request waiting for a decision.", "holadmin.png"],
+          ["Tap <b>Approve</b> or <b>Reject</b> — the person is notified automatically either way."],
+          ["When staff cancel their own approved leave, it shows here too (that's part of the red bubble on Holiday Admin)."],
+        ]},
+        { icon: "📊", title: "The wall chart & marking days worked", perms: ["HolidayAdmin"], steps: [
+          ["The <b>Wall chart</b> tab shows the whole team's month — green approved, amber pending, blue bank holidays, purple shutdown.", "wallchart.png"],
+          ["Use it to spot clashes before approving. Tap a <b>green block</b> to cancel that day of an approved holiday."],
+          ["Tap a <b>blue or purple block</b> to mark that the person actually worked that bank holiday / shutdown day — it credits the day back to them."],
+        ]},
+        { icon: "⚖️", title: "Allowances, bank holidays & shutdown", perms: ["HolidayAdmin"], steps: [
+          ["<b>Settings</b> tab: set the default days-per-person allowance for the year (individual overrides live in <b>Balances</b>).", "holsettings.png"],
+          ["Add <b>bank holidays</b> one by one, or tap <b>🇬🇧 Add official UK bank holidays</b> to pull in the real list automatically."],
+          ["Add <b>company shutdown</b> days (e.g. Christmas close-down) — both are deducted from allowances and shown on everyone's Holiday page."],
+          ["<b>Accrual mode</b> (tick-box) makes allowances build up 1/12th per month — bookings beyond what's accrued show a warning."],
         ]},
       ]},
 
       { title: "Office & admin", arts: [
-        { icon: "👥", title: "Managing users", perms: ["Users"], steps: [
-          ["Open <b>Users</b>. Drag the ⠿ handle to set the order people appear in across the whole portal (office staff first, then field).", "usersadmin.png"],
-          ["<b>+ Add user</b>: fill in their details on the tabs. If you give them an email, they're sent a welcome link to set their own password."],
-          ["<b>Permissions tab</b>: switches control exactly which menu buttons and guides each person sees. <b>Full access</b> is the master switch that opens everything."],
-          ["<b>Account tab</b>: set a password (the rules are shown; weak ones are refused). Tick <b>“They must change it at next login”</b> for temporary passwords — untick it to set a permanent one."],
-          ["<b>Reset password</b> generates a temporary password AND logs that person out of every device instantly — use it if a phone is lost or someone leaves."],
-          ["<b>🔔 Notification log</b> (top of the page) shows who was shown which alerts and when — including when they used Remind-me-later."],
+        { icon: "👥", title: "Add a new user", perms: ["Users"], steps: [
+          ["Open <b>Users</b> and tap <b>+ Add user</b>.", "userlist.png"],
+          ["Fill in their name and details on the <b>Details</b> tab. If you enter an <b>email</b>, they're automatically sent a welcome link to set their own password — no password hand-over needed."],
+          ["Drag the <b>⠿</b> handle in the list to set the order people appear in dropdowns across the whole portal (office staff first, then field)."],
         ]},
-        { icon: "🔐", title: "Device management", perms: ["DeviceAdmin"], steps: [
-          ["Each account is locked to registered devices — a stolen password alone isn't enough to get in from a strange phone."],
-          ["Open <b>Device Management</b> to see everyone's registered devices."],
-          ["Moving someone to a new phone: remove their old device, and they'll be prompted to register the new one at their next login."],
+        { icon: "🎚️", title: "Set someone's permissions", perms: ["Users"], steps: [
+          ["Edit the user and open the <b>Permissions</b> tab. Each switch controls a menu button — and the matching help guides.", "perms.png"],
+          ["<b>Full access</b> is the master switch that opens everything (use sparingly)."],
+          ["The <b>Personalisation</b> group controls whether they can change their colour theme and/or menu background."],
+          ["They need to log out and back in for new permissions to take effect."],
+        ]},
+        { icon: "🔑", title: "Set or reset someone's password", perms: ["Users"], steps: [
+          ["Edit the user → <b>Account</b> tab. Type a password (the rules are shown; weak ones are refused; 👁 shows what you've typed).", "usersadmin.png"],
+          ["Leave <b>“They must change it at next login”</b> ticked for a temporary password — untick it only when the password should stick (e.g. setting your own)."],
+          ["The <b>Reset password</b> button instead generates a temporary password for you to relay — and <b>logs them out of every device immediately</b>. Use that when a phone is lost or someone leaves."],
+        ]},
+        { icon: "🔔", title: "Check the notification log", perms: ["Users"], steps: [
+          ["Users page → <b>🔔 Notification log</b>. Every time the attention screen appears on someone's phone it's recorded with a timestamp.", "notifylog.png"],
+          ["Filter by person and period. <b>✅ Shown</b> proves it appeared; <b>💤 Put off</b> shows reminders used (x of 2); <b>↗ Opened</b> shows they tapped into it."],
+          ["If someone says “mine never showed that” — look here first."],
+        ]},
+        { icon: "📱", title: "Move someone to a new phone", perms: ["DeviceAdmin"], steps: [
+          ["Accounts are locked to registered devices — a password alone isn't enough from a strange phone."],
+          ["Open <b>Device Management</b> and select the person.", "deviceadmin.png"],
+          ["Remove their old device. At their next login on the new phone they'll be prompted to register it — done."],
         ]},
         { icon: "💼", title: "Office clock & timesheet", perms: ["OfficeClock", "OfficeTimesheet"], steps: [
-          ["With <b>Office clock</b> enabled on your account and your office computer, the clock in/out bar appears at the top of the main menu — tap to start and end your day."],
-          ["<b>My Hours</b> shows your own week. <b>Office Timesheet</b> (permission needed) shows the whole team's weekly hours."],
+          ["With <b>Office clock</b> enabled on your account and marked on for your office computer (Users → Devices tab), the clock in/out bar appears at the top of the main menu."],
+          ["Tap <b>Start</b> when you arrive and <b>Stop</b> when you leave — <b>My Hours</b> shows your week."],
+          ["<b>Office Timesheet</b> (permission needed) shows the whole team's weekly hours in one table."],
         ]},
       ]},
 
       { title: "Jobs & sites", arts: [
         { icon: "🚨", title: "SLA jobs", perms: ["SLA"], steps: [
-          ["Open <b>SLA</b> to see the job board. Jobs carry the site's details, priority and response target."],
-          ["Engineers: your assigned jobs are under <b>My jobs</b>. Clock on when you start, complete the risk assessment when prompted, and close out with a note, photos and a signature."],
-          ["Can't finish? Use <b>quote / order / hold</b> so the office knows why the job is paused — everything is kept on the job's history."],
+          ["Open <b>SLA</b> for the job board. Jobs carry the site's details, priority and response target."],
+          ["Engineers: your assigned jobs are under <b>My jobs</b>. Clock on when you start; complete the <b>risk assessment</b> when prompted — you can't complete a job without it."],
+          ["To finish: add your work note, photos and signature. Can't finish? Use <b>quote / order / hold</b> so the office knows why it's paused — everything stays on the job's history."],
         ]},
         { icon: "📍", title: "Sites & customers", perms: ["Sites", "AddSite"], steps: [
-          ["<b>Manage Sites</b> holds every site with photos, addresses and contact details; <b>Customers</b> groups them by client."],
-          ["Adding or updating a site pushes it automatically to SiteLog as a check-in location — no separate setup."],
+          ["<b>Manage Sites</b> holds every site with photos, addresses and contacts; <b>Customers</b> groups them by client."],
+          ["To add a site: tap <b>Add site</b>, fill in the address and customer, save. The site's photo is fetched automatically if you don't upload one."],
+          ["Saved sites are pushed to <b>SiteLog</b> automatically as check-in locations — no separate setup."],
         ]},
-        { icon: "🛰️", title: "SiteLog (site attendance)", perms: ["SiteLog"], steps: [
-          ["Open <b>SiteLog</b> and tap <b>Scan</b> on arrival — the portal signs you in to the site automatically (first time links your phone, no separate login)."],
-          ["The <b>on-site list</b> shows who's currently at which site — useful for fire-roll-call and lone-working checks."],
+        { icon: "🛰️", title: "Check in to a site (SiteLog)", perms: ["SiteLog"], steps: [
+          ["Open <b>SiteLog</b> from the menu and tap <b>Scan in / out of site</b> when you arrive or leave.", "sitelog.png"],
+          ["The first time, your phone links itself to your name automatically — no separate login."],
+          ["The office can see who's on which site — used for fire roll-call and lone-working checks, so scan every time."],
         ]},
-        { icon: "🧾", title: "PO system", perms: ["PurchaseOrders"], steps: [
-          ["Tap <b>PO System</b> on the menu — it opens with your personal link, so your orders are already under your name."],
-          ["Raise the PO before you buy; the office sees it immediately. Use the 🏠 button inside the PO system to come back to the portal."],
+        { icon: "🧾", title: "Raise a purchase order", perms: ["PurchaseOrders"], steps: [
+          ["Tap <b>PO System</b> on the menu — it opens on your personal link, so your orders are already under your name."],
+          ["Raise the PO <b>before</b> you buy; the office sees it immediately."],
+          ["Use the <b>🏠 button</b> inside the PO system to come back to the portal."],
         ]},
         { icon: "🦺", title: "H&S plans", perms: ["HSPlan"], steps: [
           ["Tap <b>H&amp;S Plans</b> on the menu — it signs you straight into the planner."],
