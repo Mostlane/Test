@@ -272,9 +272,9 @@ export async function handle(request, env, ctx, url) {
     for (const row of results || []) {
       let n; try { n = JSON.parse(row.data); } catch { continue; }
       for (const u of n.conditionSender || [])
-        photos.push({ url: rebase(u), takenAt: n.requestedAt, by: n.from, role: "handover", counterparty: n.to, transferId: n.transferId });
+        photos.push({ url: rebase(u), takenAt: utcify(n.requestedAt), by: n.from, role: "handover", counterparty: n.to, transferId: n.transferId });
       for (const u of n.conditionRecipient || [])
-        photos.push({ url: rebase(u), takenAt: n.acceptedAt, by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
+        photos.push({ url: rebase(u), takenAt: utcify(n.acceptedAt), by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
     }
     // Pending transfers — the sender's drop-off photos, not yet on a note.
     const { results: reqs } = await env.DB.prepare(
@@ -283,7 +283,7 @@ export async function handle(request, env, ctx, url) {
     for (const r of reqs || []) {
       let c = {}; try { c = JSON.parse(r.condition_photos || "{}"); } catch {}
       for (const k of c.sender || [])
-        photos.push({ url: toUrl(k), takenAt: r.requested_at, by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
+        photos.push({ url: toUrl(k), takenAt: utcify(r.requested_at), by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
     }
     photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
     return json({ ok: true, assetID, photos });
@@ -337,7 +337,7 @@ export async function handle(request, env, ctx, url) {
       let cond = {}; try { cond = r.condition_photos ? JSON.parse(r.condition_photos) : {}; } catch {}
       shaped.push({
         id: r.id, assetId: r.asset_id, from: r.from_user, to: r.to_user,
-        note: r.note || "", requestedAt: r.requested_at,
+        note: r.note || "", requestedAt: utcify(r.requested_at),
         assetName: asset?.name || r.asset_id, serial: asset?.serial || "",
         category: asset?.category || "", value: asset?.value || "",
         image: (asset?.images || [])[0] || null,
@@ -373,8 +373,8 @@ export async function handle(request, env, ctx, url) {
     ).bind(b.assetId).first();
     if (dup) return json({ ok: false, error: "This item already has a transfer pending" }, 409);
     const res = await env.DB.prepare(
-      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note) VALUES (?,?,?,?)"
-    ).bind(b.assetId, holder || me, b.to, b.note || null).run();
+      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?)"
+    ).bind(b.assetId, holder || me, b.to, b.note || null, new Date().toISOString()).run();
     const reqId = res.meta.last_row_id;
     // Optional condition photos from the person handing the item over —
     // timestamped evidence of state at drop-off.
@@ -433,7 +433,7 @@ export async function handle(request, env, ctx, url) {
       from: req.from_user,
       to: req.to_user,
       message: req.note || "",
-      requestedAt: req.requested_at,
+      requestedAt: utcify(req.requested_at),
       acceptedAt: now,
       acceptedAtText: when,
       acceptedBy: me,
@@ -530,6 +530,7 @@ export async function handle(request, env, ctx, url) {
         return json({ ok: false, error: "This document isn't linked to you" }, 403);
     }
     if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
+    note.requestedAt = utcify(note.requestedAt);   // older notes stored the naive DB timestamp
     return json({ ok: true, note });
   }
 
@@ -551,6 +552,7 @@ export async function handle(request, env, ctx, url) {
     for (const row of results || []) {
       let n; try { n = JSON.parse(row.data); } catch { continue; }
       if (n.signatureKey) n.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(n.signatureKey)}`;
+      n.requestedAt = utcify(n.requestedAt);   // older notes stored the naive DB timestamp
       if (String(n.to || "").toLowerCase() === meL && heldSet.has(n.assetID) && !seen.has(n.assetID)) {
         seen.add(n.assetID); acceptance.push(n);
       } else if (String(n.from || "").toLowerCase() === meL) {
@@ -564,6 +566,13 @@ export async function handle(request, env, ctx, url) {
 }
 
 /* ================= D1 HELPERS ================= */
+
+// SQLite's datetime('now') is UTC but carries no timezone marker, so browsers
+// parse it as LOCAL time — an hour off in UK summer. Normalise any such value
+// to a real ISO UTC string before it leaves the API.
+function utcify(s) {
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
+}
 
 async function getAsset(env, id) {
   const row = await env.DB.prepare("SELECT data FROM assets WHERE id = ?").bind(id).first();
