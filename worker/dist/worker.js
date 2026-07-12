@@ -3110,6 +3110,133 @@ async function handle10(request, env, ctx, url) {
   return error("Unknown office route", 404, env, request);
 }
 
+// src/routes/keys.js
+async function keyAdmin(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { code: 401, error: "Not authenticated" };
+  const perms = await permissionsFor(env, sess.user.username);
+  if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return { code: 403, error: "Forbidden" };
+  return { sess };
+}
+async function getKey(env, id) {
+  const row = await env.DB.prepare("SELECT data FROM portal_keys WHERE id=?").bind(id).first();
+  if (!row) return null;
+  try {
+    return JSON.parse(row.data);
+  } catch {
+    return null;
+  }
+}
+async function putKey(env, key) {
+  await env.DB.prepare(`
+    INSERT INTO portal_keys (id, data) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET data=excluded.data
+  `).bind(key.id, JSON.stringify(key)).run();
+}
+function logMove(env, keyID, action, holder, byUser, note) {
+  return env.DB.prepare(
+    "INSERT INTO key_log (key_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?)"
+  ).bind(keyID, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
+}
+async function handle11(request, env, ctx, url) {
+  const cors = corsHeaders(env, request);
+  const { pathname, searchParams } = url;
+  const method = request.method.toUpperCase();
+  const json2 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  if (method === "GET" && pathname === "/keys") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const { results } = await env.DB.prepare("SELECT data FROM portal_keys").all();
+    const keys = [];
+    for (const r of results || []) {
+      try {
+        keys.push(JSON.parse(r.data));
+      } catch {
+      }
+    }
+    keys.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
+    return json2({ ok: true, keys });
+  }
+  if (method === "GET" && pathname === "/key/log") {
+    const gate = await keyAdmin(env, request);
+    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    const keyID = searchParams.get("keyID");
+    if (!keyID) return json2({ ok: false, error: "Missing keyID" }, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT action, holder, by_user, note, at FROM key_log WHERE key_id=? ORDER BY id DESC LIMIT 50"
+    ).bind(keyID).all();
+    return json2({ ok: true, log: results || [] });
+  }
+  if (method === "POST" && (pathname === "/key/add" || pathname === "/key/update")) {
+    const gate = await keyAdmin(env, request);
+    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    const b = await request.json().catch(() => ({}));
+    if (!String(b.label || "").trim()) return json2({ ok: false, error: "A key needs a label" }, 400);
+    if (pathname === "/key/add") {
+      const id = String(b.id || "").trim() || "K-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+      if (await getKey(env, id)) return json2({ ok: false, error: "Key ID already exists" }, 400);
+      const key2 = {
+        id,
+        label: String(b.label).trim(),
+        type: ["site", "van", "other"].includes(b.type) ? b.type : "other",
+        ref: String(b.ref || "").trim(),
+        // site name or van reg
+        notes: String(b.notes || "").trim(),
+        holder: "",
+        // "" = in the office
+        outSince: null,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      await putKey(env, key2);
+      return json2({ ok: true, key: key2 });
+    }
+    const key = await getKey(env, String(b.id || ""));
+    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    key.label = String(b.label).trim();
+    key.type = ["site", "van", "other"].includes(b.type) ? b.type : key.type;
+    key.ref = String(b.ref ?? key.ref ?? "").trim();
+    key.notes = String(b.notes ?? key.notes ?? "").trim();
+    await putKey(env, key);
+    return json2({ ok: true, key });
+  }
+  if (method === "POST" && pathname === "/key/sign-out") {
+    const gate = await keyAdmin(env, request);
+    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    const b = await request.json().catch(() => ({}));
+    const key = await getKey(env, String(b.id || ""));
+    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    const to = String(b.to || "").trim();
+    if (!to) return json2({ ok: false, error: "Choose who the key is signed to" }, 400);
+    key.holder = to;
+    key.outSince = (/* @__PURE__ */ new Date()).toISOString();
+    await putKey(env, key);
+    await logMove(env, key.id, "out", to, gate.sess.user.username, b.note);
+    return json2({ ok: true, key });
+  }
+  if (method === "POST" && pathname === "/key/sign-in") {
+    const gate = await keyAdmin(env, request);
+    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    const b = await request.json().catch(() => ({}));
+    const key = await getKey(env, String(b.id || ""));
+    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    const wasWith = key.holder || "";
+    key.holder = "";
+    key.outSince = null;
+    await putKey(env, key);
+    await logMove(env, key.id, "in", wasWith, gate.sess.user.username, b.note);
+    return json2({ ok: true, key });
+  }
+  if (method === "DELETE" && pathname === "/key/delete") {
+    const gate = await keyAdmin(env, request);
+    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    const id = searchParams.get("id");
+    if (!id) return json2({ ok: false, error: "Missing id" }, 400);
+    await env.DB.prepare("DELETE FROM portal_keys WHERE id=?").bind(id).run();
+    return json2({ ok: true });
+  }
+  return json2({ ok: false, error: "Not found: " + pathname }, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -3143,8 +3270,10 @@ var ROUTES = [
   ["*", "/daily-logs", handle8],
   ["*", "/sitelog", handle9],
   ["*", "/sitelog-launch", handle9],
-  ["*", "/office", handle10]
+  ["*", "/office", handle10],
   // office clock in/out + weekly timesheet
+  ["*", "/key", handle11]
+  // /keys, /key/* (key register)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.

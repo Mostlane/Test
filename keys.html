@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Key Register — Mostlane Portal</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
+    header.page { background:linear-gradient(180deg,#1A4F8F,#003468); color:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; color:#fff; }
+    .wrap { max-width:1000px; margin:16px auto 40px; padding:0 14px; }
+    .muted { color:#667085; font-size:13px; }
+    .btn { background:#0066cc; color:#fff; border:none; border-radius:9px; padding:9px 14px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b78; } .btn.red { background:#b00020; } .btn.green { background:#0c7d27; }
+    .btn.small { padding:7px 11px; font-size:13px; font-weight:500; }
+    .btn:disabled { opacity:.5; cursor:default; pointer-events:none; }
+
+    .kpis { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+    .kpi { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px 18px; flex:1; min-width:130px; }
+    .kpi b { display:block; font-size:26px; color:#003366; }
+    .kpi span { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:#667085; }
+
+    .bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .bar h2 { margin:0; font-size:17px; color:#003366; }
+    .bar input.search { flex:1; min-width:160px; padding:10px 12px; border:1px solid #ccd5dd; border-radius:9px; font-size:14px; font-family:inherit; }
+
+    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e8f0; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(6,24,54,.06); }
+    thead th { background:#f6f8fa; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#667085; padding:10px 12px; }
+    td { padding:10px 12px; border-top:1px solid #f0f3f7; font-size:13.5px; vertical-align:middle; }
+    tr:hover td { background:#fafcff; }
+    .pill { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+    .pill.site { background:#e2edff; color:#1a4f8f; }
+    .pill.van { background:#fff4e0; color:#9a6200; }
+    .pill.other { background:#eef1f4; color:#556; }
+    .pill.in { background:#e2f5e6; color:#0c7d27; }
+    .pill.out { background:#fdeaea; color:#b00020; }
+    td.acts { white-space:nowrap; text-align:right; } td.acts .btn { margin-left:4px; }
+
+    .mcards { display:none; }
+    @media (max-width:760px){
+      table { display:none; }
+      .mcards { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+      .kcard { background:#fff; border:1px solid #e2e8f0; border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; }
+      .kcard h3 { margin:0 0 4px; font-size:15px; color:#003366; }
+      .kcard p { margin:3px 0; font-size:13px; }
+      .kcard .acts { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
+      .kcard .acts .btn { flex:1; }
+    }
+
+    .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-start; justify-content:center; padding:16px; overflow:auto; z-index:500; }
+    .overlay.open { display:flex; }
+    .panel { background:#fff; border-radius:16px; width:100%; max-width:460px; padding:20px; margin-top:5vh; }
+    .panel h2 { margin:0 0 12px; font-size:17px; color:#003366; }
+    .panel label { font-size:12px; color:#667085; display:block; margin:10px 0 3px; }
+    .panel input, .panel select, .panel textarea { width:100%; padding:10px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    .panel .acts { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
+    .msg { font-size:13.5px; margin-top:8px; } .msg.err { color:#b00020; }
+    .hist p { margin:8px 0; font-size:13.5px; border-bottom:1px solid #f0f3f7; padding-bottom:8px; }
+    .hist p:last-child { border-bottom:none; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>🔑 Key Register</h1>
+    <a class="ml-back" data-role="home" href="assets-admin.html">← Plant &amp; Equipment</a>
+  </header>
+
+  <div class="wrap">
+    <div class="kpis">
+      <div class="kpi"><b id="kpiOut">–</b><span>Out right now</span></div>
+      <div class="kpi"><b id="kpiIn">–</b><span>In the office</span></div>
+    </div>
+
+    <div class="bar">
+      <h2>Keys</h2>
+      <span class="muted" id="countLbl"></span>
+      <input class="search" id="search" placeholder="Search label, site, van, holder…">
+      <button class="btn" id="addBtn">+ Add key</button>
+    </div>
+
+    <table>
+      <thead><tr><th>Key</th><th>Type</th><th>Site / Van</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="muted">Loading keys…</td></tr></tbody>
+    </table>
+    <div class="mcards" id="mrows"></div>
+  </div>
+
+  <!-- Add / edit key -->
+  <div class="overlay" id="keyModal">
+    <div class="panel">
+      <h2 id="modalTitle">Add key</h2>
+      <label>Label *</label><input id="f_label" placeholder="e.g. Tesco Ashford — plant room">
+      <label>Type</label>
+      <select id="f_type"><option value="site">Site key</option><option value="van">Van key</option><option value="other">Other</option></select>
+      <label>Site / van reference</label><input id="f_ref" placeholder="e.g. site name or van reg">
+      <label>Notes</label><input id="f_notes" placeholder="e.g. 2 keys on fob">
+      <p class="msg" id="keyMsg"></p>
+      <div class="acts">
+        <button class="btn grey" onclick="closeM('keyModal')">Cancel</button>
+        <button class="btn" id="saveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sign out -->
+  <div class="overlay" id="outModal">
+    <div class="panel">
+      <h2 id="outTitle">Sign key out</h2>
+      <label>Signed to *</label><select id="f_to"></select>
+      <label>Note (optional)</label><input id="f_outNote" placeholder="e.g. PPM visit, back Friday">
+      <p class="msg" id="outMsg"></p>
+      <div class="acts">
+        <button class="btn grey" onclick="closeM('outModal')">Cancel</button>
+        <button class="btn" id="outBtn">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="overlay" id="histModal">
+    <div class="panel">
+      <h2 id="histTitle">Key history</h2>
+      <div id="histContent" class="hist muted">Loading…</div>
+      <div class="acts"><button class="btn grey" onclick="closeM('histModal')">Close</button></div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.MOSTLANE_API;
+    const g = id => document.getElementById(id);
+    const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+    function authFetch(path, opts = {}) {
+      opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+      return fetch(API + path, opts);
+    }
+    const openM = id => g(id).classList.add("open");
+    const closeM = id => g(id).classList.remove("open");
+    const fmtDate = s => s ? new Date(s).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
+    const fmtWhen = s => s ? new Date(s).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "";
+
+    let KEYS = [], USERS = [], editId = null, outId = null;
+
+    (async () => {
+      try {
+        const me = await authFetch("/auth/me").then(r => r.json());
+        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.AssetAdmin === "Yes")) {
+          alert("This page needs Plant & Equipment admin rights."); location.href = "main.html"; return;
+        }
+      } catch (e) { location.href = "main.html"; return; }
+      loadUsers();
+      loadKeys();
+    })();
+
+    async function loadUsers() {
+      try {
+        const d = await authFetch("/users").then(r => r.json());
+        USERS = (d.Users || []).filter(u => u.Username && u.Status !== "Not Active");
+      } catch (e) {}
+    }
+
+    async function loadKeys() {
+      try {
+        const d = await authFetch("/keys").then(r => r.json());
+        KEYS = (d && d.keys) || [];
+        render();
+      } catch (e) {
+        g("rows").innerHTML = "<tr><td colspan='5' class='muted'>⚠️ Couldn't load keys — try again.</td></tr>";
+      }
+    }
+
+    const nameOf = uname => { const u = USERS.find(x => x.Username === uname); return u ? ((u.FirstName || "") + " " + (u.LastName || "")).trim() : (uname || ""); };
+    const TYPE = { site: ["site", "📍 Site"], van: ["van", "🚐 Van"], other: ["other", "🔑 Other"] };
+
+    function render() {
+      const out = KEYS.filter(k => k.holder).length;
+      g("kpiOut").textContent = out;
+      g("kpiIn").textContent = KEYS.length - out;
+      const q = g("search").value.trim().toLowerCase();
+      const list = KEYS.filter(k => !q ||
+        [k.label, k.ref, k.id, k.holder, nameOf(k.holder), k.notes].some(v => String(v || "").toLowerCase().includes(q)));
+      g("countLbl").textContent = KEYS.length ? KEYS.length + " key" + (KEYS.length === 1 ? "" : "s") : "";
+      if (!list.length) {
+        g("rows").innerHTML = "<tr><td colspan='5' class='muted'>" + (KEYS.length ? "No matches." : "No keys yet — tap “Add key”.") + "</td></tr>";
+        g("mrows").innerHTML = KEYS.length ? "<p class='muted'>No matches.</p>" : "";
+        return;
+      }
+      const typePill = k => { const t = TYPE[k.type] || TYPE.other; return `<span class="pill ${t[0]}">${t[1]}</span>`; };
+      const statusPill = k => k.holder
+        ? `<span class="pill out">👤 ${esc(nameOf(k.holder) || k.holder)}${k.outSince ? " · " + fmtDate(k.outSince) : ""}</span>`
+        : `<span class="pill in">🏢 In office</span>`;
+      const actions = k => (k.holder
+        ? `<button class="btn green small" data-in="${esc(k.id)}">↩ Sign in</button>`
+        : `<button class="btn small" data-out="${esc(k.id)}">Sign out</button>`)
+        + `<button class="btn grey small" data-hist="${esc(k.id)}">History</button>`
+        + `<button class="btn grey small" data-edit="${esc(k.id)}">Edit</button>`
+        + `<button class="btn red small" data-del="${esc(k.id)}">✕</button>`;
+      g("rows").innerHTML = list.map(k => `
+        <tr>
+          <td><b>${esc(k.label)}</b>${k.notes ? `<br><span class="muted">${esc(k.notes)}</span>` : ""}</td>
+          <td>${typePill(k)}</td>
+          <td>${esc(k.ref || "—")}</td>
+          <td>${statusPill(k)}</td>
+          <td class="acts">${actions(k)}</td>
+        </tr>`).join("");
+      g("mrows").innerHTML = list.map(k => `
+        <div class="kcard">
+          <h3>${esc(k.label)}</h3>
+          <p>${typePill(k)} ${k.ref ? " " + esc(k.ref) : ""}</p>
+          ${k.notes ? `<p class="muted">${esc(k.notes)}</p>` : ""}
+          <p>${statusPill(k)}</p>
+          <div class="acts">${actions(k)}</div>
+        </div>`).join("");
+    }
+    g("search").addEventListener("input", render);
+
+    document.addEventListener("click", e => {
+      const t = e.target;
+      if (t.dataset.out) openOut(t.dataset.out);
+      else if (t.dataset.in) signIn(t.dataset.in);
+      else if (t.dataset.hist) openHist(t.dataset.hist);
+      else if (t.dataset.edit) openEdit(t.dataset.edit);
+      else if (t.dataset.del) delKey(t.dataset.del);
+    });
+
+    // ── Add / edit ──
+    g("addBtn").onclick = () => {
+      editId = null;
+      g("modalTitle").textContent = "Add key";
+      ["f_label","f_ref","f_notes"].forEach(i => g(i).value = "");
+      g("f_type").value = "site"; g("keyMsg").textContent = "";
+      openM("keyModal");
+    };
+    function openEdit(id) {
+      const k = KEYS.find(x => x.id === id); if (!k) return;
+      editId = id;
+      g("modalTitle").textContent = "Edit key";
+      g("f_label").value = k.label || ""; g("f_type").value = k.type || "other";
+      g("f_ref").value = k.ref || ""; g("f_notes").value = k.notes || "";
+      g("keyMsg").textContent = "";
+      openM("keyModal");
+    }
+    g("saveBtn").onclick = async () => {
+      const msg = g("keyMsg"); msg.className = "msg";
+      const label = g("f_label").value.trim();
+      if (!label) { msg.className = "msg err"; msg.textContent = "Give the key a label."; return; }
+      const body = { id: editId || undefined, label, type: g("f_type").value, ref: g("f_ref").value.trim(), notes: g("f_notes").value.trim() };
+      g("saveBtn").disabled = true; msg.textContent = "Saving…";
+      try {
+        const r = await authFetch(editId ? "/key/update" : "/key/add", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Save failed");
+        closeM("keyModal"); loadKeys();
+      } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+      finally { g("saveBtn").disabled = false; }
+    };
+
+    async function delKey(id) {
+      const k = KEYS.find(x => x.id === id);
+      if (!confirm(`Delete "${(k && k.label) || id}" from the register? Its history is kept.`)) return;
+      try {
+        const r = await authFetch("/key/delete?id=" + encodeURIComponent(id), { method: "DELETE" }).then(r => r.json());
+        if (!r.ok) { alert(r.error || "Delete failed."); return; }
+        loadKeys();
+      } catch (e) { alert("Delete failed — try again."); }
+    }
+
+    // ── Sign out / in ──
+    function openOut(id) {
+      const k = KEYS.find(x => x.id === id); if (!k) return;
+      outId = id;
+      g("outTitle").textContent = "Sign out — " + (k.label || id);
+      g("f_to").innerHTML = `<option value="">— Choose person —</option>`
+        + USERS.map(u => `<option value="${esc(u.Username)}">${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("");
+      g("f_outNote").value = ""; g("outMsg").textContent = "";
+      openM("outModal");
+    }
+    g("outBtn").onclick = async () => {
+      const msg = g("outMsg"); msg.className = "msg";
+      const to = g("f_to").value;
+      if (!to) { msg.className = "msg err"; msg.textContent = "Choose who's taking the key."; return; }
+      g("outBtn").disabled = true; msg.textContent = "Signing out…";
+      try {
+        const r = await authFetch("/key/sign-out", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: outId, to, note: g("f_outNote").value.trim() })
+        }).then(r => r.json());
+        if (!r.ok) throw new Error(r.error || "Failed");
+        closeM("outModal"); loadKeys();
+      } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+      finally { g("outBtn").disabled = false; }
+    };
+
+    async function signIn(id) {
+      const k = KEYS.find(x => x.id === id);
+      if (!confirm(`Sign "${(k && k.label) || id}" back into the office?`)) return;
+      try {
+        const r = await authFetch("/key/sign-in", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id })
+        }).then(r => r.json());
+        if (!r.ok) { alert(r.error || "Failed."); return; }
+        loadKeys();
+      } catch (e) { alert("Sign in failed — try again."); }
+    }
+
+    // ── History ──
+    async function openHist(id) {
+      const k = KEYS.find(x => x.id === id);
+      g("histTitle").textContent = "History — " + ((k && k.label) || id);
+      g("histContent").className = "hist muted"; g("histContent").textContent = "Loading…";
+      openM("histModal");
+      try {
+        const d = await authFetch("/key/log?keyID=" + encodeURIComponent(id)).then(r => r.json());
+        if (!d.ok) throw new Error(d.error || "Failed");
+        const log = d.log || [];
+        g("histContent").className = "hist";
+        g("histContent").innerHTML = log.length ? log.map(l => {
+          const who = esc(nameOf(l.holder) || l.holder || "?");
+          const by = esc(nameOf(l.by_user) || l.by_user || "?");
+          return l.action === "out"
+            ? `<p>📤 Signed out to <b>${who}</b> <span class="muted">by ${by} · ${fmtWhen(l.at)}${l.note ? " · " + esc(l.note) : ""}</span></p>`
+            : `<p>📥 Signed back in${l.holder ? ` from <b>${who}</b>` : ""} <span class="muted">by ${by} · ${fmtWhen(l.at)}${l.note ? " · " + esc(l.note) : ""}</span></p>`;
+        }).join("") : "<p>No movements yet.</p>";
+      } catch (e) { g("histContent").textContent = "History unavailable."; }
+    }
+  </script>
+</body>
+</html>
