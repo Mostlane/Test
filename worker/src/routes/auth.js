@@ -159,7 +159,13 @@ export async function loginHistory(request, env, ctx, url) {
     ? env.DB.prepare(cols + " WHERE username = ? ORDER BY at DESC LIMIT 200").bind(username)
     : env.DB.prepare(cols + " ORDER BY at DESC LIMIT 200");
   const { results } = await stmt.all();
-  return json({ ok: true, history: results || [] }, {}, env, request);
+  // SQLite datetime('now') stamps are UTC with no timezone marker — mark them
+  // so browsers don't misread them as local time (an hour off in UK summer).
+  const history = (results || []).map(r => ({
+    ...r,
+    at: /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(r.at || "")) ? r.at.replace(" ", "T") + "Z" : r.at,
+  }));
+  return json({ ok: true, history }, {}, env, request);
 }
 
 // Constant-time-ish string compare for the master password check.
