@@ -1534,6 +1534,56 @@ async function handle5(request, env, ctx, url) {
       sampleKeys: objects.slice(0, 6).map((o) => o.key)
     });
   }
+  if (method === "GET" && pathname === "/asset/condition-photos") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    const assetID = searchParams.get("assetID");
+    if (!assetID) return json2({ ok: false, error: "Missing assetID" }, 400);
+    const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
+    const keyOf = (u) => {
+      try {
+        return decodeURIComponent((String(u).split("key=")[1] || "").split("&")[0]);
+      } catch {
+        return "";
+      }
+    };
+    const rebase = (u) => {
+      const k = keyOf(u);
+      return k ? toUrl(k) : u;
+    };
+    const photos = [];
+    const { results } = await env.DB.prepare(
+      "SELECT data FROM asset_transfers WHERE asset_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE'"
+    ).bind(assetID).all();
+    for (const row of results || []) {
+      let n;
+      try {
+        n = JSON.parse(row.data);
+      } catch {
+        continue;
+      }
+      for (const u of n.conditionSender || [])
+        photos.push({ url: rebase(u), takenAt: n.requestedAt, by: n.from, role: "handover", counterparty: n.to, transferId: n.transferId });
+      for (const u of n.conditionRecipient || [])
+        photos.push({ url: rebase(u), takenAt: n.acceptedAt, by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
+    }
+    const { results: reqs } = await env.DB.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE asset_id=? AND status='pending' AND condition_photos IS NOT NULL"
+    ).bind(assetID).all();
+    for (const r of reqs || []) {
+      let c = {};
+      try {
+        c = JSON.parse(r.condition_photos || "{}");
+      } catch {
+      }
+      for (const k of c.sender || [])
+        photos.push({ url: toUrl(k), takenAt: r.requested_at, by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
+    }
+    photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
+    return json2({ ok: true, assetID, photos });
+  }
   if (method === "POST" && pathname === "/asset/r2-unlink") {
     const sess = await requireSession(env, request);
     if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
