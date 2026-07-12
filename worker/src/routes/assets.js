@@ -15,13 +15,20 @@
 
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
   const json = (data, code = 200) =>
     new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+
+  // Tenant is always server-derived: from the verified session, or — for the
+  // pre-auth public image routes — from the request host. Every tenant-table
+  // query goes through `db` and binds `db.tenantId`.
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
 
   // ── Image upload (multipart) -> R2 ─────────────────────────────────────────
   if (method === "POST" && pathname === "/upload-asset-image") {
@@ -88,12 +95,12 @@ export async function handle(request, env, ctx, url) {
 
       await env.ASSET_BUCKET.delete(r2Key);
 
-      const asset = await getAsset(env, assetId);
+      const asset = await getAsset(env, tenantId, assetId);
       if (!asset) return json({ ok: false, error: "Asset not found" }, 404);
 
       const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
       asset.images = (asset.images || []).filter(u => u !== fullUrl);
-      await putAsset(env, asset);
+      await putAsset(env, tenantId, asset);
 
       return json({ ok: true, message: "Image deleted", removedKey: r2Key });
     } catch (err) {
@@ -106,8 +113,8 @@ export async function handle(request, env, ctx, url) {
     try {
       const user = searchParams.get("user");
       const stmt = user
-        ? env.DB.prepare("SELECT data FROM assets WHERE assigned_to = ?").bind(user)
-        : env.DB.prepare("SELECT data FROM assets");
+        ? db.prepare("SELECT data FROM assets WHERE tenant_id = ? AND assigned_to = ?").bind(db.tenantId, user)
+        : db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId);
       const { results } = await stmt.all();
       const assets = (results || []).map(r => JSON.parse(r.data));
       return json({ assets });
@@ -121,7 +128,7 @@ export async function handle(request, env, ctx, url) {
     try {
       const body = await request.json();
       if (!body.id) return json({ error: "Missing ID" }, 400);
-      await putAsset(env, body);
+      await putAsset(env, tenantId, body);
       return json({ ok: true, message: `Asset ${body.id} added.` });
     } catch (err) {
       return json({ error: "Failed to add asset", details: err.message }, 500);
@@ -134,9 +141,9 @@ export async function handle(request, env, ctx, url) {
       const body = await request.json();
       if (!body.id) return json({ error: "Missing ID" }, 400);
 
-      const existing = await getAsset(env, body.id);
+      const existing = await getAsset(env, tenantId, body.id);
       const updated = { ...existing, ...body };
-      await putAsset(env, updated);
+      await putAsset(env, tenantId, updated);
 
       if (existing && existing.assignedTo !== body.assignedTo) {
         const log = {
@@ -146,7 +153,7 @@ export async function handle(request, env, ctx, url) {
           timestamp: new Date().toISOString(),
           pdfURL: updated.pdfURL || null
         };
-        await putTransfer(env, log);
+        await putTransfer(env, tenantId, log);
       }
 
       return json({ ok: true, message: `Asset ${body.id} updated.` });
@@ -161,14 +168,14 @@ export async function handle(request, env, ctx, url) {
       const log = await request.json();
       if (!log.assetID) return json({ error: "Missing assetID" }, 400);
 
-      const asset = await getAsset(env, log.assetID);
+      const asset = await getAsset(env, tenantId, log.assetID);
       if (asset) {
         asset.assignedTo = log.to;
         asset.lastTransfer = log.timestamp || new Date().toISOString();
         asset.pdfURL = log.pdfURL || asset.pdfURL;
-        await putAsset(env, asset);
+        await putAsset(env, tenantId, asset);
       }
-      await putTransfer(env, log);
+      await putTransfer(env, tenantId, log);
 
       return json({ ok: true, message: `Transfer logged for ${log.assetID}` });
     } catch (err) {
@@ -181,9 +188,9 @@ export async function handle(request, env, ctx, url) {
     const assetID = searchParams.get("assetID");
     if (!assetID) return json({ error: "Missing assetID" }, 400);
     try {
-      const { results } = await env.DB.prepare(
-        "SELECT data FROM asset_transfers WHERE asset_id = ? ORDER BY id ASC"
-      ).bind(assetID).all();
+      const { results } = await db.prepare(
+        "SELECT data FROM asset_transfers WHERE tenant_id = ? AND asset_id = ? ORDER BY id ASC"
+      ).bind(db.tenantId, assetID).all();
       return json((results || []).map(r => JSON.parse(r.data)));
     } catch (err) {
       return json({ error: "Failed to load logs", details: err.message }, 500);
@@ -195,7 +202,7 @@ export async function handle(request, env, ctx, url) {
     try {
       const id = searchParams.get("id");
       if (!id) return json({ error: "Missing ID" }, 400);
-      await env.DB.prepare("DELETE FROM assets WHERE id = ?").bind(id).run();
+      await db.prepare("DELETE FROM assets WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).run();
       return json({ ok: true, message: `Asset ${id} deleted.` });
     } catch (err) {
       return json({ error: "Failed to delete asset", details: err.message }, 500);
@@ -208,7 +215,7 @@ export async function handle(request, env, ctx, url) {
   if (method === "POST" && pathname === "/asset/r2-relink") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
     if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
 
     // List the whole bucket (paginated).
@@ -229,7 +236,7 @@ export async function handle(request, env, ctx, url) {
       (byAsset[pfx] || (byAsset[pfx] = [])).push(o.key);
     }
 
-    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let updated = 0;
     for (const row of results || []) {
       let asset; try { asset = JSON.parse(row.data); } catch { continue; }
@@ -238,7 +245,7 @@ export async function handle(request, env, ctx, url) {
       const urls = keys.sort().map(k => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`);
       if (JSON.stringify(asset.images || []) === JSON.stringify(urls)) continue;
       asset.images = urls;
-      await putAsset(env, asset);
+      await putAsset(env, tenantId, asset);
       updated++;
     }
     return json({
@@ -255,7 +262,7 @@ export async function handle(request, env, ctx, url) {
   if (method === "GET" && pathname === "/asset/condition-photos") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
     if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
     const assetID = searchParams.get("assetID");
     if (!assetID) return json({ ok: false, error: "Missing assetID" }, 400);
@@ -266,9 +273,9 @@ export async function handle(request, env, ctx, url) {
     const photos = [];
 
     // Completed transfers — photos live on the signed notes.
-    const { results } = await env.DB.prepare(
-      "SELECT data FROM asset_transfers WHERE asset_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE'"
-    ).bind(assetID).all();
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND asset_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE'"
+    ).bind(db.tenantId, assetID).all();
     for (const row of results || []) {
       let n; try { n = JSON.parse(row.data); } catch { continue; }
       for (const u of n.conditionSender || [])
@@ -277,9 +284,9 @@ export async function handle(request, env, ctx, url) {
         photos.push({ url: rebase(u), takenAt: utcify(n.acceptedAt), by: n.acceptedBy || n.to, role: "received", counterparty: n.from, transferId: n.transferId });
     }
     // Pending transfers — the sender's drop-off photos, not yet on a note.
-    const { results: reqs } = await env.DB.prepare(
-      "SELECT * FROM asset_transfer_requests WHERE asset_id=? AND status='pending' AND condition_photos IS NOT NULL"
-    ).bind(assetID).all();
+    const { results: reqs } = await db.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending' AND condition_photos IS NOT NULL"
+    ).bind(db.tenantId, assetID).all();
     for (const r of reqs || []) {
       let c = {}; try { c = JSON.parse(r.condition_photos || "{}"); } catch {}
       for (const k of c.sender || [])
@@ -294,15 +301,15 @@ export async function handle(request, env, ctx, url) {
   if (method === "POST" && pathname === "/asset/r2-unlink") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
     if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
-    const { results } = await env.DB.prepare("SELECT id, data FROM assets").all();
+    const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let cleared = 0;
     for (const row of results || []) {
       let asset; try { asset = JSON.parse(row.data); } catch { continue; }
       if (!asset.images || !asset.images.length) continue;
       delete asset.images;
-      await putAsset(env, asset);
+      await putAsset(env, tenantId, asset);
       cleared++;
     }
     return json({ ok: true, cleared });
@@ -317,9 +324,9 @@ export async function handle(request, env, ctx, url) {
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
-    const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE lower(to_user)=lower(?) AND status='pending'"
-    ).bind(sess.user.username).first();
+    const row = await db.prepare(
+      "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
+    ).bind(db.tenantId, sess.user.username).first();
     return json({ ok: true, count: Number(row?.n || 0) });
   }
 
@@ -328,12 +335,12 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
-    const { results } = await env.DB.prepare(
-      "SELECT * FROM asset_transfer_requests WHERE status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
-    ).bind(me, me).all();
+    const { results } = await db.prepare(
+      "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
+    ).bind(db.tenantId, me, me).all();
     const shaped = [];
     for (const r of results || []) {
-      const asset = await getAsset(env, r.asset_id);
+      const asset = await getAsset(env, tenantId, r.asset_id);
       let cond = {}; try { cond = r.condition_photos ? JSON.parse(r.condition_photos) : {}; } catch {}
       shaped.push({
         id: r.id, assetId: r.asset_id, from: r.from_user, to: r.to_user,
@@ -358,30 +365,30 @@ export async function handle(request, env, ctx, url) {
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     if (!b.assetId || !b.to) return json({ ok: false, error: "assetId and to required" }, 400);
-    const asset = await getAsset(env, b.assetId);
+    const asset = await getAsset(env, tenantId, b.assetId);
     if (!asset) return json({ ok: false, error: "Asset not found" }, 404);
     const me = sess.user.username;
     const holder = String(asset.assignedTo || "");
     if (holder.toLowerCase() !== me.toLowerCase()) {
-      const perms = await permissionsFor(env, me);
+      const perms = await permissionsFor(env, tenantId, me);
       if (perms.FullAccess !== "Yes") return json({ ok: false, error: "Only the current holder can transfer this item" }, 403);
     }
     if (String(b.to).toLowerCase() === holder.toLowerCase())
       return json({ ok: false, error: "That person already holds this item" }, 400);
-    const dup = await env.DB.prepare(
-      "SELECT id FROM asset_transfer_requests WHERE asset_id=? AND status='pending'"
-    ).bind(b.assetId).first();
+    const dup = await db.prepare(
+      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
+    ).bind(db.tenantId, b.assetId).first();
     if (dup) return json({ ok: false, error: "This item already has a transfer pending" }, 409);
-    const res = await env.DB.prepare(
-      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?)"
-    ).bind(b.assetId, holder || me, b.to, b.note || null, new Date().toISOString()).run();
+    const res = await db.prepare(
+      "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at, tenant_id) VALUES (?,?,?,?,?,?)"
+    ).bind(b.assetId, holder || me, b.to, b.note || null, new Date().toISOString(), db.tenantId).run();
     const reqId = res.meta.last_row_id;
     // Optional condition photos from the person handing the item over —
     // timestamped evidence of state at drop-off.
     const senderKeys = await saveConditionPhotos(env, reqId, "sender", b.photos);
     if (senderKeys.length) {
-      await env.DB.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE id=?")
-        .bind(JSON.stringify({ sender: senderKeys, recipient: [] }), reqId).run();
+      await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?")
+        .bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
     }
     return json({ ok: true, id: reqId });
   }
@@ -392,7 +399,7 @@ export async function handle(request, env, ctx, url) {
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     if (!b.id || !b.signature) return json({ ok: false, error: "id and signature required" }, 400);
-    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
     if (!req) return json({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
     const me = sess.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
@@ -406,7 +413,7 @@ export async function handle(request, env, ctx, url) {
     await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
 
     const now = new Date().toISOString();
-    const asset = await getAsset(env, req.asset_id);
+    const asset = await getAsset(env, tenantId, req.asset_id);
     const when = londonWhen(now);
 
     // Condition photos: the sender's from drop-off (already stored) plus any
@@ -414,8 +421,8 @@ export async function handle(request, env, ctx, url) {
     let cond = {}; try { cond = req.condition_photos ? JSON.parse(req.condition_photos) : {}; } catch {}
     const recipientKeys = await saveConditionPhotos(env, req.id, "recipient", b.photos);
     cond = { sender: cond.sender || [], recipient: recipientKeys };
-    await env.DB.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE id=?")
-      .bind(JSON.stringify(cond), req.id).run();
+    await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?")
+      .bind(JSON.stringify(cond), db.tenantId, req.id).run();
     const toUrl = k => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
 
     // The signed transfer note — the permanent paperwork trail. The statement
@@ -450,16 +457,16 @@ export async function handle(request, env, ctx, url) {
           `when ${me} accepted the item and signed this note.`
         : `This item was previously unassigned; custody was issued directly to ${me} on ${when}.`
     };
-    await putTransfer(env, { ...note, timestamp: now });
+    await putTransfer(env, tenantId, { ...note, timestamp: now });
 
     if (asset) {
       asset.assignedTo = req.to_user;
       asset.lastTransfer = now;
-      await putAsset(env, asset);
+      await putAsset(env, tenantId, asset);
     }
-    await env.DB.prepare(
-      "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE id=?"
-    ).bind(now, sigKey, req.id).run();
+    await db.prepare(
+      "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
+    ).bind(now, sigKey, db.tenantId, req.id).run();
 
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
     return json({ ok: true, note });
@@ -470,14 +477,14 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
     if (!req) return json({ ok: false, error: "Transfer not found" }, 404);
     const me = sess.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
       return json({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
     const now = new Date().toISOString();
-    await env.DB.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE id=?").bind(now, req.id).run();
-    await putTransfer(env, {
+    await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
+    await putTransfer(env, tenantId, {
       type: "TRANSFER_REJECTED", transferId: req.id, assetID: req.asset_id,
       from: req.from_user, to: req.to_user, reason: b.reason || "", timestamp: now
     });
@@ -489,15 +496,15 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    const req = await env.DB.prepare("SELECT * FROM asset_transfer_requests WHERE id=? AND status='pending'").bind(b.id).first();
+    const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
     if (!req) return json({ ok: false, error: "Transfer not found" }, 404);
     const me = sess.user.username;
     if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
-      const perms = await permissionsFor(env, me);
+      const perms = await permissionsFor(env, tenantId, me);
       if (perms.FullAccess !== "Yes") return json({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
     }
-    await env.DB.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE id=?")
-      .bind(new Date().toISOString(), req.id).run();
+    await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?")
+      .bind(new Date().toISOString(), db.tenantId, req.id).run();
     return json({ ok: true });
   }
 
@@ -510,20 +517,20 @@ export async function handle(request, env, ctx, url) {
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const id = searchParams.get("id");
     if (!id) return json({ ok: false, error: "Missing id" }, 400);
-    const { results } = await env.DB.prepare(
-      "SELECT data FROM asset_transfers WHERE json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
-    ).bind(Number(id)).all();
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
+    ).bind(db.tenantId, Number(id)).all();
     if (!results || !results.length) return json({ ok: false, error: "Note not found" }, 404);
     const note = JSON.parse(results[0].data);
 
     const me = sess.user.username, meL = me.toLowerCase();
-    const perms = await permissionsFor(env, me);
+    const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (!admin) {
       const isFrom = String(note.from || "").toLowerCase() === meL;
       let isCurrentTo = false;
       if (String(note.to || "").toLowerCase() === meL) {
-        const a = await getAsset(env, note.assetID);
+        const a = await getAsset(env, tenantId, note.assetID);
         isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
       }
       if (!isFrom && !isCurrentTo)
@@ -542,11 +549,11 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username, meL = me.toLowerCase();
-    const { results } = await env.DB.prepare(
-      "SELECT data FROM asset_transfers WHERE json_extract(data,'$.type')='TRANSFER_NOTE' " +
+    const { results } = await db.prepare(
+      "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE' " +
       "AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
-    ).bind(meL, meL).all();
-    const { results: held } = await env.DB.prepare("SELECT id FROM assets WHERE lower(assigned_to)=?").bind(meL).all();
+    ).bind(db.tenantId, meL, meL).all();
+    const { results: held } = await db.prepare("SELECT id FROM assets WHERE tenant_id=? AND lower(assigned_to)=?").bind(db.tenantId, meL).all();
     const heldSet = new Set((held || []).map(h => h.id));
     const acceptance = [], releases = [], seen = new Set();
     for (const row of results || []) {
@@ -574,22 +581,25 @@ function utcify(s) {
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
 }
 
-async function getAsset(env, id) {
-  const row = await env.DB.prepare("SELECT data FROM assets WHERE id = ?").bind(id).first();
+async function getAsset(env, tenantId, id) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT data FROM assets WHERE tenant_id=? AND id = ?").bind(db.tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
 }
 
-async function putAsset(env, asset) {
-  await env.DB.prepare(`
-    INSERT INTO assets (id, assigned_to, data) VALUES (?,?,?)
+async function putAsset(env, tenantId, asset) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO assets (id, assigned_to, data, tenant_id) VALUES (?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET assigned_to = excluded.assigned_to, data = excluded.data
-  `).bind(asset.id, asset.assignedTo || null, JSON.stringify(asset)).run();
+  `).bind(asset.id, asset.assignedTo || null, JSON.stringify(asset), db.tenantId).run();
 }
 
-async function putTransfer(env, log) {
-  await env.DB.prepare(
-    "INSERT INTO asset_transfers (asset_id, at, data) VALUES (?,?,?)"
-  ).bind(log.assetID, log.timestamp || new Date().toISOString(), JSON.stringify(log)).run();
+async function putTransfer(env, tenantId, log) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO asset_transfers (asset_id, at, data, tenant_id) VALUES (?,?,?,?)"
+  ).bind(log.assetID, log.timestamp || new Date().toISOString(), JSON.stringify(log), db.tenantId).run();
 }
 
 // Store condition-photo data URLs (max 6, PNG/JPEG) in R2 under the transfer.

@@ -12,9 +12,31 @@
 
 PRAGMA foreign_keys = ON;
 
+-- ── Tenants (multi-tenant SaaS foundation) ──────────────────────────────────
+-- One row per customer company. Every data table carries a tenant_id pointing
+-- here; a request may only ever touch its own tenant's rows (enforced by
+-- lib/tenantdb.js). Tenant 1 = the origin company (Mostlane). Existing live
+-- data is migrated with worker/migrations/001-multitenant.sql.
+CREATE TABLE IF NOT EXISTS tenants (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug         TEXT UNIQUE,
+  company_name TEXT NOT NULL,
+  status       TEXT DEFAULT 'active',   -- active | trialing | past_due | suspended | cancelled
+  plan         TEXT DEFAULT 'standard',
+  seat_limit   INTEGER,
+  branding     TEXT,                    -- JSON: logo, accent colour, menu bg
+  stripe_customer_id     TEXT,
+  stripe_subscription_id TEXT,
+  trial_ends_at TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO tenants (id, slug, company_name, status)
+VALUES (1, 'mostlane', 'Mostlane', 'active');
+
 -- ── Users & access ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id       INTEGER NOT NULL DEFAULT 1,
   engineer_number TEXT,
   first_name      TEXT,
   last_name       TEXT,
@@ -38,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- Sites, Users, DeviceAdmin, EngineersHoursMenu, Projects, ProjectsAdmin,
 -- HolidayAdmin, Weekly, TimesheetAdmin, LabourPlanning, SLA, Vehicles, ...).
 CREATE TABLE IF NOT EXISTS user_permissions (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   username   TEXT NOT NULL,
   permission TEXT NOT NULL,
   value      INTEGER NOT NULL DEFAULT 0,  -- 0 = No, 1 = Yes
@@ -46,6 +69,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
 
 -- ── Sessions (server-side auth — replaces localStorage-only "logged in") ────
 CREATE TABLE IF NOT EXISTS sessions (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   token       TEXT PRIMARY KEY,          -- random id; signed value sent to client
   username    TEXT NOT NULL,
   device_id   TEXT,
@@ -56,6 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_username ON sessions(username);
 
 -- Story Mode: one shift row per engineer per day (clock on/off, mileage, fuel).
 CREATE TABLE IF NOT EXISTS shifts (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   username      TEXT NOT NULL,
   date          TEXT NOT NULL,
   clock_on_at   TEXT,
@@ -73,6 +98,7 @@ CREATE TABLE IF NOT EXISTS shifts (
 -- The weekly master timesheet sums each user's segments per day. The clock only
 -- shows on devices flagged office_clock=1 for a user holding the OfficeClock perm.
 CREATE TABLE IF NOT EXISTS office_shifts (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   username   TEXT NOT NULL,
   date       TEXT NOT NULL,          -- Europe/London calendar day yyyy-mm-dd (of the effective start)
@@ -93,6 +119,7 @@ CREATE INDEX IF NOT EXISTS idx_office_shifts_date ON office_shifts(date);
 
 -- Customers (clients) — own sites; billing details feed quoting/invoicing.
 CREATE TABLE IF NOT EXISTS customers (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id              TEXT PRIMARY KEY,   -- slug, matches sites.client
   name            TEXT,
   contact_name    TEXT,
@@ -107,6 +134,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
 -- Sites — replaces the mostlane-sites Worker's KV. Full site JSON in `data`.
 CREATE TABLE IF NOT EXISTS sites (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   client      TEXT NOT NULL,          -- customer id (slug)
   site_number TEXT NOT NULL,
   site_name   TEXT,
@@ -120,6 +148,7 @@ CREATE TABLE IF NOT EXISTS sites (
 
 -- On-call rota: append-only log; the latest row per role is the current holder.
 CREATE TABLE IF NOT EXISTS oncall_log (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id     INTEGER PRIMARY KEY AUTOINCREMENT,
   role   TEXT NOT NULL,             -- 'engineer' | 'manager'
   name   TEXT NOT NULL,
@@ -129,6 +158,7 @@ CREATE TABLE IF NOT EXISTS oncall_log (
 
 -- Engineer daily logs (replaces the Zapier daily-log form).
 CREATE TABLE IF NOT EXISTS daily_logs (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   engineer       TEXT NOT NULL,
   date           TEXT NOT NULL,
@@ -144,6 +174,7 @@ CREATE TABLE IF NOT EXISTS daily_logs (
 
 -- Story Mode: one weekly vehicle (van walkaround) check per engineer.
 CREATE TABLE IF NOT EXISTS vehicle_checks (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   username      TEXT NOT NULL,
   week          TEXT NOT NULL,   -- Monday date yyyy-mm-dd
   vehicle       TEXT,
@@ -156,6 +187,7 @@ CREATE TABLE IF NOT EXISTS vehicle_checks (
 
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   token      TEXT PRIMARY KEY,
   username   TEXT NOT NULL,
   expires_at TEXT NOT NULL,
@@ -166,6 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_pwreset_username ON password_resets(username);
 
 -- Device locking (replaces userdevicekv Worker)
 CREATE TABLE IF NOT EXISTS devices (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   device_id   TEXT PRIMARY KEY,
   username    TEXT NOT NULL,
   label       TEXT,
@@ -176,6 +209,7 @@ CREATE INDEX IF NOT EXISTS idx_devices_username ON devices(username);
 
 -- Login history (replaces login /admin/login-history)
 CREATE TABLE IF NOT EXISTS login_history (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   username  TEXT,
   device_id TEXT,
@@ -192,6 +226,7 @@ CREATE TABLE IF NOT EXISTS login_history (
 -- ── Holidays (full port of mostlane-holidays Worker) ────────────────────────
 -- Leave requests (was HOLIDAYS_KV `holiday:<id>`).
 CREATE TABLE IF NOT EXISTS holidays (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id           TEXT PRIMARY KEY,          -- "H-<timestamp>"
   username     TEXT NOT NULL,
   engineer     TEXT,                      -- display name (username with dot->space)
@@ -214,6 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_holidays_year_status ON holidays(year, status);
 -- System-generated per-user days for bank holidays & company shutdowns
 -- (was HOLIDAYS_KV `system:<kind>:<year>:<date>:<username>`).
 CREATE TABLE IF NOT EXISTS holiday_system_days (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   kind       TEXT NOT NULL,               -- 'bankholiday' | 'shutdown'
   year       INTEGER NOT NULL,
   date       TEXT NOT NULL,
@@ -234,6 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_sysdays_year_user ON holiday_system_days(year, us
 
 -- Per-user yearly allowance override (was HOLIDAY_CONFIG_KV `allowance:<year>:<user>`).
 CREATE TABLE IF NOT EXISTS holiday_allowance (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   year      INTEGER NOT NULL,
   username  TEXT NOT NULL,
   allowance INTEGER NOT NULL,
@@ -242,6 +279,7 @@ CREATE TABLE IF NOT EXISTS holiday_allowance (
 
 -- Audit log (was HOLIDAY_LOG_KV `log:<id>:<ts>`).
 CREATE TABLE IF NOT EXISTS holiday_log (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   request_id TEXT,
   action     TEXT,
@@ -261,6 +299,7 @@ CREATE TABLE IF NOT EXISTS holiday_log (
 -- in `data`, with assigned_to denormalised for the /assets?user= filter.
 -- Asset images stay in the ASSET_BUCKET R2 bucket.
 CREATE TABLE IF NOT EXISTS assets (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id          TEXT PRIMARY KEY,
   assigned_to TEXT,
   data        TEXT NOT NULL                -- full asset JSON (name, serial, value,
@@ -271,6 +310,7 @@ CREATE INDEX IF NOT EXISTS idx_assets_assigned ON assets(assigned_to);
 -- Transfer log (was ASSET_LOG_KV key `<assetID>-<timestamp>`). Full log JSON in
 -- `data`; asset_id + at denormalised for lookups/ordering.
 CREATE TABLE IF NOT EXISTS asset_transfers (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
   asset_id TEXT NOT NULL,
   at       TEXT,
@@ -282,6 +322,7 @@ CREATE INDEX IF NOT EXISTS idx_asset_tx_asset ON asset_transfers(asset_id);
 -- accept (signing a transfer note — logged in asset_transfers) or reject it.
 -- The recipient's pending count drives the red badge on Plant & Equipment.
 CREATE TABLE IF NOT EXISTS asset_transfer_requests (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   asset_id      TEXT NOT NULL,
   from_user     TEXT,
@@ -301,6 +342,7 @@ CREATE INDEX IF NOT EXISTS idx_atr_asset ON asset_transfer_requests(asset_id, st
 -- (events, statusHistory, signature, etc.) exactly as the front end expects.
 -- Binary files (photos/signatures) stay in the JOB_FILES R2 bucket.
 CREATE TABLE IF NOT EXISTS sla_jobs (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id           TEXT PRIMARY KEY,
   helpdesk_ref TEXT,
   description  TEXT,
@@ -322,6 +364,7 @@ CREATE INDEX IF NOT EXISTS idx_sla_site     ON sla_jobs(site_code);
 
 -- Generic key/value config store (replaces SLA_CONFIG KV; reusable elsewhere).
 CREATE TABLE IF NOT EXISTS app_config (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
@@ -332,10 +375,12 @@ CREATE TABLE IF NOT EXISTS app_config (
 -- append-only sign-out/sign-in audit trail; rows are kept even if the key
 -- record is later deleted.
 CREATE TABLE IF NOT EXISTS portal_keys (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id   TEXT PRIMARY KEY,
   data TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS key_log (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   key_id  TEXT NOT NULL,
   action  TEXT NOT NULL,            -- 'out' | 'in'
@@ -351,6 +396,7 @@ CREATE INDEX IF NOT EXISTS idx_key_log_key ON key_log(key_id, id);
 -- (action 'shown'), plus 'snoozed' / 'dismissed' / 'opened'. `items` is the
 -- JSON list of what was on screen. Proof against "mine never showed that".
 CREATE TABLE IF NOT EXISTS notify_log (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL,
   action   TEXT NOT NULL,            -- 'shown' | 'snoozed' | 'dismissed' | 'opened'
@@ -365,6 +411,7 @@ CREATE INDEX IF NOT EXISTS idx_notify_log_user ON notify_log(username, id);
 -- the middleware in index.js) plus page views (method 'VIEW', posted by
 -- portal-config). Pruned automatically to 12 months.
 CREATE TABLE IF NOT EXISTS audit_log (
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL,
   method   TEXT NOT NULL,            -- POST | PUT | PATCH | DELETE | VIEW

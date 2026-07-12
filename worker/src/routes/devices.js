@@ -9,9 +9,13 @@
 
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
+
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
 
   // The portal owner is exempt from device locking entirely — any device,
   // no registration, no caps. (Matches the View As owner account.)
@@ -22,8 +26,8 @@ export async function handle(request, env, ctx, url) {
     if (!username || !deviceId) return error("username and deviceId required", 400, env, request);
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);
 
-    const dev = await env.DB.prepare("SELECT * FROM devices WHERE device_id = ?")
-      .bind(deviceId).first();
+    const dev = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?")
+      .bind(db.tenantId, deviceId).first();
 
     if (!dev) {
       // device unknown — is this user already on another device?
@@ -42,8 +46,8 @@ export async function handle(request, env, ctx, url) {
     // could later block someone else logging in on the same machine.
     if (username === OWNER) return json({ status: "OK" }, {}, env, request);
 
-    const existing = await env.DB.prepare("SELECT * FROM devices WHERE device_id = ?")
-      .bind(deviceId).first();
+    const existing = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND device_id = ?")
+      .bind(db.tenantId, deviceId).first();
     if (existing && existing.username !== username)
       return json({ status: "DEVICE_MISMATCH" }, {}, env, request);
 
@@ -51,18 +55,18 @@ export async function handle(request, env, ctx, url) {
     // user's profile; default 1, or unlimited). Existing devices always re-register;
     // only a brand-new device beyond the cap is refused.
     if (!existing) {
-      const s = await deviceSettings(env, username);
+      const s = await deviceSettings(env, tenantId, username);
       if (!s.unlimited) {
-        const { count } = await env.DB.prepare("SELECT COUNT(*) AS count FROM devices WHERE username=?").bind(username).first();
+        const { count } = await db.prepare("SELECT COUNT(*) AS count FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
         if (Number(count) >= s.allowedDevices)
           return json({ status: "DEVICE_LIMIT_REACHED", allowed: s.allowedDevices }, {}, env, request);
       }
     }
 
-    await env.DB.prepare(`
-      INSERT INTO devices (device_id, username, label) VALUES (?,?,?)
+    await db.prepare(`
+      INSERT INTO devices (tenant_id, device_id, username, label) VALUES (?,?,?,?)
       ON CONFLICT(device_id) DO UPDATE SET username=excluded.username, label=excluded.label
-    `).bind(deviceId, username, label || null).run();
+    `).bind(db.tenantId, deviceId, username, label || null).run();
     return json({ status: "OK" }, {}, env, request);
   }
 
@@ -72,8 +76,8 @@ export async function handle(request, env, ctx, url) {
   if (path === "/device/admin-list" && request.method === "GET") {
     const gate = await requireDeviceAdmin(env, request);
     if (gate) return gate;
-    const { results: devs } = await env.DB.prepare("SELECT * FROM devices ORDER BY registered_at DESC").all();
-    const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name, profile FROM users").all();
+    const { results: devs } = await db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId).all();
+    const { results: users } = await db.prepare("SELECT username, first_name, last_name, profile FROM users WHERE tenant_id = ?").bind(db.tenantId).all();
     const byUser = {};
     for (const d of devs || []) {
       (byUser[d.username] || (byUser[d.username] = [])).push({
@@ -114,14 +118,14 @@ export async function handle(request, env, ctx, url) {
     if (gate) return gate;
     const { username, allowedDevices, unlimited } = await request.json().catch(() => ({}));
     if (!username) return error("username required", 400, env, request);
-    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
     if (!row) return error("Unknown user", 404, env, request);
     let p = {}; try { p = row.profile ? JSON.parse(row.profile) : {}; } catch {}
     p.deviceUnlimited = !!unlimited;
     let cap = parseInt(allowedDevices, 10); if (!Number.isFinite(cap) || cap < 1) cap = 1; if (cap > 5) cap = 5;
     p.allowedDevices = cap;
-    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?")
-      .bind(JSON.stringify(p), username).run();
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?")
+      .bind(JSON.stringify(p), db.tenantId, username).run();
     return json({ ok: true, allowedDevices: cap, unlimited: !!unlimited }, {}, env, request);
   }
 
@@ -132,7 +136,7 @@ export async function handle(request, env, ctx, url) {
     let username = url.searchParams.get("username");
     if (!username) { const b = await request.json().catch(() => ({})); username = b.username; }
     if (!username) return error("username required", 400, env, request);
-    await env.DB.prepare("DELETE FROM devices WHERE username=?").bind(username).run();
+    await db.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(db.tenantId, username).run();
     return json({ ok: true, username }, {}, env, request);
   }
 
@@ -142,8 +146,8 @@ export async function handle(request, env, ctx, url) {
     if (!sess) return error("Not authenticated", 401, env, request);
     const u = url.searchParams.get("u");
     const stmt = u
-      ? env.DB.prepare("SELECT * FROM devices WHERE username = ? ORDER BY registered_at DESC").bind(u)
-      : env.DB.prepare("SELECT * FROM devices ORDER BY registered_at DESC");
+      ? db.prepare("SELECT * FROM devices WHERE tenant_id = ? AND username = ? ORDER BY registered_at DESC").bind(db.tenantId, u)
+      : db.prepare("SELECT * FROM devices WHERE tenant_id = ? ORDER BY registered_at DESC").bind(db.tenantId);
     const { results } = await stmt.all();
     return json({ ok: true, devices: results || [] }, {}, env, request);
   }
@@ -152,13 +156,13 @@ export async function handle(request, env, ctx, url) {
   if (path === "/device/office-clock" && request.method === "POST") {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
-    const perms = await permissionsFor(env, sess.user.username);
+    const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
     if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
       return error("Forbidden", 403, env, request);
     const { deviceId, office } = await request.json().catch(() => ({}));
     if (!deviceId) return error("deviceId required", 400, env, request);
-    await env.DB.prepare("UPDATE devices SET office_clock=? WHERE device_id=?")
-      .bind(office ? 1 : 0, deviceId).run();
+    await db.prepare("UPDATE devices SET office_clock=? WHERE tenant_id=? AND device_id=?")
+      .bind(office ? 1 : 0, db.tenantId, deviceId).run();
     return json({ ok: true, deviceId, office: office ? 1 : 0 }, {}, env, request);
   }
 
@@ -166,7 +170,7 @@ export async function handle(request, env, ctx, url) {
     const sess = await requireSession(env, request);
     if (!sess) return error("Not authenticated", 401, env, request);
     const deviceId = path.split("/")[2];
-    await env.DB.prepare("DELETE FROM devices WHERE device_id = ?").bind(deviceId).run();
+    await db.prepare("DELETE FROM devices WHERE tenant_id = ? AND device_id = ?").bind(db.tenantId, deviceId).run();
     return json({ ok: true }, {}, env, request);
   }
 
@@ -178,15 +182,16 @@ export async function handle(request, env, ctx, url) {
 async function requireDeviceAdmin(env, request) {
   const sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
-  const perms = await permissionsFor(env, sess.user.username);
+  const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
   if (perms.FullAccess !== "Yes" && perms.Users !== "Yes" && perms.DeviceAdmin !== "Yes")
     return error("Forbidden", 403, env, request);
   return null;
 }
 
 // A user's device cap, from their profile (default 2 devices, not unlimited).
-async function deviceSettings(env, username) {
-  const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(username).first();
+async function deviceSettings(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, username).first();
   let p = {}; try { p = row && row.profile ? JSON.parse(row.profile) : {}; } catch {}
   return {
     allowedDevices: Number.isFinite(+p.allowedDevices) ? +p.allowedDevices : 2,

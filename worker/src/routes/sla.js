@@ -15,29 +15,34 @@
 // Optional vars: MOSTLANE_LOGO_BASE64, R2_PUBLIC_BASE
 
 import { corsHeaders } from "../lib/http.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
+  // Tenant is taken from the verified session, or — for the PUBLIC export
+  // route, which may have no session — from the request host (Tenant 1 today).
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
   // Strip the /sla mount prefix so the routing below mirrors the original Worker.
   const subpath = url.pathname.replace(/^\/sla(?=\/|$)/, "") || "/";
   const searchParams = url.searchParams;
 
   /* GET/POST /sla/config */
   if (subpath === "/config") {
-    if (method === "GET")  return jsonResponse(await getConfig(env), headers);
-    if (method === "POST") return jsonResponse(await setConfig(env, await readJson(request)), headers);
+    if (method === "GET")  return jsonResponse(await getConfig(env, tenantId), headers);
+    if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
   }
 
   /* POST /sla/jobs */
   if (subpath === "/jobs" && method === "POST") {
-    const job = await createOrUpdateJobFromPayload(env, await readJson(request));
+    const job = await createOrUpdateJobFromPayload(env, tenantId, await readJson(request));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
 
   /* GET /sla/jobs (with filters) */
   if (subpath === "/jobs" && method === "GET") {
-    let jobs = (await listJobs(env)).map(decorateJobWithLiveSla);
+    let jobs = (await listJobs(env, tenantId)).map(decorateJobWithLiveSla);
     const statusFilter = searchParams.get("status");
     const priorityFilter = searchParams.get("priority");
     const overdueFilter = searchParams.get("overdue");
@@ -58,7 +63,7 @@ export async function handle(request, env, ctx, url) {
     // are normalised the same way so "John Thorn" matches "john.thorn".
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
-    let jobs = (await listJobs(env)).filter(j => assignedList(j).some(a => normId(a) === engineer));
+    let jobs = (await listJobs(env, tenantId)).filter(j => assignedList(j).some(a => normId(a) === engineer));
     if (date) {
       jobs = jobs.filter(j => {
         if (!j.scheduledAt) return false;
@@ -72,44 +77,44 @@ export async function handle(request, env, ctx, url) {
   if (subpath === "/shift/today" && method === "GET") {
     const engineer = searchParams.get("engineer") || "";
     const date = searchParams.get("date") || todayStr();
-    return jsonResponse({ shift: await getShift(env, engineer, date) }, headers);
+    return jsonResponse({ shift: await getShift(env, tenantId, engineer, date) }, headers);
   }
   if (subpath === "/shift/clock-on" && method === "POST") {
     const b = await readJson(request);
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
-    await env.DB.prepare(`
-      INSERT INTO shifts (username, date, clock_on_at, clock_on_gps, start_mileage)
-      VALUES (?,?,?,?,?)
+    await db.prepare(`
+      INSERT INTO shifts (tenant_id, username, date, clock_on_at, clock_on_gps, start_mileage)
+      VALUES (?,?,?,?,?,?)
       ON CONFLICT(username, date) DO UPDATE SET
         clock_on_at   = COALESCE(shifts.clock_on_at, excluded.clock_on_at),
         clock_on_gps  = COALESCE(shifts.clock_on_gps, excluded.clock_on_gps),
         start_mileage = COALESCE(shifts.start_mileage, excluded.start_mileage)
-    `).bind(b.engineer, date, new Date().toISOString(), b.gps || null, b.startMileage ?? null).run();
-    return jsonResponse({ ok: true, shift: await getShift(env, b.engineer, date) }, headers, 201);
+    `).bind(db.tenantId, b.engineer, date, new Date().toISOString(), b.gps || null, b.startMileage ?? null).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers, 201);
   }
   if (subpath === "/shift/clock-off" && method === "POST") {
     const b = await readJson(request);
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
-    await env.DB.prepare(
-      "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE username=? AND date=?"
-    ).bind(new Date().toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, b.engineer, date).run();
-    return jsonResponse({ ok: true, shift: await getShift(env, b.engineer, date) }, headers);
+    await db.prepare(
+      "UPDATE shifts SET clock_off_at=?, clock_off_gps=?, end_mileage=?, fuel=? WHERE tenant_id=? AND username=? AND date=?"
+    ).bind(new Date().toISOString(), b.gps || null, b.endMileage ?? null, b.fuel || null, db.tenantId, b.engineer, date).run();
+    return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers);
   }
   /* GET /sla/shifts  -> list recorded day sessions (office view), filterable */
   if (subpath === "/shifts" && method === "GET") {
     const engineer = searchParams.get("engineer");
     const from = searchParams.get("from");
     const to = searchParams.get("to");
-    const conds = [], binds = [];
+    const conds = ["tenant_id = ?"], binds = [db.tenantId];
     if (engineer) { conds.push("username = ?"); binds.push(engineer); }
     if (from)     { conds.push("date >= ?");    binds.push(from); }
     if (to)       { conds.push("date <= ?");    binds.push(to); }
     let q = "SELECT * FROM shifts";
-    if (conds.length) q += " WHERE " + conds.join(" AND ");
+    q += " WHERE " + conds.join(" AND ");
     q += " ORDER BY date DESC, username ASC LIMIT 500";
-    const { results } = await env.DB.prepare(q).bind(...binds).all();
+    const { results } = await db.prepare(q).bind(...binds).all();
     return jsonResponse({ shifts: results || [] }, headers);
   }
 
@@ -118,20 +123,20 @@ export async function handle(request, env, ctx, url) {
     const engineer = searchParams.get("engineer") || "";
     const week = searchParams.get("week") || "";
     const row = (engineer && week)
-      ? await env.DB.prepare("SELECT * FROM vehicle_checks WHERE username=? AND week=?").bind(engineer, week).first()
+      ? await db.prepare("SELECT * FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, engineer, week).first()
       : null;
     return jsonResponse({ check: row || null }, headers);
   }
   if (subpath === "/vehicle-check" && method === "POST") {
     const b = await readJson(request);
     if (!b.engineer || !b.week) return jsonResponse({ error: "engineer and week required" }, headers, 400);
-    await env.DB.prepare(`
-      INSERT INTO vehicle_checks (username, week, vehicle, checked_at, safe_to_drive, items, note)
-      VALUES (?,?,?,?,?,?,?)
+    await db.prepare(`
+      INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
+      VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(username, week) DO UPDATE SET
         vehicle=excluded.vehicle, checked_at=excluded.checked_at,
         safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
-    `).bind(b.engineer, b.week, b.vehicle || null, new Date().toISOString(),
+    `).bind(db.tenantId, b.engineer, b.week, b.vehicle || null, new Date().toISOString(),
             b.safeToDrive ? 1 : 0, JSON.stringify(b.items || {}), b.note || null).run();
     return jsonResponse({ ok: true }, headers, 201);
   }
@@ -148,7 +153,7 @@ export async function handle(request, env, ctx, url) {
         : (body.assignedTo !== undefined ? (body.assignedTo ? [body.assignedTo] : []) : undefined),
       changedBy: body.changedBy || "scheduler"
     };
-    const updated = await patchJob(env, id, patch);
+    const updated = await patchJob(env, tenantId, id, patch);
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -162,7 +167,7 @@ export async function handle(request, env, ctx, url) {
 
     // GET /sla/jobs/{id}/export  -> downloadable HTML
     if (method === "GET" && parts[2] === "export") {
-      const job = await getJob(env, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -176,7 +181,7 @@ export async function handle(request, env, ctx, url) {
 
     // GET /sla/jobs/{id}/export.pdf  -> downloadable PDF
     if (method === "GET" && parts[2] === "export.pdf") {
-      const job = await getJob(env, id);
+      const job = await getJob(env, tenantId, id);
       if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
       const decorated = decorateJobWithLiveSla(job);
       const files = await getJobFilesPublicList(env, id);
@@ -218,25 +223,25 @@ export async function handle(request, env, ctx, url) {
       const binary = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
       await env.JOB_FILES.put(key, binary, { httpMetadata: { contentType: "image/png" } });
-      const job = await getJob(env, id);
+      const job = await getJob(env, tenantId, id);
       if (job) {
         job.signature = { signedBy, signedAt, fileKey: key };
         job.updatedAt = new Date().toISOString();
-        await saveJob(env, job);
+        await saveJob(env, tenantId, job);
       }
       return jsonResponse({ ok: true, key, publicURL: r2Url(env, key) }, headers, 201);
     }
 
     // GET /sla/jobs/{id}
     if (method === "GET") {
-      const job = await getJob(env, id);
+      const job = await getJob(env, tenantId, id);
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers)
                  : jsonResponse({ error: "Not found" }, headers, 404);
     }
 
     // PATCH /sla/jobs/{id}
     if (method === "PATCH") {
-      const updated = await patchJob(env, id, await readJson(request));
+      const updated = await patchJob(env, tenantId, id, await readJson(request));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers)
                      : jsonResponse({ error: "Not found" }, headers, 404);
     }
@@ -300,29 +305,33 @@ function assignedList(job) {
 
 /* ================= STORAGE (D1) ================= */
 
-async function getJob(env, id) {
-  const row = await env.DB.prepare("SELECT data FROM sla_jobs WHERE id = ?").bind(id).first();
+async function getJob(env, tenantId, id) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
 }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
-async function getShift(env, username, date) {
+async function getShift(env, tenantId, username, date) {
   if (!username) return null;
-  return (await env.DB.prepare("SELECT * FROM shifts WHERE username=? AND date=?").bind(username, date).first()) || null;
+  const db = tenantDB(env, tenantId);
+  return (await db.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tenantId, username, date).first()) || null;
 }
 
-async function listJobs(env) {
-  const { results } = await env.DB.prepare("SELECT data FROM sla_jobs").all();
+async function listJobs(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
   return (results || []).map(r => JSON.parse(r.data));
 }
 
 // Upsert a full job object: indexed columns for filtering + full JSON in `data`.
-async function saveJob(env, job) {
-  await env.DB.prepare(`
-    INSERT INTO sla_jobs (id, helpdesk_ref, description, priority, status, assigned_to,
+async function saveJob(env, tenantId, job) {
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`
+    INSERT INTO sla_jobs (tenant_id, id, helpdesk_ref, description, priority, status, assigned_to,
                           site_code, raised_at, target_at, scheduled_at, created_at,
                           updated_at, closed_at, data)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET
       helpdesk_ref=excluded.helpdesk_ref, description=excluded.description,
       priority=excluded.priority, status=excluded.status, assigned_to=excluded.assigned_to,
@@ -330,6 +339,7 @@ async function saveJob(env, job) {
       scheduled_at=excluded.scheduled_at, updated_at=excluded.updated_at,
       closed_at=excluded.closed_at, data=excluded.data
   `).bind(
+    tenantId,
     job.id, job.helpdeskRef || null, job.description || null, job.priority || null,
     job.status || null, job.assignedTo || null, job.siteCode || null,
     job.raisedAt || null, job.targetAt || null, job.scheduledAt || null,
@@ -340,10 +350,10 @@ async function saveJob(env, job) {
 
 /* ================= CREATE / PATCH ================= */
 
-async function createOrUpdateJobFromPayload(env, body) {
-  const cfg = await getConfig(env);
+async function createOrUpdateJobFromPayload(env, tenantId, body) {
+  const cfg = await getConfig(env, tenantId);
   const id = body.id || body.reference || crypto.randomUUID();
-  const existing = await getJob(env, id);
+  const existing = await getJob(env, tenantId, id);
   const now = new Date().toISOString();
 
   const status = normalizeStatus(body.status || existing?.status);
@@ -386,12 +396,12 @@ async function createOrUpdateJobFromPayload(env, body) {
   };
 
   job.statusHistory.push({ status, at: now, by: body.changedBy || "system" });
-  await saveJob(env, job);
+  await saveJob(env, tenantId, job);
   return job;
 }
 
-async function patchJob(env, id, patch) {
-  const job = await getJob(env, id);
+async function patchJob(env, tenantId, id, patch) {
+  const job = await getJob(env, tenantId, id);
   if (!job) return null;
   const now = new Date().toISOString();
   job.statusHistory ||= [];
@@ -424,7 +434,7 @@ async function patchJob(env, id, patch) {
   }
 
   job.updatedAt = now;
-  await saveJob(env, job);
+  await saveJob(env, tenantId, job);
   return job;
 }
 
@@ -453,16 +463,18 @@ const DEFAULT_CONFIG = {
   }
 };
 
-async function getConfig(env) {
-  const row = await env.DB.prepare("SELECT value FROM app_config WHERE key = 'sla_config'").first();
+async function getConfig(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_config'").bind(tenantId).first();
   return row ? JSON.parse(row.value) : DEFAULT_CONFIG;
 }
 
-async function setConfig(env, body) {
+async function setConfig(env, tenantId, body) {
   const merged = { ...DEFAULT_CONFIG, ...body };
-  await env.DB.prepare(
-    "INSERT INTO app_config (key, value) VALUES ('sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(JSON.stringify(merged)).run();
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(merged)).run();
   return merged;
 }
 

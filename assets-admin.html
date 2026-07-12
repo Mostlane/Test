@@ -308,6 +308,28 @@
     });
 
     // ── Add / edit ──
+    // Suggest the next asset ID when adding: the LOWEST missing number in the
+    // existing sequence (fills gaps first), otherwise one past the highest.
+    // Reuses the most common prefix + zero-padding already in use. Pre-filled
+    // into the ID box but fully editable — change it if you want.
+    function nextAssetId() {
+      const parsed = [];
+      for (const a of ASSETS) {
+        const m = /^(.*?)(\d+)\s*$/.exec(String(a.id || ""));  // trailing number + its prefix
+        if (m) parsed.push({ prefix: m[1], num: parseInt(m[2], 10), width: m[2].length });
+      }
+      if (!parsed.length) return "AST-1";
+      // Pick the prefix most assets share (e.g. "AST-"), then work within it.
+      const counts = {};
+      parsed.forEach(p => (counts[p.prefix] = (counts[p.prefix] || 0) + 1));
+      const prefix = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+      const group = parsed.filter(p => p.prefix === prefix);
+      const used = new Set(group.map(p => p.num));
+      const width = Math.max(...group.map(p => p.width));       // keep zero-padding
+      let n = Math.min(...used);
+      while (used.has(n)) n++;                                  // first gap ≥ min, else max+1
+      return prefix + String(n).padStart(width, "0");
+    }
     function fillUsers(selected) {
       g("f_assigned").innerHTML = `<option value="">— Select person —</option>`
         + USERS.map(u => `<option value="${esc(u.Username)}"${u.Username === selected ? " selected" : ""}>${esc(((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username)}</option>`).join("")
@@ -318,6 +340,7 @@
       g("modalTitle").textContent = "Add asset";
       ["f_id","f_name","f_category","f_serial","f_value"].forEach(i => g(i).value = "");
       g("f_id").disabled = false;
+      g("f_id").value = nextAssetId();   // pre-fill next/gap number (editable)
       g("f_shared").value = "no";
       g("f_date").value = new Date().toISOString().slice(0, 10);
       g("gallery").innerHTML = ""; g("uploadHint").style.display = "block"; g("modalMsg").textContent = "";

@@ -12,12 +12,13 @@
 
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
+import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 
 const ACCENTS = ["blue", "teal", "green", "purple", "burgundy", "orange", "slate", "midnight"];
 const BG_COLOURS = ["sky", "sand", "sage", "blush", "lavender", "steel"];
 
-async function caps(env, username) {
-  const perms = await permissionsFor(env, username);
+async function caps(env, tenantId, username) {
+  const perms = await permissionsFor(env, tenantId, username);
   const full = perms.FullAccess === "Yes";
   return {
     colour: full || perms.ThemeColour === "Yes",
@@ -32,29 +33,31 @@ function filterTheme(theme, can) {
   return t;
 }
 
-export async function handle(request, env, ctx, url) {
+export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
   const json = (data, code = 200) =>
     new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
 
-  const sess = await requireSession(env, request);
+  if (!sess) sess = await requireSession(env, request);
   if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+  const tenantId = sess.tenantId;
+  const db = tenantDB(env, tenantId);
   const me = sess.user.username;
 
   if (method === "GET" && pathname === "/theme") {
-    const can = await caps(env, me);
-    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(me).first();
+    const can = await caps(env, tenantId, me);
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tenantId, me).first();
     let profile = {}; try { profile = row?.profile ? JSON.parse(row.profile) : {}; } catch {}
     return json({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
   }
 
   if (method === "POST" && pathname === "/theme") {
-    const can = await caps(env, me);
+    const can = await caps(env, tenantId, me);
     if (!can.colour && !can.background) return json({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
     const b = await request.json().catch(() => ({}));
-    const row = await env.DB.prepare("SELECT profile FROM users WHERE username=?").bind(me).first();
+    const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tenantId, me).first();
     let profile = {}; try { profile = row?.profile ? JSON.parse(row.profile) : {}; } catch {}
     const t = profile.theme || {};
 
@@ -71,14 +74,14 @@ export async function handle(request, env, ctx, url) {
     }
 
     profile.theme = t;
-    await env.DB.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE username=?")
-      .bind(JSON.stringify(profile), me).run();
+    await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?")
+      .bind(JSON.stringify(profile), tenantId, me).run();
     return json({ ok: true, theme: filterTheme(t, can), can });
   }
 
   // Custom background photo -> R2 (old ones for this user are cleaned up).
   if (method === "POST" && pathname === "/theme/background") {
-    const can = await caps(env, me);
+    const can = await caps(env, tenantId, me);
     if (!can.background) return json({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
     const form = await request.formData().catch(() => null);
     const file = form && form.get("file");

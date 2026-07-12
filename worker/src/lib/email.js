@@ -18,12 +18,12 @@ export function appBase(env) {
 
 // Issue a single-use password token. Reused for both "forgot password" and the
 // "set your password" welcome link (same reset-password.html page consumes it).
-export async function issuePasswordToken(env, username, ttlHours = 1) {
+export async function issuePasswordToken(env, tenantId, username, ttlHours = 1) {
   const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   const expires = new Date(Date.now() + ttlHours * 3600 * 1000).toISOString();
   await env.DB.prepare(
-    "INSERT INTO password_resets (token, username, expires_at) VALUES (?,?,?)"
-  ).bind(token, username, expires).run();
+    "INSERT INTO password_resets (token, username, tenant_id, expires_at) VALUES (?,?,?,?)"
+  ).bind(token, username, tenantId, expires).run();
   return token;
 }
 
