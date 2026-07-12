@@ -76,6 +76,12 @@
     .gitem img { width:66px; height:66px; object-fit:cover; border-radius:9px; border:1px solid #e2e8f0; cursor:pointer; }
     .gitem .del { position:absolute; top:-7px; right:-7px; width:20px; height:20px; border-radius:50%; background:#b00020; color:#fff; border:none; font-size:12px; line-height:20px; cursor:pointer; padding:0; }
 
+    /* Condition photo list */
+    .cphoto { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid #f0f3f7; }
+    .cphoto:last-child { border-bottom:none; }
+    .cphoto img { width:86px; height:86px; object-fit:cover; border-radius:10px; background:#f2f5f8; cursor:pointer; flex:none; border:1px solid #e2e8f0; }
+    .cphoto p { margin:2px 0; font-size:13.5px; }
+
     .viewer { display:none; position:fixed; inset:0; z-index:999; background:rgba(0,0,0,.88); justify-content:center; align-items:center; }
     .viewer img { max-width:92%; max-height:88%; border-radius:8px; }
     .viewer .close { position:absolute; top:14px; right:22px; color:#fff; font-size:34px; cursor:pointer; }
@@ -108,9 +114,6 @@
         <button class="btn grey small" id="sortValue">Value ↓</button>
         <button class="btn grey small" id="sortName">Name A–Z</button>
         <button class="btn small" id="exportBtn">⬇ Export report</button>
-        <button class="btn grey small" id="repairBtn" title="Overwrite each record's details with the original text from the old system's KV (matched by asset ID) — photos then line up">🩹 Restore original details</button>
-        <button class="btn grey small" id="relinkBtn" title="Rebuild photo links from the image storage bucket (by ID only)">🔗 Re-link photos</button>
-        <button class="btn grey small" id="unlinkBtn" title="Remove all photo links (photos stay safe in storage)">✖ Clear photo links</button>
       </div>
       <div id="summary"><span class="muted">Loading summary…</span></div>
     </div>
@@ -155,18 +158,15 @@
     </div>
   </div>
 
-  <!-- Restore-original-details preview -->
-  <div class="overlay" id="repairModal">
+  <!-- Condition photos (transfer handover/receipt shots) -->
+  <div class="overlay" id="condModal">
     <div class="panel" style="max-width:640px;">
-      <h2>🩹 Restore original details</h2>
-      <p class="muted" style="margin:0 0 10px;">Replaces each record's text (name, category, serial, value, holder…) with the
-        original from the old system's storage, matched by asset ID — the photos are filed by those IDs, so they line up again.
-        Nothing changes until you press Apply.</p>
-      <div id="repairList" class="muted" style="max-height:50vh; overflow:auto;">Loading…</div>
-      <p class="msg" id="repairMsg"></p>
+      <h2 id="condTitle">📷 Condition photos</h2>
+      <p class="muted" style="margin:0 0 10px;">Every photo taken during transfers of this item — who took it, when, and
+        whether they were handing it over or receiving it.</p>
+      <div id="condList" class="muted" style="max-height:60vh; overflow:auto;">Loading…</div>
       <div class="acts">
-        <button class="btn grey" onclick="closeM('repairModal')">Cancel</button>
-        <button class="btn green" id="repairApply" disabled>Apply restore</button>
+        <button class="btn grey" onclick="closeM('condModal')">Close</button>
       </div>
     </div>
   </div>
@@ -282,7 +282,7 @@
           <td>${a.value ? "£" + esc(String(a.value).replace(/£/g, "")) : "—"}</td>
           <td>${holderCell(a)}</td>
           <td><span class="pill ${String(a.shared).toLowerCase() === "yes" ? "shared" : "no"}">${String(a.shared).toLowerCase() === "yes" ? "Yes" : "No"}</span></td>
-          <td class="acts"><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></td>
+          <td class="acts"><button class="btn grey small" data-cond="${esc(a.id)}" title="Condition photos from transfers">📷</button><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></td>
         </tr>`).join("");
       g("mrows").innerHTML = list.map(a => `
         <div class="acard">
@@ -293,7 +293,7 @@
           <p><b>Serial:</b> ${esc(a.serial || "—")}</p>
           <p><b>Value:</b> ${a.value ? "£" + esc(String(a.value).replace(/£/g, "")) : "—"}</p>
           <p><b>Held by:</b> ${holderCell(a)}</p>
-          <div class="acts"><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></div>
+          <div class="acts"><button class="btn grey small" data-cond="${esc(a.id)}" title="Condition photos from transfers">📷</button><button class="btn grey small" data-edit="${esc(a.id)}">Edit</button><button class="btn red small" data-del="${esc(a.id)}">Delete</button></div>
         </div>`).join("");
     }
     g("search").addEventListener("input", renderTable);
@@ -301,6 +301,7 @@
     document.addEventListener("click", e => {
       const t = e.target;
       if (t.dataset.edit) { const a = ASSETS.find(x => x.id === t.dataset.edit); if (a) openEdit(a); }
+      else if (t.dataset.cond) openCond(t.dataset.cond);
       else if (t.dataset.del) delAsset(t.dataset.del);
       else if (t.dataset.view) { const a = ASSETS.find(x => x.id === t.dataset.view); if (a) openViewer(a.images || [], 0); }
     });
@@ -419,131 +420,42 @@
     function stepImg(d) { if (!viewList.length) return; viewIdx = (viewIdx + d + viewList.length) % viewList.length; g("viewerImg").src = viewList[viewIdx]; }
     window.addEventListener("keydown", e => { if (e.key === "Escape") closeViewer(); if (e.key === "ArrowRight") stepImg(1); if (e.key === "ArrowLeft") stepImg(-1); });
 
-    // ── Re-link photos from R2 storage (recovers lost image links) ──
-    g("relinkBtn").onclick = async () => {
-      if (!confirm("Scan the image storage bucket and rebuild photo links on all assets?")) return;
-      const btn = g("relinkBtn"); btn.disabled = true; btn.textContent = "Scanning…";
+    // ── Condition photos (taken during transfers) ──
+    async function openCond(assetId) {
+      const a = ASSETS.find(x => x.id === assetId);
+      g("condTitle").textContent = "📷 Condition photos — " + ((a && a.name) || assetId);
+      g("condList").className = "muted"; g("condList").textContent = "Loading…";
+      openM("condModal");
       try {
-        const r = await authFetch("/asset/r2-relink", { method: "POST" }).then(r => r.json());
-        if (!r.ok) throw new Error(r.error || "Failed");
-        if (r.bucketObjects === 0) {
-          alert("The image bucket is empty — there are no photos stored for these assets.\n\nThese look like assets that never had photos uploaded (or a different set of assets).");
-        } else {
-          alert(`Found ${r.bucketObjects} photo(s) in storage across ${r.assetsInBucket} asset(s).\nRe-linked ${r.assetsUpdated} asset(s).` +
-            (r.assetsUpdated === 0 ? "\n\n(Every matching asset already had its links.)" : ""));
-          loadAssets();
+        const d = await authFetch("/asset/condition-photos?assetID=" + encodeURIComponent(assetId)).then(r => r.json());
+        if (!d.ok) throw new Error(d.error || "Failed");
+        const photos = d.photos || [];
+        if (!photos.length) {
+          g("condList").innerHTML = "<p>No condition photos yet — they appear here once this item is handed over or received in a transfer.</p>";
+          return;
         }
-      } catch (err) { alert("Re-link failed: " + err.message); }
-      finally { btn.disabled = false; btn.textContent = "🔗 Re-link photos"; }
-    };
-
-    // ── Repair photo matching using the ORIGINAL records from the old asset
-    // system. The D1 migration reassigned IDs, so R2 photo folders (keyed by
-    // the old IDs) point at the wrong items. The old worker still serves the
-    // original id ↔ name/serial ↔ images records from its KV store — we match
-    // old→new by serial (fallback: name) and rewrite the photo links.
-    // XHR is used deliberately: portal-config redirects fetch() calls to the
-    // old host onto the new API, which would defeat the whole point.
-    function fetchOldAssets() {
-      return new Promise((resolve, reject) => {
-        const x = new XMLHttpRequest();
-        x.open("GET", "https://mostlane-assets.jamie-def.workers.dev/assets");
-        x.timeout = 20000;
-        x.onload = () => { try { resolve((JSON.parse(x.responseText).assets) || []); } catch (e) { reject(new Error("Old system returned unreadable data.")); } };
-        x.onerror = () => reject(new Error("Couldn't reach the old asset system (it may have been deleted)."));
-        x.ontimeout = () => reject(new Error("The old asset system didn't respond."));
-        x.send();
-      });
+        const condUrls = photos.map(p => p.url);
+        g("condList").className = "";
+        g("condList").innerHTML = photos.map((p, i) => {
+          const when = p.takenAt ? new Date(p.takenAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "Date unknown";
+          const role = p.role === "received"
+            ? `📥 <b>${esc(p.by || "?")}</b> received it${p.counterparty ? " from <b>" + esc(p.counterparty) + "</b>" : ""}`
+            : `📤 <b>${esc(p.by || "?")}</b> handed it over${p.counterparty ? " to <b>" + esc(p.counterparty) + "</b>" : ""}`;
+          return `<div class="cphoto">
+            <img src="${esc(thumbUrl(p.url))}" data-cview="${i}" alt="Condition photo">
+            <div>
+              <p>${role}${p.pending ? ' <span class="pill shared">Transfer pending</span>' : ""}</p>
+              <p class="muted">🕒 ${esc(when)}</p>
+            </div>
+          </div>`;
+        }).join("");
+        g("condList").querySelectorAll("[data-cview]").forEach(el => {
+          el.onclick = () => openViewer(condUrls, parseInt(el.dataset.cview, 10));
+        });
+      } catch (e) {
+        g("condList").textContent = "Couldn't load condition photos — try again.";
+      }
     }
-    const keyOf = u => (String(u || "").split("key=")[1] || "").split("&")[0];
-    // Old records use the pre-rename dotted usernames; map them onto today's.
-    function migrateUser(s) {
-      let v = String(s || "").replace(/\./g, " ").trim();
-      if (v === "Chloe Line") v = "Chloe Molloy";
-      return v;
-    }
-    let repairPlan = [];
-
-    g("repairBtn").onclick = async () => {
-      g("repairList").textContent = "Fetching original records from the old system's storage…";
-      g("repairMsg").textContent = ""; g("repairApply").disabled = true; repairPlan = [];
-      openM("repairModal");
-      let oldAssets;
-      try { oldAssets = await fetchOldAssets(); }
-      catch (err) { g("repairList").textContent = err.message; return; }
-      if (!oldAssets.length) { g("repairList").textContent = "The old system has no asset records — nothing to restore from."; return; }
-
-      const curById = {};
-      for (const c of ASSETS) curById[c.id] = c;
-      const oldIds = new Set();
-      const rows = []; let renames = 0, creates = 0;
-
-      for (const o of oldAssets) {
-        if (!o || !o.id) continue;
-        oldIds.add(o.id);
-        const cur = curById[o.id];
-        const keys = (o.images || []).map(keyOf).filter(Boolean);
-        const rec = {
-          id: o.id,
-          name: o.name || "",
-          category: o.category || "",
-          serial: o.serial || "",
-          value: o.value || "",
-          assignedTo: migrateUser(o.assignedTo),
-          shared: String(o.shared || "no").toLowerCase() === "yes" ? "yes" : "no",
-          calibrationDate: o.calibrationDate || "",
-          lastTransfer: o.lastTransfer || (cur && cur.lastTransfer) || "",
-          images: keys.map(k => API + "/asset-image?key=" + k)
-        };
-        repairPlan.push(rec);
-        if (cur && String(cur.name || "").trim() !== String(o.name || "").trim()) {
-          renames++;
-          rows.push(`<p style="margin:7px 0;">✏️ <b>${esc(o.id)}</b>: “${esc(cur.name)}” → <b>“${esc(o.name)}”</b>
-            <span class="muted">· serial ${esc(o.serial || "—")} · ${keys.length} photo(s) · ${esc(rec.assignedTo || "Unassigned")}</span></p>`);
-        } else if (cur) {
-          rows.push(`<p style="margin:7px 0;">✅ <b>${esc(o.id)}</b>: “${esc(o.name)}” <span class="muted">already matches · ${keys.length} photo(s)</span></p>`);
-        } else {
-          creates++;
-          rows.push(`<p style="margin:7px 0;">➕ <b>${esc(o.id)}</b>: “${esc(o.name)}” <span class="muted">missing from the new system — will be added · ${keys.length} photo(s)</span></p>`);
-        }
-      }
-      const extras = ASSETS.filter(c => !oldIds.has(c.id));
-      for (const c of extras) {
-        rows.push(`<p style="margin:7px 0;">⚠️ <b>${esc(c.id)}</b>: “${esc(c.name)}” <span class="muted">isn't in the old system — left untouched</span></p>`);
-      }
-      g("repairList").innerHTML =
-        `<p style="margin:0 0 8px;"><b>${renames}</b> record(s) get their original text back${creates ? `, <b>${creates}</b> will be re-added` : ""}${extras.length ? `, ${extras.length} unknown to the old system` : ""}.</p>` + rows.join("");
-      g("repairList").classList.remove("muted");
-      g("repairApply").disabled = repairPlan.length === 0;
-    };
-
-    g("repairApply").onclick = async () => {
-      const btn = g("repairApply"); btn.disabled = true; btn.textContent = "Restoring…";
-      let done = 0, failed = 0;
-      for (const rec of repairPlan) {
-        try {
-          const r = await authFetch("/asset/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) }).then(r => r.json());
-          if (r.error && !r.ok) throw new Error(r.error);
-          done++;
-        } catch (e) { failed++; }
-      }
-      btn.textContent = "Apply restore";
-      g("repairMsg").textContent = `Restored ${done} asset(s)` + (failed ? `, ${failed} failed — run it again` : " ✓");
-      if (!failed) setTimeout(() => closeM("repairModal"), 1200);
-      loadAssets();
-    };
-
-    g("unlinkBtn").onclick = async () => {
-      if (!confirm("Remove ALL photo links from every asset?\n\nThe photos stay safe in storage — this just un-attaches them (use it to undo a re-link that matched the wrong photos).")) return;
-      const btn = g("unlinkBtn"); btn.disabled = true; btn.textContent = "Clearing…";
-      try {
-        const r = await authFetch("/asset/r2-unlink", { method: "POST" }).then(r => r.json());
-        if (!r.ok) throw new Error(r.error || "Failed");
-        alert(`Cleared photo links from ${r.cleared} asset(s). The photos are still in storage.`);
-        loadAssets();
-      } catch (err) { alert("Clear failed: " + err.message); }
-      finally { btn.disabled = false; btn.textContent = "✖ Clear photo links"; }
-    };
 
     // ── Excel export (per-person tabs with transfer history) ──
     g("exportBtn").onclick = async () => {
