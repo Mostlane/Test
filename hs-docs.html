@@ -112,6 +112,65 @@
       </div>
     </div>
 
+    <!-- FORM: Hot Works Permit -->
+    <div id="formHotworks" class="hide">
+      <h2 id="hwFormTitle">New Hot Works Permit</h2>
+      <div class="card">
+        <h3 style="margin-top:0;">Project details</h3>
+        <div class="grid2">
+          <div><label>Project *</label><input type="text" id="h_project"></div>
+          <div><label>Site</label><input type="text" id="h_site"></div>
+          <div><label>Client / PC</label><input type="text" id="h_client"></div>
+          <div><label>Date</label><input type="date" id="h_date"></div>
+          <div><label>Issued by</label><input type="text" id="h_issuedby"></div>
+          <div><label>Valid from</label><input type="time" id="h_validfrom"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">1. Description of hot works</h3>
+        <div class="grid2">
+          <div><label>Location</label><input type="text" id="h_location"></div>
+          <div><label>Nature of works</label><input type="text" id="h_nature"></div>
+          <div><label>Equipment</label><input type="text" id="h_equipment"></div>
+        </div>
+      </div>
+      <div class="card brief">
+        <h3 style="margin-top:0;">2. Fire &amp; safety precautions</h3>
+        <div id="h_fire"></div>
+      </div>
+      <div class="card brief">
+        <h3 style="margin-top:0;">3. Fire watch requirements</h3>
+        <div id="h_watch"></div>
+        <label>Fire watch name</label><input type="text" id="h_watchname">
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">4. Operatives</h3>
+        <div id="h_operatives"></div>
+        <button class="btn ghost small" type="button" onclick="addOperative()">+ Add operative</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">5. Permit issued by</h3>
+        <label>Print name</label><input type="text" id="h_byname">
+        <label>Signature</label><div class="sigwrap"><canvas class="sig" id="h_bysig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('h_bysig')">Clear signature</button>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Close out</h3>
+        <div class="grid2">
+          <div><label>Completion time</label><input type="time" id="h_completion"></div>
+          <div><label class="chk" style="margin-top:26px;"><input type="checkbox" id="h_safe"> Final area declared SAFE</label></div>
+        </div>
+        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="h_mgrsig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('h_mgrsig')">Clear signature</button>
+      </div>
+      <p class="msg" id="hwMsg"></p>
+      <div class="row">
+        <button class="btn" id="hwSave">Save permit</button>
+        <button class="btn ghost" id="hwSaveView">Save &amp; open document</button>
+        <button class="btn grey" onclick="showList('hotworks')">Cancel</button>
+      </div>
+    </div>
+
     <!-- DOCUMENT VIEW (printable) -->
     <div id="docView" class="hide">
       <div class="row noprint" style="margin-bottom:10px; justify-content:flex-end;">
@@ -146,10 +205,28 @@
     "Accident / near miss reporting procedure",
   ];
 
+  const HW_FIRE = [
+    "Area inspected and deemed safe",
+    "Combustibles removed (10m where possible)",
+    "Combustibles protected with fire blankets",
+    "Openings / voids sealed or protected",
+    "Minimum 2 fire extinguishers present",
+    "Fire alarm isolation agreed (if required)",
+    "Fire watch appointed during works",
+    "Gas cylinders secured & flashback arrestors fitted",
+    "Adequate ventilation confirmed",
+  ];
+  const HW_WATCH = [
+    "Continuous fire watch during works",
+    "Fire watch to remain minimum 60 minutes after completion",
+    "Area re-inspected after 1 hour",
+  ];
+  const HW_FOOTER = "Permit valid for one shift only. Must be displayed at work location. Void if works stop for more than 2 hours. All works must comply with CDM Regulations and approved RAMS.";
+
   // Document types shown in the hub.
   const TYPES = [
     { key:"induction", emoji:"📋", title:"Site Inductions", desc:"Contractor / visitor site inductions", ready:true },
-    { key:"hotworks",  emoji:"🔥", title:"Permits (Hot Works…)", desc:"Hot works & permit-to-work", ready:false },
+    { key:"hotworks",  emoji:"🔥", title:"Hot Works Permit", desc:"Hot works permit-to-work", ready:true },
     { key:"rams",      emoji:"⚠️", title:"Risk Assessments / RAMS", desc:"Standalone RAMS", ready:false },
     { key:"incident",  emoji:"🚑", title:"Incident / Near-miss", desc:"Accident & near-miss reports", ready:false },
   ];
@@ -179,8 +256,9 @@
            <p class="muted">Full project H&amp;S plan (existing tool)</p>
          </button>`;
   }
-  function showHub(){ ["list","formInduction","docView"].forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
-  function show(id){ ["hub","list","formInduction","docView"].forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
+  const VIEWS = ["hub","list","formInduction","formHotworks","docView"];
+  function showHub(){ VIEWS.forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
+  function show(id){ VIEWS.forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
 
   // Open the existing Construction Phase Plan app (unchanged) via its launch config.
   async function openPlan() {
@@ -217,7 +295,7 @@
         </tr>`).join("");
     } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
   }
-  g("newBtn").onclick = () => { if (curType === "induction") newInduction(); };
+  g("newBtn").onclick = () => { if (curType === "induction") newInduction(); else if (curType === "hotworks") newHotworks(); };
 
   // ── Signature pads ───────────────────────────────────────────────────────────
   const pads = {};
@@ -281,13 +359,16 @@
     setTimeout(() => { initSig("i_bysig",""); contractorRow(); }, 30);
   }
   async function editDoc(id) {
-    if (curType !== "induction") return;
     const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
     if (!d.ok) return alert("Couldn't load that document.");
-    const x = d.doc.data || {};
     editId = id;
-    g("indFormTitle").textContent = "Edit Site Induction — " + (d.doc.ref || "");
-    g("i_project").value = x.project || d.doc.site || ""; g("i_addr").value = x.siteAddress || "";
+    if (d.doc.doc_type === "induction") fillInduction(d.doc);
+    else if (d.doc.doc_type === "hotworks") fillHotworks(d.doc);
+  }
+  function fillInduction(doc) {
+    const x = doc.data || {};
+    g("indFormTitle").textContent = "Edit Site Induction — " + (doc.ref || "");
+    g("i_project").value = x.project || doc.site || ""; g("i_addr").value = x.siteAddress || "";
     g("i_mgr").value = x.siteManager || ""; g("i_date").value = x.startDate || "";
     g("i_byname").value = x.inductorName || "";
     renderBriefing(x.briefing || null);
@@ -330,6 +411,93 @@
   g("indSave").onclick = () => saveInduction(false);
   g("indSaveView").onclick = () => saveInduction(true);
 
+  // ── Hot Works permit form ────────────────────────────────────────────────────
+  function renderChecks(containerId, items, checked) {
+    g(containerId).innerHTML = items.map((t,i) =>
+      `<label class="chk"><input type="checkbox" data-chk="${i}" ${(!checked || checked.includes(t)) ? "checked" : ""}> ${esc(t)}</label>`).join("");
+  }
+  const collectChecks = (containerId, items) => items.filter((_,i) => g(containerId).querySelector(`[data-chk="${i}"]`).checked);
+  function hwOperativeRow(o = {}) {
+    const idx = g("h_operatives").children.length;
+    const div = document.createElement("div");
+    div.className = "sub";
+    div.innerHTML = `
+      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
+      <div class="grid2">
+        <div><label>Operative name *</label><input type="text" data-o="name" value="${esc(o.name||"")}"></div>
+        <div><label>Company</label><input type="text" data-o="company" value="${esc(o.company||"")}"></div>
+      </div>
+      <label>Signature</label><div class="sigwrap"><canvas class="sig" id="osig${idx}"></canvas></div>
+      <button class="btn grey small noprint" type="button" onclick="clearSig('osig${idx}')">Clear signature</button>`;
+    g("h_operatives").appendChild(div);
+    initSig("osig" + idx, o.signature || "");
+    div.dataset.sig = "osig" + idx;
+  }
+  function addOperative(){ hwOperativeRow(); }
+
+  function newHotworks() {
+    editId = null;
+    g("hwFormTitle").textContent = "New Hot Works Permit";
+    ["h_project","h_site","h_client","h_issuedby","h_validfrom","h_location","h_nature","h_equipment","h_watchname","h_byname","h_completion"].forEach(i => g(i).value = "");
+    g("h_date").value = new Date().toISOString().slice(0,10);
+    g("h_safe").checked = false;
+    renderChecks("h_fire", HW_FIRE, null);
+    renderChecks("h_watch", HW_WATCH, null);
+    g("h_operatives").innerHTML = "";
+    g("hwMsg").textContent = "";
+    show("formHotworks");
+    setTimeout(() => { initSig("h_bysig",""); initSig("h_mgrsig",""); hwOperativeRow(); }, 30);
+  }
+  function fillHotworks(doc) {
+    const x = doc.data || {};
+    g("hwFormTitle").textContent = "Edit Hot Works Permit — " + (doc.ref || "");
+    g("h_project").value = x.project || doc.site || ""; g("h_site").value = x.site || "";
+    g("h_client").value = x.client || ""; g("h_date").value = x.date || "";
+    g("h_issuedby").value = x.issuedBy || ""; g("h_validfrom").value = x.validFrom || "";
+    g("h_location").value = x.location || ""; g("h_nature").value = x.nature || ""; g("h_equipment").value = x.equipment || "";
+    g("h_watchname").value = x.watchName || ""; g("h_byname").value = x.issuedByName || "";
+    g("h_completion").value = x.completionTime || ""; g("h_safe").checked = !!x.finalSafe;
+    renderChecks("h_fire", HW_FIRE, x.fire || null);
+    renderChecks("h_watch", HW_WATCH, x.watch || null);
+    g("h_operatives").innerHTML = "";
+    show("formHotworks");
+    setTimeout(() => {
+      initSig("h_bysig", x.issuedBySignature || ""); initSig("h_mgrsig", x.managerSignature || "");
+      (x.operatives && x.operatives.length ? x.operatives : [{}]).forEach(o => hwOperativeRow(o));
+    }, 30);
+  }
+  function collectHotworks() {
+    const operatives = [...g("h_operatives").children].map(div => {
+      const get = k => { const el = div.querySelector(`[data-o="${k}"]`); return el ? el.value.trim() : ""; };
+      return { name:get("name"), company:get("company"), signature: sigVal(div.dataset.sig) };
+    }).filter(o => o.name || o.company);
+    return {
+      project:g("h_project").value.trim(), site:g("h_site").value.trim(), client:g("h_client").value.trim(),
+      date:g("h_date").value, issuedBy:g("h_issuedby").value.trim(), validFrom:g("h_validfrom").value,
+      location:g("h_location").value.trim(), nature:g("h_nature").value.trim(), equipment:g("h_equipment").value.trim(),
+      fire: collectChecks("h_fire", HW_FIRE), watch: collectChecks("h_watch", HW_WATCH), watchName:g("h_watchname").value.trim(),
+      operatives, issuedByName:g("h_byname").value.trim(), issuedBySignature: sigVal("h_bysig"),
+      completionTime:g("h_completion").value, finalSafe:g("h_safe").checked, managerSignature: sigVal("h_mgrsig"),
+    };
+  }
+  async function saveHotworks(openAfter) {
+    const data = collectHotworks();
+    const msg = g("hwMsg"); msg.className = "msg";
+    if (!data.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    g("hwSave").disabled = g("hwSaveView").disabled = true; msg.textContent = "Saving…";
+    try {
+      const body = { doc_type:"hotworks", site:(data.site || data.project), data, ...(editId ? { id: editId } : {}) };
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      const id = editId || r.id;
+      msg.className = "msg ok"; msg.textContent = "Saved" + (r.ref ? " as " + r.ref : "") + ".";
+      if (openAfter) openDoc(id); else showList("hotworks");
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't save — " + e.message; }
+    finally { g("hwSave").disabled = g("hwSaveView").disabled = false; }
+  }
+  g("hwSave").onclick = () => saveHotworks(false);
+  g("hwSaveView").onclick = () => saveHotworks(true);
+
   async function delDoc(id) {
     if (!confirm("Delete this document? This can't be undone.")) return;
     await authFetch("/hs/doc/delete", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id }) });
@@ -342,6 +510,7 @@
     if (!d.ok) return alert("Couldn't load that document.");
     show("docView");
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
+    else if (d.doc.doc_type === "hotworks") g("docBody").innerHTML = renderHotworks(d.doc);
     else g("docBody").innerHTML = `<p class="muted">Viewer for this type is coming soon.</p>`;
   }
   const sigImg = s => s ? `<img src="${s}" alt="signature">` : `<span class="muted">(not signed)</span>`;
@@ -373,6 +542,41 @@
       <div class="kv"><div><b>Print name:</b> ${esc(x.inductorName||"")}</div></div>
       <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(x.inductorSignature)}</div>
       <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
+  }
+  function renderHotworks(doc) {
+    const x = doc.data || {};
+    const ticks = (all, chosen) => `<div style="font-family:monospace; font-size:13px; line-height:1.7;">` +
+      all.map(t => `<div>[${(chosen||[]).includes(t) ? "X" : "&nbsp;"}] ${esc(t)}</div>`).join("") + `</div>`;
+    const operatives = (x.operatives || []).map((o,i) => `
+      <div style="margin:8px 0; padding:8px 0; border-top:1px solid #eee;">
+        <div class="kv"><div><b>Operative ${i+1}:</b> ${esc(o.name||"")}</div><div><b>Company:</b> ${esc(o.company||"")}</div></div>
+        <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(o.signature)}</div>
+      </div>`).join("") || `<p class="muted">No operatives recorded.</p>`;
+    return `
+      <h2>Hot Works Permit</h2>
+      <p class="ref">Permit No: ${esc(doc.ref || "—")}</p>
+      <h3>PROJECT DETAILS</h3>
+      <div class="kv">
+        <div><b>Project:</b> ${esc(x.project||"")}</div><div><b>Site:</b> ${esc(x.site||"")}</div>
+        <div><b>Client / PC:</b> ${esc(x.client||"")}</div><div><b>Date:</b> ${esc(fmtDate(x.date))}</div>
+        <div><b>Issued by:</b> ${esc(x.issuedBy||"")}</div><div><b>Valid from:</b> ${esc(x.validFrom||"")}</div>
+      </div>
+      <h3>1. DESCRIPTION OF HOT WORKS</h3>
+      <div class="kv"><div><b>Location:</b> ${esc(x.location||"")}</div><div><b>Nature of works:</b> ${esc(x.nature||"")}</div><div><b>Equipment:</b> ${esc(x.equipment||"")}</div></div>
+      <h3>2. FIRE &amp; SAFETY PRECAUTIONS</h3>
+      ${ticks(HW_FIRE, x.fire)}
+      <h3>3. FIRE WATCH REQUIREMENTS</h3>
+      ${ticks(HW_WATCH, x.watch)}
+      <div class="kv" style="margin-top:6px;"><div><b>Fire watch name:</b> ${esc(x.watchName||"")}</div></div>
+      <h3>4. OPERATIVES</h3>
+      ${operatives}
+      <h3>5. PERMIT ISSUED BY</h3>
+      <div class="kv"><div><b>Print name:</b> ${esc(x.issuedByName||"")}</div></div>
+      <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(x.issuedBySignature)}</div>
+      <h3>CLOSE OUT</h3>
+      <div class="kv"><div><b>Completion time:</b> ${esc(x.completionTime||"")}</div><div><b>Final area:</b> ${x.finalSafe ? "Area declared SAFE" : "—"}</div></div>
+      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>
+      <div class="foot"><b>${esc(HW_FOOTER)}</b><br>Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
 </script>
 </body>
