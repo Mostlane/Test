@@ -853,7 +853,6 @@ detailsTitle.textContent =
     const sd = document.getElementById("detailsSiteDocs");
     if (sd) {
       const params = new URLSearchParams({ site: String(site.siteNumber || ""), name: site.siteName || "", back: "sites.html" });
-      if (site.sharepointURL) params.set("sp", site.sharepointURL);
       sd.href = "site-folder.html?" + params.toString();
     }
     // all fields

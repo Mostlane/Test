@@ -918,7 +918,6 @@ async function renderSite(){
   // extra button inside it, not the whole feature.
   if(hasSite){
     const params = new URLSearchParams({ site: scode, name: sname, back: "job-view.html" + location.search });
-    if(info.sharepoint) params.set("sp", info.sharepoint);
     $("siteSharepointBtn").href = "site-folder.html?" + params.toString();
     $("siteSharepointBtn").removeAttribute("target");
     $("siteSharepointBtn").textContent = "📁 Site documents";
