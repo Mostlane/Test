@@ -1,0 +1,38 @@
+# Secrets & environment — NEVER commit these to this public repo
+.env
+.env.*
+*.env
+.dev.vars
+.dev.vars.*
+wrangler.local.toml
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local user / business data — this repo is public; data lives in D1/R2, not here
+*.csv
+*.xlsx
+*.xls
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.dump
+backup/
+dump/
+export/
+users.json
+users-data*.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Node
+node_modules/
+npm-debug.log*

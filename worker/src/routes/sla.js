@@ -16,6 +16,7 @@
 
 import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -271,14 +272,14 @@ export async function handle(request, env, ctx, url, sess) {
     for (const j of jobsHere) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/` });
       for (const o of listed.objects || []) {
-        photos.push({ url: r2Url(env, o.key), key: o.key, name: o.key.split("/").pop(),
+        photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: o.key.split("/").pop(),
           jobRef: j.helpdeskRef || j.id, jobId: j.id, at: o.uploaded ? new Date(o.uploaded).toISOString() : null, source: "job" });
       }
     }
     if (code) {
       const up = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/Site Photos/`, include: ["customMetadata"] });
       for (const o of up.objects || []) {
-        photos.push({ url: r2Url(env, o.key), key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
+        photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null, by: o.customMetadata && o.customMetadata.by, source: "upload" });
       }
     }
@@ -294,13 +295,13 @@ export async function handle(request, env, ctx, url, sess) {
     const docs = {};
     for (const area of areas) {
       const listed = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/${area}/`, include: ["customMetadata"] });
-      docs[area] = (listed.objects || []).map(o => ({
-        url: r2Url(env, o.key), key: o.key,
+      docs[area] = (await Promise.all((listed.objects || []).map(async o => ({
+        url: await fileUrl(env, url, o.key), key: o.key,
         name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
         at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
         by: o.customMetadata && o.customMetadata.by,
         size: o.size
-      })).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+      })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
     return jsonResponse({ areas, docs }, headers);
   }
@@ -328,7 +329,13 @@ export async function handle(request, env, ctx, url, sess) {
   // fetch-based viewer needs. Keys are constrained to the sitedocs/ prefix.
   if (subpath === "/site/doc" && method === "GET") {
     const key = searchParams.get("key");
-    if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    // Only ever serve site documents / job photos (never arbitrary bucket keys).
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+      return jsonResponse({ error: "Bad key" }, headers, 400);
+    // Access control: a valid, unexpired signature (minted by the authenticated
+    // listing) or a live session. Falls open only when no signing secret is set.
+    if (!sess && !(await verifyFileSig(env, key, searchParams)))
+      return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -713,6 +720,14 @@ async function setConfig(env, tenantId, body) {
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+
+// Access-controlled URL for a site document / photo. Routes through the worker
+// (/sla/site/doc) so it carries CORS + an HMAC signature that expires — instead
+// of the raw, permanent, world-readable r2.dev link. One URL works for <img>,
+// PDF.js fetch, download and open-in-new-tab.
+async function fileUrl(env, url, key) {
+  return signedFileUrl(env, url.origin, "/sla/site/doc", key);
 }
 
 async function getJobFilesPublicList(env, id) {

@@ -2167,6 +2167,44 @@ function londonWhen(iso) {
   return `${day}${suf} ${get("month")} ${get("year")} at ${get("hour")}:${get("minute")}`;
 }
 
+// src/lib/filesign.js
+function fileSecret(env) {
+  return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
+}
+async function hmacHex(secret, msg) {
+  const enc2 = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc2.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc2.encode(msg));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
+  const base = `${origin}${streamPath}?key=${encodeURIComponent(key)}`;
+  const secret = fileSecret(env);
+  if (!secret) return base;
+  const exp = Math.floor(Date.now() / 1e3) + ttlSec;
+  const sig = await hmacHex(secret, key + "|" + exp);
+  return `${base}&exp=${exp}&sig=${sig}`;
+}
+async function verifyFileSig(env, key, params) {
+  const secret = fileSecret(env);
+  if (!secret) return true;
+  const exp = parseInt(params.get("exp") || "0", 10);
+  const sig = params.get("sig") || "";
+  if (!exp || !sig) return false;
+  if (Math.floor(Date.now() / 1e3) > exp) return false;
+  const good = await hmacHex(secret, key + "|" + exp);
+  if (good.length !== sig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < good.length; i++) diff |= good.charCodeAt(i) ^ sig.charCodeAt(i);
+  return diff === 0;
+}
+
 // src/routes/sla.js
 async function handle6(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -2394,7 +2432,7 @@ async function handle6(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/` });
       for (const o of listed.objects || []) {
         photos.push({
-          url: r2Url(env, o.key),
+          url: await fileUrl(env, url, o.key),
           key: o.key,
           name: o.key.split("/").pop(),
           jobRef: j.helpdeskRef || j.id,
@@ -2408,7 +2446,7 @@ async function handle6(request, env, ctx, url, sess) {
       const up = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/Site Photos/`, include: ["customMetadata"] });
       for (const o of up.objects || []) {
         photos.push({
-          url: r2Url(env, o.key),
+          url: await fileUrl(env, url, o.key),
           key: o.key,
           name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
@@ -2427,14 +2465,14 @@ async function handle6(request, env, ctx, url, sess) {
     const docs = {};
     for (const area of areas) {
       const listed = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/${area}/`, include: ["customMetadata"] });
-      docs[area] = (listed.objects || []).map((o) => ({
-        url: r2Url(env, o.key),
+      docs[area] = (await Promise.all((listed.objects || []).map(async (o) => ({
+        url: await fileUrl(env, url, o.key),
         key: o.key,
         name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
         at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
         by: o.customMetadata && o.customMetadata.by,
         size: o.size
-      })).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+      })))).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     }
     return jsonResponse({ areas, docs }, headers);
   }
@@ -2455,7 +2493,10 @@ async function handle6(request, env, ctx, url, sess) {
   }
   if (subpath === "/site/doc" && method === "GET") {
     const key = searchParams.get("key");
-    if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    if (!key || !(String(key).startsWith("sitedocs/") || String(key).startsWith("jobs/")))
+      return jsonResponse({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, searchParams))
+      return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -2802,6 +2843,9 @@ async function setConfig(env, tenantId, body) {
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
   return `${base}/${key}`;
+}
+async function fileUrl(env, url, key) {
+  return signedFileUrl(env, url.origin, "/sla/site/doc", key);
 }
 async function getJobFilesPublicList(env, id) {
   if (!env.JOB_FILES) return [];

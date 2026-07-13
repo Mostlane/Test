@@ -289,14 +289,16 @@ async function delDoc(key){
 
 function openLb(url){ $("lbImg").src = url; $("lb").classList.add("show"); }
 
-// Open a document in the shared viewer. PDFs render via PDF.js fetching the
-// CORS-enabled worker route (so it scrolls/zooms on mobile); images use their
-// public URL directly.
+// Open a document in the shared viewer. Both PDFs and images use the signed,
+// CORS-enabled worker route (so PDFs scroll/zoom on mobile and links expire).
 function openDoc(f){
   const isImg = /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");
+  // f.url is the signed, access-controlled worker stream URL (from the
+  // authenticated listing) — use it for viewing, PDF.js fetch and download so
+  // the raw public-bucket link is never needed.
   window.MLDocViewer.open({
     url: f.url,
-    fetchUrl: isImg ? f.url : (API + "/sla/site/doc?key=" + encodeURIComponent(f.key)),
+    fetchUrl: f.url,
     name: f.name,
     downloadUrl: f.url
   });
