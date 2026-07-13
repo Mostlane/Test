@@ -263,6 +263,7 @@
             <div class="placeholder">No Image Available</div>
           </div>
           <div class="row-actions">
+            <a id="detailsSiteDocs" class="btn">📁 Site documents</a>
             <a id="detailsSharepoint" class="btn outline" target="_blank" rel="noopener">Open SharePoint</a>
           </div>
         </div>
@@ -847,6 +848,13 @@ detailsTitle.textContent =
       detailsSharepoint.href = site.sharepointURL;
     } else {
       detailsSharepoint.style.display = "none";
+    }
+    // In-portal Site Documents (previous jobs, photos, compliance)
+    const sd = document.getElementById("detailsSiteDocs");
+    if (sd) {
+      const params = new URLSearchParams({ site: String(site.siteNumber || ""), name: site.siteName || "", back: "sites.html" });
+      if (site.sharepointURL) params.set("sp", site.sharepointURL);
+      sd.href = "site-folder.html?" + params.toString();
     }
     // all fields
     const preferredOrder = [

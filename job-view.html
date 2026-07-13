@@ -891,7 +891,10 @@ async function renderSite(){
       info.sharepoint = s.sharepointURL || s.sharepoint || "";
     }
   }
-  if(!info.address && !info.phone) return;   // nothing useful — keep the card hidden
+  const scode = (job.siteCode || "").toString();
+  const sname = job.siteName || "";
+  const hasSite = !!(scode || sname);
+  if(!info.address && !info.phone && !hasSite) return;   // truly nothing — keep hidden
   $("siteAddress").textContent = info.address || "—";
   if(info.phone){
     $("sitePhone").innerHTML = "";
@@ -910,8 +913,15 @@ async function renderSite(){
     $("headerMapBtn").href = dirUrl;
     $("headerMapBtn").style.display = "inline-flex";
   }
-  if(info.sharepoint){
-    $("siteSharepointBtn").href = info.sharepoint;
+  // "Site folder" now opens the in-portal Site Documents area (previous jobs,
+  // site photos, compliance docs). Any SharePoint link is carried along as an
+  // extra button inside it, not the whole feature.
+  if(hasSite){
+    const params = new URLSearchParams({ site: scode, name: sname, back: "job-view.html" + location.search });
+    if(info.sharepoint) params.set("sp", info.sharepoint);
+    $("siteSharepointBtn").href = "site-folder.html?" + params.toString();
+    $("siteSharepointBtn").removeAttribute("target");
+    $("siteSharepointBtn").textContent = "📁 Site documents";
     $("siteSharepointBtn").style.display = "inline-block";
   }
   $("siteCard").style.display = "block";

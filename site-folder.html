@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <meta charset="UTF-8">
+  <title>Mostlane • Site Documents</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --panel:rgba(255,255,255,0.95); }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:#0f172a;background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:180%;}
+    .shell{max-width:960px;margin:18px auto 40px;padding:0 12px;}
+    .card{background:var(--panel);border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);border:1px solid rgba(15,23,42,0.05);overflow:hidden;}
+    header.top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 18px;border-bottom:1px solid #e5e7eb;background:linear-gradient(90deg,#fff,#f3f4f6);flex-wrap:wrap;}
+    header.top h1{margin:0;font-size:19px;color:var(--ml-blue);}
+    header.top .sub{font-size:12px;color:var(--muted);margin-top:2px;}
+    .btn{border:1px solid var(--border);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;background:#f9fafb;color:#0f172a;text-decoration:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+    .btn.primary{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue);}
+    .btn.small{padding:5px 10px;font-size:12px;}
+    .btn.danger{color:#b91c1c;border-color:#fca5a5;background:#fff;}
+    .tabs{display:flex;gap:4px;overflow-x:auto;padding:8px 12px 0;border-bottom:1px solid #e5e7eb;background:#f9fafb;-webkit-overflow-scrolling:touch;}
+    .tab{padding:9px 13px;font-size:13px;border:0;background:transparent;border-bottom:3px solid transparent;color:var(--muted);cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px;}
+    .tab.active{color:var(--ml-blue);border-bottom-color:var(--ml-blue);font-weight:600;}
+    .tab .cnt{background:#e5e7eb;border-radius:8px;padding:0 6px;font-size:11px;}
+    .tab.addtab{color:#0d7a3f;font-weight:600;}
+    .content{padding:16px 18px 20px;min-height:200px;}
+    .muted{color:var(--muted);}
+    .empty{color:var(--muted);font-size:14px;padding:24px 4px;text-align:center;}
+
+    /* previous jobs */
+    .jobrow{border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;background:#fff;overflow:hidden;}
+    .jobrow .head{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;flex-wrap:wrap;}
+    .ref{font-family:monospace;background:#f3f4f6;padding:2px 6px;border-radius:6px;font-size:12px;}
+    .dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto;}
+    .jobrow .desc{font-weight:600;flex:1;min-width:120px;}
+    .jobrow .when{font-size:12px;color:var(--muted);}
+    .jobrow .body{display:none;padding:0 13px 12px;font-size:13px;color:#334155;}
+    .jobrow.open .body{display:block;}
+    .kv{display:flex;gap:8px;padding:3px 0;}
+    .kv b{min-width:120px;color:#475569;font-weight:600;}
+    .sheetimgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+    .sheetimgs img{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db;cursor:pointer;}
+
+    /* photos */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;}
+    .gitem{position:relative;border-radius:10px;overflow:hidden;border:1px solid #d1d5db;background:#f3f4f6;aspect-ratio:1/1;}
+    .gitem img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;}
+    .gitem .tag{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+    /* docs */
+    .doclist{display:flex;flex-direction:column;gap:6px;}
+    .docrow{display:flex;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:10px;padding:9px 12px;background:#fff;}
+    .docrow .ic{font-size:20px;}
+    .docrow .nm{flex:1;font-size:14px;word-break:break-word;}
+    .docrow .meta{font-size:11px;color:var(--muted);}
+    .uploadbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+
+    /* lightbox */
+    .lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:9999;}
+    .lb.show{display:flex;}
+    .lb img{max-width:94vw;max-height:92vh;border-radius:8px;}
+    .lb .x{position:absolute;top:12px;right:14px;color:#fff;font-size:26px;cursor:pointer;background:none;border:0;}
+    #msg{font-size:13px;margin-top:8px;}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header class="top">
+      <div>
+        <h1 id="siteName">Site documents</h1>
+        <div class="sub" id="siteSub"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a class="btn" id="spBtn" target="_blank" rel="noopener" style="display:none;">☁️ SharePoint</a>
+        <a class="btn" id="backBtn" href="#">← Back</a>
+      </div>
+    </header>
+    <div class="tabs" id="tabs"></div>
+    <div class="content" id="content"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<div class="lb" id="lb"><button class="x" id="lbClose">✕</button><img id="lbImg" alt=""></div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function qp(k){ return new URLSearchParams(location.search).get(k) || ""; }
+function isAdmin(){
+  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }catch{ return false; }
+}
+const STATUS_COLOUR = {"Pending":"#9f1239","Scheduled":"#f59e0b","Travelling":"#3b82f6","In Progress":"#9333ea","On Hold":"#6b7280","Quote":"#dc2626","Order":"#0d9488","Complete":"#84cc16","Invoiced":"#22c55e","Closed Jobs":"#701a75"};
+
+const siteCode = qp("site");
+const siteNm = qp("name");
+const admin = isAdmin();
+let areas = [], activeTab = "Previous Jobs";
+const cache = {};   // tab -> loaded data
+
+function fmt(d){ if(!d) return ""; const x = new Date(d); return isNaN(x) ? "" : x.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
+function fileIcon(name){ const e=(name.split(".").pop()||"").toLowerCase(); if(["pdf"].includes(e))return"📄"; if(["doc","docx"].includes(e))return"📝"; if(["xls","xlsx","csv"].includes(e))return"📊"; if(["png","jpg","jpeg","webp","gif","heic"].includes(e))return"🖼️"; return"📎"; }
+
+function init(){
+  $("siteName").textContent = siteNm ? ("📁 " + siteNm) : "📁 Site documents";
+  $("siteSub").textContent = siteCode ? ("Site " + siteCode + " · everything on file for this site") : "";
+  const back = qp("back");
+  $("backBtn").href = back || "sla-main.html";
+  const sp = qp("sp");
+  if(sp){ $("spBtn").href = sp; $("spBtn").style.display = "inline-flex"; }
+  $("lbClose").addEventListener("click", () => $("lb").classList.remove("show"));
+  $("lb").addEventListener("click", e => { if(e.target === $("lb")) $("lb").classList.remove("show"); });
+  loadAreas().then(renderTabs).then(() => selectTab("Previous Jobs"));
+}
+
+async function loadAreas(){
+  try{ const d = await authFetch("/sla/site/docs?siteCode=" + encodeURIComponent(siteCode)).then(r=>r.json()); areas = d.areas || ["Compliance"]; cache["__docs"] = d; }
+  catch(e){ areas = ["Compliance"]; }
+}
+
+function renderTabs(){
+  const tabs = ["Previous Jobs", "Site Photos", ...areas];
+  const host = $("tabs");
+  host.innerHTML = "";
+  tabs.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "tab" + (t === activeTab ? " active" : "");
+    b.textContent = t;
+    b.onclick = () => selectTab(t);
+    host.appendChild(b);
+  });
+  if(admin){
+    const add = document.createElement("button");
+    add.className = "tab addtab";
+    add.textContent = "➕ Add area";
+    add.onclick = addArea;
+    host.appendChild(add);
+  }
+}
+
+async function addArea(){
+  const name = prompt("New document area name (e.g. Access info, Warranties, Drawings):");
+  if(!name || !name.trim()) return;
+  try{
+    const r = await authFetch("/sla/site/area", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ area: name.trim() }) }).then(r=>r.json());
+    if(r.areas){ areas = r.areas; renderTabs(); selectTab(name.trim()); }
+    else alert(r.error || "Couldn't add the area.");
+  }catch(e){ alert("Couldn't add the area."); }
+}
+
+function selectTab(t){
+  activeTab = t;
+  renderTabs();
+  if(t === "Previous Jobs") return renderJobs();
+  if(t === "Site Photos") return renderPhotos();
+  return renderDocs(t);
+}
+
+/* ---- Previous Jobs ---- */
+async function renderJobs(){
+  const c = $("content"); c.innerHTML = `<div class="empty">Loading jobs…</div>`;
+  let jobs = cache.jobs;
+  if(!jobs){
+    try{ jobs = (await authFetch(`/sla/site/jobs?siteCode=${encodeURIComponent(siteCode)}&siteName=${encodeURIComponent(siteNm)}`).then(r=>r.json())).jobs || []; cache.jobs = jobs; }
+    catch(e){ c.innerHTML = `<div class="empty">Couldn't load jobs.</div>`; return; }
+  }
+  if(activeTab !== "Previous Jobs") return;
+  if(!jobs.length){ c.innerHTML = `<div class="empty">No jobs recorded at this site yet.</div>`; return; }
+  c.innerHTML = "";
+  jobs.forEach(j => {
+    const col = STATUS_COLOUR[j.status] || "#9ca3af";
+    const row = document.createElement("div");
+    row.className = "jobrow";
+    row.innerHTML = `
+      <div class="head">
+        <span class="dot" style="background:${col}"></span>
+        <span class="ref">${esc(j.ref)}</span>
+        <span class="desc">${esc(j.description || "(no description)")}</span>
+        <span class="when">${esc(fmt(j.date))} · ${esc(j.status)}</span>
+      </div>
+      <div class="body">
+        <div class="kv"><b>Reference</b><span>${esc(j.ref)}</span></div>
+        <div class="kv"><b>Status</b><span>${esc(j.status)}${j.priority ? " · " + esc(j.priority) : ""}</span></div>
+        <div class="kv"><b>Raised</b><span>${esc(fmt(j.raisedAt)) || "—"}</span></div>
+        ${j.closedAt ? `<div class="kv"><b>Completed</b><span>${esc(fmt(j.closedAt))}</span></div>` : ""}
+        <div class="kv"><b>Engineer(s)</b><span>${esc((j.engineers||[]).join(", ") || "—")}</span></div>
+        ${j.lastNote ? `<div class="kv"><b>Last note</b><span>${esc(j.lastNote)}</span></div>` : ""}
+        ${j.signedBy ? `<div class="kv"><b>Signed by</b><span>${esc(j.signedBy)}</span></div>` : ""}
+        <div style="margin-top:8px;"><a class="btn small primary" href="job-view.html?jobId=${encodeURIComponent(j.id)}">Open full job</a></div>
+      </div>`;
+    row.querySelector(".head").addEventListener("click", () => row.classList.toggle("open"));
+    c.appendChild(row);
+  });
+}
+
+/* ---- Site Photos ---- */
+async function renderPhotos(){
+  const c = $("content"); c.innerHTML = `<div class="empty">Loading photos…</div>`;
+  let photos = cache.photos;
+  if(!photos){
+    try{ photos = (await authFetch(`/sla/site/photos?siteCode=${encodeURIComponent(siteCode)}&siteName=${encodeURIComponent(siteNm)}`).then(r=>r.json())).photos || []; cache.photos = photos; }
+    catch(e){ c.innerHTML = `<div class="empty">Couldn't load photos.</div>`; return; }
+  }
+  if(activeTab !== "Site Photos") return;
+  c.innerHTML = "";
+  c.appendChild(uploadBar("Site Photos", "image/*", true));
+  if(!photos.length){ const d=document.createElement("div"); d.className="empty"; d.textContent="No photos from jobs at this site yet."; c.appendChild(d); return; }
+  const grid = document.createElement("div"); grid.className = "grid";
+  photos.forEach(p => {
+    const g = document.createElement("div"); g.className = "gitem";
+    g.innerHTML = `<img loading="lazy" decoding="async" src="${esc(p.url)}" alt=""><span class="tag">${esc(p.jobRef || (p.by ? "uploaded" : "photo"))}</span>`;
+    g.querySelector("img").addEventListener("click", () => openLb(p.url));
+    grid.appendChild(g);
+  });
+  c.appendChild(grid);
+}
+
+/* ---- Document areas ---- */
+async function renderDocs(area){
+  const c = $("content"); c.innerHTML = `<div class="empty">Loading…</div>`;
+  let d = cache["__docs"];
+  if(!d || !d.docs){
+    try{ d = await authFetch("/sla/site/docs?siteCode=" + encodeURIComponent(siteCode)).then(r=>r.json()); cache["__docs"] = d; }
+    catch(e){ c.innerHTML = `<div class="empty">Couldn't load documents.</div>`; return; }
+  }
+  if(activeTab !== area) return;
+  const files = (d.docs && d.docs[area]) || [];
+  c.innerHTML = "";
+  c.appendChild(uploadBar(area, "*/*", false));
+  if(!files.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="Nothing here yet — drop in a document above."; c.appendChild(e); return; }
+  const list = document.createElement("div"); list.className = "doclist";
+  files.forEach(f => {
+    const isImg = /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");
+    const row = document.createElement("div"); row.className = "docrow";
+    row.innerHTML = `
+      <span class="ic">${fileIcon(f.name)}</span>
+      <div class="nm">${esc(f.name)}<div class="meta">${esc(fmt(f.at))}${f.by ? " · " + esc(f.by) : ""}</div></div>
+      <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener">${isImg ? "View" : "Open"}</a>
+      ${admin ? `<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>` : ""}`;
+    if(admin){ row.querySelector("[data-del]").addEventListener("click", () => delDoc(f.key)); }
+    list.appendChild(row);
+  });
+  c.appendChild(list);
+}
+
+function uploadBar(area, accept, cameraHint){
+  const bar = document.createElement("div"); bar.className = "uploadbar";
+  const label = document.createElement("label"); label.className = "btn primary small"; label.textContent = "⬆️ Add " + (cameraHint ? "photo" : "document");
+  const input = document.createElement("input"); input.type = "file"; input.accept = accept; input.multiple = true; input.hidden = true;
+  label.appendChild(input);
+  const status = document.createElement("span"); status.className = "muted"; status.style.fontSize = "12px";
+  input.addEventListener("change", async () => {
+    const files = [...input.files]; if(!files.length) return;
+    label.style.pointerEvents = "none"; label.textContent = "Uploading…";
+    let ok = 0, fail = 0;
+    for(const file of files){
+      try{
+        const form = new FormData(); form.append("file", file, file.name);
+        const r = await authFetch(`/sla/site/docs?siteCode=${encodeURIComponent(siteCode)}&area=${encodeURIComponent(area)}`, { method:"POST", body: form }).then(r=>r.json());
+        if(r.ok) ok++; else fail++;
+      }catch(e){ fail++; }
+    }
+    status.textContent = `✓ ${ok} added${fail ? `, ${fail} failed` : ""}`;
+    label.style.pointerEvents = ""; label.textContent = "⬆️ Add " + (cameraHint ? "photo" : "document");
+    input.value = "";
+    // refresh the relevant cache + view
+    if(area === "Site Photos"){ delete cache.photos; renderPhotos(); }
+    else { delete cache["__docs"]; renderDocs(area); }
+  });
+  bar.appendChild(label); bar.appendChild(status);
+  return bar;
+}
+
+async function delDoc(key){
+  if(!confirm("Delete this document?")) return;
+  try{
+    const r = await authFetch("/sla/site/doc-delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ key }) }).then(r=>r.json());
+    if(r.ok){ delete cache["__docs"]; renderDocs(activeTab); }
+    else alert(r.error || "Couldn't delete.");
+  }catch(e){ alert("Couldn't delete."); }
+}
+
+function openLb(url){ $("lbImg").src = url; $("lb").classList.add("show"); }
+
+window.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

@@ -2377,6 +2377,98 @@ async function handle6(request, env, ctx, url, sess) {
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
   }
+  if (subpath === "/site/jobs" && method === "GET") {
+    const code = digitsOf(searchParams.get("siteCode"));
+    const name = (searchParams.get("siteName") || "").trim().toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const mine = all.filter((j) => siteMatches(j, code, name)).map(siteJobSummary).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return jsonResponse({ jobs: mine }, headers);
+  }
+  if (subpath === "/site/photos" && method === "GET") {
+    const code = digitsOf(searchParams.get("siteCode"));
+    const name = (searchParams.get("siteName") || "").trim().toLowerCase();
+    const all = await listJobs(env, tenantId);
+    const jobsHere = all.filter((j) => siteMatches(j, code, name));
+    const photos = [];
+    for (const j of jobsHere) {
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/` });
+      for (const o of listed.objects || []) {
+        photos.push({
+          url: r2Url(env, o.key),
+          key: o.key,
+          name: o.key.split("/").pop(),
+          jobRef: j.helpdeskRef || j.id,
+          jobId: j.id,
+          at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
+          source: "job"
+        });
+      }
+    }
+    if (code) {
+      const up = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/Site Photos/`, include: ["customMetadata"] });
+      for (const o of up.objects || []) {
+        photos.push({
+          url: r2Url(env, o.key),
+          key: o.key,
+          name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
+          at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
+          by: o.customMetadata && o.customMetadata.by,
+          source: "upload"
+        });
+      }
+    }
+    photos.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return jsonResponse({ photos }, headers);
+  }
+  if (subpath === "/site/docs" && method === "GET") {
+    const code = digitsOf(searchParams.get("siteCode"));
+    if (!code) return jsonResponse({ areas: await getSiteAreas(env, tenantId), docs: {} }, headers);
+    const areas = await getSiteAreas(env, tenantId);
+    const docs = {};
+    for (const area of areas) {
+      const listed = await env.JOB_FILES.list({ prefix: `sitedocs/${code}/${area}/`, include: ["customMetadata"] });
+      docs[area] = (listed.objects || []).map((o) => ({
+        url: r2Url(env, o.key),
+        key: o.key,
+        name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
+        at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
+        by: o.customMetadata && o.customMetadata.by,
+        size: o.size
+      })).sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    }
+    return jsonResponse({ areas, docs }, headers);
+  }
+  if (subpath === "/site/docs" && method === "POST") {
+    const code = digitsOf(searchParams.get("siteCode"));
+    const area = (searchParams.get("area") || "Compliance").replace(/[\/]/g, "-").trim();
+    if (!code) return jsonResponse({ error: "Missing siteCode" }, headers, 400);
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!file) return jsonResponse({ error: "Missing file" }, headers, 400);
+    const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
+    const key = `sitedocs/${code}/${area}/${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+      customMetadata: { name: file.name || safe, by: sess && sess.user && sess.user.username || "", at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
+  }
+  if (subpath === "/site/doc-delete" && method === "POST") {
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const { key } = await readJson(request);
+    if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
+    return jsonResponse({ ok: true }, headers);
+  }
+  if (subpath === "/site/area" && method === "POST") {
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const { area } = await readJson(request);
+    const clean = String(area || "").replace(/[\/]/g, "-").trim();
+    if (!clean) return jsonResponse({ error: "Area name required" }, headers, 400);
+    if (["Previous Jobs", "Site Photos"].some((r) => r.toLowerCase() === clean.toLowerCase()))
+      return jsonResponse({ error: "That name is reserved" }, headers, 400);
+    return jsonResponse({ ok: true, areas: await addSiteArea(env, tenantId, clean) }, headers);
+  }
   if (subpath === "/pdf" && method === "POST") {
     const { html, filename } = await readJson(request);
     if (!html) return jsonResponse({ error: "Missing HTML" }, headers, 400);
@@ -2605,6 +2697,59 @@ async function patchJob(env, tenantId, id, patch) {
   job.updatedAt = now;
   await saveJob(env, tenantId, job);
   return job;
+}
+function digitsOf(s) {
+  const m = String(s || "").match(/(\d+)/);
+  return m ? String(Number(m[1])) : "";
+}
+function siteMatches(job, code, nameLower) {
+  const jc = digitsOf(job.siteCode);
+  if (code && jc && jc === code) return true;
+  if (!jc && nameLower && (job.siteName || "").trim().toLowerCase() === nameLower) return true;
+  return false;
+}
+function siteJobSummary(j) {
+  const events = Array.isArray(j.events) ? j.events : [];
+  const lastNote = [...events].reverse().find((e) => e.note);
+  return {
+    id: j.id,
+    ref: j.helpdeskRef || j.id,
+    description: j.description || "",
+    status: j.status || "Pending",
+    priority: j.priority || "",
+    date: j.closedAt || j.scheduledAt || j.raisedAt || null,
+    raisedAt: j.raisedAt || null,
+    closedAt: j.closedAt || null,
+    engineers: Array.isArray(j.assignedEngineers) && j.assignedEngineers.length ? j.assignedEngineers : j.assignedTo ? [j.assignedTo] : [],
+    lastNote: lastNote ? lastNote.note : "",
+    signedBy: j.signature && j.signature.signedBy || ""
+  };
+}
+async function isSlaAdmin(env, tenantId, sess) {
+  const username = sess && sess.user && sess.user.username;
+  if (!username) return false;
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT permission FROM user_permissions WHERE tenant_id = ? AND username = ? AND value = 1"
+  ).bind(tenantId, username).all();
+  const set = new Set((results || []).map((r) => r.permission));
+  return set.has("FullAccess") || set.has("SLAAdmin");
+}
+async function getSiteAreas(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'site_doc_areas'").bind(tenantId).first();
+  let areas = row ? JSON.parse(row.value) : null;
+  if (!Array.isArray(areas) || !areas.length) areas = ["Compliance"];
+  return areas;
+}
+async function addSiteArea(env, tenantId, area) {
+  const areas = await getSiteAreas(env, tenantId);
+  if (!areas.some((a) => a.toLowerCase() === area.toLowerCase())) areas.push(area);
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'site_doc_areas', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).bind(tenantId, JSON.stringify(areas)).run();
+  return areas;
 }
 function computeSlaTarget(raisedAt, priority, cfg) {
   const hrs = cfg.priorities[priority]?.hours || 168;
