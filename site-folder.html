@@ -73,7 +73,6 @@
         <div class="sub" id="siteSub"></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <a class="btn" id="spBtn" target="_blank" rel="noopener" style="display:none;">☁️ SharePoint</a>
         <a class="btn" id="backBtn" href="#">← Back</a>
       </div>
     </header>
@@ -113,8 +112,6 @@ function init(){
   $("siteSub").textContent = siteCode ? ("Site " + siteCode + " · everything on file for this site") : "";
   const back = qp("back");
   $("backBtn").href = back || "sla-main.html";
-  const sp = qp("sp");
-  if(sp){ $("spBtn").href = sp; $("spBtn").style.display = "inline-flex"; }
   $("lbClose").addEventListener("click", () => $("lb").classList.remove("show"));
   $("lb").addEventListener("click", e => { if(e.target === $("lb")) $("lb").classList.remove("show"); });
   loadAreas().then(renderTabs).then(() => selectTab("Previous Jobs"));
