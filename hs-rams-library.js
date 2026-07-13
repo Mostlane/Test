@@ -1,23 +1,40 @@
 // Mostlane RAMS hazard/control library + risk matrix.
 // ---------------------------------------------------------------------------
 // Powers the Risk Assessment Builder (hs-docs.html). Modelled on the THSP
-// "Risk Assessment Builder" format: every hazard carries a WITHOUT-controls
+// "Risk Assessment Builder": every hazard carries a WITHOUT-controls
 // severity×likelihood and, after its control measures, a WITH-controls
 // (residual) severity×likelihood. Risk rating = severity × likelihood.
 //
-// STRUCTURE
-//   HS_RAMS.severityKey / likelihoodKey / riskControlPlan  — the standard keys.
-//   HS_RAMS.hazards      — id → { name, persons[], sevWithout, likWithout,
-//                                 controls[], sevWith, likWith }
-//   HS_RAMS.workTypes    — the selection tree: work type → sub-category →
-//                          sub-type, each sub-type listing the hazard ids it
-//                          brings in. Selecting sub-types assembles a deduped
-//                          hazard list, pre-filled and then editable.
+// Each hazard also carries, THSP-style:
+//   • controls tagged by the HSE Hierarchy of Control (Eliminate → Substitute →
+//     Engineering → Administrative → PPE) so they order most-effective first;
+//   • the PPE it calls for (aggregated into a Required-PPE list); and
+//   • its likely injuries (aggregated into the assessment's Likely Harm(s)).
 //
-// This is a shared starter library; an in-app editor (and per-tenant overrides)
-// come in a later step. Grow it by adding to `hazards` and referencing the ids
-// under the relevant sub-types.
+// STRUCTURE
+//   HS_RAMS.severityKey / likelihoodKey / riskControlPlan / levels
+//   HS_RAMS.hazards   — id → { name, persons[], injuries[], ppe[],
+//                              sevWithout, likWithout, controls[{level,text}],
+//                              sevWith, likWith }
+//   HS_RAMS.workTypes — selection tree: work type → sub-category → sub-type,
+//                       each sub-type listing the hazard ids it brings in.
+//
+// This is a shared starter library; an in-app editor and per-tenant overrides
+// come next. Grow it by adding to `hazards` and referencing ids under the
+// relevant sub-types.
 window.HS_RAMS = (function () {
+  const c = (level, text) => ({ level, text });   // control measure helper
+
+  // HSE Hierarchy of Control — most effective first.
+  const levels = [
+    { id: "eliminate", label: "Elimination" },
+    { id: "substitute", label: "Substitution" },
+    { id: "engineering", label: "Engineering" },
+    { id: "admin", label: "Administrative" },
+    { id: "ppe", label: "PPE" },
+  ];
+  const levelRank = { eliminate: 0, substitute: 1, engineering: 2, admin: 3, ppe: 4 };
+
   const severityKey = [
     "Trivial / minor injury",
     "Moderate injury / minor property damage",
@@ -38,7 +55,6 @@ window.HS_RAMS = (function () {
     { band: "HIGH (15-25)", text: "Work should not be started until the risk has been reduced. Considerable resources may have to be allocated to reduce the risk. Where the risk involves work in progress, urgent action should be taken. If it is not possible to reduce the risk, even with unlimited resources, work has to remain prohibited." },
   ];
 
-  // Risk = severity × likelihood, banded exactly as THSP.
   function band(sev, lik) {
     const r = (Number(sev) || 0) * (Number(lik) || 0);
     if (r >= 15) return "High";
@@ -48,365 +64,444 @@ window.HS_RAMS = (function () {
 
   const P_STD = ["Operative", "Supervisor", "Third Party", "Members of the public"];
 
-  // ── Hazard library ────────────────────────────────────────────────────────
   const hazards = {
     electricity: {
       name: "Contact with electricity",
       persons: ["Operative", "Apprentice", "Third Party"],
+      injuries: ["Fatality", "Electric shock", "Burn injury", "Long term health effects"],
+      ppe: ["Insulated gloves", "Safety boots", "Eye protection"],
       sevWithout: 5, likWithout: 5,
       controls: [
-        "Only suitably trained, competent and authorised persons carry out electrical work, working to BS 7671 and the Electricity at Work Regulations 1989.",
-        "Circuits are safely isolated, proved dead with a proprietary voltage indicator (proved on a known source before and after), and locked off with a personal lock and warning label before work begins.",
-        "All portable electrical tools and leads are inspected before use for damage; defective items are removed from use immediately, reported and quarantined.",
-        "Suitable insulated tools and PPE are used; 110V or battery equipment is used on site in preference to 230V.",
+        c("engineering", "Circuits safely isolated, proved dead with a proprietary voltage indicator (proved on a known source before and after) and locked off with a personal lock and warning label before work begins."),
+        c("admin", "Only suitably trained, competent and authorised persons carry out electrical work, working to BS 7671 and the Electricity at Work Regulations 1989."),
+        c("admin", "All portable electrical tools and leads are inspected before use for damage; defective items are removed from use immediately, reported and quarantined."),
+        c("ppe", "Insulated tools and appropriate PPE used; 110V or battery equipment used in preference to 230V."),
       ],
       sevWith: 5, likWith: 1,
     },
     electricity_live: {
       name: "Live electrical working",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Fatality", "Electric shock", "Burn injury"],
+      ppe: ["Arc-rated gloves & clothing", "Face shield", "Insulated matting"],
       sevWithout: 5, likWithout: 5,
       controls: [
-        "Live working is avoided; work is only carried out live where it is unreasonable to work dead AND a documented live-working risk assessment/permit is in place.",
-        "A competent person uses insulated tools, insulated matting, appropriate arc-rated PPE and works with an accompanying person present.",
-        "Adjacent live parts are guarded or made dead; barriers and warning signage are positioned.",
+        c("eliminate", "Live working is avoided; work is only carried out live where it is unreasonable to work dead."),
+        c("admin", "A documented live-working risk assessment / permit is in place and an accompanying person is present."),
+        c("engineering", "Adjacent live parts are guarded or made dead; barriers and warning signage positioned."),
+        c("ppe", "Competent person uses insulated tools, insulated matting and appropriate arc-rated PPE."),
       ],
       sevWith: 5, likWith: 2,
     },
     arc_flash: {
       name: "Arc flash / burns",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Burn injury", "Eye injury", "Fatality"],
+      ppe: ["Arc-rated PPE", "Face shield"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Equipment is isolated and proved dead before work; where live testing is unavoidable, arc-rated face/hand protection and clothing are worn.",
-        "Working space, access and lighting are adequate; tools are insulated and in good condition.",
+        c("engineering", "Equipment is isolated and proved dead before work; working space, access and lighting are adequate."),
+        c("admin", "Where live testing is unavoidable, minimum approach distances are maintained and tools are insulated and in good condition."),
+        c("ppe", "Arc-rated face/hand protection and clothing worn."),
       ],
       sevWith: 5, likWith: 1,
     },
     work_height_mewp: {
       name: "Fall of person / object from height (MEWP)",
       persons: ["Operative", "Apprentice", "Third Party"],
+      injuries: ["Fatality", "Fractures/broken bones", "Head injury"],
+      ppe: ["Fall-arrest harness & lanyard", "Hard hat", "Safety boots"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "MEWP operated only by IPAF-certified, competent operators; daily pre-use checks recorded and LOLER thorough examination in date.",
-        "Harness and adjustable lanyard worn and clipped to the designated anchor in boom-type platforms; ground conditions assessed and outriggers used as required.",
-        "Exclusion zone established beneath the work area; a trained ground/rescue person is present with a rescue plan.",
+        c("engineering", "Ground conditions assessed and outriggers used as required; exclusion zone established beneath the work area."),
+        c("admin", "MEWP operated only by IPAF-certified operators; daily pre-use checks recorded and LOLER thorough examination in date; trained ground/rescue person present with a rescue plan."),
+        c("ppe", "Harness and adjustable lanyard worn and clipped to the designated anchor in boom-type platforms."),
       ],
       sevWith: 5, likWith: 1,
     },
     work_height_ladder: {
       name: "Fall from height (ladders / steps)",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Fractures/broken bones", "Head injury", "Cut, abrasion, laceration or bruise"],
+      ppe: ["Safety boots"],
       sevWithout: 4, likWithout: 4,
       controls: [
-        "Ladders used only for short-duration, low-risk work; a suitable working platform is used in preference where practicable.",
-        "Ladders/steps are inspected before use, sound, on firm level ground, secured/footed, and used at the correct angle with three points of contact maintained.",
+        c("substitute", "A suitable working platform (tower/MEWP) is used in preference where practicable."),
+        c("admin", "Ladders used only for short-duration, low-risk work; inspected before use, sound, on firm level ground, secured/footed, at the correct angle with three points of contact maintained."),
       ],
       sevWith: 4, likWith: 1,
     },
     work_height_tower: {
       name: "Fall from height (mobile tower / scaffold)",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Fatality", "Fractures/broken bones", "Head injury"],
+      ppe: ["Hard hat", "Safety boots"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Mobile towers erected by PASMA-trained persons to manufacturer's instructions, with guardrails, toe-boards and outriggers; inspected and tag-signed before use and after any alteration.",
-        "Tower is not moved with persons/materials on it; wheels locked when in use.",
+        c("engineering", "Guardrails, toe-boards and outriggers fitted; wheels locked when in use."),
+        c("admin", "Towers erected by PASMA-trained persons to manufacturer's instructions, inspected and tag-signed before use and after any alteration; not moved with persons/materials on board."),
       ],
       sevWith: 5, likWith: 1,
     },
     falling_objects: {
       name: "Strike by falling object",
       persons: P_STD,
+      injuries: ["Head injury", "Fractures/broken bones", "Fatality"],
+      ppe: ["Hard hat", "Safety boots"],
       sevWithout: 5, likWithout: 3,
       controls: [
-        "Exclusion zones, barriers and signage established beneath overhead work; tools and materials secured/tethered and not left at height.",
-        "Hard hats worn within the work area; materials raised/lowered by suitable means, never thrown.",
+        c("engineering", "Toe-boards, nets or brick guards fitted; materials raised/lowered by suitable means, never thrown."),
+        c("admin", "Exclusion zones, barriers and signage established beneath overhead work; tools and materials secured/tethered and not left at height."),
+        c("ppe", "Hard hats worn within the work area."),
       ],
       sevWith: 5, likWith: 1,
     },
     fragile_surfaces: {
       name: "Fall through fragile surface",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Fatality", "Fractures/broken bones"],
+      ppe: ["Fall-arrest harness", "Hard hat"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Fragile surfaces (roof lights, old roof sheets) identified and clearly marked; access prevented by covers, guardrails or staging boards.",
-        "Work planned to avoid walking on fragile surfaces; crawling boards and edge protection used where access is unavoidable.",
+        c("eliminate", "Work planned to avoid walking on fragile surfaces."),
+        c("engineering", "Access prevented by covers, guardrails or staging boards; crawling boards and edge protection used where access is unavoidable."),
+        c("admin", "Fragile surfaces (roof lights, old roof sheets) identified and clearly marked before work."),
       ],
       sevWith: 5, likWith: 1,
     },
     excavation_collapse: {
       name: "Excavation collapse / fall into excavation",
       persons: ["Operative", "Site Foreman", "Engineer"],
+      injuries: ["Fatality", "Crush injury", "Asphyxiation"],
+      ppe: ["Safety boots", "Hard hat", "Hi-vis"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "All excavations assessed daily by a competent person and the inspection recorded; battering, stepping or trench support installed where depth/ground conditions require.",
-        "No person enters an unsupported excavation over 1.2m deep; edge protection / barriers and access ladders provided.",
-        "Spoil heaps, plant and materials kept back from the excavation edge.",
+        c("engineering", "Battering, stepping or trench support installed where depth/ground conditions require; edge protection / barriers and access ladders provided."),
+        c("admin", "All excavations assessed daily by a competent person and the inspection recorded; no person enters an unsupported excavation over 1.2m deep; spoil, plant and materials kept back from the edge."),
       ],
       sevWith: 5, likWith: 1,
     },
     underground_services: {
       name: "Contact with underground services",
       persons: ["Operative", "Site Foreman", "Third Party"],
+      injuries: ["Fatality", "Burn injury", "Electric shock"],
+      ppe: ["Insulated gloves", "Safety boots"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Utility drawings obtained and a CAT & Genny survey completed before breaking ground; findings marked up on the surface.",
-        "Safe digging practices followed — hand-dig / vacuum excavation within 500mm of marked services; no mechanical excavation over known services.",
+        c("engineering", "Utility drawings obtained and a CAT & Genny survey completed before breaking ground; findings marked up on the surface."),
+        c("admin", "Safe digging practices followed — hand-dig / vacuum excavation within 500mm of marked services; no mechanical excavation over known services."),
       ],
       sevWith: 5, likWith: 1,
     },
     plant_pedestrian: {
       name: "Plant / pedestrian interface",
       persons: P_STD.concat(["Site Foreman"]),
+      injuries: ["Fatality", "Crush injury", "Fractures/broken bones"],
+      ppe: ["Hi-vis", "Safety boots", "Hard hat"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Segregated pedestrian and plant routes established with barriers; plant fitted with working lights, beacons and reversing alarms.",
-        "Plant operated only by CPCS/NPORS-certified operators; banksman used for reversing/blind spots; exclusion zones around slewing plant.",
+        c("engineering", "Segregated pedestrian and plant routes established with barriers; plant fitted with working lights, beacons and reversing alarms."),
+        c("admin", "Plant operated only by CPCS/NPORS-certified operators; banksman used for reversing/blind spots; exclusion zones around slewing plant."),
+        c("ppe", "Hi-vis clothing worn by all on site."),
       ],
       sevWith: 5, likWith: 1,
     },
     overturning: {
       name: "Plant overturn",
       persons: ["Operative", "Site Foreman"],
+      injuries: ["Fatality", "Crush injury"],
+      ppe: ["Seatbelt (in cab)", "Hi-vis"],
       sevWithout: 5, likWithout: 3,
       controls: [
-        "Ground assessed for bearing capacity; plant operated within its rated capacity on stable, level ground with outriggers where fitted.",
-        "ROPS/FOPS and seatbelts in use; loads kept low when travelling.",
+        c("engineering", "ROPS/FOPS fitted and seatbelts in use; plant operated on stable, level ground with outriggers where fitted."),
+        c("admin", "Ground assessed for bearing capacity; plant operated within its rated capacity; loads kept low when travelling."),
       ],
       sevWith: 5, likWith: 1,
     },
     lifting_ops: {
       name: "Lifting operations",
       persons: ["Operative", "Site Foreman", "Third Party"],
+      injuries: ["Fatality", "Crush injury", "Fractures/broken bones"],
+      ppe: ["Hard hat", "Safety boots", "Gloves"],
       sevWithout: 5, likWithout: 3,
       controls: [
-        "Lift planned by a competent Appointed Person; lifting accessories certified (LOLER, in date) and inspected before use.",
-        "Exclusion zone under the load; no person passes/stands beneath a suspended load; trained slinger/signaller directs the lift.",
+        c("engineering", "Certified lifting accessories (LOLER, in date) inspected before use; exclusion zone under the load."),
+        c("admin", "Lift planned by a competent Appointed Person; trained slinger/signaller directs the lift; no person passes/stands beneath a suspended load."),
       ],
       sevWith: 5, likWith: 1,
     },
     wet_concrete: {
       name: "Wet concrete (burns / dermatitis)",
       persons: ["Operative", "Site Foreman"],
+      injuries: ["Burn injury", "Dermatitis", "Eye injury"],
+      ppe: ["Waterproof gloves", "Waterproof trousers/boots", "Eye protection"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Impervious gloves, waterproof trousers/boots and eye protection worn; skin contact avoided and washed off promptly.",
-        "Welfare/washing facilities available on site; barrier cream and eye-wash provided.",
+        c("admin", "Skin contact avoided and washed off promptly; welfare/washing facilities, barrier cream and eye-wash provided."),
+        c("ppe", "Impervious gloves, waterproof trousers/boots and eye protection worn."),
       ],
       sevWith: 3, likWith: 1,
     },
     manual_handling: {
       name: "Manual handling",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Musculoskeletal injury", "Short term health effects", "Cut, abrasion, laceration or bruise"],
+      ppe: ["Gloves", "Safety boots"],
       sevWithout: 3, likWithout: 4,
       controls: [
-        "Mechanical aids (trolleys, teleporter, genie) used in preference to manual lifting; loads assessed and split where possible.",
-        "Team lifts used for awkward/heavy items; operatives trained in safe manual-handling technique.",
+        c("engineering", "Mechanical aids (trolleys, teleporter, genie) used in preference to manual lifting."),
+        c("admin", "Loads assessed and split where possible; team lifts used for awkward/heavy items; operatives trained in safe manual-handling technique."),
       ],
       sevWith: 3, likWith: 1,
     },
     slips_trips: {
       name: "Slips, trips and falls",
       persons: P_STD,
+      injuries: ["Fractures/broken bones", "Cut, abrasion, laceration or bruise"],
+      ppe: ["Safety boots"],
       sevWithout: 3, likWithout: 4,
       controls: [
-        "Good housekeeping maintained; leads/hoses routed off walkways or covered; work areas kept clear of offcuts and materials.",
-        "Adequate lighting provided; spillages cleaned immediately; suitable footwear worn.",
+        c("engineering", "Leads/hoses routed off walkways or covered; adequate lighting provided."),
+        c("admin", "Good housekeeping maintained; work areas kept clear of offcuts and materials; spillages cleaned immediately."),
       ],
       sevWith: 3, likWith: 1,
     },
     noise_vibration: {
       name: "Noise and vibration",
       persons: ["Operative", "Site Foreman"],
+      injuries: ["Hearing loss", "Hand-arm vibration syndrome (HAVS)"],
+      ppe: ["Hearing protection", "Anti-vibration gloves"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Low-vibration/low-noise tools selected; trigger/exposure times managed and job rotation used to stay within EAV/ELV limits.",
-        "Hearing protection worn in designated zones; anti-vibration gloves provided where appropriate.",
+        c("substitute", "Low-vibration/low-noise tools selected."),
+        c("admin", "Trigger/exposure times managed and job rotation used to stay within EAV/ELV limits."),
+        c("ppe", "Hearing protection worn in designated zones; anti-vibration gloves provided where appropriate."),
       ],
       sevWith: 3, likWith: 1,
     },
     dust: {
       name: "Exposure to dust (incl. silica)",
       persons: ["Operative", "Apprentice", "Third Party"],
+      injuries: ["Respiratory illness", "Long term health effects", "Eye injury"],
+      ppe: ["RPE (FFP3, face-fit tested)", "Eye protection"],
       sevWithout: 4, likWithout: 4,
       controls: [
-        "Dust suppressed at source using water or on-tool extraction (M/H-class); dry cutting avoided.",
-        "Suitable RPE (FFP3, face-fit tested) and eye protection worn; area ventilated and others kept clear.",
+        c("engineering", "Dust suppressed at source using water or on-tool extraction (M/H-class); dry cutting avoided."),
+        c("admin", "Area ventilated and others kept clear; exposure times managed."),
+        c("ppe", "Suitable RPE (FFP3, face-fit tested) and eye protection worn."),
       ],
       sevWith: 4, likWith: 1,
     },
     coshh: {
       name: "Hazardous substances (COSHH)",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Dermatitis", "Respiratory illness", "Burn injury"],
+      ppe: ["Gloves (per SDS)", "RPE", "Eye protection"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "COSHH assessment completed for each substance; safety data sheets held on site and least-hazardous product selected.",
-        "Correct PPE (gloves/RPE/eye protection) worn; substances stored, used and disposed of per the SDS; spill kit available.",
+        c("substitute", "Least-hazardous product selected; COSHH assessment completed for each substance with safety data sheets held on site."),
+        c("admin", "Substances stored, used and disposed of per the SDS; spill kit available."),
+        c("ppe", "Correct PPE (gloves/RPE/eye protection) worn."),
       ],
       sevWith: 3, likWith: 1,
     },
     asbestos: {
       name: "Exposure to asbestos",
       persons: ["Operative", "Apprentice", "Third Party", "Members of the public"],
+      injuries: ["Long term health effects", "Respiratory illness", "Fatality"],
+      ppe: ["Disposable coveralls", "RPE (FFP3)"],
       sevWithout: 4, likWithout: 5,
       controls: [
-        "Asbestos identified via the client's asbestos register / refurbishment & demolition survey before work; ACMs clearly marked.",
-        "Work planned to avoid disturbing ACMs; if suspected material is found, work stops immediately and is reported — licensed removal arranged where required.",
+        c("eliminate", "Work planned to avoid disturbing ACMs; if suspected material is found, work stops immediately and is reported — licensed removal arranged where required."),
+        c("admin", "Asbestos identified via the client's asbestos register / refurbishment & demolition survey before work; ACMs clearly marked."),
       ],
       sevWith: 4, likWith: 1,
     },
     biological_drainage: {
       name: "Biological hazard (drainage / foul water)",
       persons: ["Operative", "Site Foreman"],
+      injuries: ["Short term health effects", "Long term health effects"],
+      ppe: ["Impervious gloves", "Eye protection"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Impervious gloves and eye protection worn; cuts covered; hands washed before eating and welfare facilities used.",
-        "No eating/drinking/smoking in the work area; vaccination status (e.g. tetanus) considered.",
+        c("admin", "Cuts covered; hands washed before eating; no eating/drinking/smoking in the work area; welfare facilities used; vaccination status (e.g. tetanus) considered."),
+        c("ppe", "Impervious gloves and eye protection worn."),
       ],
       sevWith: 3, likWith: 1,
     },
     confined_space: {
       name: "Confined space",
       persons: ["Operative", "Site Foreman"],
+      injuries: ["Fatality", "Asphyxiation", "Long term health effects"],
+      ppe: ["Gas monitor", "Rescue harness", "RPE"],
       sevWithout: 5, likWithout: 4,
       controls: [
-        "Confined-space entry avoided where possible; where unavoidable, a permit-to-work, atmosphere testing, forced ventilation and a trained top-man with rescue plan/equipment are in place.",
-        "Only trained, competent persons enter; continuous gas monitoring and communications maintained.",
+        c("eliminate", "Confined-space entry avoided where possible."),
+        c("engineering", "Forced ventilation and continuous gas monitoring provided; communications maintained."),
+        c("admin", "Where unavoidable, a permit-to-work, atmosphere testing and a trained top-man with rescue plan/equipment are in place; only trained, competent persons enter."),
       ],
       sevWith: 5, likWith: 1,
     },
     hot_works: {
       name: "Hot works (fire)",
       persons: P_STD,
+      injuries: ["Burn injury", "Fatality", "Respiratory illness"],
+      ppe: ["Flame-resistant gloves", "Face shield/goggles"],
       sevWithout: 5, likWithout: 3,
       controls: [
-        "A Hot Works Permit is raised; combustibles removed/protected within 10m and a suitable fire extinguisher is to hand.",
-        "A fire watch is maintained during the works and for at least 60 minutes afterwards, and the area re-inspected before leaving.",
+        c("admin", "A Hot Works Permit is raised; combustibles removed/protected within 10m; a fire watch is maintained during the works and for at least 60 minutes afterwards, and the area re-inspected before leaving."),
+        c("engineering", "A suitable fire extinguisher is to hand; gas cylinders secured with flashback arrestors fitted."),
       ],
       sevWith: 5, likWith: 1,
     },
     fire_general: {
       name: "Fire",
       persons: P_STD,
+      injuries: ["Burn injury", "Respiratory illness", "Fatality"],
+      ppe: [],
       sevWithout: 4, likWithout: 3,
       controls: [
-        "Good housekeeping; flammable materials stored safely and quantities on site minimised; ignition sources controlled.",
-        "Suitable extinguishers available and site fire/emergency arrangements briefed to all.",
+        c("engineering", "Suitable extinguishers available; ignition sources controlled."),
+        c("admin", "Good housekeeping; flammable materials stored safely and quantities on site minimised; site fire/emergency arrangements briefed to all."),
       ],
       sevWith: 4, likWith: 1,
     },
     fumes: {
       name: "Welding / soldering fumes",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Respiratory illness", "Long term health effects"],
+      ppe: ["RPE", "Eye protection"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Local exhaust ventilation / on-tool extraction used; work in well-ventilated areas.",
-        "Suitable RPE worn where extraction cannot control exposure at source.",
+        c("engineering", "Local exhaust ventilation / on-tool extraction used; work in well-ventilated areas."),
+        c("ppe", "Suitable RPE worn where extraction cannot control exposure at source."),
       ],
       sevWith: 3, likWith: 1,
     },
     hand_tools: {
       name: "Use of hand & power tools",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Cut, abrasion, laceration or bruise", "Eye injury"],
+      ppe: ["Gloves", "Eye protection"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Correct tool selected for the task, inspected before use and used with guards in place; damaged tools removed from use.",
-        "Operatives trained/competent; appropriate PPE (gloves, eye protection) worn.",
+        c("admin", "Correct tool selected for the task, inspected before use and used with guards in place; damaged tools removed from use; operatives trained/competent."),
+        c("ppe", "Appropriate PPE (gloves, eye protection) worn."),
       ],
       sevWith: 3, likWith: 1,
     },
     power_tools: {
       name: "Cutting / abrasive tools",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Cut, abrasion, laceration or bruise", "Eye injury", "Hearing loss"],
+      ppe: ["Face/eye protection", "Cut-resistant gloves", "Hearing protection"],
       sevWithout: 4, likWithout: 3,
       controls: [
-        "Guards fitted and in place; correct disc/blade for the material, undamaged and within its use-by date; two hands on the tool.",
-        "Eye/face protection, gloves and hearing protection worn; others kept clear and dust controlled.",
+        c("engineering", "Guards fitted and in place; correct disc/blade for the material, undamaged and within its use-by date; dust controlled."),
+        c("admin", "Two hands on the tool; others kept clear."),
+        c("ppe", "Eye/face protection, gloves and hearing protection worn."),
       ],
       sevWith: 4, likWith: 1,
     },
     refuelling: {
       name: "Refuelling of plant",
       persons: ["Operative", "Site Foreman", "Third Party"],
+      injuries: ["Burn injury", "Dermatitis", "Fire"],
+      ppe: ["Gloves", "Eye protection"],
       sevWithout: 4, likWithout: 3,
       controls: [
-        "Refuelling carried out with the engine off, away from ignition sources, using suitable containers and a drip tray / spill kit.",
-        "Fuel stored securely in a bunded store away from excavations and drains; no smoking during refuelling.",
+        c("engineering", "Fuel stored securely in a bunded store away from excavations and drains; drip tray / spill kit used."),
+        c("admin", "Refuelling carried out with the engine off, away from ignition sources, using suitable containers; no smoking during refuelling."),
       ],
       sevWith: 4, likWith: 1,
     },
     adverse_weather: {
       name: "Adverse weather",
       persons: ["Operative", "Site Foreman", "Engineer"],
+      injuries: ["Short term health effects", "Slips/fractures"],
+      ppe: ["Weatherproof clothing"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Forecast monitored; high-level, lifting and hot works suspended in high winds/lightning; work adjusted for heat/cold.",
-        "Appropriate clothing/PPE provided; excavations protected from flooding and re-inspected after heavy rain.",
+        c("admin", "Forecast monitored; high-level, lifting and hot works suspended in high winds/lightning; work adjusted for heat/cold; excavations protected from flooding and re-inspected after heavy rain."),
+        c("ppe", "Appropriate weatherproof clothing/PPE provided."),
       ],
       sevWith: 3, likWith: 1,
     },
     housekeeping: {
       name: "Poor housekeeping",
       persons: P_STD,
+      injuries: ["Cut, abrasion, laceration or bruise", "Slips/trips"],
+      ppe: ["Safety boots"],
       sevWithout: 2, likWithout: 4,
       controls: [
-        "Work areas kept tidy; waste cleared regularly to designated skips; access/egress and fire routes kept clear.",
+        c("admin", "Work areas kept tidy; waste cleared regularly to designated skips; access/egress and fire routes kept clear."),
       ],
       sevWith: 2, likWith: 1,
     },
     water_leak: {
       name: "Water / flooding (pipework)",
       persons: ["Operative", "Client"],
+      injuries: ["Electric shock", "Slips/trips", "Property damage"],
+      ppe: ["Gloves"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "Supply isolated and drained down before work; isolation valves identified; work area protected and leak-tested on completion.",
-        "Absorbent materials / wet-vac available; adjacent electrical equipment protected.",
+        c("engineering", "Supply isolated and drained down before work; isolation valves identified; adjacent electrical equipment protected."),
+        c("admin", "Work area protected and leak-tested on completion; absorbent materials / wet-vac available."),
       ],
       sevWith: 3, likWith: 1,
     },
     hot_surfaces: {
       name: "Hot surfaces / scalding (heating systems)",
       persons: ["Operative", "Client"],
+      injuries: ["Burn injury"],
+      ppe: ["Heat-resistant gloves"],
       sevWithout: 3, likWithout: 3,
       controls: [
-        "System isolated and allowed to cool before work; heat-resistant gloves worn when handling hot components.",
-        "Warning signage where hot surfaces remain; others kept clear.",
+        c("admin", "System isolated and allowed to cool before work; warning signage where hot surfaces remain; others kept clear."),
+        c("ppe", "Heat-resistant gloves worn when handling hot components."),
       ],
       sevWith: 3, likWith: 1,
     },
     gas_awareness: {
       name: "Gas awareness (working near gas)",
       persons: ["Operative", "Client", "Members of the public"],
+      injuries: ["Fatality", "Burn injury", "Asphyxiation"],
+      ppe: [],
       sevWithout: 5, likWithout: 2,
       controls: [
-        "Gas work carried out only by Gas Safe registered engineers; others do not work on gas installations.",
-        "If gas is smelled, the supply is isolated at the meter, ignition sources avoided, area ventilated and the emergency line called.",
+        c("eliminate", "Others do not work on gas installations — gas work carried out only by Gas Safe registered engineers."),
+        c("admin", "If gas is smelled, the supply is isolated at the meter, ignition sources avoided, area ventilated and the emergency line called."),
       ],
       sevWith: 5, likWith: 1,
     },
     legionella: {
       name: "Legionella (water systems)",
       persons: ["Operative", "Client", "Members of the public"],
+      injuries: ["Respiratory illness", "Long term health effects", "Fatality"],
+      ppe: ["RPE"],
       sevWithout: 4, likWithout: 2,
       controls: [
-        "Systems flushed and disinfected as required; dead legs avoided; temperatures maintained outside the 20-45°C growth range.",
-        "Work planned to minimise aerosol generation; RPE worn where aerosols are likely.",
+        c("engineering", "Dead legs avoided; temperatures maintained outside the 20-45°C growth range."),
+        c("admin", "Systems flushed and disinfected as required; work planned to minimise aerosol generation."),
+        c("ppe", "RPE worn where aerosols are likely."),
       ],
       sevWith: 4, likWith: 1,
     },
     pressure_test: {
       name: "Pressure testing / stored energy",
       persons: ["Operative", "Apprentice"],
+      injuries: ["Fractures/broken bones", "Eye injury", "Cut, abrasion, laceration or bruise"],
+      ppe: ["Eye protection", "Gloves"],
       sevWithout: 4, likWithout: 3,
       controls: [
-        "Test equipment rated for the pressure and in good order; system pressurised gradually and monitored; others kept clear during test.",
-        "Pneumatic testing avoided where hydraulic testing is practicable; pressure released in a controlled manner before disconnection.",
+        c("substitute", "Pneumatic testing avoided where hydraulic testing is practicable."),
+        c("engineering", "Test equipment rated for the pressure and in good order; system pressurised gradually and monitored; pressure released in a controlled manner before disconnection."),
+        c("admin", "Others kept clear during test."),
       ],
       sevWith: 4, likWith: 1,
     },
   };
 
-  // ── Selection tree: work type → sub-category → sub-type → hazard ids ────────
   const workTypes = [
     { id: "electrical", label: "Electrical", subs: [
       { id: "test", label: "Testing & inspection", types: [
@@ -481,5 +576,5 @@ window.HS_RAMS = (function () {
     ]},
   ];
 
-  return { severityKey, likelihoodKey, riskControlPlan, band, hazards, workTypes };
+  return { severityKey, likelihoodKey, riskControlPlan, levels, levelRank, band, hazards, workTypes };
 })();
