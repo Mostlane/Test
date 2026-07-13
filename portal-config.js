@@ -446,7 +446,7 @@
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
-          { label: "Personalise", href: "personalise.html", icon: "paint", perms: ["ThemeColour", "ThemeBackground"], match: ["personalise.html", "theme.html"] },
+          { label: "Settings", href: "personalise.html", icon: "paint", always: true, match: ["personalise.html", "theme.html"] },
           { label: "Help & guides", href: "help.html", icon: "help", always: true },
           { label: "View as user…", launch: "viewas", icon: "eye", ownerOnly: true }
         ]}

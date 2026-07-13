@@ -5,7 +5,7 @@
   <script src="auth.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Personalise — Mostlane Portal</title>
+  <title>Settings — Mostlane Portal</title>
   <style>
     * { box-sizing: border-box; }
     body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,sans-serif; background:#eef1f5; color:#16202e; }
@@ -37,12 +37,19 @@
 </head>
 <body>
   <header class="page">
-    <h1>🎨 Personalise</h1>
+    <h1>⚙️ Settings</h1>
     <a class="ml-back" data-role="home" href="main.html">← Menu</a>
   </header>
 
   <div class="wrap">
-    <p class="muted" style="margin:0 0 12px;">Make the portal yours. Changes save automatically, follow you onto any device you log in on, and only change what <b>you</b> see.</p>
+    <p class="muted" style="margin:0 0 12px;">Your personal settings. Changes save automatically, follow you onto any device you log in on, and only change what <b>you</b> see.</p>
+
+    <div class="card" id="landingCard">
+      <h2>Landing page</h2>
+      <p class="muted" style="margin:0 0 8px;">The page you open on straight after logging in. Choose from the areas you have access to.</p>
+      <select id="landingSel" style="width:100%;padding:10px;border:1px solid #ccd5dd;border-radius:9px;font-size:16px;font-family:inherit;"><option>Loading…</option></select>
+      <p class="msg" id="landingMsg"></p>
+    </div>
 
     <div class="card" id="colourCard" style="display:none;">
       <h2>Colour theme</h2>
@@ -118,6 +125,50 @@
       if (!CAN.colour && !CAN.background) { g("lockedNote").style.display = "block"; return; }
       if (CAN.colour) { g("colourCard").style.display = "block"; renderSwatches(); }
       if (CAN.background) { g("bgCard").style.display = "block"; renderBg(); }
+    })();
+
+    // ── Landing page (available to everyone) ──
+    // Curated destinations; each shown only if the user has the access for it.
+    const LANDING_OPTIONS = [
+      { label: "Main menu (default)", href: "", perms: "always" },
+      { label: "My Day", href: "my-day.html", perms: ["StoryMode"] },
+      { label: "Check In / Out", href: "index.html", perms: ["CheckInOut"] },
+      { label: "Holiday Requests", href: "holiday.html", perms: ["Holiday"] },
+      { label: "Holiday Admin", href: "holiday-admin.html", perms: ["HolidayAdmin"] },
+      { label: "Plant & Equipment", href: "my-assets.html", perms: ["Assets"] },
+      { label: "H&S Documents", href: "hs-docs.html", perms: ["HSPlan"] },
+      { label: "SLA", href: "sla-menu.html", perms: ["SLA"] },
+      { label: "Manage Sites", href: "sites.html", perms: ["Sites", "AddSite"] },
+      { label: "Customers", href: "customers.html", perms: ["Sites", "AddSite"] },
+      { label: "Weekly Summary", href: "weekly.html", perms: ["Weekly"] },
+      { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", perms: ["HoursDashboard"] },
+      { label: "Office Timesheet", href: "office-timesheet.html", perms: ["OfficeTimesheet"] },
+      { label: "Users", href: "users-admin.html", perms: ["Users"] },
+      { label: "Projects", href: "projects.html", perms: ["Projects"] },
+      { label: "Compliance", href: "compliance.html", perms: ["Compliance"] },
+      { label: "Forms", href: "forms.html", perms: ["Forms"] },
+      { label: "SiteLog", href: "sitelog.html", perms: ["SiteLog"] },
+      { label: "PO System", href: "po.html", perms: ["PurchaseOrders"] },
+      { label: "Help", href: "help.html", perms: "always" },
+    ];
+    (async () => {
+      let me = {}, prefs = {};
+      try { const d = await authFetch("/auth/me").then(r => r.json()); me = (d && d.user) || {}; } catch (e) {}
+      try { const p = await authFetch("/prefs").then(r => r.json()); prefs = (p && p.ok && p.prefs) || {}; } catch (e) {}
+      const has = o => o.perms === "always" || me.FullAccess === "Yes" || (Array.isArray(o.perms) && o.perms.some(k => me[k] === "Yes"));
+      const cur = prefs.landingPage || "";
+      g("landingSel").innerHTML = LANDING_OPTIONS.filter(has)
+        .map(o => `<option value="${esc(o.href)}" ${o.href === cur ? "selected" : ""}>${esc(o.label)}</option>`).join("");
+      g("landingSel").addEventListener("change", async () => {
+        const v = g("landingSel").value, m = g("landingMsg"); m.className = "msg"; m.textContent = "Saving…";
+        try {
+          const r = await authFetch("/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ landingPage: v }) }).then(r => r.json());
+          if (!r.ok) throw new Error(r.error || "Save failed");
+          try { localStorage.setItem("mostlaneLanding", v); } catch (e) {}
+          m.className = "msg ok"; m.textContent = v ? "Saved ✓ — you'll open here next time you log in." : "Saved ✓ — you'll open on the main menu.";
+          setTimeout(() => { if (m.textContent.indexOf("Saved") === 0) m.textContent = ""; }, 2500);
+        } catch (e) { m.className = "msg err"; m.textContent = e.message; }
+      });
     })();
 
     function cacheAndApply() {

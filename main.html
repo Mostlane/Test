@@ -173,11 +173,22 @@ a.button {
   </div>
   <script>
     (function(){
-      var fn = localStorage.getItem("firstName") || "";
-      var u = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
-      var name = fn || (u ? u.replace(/[._]/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}) : "");
+      // Greet the CURRENT logged-in user. The old code read localStorage
+      // "firstName", which is device-persistent and went stale (it showed
+      // whoever set it first — hence everyone seeing "Jamie"). Derive the name
+      // from the session, then confirm the real first name from the server.
       var hi = document.getElementById("landHi");
-      if (hi) hi.textContent = name ? ("Welcome back, " + name) : "Welcome back";
+      function setName(n){ if (hi) hi.textContent = n ? ("Welcome back, " + n) : "Welcome back"; }
+      var u = sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") || "";
+      var pretty = u ? u.replace(/[._]/g," ").replace(/\b\w/g,function(c){return c.toUpperCase();}) : "";
+      setName(pretty.split(" ")[0]);
+      try {
+        var token = localStorage.getItem("mostlaneToken");
+        if (token) fetch(window.MOSTLANE_API + "/auth/me", { headers: { "Authorization": "Bearer " + token } })
+          .then(function(r){ return r.json(); })
+          .then(function(d){ if (d && d.ok && d.user){ var fn = d.user.FirstName || pretty.split(" ")[0]; setName(fn); try { localStorage.setItem("firstName", d.user.FirstName || ""); } catch(e){} } })
+          .catch(function(){});
+      } catch(e){}
       var d = document.getElementById("landDate");
       if (d) d.textContent = new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
     })();
@@ -226,7 +237,7 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
 -->
-    <a class="button" href="personalise.html" id="Personalise"><span class="emoji">🎨</span> Personalise</a>
+    <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
     <a class="button visible" href="help.html"><span class="emoji">❓</span> Help</a>
 
     <!-- FIXED -->
@@ -283,9 +294,10 @@ const MAP = {
   SiteLog: ["SiteLog"],
   // Weekly master office timesheet — visible to holders of the OfficeTimesheet
   // permission (and FullAccess, which unlocks every button).
-  OfficeTimesheet: ["OfficeTimesheet"],
-  // Personal theming — visible with either personalisation permission.
-  Personalise: ["ThemeColour", "ThemeBackground"]
+  OfficeTimesheet: ["OfficeTimesheet"]
+  // Settings (was Personalise) is now ALWAYS visible (class "button visible")
+  // so every user can set their landing page; the appearance options inside
+  // stay permission-gated. It is deliberately NOT in this MAP.
 };
 
 // H&S button now opens the H&S Documents hub (inductions, permits, RAMS,
