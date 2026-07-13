@@ -953,6 +953,18 @@ async function init(){
   currentUser = u;
   $("userLabel").textContent = "Logged in as " + u;
 
+  // The scheduler is an SLA-Admin area. Engineers (SLA only) go to My Jobs.
+  try{
+    const who = await authFetch("/user?u=" + encodeURIComponent(u)).then(r => r.json());
+    const p = (who && who.user) || {};
+    const isAdmin = (p.FullAccess === "Yes") || (p.SLAAdmin === "Yes");
+    if(!isAdmin){
+      if(p.SLA === "Yes"){ location.replace("engineer-jobs.html"); return; }
+      document.querySelector(".card").innerHTML = "<p style='padding:16px;color:#b91c1c;'>🚫 You don't have SLA Admin access.</p>";
+      return;
+    }
+  }catch(e){ /* if the check fails, fall through and let the page load */ }
+
   const dp = $("datePicker");
   selectedDate = new Date();
   dp.value = formatDateInput(selectedDate);

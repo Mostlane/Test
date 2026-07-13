@@ -262,6 +262,8 @@
         <div class="sub" id="userLabel">Engineer</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <a class="btn" id="adminDashBtn" href="sla-main.html" style="display:none;">📋 Dashboard</a>
+        <a class="btn" id="adminSchedBtn" href="sla-scheduler.html" style="display:none;">🗓️ Scheduler</a>
         <button type="button" class="btn" id="dayMapBtn">🗺️ Today's map</button>
         <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
@@ -691,6 +693,12 @@ function isStoryMode(){
   try { return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}").StoryMode === "Yes"; }
   catch { return false; }
 }
+function hasSLAAdmin(){
+  try {
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}");
+    return p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
+  } catch { return false; }
+}
 function todayLocal(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -956,6 +964,12 @@ function init(){
 
   $("dayMapBtn").addEventListener("click", openDayMap);
   $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
+  // Admin-only shortcuts to the SLA management areas — hidden for engineers
+  // (SLA-only). The target pages also gate, so this is just clean navigation.
+  if(hasSLAAdmin()){
+    $("adminDashBtn").style.display = "inline-flex";
+    $("adminSchedBtn").style.display = "inline-flex";
+  }
   checkBlocked();
   loadUnscheduled();
 

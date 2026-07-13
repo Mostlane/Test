@@ -726,6 +726,8 @@ var PERMISSION_KEYS = [
   "TimesheetAdmin",
   "LabourPlanning",
   "SLA",
+  "SLAAdmin",
+  // office SLA management: dashboard, scheduler, add/edit jobs
   "StoryMode",
   // opt-in: guided day protocol for this engineer
   "HSPlan",

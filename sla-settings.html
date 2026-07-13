@@ -127,6 +127,13 @@
 </div>
 
 <script>
+// SLA Settings is an SLA-Admin area — engineers are bounced to their jobs.
+(function(){
+  try{
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    if(p.FullAccess !== "Yes" && p.SLAAdmin !== "Yes"){ location.replace("engineer-jobs.html"); }
+  }catch(e){}
+})();
 const API_BASE = "https://mostlane-sla.jamie-def.workers.dev";
 
 let currentConfig = null;
