@@ -8,6 +8,12 @@
  * whole page width is visible) with zoom in/out, working identically on mobile
  * and desktop. Images get the same fit-width + zoom + scroll treatment.
  *
+ * Wide drawings (A3 landscape) that are larger than the screen scroll FREELY in
+ * every direction — a two-finger pinch zooms in/out around the point between
+ * your fingers, one finger pans. Content is left-aligned (not centred) once it
+ * grows past the viewport so every edge stays reachable, then re-rasterised at
+ * the settled zoom so text/lines stay crisp.
+ *
  * - url        : the file's normal URL (used for <img>, download, and the
  *                "open full screen" fallback / native viewer).
  * - fetchUrl   : optional CORS-enabled URL PDF.js should fetch from (defaults
@@ -54,7 +60,16 @@
     + '.mldv-bar button,.mldv-bar a{appearance:none;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:8px;padding:7px 11px;font-size:14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;line-height:1;font-family:inherit;}'
     + '.mldv-bar button:active{background:#334155;}'
     + '.mldv-zoom{font-variant-numeric:tabular-nums;min-width:44px;text-align:center;font-size:13px;color:#cbd5e1;}'
-    + '.mldv-body{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#334155;padding:12px;text-align:center;}'
+    // The scroller. touch-action pan-x pan-y = one finger scrolls in any
+    // direction; two-finger pinch is handled by us (so the browser doesn't
+    // zoom the whole overlay instead).
+    + '.mldv-body{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#334155;padding:12px;touch-action:pan-x pan-y;}'
+    // The stage grows to the widest page. min-width:100% keeps it full-width so
+    // narrow content still centres (margin:auto), but once a page is WIDER than
+    // the viewport the stage overflows and every edge is reachable by scrolling
+    // — no clipped-left "squeeze". transform-origin/​transform are driven live
+    // during a pinch, then cleared.
+    + '.mldv-stage{width:-moz-max-content;width:max-content;min-width:100%;margin:0 auto;display:flex;flex-direction:column;align-items:center;transform-origin:0 0;}'
     + '.mldv-page{display:block;margin:0 auto 12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);overflow:hidden;}'
     + '.mldv-img{display:block;margin:0 auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);}'
     + '.mldv-msg{color:#e2e8f0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;max-width:420px;margin:40px auto;text-align:center;font-size:15px;line-height:1.5;}'
@@ -82,10 +97,11 @@
     el.back = back;
     ["mldvTitle","mldvOut","mldvIn","mldvFit","mldvZoom","mldvFull","mldvDl","mldvClose","mldvBody"].forEach(function (id) { el[id] = document.getElementById(id); });
     el.mldvClose.addEventListener("click", close);
-    el.mldvOut.addEventListener("click", function () { setZoom(zoom / 1.25); });
-    el.mldvIn.addEventListener("click", function () { setZoom(zoom * 1.25); });
-    el.mldvFit.addEventListener("click", function () { setZoom(1); });
+    el.mldvOut.addEventListener("click", function () { zoomAround(zoom / 1.25); });
+    el.mldvIn.addEventListener("click", function () { zoomAround(zoom * 1.25); });
+    el.mldvFit.addEventListener("click", function () { setZoom(1); el.mldvBody.scrollLeft = 0; });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && el.back.classList.contains("show")) close(); });
+    initPinch(el.mldvBody);
   }
 
   var current = null, zoom = 1, pdfDoc = null, renderToken = 0;
@@ -93,10 +109,21 @@
   function close() {
     if (el.back) el.back.classList.remove("show");
     el.mldvBody && (el.mldvBody.innerHTML = "");
+    el.stage = null;
     if (pdfIO) { try { pdfIO.disconnect(); } catch (e) {} pdfIO = null; }
     pageInfos = [];
     if (pdfDoc) { try { pdfDoc.destroy(); } catch (e) {} pdfDoc = null; }
     current = null; renderToken++;
+  }
+
+  // Fresh centred stage inside the scroller; content gets appended to this.
+  function newStage() {
+    el.mldvBody.innerHTML = "";
+    var s = document.createElement("div");
+    s.className = "mldv-stage";
+    el.mldvBody.appendChild(s);
+    el.stage = s;
+    return s;
   }
 
   function setZoom(z) {
@@ -106,6 +133,17 @@
     if (current.kind === "pdf") layoutPdf();
     else if (current.kind === "img") applyImgZoom();
   }
+
+  // Zoom keeping the CENTRE of the viewport steady (used by the +/– buttons).
+  function zoomAround(z) {
+    var b = el.mldvBody;
+    var z0 = zoom, prevCx = b.scrollLeft + b.clientWidth / 2, prevCy = b.scrollTop + b.clientHeight / 2;
+    setZoom(z);
+    var ratio = zoom / z0;
+    b.scrollLeft = prevCx * ratio - b.clientWidth / 2;
+    b.scrollTop = prevCy * ratio - b.clientHeight / 2;
+  }
+
   function showZoomControls(on) {
     ["mldvOut","mldvIn","mldvFit","mldvZoom"].forEach(function (k) { el[k].style.display = on ? "" : "none"; });
   }
@@ -129,6 +167,7 @@
     el.mldvFull.href = url;
     el.mldvDl.href = opts.downloadUrl || url;
     el.mldvBody.innerHTML = '<div class="mldv-spin">Loading…</div>';
+    el.stage = null;
     el.back.classList.add("show");
 
     if (["png","jpg","jpeg","gif","webp","bmp","svg"].indexOf(e) >= 0) {
@@ -142,19 +181,23 @@
 
   /* ---- image ---- */
   function renderImg() {
+    var stage = newStage();
     var img = document.createElement("img");
     img.className = "mldv-img"; img.alt = current.name;
-    img.onload = function () { el.mldvZoom.textContent = "100%"; };
+    img.onload = function () { applyImgZoom(); };
     img.onerror = function () { showFallback("Couldn't load this image here."); };
     img.src = current.url;
-    el.mldvBody.innerHTML = ""; el.mldvBody.appendChild(img);
+    stage.appendChild(img);
     current.imgEl = img; applyImgZoom();
   }
   function applyImgZoom() {
     if (!current || !current.imgEl) return;
-    // Fit width at zoom 1; grow beyond container (scroll) when zoomed in.
-    current.imgEl.style.width = Math.round(zoom * 100) + "%";
-    current.imgEl.style.maxWidth = zoom <= 1 ? "100%" : "none";
+    // Fit width at zoom 1 (whole drawing visible); grow past the viewport when
+    // zoomed in so it scrolls freely. Explicit px so the stage's max-content
+    // width tracks it (percentage-of-max-content is circular).
+    var innerW = Math.max(120, el.mldvBody.clientWidth - 24);
+    current.imgEl.style.width = Math.round(innerW * zoom) + "px";
+    current.imgEl.style.maxWidth = "none";
     current.imgEl.style.height = "auto";
     el.mldvZoom.textContent = Math.round(zoom * 100) + "%";
   }
@@ -163,8 +206,8 @@
      Pages are laid out as sized placeholders and only rasterised when they
      scroll near the viewport (IntersectionObserver), so a big document doesn't
      blow up memory. Each page is rendered ABOVE its display size (device pixel
-     ratio × a supersample factor) so text stays crisp when pinch-zoomed, and
-     the −/Fit/+ buttons re-rasterise for pin-sharp text at any zoom. */
+     ratio × a supersample factor) so text stays crisp when zoomed, and every
+     zoom change re-rasterises for pin-sharp text at any zoom. */
   var pageInfos = [], pdfIO = null;
   var SUPERSAMPLE = 2;   // extra resolution for pinch-zoom headroom
   var MAX_CANVAS_W = 3000;
@@ -194,11 +237,10 @@
 
   function layoutPdf() {
     if (!pdfDoc || !current || current.kind !== "pdf") return;
-    var body = el.mldvBody;
+    var stage = newStage();
     if (pdfIO) { pdfIO.disconnect(); pdfIO = null; }
-    body.innerHTML = "";
     el.mldvZoom.textContent = Math.round(zoom * 100) + "%";
-    var innerWidth = Math.max(120, body.clientWidth - 24);
+    var innerWidth = Math.max(120, el.mldvBody.clientWidth - 24);
     var dispW = innerWidth * zoom;
     var placeholders = [];
     pageInfos.forEach(function (pi) {
@@ -207,12 +249,12 @@
       ph.style.width = Math.floor(dispW) + "px";
       ph.style.height = Math.floor(dispW * (pi.h / pi.w)) + "px";
       ph._pi = pi; ph._dispW = dispW; ph._done = false;
-      body.appendChild(ph);
+      stage.appendChild(ph);
       placeholders.push(ph);
     });
     pdfIO = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) { if (e.isIntersecting) renderPage(e.target); });
-    }, { root: body, rootMargin: "400px 0px" });
+    }, { root: el.mldvBody, rootMargin: "400px 0px" });
     placeholders.forEach(function (ph) { pdfIO.observe(ph); });
   }
 
@@ -236,15 +278,70 @@
 
   function showFallback(msg) {
     showZoomControls(false);
+    el.stage = null;
     el.mldvBody.innerHTML = '<div class="mldv-msg">' + msg
       + '<br><a class="big" href="' + encodeURI(current.url) + '" target="_blank" rel="noopener">📄 Open document</a></div>';
   }
 
-  // Re-fit PDFs when the viewport width changes (rotation / resize).
+  /* ---- two-finger pinch zoom + pan ----
+     One finger scrolls (native). Two fingers scale the stage live around the
+     midpoint between them; on release we commit the new zoom, re-rasterise for
+     crispness, and set the scroll so the point under your fingers stays put. */
+  function initPinch(body) {
+    var pinch = null;
+    function dist(t) { var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY; return Math.sqrt(dx * dx + dy * dy); }
+    function mid(t) { return { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 }; }
+    function clampZ(z) { return Math.max(0.4, Math.min(6, z)); }
+
+    body.addEventListener("touchstart", function (e) {
+      if (e.touches.length !== 2 || !current || (current.kind !== "pdf" && current.kind !== "img") || !el.stage) return;
+      var r = body.getBoundingClientRect(), m = mid(e.touches);
+      pinch = {
+        d0: dist(e.touches), z0: zoom, zLive: zoom,
+        fx: body.scrollLeft + (m.x - r.left),   // focal, in scroll-content coords
+        fy: body.scrollTop + (m.y - r.top),
+        mx: m.x - r.left, my: m.y - r.top       // focal, relative to viewport
+      };
+      var s = el.stage;
+      // transform-origin is relative to the stage's own box; correct for its
+      // offset in case narrow content is still centred.
+      s.style.transformOrigin = (pinch.fx - s.offsetLeft) + "px " + (pinch.fy - s.offsetTop) + "px";
+      e.preventDefault();
+    }, { passive: false });
+
+    body.addEventListener("touchmove", function (e) {
+      if (!pinch || e.touches.length !== 2) return;
+      var k = dist(e.touches) / pinch.d0;
+      pinch.zLive = clampZ(pinch.z0 * k);
+      if (el.stage) el.stage.style.transform = "scale(" + (pinch.zLive / pinch.z0) + ")";
+      e.preventDefault();
+    }, { passive: false });
+
+    function endPinch() {
+      if (!pinch) return;
+      var p = pinch; pinch = null;
+      var ratio = p.zLive / p.z0;
+      if (el.stage) { el.stage.style.transform = ""; el.stage.style.transformOrigin = ""; }
+      zoom = p.zLive;
+      if (current && current.kind === "pdf") layoutPdf();
+      else if (current && current.kind === "img") applyImgZoom();
+      el.mldvZoom.textContent = Math.round(zoom * 100) + "%";
+      // Keep the pinched point under the fingers after the relayout.
+      body.scrollLeft = p.fx * ratio - p.mx;
+      body.scrollTop = p.fy * ratio - p.my;
+    }
+    body.addEventListener("touchend", function (e) { if (pinch && e.touches.length < 2) endPinch(); });
+    body.addEventListener("touchcancel", function () { if (pinch) endPinch(); });
+  }
+
+  // Re-fit PDFs/images when the viewport width changes (rotation / resize).
   var rt;
   window.addEventListener("resize", function () {
-    if (!current || current.kind !== "pdf" || !el.back.classList.contains("show")) return;
-    clearTimeout(rt); rt = setTimeout(layoutPdf, 200);
+    if (!current || !el.back.classList.contains("show")) return;
+    clearTimeout(rt); rt = setTimeout(function () {
+      if (current && current.kind === "pdf") layoutPdf();
+      else if (current && current.kind === "img") applyImgZoom();
+    }, 200);
   });
 
   window.MLDocViewer = { open: open };
