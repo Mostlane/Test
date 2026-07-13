@@ -36,7 +36,22 @@ const DEFAULT_CHECKLIST = [
   { id: "leaks", label: "No leaks under the vehicle" },
   { id: "firstaid", label: "First aid kit & fire extinguisher present" },
 ];
-const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST }; // Friday 17:00 UK
+// Named photo slots — each one opens the camera and is required unless
+// marked optional. Editable in van-checks.html settings like the checklist.
+const DEFAULT_PHOTO_SLOTS = [
+  { id: "front", label: "Front of van", required: true },
+  { id: "rear", label: "Rear of van", required: true },
+  { id: "nearside", label: "Nearside (passenger side)", required: true },
+  { id: "offside", label: "Offside (driver side)", required: true },
+  { id: "tyre_nsf", label: "Tyre — front nearside", required: true },
+  { id: "tyre_osf", label: "Tyre — front offside", required: true },
+  { id: "tyre_nsr", label: "Tyre — rear nearside", required: true },
+  { id: "tyre_osr", label: "Tyre — rear offside", required: true },
+  { id: "oil", label: "Oil level (dipstick)", required: true },
+  { id: "cab", label: "Inside cab", required: true },
+  { id: "load", label: "Load area", required: false },
+];
+const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, photoSlots: DEFAULT_PHOTO_SLOTS }; // Friday 17:00 UK
 
 function londonDate(d = new Date()) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
 function londonHM(d) { return new Date(d).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" }); }
@@ -63,6 +78,7 @@ async function getSettings(db) {
   let s = null; try { s = row ? JSON.parse(row.value) : null; } catch {}
   const out = { ...DEFAULT_SETTINGS, ...(s || {}) };
   if (!Array.isArray(out.checklist) || !out.checklist.length) out.checklist = DEFAULT_CHECKLIST;
+  if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
   return out;
 }
 // This week's deadline instant: Monday `week` + (dueDow-1) days at dueTime UK.
@@ -80,7 +96,8 @@ function shapeCheck(r) {
     username: r.username, week: r.week, vehicle: r.vehicle, checkedAt: r.checked_at,
     safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
     note: r.note || "", answers, defectNotes: items.defectNotes || {},
-    photos: items.photos || [], mileage: items.mileage || "", source: items.source || "story",
+    photos: items.photos || [], slotPhotos: items.slotPhotos || {},
+    mileage: items.mileage || "", source: items.source || "story",
     defectCount: defects.length,
   };
 }
@@ -118,6 +135,12 @@ export async function handle(request, env, ctx, url, sess) {
         .filter(i => i.label);
       if (list.length) s.checklist = list;
     }
+    if (Array.isArray(b.photoSlots)) {
+      const slots = b.photoSlots
+        .map(i => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim(), required: i.required !== false }))
+        .filter(i => i.label);
+      if (slots.length) s.photoSlots = slots;
+    }
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(db.tenantId, SETTINGS_KEY, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
@@ -134,6 +157,7 @@ export async function handle(request, env, ctx, url, sess) {
       ok: true, week, vehicle: sess.user.vehicle_assigned || "",
       deadline: { dow: s.dueDow, time: s.dueTime, dueAt, overdue: Date.now() > Date.parse(dueAt) },
       checklist: s.checklist,
+      photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine),
     }, {}, env, request);
   }
@@ -148,21 +172,40 @@ export async function handle(request, env, ctx, url, sess) {
     if (!Object.keys(answers).length) return error("Complete the checklist first.", 400, env, request);
     const defectNotes = (b.defectNotes && typeof b.defectNotes === "object") ? b.defectNotes : {};
 
-    // Photos: data URLs -> R2 (max 8, 4MB each), same serving path as assets.
-    const photoKeys = [];
-    for (const p of (Array.isArray(b.photos) ? b.photos : []).slice(0, 8)) {
-      if (typeof p === "string" && /^vancheck\//.test(p)) { photoKeys.push(p); continue; }  // already-stored key (edit/resubmit)
+    // Photos. Named slots (oil level, each tyre, cab…) come as
+    // photoSlots {slotId: dataURL|existingKey}; extras as photos[]. Each data
+    // URL -> R2 (4MB cap), same serving path as assets. Required slots are
+    // enforced server-side.
+    const s2 = await getSettings(db);
+    const userDir = me.replace(/[^A-Za-z0-9._-]/g, "_");
+    let n = 0;
+    async function storeOne(p, tag) {
+      if (typeof p === "string" && /^vancheck\//.test(p)) return p;   // already stored (edit/resubmit)
       const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
-      if (!m) continue;
+      if (!m) return null;
       const bytes = Uint8Array.from(atob(m[2]), c => c.charCodeAt(0));
-      if (bytes.length > 4 * 1024 * 1024) continue;
-      const key = `vancheck/${me.replace(/[^A-Za-z0-9._-]/g, "_")}/${week}/${photoKeys.length + 1}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+      if (bytes.length > 4 * 1024 * 1024) return null;
+      const key = `vancheck/${userDir}/${week}/${tag}-${++n}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
       await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
-      photoKeys.push(key);
+      return key;
+    }
+    const slotIn = (b.photoSlots && typeof b.photoSlots === "object") ? b.photoSlots : {};
+    const slotPhotos = {};
+    for (const slot of s2.photoSlots) {
+      const key = await storeOne(slotIn[slot.id], slot.id);
+      if (key) slotPhotos[slot.id] = key;
+    }
+    const missing = s2.photoSlots.filter(sl => sl.required !== false && !slotPhotos[sl.id]);
+    if (missing.length)
+      return error("Missing required photos: " + missing.map(m2 => m2.label).join(", "), 400, env, request);
+    const photoKeys = Object.values(slotPhotos);
+    for (const p of (Array.isArray(b.photos) ? b.photos : []).slice(0, 6)) {   // extras
+      const key = await storeOne(p, "extra");
+      if (key) photoKeys.push(key);
     }
 
     const items = JSON.stringify({
-      answers, defectNotes, photos: photoKeys,
+      answers, defectNotes, photos: photoKeys, slotPhotos,
       mileage: String(b.mileage || "").trim(), source: "portal",
     });
     const now = new Date().toISOString();
