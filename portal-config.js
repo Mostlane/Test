@@ -214,7 +214,7 @@
         if (document.getElementById("smReturnBtn")) return;
         var a = document.createElement("a");
         a.id = "smReturnBtn";
-        a.href = "my-day.html";
+        a.href = "/my-day.html";
         a.textContent = "⚡ My Day";
         a.style.cssText = "position:fixed;bottom:18px;right:16px;z-index:99998;" +
           "background:linear-gradient(90deg,#003b82,#1e66ff);color:#fff;text-decoration:none;" +
@@ -314,7 +314,7 @@
               master: sessionStorage.getItem("mostlaneMasterLogin") || ""
             }));
             applySession(d);
-            location.href = "main.html";
+            location.href = "/main.html";
           }).catch(function () { alert("Couldn't switch user."); go.disabled = false; go.textContent = "View as"; });
         };
       };
@@ -347,7 +347,7 @@
             if (stash.master) sessionStorage.setItem("mostlaneMasterLogin", stash.master);
             else sessionStorage.removeItem("mostlaneMasterLogin");
             localStorage.removeItem("mostlaneViewAsReal");
-            location.href = "main.html";
+            location.href = "/main.html";
           };
           bar.appendChild(lbl); bar.appendChild(btn);
           document.body.appendChild(bar);
@@ -476,7 +476,10 @@
           if (!items.length) return;
           out += '<div class="pn-grp"><h4>' + esc(grp.title) + "</h4>";
           items.forEach(function (it) {
-            var attrs = it.launch ? 'href="#" data-launch="' + it.launch + '"' : 'href="' + esc(it.href) + '"';
+            // Root-absolute hrefs: the sidebar also renders inside sub-app
+            // folders (e.g. /hs-plan/), where a relative "main.html" would
+            // resolve to /hs-plan/main.html and 404.
+            var attrs = it.launch ? 'href="#" data-launch="' + it.launch + '"' : 'href="/' + esc(it.href) + '"';
             out += '<a class="pn-item' + (isActive(it) ? " active" : "") + '" ' + attrs + ' title="' + esc(it.label) + '">'
               + svg(it.icon) + '<span class="pn-label">' + esc(it.label) + "</span></a>";
           });
@@ -520,7 +523,7 @@
           if (launch) { e.preventDefault(); doLaunch(launch.getAttribute("data-launch")); }
         });
         document.getElementById("pnavLogout").addEventListener("click", function () {
-          localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "login.html";
+          localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "/login.html";
         });
         document.getElementById("pnavCollapse").addEventListener("click", function () {
           var c = document.documentElement.classList.toggle("pnav-collapsed");
@@ -622,7 +625,7 @@
           if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
           var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
-          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "login.html"; };
+          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "/login.html"; };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
         }
         // Two taps to stop — the second confirms (guards against accidental stops).
@@ -699,7 +702,7 @@
       var badgeCounts = {};   // nav href -> count
       function applyBadges() {
         Object.keys(badgeCounts).forEach(function (href) {
-          var item = document.querySelector('#pnav a.pn-item[href="' + href + '"]');
+          var item = document.querySelector('#pnav a.pn-item[href="/' + href + '"]');
           if (!item) return;
           var old = item.querySelector(".pn-badge");
           if (old) old.remove();
@@ -769,7 +772,7 @@
         } else if (kind === "hs") {
           // H&S now opens the documents hub (inductions, permits, RAMS,
           // incidents); the Construction Phase Plan app launches from a tile there.
-          location.href = "hs-docs.html";
+          location.href = "/hs-docs.html";
         } else if (kind === "viewas") {
           if (window.mlViewAsPicker) window.mlViewAsPicker();
         }
