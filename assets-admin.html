@@ -119,6 +119,15 @@
       <div id="summary"><span class="muted">Loading summary…</span></div>
     </div>
 
+    <div class="card" style="padding:14px 16px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+        <h2 style="margin:0; font-size:15px; color:#003366; flex:1;">📋 Equipment confirmation</h2>
+        <button class="btn small" id="confirmSendBtn">Send confirmation request</button>
+        <button class="btn grey small" id="confirmRefreshBtn">Refresh</button>
+      </div>
+      <div id="confirmStatus"><span class="muted">Loading…</span></div>
+    </div>
+
     <div class="bar">
       <h2>Assets</h2>
       <span class="muted" id="assetCount"></span>
@@ -231,7 +240,50 @@
       } catch (e) { location.href = "main.html"; return; }
       loadUsers();
       loadAssets();
+      loadConfirm();
     })();
+
+    // ── Equipment confirmation round ──
+    function escA(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+    async function loadConfirm() {
+      const box = g("confirmStatus");
+      try {
+        const d = await authFetch("/asset/confirm/status").then(r => r.json());
+        if (!d.ok) { box.innerHTML = '<span class="muted">Couldn\'t load.</span>'; return; }
+        if (!d.round) { box.innerHTML = '<span class="muted">No confirmation request has been sent yet. Use the button to ask everyone to confirm the equipment they hold.</span>'; return; }
+        const items = d.items || [];
+        const by = {};
+        items.forEach(it => { (by[it.holder] = by[it.holder] || []).push(it); });
+        const nConf = items.filter(i => i.status === "confirmed").length;
+        const nPend = items.filter(i => i.status === "pending").length;
+        const nFlag = items.filter(i => i.status === "flagged").length;
+        const chip = s => s === "confirmed" ? '<span style="color:#16a34a;">✅ confirmed</span>'
+          : s === "flagged" ? '<span style="color:#dc2626;font-weight:600;">⚠️ NOT HELD</span>'
+          : '<span style="color:#b45309;">⏳ pending</span>';
+        let html = `<div style="font-size:13px;margin-bottom:8px;">Sent ${escA((d.round.startedAt||"").replace("T"," ").slice(0,16))} by ${escA(d.round.by||"")} · `
+          + `<b style="color:#16a34a;">${nConf} confirmed</b> · <b style="color:#b45309;">${nPend} pending</b> · <b style="color:#dc2626;">${nFlag} flagged</b></div>`;
+        html += Object.keys(by).sort().map(holder => {
+          const rows = by[holder].map(it =>
+            `<div style="display:flex;gap:8px;justify-content:space-between;padding:3px 0;font-size:13px;border-top:1px solid #eee;">
+               <span>${escA(it.name)}${it.serial ? ' <span class="muted">· '+escA(it.serial)+'</span>' : ''}${it.note ? ' <span class="muted">— “'+escA(it.note)+'”</span>' : ''}</span>
+               <span style="white-space:nowrap;">${chip(it.status)}</span>
+             </div>`).join("");
+          return `<div style="margin-top:8px;"><b>${escA(holder)}</b>${rows}</div>`;
+        }).join("");
+        box.innerHTML = html;
+      } catch (e) { box.innerHTML = '<span class="muted">Couldn\'t load.</span>'; }
+    }
+    g("confirmRefreshBtn").onclick = loadConfirm;
+    g("confirmSendBtn").onclick = async () => {
+      if (!confirm("Send a confirmation request to everyone who holds equipment? They'll be asked to confirm each item they still have.")) return;
+      g("confirmSendBtn").disabled = true;
+      try {
+        const r = await authFetch("/asset/confirm/request", { method: "POST" }).then(r => r.json());
+        if (r.ok) { alert("Confirmation request sent for " + r.count + " item(s)."); loadConfirm(); }
+        else alert(r.error || "Failed to send.");
+      } catch (e) { alert("Failed to send."); }
+      g("confirmSendBtn").disabled = false;
+    };
 
     async function loadUsers() {
       try {
