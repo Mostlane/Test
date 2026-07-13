@@ -51,3 +51,5 @@
   Cache-Control: no-cache
 /sla-jobedit.js
   Cache-Control: no-cache
+/site-folder.html
+  Cache-Control: no-cache
