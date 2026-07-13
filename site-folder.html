@@ -6,6 +6,7 @@
   <title>Mostlane • Site Documents</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+  <script src="/docviewer.js?v=1"></script>
   <style>
     :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --panel:rgba(255,255,255,0.95); }
     *{box-sizing:border-box;}
@@ -240,8 +241,9 @@ async function renderDocs(area){
     row.innerHTML = `
       <span class="ic">${fileIcon(f.name)}</span>
       <div class="nm">${esc(f.name)}<div class="meta">${esc(fmt(f.at))}${f.by ? " · " + esc(f.by) : ""}</div></div>
-      <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener">${isImg ? "View" : "Open"}</a>
+      <button class="btn small" data-open>${isImg ? "View" : "Open"}</button>
       ${admin ? `<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>` : ""}`;
+    row.querySelector("[data-open]").addEventListener("click", () => openDoc(f));
     if(admin){ row.querySelector("[data-del]").addEventListener("click", () => delDoc(f.key)); }
     list.appendChild(row);
   });
@@ -286,6 +288,19 @@ async function delDoc(key){
 }
 
 function openLb(url){ $("lbImg").src = url; $("lb").classList.add("show"); }
+
+// Open a document in the shared viewer. PDFs render via PDF.js fetching the
+// CORS-enabled worker route (so it scrolls/zooms on mobile); images use their
+// public URL directly.
+function openDoc(f){
+  const isImg = /\.(png|jpe?g|webp|gif)$/i.test(f.name || "");
+  window.MLDocViewer.open({
+    url: f.url,
+    fetchUrl: isImg ? f.url : (API + "/sla/site/doc?key=" + encodeURIComponent(f.key)),
+    name: f.name,
+    downloadUrl: f.url
+  });
+}
 
 window.addEventListener("DOMContentLoaded", init);
 </script>

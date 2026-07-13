@@ -55,3 +55,5 @@
   Cache-Control: no-cache
 /stats.html
   Cache-Control: no-cache
+/docviewer.js
+  Cache-Control: no-cache

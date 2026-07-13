@@ -3,6 +3,7 @@
 <head>
   <script src="/portal-config.js?v=2"></script>
   <script src="auth.js"></script>
+  <script src="/docviewer.js?v=1"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Projects – Mostlane</title>
@@ -262,16 +263,14 @@ function loadFiles(p){
 function openViewer(i){
   CURRENT_INDEX=i;
   const f=FILES[i];
-  viewerTitle.textContent=f.title||f.name;
-  viewerMeta.textContent=f.category||"";
-  viewerBody.innerHTML=`
-    <object data="${API}/download/${f.id}?inline=1&u=${USER}">
-      <iframe src="${API}/download/${f.id}?inline=1&u=${USER}"></iframe>
-    </object>
-  `;
-  viewerDownload.style.display=f.downloadable?"inline-flex":"none";
-  viewerDownload.onclick=()=>downloadFrame.src=`${API}/download/${f.id}?u=${USER}`;
-  viewer.classList.add("show");
+  // Shared viewer: PDFs render with PDF.js (scroll + fit-width + zoom on mobile
+  // too), images fit-width; falls back to full screen if it can't fetch.
+  const inlineUrl=`${API}/download/${f.id}?inline=1&u=${encodeURIComponent(USER)}`;
+  window.MLDocViewer.open({
+    url: inlineUrl,
+    name: f.name || f.title || "Document",
+    downloadUrl: f.downloadable ? `${API}/download/${f.id}?u=${encodeURIComponent(USER)}` : inlineUrl
+  });
 }
 
 function closeViewer(){viewer.classList.remove("show");viewerBody.innerHTML=""}

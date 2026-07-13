@@ -184,6 +184,9 @@ const PUBLIC_ROUTES = [
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
   ["GET", "/asset-thumb"],
+  // Site documents streamed for the in-app viewer (parity with the public R2
+  // URL these already have; adds CORS for fetch-based rendering).
+  ["GET", "/sla/site/doc"],
 ];
 
 function isPublic(method, pathname) {
