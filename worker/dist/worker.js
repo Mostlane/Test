@@ -2575,6 +2575,12 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.lon !== void 0) job.lon = patch.lon;
   if (patch.priority !== void 0 && patch.priority) job.priority = patch.priority;
   if (patch.description !== void 0 && patch.description) job.description = patch.description;
+  if (patch.helpdeskRef !== void 0 && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
+  if (patch.raisedAt !== void 0 && patch.raisedAt) job.raisedAt = patch.raisedAt;
+  if (patch.priority !== void 0 && patch.priority || patch.raisedAt !== void 0 && patch.raisedAt) {
+    const cfg = await getConfig(env, tenantId);
+    job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
+  }
   if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
   if (patch.hold !== void 0) job.hold = patch.hold;

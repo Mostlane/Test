@@ -6,6 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+  <script src="sla-jobedit.js?v=1"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -370,6 +371,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn">← My Jobs</a>
+        <button id="editJobBtn" class="btn" style="display:none;">✏️ Edit details</button>
         <a id="headerMapBtn" class="btn" target="_blank" rel="noopener" style="display:none;">🧭 Directions</a>
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
       </div>
@@ -1295,9 +1297,23 @@ function showPrevPhoto(){
 /* ---------------------------
    INIT
 ---------------------------- */
+function isOfficeAdmin(){
+  try{
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return p.FullAccess === "Yes";
+  }catch{ return false; }
+}
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
   $("statusSelect").addEventListener("change", syncPanels);
+  // Office admins can edit ANY job detail — including the full site address —
+  // from the job view, the same editor used on the dashboard and scheduler.
+  if(isOfficeAdmin()){
+    $("editJobBtn").style.display = "inline-flex";
+    $("editJobBtn").addEventListener("click", () => {
+      if(job && window.MLJobEdit) window.MLJobEdit.open(job, { onSaved: async () => { await loadJob(); } });
+    });
+  }
         $("openSignatureBtn").addEventListener("click", openSignatureModal);
 $("closeSignatureModal").addEventListener("click", closeSignatureModal);
 $("clearSig").addEventListener("click", () => {
