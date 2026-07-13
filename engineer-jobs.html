@@ -6,6 +6,7 @@
   <title>Mostlane • My Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
   <style>
     :root{
@@ -260,10 +261,14 @@
         <h1>My Jobs</h1>
         <div class="sub" id="userLabel">Engineer</div>
       </div>
-      <a class="ml-back" data-role="up" href="sla-main.html">← SLA Board</a>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button type="button" class="btn" id="dayMapBtn">🗺️ Today's map</button>
+        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+      </div>
     </header>
 
     <div class="content">
+<div id="blockedBanner" style="display:none;margin-bottom:12px;padding:12px 14px;border-radius:12px;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;font-size:14px;"></div>
 <div id="dayBar" style="display:none;margin-bottom:12px;"></div>
 <div class="nav-row">
   <button type="button" class="btn" id="prevWeekBtn">← Load Previous Week</button>
@@ -308,10 +313,30 @@
   </div>
 </div>
 
+<div id="dayMapOverlay" style="position:fixed;inset:0;background:#fff;z-index:8000;display:none;flex-direction:column;">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
+    <h3 style="margin:0;font-size:16px;color:#003b82;flex:1;">🗺️ Today's jobs</h3>
+    <button type="button" class="btn" id="dayMapClose">✕ Close</button>
+  </div>
+  <div id="dayMap" style="flex:1;"></div>
+  <div id="dayMapNote" style="font-size:11px;color:#6b7280;padding:4px 12px;background:#f9fafb;border-top:1px solid #e5e7eb;">Tap a pin to open the job.</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 
 let countdownTimerId = null;
+const dayJobsCache = {};   // dateStr -> jobs[] (feeds the map)
+
+/* Google Maps directions from wherever the engineer currently is. */
+function dirUrl(job){
+  const dest = (job.lat != null && job.lon != null && (job.lat || job.lon))
+    ? `${job.lat},${job.lon}`
+    : [job.address, job.postcode].filter(Boolean).join(", ");
+  if(!dest) return "";
+  return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest) + "&travelmode=driving";
+}
 
 let anchorDate = new Date();
 let loadedDates = new Set();
@@ -463,6 +488,7 @@ function renderDay(dateStr, jobs, mode){
         <span class="${statusClass(job.status, slaInfo.status)}">
           ${job.status || "Open"}
         </span>
+        ${dirUrl(job) ? `<a class="btn" href="${dirUrl(job)}" target="_blank" rel="noopener">🧭 Directions</a>` : ""}
         <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
       </div>
     `;
@@ -493,6 +519,7 @@ async function loadDay(dateObj, mode){
     );
     const list = await res.json();
 
+    dayJobsCache[dateStr] = Array.isArray(list) ? list : [];
     renderDay(dateStr, Array.isArray(list) ? list : [], mode);
     loadedDates.add(dateStr);
     startCountdownLoop();
@@ -757,9 +784,98 @@ function applyDayGate(){
   $("statusBar").style.display    = onShift ? "" : "none";
 }
 
+/* ===== Today's jobs as pins on a map ===== */
+let dayMap = null, dayMapLayer = null;
+const DAY_STATUS_COLOUR = {
+  "Pending":"#9f1239","Scheduled":"#f59e0b","Travelling":"#3b82f6",
+  "In Progress":"#9333ea","On Hold":"#6b7280","Quote":"#dc2626","Order":"#0d9488"
+};
+function escH(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+async function openDayMap(){
+  $("dayMapOverlay").style.display = "flex";
+  if(typeof L === "undefined"){
+    $("dayMapNote").textContent = "⚠️ Map couldn't load — check your connection and try again.";
+    return;
+  }
+  if(!dayMap){
+    dayMap = L.map("dayMap");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(dayMap);
+    dayMapLayer = L.layerGroup().addTo(dayMap);
+  }
+  const today = isoDate(new Date());
+  let list = dayJobsCache[today];
+  if(!list){
+    try{
+      const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}&date=${today}`, { cache:"no-store" });
+      list = await res.json();
+      if(!Array.isArray(list)) list = [];
+      dayJobsCache[today] = list;
+    }catch{ list = []; }
+  }
+  setTimeout(() => {
+    dayMap.invalidateSize();
+    dayMapLayer.clearLayers();
+    const pts = [];
+    let noLoc = 0;
+    list.forEach(job => {
+      const lat = Number(job.lat), lon = Number(job.lon);
+      if(!isFinite(lat) || !isFinite(lon) || (!lat && !lon)){ noLoc++; return; }
+      const colour = DAY_STATUS_COLOUR[job.status] || "#2563eb";
+      const m = L.circleMarker([lat, lon], { radius:9, color:"#fff", weight:2, fillColor:colour, fillOpacity:0.95 });
+      m.bindPopup(`
+        <div style="font-size:13px;min-width:180px;">
+          <b style="color:#003b82;">${escH(job.helpdeskRef || job.id)}</b>
+          <span style="display:inline-block;border-radius:999px;padding:1px 8px;color:#fff;font-size:11px;font-weight:600;background:${colour};margin-left:4px;">${escH(job.status||"")}</span><br>
+          ${escH(job.description||"")}<br>
+          <span style="color:#6b7280;">${escH(job.siteName||job.address||"")}</span><br>
+          ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
+          <a href="job-view.html?jobId=${encodeURIComponent(job.id)}" style="color:#1d4ed8;font-weight:600;">Open job →</a>
+          ${dirUrl(job) ? ` · <a href="${dirUrl(job)}" target="_blank" rel="noopener" style="color:#1d4ed8;">Directions</a>` : ""}
+        </div>`);
+      m.addTo(dayMapLayer);
+      pts.push([lat, lon]);
+    });
+    if(pts.length){
+      dayMap.fitBounds(pts, { padding:[36,36], maxZoom:13 });
+      $("dayMapNote").textContent = `${pts.length} job(s) today` + (noLoc ? ` · ${noLoc} with no saved location` : "") + ". Tap a pin to open the job.";
+    }else{
+      dayMap.setView([51.27,-0.75], 9);
+      $("dayMapNote").textContent = list.length ? "Today's jobs have no saved locations." : "No jobs scheduled today.";
+    }
+  }, 60);
+}
+
+/* ===== Parked-without-info banner ===== */
+function jobIsBlocking(j){
+  if(j.status === "On Hold") return !(j.hold && j.hold.reason && j.hold.needs);
+  if(j.status === "Quote")   return !(j.quote && j.quote.description && j.quote.reason && j.quote.materials);
+  return false;
+}
+async function checkBlocked(){
+  try{
+    const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}`, { cache:"no-store" });
+    const list = await res.json();
+    const blocking = (Array.isArray(list) ? list : []).find(jobIsBlocking);
+    const banner = $("blockedBanner");
+    if(blocking){
+      const ref = escH(blocking.helpdeskRef || blocking.id);
+      banner.innerHTML = `⚠️ <b>Job ${ref}</b> is <b>${escH(blocking.status)}</b> but is missing the required details. ` +
+        `You can't start another job until it's completed. ` +
+        `<a href="job-view.html?jobId=${encodeURIComponent(blocking.id)}" style="color:#b91c1c;font-weight:700;">Complete it now →</a>`;
+      banner.style.display = "block";
+    }else{
+      banner.style.display = "none";
+    }
+  }catch{}
+}
+
 function init(){
   const engineer = getEngineer();
   $("userLabel").textContent = engineer ? `Logged in as ${engineer}` : "Engineer";
+
+  $("dayMapBtn").addEventListener("click", openDayMap);
+  $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
+  checkBlocked();
 
   buildVcItems();
   $("vcSubmit").addEventListener("click", submitVehicleCheck);

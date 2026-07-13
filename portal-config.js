@@ -420,7 +420,7 @@
       var NAV = [
         { title: "Operations", items: [
           { label: "Home", href: "main.html", icon: "home", always: true, match: ["main.html", ""] },
-          { label: "SLA / Jobs", href: "sla-menu.html", icon: "jobs", perms: ["SLA"], match: ["sla-menu.html", "sla-main.html", "job-view.html", "sla-settings.html"] },
+          { label: "SLA / Jobs", href: "sla-main.html", icon: "jobs", perms: ["SLA"], match: ["sla-menu.html", "sla-main.html", "job-view.html", "sla-settings.html", "sla-scheduler.html", "engineer-jobs.html", "add-job.html"] },
           { label: "Sites", href: "sites.html", icon: "sites", perms: ["Sites", "AddSite"] },
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },

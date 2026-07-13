@@ -148,6 +148,8 @@ export async function handle(request, env, ctx, url, sess) {
     const body = await readJson(request);
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
+      scheduledEnd: body.scheduledEnd,
+      durationMinutes: body.durationMinutes,
       assignedEngineers: Array.isArray(body.assignedEngineers)
         ? body.assignedEngineers.filter(Boolean)
         : (body.assignedTo !== undefined ? (body.assignedTo ? [body.assignedTo] : []) : undefined),
@@ -356,7 +358,7 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const existing = await getJob(env, tenantId, id);
   const now = new Date().toISOString();
 
-  const status = normalizeStatus(body.status || existing?.status);
+  let status = normalizeStatus(body.status || existing?.status);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
@@ -365,6 +367,21 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     ? body.assignedEngineers.filter(Boolean)
     : (body.assignedTo ? [body.assignedTo]
        : (existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : [])));
+
+  // Assigned + still Pending = it's been sent to someone: mark it Scheduled.
+  if (assignedEngineers.length && status === "Pending") status = "Scheduled";
+
+  // Finish time: explicit end > explicit duration > keep existing > start + 1h.
+  const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
+  let scheduledEnd = body.scheduledEnd || existing?.scheduledEnd || null;
+  if (scheduledAt) {
+    const s = Date.parse(scheduledAt);
+    if (body.durationMinutes && Number.isFinite(s)) {
+      scheduledEnd = new Date(s + Math.max(15, Number(body.durationMinutes)) * 60000).toISOString();
+    } else if ((!scheduledEnd || Date.parse(scheduledEnd) <= s) && Number.isFinite(s)) {
+      scheduledEnd = new Date(s + 3600000).toISOString();
+    }
+  }
 
   const job = {
     id,
@@ -387,10 +404,15 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     lon: body.lon ?? existing?.lon ?? null,
     storeType: body.storeType || existing?.storeType || "",
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
-    scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
+    scheduledAt,
+    scheduledEnd,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Engineer-captured packs survive an office re-save.
+    quote: existing?.quote, riskAssessment: existing?.riskAssessment,
+    hold: existing?.hold, order: existing?.order, signature: existing?.signature,
+    travelStartMileage: existing?.travelStartMileage,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
@@ -407,6 +429,8 @@ async function patchJob(env, tenantId, id, patch) {
   job.statusHistory ||= [];
   job.events ||= [];
 
+  const hadEngineers = assignedList(job).length > 0;
+
   if (patch.assignedEngineers !== undefined) {
     job.assignedEngineers = patch.assignedEngineers;
     job.assignedTo = patch.assignedEngineers[0] || "";   // keep legacy field as the primary
@@ -414,11 +438,32 @@ async function patchJob(env, tenantId, id, patch) {
     job.assignedTo = patch.assignedTo;
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
   }
-  if (patch.scheduledAt !== undefined) job.scheduledAt = patch.scheduledAt;
+  // Every job gets a finish time. If the start moves and no explicit end came
+  // with it, slide the end to keep the same duration (default 1 hour).
+  if (patch.scheduledAt !== undefined) {
+    const prevStart = Date.parse(job.scheduledAt);
+    const prevEnd = Date.parse(job.scheduledEnd);
+    const durMs = (Number.isFinite(prevStart) && Number.isFinite(prevEnd) && prevEnd > prevStart)
+      ? prevEnd - prevStart : 3600000;
+    job.scheduledAt = patch.scheduledAt;
+    if (patch.scheduledEnd === undefined && job.scheduledAt) {
+      const s = Date.parse(job.scheduledAt);
+      if (Number.isFinite(s)) job.scheduledEnd = new Date(s + durMs).toISOString();
+    }
+  }
+  if (patch.scheduledEnd !== undefined) job.scheduledEnd = patch.scheduledEnd;
+  if (patch.durationMinutes !== undefined && job.scheduledAt) {
+    const mins = Math.max(15, Number(patch.durationMinutes) || 60);
+    const s = Date.parse(job.scheduledAt);
+    if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 60000).toISOString();
+  }
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
-  if (patch.quote !== undefined) job.quote = patch.quote;   // Story Mode quote pack
-  if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // Story Mode RA
-  if (patch.order !== undefined) job.order = patch.order;   // Story Mode parts-order pack
+  if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
+  if (patch.description !== undefined && patch.description) job.description = patch.description;
+  if (patch.quote !== undefined) job.quote = patch.quote;   // quote pack
+  if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // pre-start RA
+  if (patch.hold !== undefined) job.hold = patch.hold;      // on-hold pack (reason / needs / resume)
+  if (patch.order !== undefined) job.order = patch.order;   // parts-order pack
   if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
 
   if (patch.status) {
@@ -428,6 +473,10 @@ async function patchJob(env, tenantId, id, patch) {
       job.statusHistory.push({ status: s, at: now, by: patch.changedBy || "system" });
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
     }
+  } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
+    // Sending a job to someone IS scheduling it — flip Pending → Scheduled.
+    job.status = "Scheduled";
+    job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
   }
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });

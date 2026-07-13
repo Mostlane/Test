@@ -248,19 +248,25 @@
       ]},
 
       { title: "Jobs & sites", arts: [
-        { icon: "🚨", title: "The SLA menu", perms: ["SLA"], steps: [
-          ["Tap <b>SLA</b> on the portal menu. You get four areas:", "slamenu.png"],
-          ["<b>Dashboard</b> — the live job board and tracker (see the next guide)."],
-          ["<b>Scheduler</b> — plan which engineer takes which job on which day."],
-          ["<b>Jobs</b> — create and manage jobs directly."],
-          ["<b>Settings</b> — SLA targets and system options (admin)."],
+        { icon: "🚨", title: "The SLA job board (office)", perms: ["SLA"], steps: [
+          ["Tap <b>SLA</b> — the job board opens straight away. Engineers land on <b>My Jobs</b> instead; office staff see everything."],
+          ["The <b>status chips</b> across the top (Pending, Scheduled, In Progress…) show live counts — tap one to filter. Use the search box for a ref, site or description."],
+          ["<b>👤 Send</b> on a job: tick <b>every engineer attending</b>, roll the smooth <b>start</b> and <b>finish</b> time wheels (finish auto-sets to an hour after start), and send. The job flips to <b>Scheduled</b> automatically and appears on each engineer's list."],
+          ["Jobs with nobody on them show <b>Not Allocated</b> in red. Tick several rows and use <b>Mark selected as…</b> for bulk status changes."],
+          ["Top buttons: <b>🗓️ Scheduler</b> (drag-and-drop day plan), <b>🗺️ Map</b> (all open jobs as pins — tap a pin for the job summary), <b>＋ Add Job</b>, <b>⚙️ Settings</b>."],
         ]},
-        { icon: "📋", title: "The SLA job board", perms: ["SLA"], steps: [
-          ["The board opens with live counters — <b>Open Jobs, Due Today, Overdue, SLA at Risk</b> — then the tracker below.", "slaboard.png"],
-          ["Filter with the <b>P1–P4 priority chips</b>, the <b>status</b> dropdown, or the search box (ref, site or description)."],
-          ["Each job card shows the helpdesk ref, priority badge, site, who's assigned, when it was raised and a <b>live countdown to its SLA target</b>."],
-          ["<b>+ Create Job</b> raises a new job; the buttons on a card open the job, its engineer and its paperwork. <b>£ Financials</b> and <b>📊 SLA Performance</b> give office-side reporting; <b>Day Sessions</b> shows engineers' clocked job time."],
-          ["Engineers: open your job, clock on when you start, complete the <b>risk assessment</b> when prompted (you can't complete without it), then finish with a note, photos and signature — or use <b>quote / order / hold</b> if it can't be completed, so the office knows why."],
+        { icon: "🗓️", title: "The SLA scheduler & map", perms: ["SLA"], steps: [
+          ["The scheduler shows every engineer's day. <b>Drag a job</b> anywhere — the drop time updates for <b>everyone assigned to that job</b>. A double border means several engineers share it."],
+          ["Jobs with no time or no engineer sit in the <b>Needs scheduling</b> tray — drag one onto an engineer's row to book it in."],
+          ["A job's width is its booked duration (finish time). Tap a job to edit details, duration or the engineer list."],
+          ["<b>🗺️ Map view</b> shows Pending / Scheduled / In Progress / On Hold jobs as coloured pins. Tap a pin for the summary and an <b>Open job</b> link."],
+        ]},
+        { icon: "📋", title: "Working a job (engineers)", perms: ["SLA"], steps: [
+          ["<b>My Jobs</b> lists your jobs by day. <b>🗺️ Today's map</b> shows today's jobs as pins; <b>🧭 Directions</b> opens Google Maps from wherever you are."],
+          ["Before you can set a job <b>In Progress</b> you must complete the <b>risk assessment</b> on the job — every time, no exceptions."],
+          ["Putting a job <b>On Hold</b> or to <b>Quote</b>? You must fill in the required details (why, what's needed / materials). Until you do, you <b>can't start another job</b> — the portal will take you back to finish it."],
+          ["<b>Raise PO for this job</b> opens your PO system with the job details carried across, so you only add materials and the supplier."],
+          ["Finish with a note, photos and the customer's signature."],
         ]},
         { icon: "📍", title: "Site Manager", perms: ["Sites", "AddSite"], steps: [
           ["<b>Manage Sites</b> lists every site. Use the <b>Active / Inactive</b> chips, the type dropdown, or search by name, number, postcode or phone.", "sites.png"],
