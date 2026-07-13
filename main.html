@@ -159,7 +159,9 @@ a.button {
     if (user) document.getElementById("userName").textContent = user;
   </script>
 
-  <div id="officeClockBar"></div>
+  <!-- Office clock is now the portal-wide version in portal-config.js
+       (blocking start-of-day gate + flashing sidebar light). The old inline
+       bar's script self-disables because this #officeClockBar element is gone. -->
 
   <!-- Owner-only: view the portal as any user (server enforces who can use it). -->
   <button id="viewAsBtn" style="display:none;margin:0 auto 16px;max-width:calc(100% - 24px);background:#4a1d96;color:#fff;border:none;border-radius:10px;padding:12px 18px;font:600 14px 'Segoe UI',system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18);">👁 View portal as another user…</button>
