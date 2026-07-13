@@ -521,8 +521,8 @@ function renderDay(dateStr, jobs, mode){
         <span class="priority-badge ${job.priority?.toLowerCase() || "p4"}">${job.priority || "P4"}</span>
       </div>
 
-      <div class="job-desc">${job.description || ""}</div>
-      <div class="job-site">${job.siteName || job.address || ""}</div>
+      <div class="job-desc">${escH(job.description || "")}</div>
+      <div class="job-site">${escH(job.siteName || job.address || "")}</div>
 
       <div class="job-meta">
         <span class="${slaInfo.cls}" data-sla-target="${target || ""}">
@@ -920,8 +920,8 @@ async function loadUnscheduled(){
           <span class="ref">${job.helpdeskRef || job.id}</span>
           <span class="priority-badge ${job.priority?.toLowerCase().replace("riority ","") || "p4"}">${(job.priority||"P4").replace("Priority ","P")}</span>
         </div>
-        <div class="job-desc">${job.description || ""}</div>
-        <div class="job-site">${job.siteName || job.address || ""}</div>
+        <div class="job-desc">${escH(job.description || "")}</div>
+        <div class="job-site">${escH(job.siteName || job.address || "")}</div>
         <div class="job-meta">
           <span class="${slaInfo.cls}" data-sla-target="${job.targetAt || ""}">${slaInfo.text}</span>
           <span class="${statusClass(job.status, slaInfo.status)}">${job.status || "Open"}</span>

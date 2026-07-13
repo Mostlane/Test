@@ -391,11 +391,12 @@ function renderTray(){
     host.innerHTML = `<span class="tray-empty">Nothing waiting 🎉</span>`;
     return;
   }
+  const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   waiting.forEach(job => {
     const el = document.createElement("div");
     el.className = "tray-job";
     el.dataset.jobId = job.id;
-    el.innerHTML = `<b>${job.ref || job.id}</b> ${job.title}`;
+    el.innerHTML = `<b>${escX(job.ref || job.id)}</b> ${escX(job.title || "")}`;
     el.title = (job.ref ? job.ref + " · " : "") + job.title + (job.site ? " · " + job.site : "");
     attachPointerDrag(el, job, true);
     el.addEventListener("click", () => { if(!dragState.moved) openJobModal(job.id); });

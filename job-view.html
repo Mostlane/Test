@@ -756,8 +756,9 @@ function renderJob(){
   if(isStoryMode() && $("storyModeBanner")) $("storyModeBanner").style.display = "block";
 
   if(job.signature && job.signature.signedBy){
+    const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     $("signatureStatus").innerHTML =
-      `✔ Signed by <strong>${job.signature.signedBy}</strong>` +
+      `✔ Signed by <strong>${escX(job.signature.signedBy)}</strong>` +
       (job.signature.signedAt ? ` on ${fmtDateTimeLong(new Date(job.signature.signedAt))}` : "");
   }
 
