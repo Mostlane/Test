@@ -557,9 +557,7 @@
         function af(path, init) { init = init || {}; init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {}); if (init.body) init.headers["Content-Type"] = "application/json"; return fetch(API + path, init); }
         function pad(n) { return String(n).padStart(2, "0"); }
         function hms(s) { s = Math.max(0, Math.floor(s)); return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor(s % 3600 / 60)) + ":" + pad(s % 60); }
-        function today() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
-        function promptedToday() { try { return localStorage.getItem("mlClockDay") === today(); } catch (e) { return false; } }
-        function markToday() { try { localStorage.setItem("mlClockDay", today()); } catch (e) {} }
+        function hm(s) { s = Math.max(0, Math.floor(s)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? h + "h " + m + "m" : m + "m"; }
         injectClockStyles();
 
         var state = null, tick = null, confirmT = null, mode = null;
@@ -599,12 +597,21 @@
           mode = m;
           var o = document.getElementById("ocModal");
           if (!o) { o = document.createElement("div"); o.id = "ocModal"; document.body.appendChild(o); }
-          var blocking = (m === "start");
+          // "start" and "stopped" BLOCK the whole portal; "stop" (viewing a
+          // running timer) can be dismissed to keep working.
+          var blocking = (m !== "stop");
           o.className = blocking ? "oc-overlay blocking" : "oc-overlay";
           if (m === "start") {
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🕒</div><h2>Start your day</h2>'
               + '<p>Please start your timer to begin — you need to do this before using the portal.</p>'
               + '<button class="oc-cta" id="ocStartBtn">▶ Start timer</button></div>';
+          } else if (m === "stopped") {
+            var banked = state ? (state.todayClosedSeconds || 0) : 0;
+            o.innerHTML = '<div class="oc-card"><div class="oc-big">✅</div><h2>Timer stopped</h2>'
+              + '<div class="oc-modal-time">' + hm(banked) + '</div>'
+              + '<p>logged today. Start again if you\'re back on, or log out if you\'re done.</p>'
+              + '<button class="oc-cta" id="ocStartBtn">▶ Start again</button>'
+              + '<button class="oc-close" id="ocLogoutBtn">Log out</button></div>';
           } else {
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🟢</div><h2>On the clock</h2>'
               + '<div class="oc-modal-time" id="ocModalTime">' + hms(runSecs()) + '</div>'
@@ -615,6 +622,7 @@
           if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
           var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
+          var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "login.html"; };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
         }
         // Two taps to stop — the second confirms (guards against accidental stops).
@@ -629,14 +637,14 @@
           var b = document.getElementById("ocStartBtn"); if (b) b.disabled = true;
           af("/office/clock-in", { method: "POST", body: JSON.stringify({ deviceId: deviceId }) })
             .then(function (r) { return r.json(); })
-            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't start the timer."); if (b) b.disabled = false; return; } markToday(); closeModal(); refresh(); })
+            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't start the timer."); if (b) b.disabled = false; return; } closeModal(); refresh(); })
             .catch(function () { alert("Network error — couldn't start the timer."); if (b) b.disabled = false; });
         }
         function doStop() {
           var b = document.getElementById("ocStopBtn"); if (b) b.disabled = true;
           af("/office/clock-out", { method: "POST", body: JSON.stringify({ deviceId: deviceId }) })
             .then(function (r) { return r.json(); })
-            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't stop the timer."); if (b) b.disabled = false; return; } markToday(); closeModal(); refresh(); })
+            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't stop the timer."); if (b) b.disabled = false; return; } mode = "stopped"; refresh(); })
             .catch(function () { alert("Network error — couldn't stop the timer."); if (b) b.disabled = false; });
         }
 
@@ -647,12 +655,17 @@
               state = c;
               if (!state || !state.ok || !state.enabled) { removeUI(); return; }
               renderPill();
-              if (state.open) { markToday(); if (mode === "start") closeModal(); }
-              else if (!promptedToday()) openModal("start");
+              if (state.open) { if (mode === "start" || mode === "stopped") closeModal(); }
+              // Not clocked in: the gate ALWAYS blocks — the only way past is
+              // starting the timer (or Log out from the just-stopped screen).
+              else openModal(mode === "stopped" ? "stopped" : "start");
             })
             .catch(function () {});
         }
         refresh();
+        // Re-check every minute so flipping the permission on (or a clock-in
+        // from another tab/machine) is picked up without navigating.
+        setInterval(refresh, 60000);
       }
       function injectClockStyles() {
         if (document.getElementById("oc-style")) return;
@@ -666,7 +679,8 @@
           + "#ocPill.idle{ background:rgba(255,255,255,.12); } #ocPill.idle .oc-led{ background:#c9d2dc; }"
           + "@keyframes ocflash{ 0%,100%{ opacity:1; box-shadow:0 0 10px 2px #38e07b; } 50%{ opacity:.3; box-shadow:0 0 2px 0 #38e07b; } }"
           + "html.pnav-collapsed #ocPill{ justify-content:center; } html.pnav-collapsed #ocPill .oc-txt{ display:none; }"
-          + ".oc-overlay{ position:fixed; inset:0; z-index:4000; display:flex; align-items:center; justify-content:center; background:rgba(8,18,34,.55); font-family:'Segoe UI',system-ui,-apple-system,sans-serif; }"
+          + ".oc-overlay{ position:fixed; inset:0; z-index:99000; display:flex; align-items:center; justify-content:center; background:rgba(8,18,34,.55); font-family:'Segoe UI',system-ui,-apple-system,sans-serif; }"
+          + ".oc-overlay .oc-cta + .oc-close{ margin-top:8px; display:inline-block; }"
           + ".oc-overlay .oc-card{ background:#fff; color:#16202e; width:min(420px,92vw); border-radius:18px; padding:26px 24px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.35); }"
           + ".oc-overlay .oc-big{ font-size:40px; } .oc-overlay h2{ margin:6px 0 6px; color:#003366; font-size:22px; } .oc-overlay p{ color:#5b6b7b; font-size:14px; margin:0 0 16px; }"
           + ".oc-modal-time{ font-size:34px; font-weight:800; color:#0a7d33; font-variant-numeric:tabular-nums; margin:4px 0 10px; }"

@@ -56,19 +56,12 @@ async function hasOfficePerm(env, tenantId, username) {
   ).bind(tenantId, username).first();
   return !!(row && Number(row.value) === 1);
 }
-async function deviceEnabled(env, tenantId, username, deviceId) {
-  // The portal owner is exempt from device locking, so their devices are never
-  // registered — there's no device row to flag in Device Management. For the
-  // owner, holding the OfficeClock permission is enough (any desktop counts).
-  const OWNER = env.OWNER_USERNAME || "Jamie Line";
-  if (username === OWNER) return true;
-  if (!deviceId) return false;
-  const db = tenantDB(env, tenantId);
-  const dev = await db.prepare(
-    "SELECT office_clock FROM devices WHERE tenant_id=? AND device_id=? AND username=?"
-  ).bind(tenantId, deviceId, username).first();
-  return !!(dev && Number(dev.office_clock) === 1);
-}
+// NOTE: the clock used to ALSO require the device to be flagged office_clock=1
+// in Device Management. That second gate made enabling it unreliable (no row
+// for the owner, wrong/missing device ids for staff), so the OfficeClock
+// permission is now the single switch — tick it in Users Admin and the clock
+// gate appears on any desktop that person uses. deviceId is still recorded on
+// each segment for the audit trail.
 async function isTimesheetAdmin(env, tenantId, username) {
   const p = await permissionsFor(env, tenantId, username);
   return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
@@ -125,9 +118,8 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── GET /office/config ────────────────────────────────────────────────────
   if (path === "/office/config" && request.method === "GET") {
-    const deviceId = url.searchParams.get("device") || sess.session.device_id || "";
     const perm = await hasOfficePerm(env, tenantId, me);
-    const enabled = perm && await deviceEnabled(env, tenantId, me, deviceId);
+    const enabled = perm;
     const today = londonDate();
     const open = await openSegmentRow(env, tenantId, me);
     const { results } = await db.prepare(
@@ -148,8 +140,6 @@ export async function handle(request, env, ctx, url, sess) {
     const deviceId = b.deviceId || sess.session.device_id || "";
     if (!(await hasOfficePerm(env, tenantId, me)))
       return error("Office clock isn't enabled for your account.", 403, env, request);
-    if (!(await deviceEnabled(env, tenantId, me, deviceId)))
-      return error("This device isn't set up for the office clock.", 403, env, request);
     const open = await openSegmentRow(env, tenantId, me);
     if (open) return json({ ok: true, already: true, open: { id: open.id, date: open.date, clockIn: effIn(open) } }, {}, env, request);
     const now = new Date();
