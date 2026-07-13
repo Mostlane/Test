@@ -85,6 +85,9 @@
     .mm td.bank { background:#4d8bff; color:#fff; font-weight:700; }
     .mm td.shut { background:#8b5cf6; color:#fff; font-weight:700; }
     .mm td.wrk { background:#b9e5c8; color:#0c7d27; font-weight:700; }
+    .mm td.hol.half { background:linear-gradient(135deg,#18a558 50%,#d9f2e3 50%); color:#0c7d27; }
+    .mm td.oth.half { background:linear-gradient(135deg,#0d9488 50%,#d6efec 50%); color:#0b6e66; }
+    .mm td.pend.half { background:linear-gradient(135deg,#f4b942 50%,#fdf1d7 50%); color:#7a5b00; }
     .callegend { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:#475569; }
     .callegend span { display:inline-flex; align-items:center; gap:5px; }
     .callegend i { width:13px; height:13px; border-radius:4px; display:inline-block; }
@@ -165,6 +168,10 @@
         <div><label>First day</label><input type="date" id="bStart"></div>
         <div><label>Last day</label><input type="date" id="bEnd"></div>
       </div>
+      <div id="bHalfWrap" style="display:none;">
+        <label>How much of the day?</label>
+        <select id="bHalf"><option value="">Full day</option><option value="AM">Half day — morning</option><option value="PM">Half day — afternoon</option></select>
+      </div>
       <label>Type</label>
       <select id="bType"><option>Holiday</option><option>Unpaid</option><option>Other</option></select>
       <label id="bNoteLbl">Reminder note (required)</label>
@@ -187,6 +194,8 @@
       opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
       return fetch(API + path, opts);
     }
+    const fmtDays = n => { n = Number(n) || 0; if (n === 0.5) return "\u00bd day"; if (n % 1 === 0.5) return Math.floor(n) + "\u00bd days"; return n + " day" + (n === 1 ? "" : "s"); };
+    const halfLbl = h => h === "AM" ? "morning" : h === "PM" ? "afternoon" : "half day";
     let YEAR = new Date().getFullYear();
     const me = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
     let LAST_SUM = {};   // latest /holiday/summary (for the accrual warning)
@@ -274,7 +283,7 @@
 
       const row = r => `
         <div class="row">
-          <div class="dateblock"><b>${fmtD(r.start)}${r.start !== r.end ? " – " + fmtD(r.end) : ""}</b><span>${r.days} day${r.days === 1 ? "" : "s"}</span></div>
+          <div class="dateblock"><b>${fmtD(r.start)}${r.start !== r.end ? " – " + fmtD(r.end) : ""}</b><span>${fmtDays(r.days)}${r.half ? " \u00b7 " + halfLbl(r.half) : ""}</span></div>
           <div class="what"><b>${esc(r.type || "Annual Leave")}</b><div class="muted">${esc(r.notes || "")}${r.status === "Approved" && r.approvedBy ? " · approved by " + esc(r.approvedBy) : ""}${r.status === "Rejected" && r.approvedBy ? " · by " + esc(r.approvedBy) : ""}</div></div>
           <span class="pill ${r.status}">${r.status}</span>
           ${r.status === "Pending" || (r.status === "Approved" && r.end >= today)
@@ -316,12 +325,13 @@
       const put = (di, cls, label, info, force) => { if (force || !marks[di]) marks[di] = { cls, label, info }; };
       for (const r of items.filter(i => i.start)) {
         if (!["Approved", "Pending"].includes(r.status)) continue;
-        const cls = r.status === "Pending" ? "pend" : (r.type === "Other" ? "oth" : "hol");
+        const isHalf = (r.half || Number(r.days) === 0.5) && r.start === r.end;
+        const cls = (r.status === "Pending" ? "pend" : (r.type === "Other" ? "oth" : "hol")) + (isHalf ? " half" : "");
         const s = new Date(r.start + "T00:00:00Z"), e = new Date(r.end + "T00:00:00Z");
         for (let d = new Date(s); d <= e; d.setUTCDate(d.getUTCDate() + 1)) {
           if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
-          put(d.toISOString().slice(0, 10), cls, (r.type || "Holiday") + (r.notes ? " · " + r.notes : ""),
-            { kind: "req", type: r.type || "Holiday", status: r.status, start: r.start, end: r.end, days: r.days, notes: r.notes || "" },
+          put(d.toISOString().slice(0, 10), cls, (r.type || "Holiday") + (isHalf ? " (½ day)" : "") + (r.notes ? " · " + r.notes : ""),
+            { kind: "req", type: r.type || "Holiday", status: r.status, start: r.start, end: r.end, days: r.days, half: r.half, notes: r.notes || "" },
             r.status === "Approved");
         }
       }
@@ -388,7 +398,7 @@
       if (mk.info.kind === "req") {
         const i = mk.info;
         html = `<h5>${esc(i.type)} — ${esc(i.status)}</h5>
-          <p>${fmtD(i.start)}${i.start !== i.end ? " – " + fmtD(i.end) : ""} · ${i.days} day${i.days === 1 ? "" : "s"}</p>
+          <p>${fmtD(i.start)}${i.start !== i.end ? " – " + fmtD(i.end) : ""} · ${fmtDays(i.days)}${i.half ? " \u00b7 " + halfLbl(i.half) : ""}</p>
           ${i.notes ? `<p class="muted">“${esc(i.notes)}”</p>` : ""}`;
       } else {
         html = `<h5>${esc(mk.info.label)}</h5>
@@ -410,14 +420,18 @@
     function updateCount() {
       const s = g("bStart").value, e = g("bEnd").value, box = g("bCount"), warn = g("bAccrual");
       warn.style.display = "none";
+      const single = s && e && s === e;
+      g("bHalfWrap").style.display = single ? "" : "none";
+      if (!single) g("bHalf").value = "";
       if (!s || !e || new Date(e) < new Date(s)) { box.style.display = "none"; return; }
-      const n = weekdays(s, e);
+      let n = weekdays(s, e);
+      if (single && g("bHalf").value && n > 0) n = 0.5;
       const isOther = g("bType").value === "Other";
       box.style.display = "block";
       box.innerHTML = n > 0
         ? (isOther
-            ? `This is <b>${n} day${n === 1 ? "" : "s"}</b> — if approved as “Other” it won't come off your allowance.`
-            : `This will use <b>${n} day${n === 1 ? "" : "s"}</b> of your allowance (weekends not counted).`)
+            ? `This is <b>${fmtDays(n)}</b> — if approved as “Other” it won't come off your allowance.`
+            : `This will use <b>${fmtDays(n)}</b> of your allowance (weekends not counted).`)
         : "No weekdays in that range — pick different dates.";
       // Accrual warning: allowance builds up 1/12th per month through the year.
       if (LAST_SUM.accrualMode && !isOther && n > 0 && Number.isFinite(LAST_SUM.allowance)) {
@@ -439,9 +453,11 @@
     });
     g("bStart").addEventListener("change", () => { if (!g("bEnd").value || g("bEnd").value < g("bStart").value) g("bEnd").value = g("bStart").value; updateCount(); });
     g("bEnd").addEventListener("change", updateCount);
+    g("bHalf").addEventListener("change", updateCount);
 
     g("bookBtn").onclick = () => {
       g("bStart").value = ""; g("bEnd").value = ""; g("bNote").value = ""; g("bType").selectedIndex = 0;
+      g("bHalf").value = ""; g("bHalfWrap").style.display = "none";
       g("bMsg").textContent = ""; g("bCount").style.display = "none";
       g("bookModal").classList.add("open");
     };
@@ -458,7 +474,7 @@
       try {
         const bookYear = new Date(s + "T00:00:00").getFullYear();
         const res = await authFetch(`/holiday/request?year=${bookYear}`, { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ start: s, end: e, type: g("bType").value, notes: note }) });
+          body: JSON.stringify({ start: s, end: e, type: g("bType").value, notes: note, half: (s === e && g("bHalf").value) || undefined }) });
         if (!res.ok) throw new Error(await res.text());
         closeBook();
         if (bookYear !== YEAR) { YEAR = bookYear; g("yearSel").value = String(bookYear); }

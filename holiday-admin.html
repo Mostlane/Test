@@ -55,6 +55,8 @@
     .blk.bank { background:#4d8bff; }
     .blk.shut { background:#8b5cf6; }
     .blk.worked { background:repeating-linear-gradient(45deg,#b9e5c8,#b9e5c8 4px,#e9f8ee 4px,#e9f8ee 8px); }
+    .blk.hol.half { background:linear-gradient(135deg,#18a558 50%,#d9f2e3 50%); }
+    .blk.pend.half { background:linear-gradient(135deg,#f4b942 50%,#fdf1d7 50%); }
     .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:12px; color:#475569; }
     .legend span { display:inline-flex; align-items:center; gap:6px; }
     .legend i { width:14px; height:14px; border-radius:4px; display:inline-block; }
@@ -250,6 +252,8 @@
     let NAMES = {};           // username -> display name
     let ALL = [];             // all requests for the year
     let CFGDATA = {};         // year config (accrualMode etc)
+    const fmtDays = n => { n = Number(n) || 0; if (n === 0.5) return "\u00bd day"; if (n % 1 === 0.5) return Math.floor(n) + "\u00bd days"; return n + " day" + (n === 1 ? "" : "s"); };
+    const halfLbl = h => h === "AM" ? "morning" : h === "PM" ? "afternoon" : "half day";
     let BALMAP = {};          // username -> {allowance, used}
     const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
 
@@ -360,7 +364,7 @@
       }
       const row = (h, acts) => `
         <div class="apr">
-          <div class="dateblock"><b>${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}</b><span>${h.days} day${h.days === 1 ? "" : "s"}</span></div>
+          <div class="dateblock"><b>${fmtD(h.start)}${h.start !== h.end ? " – " + fmtD(h.end) : ""}</b><span>${fmtDays(h.days)}${h.half ? " \u00b7 " + halfLbl(h.half) : ""}</span></div>
           <div class="who"><b>${esc(NAMES[h.username] || h.engineer || h.username)}</b>
             <span class="muted">${esc(h.type || "Holiday")}${h.notes ? " · “" + esc(h.notes) + "”" : ""}</span>${accrualTag(h)}</div>
           ${acts}
@@ -553,12 +557,12 @@
           const pendR = (pendCells[eng.username] || {})[di];
           let inner = "";
           if (cell && cell.kind === "holiday") {
-            inner = `<button class="blk hol" data-wc-revoke="${esc(cell.requestId)}" title="${esc((NAMES[eng.username]||eng.username) + " — " + (cell.type||"Holiday") + (cell.note ? " · " + cell.note : "") + " (" + cell.rangeStart + " → " + cell.rangeEnd + ") — tap to cancel")}"></button>`;
+            inner = `<button class="blk hol${cell.half ? " half" : ""}" data-wc-revoke="${esc(cell.requestId)}" title="${esc((NAMES[eng.username]||eng.username) + " — " + (cell.type||"Holiday") + (cell.half ? " (½ day)" : "") + (cell.note ? " · " + cell.note : "") + " (" + cell.rangeStart + " → " + cell.rangeEnd + ") — tap to cancel")}"></button>`;
           } else if (cell && (cell.kind === "bankholiday" || cell.kind === "shutdown")) {
             const cls = cell.worked ? "worked" : (cell.kind === "shutdown" ? "shut" : "bank");
             inner = `<button class="blk ${cls}" data-wc-work="${esc(eng.username)}" data-kind="${cell.kind}" data-date="${di}" data-worked="${cell.worked ? 1 : 0}" title="${esc(cell.label + " — " + (cell.worked ? "worked (credited); tap to revert" : "tap if they worked this day"))}"></button>`;
           } else if (pendR && !wkend) {
-            inner = `<span class="blk pend" title="${esc((NAMES[eng.username]||eng.username) + " — PENDING " + pendR.start + " → " + pendR.end)}"></span>`;
+            inner = `<span class="blk pend${(pendR.half || Number(pendR.days) === 0.5) && pendR.start === pendR.end ? " half" : ""}" title="${esc((NAMES[eng.username]||eng.username) + " — PENDING " + fmtDays(pendR.days) + " " + pendR.start + " → " + pendR.end)}"></span>`;
           }
           body += `<td class="day${wkend ? " wkend" : ""}${di === today ? " today" : ""}">${inner}</td>`;
         }

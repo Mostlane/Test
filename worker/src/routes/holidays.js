@@ -152,12 +152,16 @@ export async function handle(request, env, ctx, url, sess) {
     if (new Date(end) < new Date(start)) return text("End before start", 400);
     const note = String(body.notes || "").trim();
     if (!note) return text("Notes (reminder) required", 400);
-    const days = countWeekdaysInclusive(start, end);
+    // Half days: AM or PM, only for a single-weekday booking; counts as 0.5.
+    const half = ["AM", "PM"].includes(body.half) ? body.half : null;
+    if (half && start !== end) return text("Half days are for a single day", 400);
+    let days = countWeekdaysInclusive(start, end);
     if (days <= 0) return text("No weekdays in range", 400);
+    if (half) days = 0.5;
     await db.prepare(`
-      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, type, notes, status, submitted_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'Pending',?)
-    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, body.type || null, note, new Date().toISOString()).run();
+      INSERT INTO holidays (tenant_id, id, engineer, username, year, start_date, end_date, days, half, type, notes, status, submitted_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
+    `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, new Date().toISOString()).run();
     await logAction(id, "Submitted", user);
     return json({ success: true, id });
   }
@@ -414,7 +418,8 @@ export async function handle(request, env, ctx, url, sess) {
           cells[di] = {
             kind: "holiday", type: h.type || "Annual Leave", note: h.notes || "",
             label: "Holiday", username: u, requestId: h.id,
-            rangeStart: h.start, rangeEnd: h.end, days: h.days
+            rangeStart: h.start, rangeEnd: h.end, days: h.days,
+            half: h.half || (Number(h.days) === 0.5 && h.start === h.end ? "HALF" : null)
           };
         }
       }
@@ -471,7 +476,7 @@ export async function handle(request, env, ctx, url, sess) {
 function reqOut(r) {
   return {
     id: r.id, engineer: r.engineer, username: r.username, year: r.year,
-    start: r.start_date, end: r.end_date, days: r.days, type: r.type,
+    start: r.start_date, end: r.end_date, days: r.days, half: r.half || null, type: r.type,
     notes: r.notes, status: r.status, submittedAt: r.submitted_at,
     approvedBy: r.approved_by, decisionAt: r.decision_at,
     cancelledBy: r.cancelled_by, cancelNote: r.cancel_note
