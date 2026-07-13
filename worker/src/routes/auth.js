@@ -29,6 +29,16 @@ export async function handle(request, env, ctx, url, sess) {
     const { username, password } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
 
+    // Brute-force throttle: stop an IP that has piled up failed attempts in the
+    // last 15 minutes. Keyed on IP, not the account, so nobody can lock a real
+    // user out by hammering their username from elsewhere. Only 'fail' rows
+    // count, so a genuine user who mistypes once or twice is never affected —
+    // and this also caps master-password guessing.
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
+
     // Forgiving username match: exact, case-insensitive, the LEGACY dotted
     // form ("Jamie.Line" — phones still autofill it from saved passwords
     // created before the rename), or the account's email address. Everything
@@ -227,6 +237,20 @@ function shapeUser(u, perms) {
     MustChangePassword: !!u.must_change_password,
     ...perms,
   };
+}
+
+// Brute-force guard. Counts failed logins from one IP in the last 15 minutes.
+// Threshold is generous (a real user won't fail 20× in a quarter-hour) but a
+// password-guesser is stopped cold. Never throws — a counting error must never
+// block a legitimate login.
+const LOGIN_FAIL_LIMIT = 20;
+async function tooManyRecentFails(env, ip) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
+    ).bind(ip).first();
+    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
+  } catch { return false; }
 }
 
 async function logLogin(env, tenantId, request, username, outcome) {

@@ -307,6 +307,10 @@ async function handle(request, env, ctx, url, sess) {
   if (path === "/auth/login" && request.method === "POST") {
     const { username, password } = await request.json().catch(() => ({}));
     if (!username || !password) return error("Username and password required", 400, env, request);
+    const loginIp = request.headers.get("CF-Connecting-IP") || "";
+    if (loginIp && await tooManyRecentFails(env, loginIp)) {
+      return error("Too many failed attempts. Please wait a few minutes and try again.", 429, env, request);
+    }
     const user = await findUser(env, username);
     const active = user && user.status !== "Disabled";
     const passwordOk = active && await verifyPassword(password, user);
@@ -453,6 +457,17 @@ function shapeUser(u, perms) {
     MustChangePassword: !!u.must_change_password,
     ...perms
   };
+}
+var LOGIN_FAIL_LIMIT = 20;
+async function tooManyRecentFails(env, ip) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM login_history WHERE ip = ? AND outcome = 'fail' AND at > datetime('now','-15 minutes')"
+    ).bind(ip).first();
+    return !!row && Number(row.n) >= LOGIN_FAIL_LIMIT;
+  } catch {
+    return false;
+  }
 }
 async function logLogin(env, tenantId, request, username, outcome) {
   try {
