@@ -3147,6 +3147,8 @@ async function hasOfficePerm(env, tenantId, username) {
   return !!(row && Number(row.value) === 1);
 }
 async function deviceEnabled(env, tenantId, username, deviceId) {
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  if (username === OWNER) return true;
   if (!deviceId) return false;
   const db = tenantDB(env, tenantId);
   const dev = await db.prepare(

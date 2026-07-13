@@ -57,6 +57,11 @@ async function hasOfficePerm(env, tenantId, username) {
   return !!(row && Number(row.value) === 1);
 }
 async function deviceEnabled(env, tenantId, username, deviceId) {
+  // The portal owner is exempt from device locking, so their devices are never
+  // registered — there's no device row to flag in Device Management. For the
+  // owner, holding the OfficeClock permission is enough (any desktop counts).
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  if (username === OWNER) return true;
   if (!deviceId) return false;
   const db = tenantDB(env, tenantId);
   const dev = await db.prepare(
