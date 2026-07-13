@@ -601,7 +601,15 @@ async function handleSubmit(evt){
    INIT PAGE
 --------------------------- */
 
+function hasSLAAdmin(){
+  try {
+    const p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    return p.FullAccess === "Yes" || p.SLAAdmin === "Yes";
+  } catch { return false; }
+}
 async function init(){
+  // Raising jobs is an SLA-Admin action — send engineers back to their jobs.
+  if(!hasSLAAdmin()){ location.replace("engineer-jobs.html"); return; }
   const user = getLoggedInUser();
   if(user) $("originator").value = user;
 

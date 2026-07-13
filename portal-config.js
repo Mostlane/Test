@@ -420,7 +420,7 @@
       var NAV = [
         { title: "Operations", items: [
           { label: "Home", href: "main.html", icon: "home", always: true, match: ["main.html", ""] },
-          { label: "SLA / Jobs", href: "sla-main.html", icon: "jobs", perms: ["SLA"], match: ["sla-menu.html", "sla-main.html", "job-view.html", "sla-settings.html", "sla-scheduler.html", "engineer-jobs.html", "add-job.html"] },
+          { label: "SLA / Jobs", href: "sla-main.html", icon: "jobs", perms: ["SLA", "SLAAdmin"], match: ["sla-menu.html", "sla-main.html", "job-view.html", "sla-settings.html", "sla-scheduler.html", "engineer-jobs.html", "add-job.html"] },
           { label: "Sites", href: "sites.html", icon: "sites", perms: ["Sites", "AddSite"] },
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
@@ -828,7 +828,7 @@
           if (d && d.ok && d.user) {
             perms = d.user;
             try {
-              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","ThemeColour","ThemeBackground","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
+              var slim = {}; ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles","Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders","Sites","AddSite","Assets","AssetAdmin","MyDocuments","Weekly","Forms","Compliance","Projects","ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan","SiteLog","OfficeClock","OfficeTimesheet","ThemeColour","ThemeBackground","FirstName","LastName"].forEach(function (k) { slim[k] = d.user[k]; });
               sessionStorage.setItem("mostlanePermissions", JSON.stringify(slim));
               localStorage.setItem("mostlanePermissions", JSON.stringify(slim));
             } catch (e) {}

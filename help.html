@@ -248,14 +248,14 @@
       ]},
 
       { title: "Jobs & sites", arts: [
-        { icon: "🚨", title: "The SLA job board (office)", perms: ["SLA"], steps: [
-          ["Tap <b>SLA</b> — the job board opens straight away. Engineers land on <b>My Jobs</b> instead; office staff see everything."],
+        { icon: "🚨", title: "The SLA job board (office)", perms: ["SLAAdmin"], steps: [
+          ["Tap <b>SLA</b> — the job board opens straight away. This is the <b>SLA Admin</b> area (dashboard, scheduler, add/edit jobs); give a user the <b>SLA Admin</b> permission for it. Engineers with just <b>SLA</b> land on <b>My Jobs</b> and can only see their own work."],
           ["The <b>status chips</b> across the top (Pending, Scheduled, In Progress…) show live counts — tap one to filter. Use the search box for a ref, site or description."],
           ["<b>👤 Send</b> on a job: tick <b>every engineer attending</b>, roll the smooth <b>start</b> and <b>finish</b> time wheels (finish auto-sets to an hour after start), and send. The job flips to <b>Scheduled</b> automatically and appears on each engineer's list."],
           ["Jobs with nobody on them show <b>Not Allocated</b> in red. Tick several rows and use <b>Mark selected as…</b> for bulk status changes."],
           ["Top buttons: <b>🗓️ Scheduler</b> (drag-and-drop day plan), <b>🗺️ Map</b> (all open jobs as pins — tap a pin for the job summary), <b>＋ Add Job</b>, <b>⚙️ Settings</b>."],
         ]},
-        { icon: "🗓️", title: "The SLA scheduler & map", perms: ["SLA"], steps: [
+        { icon: "🗓️", title: "The SLA scheduler & map", perms: ["SLAAdmin"], steps: [
           ["The scheduler shows every engineer's day. <b>Drag a job</b> anywhere — the drop time updates for <b>everyone assigned to that job</b>. A double border means several engineers share it."],
           ["Jobs with no time or no engineer sit in the <b>Needs scheduling</b> tray — drag one onto an engineer's row to book it in."],
           ["A job's width is its booked duration (finish time). Tap a job to edit details, duration or the engineer list."],

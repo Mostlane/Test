@@ -309,6 +309,7 @@ const PERMISSION_KEYS = [
   "HolidayAdmin", "EngineersHoursMenu", "HoursDashboard", "PurchaseOrders",
   "Sites", "AddSite", "Assets", "MyDocuments", "Weekly", "Forms", "Compliance",
   "Projects", "ProjectsAdmin", "TimesheetAdmin", "LabourPlanning", "SLA",
+  "SLAAdmin",    // office SLA management: dashboard, scheduler, add/edit jobs
   "StoryMode",   // opt-in: guided day protocol for this engineer
   "HSPlan",      // access to the H&S planning tool
   "SiteLog",       // access to SiteLog (site check-in/attendance)

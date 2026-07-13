@@ -441,7 +441,10 @@ function slaBadge(job){
   return {text:(over ? "Overdue " : "Due in ") + label, cls:"sla-badge " + cls};
 }
 
-/* ============ access gate: office → dashboard, engineers → My Jobs ============ */
+/* ============ access gate ============
+   SLA Admin (or Full access) → this dashboard.
+   SLA only (engineers)       → their own My Jobs.
+   Neither                    → blocked. */
 async function gate(){
   try{
     const u = getCurrentUser();
@@ -449,17 +452,17 @@ async function gate(){
     const data = await res.json();
     if(!data.found){ $("forbidden").style.display = "block"; return false; }
     const user = data.user;
-    const full = (user.FullAccess||"") === "Yes";
-    const sla  = (user.SLA||"") === "Yes";
-    if(!full && !sla){ $("forbidden").style.display = "block"; return false; }
-    if(!full && user.StaffType !== "office"){
-      // Engineers only see their own jobs.
-      location.replace("engineer-jobs.html");
-      return false;
+    const full  = (user.FullAccess||"") === "Yes";
+    const admin = (user.SLAAdmin||"") === "Yes";
+    const sla   = (user.SLA||"") === "Yes";
+    if(full || admin){
+      $("userLabel").textContent = "Logged in as " + u;
+      $("mainCard").style.display = "block";
+      return true;
     }
-    $("userLabel").textContent = "Logged in as " + u;
-    $("mainCard").style.display = "block";
-    return true;
+    if(sla){ location.replace("engineer-jobs.html"); return false; }  // engineer → My Jobs
+    $("forbidden").style.display = "block";
+    return false;
   }catch(e){
     // If the lookup fails, show the board rather than a dead end.
     $("mainCard").style.display = "block";
