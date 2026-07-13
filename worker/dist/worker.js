@@ -2568,6 +2568,11 @@ async function patchJob(env, tenantId, id, patch) {
     if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 6e4).toISOString();
   }
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
+  for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
+    if (patch[k] !== void 0) job[k] = patch[k];
+  }
+  if (patch.lat !== void 0) job.lat = patch.lat;
+  if (patch.lon !== void 0) job.lon = patch.lon;
   if (patch.priority !== void 0 && patch.priority) job.priority = patch.priority;
   if (patch.description !== void 0 && patch.description) job.description = patch.description;
   if (patch.quote !== void 0) job.quote = patch.quote;

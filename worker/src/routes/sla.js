@@ -458,6 +458,13 @@ async function patchJob(env, tenantId, id, patch) {
     if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 60000).toISOString();
   }
   if (patch.siteCode !== undefined) job.siteCode = patch.siteCode;
+  // The site can be corrected after creation (test jobs, wrong pick at raise
+  // time). All the site details travel together.
+  for (const k of ["siteName", "address", "postcode", "telephone", "storeType", "sharepointURL"]) {
+    if (patch[k] !== undefined) job[k] = patch[k];
+  }
+  if (patch.lat !== undefined) job.lat = patch.lat;
+  if (patch.lon !== undefined) job.lon = patch.lon;
   if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
   if (patch.description !== undefined && patch.description) job.description = patch.description;
   if (patch.quote !== undefined) job.quote = patch.quote;   // quote pack
