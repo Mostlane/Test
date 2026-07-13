@@ -801,10 +801,12 @@
         }).catch(function () {});
         Promise.all([
           fetchAuthed("/asset/transfers/pending-count").catch(function () { return null; }),
-          fetchAuthed("/asset/requests/attention").catch(function () { return null; })
+          fetchAuthed("/asset/requests/attention").catch(function () { return null; }),
+          fetchAuthed("/asset/confirm/pending-count").catch(function () { return null; })
         ]).then(function (res) {
           var t = (res[0] && res[0].ok ? res[0].count : 0)
-                + (res[1] && res[1].ok ? (res[1].toAction || 0) + (res[1].decided || 0) : 0);
+                + (res[1] && res[1].ok ? (res[1].toAction || 0) + (res[1].decided || 0) : 0)
+                + (res[2] && res[2].ok ? res[2].count : 0);
           setNavBadge("my-assets.html", t);
         }).catch(function () {});
         var yr = new Date().getFullYear();

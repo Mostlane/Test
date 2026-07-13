@@ -378,6 +378,91 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, count: Number(row?.n || 0) });
   }
 
+  // ── Equipment re-confirmation ("do you still hold this?") ──────────────────
+  // Manual: an admin sends a round; every holder confirms or flags each item.
+  // Flagged items stay assigned and simply surface on the admin dashboard.
+  const CONFIRM_KEY = `asset_confirm_round:${tenantId}`;
+
+  // Admin starts a new round over everything currently allocated to a person.
+  if (method === "POST" && pathname === "/asset/confirm/request") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
+    const round = new Date().toISOString();
+    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    let count = 0;
+    for (const r of results || []) {
+      let a; try { a = JSON.parse(r.data); } catch { continue; }
+      const holder = String(a.assignedTo || "").trim().toLowerCase();
+      if (!holder || holder === "shared" || holder === "unassigned") continue;
+      a.confirm = { round, status: "pending", at: null, note: "" };
+      await putAsset(env, tenantId, a);
+      count++;
+    }
+    await env.DB.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess.user.username, total: count })).run();
+    return json({ ok: true, count, round });
+  }
+
+  // Holder (or admin) responds to one item: still held, or no longer held.
+  if (method === "POST" && pathname === "/asset/confirm/respond") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return json({ ok: false, error: "Missing id" }, 400);
+    const asset = await getAsset(env, tenantId, b.id);
+    if (!asset) return json({ ok: false, error: "Unknown item" }, 404);
+    const me = sess.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const isAdmin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (String(asset.assignedTo || "").toLowerCase() !== me.toLowerCase() && !isAdmin)
+      return json({ ok: false, error: "Not your item" }, 403);
+    asset.confirm = Object.assign({ round: null }, asset.confirm, {
+      status: b.held === false ? "flagged" : "confirmed",
+      at: new Date().toISOString(),
+      note: String(b.note || "").slice(0, 300),
+      by: me
+    });
+    await putAsset(env, tenantId, asset);
+    return json({ ok: true, status: asset.confirm.status });
+  }
+
+  // Badge: how many of MY items are still awaiting my confirmation.
+  if (method === "GET" && pathname === "/asset/confirm/pending-count") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const { results } = await db.prepare(
+      "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
+    ).bind(db.tenantId, sess.user.username).all();
+    let n = 0;
+    for (const r of results || []) { try { const a = JSON.parse(r.data); if (a.confirm && a.confirm.status === "pending") n++; } catch {} }
+    return json({ ok: true, count: n });
+  }
+
+  // Admin dashboard: status of every item in the current round.
+  if (method === "GET" && pathname === "/asset/confirm/status") {
+    const sess = await requireSession(env, request);
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
+    let roundInfo = null;
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CONFIRM_KEY).first();
+      if (row?.value) roundInfo = JSON.parse(row.value);
+    } catch {}
+    const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
+    const items = [];
+    for (const r of results || []) {
+      let a; try { a = JSON.parse(r.data); } catch { continue; }
+      if (!a.confirm || (roundInfo && a.confirm.round !== roundInfo.round)) continue;
+      items.push({ id: a.id, name: a.name || a.assetName || a.id, serial: a.serial || "",
+        holder: a.assignedTo || "", status: a.confirm.status, at: a.confirm.at, note: a.confirm.note || "" });
+    }
+    return json({ ok: true, round: roundInfo, items });
+  }
+
   // Incoming + outgoing pending requests for the logged-in user, with asset details.
   if (method === "GET" && pathname === "/asset/transfers/pending") {
     const sess = await requireSession(env, request);

@@ -559,15 +559,22 @@ const MAP = {
           });
         }).catch(function () {}));
 
-      jobs.push(fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d || !d.ok) return;
-          dot("Assets", d.count);
-          if (d.count > 0) notes.push({
-            n: d.count, icon: "📦", href: "my-assets.html",
-            title: d.count > 1 ? d.count + " asset transfers waiting" : "An asset transfer is waiting",
+      jobs.push(Promise.all([
+        fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H).then(function (r) { return r.json(); }).catch(function () { return null; }),
+        fetch(window.MOSTLANE_API + "/asset/confirm/pending-count", H).then(function (r) { return r.json(); }).catch(function () { return null; })
+      ]).then(function (res) {
+          var tx = (res[0] && res[0].ok) ? res[0].count : 0;
+          var cf = (res[1] && res[1].ok) ? res[1].count : 0;
+          dot("Assets", tx + cf);
+          if (tx > 0) notes.push({
+            n: tx, icon: "📦", href: "my-assets.html",
+            title: tx > 1 ? tx + " asset transfers waiting" : "An asset transfer is waiting",
             text: "Accept & sign, or reject — items stay in limbo until you do."
+          });
+          if (cf > 0) notes.push({
+            n: cf, icon: "📋", href: "my-assets.html",
+            title: cf > 1 ? cf + " items to confirm you hold" : "Confirm an item you hold",
+            text: "The office has asked you to confirm the equipment allocated to you."
           });
         }).catch(function () {}));
 

@@ -143,6 +143,7 @@
       <a class="btn grey small" href="shared-assets.html" style="text-decoration:none;">Shared assets</a>
       <a class="btn small" href="assets-admin.html" id="allAssetsBtn" style="text-decoration:none; display:none;">All assets</a>
     </div>
+    <div id="confirmBanner" style="display:none;margin:10px 0;padding:10px 12px;border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;font-size:14px;"></div>
     <div id="assetGrid" class="grid"><p class="muted">Loading…</p></div>
   </div>
 
@@ -304,11 +305,29 @@
 
       // My items grid
       g("countLbl").textContent = myAssets.length ? myAssets.length + " item" + (myAssets.length === 1 ? "" : "s") : "";
+      // Equipment re-confirmation banner (admin has asked people to confirm what they hold).
+      const toConfirm = myAssets.filter(a => a.confirm && a.confirm.status === "pending").length;
+      const cb = g("confirmBanner");
+      if (cb) cb.style.display = toConfirm ? "block" : "none";
+      if (cb && toConfirm) cb.innerHTML = `📋 Please confirm you still hold your equipment — <b>${toConfirm}</b> item${toConfirm===1?"":"s"} to check below.`;
       if (!myAssets.length) { g("assetGrid").innerHTML = "<p class='muted'>No items currently assigned to you.</p>"; return; }
       g("assetGrid").innerHTML = myAssets.map(a => {
         const imgs = a.images || [];
         const out = pending.outgoing.find(o => o.assetId === a.id);
         const since = a.lastTransfer ? new Date(a.lastTransfer).toLocaleDateString("en-GB") : "—";
+        const cf = a.confirm || null;
+        let confirmBlock = "";
+        if (cf && cf.status === "pending") {
+          confirmBlock = `<div class="confirm-ask" style="margin-top:8px;padding:8px;border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;">
+            <div style="font-size:13px;margin-bottom:6px;">Do you still have this item?</div>
+            <button class="btn small" data-confirm-yes="${esc(a.id)}">✅ Yes, I have it</button>
+            <button class="btn grey small" data-confirm-no="${esc(a.id)}">⚠️ No longer have it</button>
+          </div>`;
+        } else if (cf && cf.status === "confirmed") {
+          confirmBlock = `<div style="margin-top:8px;font-size:12px;color:#16a34a;">✅ Confirmed ${cf.at ? new Date(cf.at).toLocaleDateString("en-GB") : ""}</div>`;
+        } else if (cf && cf.status === "flagged") {
+          confirmBlock = `<div style="margin-top:8px;font-size:12px;color:#dc2626;">⚠️ You reported you no longer have this — flagged for admin.</div>`;
+        }
         return `<div class="card">
           ${imgs.length ? `<img class="thumb" loading="lazy" decoding="async" src="${esc(thumbUrl(imgs[0]))}" data-gallery="${esc(a.id)}" alt="${esc(a.name)}">` : ""}
           <h3>${esc(a.name || a.id)}</h3>
@@ -321,14 +340,25 @@
                  <button class="btn small" data-tx="${esc(a.id)}">Transfer</button>
                  <button class="btn grey small" data-hist="${esc(a.id)}">History</button>
                </div>`}
+          ${confirmBlock}
         </div>`;
       }).join("");
+    }
+
+    async function confirmItem(id, held) {
+      if (!held && !confirm("Report that you no longer have this item? It'll be flagged for the office to review.")) return;
+      try {
+        const r = await authFetch("/asset/confirm/respond", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, held }) }).then(r => r.json());
+        if (r.ok) { const a = myAssets.find(x => x.id === id); if (a) a.confirm = Object.assign(a.confirm || {}, { status: r.status, at: new Date().toISOString() }); loadAll(); }
+      } catch (e) {}
     }
 
     // ── Event delegation ──
     document.addEventListener("click", async e => {
       const t = e.target;
-      if (t.dataset.tx) openTransfer(t.dataset.tx);
+      if (t.dataset.confirmYes) confirmItem(t.dataset.confirmYes, true);
+      else if (t.dataset.confirmNo) confirmItem(t.dataset.confirmNo, false);
+      else if (t.dataset.tx) openTransfer(t.dataset.tx);
       else if (t.dataset.accept) openSign(Number(t.dataset.accept));
       else if (t.dataset.reject) doReject(Number(t.dataset.reject));
       else if (t.dataset.cancel) doCancel(Number(t.dataset.cancel));
