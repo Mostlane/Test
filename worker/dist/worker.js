@@ -3041,8 +3041,8 @@ async function handle7(request, env, ctx, url, sess) {
     const siteNumber = form && String(form.get("siteNumber") || "").trim();
     const client = form ? String(form.get("client") || "retail").toLowerCase() : "retail";
     if (!file || !siteNumber) return json({ success: false, error: "Missing file or siteNumber" }, { status: 400 }, env, request);
-    const safeName = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
-    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName}`;
+    const safeName2 = (file.name || "site.jpg").replace(/[^\w.\-]+/g, "_");
+    const key = `sites/${client}/${siteNumber}/${Date.now()}-${safeName2}`;
     await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || "image/jpeg" } });
     const base = (env.R2_PUBLIC_BASE || "").replace(/\/$/, "");
     return json({ success: true, url: `${base}/${key}` }, { status: 201 }, env, request);
@@ -4624,6 +4624,243 @@ function classifyAssetBucket(key) {
   return "Asset photos";
 }
 
+// src/routes/hrdocs.js
+var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Other"];
+function jr(obj, headers, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
+}
+async function readJson2(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
+var safeName = (s) => String(s || "file").replace(/[^\w.\-]+/g, "_");
+var cleanCat = (s) => String(s || "").replace(/[\/]/g, "-").trim();
+async function isFull(env, tenantId, sess) {
+  if (!sess) return false;
+  const p = await permissionsFor(env, tenantId, sess.user.username);
+  return p.FullAccess === "Yes";
+}
+async function getCategories(env, tenantId) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`staff_doc_categories:${tenantId}`).first();
+    if (row && row.value) {
+      const c = JSON.parse(row.value);
+      if (Array.isArray(c) && c.length) return c;
+    }
+  } catch {
+  }
+  return DEFAULT_CATEGORIES.slice();
+}
+async function addCategory(env, tenantId, name) {
+  const cats = await getCategories(env, tenantId);
+  const clean = cleanCat(name);
+  if (clean && !cats.some((c) => c.toLowerCase() === clean.toLowerCase())) cats.push(clean);
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, `staff_doc_categories:${tenantId}`, JSON.stringify(cats)).run();
+  return cats;
+}
+var personalPrefix = (tid, user) => `staffdocs/${tid}/user/${user}/`;
+var companyPrefix = (tid) => `staffdocs/${tid}/company/`;
+async function listUnder(env, prefix) {
+  const out = {};
+  const listed = await env.JOB_FILES.list({ prefix, include: ["customMetadata"] });
+  for (const o of listed.objects || []) {
+    const rest = o.key.slice(prefix.length);
+    const slash = rest.indexOf("/");
+    const category = slash > 0 ? rest.slice(0, slash) : "Other";
+    (out[category] = out[category] || []).push({
+      key: o.key,
+      name: o.customMetadata && o.customMetadata.name || o.key.split("/").pop(),
+      at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
+      by: o.customMetadata && o.customMetadata.by,
+      size: o.size
+    });
+  }
+  return out;
+}
+async function signGroups(env, origin, groups) {
+  for (const cat of Object.keys(groups)) {
+    for (const f of groups[cat]) f.url = await signedFileUrl(env, origin, "/staff/doc", f.key);
+    groups[cat].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  }
+  return groups;
+}
+async function handle16(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const method = request.method.toUpperCase();
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const sub = url.pathname.replace(/^\/staff(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  if (sub === "/doc" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("staffdocs/")) return jr({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
+  const full = await isFull(env, tenantId, sess);
+  if (sub === "/docs" && method === "GET") {
+    const who = (q.get("user") || sess.user.username).trim();
+    if (who !== sess.user.username && !full) return jr({ error: "Forbidden" }, headers, 403);
+    const categories = await getCategories(env, tenantId);
+    const personal = await signGroups(env, url.origin, await listUnder(env, personalPrefix(tenantId, who)));
+    const company = await signGroups(env, url.origin, await listUnder(env, companyPrefix(tenantId)));
+    return jr({ user: who, categories, personal, company, canManage: full }, headers);
+  }
+  if (sub === "/docs" && method === "POST") {
+    if (!full) return jr({ error: "Only a Full-access user can upload staff documents." }, headers, 403);
+    const scope = (q.get("scope") || "personal") === "company" ? "company" : "personal";
+    const category = cleanCat(q.get("category")) || "Other";
+    const who = (q.get("user") || "").trim();
+    if (scope === "personal" && !who) return jr({ error: "Missing user" }, headers, 400);
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!file) return jr({ error: "Missing file" }, headers, 400);
+    const base = scope === "company" ? companyPrefix(tenantId) : personalPrefix(tenantId, who);
+    const key = `${base}${category}/${Date.now()}-${safeName(file.name)}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+      customMetadata: { name: file.name || safeName(file.name), by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    return jr({ ok: true, key, url: await signedFileUrl(env, url.origin, "/staff/doc", key) }, headers, 201);
+  }
+  if (sub === "/doc-delete" && method === "POST") {
+    if (!full) return jr({ error: "Forbidden" }, headers, 403);
+    const { key } = await readJson2(request);
+    if (!key || !String(key).startsWith("staffdocs/")) return jr({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
+    return jr({ ok: true }, headers);
+  }
+  if (sub === "/category" && method === "POST") {
+    if (!full) return jr({ error: "Only a Full-access user can add categories." }, headers, 403);
+    const { name } = await readJson2(request);
+    if (!cleanCat(name)) return jr({ error: "Category name required" }, headers, 400);
+    return jr({ ok: true, categories: await addCategory(env, tenantId, name) }, headers);
+  }
+  return jr({ error: "Not found: " + sub }, headers, 404);
+}
+async function deletePersonalDocs(env, tenantId, username) {
+  let n = 0;
+  try {
+    const listed = await env.JOB_FILES.list({ prefix: personalPrefix(tenantId, username) });
+    for (const o of listed.objects || []) {
+      await env.JOB_FILES.delete(o.key);
+      n++;
+    }
+  } catch {
+  }
+  return n;
+}
+
+// src/routes/privacy.js
+var EXPORT_TABLES = [
+  ["users", "username"],
+  ["user_permissions", "username"],
+  ["sessions", "username"],
+  ["devices", "username"],
+  ["login_history", "username"],
+  ["holidays", "username"],
+  ["office_shifts", "username"],
+  ["oncall_log", "username"],
+  ["key_log", "username"],
+  ["notify_log", "username"],
+  ["audit_log", "username"],
+  ["password_resets", "username"]
+];
+async function safeSelect(env, tenantId, table, col, value) {
+  try {
+    const res = await env.DB.prepare(
+      `SELECT * FROM ${table} WHERE tenant_id = ? AND ${col} = ?`
+    ).bind(tenantId, value).all();
+    return res.results || [];
+  } catch {
+    try {
+      const res = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${col} = ?`).bind(value).all();
+      return res.results || [];
+    } catch {
+      return [];
+    }
+  }
+}
+function redact(rows) {
+  return rows.map((r) => {
+    const o = { ...r };
+    for (const k of Object.keys(o)) {
+      if (/password|hash|token|secret/i.test(k)) o[k] = "[redacted]";
+    }
+    return o;
+  });
+}
+async function handle17(request, env, ctx, url, sess) {
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const perms = await permissionsFor(env, tenantId, sess.user.username);
+  const isFull2 = perms.FullAccess === "Yes";
+  const path = url.pathname;
+  if (path === "/privacy/export" && request.method === "GET") {
+    const who = (url.searchParams.get("u") || sess.user.username).trim();
+    if (who !== sess.user.username && !isFull2) return error("Forbidden", 403, env, request);
+    const data = {};
+    for (const [table, col] of EXPORT_TABLES) {
+      const rows = await safeSelect(env, tenantId, table, col, who);
+      if (rows.length) data[table] = redact(rows);
+    }
+    return json({
+      ok: true,
+      subject: who,
+      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      note: "Personal data held for this person across the portal. Password hashes and tokens are redacted. Uploaded documents are stored separately in the staff documents area.",
+      data
+    }, {}, env, request);
+  }
+  if (path === "/privacy/erase" && request.method === "POST") {
+    if (!isFull2) return error("Only a Full-access user can erase an account.", 403, env, request);
+    const body = await request.json().catch(() => ({}));
+    const who = (body.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    if (body.confirm !== true) return error("Confirmation required", 400, env, request);
+    if (who === sess.user.username) return error("You cannot erase your own account.", 400, env, request);
+    const summary = { anonymisedUser: false, sessionsDeleted: 0, devicesDeleted: 0, personalDocsDeleted: 0, kept: [] };
+    try {
+      await env.DB.prepare(
+        `UPDATE users SET first_name='(erased)', last_name='(erased)', email=NULL, phone=NULL,
+           profile='{}', status='Disabled', updated_at=? WHERE tenant_id=? AND username=?`
+      ).bind((/* @__PURE__ */ new Date()).toISOString(), tenantId, who).run();
+      summary.anonymisedUser = true;
+    } catch (e) {
+      summary.userError = e.message;
+    }
+    try {
+      const r = await env.DB.prepare("DELETE FROM sessions WHERE tenant_id=? AND username=?").bind(tenantId, who).run();
+      summary.sessionsDeleted = r.meta?.changes || 0;
+    } catch {
+    }
+    try {
+      const r = await env.DB.prepare("DELETE FROM devices WHERE tenant_id=? AND username=?").bind(tenantId, who).run();
+      summary.devicesDeleted = r.meta?.changes || 0;
+    } catch {
+    }
+    summary.personalDocsDeleted = await deletePersonalDocs(env, tenantId, who);
+    summary.kept = [
+      "Working-time / holiday / shift history (payroll & Working Time Regulations)",
+      "Security & audit logs (legitimate interest; auto-pruned at 12 months)"
+    ];
+    return json({ ok: true, subject: who, erasedAt: (/* @__PURE__ */ new Date()).toISOString(), summary }, {}, env, request);
+  }
+  return error("Not found: " + path, 404, env, request);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -4645,6 +4882,10 @@ var ROUTES = [
   ["*", "/delete-asset-image", handle5],
   ["*", "/sla", handle6],
   ["*", "/stats", handle15],
+  ["*", "/staff", handle16],
+  // staff personal + company documents
+  ["*", "/privacy", handle17],
+  // GDPR data export + erasure
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
   ["*", "/update-site", handle7],
@@ -4783,7 +5024,11 @@ var PUBLIC_ROUTES = [
   ["GET", "/asset-thumb"],
   // Site documents streamed for the in-app viewer (parity with the public R2
   // URL these already have; adds CORS for fetch-based rendering).
-  ["GET", "/sla/site/doc"]
+  ["GET", "/sla/site/doc"],
+  // Staff documents streamed for the in-app viewer — access-gated by the
+  // signed URL (see filesign.js), so being "public" only means "no session
+  // header needed"; an unsigned/expired link is refused inside the handler.
+  ["GET", "/staff/doc"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

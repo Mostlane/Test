@@ -33,6 +33,8 @@ import * as theme from "./routes/theme.js";         // DONE  (per-user personali
 import * as hs from "./routes/hs.js";               // DONE  (H&S documents: inductions, permits, RAMS, incidents)
 import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks — replaces Jotform walkaround)
 import * as stats from "./routes/stats.js";        // DONE  (Full-access portal stats dashboard)
+import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + company documents)
+import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -52,6 +54,8 @@ const ROUTES = [
   ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
   ["*", "/stats",      stats.handle],
+  ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
+  ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
@@ -187,6 +191,10 @@ const PUBLIC_ROUTES = [
   // Site documents streamed for the in-app viewer (parity with the public R2
   // URL these already have; adds CORS for fetch-based rendering).
   ["GET", "/sla/site/doc"],
+  // Staff documents streamed for the in-app viewer — access-gated by the
+  // signed URL (see filesign.js), so being "public" only means "no session
+  // header needed"; an unsigned/expired link is refused inside the handler.
+  ["GET", "/staff/doc"],
 ];
 
 function isPublic(method, pathname) {

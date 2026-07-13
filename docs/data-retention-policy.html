@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Protection &amp; Retention Policy — Mostlane</title>
+<style>
+  body{font-family:Georgia,"Times New Roman",serif;max-width:820px;margin:0 auto;padding:32px 28px;color:#111;line-height:1.5;}
+  h1{font-size:26px;margin:0 0 4px;}
+  h2{font-size:18px;margin:26px 0 6px;border-bottom:2px solid #222;padding-bottom:4px;}
+  h3{font-size:15px;margin:16px 0 4px;}
+  .meta{color:#555;font-size:13px;margin-bottom:18px;}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px;}
+  th,td{border:1px solid #999;padding:6px 8px;text-align:left;vertical-align:top;}
+  th{background:#f0f0f0;}
+  .fill{background:#fff8d6;padding:0 3px;}
+  ul{margin:6px 0 6px 18px;}
+  .note{font-size:13px;color:#444;background:#f6f6f6;border-left:3px solid #888;padding:8px 12px;margin:10px 0;}
+  @media print{ body{padding:0;} .noprint{display:none;} }
+  .noprint{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px 14px;font-family:system-ui,sans-serif;font-size:13px;margin-bottom:20px;}
+</style>
+</head>
+<body>
+<div class="noprint">
+  <strong>How to use this:</strong> fill in the highlighted <span class="fill">[bracketed]</span> details, then use your browser’s <em>Print → Save as PDF</em> and upload it to <strong>My Documents → Company documents → Policies</strong>. Have it reviewed by a professional before relying on it. Not legal advice.
+</div>
+
+<h1>Data Protection &amp; Retention Policy</h1>
+<div class="meta">
+  <strong><span class="fill">[Company registered name]</span></strong> (“the Company”) &nbsp;·&nbsp;
+  ICO registration: <span class="fill">[ICO reg. number]</span> &nbsp;·&nbsp;
+  Data protection contact: <span class="fill">[name / email]</span><br>
+  Version 1.0 &nbsp;·&nbsp; Effective: <span class="fill">[date]</span> &nbsp;·&nbsp; Next review: <span class="fill">[date + 12 months]</span>
+</div>
+
+<h2>1. Purpose &amp; scope</h2>
+<p>This policy sets out how the Company collects, uses, stores, secures and disposes of personal data in line with the <strong>UK GDPR</strong> and the <strong>Data Protection Act 2018</strong>. It applies to all personal data processed through the Mostlane Portal and related systems, covering employees, workers, contractors and customer contacts.</p>
+
+<h2>2. Roles</h2>
+<p>The Company is the <strong>data controller</strong>. Day-to-day responsibility sits with <span class="fill">[name / role]</span>. The Company is not required to appoint a statutory Data Protection Officer but has designated the above person as the point of contact for data protection matters.</p>
+
+<h2>3. Data protection principles</h2>
+<p>The Company processes personal data: lawfully, fairly and transparently; for specified purposes only; limited to what is necessary; kept accurate; retained no longer than necessary; and kept secure.</p>
+
+<h2>4. Personal data we hold &amp; lawful basis</h2>
+<table>
+  <tr><th>Category</th><th>Examples</th><th>Lawful basis</th></tr>
+  <tr><td>Staff records</td><td>Name, username, email, phone, permissions, pay rate</td><td>Contract; legal obligation</td></tr>
+  <tr><td>Working time</td><td>Clock in/out, timesheets, shifts, holiday</td><td>Legal obligation (Working Time Regs); contract</td></tr>
+  <tr><td>Employment documents</td><td>Contracts, letters, policies (in the staff documents area)</td><td>Contract; legal obligation</td></tr>
+  <tr><td>Job &amp; site records</td><td>Job notes, photos, signatures, site &amp; customer contacts</td><td>Contract; legitimate interests</td></tr>
+  <tr><td>Security data</td><td>Login history, IP address, device records, audit log</td><td>Legitimate interests (system security)</td></tr>
+</table>
+
+<h2>5. Retention periods</h2>
+<p>Personal data is kept only as long as necessary for the purpose or as required by law, then deleted or anonymised.</p>
+<table>
+  <tr><th>Record</th><th>Retention period</th><th>Reason</th></tr>
+  <tr><td>Payroll, pay &amp; working-time records</td><td>6 years after the tax year</td><td>HMRC / statutory</td></tr>
+  <tr><td>Holiday &amp; shift history</td><td>6 years</td><td>Working Time Regulations</td></tr>
+  <tr><td>Employment contracts &amp; HR file</td><td>6 years after leaving</td><td>Limitation Act / disputes</td></tr>
+  <tr><td>Job sheets, site photos, signatures</td><td>6 years after job completion</td><td>Contract / liability</td></tr>
+  <tr><td>Login history, IP, device records, audit log</td><td>12 months (auto-pruned)</td><td>Security; data minimisation</td></tr>
+  <tr><td>Unsuccessful applicants / leavers’ access</td><td>Access removed immediately on leaving</td><td>Data minimisation</td></tr>
+</table>
+<p class="note">The portal automatically prunes its security audit log and login history at 12 months. Longer-retained records (payroll, HR, job history) are reviewed annually and deleted or anonymised once their period expires.</p>
+
+<h2>6. Security measures</h2>
+<ul>
+  <li>Passwords stored using salted PBKDF2 hashing; never in plain text.</li>
+  <li>Every data endpoint requires an authenticated session; brute-force login attempts are rate-limited.</li>
+  <li>Uploaded documents are served via signed, time-limited links — not public URLs.</li>
+  <li>Per-device login control and a full audit trail of changes.</li>
+  <li>Access is role-based; staff see only what their role requires.</li>
+  <li>Data is hosted on Cloudflare infrastructure with encryption in transit.</li>
+</ul>
+
+<h2>7. Your rights</h2>
+<p>Individuals have the right to be informed, to access their data, to rectification, to erasure, to restrict or object to processing, and to data portability. The portal provides a one-click <strong>data export</strong> (access/portability) and <strong>erasure</strong> (anonymise &amp; close) for each person, via <em>My Documents</em> (administrator function). Requests should be sent to <span class="fill">[contact email]</span> and will be answered within <strong>one month</strong>.</p>
+
+<h2>8. Personal data breaches</h2>
+<p>Any suspected breach must be reported immediately to <span class="fill">[contact]</span>. Where a breach is likely to result in a risk to individuals, it will be reported to the <strong>ICO within 72 hours</strong> of becoming aware, and affected individuals informed where the risk is high.</p>
+
+<h2>9. Processors &amp; international transfers</h2>
+<p>The Company uses the following processors, each under a data processing agreement. Where data is transferred outside the UK, an approved safeguard (UK adequacy or the International Data Transfer Agreement) applies.</p>
+<table>
+  <tr><th>Processor</th><th>Purpose</th></tr>
+  <tr><td>Cloudflare</td><td>Hosting, database (D1), file storage (R2)</td></tr>
+  <tr><td>Resend</td><td>Transactional email (password / welcome)</td></tr>
+  <tr><td>Google Maps Platform</td><td>Mapping &amp; geocoding of site addresses</td></tr>
+  <tr><td>PDFShift</td><td>Generating job-sheet PDFs</td></tr>
+  <tr><td><span class="fill">[others as applicable]</span></td><td></td></tr>
+</table>
+
+<h2>10. Review</h2>
+<p>This policy is reviewed at least every 12 months, or sooner if the law or our systems change materially.</p>
+
+<p style="margin-top:26px;font-size:13px;color:#555;">Signed: <span class="fill">[name]</span> &nbsp;·&nbsp; Position: <span class="fill">[role]</span> &nbsp;·&nbsp; Date: <span class="fill">[date]</span></p>
+</body>
+</html>

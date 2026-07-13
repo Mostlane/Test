@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Documents — Mostlane</title>
+<script src="/portal-config.js?v=2"></script>
+<script src="/docviewer.js"></script>
+<style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
+  .wrap{max-width:900px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+  .card h2{margin:0 0 4px;font-size:16px;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  .cat{margin:14px 0 4px;font-size:13px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.03em;}
+  .doc{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fafbfc;}
+  .doc .nm{flex:1;min-width:0;}
+  .doc .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;}
+  .doc .nm span{font-size:12px;color:var(--muted);}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.small{padding:6px 10px;font-size:13px;}
+  .btn.danger{color:#dc2626;border-color:#fca5a5;}
+  .empty{color:var(--muted);font-size:14px;padding:8px 0;}
+  .adminbar{background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:14px;margin-bottom:16px;}
+  .adminbar .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px;}
+  select,input[type=file]{font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;}
+  label.lbl{font-size:13px;color:#334155;font-weight:600;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:50;}
+  a.ml-back{color:#fff;text-decoration:none;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html" title="Back">‹ Back</a>
+  <h1>📄 My Documents</h1>
+</header>
+
+<div class="wrap">
+  <!-- Admin controls (Full access only) -->
+  <div class="adminbar" id="adminBar" style="display:none;">
+    <label class="lbl">Manage a staff member's file</label>
+    <div class="row">
+      <select id="staffPick"></select>
+      <button class="btn small" id="addCatBtn">+ Add category</button>
+    </div>
+    <div class="row">
+      <label class="lbl" for="upFile">Upload:</label>
+      <input type="file" id="upFile">
+      <select id="upScope">
+        <option value="personal">Personal (selected staff)</option>
+        <option value="company">Company-wide (everyone)</option>
+      </select>
+      <select id="upCat"></select>
+      <button class="btn primary small" id="upBtn">Upload</button>
+    </div>
+    <div class="row" style="border-top:1px solid #c7d2fe;padding-top:10px;margin-top:12px;">
+      <label class="lbl">UK GDPR (selected staff):</label>
+      <button class="btn small" id="exportBtn" title="Download everything the portal holds on this person">⬇ Export data</button>
+      <button class="btn small danger" id="eraseBtn" title="Anonymise identifiers, close the account, delete their private documents">Erase &amp; close account</button>
+    </div>
+  </div>
+
+  <div class="card" id="personalCard">
+    <h2 id="personalTitle">My documents</h2>
+    <p class="sub">Private to you and management — e.g. your employment contract.</p>
+    <div id="personalList"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card" id="companyCard">
+    <h2>Company documents</h2>
+    <p class="sub">Policies and documents that apply to everyone.</p>
+    <div id="companyList"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+function token(){ return localStorage.getItem("mostlaneToken") || ""; }
+function authFetch(path, opts = {}){
+  opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + token() });
+  return fetch(API + path, opts);
+}
+function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch{ return {}; } }
+function isFull(){ return perms().FullAccess === "Yes"; }
+function me(){ return sessionStorage.getItem("mostlaneUsername") || localStorage.getItem("mostlaneUsername") || sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || ""; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none", 2600); }
+function fmtDate(iso){ if(!iso) return ""; try{ return new Date(iso).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }catch{ return ""; } }
+
+const full = isFull();
+let viewing = me();     // whose personal file we're showing (admins can switch)
+let categories = [];
+
+async function loadUsers(){
+  try{
+    const d = await authFetch("/users").then(r=>r.json());
+    const users = d.Users || d.users || [];
+    const sel = document.getElementById("staffPick");
+    sel.innerHTML = users.map(u => `<option value="${esc(u.Username||u.username)}">${esc(u.Username||u.username)}</option>`).join("");
+    if(users.length){ viewing = (users.find(u => (u.Username||u.username)===me()) ? me() : (users[0].Username||users[0].username)); sel.value = viewing; }
+    sel.onchange = () => { viewing = sel.value; load(); };
+  }catch(e){ /* non-fatal */ }
+}
+
+function renderGroups(container, groups, canDelete){
+  const cats = Object.keys(groups||{}).sort();
+  if(!cats.length){ container.innerHTML = '<div class="empty">No documents yet.</div>'; return; }
+  container.innerHTML = cats.map(cat => `
+    <div class="cat">${esc(cat)}</div>
+    ${(groups[cat]||[]).map(f => `
+      <div class="doc">
+        <div class="nm"><b>${esc(f.name)}</b><span>${fmtDate(f.at)}${f.by?" · added by "+esc(f.by):""}</span></div>
+        <button class="btn small" data-open='${esc(JSON.stringify({url:f.url,name:f.name}))}'>👁 Open</button>
+        ${canDelete?`<button class="btn small danger" data-del="${esc(f.key)}">Delete</button>`:""}
+      </div>`).join("")}
+  `).join("");
+  container.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
+    const f = JSON.parse(b.getAttribute("data-open"));
+    window.MLDocViewer.open({ url: f.url, fetchUrl: f.url, name: f.name, downloadUrl: f.url });
+  }));
+  container.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => delDoc(b.getAttribute("data-del"))));
+}
+
+async function load(){
+  document.getElementById("personalTitle").textContent =
+    (full && viewing !== me()) ? (viewing + " — documents") : "My documents";
+  document.getElementById("personalList").innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    const d = await authFetch("/staff/docs?user=" + encodeURIComponent(viewing)).then(r=>r.json());
+    categories = d.categories || [];
+    renderGroups(document.getElementById("personalList"), d.personal, full);
+    renderGroups(document.getElementById("companyList"), d.company, full);
+    if(full){
+      const upCat = document.getElementById("upCat");
+      upCat.innerHTML = categories.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    }
+  }catch(e){
+    document.getElementById("personalList").innerHTML = '<div class="empty">Couldn’t load documents.</div>';
+  }
+}
+
+async function delDoc(key){
+  if(!confirm("Delete this document? This cannot be undone.")) return;
+  try{
+    const r = await authFetch("/staff/doc-delete", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ key }) }).then(r=>r.json());
+    if(r.ok){ toast("Deleted"); load(); } else toast(r.error||"Delete failed");
+  }catch{ toast("Delete failed"); }
+}
+
+async function doUpload(){
+  const fileEl = document.getElementById("upFile");
+  const file = fileEl.files[0];
+  if(!file){ toast("Choose a file first"); return; }
+  const scope = document.getElementById("upScope").value;
+  const cat = document.getElementById("upCat").value || "Other";
+  const qs = `?scope=${encodeURIComponent(scope)}&category=${encodeURIComponent(cat)}` +
+             (scope==="personal" ? `&user=${encodeURIComponent(viewing)}` : "");
+  const form = new FormData(); form.append("file", file);
+  document.getElementById("upBtn").disabled = true;
+  try{
+    const r = await authFetch("/staff/docs" + qs, { method:"POST", body: form }).then(r=>r.json());
+    if(r.ok){ toast("Uploaded"); fileEl.value=""; load(); } else toast(r.error||"Upload failed");
+  }catch{ toast("Upload failed"); }
+  document.getElementById("upBtn").disabled = false;
+}
+
+async function addCategory(){
+  const name = prompt("New category name (e.g. Right to Work, Training):");
+  if(!name) return;
+  try{
+    const r = await authFetch("/staff/category", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ name }) }).then(r=>r.json());
+    if(r.ok){ categories = r.categories; document.getElementById("upCat").innerHTML = categories.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join(""); toast("Category added"); }
+    else toast(r.error||"Failed");
+  }catch{ toast("Failed"); }
+}
+
+async function exportData(){
+  toast("Preparing export…");
+  try{
+    const d = await authFetch("/privacy/export?u=" + encodeURIComponent(viewing)).then(r=>r.json());
+    if(!d.ok){ toast(d.error||"Export failed"); return; }
+    const blob = new Blob([JSON.stringify(d, null, 2)], { type:"application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "gdpr-export-" + viewing.replace(/[^\w.-]+/g,"_") + ".json";
+    a.click(); URL.revokeObjectURL(a.href);
+    toast("Exported");
+  }catch{ toast("Export failed"); }
+}
+
+async function eraseAccount(){
+  const who = viewing;
+  if(!confirm("ERASE " + who + "?\n\nThis anonymises their name/email, closes the account, ends all their sessions/devices, and deletes their PRIVATE documents.\n\nWork records kept for legal/payroll reasons are retained. This cannot be undone.")) return;
+  if(prompt('Type the username to confirm erasure:') !== who){ toast("Name didn’t match — cancelled"); return; }
+  try{
+    const r = await authFetch("/privacy/erase", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ username: who, confirm: true }) }).then(r=>r.json());
+    if(r.ok){ toast("Account erased & closed"); loadUsers().then(load); }
+    else toast(r.error||"Erase failed");
+  }catch{ toast("Erase failed"); }
+}
+
+function init(){
+  if(full){
+    document.getElementById("adminBar").style.display = "block";
+    document.getElementById("upBtn").addEventListener("click", doUpload);
+    document.getElementById("addCatBtn").addEventListener("click", addCategory);
+    document.getElementById("exportBtn").addEventListener("click", exportData);
+    document.getElementById("eraseBtn").addEventListener("click", eraseAccount);
+    loadUsers().then(load);
+  }else{
+    load();
+  }
+}
+window.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
