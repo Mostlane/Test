@@ -337,6 +337,11 @@
         <select id="updateStatus"></select>
       </div>
       <div class="field">
+        <label for="updateSite">Site <span class="muted" style="font-weight:400;">(current: <span id="updateSiteCurrent">—</span>)</span></label>
+        <input type="text" id="updateSiteFilter" placeholder="Type to filter sites…" style="margin-bottom:6px;">
+        <select id="updateSite"><option value="">(keep current site)</option></select>
+      </div>
+      <div class="field">
         <label for="updateNote">Note (goes in the job history)</label>
         <textarea id="updateNote"></textarea>
       </div>
@@ -767,8 +772,51 @@ async function saveAssign(){
   }
 }
 
+/* ============ sites (for correcting a job's site after creation) ============ */
+let sitesList = null;
+async function ensureSites(){
+  if(sitesList) return;
+  sitesList = [];
+  try{
+    const res = await authFetch("/get-sites?category=all");
+    const raw = await res.json();
+    sitesList = (Array.isArray(raw) ? raw : [])
+      .filter(s => s.active !== false)
+      .map(s => {
+        const postcode = String(s.postcode || "").replace(/\*+$/,"").trim();
+        return {
+          code: String(s.siteNumber || "").toString().padStart(4,"0"),
+          name: s.siteName || "",
+          postcode,
+          telephone: s.telephone || s.phone || "",
+          address: [s.address1 || s.street || "", s.town || "", s.county || "", postcode].filter(Boolean).join(", "),
+          lat: s.lat ?? null,
+          lon: s.lon ?? null,
+          storeType: s.storeType || s.client || "",
+          sharepointURL: s.sharepointURL || s.sharepoint || ""
+        };
+      })
+      .filter(s => s.name)
+      .sort((a,b) => a.name.localeCompare(b.name));
+  }catch(e){ sitesList = []; }
+}
+function fillSiteSelect(filter){
+  const sel = $("updateSite");
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">(keep current site)</option>`;
+  const f = (filter || "").toLowerCase();
+  sitesList.forEach((s, i) => {
+    if(f && !(`${s.name} ${s.code} ${s.postcode}`.toLowerCase().includes(f))) return;
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = `${s.name} — ${s.code}${s.postcode ? " (" + s.postcode + ")" : ""}`;
+    sel.appendChild(o);
+  });
+  if([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+
 /* ============ update modal ============ */
-function openUpdate(jobId){
+async function openUpdate(jobId){
   const job = allJobs.find(j => j.id === jobId);
   if(!job) return;
   currentUpdateId = jobId;
@@ -781,23 +829,43 @@ function openUpdate(jobId){
     const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o);
   });
   sel.value = job.status || "Pending";
+  $("updateSiteCurrent").textContent = job.siteName || job.siteCode || "none set";
+  $("updateSiteFilter").value = "";
+  $("updateSite").innerHTML = `<option value="">(keep current site)</option><option disabled>Loading sites…</option>`;
   $("updateNote").value = "";
   $("updateStatusText").textContent = "";
   $("updateBackdrop").classList.add("show");
+  await ensureSites();
+  fillSiteSelect("");
 }
 function closeUpdate(){ $("updateBackdrop").classList.remove("show"); currentUpdateId = null; }
 async function saveUpdate(){
   if(!currentUpdateId) return;
   $("updateStatusText").textContent = "Saving…";
   try{
+    const payload = {
+      priority: $("updatePriority").value,
+      status: $("updateStatus").value,
+      note: $("updateNote").value.trim() || undefined,
+      changedBy: getCurrentUser()
+    };
+    const pick = $("updateSite").value;
+    if(pick !== "" && sitesList[Number(pick)]){
+      const s = sitesList[Number(pick)];
+      payload.siteCode = s.code;
+      payload.siteName = s.name;
+      payload.address = s.address;
+      payload.postcode = s.postcode;
+      payload.telephone = s.telephone;
+      payload.lat = s.lat;
+      payload.lon = s.lon;
+      payload.storeType = s.storeType;
+      payload.sharepointURL = s.sharepointURL;
+      payload.note = (payload.note ? payload.note + " · " : "") + `Site changed to ${s.name} (${s.code})`;
+    }
     const res = await authFetch("/sla/jobs/" + encodeURIComponent(currentUpdateId), {
       method:"PATCH", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        priority: $("updatePriority").value,
-        status: $("updateStatus").value,
-        note: $("updateNote").value.trim() || undefined,
-        changedBy: getCurrentUser()
-      })
+      body: JSON.stringify(payload)
     });
     if(!res.ok) throw new Error("HTTP " + res.status);
     $("updateStatusText").textContent = "✅ Saved.";
@@ -876,6 +944,7 @@ function init(){
   $("assignClose").addEventListener("click", closeAssign);
   $("assignCancel").addEventListener("click", closeAssign);
   $("assignSave").addEventListener("click", saveAssign);
+  $("updateSiteFilter").addEventListener("input", () => { if(sitesList) fillSiteSelect($("updateSiteFilter").value); });
   $("updateClose").addEventListener("click", closeUpdate);
   $("updateCancel").addEventListener("click", closeUpdate);
   $("updateSave").addEventListener("click", saveUpdate);

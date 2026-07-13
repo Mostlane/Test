@@ -270,6 +270,7 @@
     <div class="content">
 <div id="blockedBanner" style="display:none;margin-bottom:12px;padding:12px 14px;border-radius:12px;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;font-size:14px;"></div>
 <div id="dayBar" style="display:none;margin-bottom:12px;"></div>
+<div id="unschedBox" style="display:none;margin-bottom:14px;"></div>
 <div class="nav-row">
   <button type="button" class="btn" id="prevWeekBtn">← Load Previous Week</button>
   <button type="button" class="btn" id="nextWeekBtn">Load Next Week →</button>
@@ -888,6 +889,43 @@ async function openDayMap(){
   }, 60);
 }
 
+/* ===== Assigned but not yet booked in (no date/time set) ===== */
+/* The day timeline can only show jobs that HAVE a date — without this, a job
+   assigned with no schedule time was invisible to its engineer. */
+async function loadUnscheduled(){
+  try{
+    const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(getEngineer())}`, { cache:"no-store" });
+    const list = await res.json();
+    const open = (Array.isArray(list) ? list : []).filter(j =>
+      !j.scheduledAt && !["Complete","Closed Jobs","Invoiced"].includes(j.status || ""));
+    const box = $("unschedBox");
+    if(!open.length){ box.style.display = "none"; box.innerHTML = ""; return; }
+    box.style.display = "block";
+    box.innerHTML = `<div class="day-banner" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">📌 Assigned to you — not booked in yet (${open.length})</div>`;
+    for(const job of open){
+      const slaInfo = computeSlaCountdown(job.targetAt || job.sla?.targetAt);
+      const card = document.createElement("div");
+      card.className = "job-card";
+      card.style.borderColor = "#fdba74";
+      card.innerHTML = `
+        <div class="job-top">
+          <span class="ref">${job.helpdeskRef || job.id}</span>
+          <span class="priority-badge ${job.priority?.toLowerCase().replace("riority ","") || "p4"}">${(job.priority||"P4").replace("Priority ","P")}</span>
+        </div>
+        <div class="job-desc">${job.description || ""}</div>
+        <div class="job-site">${job.siteName || job.address || ""}</div>
+        <div class="job-meta">
+          <span class="${slaInfo.cls}" data-sla-target="${job.targetAt || ""}">${slaInfo.text}</span>
+          <span class="${statusClass(job.status, slaInfo.status)}">${job.status || "Open"}</span>
+          ${dirUrl(job) ? `<a class="btn" href="${dirUrl(job)}" target="_blank" rel="noopener">🧭 Directions</a>` : ""}
+          <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
+        </div>`;
+      box.appendChild(card);
+    }
+    startCountdownLoop();
+  }catch(e){}
+}
+
 /* ===== Parked-without-info banner ===== */
 function jobIsBlocking(j){
   if(j.status === "On Hold") return !(j.hold && j.hold.reason && j.hold.needs);
@@ -919,6 +957,7 @@ function init(){
   $("dayMapBtn").addEventListener("click", openDayMap);
   $("dayMapClose").addEventListener("click", () => { $("dayMapOverlay").style.display = "none"; });
   checkBlocked();
+  loadUnscheduled();
 
   buildVcItems();
   $("vcSubmit").addEventListener("click", submitVehicleCheck);
