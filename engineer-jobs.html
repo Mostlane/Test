@@ -329,13 +329,47 @@ const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
 let countdownTimerId = null;
 const dayJobsCache = {};   // dateStr -> jobs[] (feeds the map)
 
-/* Google Maps directions from wherever the engineer currently is. */
+/* Google Maps directions from wherever the engineer currently is.
+   Postcode/address first — sat-navs handle postcodes best. */
 function dirUrl(job){
-  const dest = (job.lat != null && job.lon != null && (job.lat || job.lon))
-    ? `${job.lat},${job.lon}`
-    : [job.address, job.postcode].filter(Boolean).join(", ");
+  const pc = String(job.postcode || "").replace(/\*+$/,"").trim();
+  const dest = [job.address, pc].filter(Boolean).join(", ")
+    || ((job.lat != null && job.lon != null && (job.lat || job.lon)) ? `${job.lat},${job.lon}` : "");
   if(!dest) return "";
   return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest) + "&travelmode=driving";
+}
+
+/* Postcode → map pin (postcodes.io, cached on the device). */
+const GEO_KEY = "mlPostcodeGeo_v1";
+let geoCache = {};
+try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+function jobPostcode(job){
+  return String(job.postcode || "").replace(/\*+$/,"").trim().toUpperCase().replace(/\s+/g," ");
+}
+async function geocodePostcodes(pcs){
+  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  for(let i = 0; i < todo.length; i += 100){
+    const batch = todo.slice(i, i + 100);
+    try{
+      const res = await fetch("https://api.postcodes.io/postcodes", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ postcodes: batch })
+      });
+      const data = await res.json();
+      (data.result || []).forEach(r => {
+        geoCache[(r.query || "").toUpperCase()] =
+          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+      });
+    }catch(e){}
+  }
+  try{ localStorage.setItem(GEO_KEY, JSON.stringify(geoCache)); }catch{}
+}
+function jobCoords(job){
+  const pc = jobPostcode(job);
+  if(pc && Array.isArray(geoCache[pc])) return geoCache[pc];
+  const lat = Number(job.lat), lon = Number(job.lon);
+  if(isFinite(lat) && isFinite(lon) && (lat || lon)) return [lat, lon];
+  return null;
 }
 
 let anchorDate = new Date();
@@ -812,14 +846,17 @@ async function openDayMap(){
       dayJobsCache[today] = list;
     }catch{ list = []; }
   }
+  $("dayMapNote").textContent = "Placing jobs by postcode…";
+  await geocodePostcodes(list.map(jobPostcode));
   setTimeout(() => {
     dayMap.invalidateSize();
     dayMapLayer.clearLayers();
     const pts = [];
     let noLoc = 0;
     list.forEach(job => {
-      const lat = Number(job.lat), lon = Number(job.lon);
-      if(!isFinite(lat) || !isFinite(lon) || (!lat && !lon)){ noLoc++; return; }
+      const pt = jobCoords(job);
+      if(!pt){ noLoc++; return; }
+      const [lat, lon] = pt;
       const colour = DAY_STATUS_COLOUR[job.status] || "#2563eb";
       const m = L.circleMarker([lat, lon], { radius:9, color:"#fff", weight:2, fillColor:colour, fillOpacity:0.95 });
       m.bindPopup(`
@@ -837,10 +874,10 @@ async function openDayMap(){
     });
     if(pts.length){
       dayMap.fitBounds(pts, { padding:[36,36], maxZoom:13 });
-      $("dayMapNote").textContent = `${pts.length} job(s) today` + (noLoc ? ` · ${noLoc} with no saved location` : "") + ". Tap a pin to open the job.";
+      $("dayMapNote").textContent = `${pts.length} job(s) today` + (noLoc ? ` · ${noLoc} with no usable postcode` : "") + ". Tap a pin to open the job.";
     }else{
       dayMap.setView([51.27,-0.75], 9);
-      $("dayMapNote").textContent = list.length ? "Today's jobs have no saved locations." : "No jobs scheduled today.";
+      $("dayMapNote").textContent = list.length ? "Today's jobs have no usable postcodes." : "No jobs scheduled today.";
     }
   }, 60);
 }
