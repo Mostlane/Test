@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <meta charset="UTF-8">
+  <title>Mostlane • Fix Test Job Sites</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --border:#d1d5db; --muted:#6b7280; --panel:rgba(255,255,255,0.95); }
+    *{box-sizing:border-box;}
+    html,body{
+      margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      color:#0f172a;background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;background-size:180%;
+    }
+    .shell{max-width:900px;margin:20px auto 40px;padding:0 14px;}
+    .card{background:var(--panel);border-radius:14px;box-shadow:0 12px 28px rgba(0,0,0,0.12);border:1px solid rgba(15,23,42,0.05);padding:18px;}
+    header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;}
+    h1{margin:0;font-size:20px;color:var(--ml-blue);}
+    p.lead{font-size:13px;color:#374151;margin:4px 0 14px;}
+    .btn{border:1px solid var(--border);border-radius:999px;padding:9px 16px;font-size:14px;cursor:pointer;background:#f9fafb;text-decoration:none;color:#0f172a;display:inline-flex;align-items:center;gap:6px;}
+    .btn.primary{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue);}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+    .stat{background:#f3f4f6;border-radius:10px;padding:8px 12px;font-size:13px;}
+    .stat b{color:var(--ml-blue);font-size:16px;}
+    table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;}
+    th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f4;vertical-align:top;}
+    th{background:#f3f4f6;font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:#374151;}
+    .ref{font-family:monospace;background:#f3f4f6;padding:1px 5px;border-radius:5px;font-size:12px;}
+    .arrow{color:#9ca3af;}
+    .newsite{color:#166534;font-weight:600;}
+    .pc{color:var(--muted);font-size:12px;}
+    .warn{background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;}
+    .err{background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;}
+    .ok{background:#ecfdf5;border:1px solid #86efac;color:#166534;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px;}
+    #log{font-size:12px;color:#374151;max-height:200px;overflow:auto;margin-top:10px;}
+    #log div{padding:2px 0;border-bottom:1px solid #f1f5f9;}
+    .muted{color:var(--muted);}
+    label.chk{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="card">
+    <header>
+      <h1>🧭 Fix test-job sites</h1>
+      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    </header>
+    <p class="lead">
+      This points your existing test jobs at <b>real sites from your database</b> so the map pins work.
+      Each job is given a different real site (spread around so pins appear in different places).
+      Nothing else about the job changes — engineer, times and status stay as they are.
+    </p>
+
+    <div id="gate" class="warn" style="display:none;">Checking your access…</div>
+
+    <div id="panel" style="display:none;">
+      <div class="row">
+        <div class="stat">Jobs: <b id="jobCount">–</b></div>
+        <div class="stat">Real sites with a postcode: <b id="siteCount">–</b></div>
+      </div>
+
+      <label class="chk" style="margin-bottom:10px;">
+        <input type="checkbox" id="onlyFake" checked>
+        Only change jobs that don't already have a real postcode <span class="muted">(recommended)</span>
+      </label>
+
+      <div class="row">
+        <button class="btn" id="shuffleBtn">🔀 Shuffle site choices</button>
+        <button class="btn primary" id="applyBtn">✅ Apply to all shown jobs</button>
+      </div>
+
+      <div id="msg"></div>
+
+      <table id="previewTable">
+        <thead><tr><th>Job</th><th>Description</th><th></th><th>New site</th></tr></thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
+}
+function getUser(){
+  return sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") ||
+         localStorage.getItem("mostlaneUser") || "";
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function log(m){ const d = document.createElement("div"); d.innerHTML = m; $("log").prepend(d); }
+
+let jobs = [], sites = [], plan = [];   // plan: [{job, site}]
+const PC_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+function jobHasRealPostcode(j){
+  const pc = String(j.postcode || "").trim();
+  return !!pc || PC_RE.test(j.address || "");
+}
+
+async function gate(){
+  $("gate").style.display = "block";
+  try{
+    const res = await authFetch("/user?u=" + encodeURIComponent(getUser()));
+    const d = await res.json();
+    if(!d.found || (d.user.FullAccess !== "Yes")){
+      $("gate").className = "err";
+      $("gate").textContent = "🚫 This tool is for full-access admins only.";
+      return false;
+    }
+    $("gate").style.display = "none";
+    return true;
+  }catch(e){
+    $("gate").className = "err";
+    $("gate").textContent = "Couldn't check your access — try again.";
+    return false;
+  }
+}
+
+function mapSite(s){
+  const postcode = String(s.postcode || "").replace(/\*+$/,"").trim();
+  return {
+    code: String(s.siteNumber || "").toString().padStart(4,"0"),
+    name: s.siteName || "",
+    postcode,
+    telephone: s.telephone || s.phone || "",
+    address: [s.address1 || s.street || "", s.town || "", s.county || "", postcode].filter(Boolean).join(", "),
+    lat: (s.lat ?? null), lon: (s.lon ?? null),
+    storeType: s.storeType || s.client || "",
+    sharepointURL: s.sharepointURL || s.sharepoint || ""
+  };
+}
+
+async function loadAll(){
+  const [jr, sr] = await Promise.all([
+    authFetch("/sla/jobs?t=" + Date.now()).then(r => r.json()),
+    authFetch("/get-sites?category=all").then(r => r.json())
+  ]);
+  jobs = (Array.isArray(jr) ? jr : []);
+  sites = (Array.isArray(sr) ? sr : [])
+    .filter(s => s.active !== false)
+    .map(mapSite)
+    .filter(s => s.name && s.postcode);       // only sites that will actually pin
+  $("jobCount").textContent = jobs.length;
+  $("siteCount").textContent = sites.length;
+  if(!sites.length){
+    $("msg").innerHTML = `<div class="err">No sites with a postcode were found in your database, so there's nothing to point jobs at. Add postcodes to your sites first.</div>`;
+  }
+  buildPlan();
+}
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function buildPlan(){
+  const onlyFake = $("onlyFake").checked;
+  const targets = jobs.filter(j => onlyFake ? !jobHasRealPostcode(j) : true);
+  const pool = shuffle(sites);
+  plan = targets.map((job, i) => ({ job, site: pool[i % pool.length] }));
+  renderPlan();
+}
+
+function renderPlan(){
+  const body = $("previewBody");
+  body.innerHTML = "";
+  if(!plan.length){
+    body.innerHTML = `<tr><td colspan="4" class="muted" style="padding:14px;">No jobs need changing — every job already has a real postcode. Untick the box above to re-point them anyway.</td></tr>`;
+    $("applyBtn").disabled = true;
+    return;
+  }
+  $("applyBtn").disabled = sites.length === 0;
+  plan.forEach(({job, site}) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="ref">${esc(job.helpdeskRef || job.id)}</span></td>
+      <td>${esc((job.description || "").slice(0, 60))}<div class="pc muted">now: ${esc(job.siteName || job.siteCode || "none")}</div></td>
+      <td class="arrow">→</td>
+      <td><span class="newsite">${esc(site.name)}</span> <span class="pc">${esc(site.code)} · ${esc(site.postcode)}</span></td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function apply(){
+  if(!plan.length) return;
+  $("applyBtn").disabled = true; $("shuffleBtn").disabled = true;
+  $("msg").innerHTML = `<div class="warn">Updating ${plan.length} job(s)… please keep this page open.</div>`;
+  let done = 0, failed = 0, verified = false, workerOld = false;
+  for(const { job, site } of plan){
+    try{
+      const payload = {
+        siteCode: site.code, siteName: site.name, address: site.address,
+        postcode: site.postcode, telephone: site.telephone,
+        lat: site.lat, lon: site.lon, storeType: site.storeType,
+        sharepointURL: site.sharepointURL,
+        note: `Test-fix: site set to ${site.name} (${site.code})`,
+        changedBy: getUser()
+      };
+      const res = await authFetch("/sla/jobs/" + encodeURIComponent(job.id), {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
+      });
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const saved = await res.json();
+      // Verify the site actually stuck (proves the worker supports site edits).
+      if(!verified){
+        verified = true;
+        if((saved.postcode || "") !== site.postcode || (saved.siteName || "") !== site.name){
+          workerOld = true;
+          throw new Error("worker-old");
+        }
+      }
+      done++;
+      log(`✅ <span class="ref">${esc(job.helpdeskRef || job.id)}</span> → ${esc(site.name)} (${esc(site.postcode)})`);
+    }catch(err){
+      failed++;
+      if(err.message === "worker-old"){
+        $("msg").innerHTML = `<div class="err">⚠️ The site change didn't save. Your worker needs the latest update (commit a7575a0) pasted into Cloudflare first — deploy that, then reload this page and try again. Stopping so nothing is half-done.</div>`;
+        $("shuffleBtn").disabled = false;
+        return;
+      }
+      log(`❌ <span class="ref">${esc(job.helpdeskRef || job.id)}</span> — ${esc(err.message)}`);
+    }
+  }
+  $("msg").innerHTML = `<div class="${failed ? "warn" : "ok"}">Done — ${done} job(s) updated${failed ? `, ${failed} failed (see log below)` : ""}. Open the SLA map to see the pins. 🗺️</div>`;
+  $("shuffleBtn").disabled = false;
+  // refresh counts/preview against new state
+  await loadAll();
+}
+
+$("onlyFake").addEventListener("change", buildPlan);
+$("shuffleBtn").addEventListener("click", buildPlan);
+$("applyBtn").addEventListener("click", apply);
+
+window.addEventListener("DOMContentLoaded", async () => {
+  if(await gate()){
+    $("panel").style.display = "block";
+    try{ await loadAll(); }
+    catch(e){ $("msg").innerHTML = `<div class="err">Couldn't load jobs or sites — try again. (${esc(e.message)})</div>`; }
+  }
+});
+</script>
+</body>
+</html>
