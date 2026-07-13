@@ -32,6 +32,7 @@ import * as keys from "./routes/keys.js";           // DONE  (key register: sign
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
 import * as hs from "./routes/hs.js";               // DONE  (H&S documents: inductions, permits, RAMS, incidents)
 import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks — replaces Jotform walkaround)
+import * as stats from "./routes/stats.js";        // DONE  (Full-access portal stats dashboard)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -50,6 +51,7 @@ const ROUTES = [
   ["*", "/upload-asset-thumb", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
+  ["*", "/stats",      stats.handle],
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
