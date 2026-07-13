@@ -275,7 +275,7 @@
       g("pendBox").style.display = inc.length ? "block" : "none";
       g("pendList").innerHTML = inc.map(r => `
         <div class="pendrow">
-          ${r.image ? `<img src="${esc(thumbUrl(r.image))}" alt="">` : `<img alt="" style="display:none">`}
+          ${r.image ? `<img loading="lazy" decoding="async" src="${esc(thumbUrl(r.image))}" alt="">` : `<img alt="" style="display:none">`}
           <div class="info">
             <b>${esc(r.assetName)}</b>
             <span class="muted">${esc(r.serial ? "Serial " + r.serial + " · " : "")}from <b>${esc(r.from || "Unassigned")}</b>${r.note ? " — “" + esc(r.note) + "”" : ""}</span>
@@ -284,7 +284,7 @@
             <button class="btn green small" data-accept="${r.id}">Accept &amp; sign</button>
             <button class="btn red small" data-reject="${r.id}">Reject</button>
           </div>
-          ${(r.senderPhotos && r.senderPhotos.length) ? `<div class="cond"><span class="clbl">Condition photos from ${esc(r.from || "sender")} — tap to inspect:</span>${r.senderPhotos.map((u, i) => `<img src="${esc(thumbUrl(u))}" data-cview="${r.id}" data-ci="${i}" alt="">`).join("")}</div>` : ""}
+          ${(r.senderPhotos && r.senderPhotos.length) ? `<div class="cond"><span class="clbl">Condition photos from ${esc(r.from || "sender")} — tap to inspect:</span>${r.senderPhotos.map((u, i) => `<img loading="lazy" decoding="async" src="${esc(thumbUrl(u))}" data-cview="${r.id}" data-ci="${i}" alt="">`).join("")}</div>` : ""}
         </div>`).join("");
 
       // Keys signed to me (read-only — the office signs them back in)
@@ -310,7 +310,7 @@
         const out = pending.outgoing.find(o => o.assetId === a.id);
         const since = a.lastTransfer ? new Date(a.lastTransfer).toLocaleDateString("en-GB") : "—";
         return `<div class="card">
-          ${imgs.length ? `<img class="thumb" src="${esc(thumbUrl(imgs[0]))}" data-gallery="${esc(a.id)}" alt="${esc(a.name)}">` : ""}
+          ${imgs.length ? `<img class="thumb" loading="lazy" decoding="async" src="${esc(thumbUrl(imgs[0]))}" data-gallery="${esc(a.id)}" alt="${esc(a.name)}">` : ""}
           <h3>${esc(a.name || a.id)}</h3>
           <p><b>Serial:</b> ${esc(a.serial || "—")}</p>
           <p><b>Category:</b> ${esc(a.category || "—")}</p>
@@ -475,7 +475,7 @@
         (n.from && n.from !== "Unassigned"
           ? `Upon this acceptance, custody of the item passed from ${n.from}. ${n.from}'s responsibility for this item and all of its accessories ended on ${when}, when ${n.acceptedBy} accepted the item and signed this note.`
           : `This item was previously unassigned; custody was issued directly to ${n.acceptedBy} on ${when}.`);
-      const photos = (n.images || []).map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("");
+      const photos = (n.images || []).map(u => `<img loading="lazy" decoding="async" src="${esc(thumbUrl(u))}" alt="">`).join("");
       g("noteSheet").innerHTML = `
         <div class="dochead">
           <img class="logo" src="/mostlane-logo.jpg" alt="Mostlane">
@@ -493,8 +493,8 @@
           ${new Date(n.requestedAt).toLocaleDateString("en-GB")} and accepted on ${esc(when)}.${n.message ? " Handover note: “" + esc(n.message) + "”." : ""}</p>
         <p class="para"><b>Declaration by the receiving party.</b> ${esc(declaration)}</p>
         <p class="para"><b>Release of the previous holder.</b> ${esc(release)}</p>
-        ${(n.conditionSender || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at handover</b> — photographed by ${esc(n.from || "the sender")}:</p><div class="photos">${n.conditionSender.map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
-        ${(n.conditionRecipient || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at acceptance</b> — photographed by ${esc(n.acceptedBy)}:</p><div class="photos">${n.conditionRecipient.map(u => `<img src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
+        ${(n.conditionSender || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at handover</b> — photographed by ${esc(n.from || "the sender")}:</p><div class="photos">${n.conditionSender.map(u => `<img loading="lazy" decoding="async" src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
+        ${(n.conditionRecipient || []).length ? `<p class="para" style="margin-bottom:4px;"><b>Condition at acceptance</b> — photographed by ${esc(n.acceptedBy)}:</p><div class="photos">${n.conditionRecipient.map(u => `<img loading="lazy" decoding="async" src="${esc(thumbUrl(u))}" alt="">`).join("")}</div>` : ""}
         <div class="sigblock">
           <div class="who"><b>${esc(n.acceptedBy)}</b>Accepted ${esc(when)}</div>
           <div>

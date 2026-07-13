@@ -370,6 +370,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <a href="engineer-jobs.html" class="btn">← My Jobs</a>
+        <a id="headerMapBtn" class="btn" target="_blank" rel="noopener" style="display:none;">🧭 Directions</a>
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
       </div>
     </div>
@@ -478,6 +479,17 @@
       <div class="field-label" style="margin-top:8px;">Measurements / notes</div>
       <textarea id="q_notes"></textarea>
       <div style="font-size:12px;color:#6b7280;margin-top:8px;">Add photos in the gallery below — at least one is expected for a quote.</div>
+    </div>
+    <div id="holdPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid #cbd5e1;border-radius:10px;background:#f8fafc;">
+      <div style="font-weight:700;color:#334155;margin-bottom:8px;">On hold — tell the office everything they need</div>
+      <div class="field-label">Why is this job on hold? *</div>
+      <textarea id="h_reason" placeholder="e.g. waiting on parts / access refused / needs scaffold"></textarea>
+      <div class="field-label" style="margin-top:8px;">What's needed to get it moving? *</div>
+      <textarea id="h_needs" placeholder="e.g. order 2× pump seals, book access with site for next week"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <div class="col"><div class="field-label">Expected resume date</div><input id="h_resume" type="date" style="width:100%;border-radius:8px;border:1px solid #d1d5db;padding:7px 9px;font-size:13px;"></div>
+      </div>
+      <div style="font-size:12px;color:#6b7280;margin-top:8px;">You can't start another job until this is filled in.</div>
     </div>
     <div id="raPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid #f0c98a;border-radius:10px;background:#fffaf0;">
       <div style="font-weight:700;color:#92500a;margin-bottom:8px;">Risk assessment — before you start work</div>
@@ -737,6 +749,7 @@ function renderJob(){
 
   fillQuoteFromJob();
   fillRAFromJob();
+  fillHoldFromJob();
   syncPanels();
   if(isStoryMode() && $("storyModeBanner")) $("storyModeBanner").style.display = "block";
 
@@ -813,7 +826,9 @@ async function loadJob(){
   }
 }
 
-/* "Raise PO" opens this user's personal link on the new PO system. */
+/* "Raise PO" opens this user's personal link on the PO system, carrying the
+   job details in the URL (#mlpo=…) so the PO can pre-fill everything except
+   the materials and the supplier. */
 async function fillPoButton(){
   const btn = $("poBtn");
   if(!btn || btn.dataset.done) return;
@@ -822,7 +837,23 @@ async function fillPoButton(){
     const t = localStorage.getItem("mostlaneToken");
     const r = await fetch(window.MOSTLANE_API + "/po-config", { headers: t ? { "Authorization": "Bearer " + t } : {} });
     const c = await r.json().catch(() => ({}));
-    if(r.ok && c.ok && c.url){ btn.href = c.url; return; }
+    if(r.ok && c.ok && c.url){
+      let href = c.url;
+      try{
+        const payload = {
+          jobRef: job?.helpdeskRef || job?.id || "",
+          jobId: job?.id || "",
+          site: job?.siteName || job?.siteCode || "",
+          address: [job?.address, job?.postcode].filter(Boolean).join(", "),
+          description: job?.description || "",
+          by: getUser()
+        };
+        href += (href.includes("#") ? "&" : "#") + "mlpo=" +
+                btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+      }catch(e){}
+      btn.href = href;
+      return;
+    }
   }catch(e){}
   btn.style.display = "none";   // no PO link on this account — hide the button
 }
@@ -867,8 +898,12 @@ async function renderSite(){
   }
   const dest = (info.lat != null && info.lon != null) ? `${info.lat},${info.lon}` : info.address;
   if(dest){
-    $("siteMapBtn").href = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest);
+    // Google Maps directions: origin defaults to wherever the engineer is now.
+    const dirUrl = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest) + "&travelmode=driving";
+    $("siteMapBtn").href = dirUrl;
     $("siteMapBtn").style.display = "inline-block";
+    $("headerMapBtn").href = dirUrl;
+    $("headerMapBtn").style.display = "inline-flex";
   }
   if(info.sharepoint){
     $("siteSharepointBtn").href = info.sharepoint;
@@ -917,6 +952,15 @@ function renderCapture(){
       kvRow("Checks", ticks),
       kvRow("Safe to proceed", r.safeToProceed ? "Yes" : "No"),
       kvRow("Notes", r.note)
+    ]));
+  }
+  if(job.hold){
+    any = true;
+    const h = job.hold;
+    body.appendChild(captureSection("⏸ On-hold details" + (h.by ? ` — ${h.by}` : ""), [
+      kvRow("Why on hold", h.reason),
+      kvRow("Needed to restart", h.needs),
+      kvRow("Expected resume", h.resume)
     ]));
   }
   if(job.order){
@@ -980,6 +1024,36 @@ function syncPanels(){
   const s = $("statusSelect").value;
   if($("quotePanel")) $("quotePanel").style.display = (s === "Quote") ? "block" : "none";
   if($("raPanel"))    $("raPanel").style.display    = (s === "In Progress") ? "block" : "none";
+  if($("holdPanel"))  $("holdPanel").style.display  = (s === "On Hold") ? "block" : "none";
+}
+function collectHold(){
+  return {
+    reason: $("h_reason").value.trim(),
+    needs:  $("h_needs").value.trim(),
+    resume: $("h_resume").value || "",
+    by:     getUser(),
+    at:     new Date().toISOString()
+  };
+}
+function fillHoldFromJob(){
+  const h = (job && job.hold) || {};
+  $("h_reason").value = h.reason || "";
+  $("h_needs").value  = h.needs || "";
+  $("h_resume").value = h.resume || "";
+}
+/* A job "blocks" its engineer if it was parked without the info the office
+   needs: On Hold with no hold pack, or Quote with no quote pack. */
+function jobIsBlocking(j){
+  if(j.status === "On Hold") return !(j.hold && j.hold.reason && j.hold.needs);
+  if(j.status === "Quote")   return !(j.quote && j.quote.description && j.quote.reason && j.quote.materials);
+  return false;
+}
+async function findBlockingJob(currentJobId, engineer){
+  try{
+    const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}`, { cache:"no-store" });
+    const list = await res.json();
+    return (Array.isArray(list) ? list : []).find(j => j.id !== currentJobId && jobIsBlocking(j)) || null;
+  }catch{ return null; }
 }
 function collectRA(){
   return {
@@ -1039,6 +1113,18 @@ async function saveUpdate(){
   const note = $("noteInput").value.trim();
   const user = getUser();
 
+  // Starting a job? First check no OTHER job was parked without its info —
+  // an On Hold / Quote job with missing details blocks everything else.
+  if(status === "Travelling" || status === "In Progress"){
+    const blocking = await findBlockingJob(job.id, user);
+    if(blocking){
+      const ref = blocking.helpdeskRef || blocking.id;
+      alert(`⚠️ Job ${ref} is "${blocking.status}" but is missing the required details.\n\nComplete it before starting another job — taking you there now.`);
+      location.href = "job-view.html?jobId=" + encodeURIComponent(blocking.id);
+      return;
+    }
+  }
+
   // Story Mode: only one active job (Travelling / In Progress) at a time.
   if(isStoryMode() && (status === "Travelling" || status === "In Progress")){
     const other = await findOtherActiveJob(job.id, user);
@@ -1049,22 +1135,33 @@ async function saveUpdate(){
     }
   }
 
-  // Story Mode: moving a job to Quote requires the quote pack first.
+  // Quote requires the full quote pack — the office can't price guesswork.
   let quote;
   if(status === "Quote"){
     quote = collectQuote();
-    if(isStoryMode() && (!quote.description || !quote.reason || !quote.materials)){
+    if(!quote.description || !quote.reason || !quote.materials){
       $("quotePanel").style.display = "block";
       $("statusBar").textContent = "⚠️ Fill in the required quote fields (description, why, materials) before saving.";
       return;
     }
   }
 
-  // Story Mode: starting work (In Progress) needs a completed risk assessment.
+  // On Hold requires the hold pack — why, and what's needed to restart.
+  let hold;
+  if(status === "On Hold"){
+    hold = collectHold();
+    if(!hold.reason || !hold.needs){
+      $("holdPanel").style.display = "block";
+      $("statusBar").textContent = "⚠️ Fill in why the job is on hold and what's needed before saving.";
+      return;
+    }
+  }
+
+  // Starting work (In Progress) needs the completed risk assessment.
   let riskAssessment;
   if(status === "In Progress"){
     riskAssessment = collectRA();
-    if(isStoryMode() && !riskAssessment.safeToProceed){
+    if(!riskAssessment.safeToProceed){
       $("raPanel").style.display = "block";
       $("statusBar").textContent = "⚠️ Complete the risk assessment and tick 'safe to proceed' before starting work.";
       return;
@@ -1092,6 +1189,7 @@ async function saveUpdate(){
       changedBy: user
     };
     if(quote) payload.quote = quote;
+    if(hold) payload.hold = hold;
     if(riskAssessment) payload.riskAssessment = riskAssessment;
     const res = await fetch(
       `${SLA_API}/jobs/${encodeURIComponent(job.id)}`,

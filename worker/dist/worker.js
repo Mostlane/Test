@@ -1458,11 +1458,17 @@ async function handle5(request, env, ctx, url, sess) {
       if (!file || !assetId) return json2({ ok: false, error: "Missing file or assetId" }, 400);
       const ext = file.name?.split(".").pop() || "jpg";
       const list = await env.ASSET_BUCKET.list({ prefix: `${assetId}/` });
-      const nextNum = (list.objects?.length || 0) + 1;
+      const nextNum = (list.objects || []).filter((o) => !o.key.endsWith(".thumb")).length + 1;
       const filename = `${assetId}/image${nextNum}.${ext}`;
       await env.ASSET_BUCKET.put(filename, await file.arrayBuffer(), {
         httpMetadata: { contentType: file.type || "image/jpeg" }
       });
+      const thumb = form.get("thumb");
+      if (thumb && typeof thumb.arrayBuffer === "function") {
+        await env.ASSET_BUCKET.put(`${filename}.thumb`, await thumb.arrayBuffer(), {
+          httpMetadata: { contentType: "image/jpeg" }
+        });
+      }
       const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
       return json2({ ok: true, url: publicUrl, key: filename });
     } catch (err) {
@@ -1483,14 +1489,38 @@ async function handle5(request, env, ctx, url, sess) {
     try {
       const key = searchParams.get("key");
       if (!key) return json2({ error: "Missing key" }, 400);
+      const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
+      if (thumb) {
+        return new Response(thumb.body, {
+          headers: { ...cors, "Content-Type": thumb.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" }
+        });
+      }
       const obj = await env.ASSET_BUCKET.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
       return new Response(obj.body, {
-        headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=3600" },
-        cf: { image: { width: 200, height: 200, fit: "cover", quality: 50, format: "auto" } }
+        headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" },
+        cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
       });
     } catch (err) {
       return json2({ error: "Thumbnail generation failed", details: err.message }, 500);
+    }
+  }
+  if (method === "POST" && pathname === "/upload-asset-thumb") {
+    try {
+      const form = await request.formData();
+      const key = form.get("key");
+      const thumb = form.get("thumb");
+      if (!key || !thumb || typeof thumb.arrayBuffer !== "function") {
+        return json2({ ok: false, error: "Missing key or thumb" }, 400);
+      }
+      const head = await env.ASSET_BUCKET.head(key);
+      if (!head) return json2({ ok: false, error: "Unknown image key" }, 404);
+      await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
+        httpMetadata: { contentType: "image/jpeg" }
+      });
+      return json2({ ok: true });
+    } catch (err) {
+      return json2({ ok: false, error: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/delete-asset-image") {
@@ -1502,6 +1532,7 @@ async function handle5(request, env, ctx, url, sess) {
       if (!r2Key && imageUrl) r2Key = decodeURIComponent((imageUrl.split("key=")[1] || "").split("&")[0]);
       if (!r2Key) return json2({ ok: false, error: "Invalid image URL or key" }, 400);
       await env.ASSET_BUCKET.delete(r2Key);
+      await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
       const asset = await getAsset(env, tenantId, assetId);
       if (!asset) return json2({ ok: false, error: "Asset not found" }, 404);
       const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
@@ -2261,6 +2292,8 @@ async function handle6(request, env, ctx, url, sess) {
     const body = await readJson(request);
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
+      scheduledEnd: body.scheduledEnd,
+      durationMinutes: body.durationMinutes,
       assignedEngineers: Array.isArray(body.assignedEngineers) ? body.assignedEngineers.filter(Boolean) : body.assignedTo !== void 0 ? body.assignedTo ? [body.assignedTo] : [] : void 0,
       changedBy: body.changedBy || "scheduler"
     };
@@ -2446,11 +2479,22 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const id = body.id || body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  const status = normalizeStatus(body.status || existing?.status);
+  let status = normalizeStatus(body.status || existing?.status);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
   const assignedEngineers = Array.isArray(body.assignedEngineers) && body.assignedEngineers.length ? body.assignedEngineers.filter(Boolean) : body.assignedTo ? [body.assignedTo] : existing?.assignedEngineers || (existing?.assignedTo ? [existing.assignedTo] : []);
+  if (assignedEngineers.length && status === "Pending") status = "Scheduled";
+  const scheduledAt = body.scheduledAt || existing?.scheduledAt || null;
+  let scheduledEnd = body.scheduledEnd || existing?.scheduledEnd || null;
+  if (scheduledAt) {
+    const s = Date.parse(scheduledAt);
+    if (body.durationMinutes && Number.isFinite(s)) {
+      scheduledEnd = new Date(s + Math.max(15, Number(body.durationMinutes)) * 6e4).toISOString();
+    } else if ((!scheduledEnd || Date.parse(scheduledEnd) <= s) && Number.isFinite(s)) {
+      scheduledEnd = new Date(s + 36e5).toISOString();
+    }
+  }
   const job = {
     id,
     helpdeskRef: body.reference || existing?.helpdeskRef || id,
@@ -2474,10 +2518,18 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
     lon: body.lon ?? existing?.lon ?? null,
     storeType: body.storeType || existing?.storeType || "",
     sharepointURL: body.sharepointURL || existing?.sharepointURL || "",
-    scheduledAt: body.scheduledAt || existing?.scheduledAt || null,
+    scheduledAt,
+    scheduledEnd,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     closedAt: status === "Closed Jobs" ? now : existing?.closedAt || null,
+    // Engineer-captured packs survive an office re-save.
+    quote: existing?.quote,
+    riskAssessment: existing?.riskAssessment,
+    hold: existing?.hold,
+    order: existing?.order,
+    signature: existing?.signature,
+    travelStartMileage: existing?.travelStartMileage,
     events: existing?.events || [],
     statusHistory: existing?.statusHistory || []
   };
@@ -2491,6 +2543,7 @@ async function patchJob(env, tenantId, id, patch) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   job.statusHistory ||= [];
   job.events ||= [];
+  const hadEngineers = assignedList(job).length > 0;
   if (patch.assignedEngineers !== void 0) {
     job.assignedEngineers = patch.assignedEngineers;
     job.assignedTo = patch.assignedEngineers[0] || "";
@@ -2498,10 +2551,28 @@ async function patchJob(env, tenantId, id, patch) {
     job.assignedTo = patch.assignedTo;
     job.assignedEngineers = patch.assignedTo ? [patch.assignedTo] : [];
   }
-  if (patch.scheduledAt !== void 0) job.scheduledAt = patch.scheduledAt;
+  if (patch.scheduledAt !== void 0) {
+    const prevStart = Date.parse(job.scheduledAt);
+    const prevEnd = Date.parse(job.scheduledEnd);
+    const durMs = Number.isFinite(prevStart) && Number.isFinite(prevEnd) && prevEnd > prevStart ? prevEnd - prevStart : 36e5;
+    job.scheduledAt = patch.scheduledAt;
+    if (patch.scheduledEnd === void 0 && job.scheduledAt) {
+      const s = Date.parse(job.scheduledAt);
+      if (Number.isFinite(s)) job.scheduledEnd = new Date(s + durMs).toISOString();
+    }
+  }
+  if (patch.scheduledEnd !== void 0) job.scheduledEnd = patch.scheduledEnd;
+  if (patch.durationMinutes !== void 0 && job.scheduledAt) {
+    const mins = Math.max(15, Number(patch.durationMinutes) || 60);
+    const s = Date.parse(job.scheduledAt);
+    if (Number.isFinite(s)) job.scheduledEnd = new Date(s + mins * 6e4).toISOString();
+  }
   if (patch.siteCode !== void 0) job.siteCode = patch.siteCode;
+  if (patch.priority !== void 0 && patch.priority) job.priority = patch.priority;
+  if (patch.description !== void 0 && patch.description) job.description = patch.description;
   if (patch.quote !== void 0) job.quote = patch.quote;
   if (patch.riskAssessment !== void 0) job.riskAssessment = patch.riskAssessment;
+  if (patch.hold !== void 0) job.hold = patch.hold;
   if (patch.order !== void 0) job.order = patch.order;
   if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;
   if (patch.status) {
@@ -2511,6 +2582,9 @@ async function patchJob(env, tenantId, id, patch) {
       job.statusHistory.push({ status: s, at: now, by: patch.changedBy || "system" });
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
     }
+  } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
+    job.status = "Scheduled";
+    job.statusHistory.push({ status: "Scheduled", at: now, by: patch.changedBy || "system" });
   }
   if (patch.note) {
     job.events.push({ at: now, by: patch.changedBy || "system", type: "note", note: patch.note });
@@ -4150,6 +4224,7 @@ var ROUTES = [
   ["*", "/transfer", handle5],
   // /transfer, /transfer-log
   ["*", "/upload-asset-image", handle5],
+  ["*", "/upload-asset-thumb", handle5],
   ["*", "/delete-asset-image", handle5],
   ["*", "/sla", handle6],
   ["*", "/get-sites", handle7],
@@ -4222,8 +4297,10 @@ var AUDIT_SKIP = [
   // runs on every page load — a check, not an action
   "/audit",
   // this system's own endpoints
-  "/auth/refresh"
+  "/auth/refresh",
   // token rotation, not a user action
+  "/upload-asset-thumb"
+  // background thumbnail backfill, not a user action
 ];
 function auditAction(env, ctx, sess, request, url, status, clone) {
   try {

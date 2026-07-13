@@ -130,7 +130,7 @@
         const since = a.lastTransfer ? new Date(a.lastTransfer).toLocaleDateString("en-GB")
           : (a.calibrationDate ? new Date(a.calibrationDate).toLocaleDateString("en-GB") : "—");
         return `<div class="card">
-          ${imgs.length ? `<img class="thumb" src="${esc(thumbUrl(imgs[0]))}" data-gallery="${esc(a.id)}" alt="${esc(a.name)}">`
+          ${imgs.length ? `<img class="thumb" loading="lazy" decoding="async" src="${esc(thumbUrl(imgs[0]))}" data-gallery="${esc(a.id)}" alt="${esc(a.name)}">`
                         : `<div class="noimg">🔧</div>`}
           <h3>${esc(a.name || a.id)}</h3>
           <p><b>Serial:</b> ${esc(a.serial || "—")}</p>

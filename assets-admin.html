@@ -192,6 +192,30 @@
     const openM = id => g(id).classList.add("open");
     const closeM = id => g(id).classList.remove("open");
     function thumbUrl(u) { const m = /[?&]key=([^&]+)/.exec(u || ""); return m ? API + "/asset-thumb?key=" + m[1] : u; }
+    function keyOf(u) { const m = /[?&]key=([^&]+)/.exec(u || ""); return m ? decodeURIComponent(m[1]) : null; }
+    // Shrink a full photo to a small JPEG in the browser so we never store or
+    // serve multi-megabyte originals as grid thumbnails. Resolves null on any
+    // failure (the upload still proceeds; /asset-thumb falls back to resizing).
+    function makeThumb(fileOrBlob, maxDim = 400, quality = 0.6) {
+      return new Promise(resolve => {
+        try {
+          const img = new Image(), url = URL.createObjectURL(fileOrBlob);
+          img.onload = () => {
+            try {
+              let w = img.naturalWidth, h = img.naturalHeight;
+              const s = Math.min(1, maxDim / Math.max(w, h));
+              w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
+              const c = document.createElement("canvas"); c.width = w; c.height = h;
+              c.getContext("2d").drawImage(img, 0, 0, w, h);
+              URL.revokeObjectURL(url);
+              c.toBlob(b => resolve(b), "image/jpeg", quality);
+            } catch (e) { URL.revokeObjectURL(url); resolve(null); }
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+          img.src = url;
+        } catch (e) { resolve(null); }
+      });
+    }
     const HIGH_VALUE = 5000;
 
     let ASSETS = [], USERS = [], sortMode = "value";
@@ -221,10 +245,50 @@
         const d = await authFetch("/assets").then(r => r.json());
         ASSETS = (d && d.assets) || [];
         renderSummary(); renderTable();
+        backfillThumbs();
       } catch (e) {
         g("rows").innerHTML = "<tr><td colspan='9' class='muted'>⚠️ Couldn't load assets — try again.</td></tr>";
         g("summary").innerHTML = "<span class='muted'>Summary unavailable.</span>";
       }
+    }
+
+    // ── Self-healing thumbnails for legacy images ──
+    // Photos uploaded before stored thumbnails existed have no ".thumb" in R2, so
+    // /asset-thumb has to fall back to the full-size original for them. This runs
+    // quietly in the background whenever an admin views this page: it fetches each
+    // old photo ONCE, shrinks it in the browser, and POSTs the small thumb back so
+    // every image ends up with a stored thumbnail. Strictly sequential (one image
+    // in memory at a time) so it can't recreate the mass-decode that crashed the
+    // grid. Marks each asset done via `_thumbs` so it never reprocesses.
+    let backfilling = false;
+    async function backfillThumbs() {
+      if (backfilling) return;
+      backfilling = true;
+      try {
+        await new Promise(res => setTimeout(res, 2000)); // let the page paint first
+        const todo = ASSETS.filter(a => !a._thumbs && a.images && a.images.length);
+        for (const a of todo) {
+          let allOk = true;
+          for (const u of a.images) {
+            const key = keyOf(u);
+            if (!key) continue;
+            try {
+              const resp = await fetch(API + "/asset-image?key=" + encodeURIComponent(key), { cache: "force-cache" });
+              if (!resp.ok) { allOk = false; continue; }
+              const thumb = await makeThumb(await resp.blob());
+              if (!thumb) { allOk = false; continue; }
+              const form = new FormData(); form.append("key", key); form.append("thumb", thumb, "thumb.jpg");
+              const r = await authFetch("/upload-asset-thumb", { method: "POST", body: form }).then(r => r.json()).catch(() => null);
+              if (!r || !r.ok) allOk = false;
+            } catch (e) { allOk = false; }
+            await new Promise(res => setTimeout(res, 200)); // breathe between images
+          }
+          if (allOk) {
+            a._thumbs = 1;
+            try { await authFetch("/asset/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(a) }); } catch (e) {}
+          }
+        }
+      } finally { backfilling = false; }
     }
 
     const numVal = a => { let v = parseFloat(String(a.value || "0").replace(/[£,]/g, "").trim()); return isNaN(v) ? 0 : v; };
@@ -273,7 +337,7 @@
         return esc(nameOf(h) || h);
       };
       const thumb = a => (a.images && a.images.length)
-        ? `<img class="thumb" src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : "";
+        ? `<img class="thumb" loading="lazy" decoding="async" src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : "";
       g("rows").innerHTML = list.map(a => `
         <tr>
           <td>${esc(a.id)}</td>
@@ -289,7 +353,7 @@
       g("mrows").innerHTML = list.map(a => `
         <div class="acard">
           <div class="top">
-            ${(a.images && a.images.length) ? `<img src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : `<img alt="" style="background:#f2f5f8">`}
+            ${(a.images && a.images.length) ? `<img loading="lazy" decoding="async" src="${esc(thumbUrl(a.images[0]))}" data-view="${esc(a.id)}" alt="">` : `<img alt="" style="background:#f2f5f8">`}
             <div><h3>${esc(a.name || a.id)}</h3><p class="muted">${esc(a.id)} · ${esc(a.category || "—")}</p></div>
           </div>
           <p><b>Serial:</b> ${esc(a.serial || "—")}</p>
@@ -402,7 +466,7 @@
     function renderGallery() {
       const imgs = (editAsset && editAsset.images) || [];
       g("gallery").innerHTML = imgs.map(u => `
-        <div class="gitem"><img src="${esc(thumbUrl(u))}" data-full="${esc(u)}"><button class="del" data-delimg="${esc(u)}">×</button></div>`).join("");
+        <div class="gitem"><img loading="lazy" decoding="async" src="${esc(thumbUrl(u))}" data-full="${esc(u)}"><button class="del" data-delimg="${esc(u)}">×</button></div>`).join("");
     }
     g("gallery").addEventListener("click", e => {
       const t = e.target;
@@ -416,6 +480,8 @@
       input.onchange = async () => {
         const file = input.files[0]; if (!file) return;
         const form = new FormData(); form.append("file", file); form.append("assetId", editAsset.id);
+        const thumb = await makeThumb(file);
+        if (thumb) form.append("thumb", thumb, "thumb.jpg");
         g("uploadBtn").disabled = true; g("uploadBtn").textContent = "Uploading…";
         try {
           const data = await authFetch("/upload-asset-image", { method: "POST", body: form }).then(r => r.json());
@@ -467,7 +533,7 @@
             ? `📥 <b>${esc(p.by || "?")}</b> received it${p.counterparty ? " from <b>" + esc(p.counterparty) + "</b>" : ""}`
             : `📤 <b>${esc(p.by || "?")}</b> handed it over${p.counterparty ? " to <b>" + esc(p.counterparty) + "</b>" : ""}`;
           return `<div class="cphoto">
-            <img src="${esc(thumbUrl(p.url))}" data-cview="${i}" alt="Condition photo">
+            <img loading="lazy" decoding="async" src="${esc(thumbUrl(p.url))}" data-cview="${i}" alt="Condition photo">
             <div>
               <p>${role}${p.pending ? ' <span class="pill shared">Transfer pending</span>' : ""}</p>
               <p class="muted">🕒 ${esc(when)}</p>

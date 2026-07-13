@@ -3,706 +3,353 @@
 <head>
   <script src="/portal-config.js?v=2"></script>
   <meta charset="UTF-8">
-  <title>Mostlane • SLA Tracker</title>
+  <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
   <style>
     :root{
       --ml-blue:#003b82;
       --ml-blue-light:#1e66ff;
-      --ml-accent:#1a73e8;
-      --ml-bg:#e6e8eb;
-      --panel:rgba(255,255,255,0.9);
       --text:#0f172a;
       --muted:#6b7280;
       --border:#d1d5db;
-      --ok:#16a34a;
-      --warn:#f97316;
-      --bad:#dc2626;
+      --panel:rgba(255,255,255,0.94);
     }
     *{box-sizing:border-box;}
     html,body{
       margin:0;padding:0;
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       color:var(--text);
-      background:var(--ml-bg) url('Mostlane_Embossed.png') no-repeat center center fixed;
+      background:#e6e8eb url('Mostlane_Embossed.png') no-repeat center center fixed;
       background-size:180%;
     }
-    .shell{
-      max-width:1200px;
-      margin:24px auto 32px;
-      padding:0 16px;
-    }
-
-    /* -------- HERO + KPI TILES (mock-up style) -------- */
-    .hero{
-      background:var(--ml-blue);
-      border-radius:24px;
-      padding:18px 18px 20px;
-      box-shadow:0 18px 32px rgba(0,0,0,0.35);
-      color:#e5ecff;
-      margin-bottom:18px;
-    }
-    .hero-logo{
-      display:flex;
-      justify-content:flex-start;
-      align-items:center;
-      margin-bottom:16px;
-    }
-    .hero-logo img{
-      height:30px;
-      width:auto;
-      display:block;
-    }
-    .hero-sub{
-      font-size:12px;
-      opacity:0.85;
-      margin-left:4px;
-      margin-bottom:10px;
-    }
-    .kpi-grid{
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:10px;
-    }
-    .kpi-card{
-      background:#f9fafb;
-      border-radius:18px;
-      padding:10px 12px;
-      box-shadow:0 6px 14px rgba(0,0,0,0.22);
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      color:#111827;
-    }
-    .kpi-label{
-      font-size:12px;
-      color:#4b5563;
-      margin-bottom:2px;
-    }
-    .kpi-value{
-      font-size:24px;
-      font-weight:700;
-      line-height:1.1;
-      color:#111827;
-    }
-
-    /* card that holds filters + list */
+    .shell{max-width:1280px;margin:20px auto 32px;padding:0 14px;}
     .card{
       background:var(--panel);
       border-radius:14px;
       box-shadow:0 12px 28px rgba(0,0,0,0.12);
-      overflow:hidden;
       border:1px solid rgba(15,23,42,0.05);
+      overflow:hidden;
     }
     header.main-header{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:12px 20px;
-      border-bottom:1px solid #e5e7eb;
+      display:flex;align-items:center;justify-content:space-between;gap:12px;
+      padding:14px 18px;border-bottom:1px solid #e5e7eb;
       background:linear-gradient(90deg,#ffffff,#f3f4f6);
-    }
-    header.main-header h1{
-      margin:0;
-      font-size:18px;
-      color:var(--ml-blue);
-    }
-    .header-main-sub{
-      font-size:12px;
-      color:var(--muted);
-      margin-top:2px;
-    }
-    .header-right{
-      display:flex;
-      gap:8px;
       flex-wrap:wrap;
     }
+    header.main-header h1{margin:0;font-size:20px;color:var(--ml-blue);}
+    .header-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+    .header-right{display:flex;gap:8px;flex-wrap:wrap;}
     .btn{
-      border-radius:999px;
-      padding:8px 14px;
-      font-size:13px;
-      border:1px solid #d1d5db;
-      background:#f9fafb;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      text-decoration:none;
-      color:var(--text);
-      font-weight:500;
-      white-space:nowrap;
+      border-radius:999px;padding:8px 14px;font-size:13px;
+      border:1px solid #d1d5db;background:#f9fafb;cursor:pointer;
+      display:inline-flex;align-items:center;gap:6px;text-decoration:none;
+      color:var(--text);font-weight:500;white-space:nowrap;
     }
-    .btn.primary{
-      background:var(--ml-blue);
-      color:#fff;
-      border-color:var(--ml-blue);
-    }
-    .btn.icon-only{
-      padding:6px 8px;
-      border-radius:8px;
-      min-width:0;
-      justify-content:center;
-    }
+    .btn.primary{background:var(--ml-blue);color:#fff;border-color:var(--ml-blue);}
+    .btn.orange{background:#ea7a23;color:#fff;border-color:#ea7a23;}
+    .btn.small{padding:5px 10px;font-size:12px;}
+    .btn:disabled{opacity:.5;cursor:default;}
 
-    .tabs{
-      display:flex;
-      border-bottom:1px solid #e5e7eb;
-      background:#f9fafb;
-      padding:0 20px;
-      gap:4px;
+    /* ---- Status chips (Workever-style) ---- */
+    .chips{display:flex;flex-wrap:wrap;gap:8px;padding:12px 18px 4px;}
+    .schip{
+      border-radius:999px;padding:5px 6px 5px 12px;font-size:13px;font-weight:600;
+      background:#fff;border:2px solid var(--c,#9ca3af);color:#1f2937;
+      cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+      user-select:none;
     }
-    .tab{
-      padding:10px 14px;
-      font-size:14px;
-      cursor:pointer;
-      border:0;
-      background:transparent;
-      border-bottom:2px solid transparent;
-      color:var(--muted);
-      display:flex;
-      align-items:center;
-      gap:6px;
-    }
-    .tab.active{
-      color:var(--ml-blue);
-      border-bottom-color:var(--ml-blue);
-      font-weight:600;
-    }
-
-    .content{
-      padding:16px 20px 18px;
-    }
-    .filters{
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      margin-bottom:10px;
-    }
-    .filters label{
-      font-size:12px;
-      color:var(--muted);
-    }
-    .chip{
-      border-radius:999px;
-      padding:5px 9px;
-      border:1px solid #e5e7eb;
-      background:#f9fafb;
-      font-size:12px;
-      cursor:pointer;
-    }
-    .chip.active{
-      background:#e5edff;
-      color:var(--ml-blue);
-      border-color:var(--ml-blue);
-      font-weight:600;
-    }
-    .filters select,
-    .filters input[type="text"]{
-      border-radius:999px;
-      border:1px solid #d1d5db;
-      padding:6px 10px;
-      font-size:13px;
-      background:#fff;
-      min-width:160px;
-    }
-    .filters .spacer{
-      flex:1;
-    }
-
-    .table-wrapper{
-      width:100%;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-      margin-bottom:8px;
-    }
-
-    table{
-      width:100%;
-      min-width:900px;
-      border-collapse:separate;
-      border-spacing:0;
-      font-size:13px;
-      background:#fff;
-      border-radius:10px;
-      overflow:hidden;
-      border:1px solid #e5e7eb;
-    }
-    thead th{
-      text-align:left;
-      padding:8px 10px;
-      background:#f3f4f6;
-      color:#111827;
-      border-bottom:1px solid #e5e7eb;
-      font-weight:600;
-      white-space:nowrap;
-    }
-    tbody td{
-      padding:8px 10px;
-      border-bottom:1px solid #f1f5f9;
-      vertical-align:top;
-    }
-    tbody tr:nth-child(even){
-      background:#fafbff;
-    }
-
-    .ref{
-      font-family:monospace;
-      font-size:12px;
-      background:#f9fafb;
-      padding:2px 6px;
-      border-radius:999px;
-      display:inline-block;
-    }
-    .priority-badge{
-      border-radius:999px;
-      padding:2px 7px;
-      font-size:11px;
-      font-weight:600;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-    }
-    .p1{background:#fef2f2;color:#b91c1c;}
-    .p2{background:#fffbeb;color:#92400e;}
-    .p3{background:#ecfdf5;color:#166534;}
-    .p4{background:#eff6ff;color:#1d4ed8;}
-
-    .sla-badge{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
+    .schip .n{
+      font-weight:600;color:#6b7280;background:#f3f4f6;
+      border-radius:8px;padding:1px 7px;font-size:12px;
       font-variant-numeric:tabular-nums;
-      white-space:nowrap;
+    }
+    .schip.active{background:var(--c,#9ca3af);color:#fff;}
+    .schip.active .n{background:rgba(255,255,255,0.25);color:#fff;}
+    .schip.allchip{border-color:#ea7a23;}
+    .schip.allchip.active{background:#ea7a23;}
+
+    /* ---- Toolbar ---- */
+    .toolbar{
+      display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      padding:12px 18px;border-bottom:1px solid #eef1f4;background:#fbfcfe;
+      margin-top:8px;
+    }
+    .toolbar select,.toolbar input[type="text"]{
+      border-radius:8px;border:1px solid var(--border);padding:7px 10px;
+      font-size:13px;background:#fff;
+    }
+    .toolbar .spacer{flex:1;}
+    .toolbar input[type="text"]{min-width:200px;}
+
+    /* ---- Table ---- */
+    .table-wrapper{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:13px;background:#fff;}
+    thead th{
+      text-align:left;padding:10px;background:#f3f4f6;color:#374151;
+      border-bottom:1px solid #e5e7eb;font-weight:600;white-space:nowrap;font-size:12px;
+      text-transform:uppercase;letter-spacing:.02em;
+    }
+    tbody td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
+    tbody tr:hover{background:#f8fafc;}
+    .ref{font-family:monospace;font-size:12px;background:#f3f4f6;padding:2px 6px;border-radius:6px;display:inline-block;}
+    .jobdesc{font-weight:600;color:#1d4ed8;margin-bottom:2px;}
+    .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex:0 0 auto;}
+    .statusline{display:flex;align-items:center;font-size:12px;color:#4b5563;margin-top:3px;}
+    .muted{color:var(--muted);}
+    .small{font-size:11px;}
+    .nowrap{white-space:nowrap;}
+    .noalloc{color:#dc2626;font-weight:600;}
+    .sla-badge{
+      border-radius:999px;padding:2px 7px;font-size:11px;display:inline-block;
+      font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:2px;
     }
     .sla-green{background:#ecfdf5;color:#166534;}
     .sla-amber{background:#fffbeb;color:#92400e;}
     .sla-red{background:#fef2f2;color:#b91c1c;}
     .sla-none{background:#e5e7eb;color:#4b5563;}
+    .rowactions{display:flex;gap:4px;flex-wrap:wrap;}
+    .viewlink{color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600;}
 
-    .status-pill{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      background:#e5e7eb;
-      color:#111827;
+    #statusBar{padding:10px 18px;font-size:12px;color:var(--muted);}
+
+    /* ---- Mobile cards ---- */
+    .job-cards{display:none;flex-direction:column;gap:8px;padding:10px 14px;}
+    .mjob{
+      background:#fff;border-radius:12px;padding:10px 12px;
+      border:1px solid #e5e7eb;box-shadow:0 4px 10px rgba(15,23,42,0.08);
     }
-    .status-open{background:#dcfce7;color:#166534;}
-    .status-overdue{background:#fee2e2;color:#b91c1c;}
-    .status-complete{background:#e5e7eb;color:#374151;}
+    .mjob-top{display:flex;justify-content:space-between;gap:6px;align-items:center;margin-bottom:4px;}
+    .mjob-title{font-size:13px;font-weight:600;}
+    .mjob-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:11px;color:#4b5563;align-items:center;}
+    .mjob-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
 
-    .small{font-size:11px;}
-    .muted{color:var(--muted);}
-    .nowrap{white-space:nowrap;}
-
-    #statusBar{
-      margin-top:8px;
-      font-size:12px;
-      color:var(--muted);
+    @media(max-width:820px){
+      .table-wrapper{display:none;}
+      .job-cards{display:flex;}
+      header.main-header{flex-direction:column;align-items:flex-start;}
     }
 
-    /* ---------- MOBILE JOB CARDS ---------- */
-    .job-cards{
-      display:none;
-      flex-direction:column;
-      gap:8px;
-      margin-bottom:8px;
-    }
-    .job-card{
-      background:#ffffff;
-      border-radius:12px;
-      padding:10px 12px;
-      box-shadow:0 4px 10px rgba(15,23,42,0.12);
-      border:1px solid #e5e7eb;
-    }
-    .job-card-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:4px;
-      gap:6px;
-    }
-    .job-card-ref{
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-    }
-    .job-card-title{
-      font-size:13px;
-      font-weight:600;
-      margin-bottom:2px;
-    }
-    .job-card-site{
-      font-size:11px;
-      color:var(--muted);
-    }
-    .job-card-meta{
-      display:flex;
-      justify-content:space-between;
-      flex-wrap:wrap;
-      gap:4px;
-      margin-top:6px;
-      align-items:center;
-    }
-    .job-card-actions{
-      display:flex;
-      gap:4px;
-      margin-top:8px;
-      flex-wrap:wrap;
-    }
-
-    /* ---------- MODALS ---------- */
+    /* ---- Modals ---- */
     .modal-backdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(15,23,42,0.35);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      z-index:50;
+      position:fixed;inset:0;background:rgba(15,23,42,0.4);display:none;
+      align-items:center;justify-content:center;z-index:60;padding:14px;
     }
-    .modal-backdrop.show{
-      display:flex;
-    }
+    .modal-backdrop.show{display:flex;}
     .modal{
-      background:#ffffff;
-      border-radius:12px;
-      max-width:420px;
-      width:100%;
-      box-shadow:0 20px 40px rgba(0,0,0,0.25);
-      padding:18px 18px 16px;
-      max-height:90vh;
-      display:flex;
-      flex-direction:column;
+      background:#fff;border-radius:14px;max-width:440px;width:100%;
+      box-shadow:0 20px 40px rgba(0,0,0,0.28);padding:16px;
+      max-height:92vh;display:flex;flex-direction:column;
     }
-    .modal header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:10px;
+    .modal header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;border:0;background:none;padding:0;}
+    .modal header h2{margin:0;font-size:16px;color:var(--ml-blue);}
+    .modal header button{border:0;background:transparent;cursor:pointer;font-size:20px;line-height:1;padding:4px;}
+    .modal-body{flex:1;overflow-y:auto;padding-right:2px;}
+    .modal .field{margin-bottom:10px;}
+    .modal label{font-size:12px;color:#4b5563;display:block;margin-bottom:3px;font-weight:600;}
+    .modal select,.modal textarea,.modal input{
+      width:100%;border-radius:8px;border:1px solid var(--border);
+      padding:8px 9px;font-size:14px;font-family:inherit;
     }
-    .modal header h2{
-      margin:0;
-      font-size:16px;
-      color:var(--ml-blue);
+    .modal textarea{min-height:60px;resize:vertical;}
+    .modal .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}
+    .engineer-checks{
+      max-height:190px;overflow-y:auto;border:1px solid var(--border);
+      border-radius:8px;padding:8px;background:#f9fafb;
     }
-    .modal header button{
-      border:0;
-      background:transparent;
-      cursor:pointer;
-      font-size:18px;
-      line-height:1;
-      padding:4px;
+    .engineer-checks label{
+      display:flex;align-items:center;gap:9px;padding:6px 4px;font-size:14px;
+      cursor:pointer;font-weight:400;border-bottom:1px solid #eef1f4;margin:0;
     }
-    .modal-body{
-      flex:1;
-      overflow-y:auto;
-      padding-right:4px;
-    }
-    .modal .field{
-      margin-bottom:10px;
-    }
-    .modal label{
-      font-size:12px;
-      color:#4b5563;
-      display:block;
-      margin-bottom:3px;
-    }
-    .modal select,
-    .modal textarea,
-    .modal input[type="date"],
-    .modal input[type="time"]{
-      width:100%;
-      border-radius:8px;
-      border:1px solid #d1d5db;
-      padding:7px 9px;
-      font-size:13px;
-      font-family:inherit;
-    }
-    .modal textarea{
-      min-height:70px;
-      resize:vertical;
-    }
-    .modal .actions{
-      display:flex;
-      justify-content:flex-end;
-      gap:8px;
-      margin-top:10px;
-    }
+    .engineer-checks label:last-child{border-bottom:0;}
+    .engineer-checks input{width:18px;height:18px;flex:0 0 auto;}
 
-    @media(max-width:768px){
-      header.main-header{
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      .header-right{
-        width:100%;
-        justify-content:flex-start;
-        flex-wrap:wrap;
-      }
-      .filters{
-        flex-direction:column;
-        align-items:flex-start;
-      }
-      table{
-        font-size:12px;
-      }
-      /* hide table, show cards on mobile */
-      .table-wrapper{
-        display:none;
-      }
-      .job-cards{
-        display:flex;
-      }
+    /* ---- Smooth time wheel ---- */
+    .timerow{display:flex;gap:12px;}
+    .timerow>div{flex:1;}
+    .wheelbox{
+      display:flex;gap:4px;align-items:center;justify-content:center;
+      border:1px solid var(--border);border-radius:10px;background:#fff;
+      position:relative;padding:0 6px;
     }
-    /* =========================
-   JOB SHEET EXPORT (PRINT)
-   ========================= */
-@media print{
-  body{
-    background:#fff !important;
-  }
-
-  .hero,
-  .tabs,
-  .filters,
-  .header-right,
-  .btn,
-  .chip,
-  .modal-backdrop{
-    display:none !important;
-  }
-
-  .card{
-    box-shadow:none !important;
-    border:1px solid #d1d5db;
-    margin-bottom:12px;
-    page-break-inside:avoid;
-  }
-
-  table{
-    min-width:0 !important;
-  }
-}
+    .wheelbox::before{
+      content:"";position:absolute;left:6px;right:6px;top:50%;height:34px;
+      transform:translateY(-50%);background:#eef4ff;border-radius:8px;
+      pointer-events:none;
+    }
+    .wheel{
+      height:112px;overflow-y:auto;scroll-snap-type:y mandatory;
+      -webkit-overflow-scrolling:touch;scrollbar-width:none;flex:1;
+      position:relative;z-index:1;text-align:center;
+    }
+    .wheel::-webkit-scrollbar{display:none;}
+    .wheel .pad{height:39px;}
+    .wheel .item{
+      height:34px;line-height:34px;scroll-snap-align:center;font-size:17px;
+      font-variant-numeric:tabular-nums;color:#94a3b8;cursor:pointer;
+    }
+    .wheel .item.sel{color:#0f172a;font-weight:700;}
+    .wheelsep{font-size:18px;font-weight:700;color:#64748b;z-index:1;}
+    #forbidden{display:none;margin:26px auto;max-width:480px;padding:20px;background:#fff;border-radius:12px;text-align:center;color:#b91c1c;border:1px solid #fca5a5;}
   </style>
 </head>
 <body>
 <div class="shell">
-
-  <!-- HERO HEADER WITH LOGO + KPI TILES -->
-  <section class="hero">
-    <div class="hero-logo">
-      <img src="Mostlane Logo.jpg" alt="Mostlane">
-    </div>
-    <div class="hero-sub">Live SLA overview • Powered by Mostlane SLA Worker</div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-label">Open Jobs</div>
-        <div class="kpi-value" id="kpiOpenJobs">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Due Today</div>
-        <div class="kpi-value" id="kpiDueToday">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Overdue</div>
-        <div class="kpi-value" id="kpiOverdue">0</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">SLA at Risk</div>
-        <div class="kpi-value" id="kpiAtRisk">0</div>
-      </div>
-    </div>
-  </section>
-
-  <div class="card">
+  <div id="forbidden">🚫 You do not have permission to access SLA tools.</div>
+  <div class="card" id="mainCard" style="display:none;">
     <header class="main-header">
       <div>
-        <h1>SLA Tracker</h1>
-        <div class="header-main-sub">
-          Live countdown for open jobs • Data: mostlane-sla Worker
-        </div>
+        <h1>Jobs</h1>
+        <div class="header-sub" id="userLabel">Live job board</div>
       </div>
-
       <div class="header-right">
-        <a href="financials.html" class="btn">£ Financials</a>
-        <a href="sla-performance.html" class="btn">📊 SLA Performance</a>
-        <a href="day-sessions.html" class="btn">🕒 Day Sessions</a>
-        <a href="settings.html" class="btn">⚙️ Settings</a>
-        <a href="add-job.html" class="btn primary">＋ Create Job</a>
+        <a href="sla-scheduler.html" class="btn">🗓️ Scheduler</a>
+        <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
+        <a href="engineer-jobs.html" class="btn">📝 My Jobs</a>
+        <a href="sla-settings.html" class="btn">⚙️ Settings</a>
+        <a href="add-job.html" class="btn orange">＋ Add Job</a>
+        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
     </header>
 
-    <div class="tabs">
-      <button class="tab active" id="tabOpen">Open Jobs <span class="count" id="countOpen">0</span></button>
-      <button class="tab" id="tabCompleted">Completed <span class="count" id="countCompleted">0</span></button>
+    <div class="chips" id="statusChips"></div>
+
+    <div class="toolbar">
+      <select id="bulkAction">
+        <option value="">Mark selected as…</option>
+        <option value="Scheduled">Scheduled</option>
+        <option value="In Progress">In Progress</option>
+        <option value="On Hold">On Hold</option>
+        <option value="Complete">Complete</option>
+        <option value="Invoiced">Invoiced</option>
+        <option value="Closed Jobs">Closed Jobs</option>
+      </select>
+      <button class="btn small" id="bulkApply">Apply</button>
+      <select id="priorityFilter">
+        <option value="all">All priorities</option>
+        <option value="Priority 1">P1</option>
+        <option value="Priority 2">P2</option>
+        <option value="Priority 3">P3</option>
+        <option value="Priority 4">P4</option>
+      </select>
+      <div class="spacer"></div>
+      <button class="btn small" id="resetBtn">Reset</button>
+      <input type="text" id="searchBox" placeholder="Search jobs…">
     </div>
 
-    <div class="content">
-      <div class="filters">
-        <div class="group">
-          <label>Priority:</label>
-          <button class="chip active" data-priority="all">All</button>
-          <button class="chip" data-priority="P1">P1</button>
-          <button class="chip" data-priority="P2">P2</button>
-          <button class="chip" data-priority="P3">P3</button>
-          <button class="chip" data-priority="P4">P4</button>
-        </div>
-
-        <div class="group">
-          <label for="statusFilter">Status:</label>
-          <select id="statusFilter">
-            <option value="all">All</option>
-            <option value="open">Open only</option>
-            <option value="overdue">Overdue</option>
-          </select>
-        </div>
-
-        <div class="spacer"></div>
-
-        <div class="group">
-          <label for="searchBox">Search:</label>
-          <input type="text" id="searchBox" placeholder="Ref, site, description…">
-        </div>
-      </div>
-
-      <!-- DESKTOP TABLE VIEW -->
-      <div class="table-wrapper">
-        <table>
-          <thead>
-          <tr>
-            <th style="width:80px;">Ref</th>
-            <th style="width:110px;">Priority</th>
-            <th>Description / Site</th>
-            <th style="width:130px;">Raised</th>
-            <th style="width:130px;">SLA Target</th>
-            <th style="width:130px;">Time Left</th>
-            <th style="width:120px;">Status</th>
-            <th style="width:120px;">Actions</th>
-          </tr>
-          </thead>
-          <tbody id="jobsTbody"></tbody>
-        </table>
-      </div>
-
-      <!-- MOBILE CARD VIEW -->
-      <div id="jobCards" class="job-cards"></div>
-
-      <div id="statusBar">Loading jobs…</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+        <tr>
+          <th style="width:26px;"><input type="checkbox" id="checkAll"></th>
+          <th>Job</th>
+          <th>Priority</th>
+          <th>Site</th>
+          <th>Due date</th>
+          <th>Scheduled</th>
+          <th>Assigned to</th>
+          <th style="width:150px;"></th>
+        </tr>
+        </thead>
+        <tbody id="jobsTbody"></tbody>
+      </table>
     </div>
+    <div id="jobCards" class="job-cards"></div>
+    <div id="statusBar">Loading jobs…</div>
   </div>
 </div>
 
-<!-- UPDATE JOB MODAL -->
-<div class="modal-backdrop" id="updateModalBackdrop">
+<!-- ASSIGN / SCHEDULE MODAL -->
+<div class="modal-backdrop" id="assignBackdrop">
   <div class="modal">
     <header>
-      <h2 id="updateModalTitle">Update Job</h2>
-      <button type="button" id="updateModalCloseBtn">&times;</button>
+      <h2 id="assignTitle">Send job to engineers</h2>
+      <button type="button" id="assignClose">&times;</button>
     </header>
     <div class="modal-body">
       <div class="field">
-        <label>Reference</label>
-        <div class="ref" id="updateModalRef">—</div>
+        <label>Job</label>
+        <div class="ref" id="assignRef">—</div>
       </div>
       <div class="field">
-        <label for="updateModalPriority">Priority</label>
-        <select id="updateModalPriority">
-          <option value="P1">P1 – Emergency</option>
-          <option value="P2">P2 – Urgent</option>
-          <option value="P3">P3 – Routine</option>
-          <option value="P4">P4 – Low</option>
-        </select>
+        <label>Engineers — tick everyone attending</label>
+        <div id="assignChecks" class="engineer-checks">Loading…</div>
       </div>
       <div class="field">
-        <label for="updateModalStatus">Status</label>
-<select id="updateModalStatus">
-  <option value="Pending">Pending</option>
-  <option value="Scheduled">Scheduled</option>
-  <option value="Travelling">Travelling</option>
-  <option value="In Progress">In Progress</option>
-  <option value="On Hold">On Hold</option>
-  <option value="Complete">Complete</option>
-  <option value="Closed Jobs">Closed Jobs</option>
-  <option value="Invoiced">Invoiced</option>
-  <option value="Order">Order</option>
-  <option value="Quote">Quote</option>
-</select>
-      </div>
-      <!-- Engineer + scheduled date/time inside UPDATE modal -->
-      <div class="field">
-        <label for="updateModalEngineer">Engineer Assigned</label>
-        <select id="updateModalEngineer">
-          <option value="">Unassigned</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="updateModalDate">Scheduled Date</label>
-        <input type="date" id="updateModalDate">
-      </div>
-      <div class="field">
-        <label for="updateModalTime">Scheduled Time</label>
-        <input type="time" id="updateModalTime">
-      </div>
-      <div class="field">
-        <label for="updateModalNote">Event / Notes (history log)</label>
-        <textarea id="updateModalNote" placeholder="e.g. Priority changed from P3 to P2 after site call…"></textarea>
-      </div>
-    </div>
-    <div class="actions">
-      <button type="button" class="btn" id="updateModalCancelBtn">Cancel</button>
-      <button type="button" class="btn primary" id="updateModalSaveBtn">Save</button>
-    </div>
-    <div id="updateModalStatusText" class="small muted" style="margin-top:4px;"></div>
-  </div>
-</div>
-
-<!-- ASSIGN JOB MODAL -->
-<div class="modal-backdrop" id="assignModalBackdrop">
-  <div class="modal">
-    <header>
-      <h2 id="assignModalTitle">Assign Job</h2>
-      <button type="button" id="assignModalCloseBtn">&times;</button>
-    </header>
-    <div class="modal-body">
-      <div class="field">
-        <label>Reference</label>
-        <div class="ref" id="assignModalRef">—</div>
-      </div>
-      <div class="field">
-        <label>Engineers (tick all that will attend)</label>
-        <div id="assignEngineerChecks" style="max-height:180px;overflow:auto;border:1px solid #d1d5db;border-radius:8px;padding:8px;">
-          Loading engineers…
-        </div>
-      </div>
-      <div class="field">
-        <label for="assignDate">Scheduled Date</label>
+        <label for="assignDate">Date</label>
         <input type="date" id="assignDate">
       </div>
-      <div class="field">
-        <label for="assignTime">Scheduled Time</label>
-        <input type="time" id="assignTime">
+      <div class="timerow">
+        <div>
+          <label>Start time</label>
+          <div class="wheelbox">
+            <div class="wheel" id="wStartH"></div>
+            <span class="wheelsep">:</span>
+            <div class="wheel" id="wStartM"></div>
+          </div>
+        </div>
+        <div>
+          <label>Finish time</label>
+          <div class="wheelbox">
+            <div class="wheel" id="wEndH"></div>
+            <span class="wheelsep">:</span>
+            <div class="wheel" id="wEndM"></div>
+          </div>
+        </div>
       </div>
+      <div class="small muted" style="margin:6px 0 8px;">Finish auto-sets to one hour after start — adjust if needed.</div>
       <div class="field">
         <label for="assignNote">Note (optional)</label>
-        <textarea id="assignNote" placeholder="e.g. Booked for Connor on early shift."></textarea>
+        <textarea id="assignNote" placeholder="e.g. Booked with site contact for the morning."></textarea>
       </div>
     </div>
     <div class="actions">
-      <button type="button" class="btn" id="assignModalCancelBtn">Cancel</button>
-      <button type="button" class="btn primary" id="assignModalSaveBtn">Assign</button>
+      <button type="button" class="btn" id="assignCancel">Cancel</button>
+      <button type="button" class="btn primary" id="assignSave">Send job</button>
     </div>
-    <div id="assignModalStatusText" class="small muted" style="margin-top:4px;"></div>
+    <div id="assignStatus" class="small muted" style="margin-top:4px;"></div>
   </div>
 </div>
+
+<!-- UPDATE MODAL -->
+<div class="modal-backdrop" id="updateBackdrop">
+  <div class="modal">
+    <header>
+      <h2 id="updateTitle">Update job</h2>
+      <button type="button" id="updateClose">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="field">
+        <label>Job</label>
+        <div class="ref" id="updateRef">—</div>
+      </div>
+      <div class="field">
+        <label for="updatePriority">Priority</label>
+        <select id="updatePriority">
+          <option value="Priority 1">P1 – Emergency</option>
+          <option value="Priority 2">P2 – Urgent</option>
+          <option value="Priority 3">P3 – Routine</option>
+          <option value="Priority 4">P4 – Low</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="updateStatus">Status</label>
+        <select id="updateStatus"></select>
+      </div>
+      <div class="field">
+        <label for="updateNote">Note (goes in the job history)</label>
+        <textarea id="updateNote"></textarea>
+      </div>
+      <div class="small muted">To change engineers or times, use <b>Send</b> on the job row instead.</div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="updateCancel">Cancel</button>
+      <button type="button" class="btn primary" id="updateSave">Save</button>
+    </div>
+    <div id="updateStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
 <!-- JOB PDF TYPE MODAL -->
 <div class="modal-backdrop" id="pdfTypeBackdrop">
   <div class="modal">
@@ -710,12 +357,8 @@
       <h2>Generate Job Sheet</h2>
       <button type="button" id="pdfTypeClose">&times;</button>
     </header>
-
     <div class="modal-body">
-      <p style="font-size:13px;color:#475569;margin-bottom:12px;">
-        Choose which document you want to generate.
-      </p>
-
+      <p style="font-size:13px;color:#475569;margin-bottom:12px;">Choose which document you want to generate.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn primary" id="pdfClientBtn">📄 Client Copy</button>
         <button class="btn" id="pdfMostlaneBtn">🏗️ Mostlane Copy</button>
@@ -723,876 +366,532 @@
     </div>
   </div>
 </div>
+
 <script>
-const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
-const USERS_API = "https://mostlane-users.jamie-def.workers.dev/users";
-/* =========================
-   JOB SHEET EXPORT
-   ========================= */
-let currentPdfJobId = null;
-
-function openPdfTypeModal(jobId){
-  currentPdfJobId = jobId;
-  $("pdfTypeBackdrop").classList.add("show");
-}
-
-function closePdfTypeModal(){
-  $("pdfTypeBackdrop").classList.remove("show");
-  currentPdfJobId = null;
-}
-
-function openJobPdf(type){
-  if(!currentPdfJobId) return;
-
-  const url =
-    `job-pdf.html?id=${encodeURIComponent(currentPdfJobId)}` +
-    `&type=${encodeURIComponent(type)}`;
-
-  window.open(url, "_blank");
-  closePdfTypeModal();
-}
-let allJobs = [];
-let showingCompleted = false;
-let activePriority = "all";
-let countdownTimerId = null;
-
-let currentUpdateJobId = null;
-let currentAssignJobId = null;
-let cachedUsers = [];
-
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
 const $ = id => document.getElementById(id);
 
-/* =========================
-   DATE HELPERS
-   ========================= */
-function parseDate(v){
-  if(!v) return null;
-  const d = new Date(v);
-  return isNaN(d) ? null : d;
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
 }
-
-function fmtDateTimeShort(d){
-  if(!(d instanceof Date) || isNaN(d)) return "—";
-  return d.toLocaleString("en-GB", {
-    day:"2-digit", month:"short",
-    hour:"2-digit", minute:"2-digit"
-  });
-}
-
-// split ISO → {date, time} for inputs
-function isoToDateAndTime(iso){
-  if(!iso) return {date:"", time:""};
-  const d = new Date(iso);
-  if(isNaN(d)) return {date:"", time:""};
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,"0");
-  const dd = String(d.getDate()).padStart(2,"0");
-  const hh = String(d.getHours()).padStart(2,"0");
-  const min = String(d.getMinutes()).padStart(2,"0");
-  return {date:`${yyyy}-${mm}-${dd}`, time:`${hh}:${min}`};
-}
-
-/* =========================
-   USER HELPER
-   ========================= */
 function getCurrentUser(){
   return sessionStorage.getItem("mostlaneUser") ||
          sessionStorage.getItem("mostlaneUsername") ||
-         sessionStorage.getItem("username") ||
-         "Portal User";
+         localStorage.getItem("mostlaneUser") || "Portal User";
 }
 
-/* =========================
-   NORMALISE JOB
-   ========================= */
-function normaliseJob(raw){
-  const j = raw || {};
+/* Statuses shown as chips, with their colours (dot + outline). */
+const STATUSES = [
+  ["Pending",     "#9f1239"],
+  ["Scheduled",   "#f59e0b"],
+  ["Travelling",  "#3b82f6"],
+  ["In Progress", "#9333ea"],
+  ["On Hold",     "#6b7280"],
+  ["Quote",       "#dc2626"],
+  ["Order",       "#0d9488"],
+  ["Complete",    "#84cc16"],
+  ["Invoiced",    "#22c55e"],
+  ["Closed Jobs", "#701a75"]
+];
+const STATUS_COLOUR = Object.fromEntries(STATUSES);
 
-  const id =
-    j.id || j.jobId || j.reference || j.helpdeskRef || j.ref;
+let allJobs = [];
+let cachedUsers = [];
+let activeStatus = "open";     // "open" = everything not complete/closed/invoiced
+let activePriority = "all";
+let selected = new Set();
+let currentAssignId = null, currentUpdateId = null, currentPdfJobId = null;
+let countdownTimerId = null;
 
-  const reference =
-    j.reference || j.helpdeskRef || j.ref || id || "N/A";
+/* ============ helpers ============ */
+function parseDate(v){ if(!v) return null; const d = new Date(v); return isNaN(d) ? null : d; }
+function fmtShort(d){
+  if(!(d instanceof Date) || isNaN(d)) return "—";
+  return d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+function fmtSched(job){
+  const s = parseDate(job.scheduledAt);
+  if(!s) return "";
+  const e = parseDate(job.scheduledEnd);
+  const day = s.toLocaleDateString("en-GB",{day:"2-digit",month:"2-digit",year:"numeric"});
+  const st = s.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+  const en = e ? e.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) : "";
+  return day + " " + st + (en ? "–" + en : "");
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
+function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status); }
 
-  let priority = (j.priority || j.slaPriority || j.urgency || "").toString().trim().toUpperCase();
-  if(!/^P[1-4]$/.test(priority)){
-    if(priority.includes("1")) priority = "P1";
-    else if(priority.includes("2")) priority = "P2";
-    else if(priority.includes("3")) priority = "P3";
-    else if(priority.includes("4")) priority = "P4";
-    else priority = "P4";
-  }
-
-  const site =
-    j.site || j.siteName || j.siteCode || j.location || j.address || "";
-
-  const description =
-    j.description || j.summary || j.title || "";
-
-  const raisedAt =
-    j.raisedAt || j.raised_on || j.createdAt || j.dateRaised;
-
-  // SLA target from Worker (targetAt)
-  const slaTarget =
-    j.slaTarget || j.targetAt || j.target || j.slaDue;
-
-  const status =
-    j.status || j.callStatus || j.state || "With Contractor - R";
-
-  const assignedEngineers = Array.isArray(j.assignedEngineers) ? j.assignedEngineers.filter(Boolean) : [];
-  const engineer =
-    assignedEngineers.join(", ") || j.engineer || j.assignedEngineer || j.assignedTo || "";
-
-  // keep scheduledAt from Worker
-  const scheduledAt = j.scheduledAt || null;
-
-  return {
-    id,
-    reference,
-    priority,
-    site,
-    description,
-    raisedAt,
-    slaTarget,
-    status,
-    engineer,
-    assignedEngineers,
-    scheduledAt,
-    raw
-  };
+function slaBadge(job){
+  if(isClosed(job)) return {text:"", cls:"sla-badge sla-none"};
+  const t = parseDate(job.targetAt);
+  if(!t) return {text:"—", cls:"sla-badge sla-none"};
+  let diff = t - new Date(); const over = diff < 0; if(over) diff = -diff;
+  const hrs = Math.floor(diff/3600000), mins = Math.floor((diff%3600000)/60000);
+  const label = hrs >= 24 ? Math.floor(hrs/24)+"d "+(hrs%24)+"h" : (String(hrs).padStart(2,"0")+":"+String(mins).padStart(2,"0"));
+  const cls = over ? "sla-red" : ((t - new Date()) <= 4*3600000 ? "sla-amber" : "sla-green");
+  return {text:(over ? "Overdue " : "Due in ") + label, cls:"sla-badge " + cls};
 }
 
-/* =========================
-   SLA COUNTDOWN
-   ========================= */
-function computeSlaCountdown(targetISO, completedAtISO){
-  if(!targetISO){
-    return { text:"—", cls:"sla-badge sla-none", status:"none" };
-  }
-
-  const now = new Date();
-  const target = parseDate(targetISO);
-  if(!target){
-    return { text:"—", cls:"sla-badge sla-none", status:"none" };
-  }
-
-  // If job is completed, compare completion vs target
-  if(completedAtISO){
-    const completedAt = parseDate(completedAtISO);
-    if(!completedAt){
-      return { text:"—", cls:"sla-badge sla-none", status:"none" };
+/* ============ access gate: office → dashboard, engineers → My Jobs ============ */
+async function gate(){
+  try{
+    const u = getCurrentUser();
+    const res = await authFetch("/user?u=" + encodeURIComponent(u));
+    const data = await res.json();
+    if(!data.found){ $("forbidden").style.display = "block"; return false; }
+    const user = data.user;
+    const full = (user.FullAccess||"") === "Yes";
+    const sla  = (user.SLA||"") === "Yes";
+    if(!full && !sla){ $("forbidden").style.display = "block"; return false; }
+    if(!full && user.StaffType !== "office"){
+      // Engineers only see their own jobs.
+      location.replace("engineer-jobs.html");
+      return false;
     }
-
-    let diff = completedAt - target;
-    const late = diff > 0;
-    diff = Math.abs(diff);
-
-    const secs = Math.floor(diff / 1000);
-    const days = Math.floor(secs / 86400);
-    const hours = Math.floor((secs % 86400) / 3600);
-
-    let label = "";
-    if(days > 0){
-      label = `${days}d ${hours}h`;
-    } else {
-      label = `${hours}h`;
-    }
-
-    return {
-      text: late ? `${label} late` : `${label} early`,
-      cls: late ? "sla-badge sla-red" : "sla-badge sla-green",
-      status: late ? "late" : "early"
-    };
-  }
-
-  // OPEN JOB LOGIC
-  let diff = target - now;
-  const overdue = diff < 0;
-  if(overdue) diff = -diff;
-
-  const secs = Math.floor(diff / 1000);
-  const days = Math.floor(secs / 86400);
-  const hours = Math.floor((secs % 86400) / 3600);
-  const mins = Math.floor((secs % 3600) / 60);
-
-  let label = "";
-  if(days > 0){
-    label = `${days}d ${String(hours).padStart(2,"0")}h`;
-  } else {
-    label = `${String(hours).padStart(2,"0")}:${String(mins).padStart(2,"0")}`;
-  }
-
-  const hoursLeft = (target - now) / 3600000;
-
-  let cls = "sla-badge sla-green";
-  let status = "ok";
-
-  if(overdue || hoursLeft <= 0){
-    cls = "sla-badge sla-red";
-    status = "overdue";
-  } else if(hoursLeft <= 4){
-    cls = "sla-badge sla-amber";
-    status = "warn";
-  }
-
-  return {
-    text: (overdue ? "Overdue " : "Due in ") + label,
-    cls,
-    status
-  };
-}
-/* =========================
-   STATUS PILL
-   ========================= */
-function statusClass(status, slaStatus){
-  const s = (status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")){
-    return "status-pill status-complete";
-  }
-  if(slaStatus === "overdue" || slaStatus === "overdueSoon"){
-    return "status-pill status-overdue";
-  }
-  return "status-pill status-open";
-}
-
-function isCompleted(job){
-  const s = (job.status || "").toLowerCase();
-  if(s.includes("complete") || s.includes("closed")) return true;
-  return false;
-}
-
-/* =========================
-   KPI UPDATE
-   ========================= */
-function updateKpis(){
-  const openElem = $("kpiOpenJobs");
-  const dueElem = $("kpiDueToday");
-  const overElem = $("kpiOverdue");
-  const riskElem = $("kpiAtRisk");
-  if(!openElem || !dueElem || !overElem || !riskElem) return;
-
-  const now = new Date();
-  let open = 0, dueToday = 0, overdue = 0, atRisk = 0;
-
-  allJobs.forEach(job => {
-    if(isCompleted(job)) return;
-
-    open++;
-const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-    const t = parseDate(job.slaTarget);
-
-    if(t &&
-       t.getFullYear() === now.getFullYear() &&
-       t.getMonth() === now.getMonth() &&
-       t.getDate() === now.getDate()){
-      dueToday++;
-    }
-
-    if(slaInfo.status === "overdue"){
-      overdue++;
-    } else if(slaInfo.status === "warn" || slaInfo.status === "overdueSoon"){
-      atRisk++;
-    }
-  });
-
-  openElem.textContent = open;
-  dueElem.textContent = dueToday;
-  overElem.textContent = overdue;
-  riskElem.textContent = atRisk;
-}
-
-/* =========================
-   RENDER TABLE + CARDS
-   ========================= */
-function render(){
-  const tbody = $("jobsTbody");
-  const wrapper = document.querySelector(".table-wrapper");
-  const cardsContainer = $("jobCards");
-  const prevScrollLeft = wrapper ? wrapper.scrollLeft : 0;
-
-  if(tbody) tbody.innerHTML = "";
-  if(cardsContainer) cardsContainer.innerHTML = "";
-
-  const openJobs = allJobs.filter(j => !isCompleted(j));
-  const completedJobs = allJobs.filter(j => isCompleted(j));
-
-  $("countOpen").textContent = openJobs.length;
-  $("countCompleted").textContent = completedJobs.length;
-
-  const list = showingCompleted ? completedJobs : openJobs;
-
-  const search = $("searchBox").value.trim().toLowerCase();
-  const statusFilter = $("statusFilter").value;
-
-  const filtered = list.filter(job => {
-    if(activePriority !== "all" && job.priority !== activePriority) return false;
-
-    const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-
-    if(!showingCompleted){
-      if(statusFilter === "open"){
-        if(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon") return false;
-      }
-      if(statusFilter === "overdue"){
-        if(!(slaInfo.status === "overdue" || slaInfo.status === "overdueSoon")) return false;
-      }
-    }
-
-    if(search){
-      const blob = [
-        job.reference,
-        job.site,
-        job.description,
-        job.status,
-        job.engineer
-      ].join(" ").toLowerCase();
-      if(!blob.includes(search)) return false;
-    }
-
+    $("userLabel").textContent = "Logged in as " + u;
+    $("mainCard").style.display = "block";
     return true;
-  });
-
-  $("statusBar").textContent =
-    filtered.length === 0
-      ? "No jobs match filters."
-      : `${filtered.length} job(s) shown`;
-
-  for(const job of filtered){
-    const raised = parseDate(job.raisedAt);
-   const completedAt =
-  isCompleted(job)
-    ? (job.raw?.completedAt || job.raw?.closedAt || null)
-    : null;
-
-const slaInfo = computeSlaCountdown(job.slaTarget, completedAt);
-    // TABLE ROW (desktop)
-    if(tbody){
-      const tr = document.createElement("tr");
-      tr.dataset.jobId = job.id || "";
-
-      tr.innerHTML = `
-        <td>
-          <div class="ref">${job.reference}</div>
-          ${job.engineer ? `<div class="small muted">${job.engineer}</div>` : ""}
-        </td>
-        <td><div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div></td>
-        <td>
-          <div style="font-size:13px;font-weight:500;">${job.description || ""}</div>
-          <div class="small muted">${job.site || ""}</div>
-        </td>
-        <td class="small nowrap">${fmtDateTimeShort(raised)}</td>
-        <td class="small nowrap">${fmtDateTimeShort(parseDate(job.slaTarget))}</td>
-        <td class="small nowrap">
-          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-            ${slaInfo.text}
-          </span>
-        </td>
-        <td class="small">
-          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
-        </td>
-<td>
-  <div style="display:flex;gap:4px;flex-wrap:wrap;">
-    <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-    <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-    <button class="btn icon-only" data-action="sheet" title="Job Sheet">📄</button>
-  </div>
-</td>
-`;
-      tbody.appendChild(tr);
-    }
-
-    // MOBILE CARD
-    if(cardsContainer){
-      const card = document.createElement("div");
-      card.className = "job-card";
-      card.dataset.jobId = job.id || "";
-
-      card.innerHTML = `
-        <div class="job-card-header">
-          <div class="job-card-ref">
-            <span class="ref">${job.reference}</span>
-            ${job.engineer ? `<span class="small muted">${job.engineer}</span>` : ""}
-          </div>
-          <div class="priority-badge ${job.priority.toLowerCase()}">${job.priority}</div>
-        </div>
-        <div class="job-card-title">${job.description || ""}</div>
-        <div class="job-card-site">${job.site || ""}</div>
-        <div class="job-card-meta">
-          <span class="${slaInfo.cls}" data-sla-target="${job.slaTarget || ""}" data-job-id="${job.id}">
-            ${slaInfo.text}
-          </span>
-          <span class="${statusClass(job.status, slaInfo.status)}">${job.status}</span>
-        </div>
-        <div class="job-card-meta small muted">
-          <span>Raised: ${fmtDateTimeShort(raised)}</span>
-          <span>SLA: ${fmtDateTimeShort(parseDate(job.slaTarget))}</span>
-        </div>
-        <div class="job-card-actions">
-  <button class="btn icon-only" data-action="update" title="Update job">✏️</button>
-  <button class="btn icon-only" data-action="assign" title="Assign to engineer">👤</button>
-  <button class="btn icon-only" data-action="sheet" title="Job Sheet">📄</button>
-</div>
-      `;
-      cardsContainer.appendChild(card);
-    }
+  }catch(e){
+    // If the lookup fails, show the board rather than a dead end.
+    $("mainCard").style.display = "block";
+    return true;
   }
-
-  // restore horizontal scroll position on desktop
-  if(wrapper){
-    wrapper.scrollLeft = prevScrollLeft;
-  }
-
-  // update KPI tiles
-  updateKpis();
-
-  startCountdownLoop();
 }
 
-/* =========================
-   COUNTDOWN LOOP
-   ========================= */
-function startCountdownLoop(){
-  if (countdownTimerId) clearInterval(countdownTimerId);
-  if (showingCompleted) return;
-
-  const tick = () => {
-    document.querySelectorAll(".sla-badge[data-sla-target]").forEach(el => {
-      const row = el.closest("[data-job-id]");
-      if (!row) return;
-
-      const jobId = row.dataset.jobId;
-      const job = allJobs.find(j => j.id === jobId);
-
-      // ✅ STEP 4: completed jobs NEVER tick again
-      if (!job || isCompleted(job)) return;
-
-      const iso = el.getAttribute("data-sla-target");
-      if (!iso) return;
-
-      const info = computeSlaCountdown(iso);
-      el.textContent = info.text;
-      el.className = info.cls;
-    });
-  };
-
-  tick();
-  countdownTimerId = setInterval(tick, 1000);
-}
-/* =========================
-   LOAD JOBS
-   ========================= */
+/* ============ data ============ */
 async function loadJobs(){
   $("statusBar").textContent = "Loading jobs…";
   try{
-    const res = await fetch(SLA_API + "/jobs?t=" + Date.now());
+    const res = await authFetch("/sla/jobs?t=" + Date.now());
     const json = await res.json();
-
-    const rawList = Array.isArray(json) ? json : (json.jobs || json.data || []);
-    allJobs = rawList.map(normaliseJob);
-
-    $("statusBar").textContent = `Loaded ${allJobs.length} job(s).`;
+    allJobs = (Array.isArray(json) ? json : []).map(j => ({
+      ...j,
+      status: j.status || "Pending",
+      assignedEngineers: (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length)
+        ? j.assignedEngineers.filter(Boolean)
+        : (j.assignedTo ? [j.assignedTo] : [])
+    }));
     render();
   }catch(err){
-    console.error("load error", err);
+    console.error(err);
     $("statusBar").textContent = "❌ Error loading jobs.";
-    allJobs = [];
-    render();
   }
 }
-
-/* =========================
-   UPDATE MODAL
-   ========================= */
-function openUpdateModal(jobId){
-  const job = allJobs.find(j => j.id === jobId);
-  if(!job) return;
-
-  currentUpdateJobId = jobId;
-  $("updateModalTitle").textContent = `Update Job – ${job.reference}`;
-  $("updateModalRef").textContent = job.reference;
-  $("updateModalPriority").value = job.priority || "P4";
-
-  const statusSelect = $("updateModalStatus");
-  let matched = false;
-  Array.from(statusSelect.options).forEach(opt => {
-    if(opt.value.toLowerCase() === (job.status || "").toLowerCase()){
-      matched = true;
-      statusSelect.value = opt.value;
-    }
-  });
-  if(!matched){
-    statusSelect.value = "In Progress";
-  }
-
-  ensureUsersLoaded().then(() => {
-    populateUpdateEngineerSelect((job.assignedEngineers && job.assignedEngineers[0]) || "");
-  });
-
-  const dt = isoToDateAndTime(job.scheduledAt);
-  $("updateModalDate").value = dt.date;
-  $("updateModalTime").value = dt.time;
-
-  $("updateModalNote").value = "";
-  $("updateModalStatusText").textContent = "";
-
-  $("updateModalBackdrop").classList.add("show");
-}
-
-function closeUpdateModal(){
-  $("updateModalBackdrop").classList.remove("show");
-  currentUpdateJobId = null;
-  $("updateModalNote").value = "";
-  $("updateModalStatusText").textContent = "";
-  $("updateModalEngineer").value = "";
-  $("updateModalDate").value = "";
-  $("updateModalTime").value = "";
-}
-
-async function saveUpdateModal(){
-  if(!currentUpdateJobId) return;
-
-  const priority = $("updateModalPriority").value;
-  const status = $("updateModalStatus").value;
-  const note = $("updateModalNote").value.trim();
-  const engineer = $("updateModalEngineer").value;
-  const date = $("updateModalDate").value;
-  const time = $("updateModalTime").value;
-  const user = getCurrentUser();
-
-  let scheduledAt = null;
-  if(date && time){
-    scheduledAt = new Date(date + "T" + time + ":00").toISOString();
-  }
-
-  $("updateModalStatusText").textContent = "Saving…";
-
-  try{
-    const payload = {
-      priority,
-      status,
-      note,
-      changedBy: user
-    };
-
-    // Only send assignment/schedule when actually changed — sending them
-    // unconditionally wiped multi-engineer lists and cleared schedules.
-    const jobNow = allJobs.find(j => j.id === currentUpdateJobId);
-    const currentPrimary = (jobNow && jobNow.assignedEngineers && jobNow.assignedEngineers[0]) || "";
-    if(engineer !== currentPrimary){
-      payload.assignedTo = engineer;   // "" = deliberate unassign
-    }
-    if(scheduledAt){
-      payload.scheduledAt = scheduledAt;
-    }
-
-    const res = await fetch(
-      SLA_API + "/jobs/" + encodeURIComponent(currentUpdateJobId),
-      {
-        method:"PATCH",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
-
-    if(!res.ok){
-  const text = await res.text();
-  throw new Error(`HTTP ${res.status}: ${text}`);
-}
-
-    $("updateModalStatusText").textContent = "✅ Saved – refreshing list…";
-    await loadJobs();
-    setTimeout(closeUpdateModal, 600);
-  }catch(err){
-    console.error("Update modal error:", err);
-$("updateModalStatusText").textContent = "❌ " + err.message;
-  }
-}
-
-/* =========================
-   LOAD ENGINEERS LIST
-   ========================= */
-async function ensureUsersLoaded(){
+async function ensureUsers(){
   if(cachedUsers.length) return;
   try{
-    const res = await fetch(USERS_API + "?t=" + Date.now());
-    if(!res.ok) throw new Error(res.status + " " + res.statusText);
+    const res = await authFetch("/users?t=" + Date.now());
     const data = await res.json();
-
-    if (Array.isArray(data.Users)) {
-      cachedUsers = data.Users.map(u => ({
-        username: u.Username,
-        displayName: `${u.FirstName} ${u.LastName}`.trim()
-      })).filter(u => u.username);
-    }
-    else if (Array.isArray(data.users)) {
-      cachedUsers = data.users.map(u => ({
-        username: u.username || u.user || "",
-        displayName: u.displayName || u.name || (u.username || "").replace(".", " ")
-      })).filter(u => u.username);
-    }
-    else if (Array.isArray(data)) {
-      cachedUsers = data.map(u => ({
-        username: u.username || u.user || u.Username || "",
-        displayName:
-          u.displayName ||
-          u.name ||
-          `${u.FirstName || ""} ${u.LastName || ""}`.trim() ||
-          (u.username || u.Username || "").replace(".", " ")
-      })).filter(u => u.username);
-    }
-  }catch(err){
-    console.error("User load error:", err);
-    cachedUsers = [];
-  }
+    let list = Array.isArray(data.Users) ? data.Users : [];
+    list = list.filter(u => (u.Status||"").toLowerCase() === "active");
+    if(window.mlOrderUsers) list = window.mlOrderUsers(list);
+    cachedUsers = list.map(u => ({
+      username: u.Username,
+      displayName: ((u.FirstName||"")+" "+(u.LastName||"")).trim() || u.Username,
+      staffType: u.StaffType || "field"
+    }));
+  }catch(e){ cachedUsers = []; }
+}
+function nameOf(username){
+  const u = cachedUsers.find(x => (x.username||"").toLowerCase() === (username||"").toLowerCase());
+  return u ? u.displayName : (username||"").replace(/\./g," ");
 }
 
-function populateEngineerSelect(selected = []){
-  const box = $("assignEngineerChecks");
-  box.innerHTML = "";
+/* ============ render ============ */
+function chipCounts(){
+  const counts = {};
+  STATUSES.forEach(([s]) => counts[s] = 0);
+  allJobs.forEach(j => { if(counts[j.status] !== undefined) counts[j.status]++; });
+  return counts;
+}
+function renderChips(){
+  const counts = chipCounts();
+  const host = $("statusChips");
+  host.innerHTML = "";
+  const openChip = document.createElement("button");
+  openChip.className = "schip allchip" + (activeStatus === "open" ? " active" : "");
+  openChip.innerHTML = `Open <span class="n">${allJobs.filter(j => !isClosed(j)).length}</span>`;
+  openChip.onclick = () => { activeStatus = "open"; render(); };
+  host.appendChild(openChip);
+  STATUSES.forEach(([s, c]) => {
+    const b = document.createElement("button");
+    b.className = "schip" + (activeStatus === s ? " active" : "");
+    b.style.setProperty("--c", c);
+    b.innerHTML = `${esc(s)} <span class="n">${counts[s]}</span>`;
+    b.onclick = () => { activeStatus = s; render(); };
+    host.appendChild(b);
+  });
+  const all = document.createElement("button");
+  all.className = "schip allchip" + (activeStatus === "all" ? " active" : "");
+  all.innerHTML = `All <span class="n">${allJobs.length}</span>`;
+  all.onclick = () => { activeStatus = "all"; render(); };
+  host.appendChild(all);
+}
 
-  if(!cachedUsers.length){
-    box.textContent = "No users found";
-    return;
+function filteredJobs(){
+  const search = $("searchBox").value.trim().toLowerCase();
+  return allJobs.filter(j => {
+    if(activeStatus === "open"){ if(isClosed(j)) return false; }
+    else if(activeStatus !== "all" && j.status !== activeStatus) return false;
+    if(activePriority !== "all" && (j.priority||"") !== activePriority) return false;
+    if(search){
+      const blob = [j.helpdeskRef, j.id, j.description, j.siteName, j.siteCode, j.address,
+                    j.status, (j.assignedEngineers||[]).join(" ")].join(" ").toLowerCase();
+      if(!blob.includes(search)) return false;
+    }
+    return true;
+  }).sort((a,b) => new Date(b.raisedAt||0) - new Date(a.raisedAt||0));
+}
+
+function render(){
+  renderChips();
+  const list = filteredJobs();
+  const tbody = $("jobsTbody");
+  const cards = $("jobCards");
+  tbody.innerHTML = ""; cards.innerHTML = "";
+
+  for(const j of list){
+    const ref = esc(j.helpdeskRef || j.id);
+    const colour = STATUS_COLOUR[j.status] || "#9ca3af";
+    const sched = fmtSched(j);
+    const engs = (j.assignedEngineers||[]);
+    const engNames = engs.map(nameOf).join(", ");
+    const sla = slaBadge(j);
+    const site = esc(j.siteName || j.siteCode || "");
+    const addr = esc([j.address, j.postcode].filter(Boolean).join(", "));
+
+    const tr = document.createElement("tr");
+    tr.dataset.jobId = j.id;
+    tr.innerHTML = `
+      <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
+      <td>
+        <div class="jobdesc viewlink" data-action="view">${esc(j.description || "(no description)")}</div>
+        <span class="ref">${ref}</span>
+        <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}</div>
+      </td>
+      <td class="nowrap">${prShort(j.priority)}</td>
+      <td>
+        <div>${site}</div>
+        <div class="small muted">${addr}</div>
+      </td>
+      <td class="nowrap small">
+        ${fmtShort(parseDate(j.targetAt))}
+        ${sla.text ? `<div><span class="${sla.cls}">${sla.text}</span></div>` : ""}
+      </td>
+      <td class="nowrap small">${sched || "<span class='muted'>—</span>"}</td>
+      <td class="small">${engNames || `<span class="noalloc">Not Allocated</span>`}</td>
+      <td>
+        <div class="rowactions">
+          <button class="btn small" data-action="assign">👤 Send</button>
+          <button class="btn small" data-action="update">✏️</button>
+          <button class="btn small" data-action="sheet">📄</button>
+          <button class="btn small" data-action="view">View</button>
+        </div>
+      </td>`;
+    tbody.appendChild(tr);
+
+    const card = document.createElement("div");
+    card.className = "mjob";
+    card.dataset.jobId = j.id;
+    card.innerHTML = `
+      <div class="mjob-top">
+        <span class="ref">${ref}</span>
+        <span class="small nowrap">${prShort(j.priority)}</span>
+      </div>
+      <div class="mjob-title">${esc(j.description||"")}</div>
+      <div class="small muted">${site}${addr ? " · " + addr : ""}</div>
+      <div class="mjob-meta">
+        <span class="dot" style="background:${colour}"></span>${esc(j.status)}
+        ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
+      </div>
+      <div class="mjob-meta">${sched ? "🗓 " + sched : ""} ${engNames ? "· 👤 " + esc(engNames) : `<span class="noalloc">Not Allocated</span>`}</div>
+      <div class="mjob-actions">
+        <button class="btn small" data-action="assign">👤 Send</button>
+        <button class="btn small" data-action="update">✏️ Update</button>
+        <button class="btn small" data-action="sheet">📄 Sheet</button>
+        <button class="btn small primary" data-action="view">Open</button>
+      </div>`;
+    cards.appendChild(card);
   }
 
-  const sel = selected.map(s => (s || "").toLowerCase());
+  $("statusBar").textContent = list.length ? `${list.length} job(s) shown` : "No jobs match the filters.";
+  startCountdown();
+}
+
+function startCountdown(){
+  if(countdownTimerId) clearInterval(countdownTimerId);
+  countdownTimerId = setInterval(() => {
+    document.querySelectorAll("[data-job-id]").forEach(row => {
+      const j = allJobs.find(x => x.id === row.dataset.jobId);
+      if(!j || isClosed(j)) return;
+      const el = row.querySelector(".sla-badge");
+      if(!el) return;
+      const info = slaBadge(j);
+      el.textContent = info.text; el.className = info.cls;
+    });
+  }, 30000);
+}
+
+/* ============ smooth time wheels ============ */
+function buildWheel(el, values, onSettle){
+  el.innerHTML = "";
+  const padTop = document.createElement("div"); padTop.className = "pad"; el.appendChild(padTop);
+  values.forEach(v => {
+    const d = document.createElement("div");
+    d.className = "item"; d.textContent = v; d.dataset.v = v;
+    d.onclick = () => el.scrollTo({top: [...el.querySelectorAll(".item")].indexOf(d) * 34, behavior:"smooth"});
+    el.appendChild(d);
+  });
+  const padBot = document.createElement("div"); padBot.className = "pad"; el.appendChild(padBot);
+  let t = null;
+  el.addEventListener("scroll", () => {
+    highlightWheel(el);
+    if(t) clearTimeout(t);
+    t = setTimeout(() => { highlightWheel(el); if(onSettle) onSettle(); }, 120);
+  }, {passive:true});
+}
+function wheelIndex(el){ return Math.round(el.scrollTop / 34); }
+function highlightWheel(el){
+  const idx = wheelIndex(el);
+  el.querySelectorAll(".item").forEach((it,i) => it.classList.toggle("sel", i === idx));
+}
+function setWheel(el, value){
+  const items = [...el.querySelectorAll(".item")];
+  let idx = items.findIndex(it => it.dataset.v === value);
+  if(idx < 0) idx = 0;
+  el.scrollTop = idx * 34;
+  highlightWheel(el);
+}
+function getWheel(el){
+  const items = [...el.querySelectorAll(".item")];
+  const it = items[Math.max(0, Math.min(items.length-1, wheelIndex(el)))];
+  return it ? it.dataset.v : "00";
+}
+const HOURS = Array.from({length:24}, (_,i) => String(i).padStart(2,"0"));
+const MINS  = Array.from({length:12}, (_,i) => String(i*5).padStart(2,"0"));
+let endTouched = false;
+
+function initWheels(){
+  buildWheel($("wStartH"), HOURS, syncEndFromStart);
+  buildWheel($("wStartM"), MINS,  syncEndFromStart);
+  buildWheel($("wEndH"),   HOURS, () => { endTouched = true; });
+  buildWheel($("wEndM"),   MINS,  () => { endTouched = true; });
+}
+function syncEndFromStart(){
+  if(endTouched) return;   // user set their own finish time — leave it alone
+  const h = Number(getWheel($("wStartH"))), m = Number(getWheel($("wStartM")));
+  const end = (h*60 + m + 60) % 1440;
+  setWheel($("wEndH"), String(Math.floor(end/60)).padStart(2,"0"));
+  setWheel($("wEndM"), String(end%60).padStart(2,"0"));
+}
+
+/* ============ assign modal ============ */
+async function openAssign(jobId){
+  const job = allJobs.find(j => j.id === jobId);
+  if(!job) return;
+  currentAssignId = jobId;
+  endTouched = false;
+  $("assignTitle").textContent = `Send job — ${job.helpdeskRef || job.id}`;
+  $("assignRef").textContent = job.helpdeskRef || job.id;
+  $("assignStatus").textContent = "";
+  $("assignNote").value = "";
+
+  await ensureUsers();
+  const box = $("assignChecks");
+  box.innerHTML = "";
+  const current = (job.assignedEngineers||[]).map(s => s.toLowerCase());
   cachedUsers.forEach(u => {
     const label = document.createElement("label");
-    label.style.cssText = "display:flex;align-items:center;gap:8px;padding:3px 2px;font-size:13px;cursor:pointer;";
     const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.value = u.username;
-    cb.checked = sel.includes((u.username || "").toLowerCase());
+    cb.type = "checkbox"; cb.value = u.username;
+    cb.checked = current.includes(u.username.toLowerCase());
     label.appendChild(cb);
     label.appendChild(document.createTextNode(" " + u.displayName));
     box.appendChild(label);
   });
-}
 
-// populate engineer dropdown in UPDATE modal
-function populateUpdateEngineerSelect(selected){
-  const sel = $("updateModalEngineer");
-  if(!sel) return;
-  sel.innerHTML = "";
-
-  const optNone = document.createElement("option");
-  optNone.value = "";
-  optNone.textContent = "Unassigned";
-  sel.appendChild(optNone);
-
-  if(cachedUsers.length){
-    cachedUsers.forEach(u => {
-      const opt = document.createElement("option");
-      opt.value = u.username;
-      opt.textContent = u.displayName;
-      sel.appendChild(opt);
-    });
+  const s = parseDate(job.scheduledAt) || new Date();
+  const yyyy = s.getFullYear(), mm = String(s.getMonth()+1).padStart(2,"0"), dd = String(s.getDate()).padStart(2,"0");
+  $("assignDate").value = `${yyyy}-${mm}-${dd}`;
+  const startM = Math.round(s.getMinutes()/5)*5 % 60;
+  setWheel($("wStartH"), String(s.getHours()).padStart(2,"0"));
+  setWheel($("wStartM"), String(startM).padStart(2,"0"));
+  const e = parseDate(job.scheduledEnd);
+  if(e){
+    endTouched = true;
+    setWheel($("wEndH"), String(e.getHours()).padStart(2,"0"));
+    setWheel($("wEndM"), String(Math.round(e.getMinutes()/5)*5 % 60).padStart(2,"0"));
+  } else {
+    syncEndFromStart();
   }
-
-  if(selected){
-    sel.value = selected;
-  }
+  $("assignBackdrop").classList.add("show");
 }
+function closeAssign(){ $("assignBackdrop").classList.remove("show"); currentAssignId = null; }
 
-/* =========================
-   ASSIGN MODAL
-   ========================= */
-function defaultDateAndTime(){
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth()+1).padStart(2,"0");
-  const dd = String(now.getDate()).padStart(2,"0");
-  const dateStr = `${yyyy}-${mm}-${dd}`;
-
-  const hh = String(now.getHours()).padStart(2,"0");
-  const min = now.getMinutes();
-  const roundedMin = Math.round(min/15)*15;
-  const mmStr = String(roundedMin === 60 ? 45 : roundedMin).padStart(2,"0");
-  const timeStr = `${hh}:${mmStr}`;
-
-  return {dateStr, timeStr};
-}
-
-async function openAssignModal(jobId){
-  const job = allJobs.find(j => j.id === jobId);
-  if(!job) return;
-
-  currentAssignJobId = jobId;
-  $("assignModalTitle").textContent = `Assign Job – ${job.reference}`;
-  $("assignModalRef").textContent = job.reference;
-  $("assignModalStatusText").textContent = "";
-
-  await ensureUsersLoaded();
-  const current = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length)
-    ? job.assignedEngineers
-    : (job.engineer ? [job.engineer] : []);
-  populateEngineerSelect(current);
-
-  const {dateStr, timeStr} = defaultDateAndTime();
-  $("assignDate").value = dateStr;
-  $("assignTime").value = timeStr;
-
-  $("assignNote").value = "";
-
-  $("assignModalBackdrop").classList.add("show");
-}
-
-function closeAssignModal(){
-  $("assignModalBackdrop").classList.remove("show");
-  currentAssignJobId = null;
-  $("assignNote").value = "";
-  $("assignModalStatusText").textContent = "";
-}
-
-async function saveAssignModal(){
-  if(!currentAssignJobId) return;
-
-  const engineers = [...document.querySelectorAll("#assignEngineerChecks input:checked")].map(c => c.value);
+async function saveAssign(){
+  if(!currentAssignId) return;
+  const engineers = [...document.querySelectorAll("#assignChecks input:checked")].map(c => c.value);
   const date = $("assignDate").value;
-  const time = $("assignTime").value;
-  const note = $("assignNote").value.trim();
-  const user = getCurrentUser();
+  if(!engineers.length){ $("assignStatus").textContent = "Tick at least one engineer."; return; }
+  if(!date){ $("assignStatus").textContent = "Pick a date."; return; }
 
-  if(!engineers.length){
-    $("assignModalStatusText").textContent = "Tick at least one engineer.";
-    return;
-  }
-  if(!date || !time){
-    $("assignModalStatusText").textContent = "Please choose date and time.";
-    return;
-  }
+  const sh = getWheel($("wStartH")), sm = getWheel($("wStartM"));
+  const eh = getWheel($("wEndH")),   em = getWheel($("wEndM"));
+  const start = new Date(`${date}T${sh}:${sm}:00`);
+  let end = new Date(`${date}T${eh}:${em}:00`);
+  if(end <= start) end = new Date(start.getTime() + 3600000);
 
-  const scheduledAt = new Date(date + "T" + time + ":00").toISOString();
-
-  $("assignModalStatusText").textContent = "Assigning…";
-
+  $("assignStatus").textContent = "Sending…";
   try{
     const payload = {
       assignedEngineers: engineers,
       assignedTo: engineers[0],
-      scheduledAt,
-      note,
-      changedBy: user
+      scheduledAt: start.toISOString(),
+      scheduledEnd: end.toISOString(),
+      status: "Scheduled",
+      note: $("assignNote").value.trim() || undefined,
+      changedBy: getCurrentUser()
     };
-
-    const res = await fetch(
-      SLA_API + "/jobs/" + encodeURIComponent(currentAssignJobId),
-      {
-        method:"PATCH",
-        headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify(payload)
-      }
-    );
-
-    if(!res.ok){
-      throw new Error(res.status + " " + res.statusText);
-    }
-
-    $("assignModalStatusText").textContent = "✅ Assigned – refreshing list…";
+    const res = await authFetch("/sla/jobs/" + encodeURIComponent(currentAssignId), {
+      method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    $("assignStatus").textContent = "✅ Sent — job is now Scheduled.";
     await loadJobs();
-    setTimeout(closeAssignModal, 600);
+    setTimeout(closeAssign, 500);
   }catch(err){
-    console.error("Assign modal error:", err);
-    $("assignModalStatusText").textContent = "❌ Error assigning job.";
+    $("assignStatus").textContent = "❌ " + err.message;
   }
 }
 
-/* =========================
-   EVENTS + INIT
-   ========================= */
-function handleJobActionClick(e){
-  const btn = e.target.closest("button[data-action]");
+/* ============ update modal ============ */
+function openUpdate(jobId){
+  const job = allJobs.find(j => j.id === jobId);
+  if(!job) return;
+  currentUpdateId = jobId;
+  $("updateTitle").textContent = `Update — ${job.helpdeskRef || job.id}`;
+  $("updateRef").textContent = job.helpdeskRef || job.id;
+  $("updatePriority").value = job.priority || "Priority 4";
+  const sel = $("updateStatus");
+  sel.innerHTML = "";
+  ["Pending", ...STATUSES.map(s => s[0]).filter(s => s !== "Pending")].forEach(s => {
+    const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o);
+  });
+  sel.value = job.status || "Pending";
+  $("updateNote").value = "";
+  $("updateStatusText").textContent = "";
+  $("updateBackdrop").classList.add("show");
+}
+function closeUpdate(){ $("updateBackdrop").classList.remove("show"); currentUpdateId = null; }
+async function saveUpdate(){
+  if(!currentUpdateId) return;
+  $("updateStatusText").textContent = "Saving…";
+  try{
+    const res = await authFetch("/sla/jobs/" + encodeURIComponent(currentUpdateId), {
+      method:"PATCH", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        priority: $("updatePriority").value,
+        status: $("updateStatus").value,
+        note: $("updateNote").value.trim() || undefined,
+        changedBy: getCurrentUser()
+      })
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    $("updateStatusText").textContent = "✅ Saved.";
+    await loadJobs();
+    setTimeout(closeUpdate, 400);
+  }catch(err){
+    $("updateStatusText").textContent = "❌ " + err.message;
+  }
+}
+
+/* ============ pdf modal ============ */
+function openPdfModal(jobId){ currentPdfJobId = jobId; $("pdfTypeBackdrop").classList.add("show"); }
+function closePdfModal(){ $("pdfTypeBackdrop").classList.remove("show"); currentPdfJobId = null; }
+function openJobPdf(type){
+  if(!currentPdfJobId) return;
+  window.open(`job-pdf.html?id=${encodeURIComponent(currentPdfJobId)}&type=${encodeURIComponent(type)}`, "_blank");
+  closePdfModal();
+}
+
+/* ============ bulk ============ */
+async function applyBulk(){
+  const status = $("bulkAction").value;
+  if(!status || !selected.size) return;
+  if(!confirm(`Mark ${selected.size} job(s) as "${status}"?`)) return;
+  $("statusBar").textContent = "Updating…";
+  for(const id of selected){
+    try{
+      await authFetch("/sla/jobs/" + encodeURIComponent(id), {
+        method:"PATCH", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ status, changedBy: getCurrentUser() })
+      });
+    }catch(e){}
+  }
+  selected.clear();
+  $("checkAll").checked = false;
+  await loadJobs();
+}
+
+/* ============ events ============ */
+function onAction(e){
+  const btn = e.target.closest("[data-action]");
   if(!btn) return;
-
-  const action = btn.dataset.action;
-  const rowOrCard = e.target.closest("[data-job-id]");
-  const id = rowOrCard && rowOrCard.dataset.jobId;
-  if(!id) return;
-
-  if(action === "update"){
-    openUpdateModal(id);
-  }
-  else if(action === "assign"){
-    openAssignModal(id);
-  }
-  else if(action === "sheet"){
-    openPdfTypeModal(id);
-  }
+  const row = e.target.closest("[data-job-id]");
+  if(!row) return;
+  const id = row.dataset.jobId;
+  const a = btn.dataset.action;
+  if(a === "assign") openAssign(id);
+  else if(a === "update") openUpdate(id);
+  else if(a === "sheet") openPdfModal(id);
+  else if(a === "view") location.href = "job-view.html?jobId=" + encodeURIComponent(id);
 }
 
-function initEvents(){
-  $("tabOpen").addEventListener("click", () => {
-    showingCompleted = false;
-    $("tabOpen").classList.add("active");
-    $("tabCompleted").classList.remove("active");
-    render();
+function init(){
+  initWheels();
+  $("jobsTbody").addEventListener("click", onAction);
+  $("jobCards").addEventListener("click", onAction);
+  $("jobsTbody").addEventListener("change", e => {
+    const cb = e.target.closest(".rowcheck");
+    if(!cb) return;
+    if(cb.checked) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
   });
-
-  $("tabCompleted").addEventListener("click", () => {
-    showingCompleted = true;
-    $("tabCompleted").classList.add("active");
-    $("tabOpen").classList.remove("active");
-    render();
-  });
-
-  document.querySelectorAll(".chip[data-priority]").forEach(chip => {
-    chip.addEventListener("click", () => {
-      activePriority = chip.dataset.priority;
-      document.querySelectorAll(".chip[data-priority]").forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      render();
+  $("checkAll").addEventListener("change", () => {
+    const on = $("checkAll").checked;
+    document.querySelectorAll(".rowcheck").forEach(cb => {
+      cb.checked = on;
+      if(on) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
     });
   });
-
-  $("statusFilter").addEventListener("change", render);
+  $("bulkApply").addEventListener("click", applyBulk);
+  $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
   $("searchBox").addEventListener("input", render);
-
-  $("jobsTbody").addEventListener("click", handleJobActionClick);
-  $("jobCards").addEventListener("click", handleJobActionClick);
-
-  // Update modal buttons
-  $("updateModalCloseBtn").addEventListener("click", closeUpdateModal);
-  $("updateModalCancelBtn").addEventListener("click", closeUpdateModal);
-  $("updateModalSaveBtn").addEventListener("click", saveUpdateModal);
-
-  // Assign modal buttons
-  $("assignModalCloseBtn").addEventListener("click", closeAssignModal);
-  $("assignModalCancelBtn").addEventListener("click", closeAssignModal);
-  $("assignModalSaveBtn").addEventListener("click", saveAssignModal);
-
-  // Backdrop click to close
-  $("updateModalBackdrop").addEventListener("click", e => {
-    if(e.target === $("updateModalBackdrop")) closeUpdateModal();
+  $("resetBtn").addEventListener("click", () => {
+    activeStatus = "open"; activePriority = "all";
+    $("priorityFilter").value = "all"; $("searchBox").value = ""; render();
   });
-  $("assignModalBackdrop").addEventListener("click", e => {
-    if(e.target === $("assignModalBackdrop")) closeAssignModal();
+  $("assignClose").addEventListener("click", closeAssign);
+  $("assignCancel").addEventListener("click", closeAssign);
+  $("assignSave").addEventListener("click", saveAssign);
+  $("updateClose").addEventListener("click", closeUpdate);
+  $("updateCancel").addEventListener("click", closeUpdate);
+  $("updateSave").addEventListener("click", saveUpdate);
+  $("pdfTypeClose").addEventListener("click", closePdfModal);
+  $("pdfClientBtn").addEventListener("click", () => openJobPdf("client"));
+  $("pdfMostlaneBtn").addEventListener("click", () => openJobPdf("mostlane"));
+  ["assignBackdrop","updateBackdrop","pdfTypeBackdrop"].forEach(id => {
+    $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
   });
-
-  document.addEventListener("keydown", e => {
-    if(e.key === "Escape"){
-      if(currentAssignJobId) closeAssignModal();
-      else if(currentUpdateJobId) closeUpdateModal();
-    }
-  });
-  // PDF type modal buttons
-$("pdfTypeClose").addEventListener("click", closePdfTypeModal);
-$("pdfClientBtn").addEventListener("click", () => openJobPdf("client"));
-$("pdfMostlaneBtn").addEventListener("click", () => openJobPdf("mostlane"));
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  initEvents();
-  loadJobs();
+window.addEventListener("DOMContentLoaded", async () => {
+  init();
+  if(await gate()){
+    ensureUsers().then(() => loadJobs());
+  }
 });
 </script>
 </body>
