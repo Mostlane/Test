@@ -47,3 +47,5 @@
   Cache-Control: no-cache
 /job-view.html
   Cache-Control: no-cache
+/sla-fix-sites.html
+  Cache-Control: no-cache
