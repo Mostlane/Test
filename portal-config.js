@@ -481,13 +481,33 @@
         ]}
       ];
 
+      // Shared Full-access menu curation: an admin can hide irrelevant tiles for
+      // everyone with Full access. The list is cached in localStorage (instant,
+      // flicker-free) and refreshed from /menu-config on load.
+      function mlMenuHidden() {
+        try { var v = JSON.parse(localStorage.getItem("mlMenuHidden") || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+      }
+      function refreshMenuConfig() {
+        fetchAuthed("/menu-config").then(function (d) {
+          if (!d || !d.ok || !Array.isArray(d.hidden)) return;
+          var prev = localStorage.getItem("mlMenuHidden") || "[]";
+          var next = JSON.stringify(d.hidden);
+          try { localStorage.setItem("mlMenuHidden", next); } catch (e) {}
+          if (next !== prev) rebuild();
+        }).catch(function () {});
+      }
+
       function allowed(item) {
         if (item.ownerOnly) {
           var uu = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "";
           return uu === "Jamie Line" && !localStorage.getItem("mostlaneViewAsReal");
         }
         if (item.always) return true;
-        if (yes(perms.FullAccess)) return true;
+        if (yes(perms.FullAccess)) {
+          // Hide pages the admin has switched off for Full access.
+          if (item.href && mlMenuHidden().indexOf(item.href) !== -1) return false;
+          return true;
+        }
         if (!item.perms || !item.perms.length) return true;
         for (var i = 0; i < item.perms.length; i++) if (yes(perms[item.perms[i]])) return true;
         return false;
@@ -559,6 +579,7 @@
           try { localStorage.setItem("pnavCollapsed", c ? "1" : "0"); } catch (e) {}
         });
         try { initOfficeClock(); } catch (e) {}
+        try { if (yes(perms.FullAccess)) refreshMenuConfig(); } catch (e) {}
       }
       function rebuild() {
         var nav = document.getElementById("pnavNav");

@@ -124,6 +124,18 @@
       <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
     </div>
 
+    <div id="menuVisCard" class="notice" style="display:none; background:#eef2ff; border-color:#c7d2fe;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <b style="flex:1;">🧹 Menu visibility for Full Access</b>
+        <button class="btn grey" id="menuVisToggle" type="button">Show</button>
+      </div>
+      <div id="menuVisBody" style="display:none; margin-top:10px;">
+        <p class="muted" style="margin:0 0 8px;">Untick a page to hide it from the menu for <b>everyone with Full Access</b>. Other users are unaffected — they only ever see pages their permissions allow. Tick it again any time to bring it back.</p>
+        <div id="menuVisList" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:6px;"></div>
+        <div style="margin-top:10px;"><button class="btn" id="menuVisSave" type="button">Save menu visibility</button> <span id="menuVisMsg" class="muted"></span></div>
+      </div>
+    </div>
+
     <p class="muted" id="orderHint" style="margin:2px 2px 12px; line-height:1.5;">
       Drag the <b>⠿</b> handle to reorder. <b>Office</b> staff show first everywhere, then <b>Field</b> staff.
       Drag a person between the two lists to change their type, then press <b>Save order</b>.
@@ -401,6 +413,7 @@
         if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Users === "Yes")) {
           alert("Access denied"); location.href = "main.html"; return;
         }
+        if (me.user.FullAccess === "Yes") initMenuVis();   // curation is Full-access only
         await loadUsers();
       } catch (e) {
         g("listMsg").style.display = "block";
@@ -412,6 +425,40 @@
       const data = await (await api("/users")).json();
       allUsers = data.Users || [];
       render();
+    }
+
+    // ── Menu visibility for Full Access (shared list) ──────────────────────
+    const MENU_PAGES = [
+      ["sla-main.html","SLA / Jobs"], ["sites.html","Sites"], ["customers.html","Customers"],
+      ["sitelog.html","SiteLog"], ["my-assets.html","Plant & Equipment"], ["projects.html","Projects"],
+      ["projects-admin.html","Projects Admin"], ["po.html","PO System"], ["office-timesheet.html","Office Timesheet"],
+      ["office-my-hours.html","My Hours"], ["holiday.html","Holiday"], ["holiday-admin.html","Holiday Admin"],
+      ["weekly.html","Weekly Summary"], ["hours-dashboard-simple-v2.html","Hours Dashboard"], ["vehicles.html","Vehicles"],
+      ["stats.html","Stats"], ["device-admin.html","Devices"], ["forms.html","Forms"],
+      ["compliance.html","Compliance"], ["settings.html","Settings (admin)"]
+    ];
+    async function initMenuVis() {
+      g("menuVisCard").style.display = "block";
+      let hidden = [];
+      try { const d = await (await api("/menu-config")).json(); if (d.ok && Array.isArray(d.hidden)) hidden = d.hidden; } catch (e) {}
+      const hset = new Set(hidden);
+      g("menuVisList").innerHTML = MENU_PAGES.map(([href, label]) =>
+        `<label style="display:flex;align-items:center;gap:8px;font-size:14px;">
+           <input type="checkbox" data-page="${esc(href)}" ${hset.has(href) ? "" : "checked"} style="width:auto;margin:0;"> ${esc(label)}
+         </label>`).join("");
+      g("menuVisToggle").onclick = () => {
+        const b = g("menuVisBody"); const show = b.style.display === "none";
+        b.style.display = show ? "block" : "none"; g("menuVisToggle").textContent = show ? "Hide" : "Show";
+      };
+      g("menuVisSave").onclick = async () => {
+        const hide = [...document.querySelectorAll("#menuVisList input[data-page]")].filter(c => !c.checked).map(c => c.dataset.page);
+        g("menuVisMsg").textContent = "Saving…";
+        try {
+          const r = await (await api("/menu-config", { method: "POST", body: JSON.stringify({ hidden: hide }) })).json();
+          if (r.ok) { try { localStorage.setItem("mlMenuHidden", JSON.stringify(hide)); } catch (e) {} g("menuVisMsg").textContent = "✔ Saved — takes effect on each user's next page load."; }
+          else g("menuVisMsg").textContent = r.error || "Save failed";
+        } catch (e) { g("menuVisMsg").textContent = "Save failed"; }
+      };
     }
 
     function accessSummary(u) {

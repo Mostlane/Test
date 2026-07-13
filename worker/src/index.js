@@ -69,6 +69,7 @@ const ROUTES = [
   ["*", "/daily-logs", portal.handle],
   ["*", "/notify",     portal.handle],  // notification audit log
   ["*", "/prefs",      portal.handle],  // per-user cross-device markers
+  ["*", "/menu-config", portal.handle], // Full-access menu visibility (shared)
   ["*", "/audit",      portal.handle],  // activity log (page views + viewer)
   ["*", "/sitelog",    sitelog.handle],
   ["*", "/sitelog-launch", sitelog.handle],

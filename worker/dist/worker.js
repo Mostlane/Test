@@ -3407,6 +3407,28 @@ async function handle8(request, env, ctx, url, sess) {
     `).bind(db.tenantId, SETTINGS_KEY, JSON.stringify(b || {})).run();
     return json({ ok: true }, {}, env, request);
   }
+  if (path === "/menu-config" && method === "GET") {
+    const s = await requireSession(env, request);
+    if (!s) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
+    let hidden = [];
+    try {
+      hidden = row ? JSON.parse(row.value) : [];
+    } catch {
+    }
+    if (!Array.isArray(hidden)) hidden = [];
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
+    return json({ ok: true, hidden }, {}, env, request);
+  }
   if (path === "/oncall/current" && method === "GET") {
     const sess2 = await requireSession(env, request);
     if (!sess2) return error("Not authenticated", 401, env, request);
@@ -4999,6 +5021,8 @@ var ROUTES = [
   // notification audit log
   ["*", "/prefs", handle8],
   // per-user cross-device markers
+  ["*", "/menu-config", handle8],
+  // Full-access menu visibility (shared)
   ["*", "/audit", handle8],
   // activity log (page views + viewer)
   ["*", "/sitelog", handle9],
