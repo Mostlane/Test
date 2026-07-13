@@ -602,7 +602,33 @@ const MAP = {
           }).catch(function () {}));
       }
 
-      var ORDER = { "hs-docs.html": 0, "my-assets.html": 1, "holiday-admin.html": 2, "holiday.html": 3 };
+      // Weekly van check: drivers (vehicle allocated) are chased until this
+      // week's check is in; office (FullAccess) sees who's missing after the
+      // deadline. Clears automatically when the check is submitted.
+      jobs.push(fetch(window.MOSTLANE_API + "/vancheck/attention", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) return;
+          var n = (d.mineDue ? 1 : 0) + (d.missing ? d.missing.length : 0);
+          dot("Vehicles", n);
+          if (d.mineDue) {
+            var dueTxt = new Date(d.dueAt).toLocaleString("en-GB", { weekday: "long", hour: "2-digit", minute: "2-digit" });
+            notes.push({
+              n: 1, icon: "🚐", href: "van-check.html",
+              title: d.overdue ? "Weekly van check OVERDUE" : "Weekly van check due",
+              text: d.overdue ? "It was due by " + dueTxt + " — do it now." : "Complete your walkaround check by " + dueTxt + "."
+            });
+          }
+          if (d.missing && d.missing.length && d.overdue) {
+            notes.push({
+              n: d.missing.length, icon: "🚐", href: "van-checks.html",
+              title: d.missing.length + " van check" + (d.missing.length === 1 ? "" : "s") + " missing this week",
+              text: d.missing.join(", ") + " — deadline has passed."
+            });
+          }
+        }).catch(function () {}));
+
+      var ORDER = { "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "holiday-admin.html": 3, "holiday.html": 4, "van-checks.html": 5 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));

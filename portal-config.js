@@ -763,6 +763,9 @@
         }).catch(function () { return {}; });
       }
       function updateBadges() {
+        fetchAuthed("/vancheck/attention").then(function (d) {
+          if (d && d.ok) setNavBadge("vehicles.html", (d.mineDue ? 1 : 0) + ((d.missing && d.overdue) ? d.missing.length : 0));
+        }).catch(function () {});
         fetchAuthed("/asset/transfers/pending-count").then(function (d) {
           if (d && d.ok) setNavBadge("my-assets.html", d.count);
         }).catch(function () {});

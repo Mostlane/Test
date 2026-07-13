@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Van Checks — Weekly</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:900px; margin:14px auto 60px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.green { background:var(--ok); } .btn.small { padding:6px 9px; font-size:13px; }
+    .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    table.list { width:100%; border-collapse:collapse; }
+    table.list td, table.list th { padding:10px; border-top:1px solid #f0f3f7; font-size:13.5px; text-align:left; vertical-align:middle; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-weight:700; font-size:12.5px; }
+    .pill.done { background:#e6f6ec; color:var(--ok); }
+    .pill.missing { background:#fdecea; color:var(--bad); }
+    .pill.defect { background:#fff6e5; color:#8a5a00; }
+    .pill.unsafe { background:var(--bad); color:#fff; }
+    label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],input[type=time],select,textarea { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:9px; font-size:15px; font-family:inherit; }
+    .overlay { position:fixed; inset:0; background:rgba(8,18,34,.55); z-index:1500; display:none; align-items:flex-start; justify-content:center; overflow:auto; padding:16px; }
+    .overlay.open { display:flex; }
+    .panel { background:#fff; border-radius:16px; width:100%; max-width:560px; padding:18px; margin-top:3vh; }
+    .vphotos { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .vphotos img { width:104px; height:104px; object-fit:cover; border-radius:9px; border:1px solid var(--line); cursor:pointer; }
+    .chk { display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid #f0f3f7; font-size:13.5px; }
+    .chk b.ok { color:var(--ok); } .chk b.bad { color:var(--bad); }
+    .viewer { position:fixed; inset:0; background:rgba(0,0,0,.9); z-index:2000; display:none; align-items:center; justify-content:center; }
+    .viewer.open { display:flex; } .viewer img { max-width:94%; max-height:90%; border-radius:8px; }
+    .msg { font-size:13.5px; margin:8px 0 0; } .msg.err { color:var(--bad); } .msg.ok { color:var(--ok); }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" data-role="home" href="/vehicles.html" style="color:#fff;text-decoration:none;">←</a>
+    <h1>🚐 Weekly Van Checks</h1>
+    <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row">
+          <button class="btn grey small" id="prevWk">←</button>
+          <b id="wkLabel">Loading…</b>
+          <button class="btn grey small" id="nextWk">→</button>
+        </div>
+        <span class="muted" id="dueLabel"></span>
+      </div>
+    </div>
+    <div class="card" style="padding:0; overflow-x:auto;">
+      <table class="list">
+        <thead><tr><th>Driver</th><th>Vehicle</th><th>Status</th><th>Submitted</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted" style="padding:14px;">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12.5px;">Drivers = active users with a vehicle allocated in Users Admin. A Story Mode weekly check counts as done too. Drivers do their check at <b>/van-check.html</b> (🚐 tile / red alert).</p>
+  </div>
+
+  <!-- View a check -->
+  <div class="overlay" id="viewModal">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;" id="vTitle">Check</h2>
+        <button class="btn grey small" onclick="document.getElementById('viewModal').classList.remove('open')">✕</button>
+      </div>
+      <div id="vBody"></div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="overlay" id="setModal">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Van check settings</h2>
+        <button class="btn grey small" onclick="document.getElementById('setModal').classList.remove('open')">✕</button>
+      </div>
+      <div class="row">
+        <div style="flex:1;"><label>Due day (each week)</label>
+          <select id="s_dow"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="7">Sunday</option></select></div>
+        <div style="flex:1;"><label>Due time</label><input type="time" id="s_time"></div>
+      </div>
+      <label>Checklist — one item per line</label>
+      <textarea id="s_list" style="min-height:220px; font-size:14px;"></textarea>
+      <p class="msg" id="sMsg"></p>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn green" id="sSave">Save settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="viewer" id="viewer" onclick="this.classList.remove('open')"><img id="viewerImg"></div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  const fmtDT = s => s ? new Date(s).toLocaleString("en-GB", { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "—";
+  let WEEK = null, DATA = null, ME = null;
+
+  function mondayOf(d) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return x.toISOString().slice(0, 10); }
+  function addDays(d, n) { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
+
+  (async () => {
+    try {
+      const me = await authFetch("/auth/me").then(r => r.json());
+      if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Vehicles === "Yes")) { alert("This page needs Vehicles access."); location.href = "/main.html"; return; }
+      ME = me.user;
+      g("settingsBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
+    } catch (e) { location.href = "/main.html"; return; }
+    WEEK = mondayOf(new Date().toISOString().slice(0, 10));
+    load();
+  })();
+
+  async function load() {
+    g("wkLabel").textContent = "w/c " + new Date(WEEK + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"long" });
+    g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>Loading…</td></tr>";
+    let d;
+    try { d = await authFetch("/vancheck/week?week=" + WEEK).then(r => r.json()); }
+    catch (e) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>⚠️ Couldn't load.</td></tr>"; return; }
+    if (!d.ok) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>" + esc(d.error || "Couldn't load.") + "</td></tr>"; return; }
+    DATA = d;
+    g("dueLabel").textContent = "Due by " + fmtDT(d.dueAt) + (d.overdue ? " — deadline passed" : "");
+    if (!d.rows.length) { g("rows").innerHTML = "<tr><td colspan='5' class='muted' style='padding:14px;'>No drivers — allocate vehicles to people in Users Admin.</td></tr>"; return; }
+    g("rows").innerHTML = d.rows.map(r => {
+      const c = r.check;
+      let status;
+      if (!c) status = `<span class="pill missing">${d.overdue ? "MISSING — overdue" : "Not done yet"}</span>`;
+      else if (c.safeToDrive === false) status = `<span class="pill unsafe">NOT SAFE</span>`;
+      else if (c.defectCount) status = `<span class="pill defect">${c.defectCount} defect${c.defectCount === 1 ? "" : "s"}</span>`;
+      else status = `<span class="pill done">✓ OK</span>`;
+      return `<tr>
+        <td><b>${esc(r.name)}</b></td>
+        <td>${esc((c && c.vehicle) || r.vehicle || "—")}</td>
+        <td>${status}</td>
+        <td class="muted">${c ? esc(fmtDT(c.checkedAt)) + (c.source === "story" ? " · via My Day" : "") : "—"}</td>
+        <td style="text-align:right;">${c ? `<button class="btn ghost small" data-view="${esc(r.username)}">Open</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+  }
+  g("prevWk").onclick = () => { WEEK = addDays(WEEK, -7); load(); };
+  g("nextWk").onclick = () => { WEEK = addDays(WEEK, 7); load(); };
+
+  document.addEventListener("click", e => {
+    if (e.target.dataset.view) openCheck(e.target.dataset.view);
+    if (e.target.closest && e.target.closest("[data-img]")) { g("viewerImg").src = e.target.closest("[data-img]").dataset.img; g("viewer").classList.add("open"); }
+  });
+
+  function openCheck(username) {
+    const r = (DATA.rows || []).find(x => x.username === username);
+    if (!r || !r.check) return;
+    const c = r.check;
+    g("vTitle").textContent = r.name + " — " + (c.vehicle || "");
+    const items = (DATA.settings.checklist || []).map(it => {
+      const a = c.answers[it.id];
+      if (!a) return "";
+      return `<div class="chk"><span>${esc(it.label)}</span><b class="${a === "ok" ? "ok" : "bad"}">${a === "ok" ? "OK" : "DEFECT"}</b></div>`
+        + (a === "defect" && c.defectNotes[it.id] ? `<div class="muted" style="font-size:12.5px; padding:0 0 6px;">↳ ${esc(c.defectNotes[it.id])}</div>` : "");
+    }).join("");
+    const photos = (c.photos || []).map(k => `<img data-img="${esc(API + "/asset-image?key=" + encodeURIComponent(k))}" src="${esc(API + "/asset-thumb?key=" + encodeURIComponent(k))}" alt="">`).join("");
+    g("vBody").innerHTML = `
+      <p class="muted">${esc(fmtDT(c.checkedAt))}${c.mileage ? " · " + esc(c.mileage) + " miles" : ""} · ${c.safeToDrive === false ? "<b style='color:var(--bad)'>marked NOT SAFE TO DRIVE</b>" : "safe to drive"}</p>
+      ${c.source === "story" ? "<p class='muted'>Submitted via the My Day guided check.</p>" : ""}
+      ${items || "<p class='muted'>No itemised answers.</p>"}
+      ${c.note ? `<p><b>Note:</b> ${esc(c.note)}</p>` : ""}
+      ${photos ? `<div class="vphotos">${photos}</div>` : "<p class='muted'>No photos.</p>"}`;
+    g("viewModal").classList.add("open");
+  }
+
+  // ── Settings ──
+  g("settingsBtn").onclick = () => {
+    const s = (DATA && DATA.settings) || { dueDow: 5, dueTime: "17:00", checklist: [] };
+    g("s_dow").value = String(s.dueDow || 5);
+    g("s_time").value = s.dueTime || "17:00";
+    g("s_list").value = (s.checklist || []).map(i => i.label).join("\n");
+    g("sMsg").textContent = "";
+    g("setModal").classList.add("open");
+  };
+  g("sSave").onclick = async () => {
+    const m = g("sMsg"); m.className = "msg"; m.textContent = "Saving…";
+    const checklist = g("s_list").value.split("\n").map(t => t.trim()).filter(Boolean).map(label => ({ label }));
+    if (!checklist.length) { m.className = "msg err"; m.textContent = "Add at least one checklist item."; return; }
+    try {
+      const r = await authFetch("/vancheck/settings", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      m.className = "msg ok"; m.textContent = "Saved ✓ — applies to everyone from now.";
+      load();
+    } catch (e) { m.className = "msg err"; m.textContent = e.message; }
+  };
+</script>
+</body>
+</html>

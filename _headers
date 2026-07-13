@@ -31,3 +31,7 @@
   Cache-Control: no-cache
 /hs-rams-admin.html
   Cache-Control: no-cache
+/van-check.html
+  Cache-Control: no-cache
+/van-checks.html
+  Cache-Control: no-cache

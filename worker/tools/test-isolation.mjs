@@ -21,6 +21,7 @@ import * as keys from "../src/routes/keys.js";
 import * as portal from "../src/routes/portal.js";
 import * as office from "../src/routes/office.js";
 import * as hs from "../src/routes/hs.js";
+import * as vancheck from "../src/routes/vancheck.js";
 
 const TABLE_RE = /\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)/gi;
 function tablesIn(sql) {
@@ -91,6 +92,8 @@ const CASES = [
   ["hs      GET /hs/docs?type=induction", hs,   "/hs/docs?type=induction"],
   ["hs      GET /hs/attention",       hs,       "/hs/attention"],
   ["hs      GET /hs/library",         hs,       "/hs/library"],
+  ["vancheck GET /vancheck/attention", vancheck, "/vancheck/attention"],
+  ["vancheck GET /vancheck/week",      vancheck, "/vancheck/week"],
 ];
 
 let failures = 0, checkedQueries = 0, drove = 0;

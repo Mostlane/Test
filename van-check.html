@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weekly Van Check</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:640px; margin:14px auto 60px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
+    label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],input[type=number],textarea { width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    textarea { min-height:60px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:12px 16px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.small { padding:7px 10px; font-size:13px; font-weight:600; }
+    .muted { color:#6b7a90; }
+    .due { border-radius:10px; padding:10px 12px; font-size:13.5px; font-weight:600; margin-bottom:12px; }
+    .due.ok { background:#e6f6ec; color:#0a7d33; border:1px solid #b6e3c6; }
+    .due.warn { background:#fff6e5; color:#8a5a00; border:1px solid #f0d9a6; }
+    .due.late { background:#fdecea; color:#b00020; border:1px solid #f5c2c0; }
+    .item { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid #f0f3f7; }
+    .item:first-child { border-top:none; }
+    .item .lbl { flex:1; font-size:14.5px; }
+    .seg { display:flex; border:1px solid #ccd5dd; border-radius:9px; overflow:hidden; flex:none; }
+    .seg button { border:none; background:#fff; padding:9px 13px; font:600 13px inherit; font-family:inherit; cursor:pointer; color:#5b6b7b; }
+    .seg button.on-ok { background:var(--ok); color:#fff; }
+    .seg button.on-bad { background:var(--bad); color:#fff; }
+    .defnote { margin:2px 0 8px; display:none; }
+    .defnote.show { display:block; }
+    .photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .ph { position:relative; }
+    .ph img { width:74px; height:74px; object-fit:cover; border-radius:9px; border:1px solid var(--line); }
+    .ph .rm { position:absolute; top:-7px; right:-7px; width:22px; height:22px; border-radius:50%; background:var(--bad); color:#fff; border:none; font-size:12px; cursor:pointer; padding:0; }
+    .safe { display:flex; gap:10px; }
+    .safe button { flex:1; border:2px solid #ccd5dd; background:#fff; border-radius:11px; padding:13px; font:700 15px inherit; font-family:inherit; cursor:pointer; color:#5b6b7b; }
+    .safe button.on-yes { border-color:var(--ok); background:#e6f6ec; color:var(--ok); }
+    .safe button.on-no { border-color:var(--bad); background:#fdecea; color:var(--bad); }
+    .msg { font-size:14px; margin:10px 0; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
+    .donebox { text-align:center; padding:22px 14px; }
+    .donebox .big { font-size:42px; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" data-role="home" href="/vehicles.html" style="color:#fff;text-decoration:none;">←</a>
+    <h1>🚐 Weekly Van Check</h1>
+  </header>
+  <div class="wrap">
+    <div class="due" id="dueBox" style="display:none;"></div>
+
+    <div class="card donebox" id="doneBox" style="display:none;">
+      <div class="big">✅</div>
+      <h2 style="margin:6px 0;">Done for this week</h2>
+      <p class="muted" id="doneInfo"></p>
+      <button class="btn grey" id="redoBtn">Edit / redo this week's check</button>
+    </div>
+
+    <div id="formWrap" style="display:none;">
+      <div class="card">
+        <label>Vehicle</label>
+        <input type="text" id="f_vehicle" placeholder="Registration">
+        <label>Mileage</label>
+        <input type="number" id="f_mileage" inputmode="numeric" placeholder="Current mileage">
+      </div>
+      <div class="card">
+        <b>Walkaround checks</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Tap OK or Defect for every item. Add a note for any defect.</p>
+        <div id="checkItems"></div>
+      </div>
+      <div class="card">
+        <b>Photos</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 0;">Add photos of the van (all four sides is ideal) and any defects. Up to 8.</p>
+        <div class="photos" id="photoRow"></div>
+        <button class="btn grey small" type="button" id="addPhoto" style="margin-top:8px;">📷 Add photo</button>
+      </div>
+      <div class="card">
+        <b>Safe to drive?</b>
+        <div class="safe" style="margin-top:8px;">
+          <button type="button" id="safeYes">✔ Safe to drive</button>
+          <button type="button" id="safeNo">✖ NOT safe</button>
+        </div>
+        <label>Anything else to report?</label>
+        <textarea id="f_note" placeholder="Optional"></textarea>
+      </div>
+      <p class="msg" id="msg"></p>
+      <button class="btn" id="submitBtn" style="width:100%;">Submit van check</button>
+    </div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  let CFG = null, answers = {}, defectNotes = {}, photos = [], safe = null;
+
+  // ── Crash-proof local draft ─────────────────────────────────────────────────
+  // Everything (answers, notes, photos, mileage…) is saved on-device as you go,
+  // so a crash / killed app / dead signal loses nothing: reopen the page and
+  // the draft is restored. IndexedDB (not localStorage) so photos fit too.
+  const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "me";
+  const DRAFT_KEY = "draft:" + meUser;
+  function idb() { return new Promise((res, rej) => { const r = indexedDB.open("mlVanCheck", 1); r.onupgradeneeded = () => r.result.createObjectStore("d"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  async function draftPut(v) { try { const d = await idb(); await new Promise((res, rej) => { const tx = d.transaction("d", "readwrite"); tx.objectStore("d").put(v, DRAFT_KEY); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} }
+  async function draftGet() { try { const d = await idb(); return await new Promise((res, rej) => { const tx = d.transaction("d", "readonly"); const q = tx.objectStore("d").get(DRAFT_KEY); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); }); } catch (e) { return null; } }
+  async function draftDel() { try { const d = await idb(); await new Promise((res, rej) => { const tx = d.transaction("d", "readwrite"); tx.objectStore("d").delete(DRAFT_KEY); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} }
+  let saveT = null;
+  function saveDraft() {
+    if (!CFG) return;
+    if (saveT) clearTimeout(saveT);
+    saveT = setTimeout(() => {
+      draftPut({ week: CFG.week, at: Date.now(), answers, defectNotes, photos, safe,
+        vehicle: g("f_vehicle").value, mileage: g("f_mileage").value, note: g("f_note").value });
+    }, 350);
+  }
+
+  (async () => {
+    let d;
+    try { d = await authFetch("/vancheck/config").then(r => r.json()); }
+    catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
+    if (!d.ok) { location.href = "/main.html"; return; }
+    CFG = d;
+    const dueBox = g("dueBox");
+    const dueTxt = new Date(d.deadline.dueAt).toLocaleString("en-GB", { weekday:"long", hour:"2-digit", minute:"2-digit" });
+    dueBox.style.display = "block";
+    if (d.myCheck) { dueBox.className = "due ok"; dueBox.textContent = "✅ This week's check is done."; }
+    else if (d.deadline.overdue) { dueBox.className = "due late"; dueBox.textContent = "⚠️ OVERDUE — this week's check was due by " + dueTxt + ". Do it now."; }
+    else { dueBox.className = "due warn"; dueBox.textContent = "🕒 Due by " + dueTxt + " this week."; }
+    // Restore an unsaved draft for THIS week (crash/kill recovery).
+    const draft = await draftGet();
+    if (draft && draft.week === d.week && !(d.myCheck && d.myCheck.source === "portal")) {
+      answers = draft.answers || {}; defectNotes = draft.defectNotes || {};
+      photos = draft.photos || []; safe = (draft.safe === true || draft.safe === false) ? draft.safe : null;
+      g("f_vehicle").value = draft.vehicle || d.vehicle || "";
+      g("f_mileage").value = draft.mileage || ""; g("f_note").value = draft.note || "";
+      startForm();
+      const m = g("msg"); m.className = "msg ok"; m.textContent = "📝 Restored your unsaved draft — carry on where you left off.";
+      return;
+    }
+    if (d.myCheck && d.myCheck.source === "portal") showDone(); else startForm();
+  })();
+
+  function showDone() {
+    g("doneBox").style.display = "block"; g("formWrap").style.display = "none";
+    const c = CFG.myCheck;
+    g("doneInfo").textContent = (c.vehicle ? c.vehicle + " · " : "") +
+      (c.defectCount ? c.defectCount + " defect" + (c.defectCount === 1 ? "" : "s") + " reported · " : "No defects · ") +
+      (c.safeToDrive === false ? "marked NOT safe to drive" : "safe to drive");
+    g("redoBtn").onclick = () => { loadExisting(); startForm(); };
+  }
+  function loadExisting() {
+    const c = CFG.myCheck || {};
+    answers = { ...(c.answers || {}) }; defectNotes = { ...(c.defectNotes || {}) };
+    photos = (c.photos || []).map(k => ({ key: k }));
+    safe = c.safeToDrive === false ? false : true;
+    g("f_vehicle").value = c.vehicle || CFG.vehicle || "";
+    g("f_mileage").value = c.mileage || "";
+    g("f_note").value = c.note || "";
+  }
+  function startForm() {
+    g("doneBox").style.display = "none"; g("formWrap").style.display = "block";
+    if (!g("f_vehicle").value) g("f_vehicle").value = CFG.vehicle || "";
+    renderItems(); renderPhotos(); renderSafe();
+  }
+
+  function renderItems() {
+    g("checkItems").innerHTML = CFG.checklist.map(it => `
+      <div class="item">
+        <span class="lbl">${esc(it.label)}</span>
+        <span class="seg">
+          <button type="button" class="${answers[it.id] === "ok" ? "on-ok" : ""}" data-ok="${esc(it.id)}">OK</button>
+          <button type="button" class="${answers[it.id] === "defect" ? "on-bad" : ""}" data-bad="${esc(it.id)}">Defect</button>
+        </span>
+      </div>
+      <div class="defnote ${answers[it.id] === "defect" ? "show" : ""}" id="dn_${esc(it.id)}">
+        <input type="text" placeholder="What's wrong?" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
+      </div>`).join("");
+  }
+  g("checkItems").addEventListener("click", e => {
+    const ok = e.target.dataset.ok, bad = e.target.dataset.bad;
+    if (ok) { answers[ok] = "ok"; delete defectNotes[ok]; renderItems(); saveDraft(); }
+    if (bad) { answers[bad] = "defect"; renderItems(); saveDraft(); }
+  });
+  g("checkItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
+  ["f_vehicle", "f_mileage", "f_note"].forEach(id => g(id).addEventListener("input", saveDraft));
+
+  function renderSafe() {
+    g("safeYes").className = safe === true ? "on-yes" : "";
+    g("safeNo").className = safe === false ? "on-no" : "";
+  }
+  g("safeYes").onclick = () => { safe = true; renderSafe(); saveDraft(); };
+  g("safeNo").onclick = () => { safe = false; renderSafe(); saveDraft(); };
+
+  // Photos: capture, shrink client-side (quick on site data), preview, remove.
+  async function shrink(file) {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.75);
+  }
+  g("addPhoto").onclick = () => {
+    if (photos.length >= 8) { alert("8 photos max."); return; }
+    // capture="environment" forces the CAMERA on phones — no gallery picker.
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.onchange = async () => {
+      const f = input.files[0]; if (!f) return;
+      try { photos.push({ data: await shrink(f) }); renderPhotos(); saveDraft(); }
+      catch (e) { alert("Couldn't read that photo — try again."); }
+    };
+    input.click();
+  };
+  function renderPhotos() {
+    g("photoRow").innerHTML = photos.map((p, i) => `
+      <span class="ph"><img src="${p.data ? p.data : esc(API + "/asset-thumb?key=" + encodeURIComponent(p.key))}" alt="">
+      <button class="rm" data-rm="${i}">✕</button></span>`).join("");
+  }
+  g("photoRow").addEventListener("click", e => { if (e.target.dataset.rm !== undefined) { photos.splice(Number(e.target.dataset.rm), 1); renderPhotos(); saveDraft(); } });
+
+  g("submitBtn").onclick = async () => {
+    const msg = g("msg"); msg.className = "msg";
+    const unanswered = CFG.checklist.filter(it => !answers[it.id]);
+    if (unanswered.length) { msg.className = "msg err"; msg.textContent = "Answer every item — " + unanswered.length + " left (" + unanswered[0].label + "…)."; return; }
+    if (safe === null) { msg.className = "msg err"; msg.textContent = "Tap whether the van is safe to drive."; return; }
+    const hasDefects = Object.values(answers).some(v => v === "defect");
+    if (hasDefects && safe === true && !confirm("You've reported defects but marked it SAFE to drive. Continue?")) return;
+    g("submitBtn").disabled = true; msg.textContent = "Sending…";
+    try {
+      const r = await authFetch("/vancheck/submit", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          vehicle: g("f_vehicle").value.trim(), mileage: g("f_mileage").value.trim(),
+          answers, defectNotes, photos: photos.map(p => p.data || p.key),
+          safeToDrive: safe, note: g("f_note").value.trim(),
+        }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "send failed");
+      msg.className = "msg ok"; msg.textContent = "Van check submitted ✓";
+      await draftDel();
+      const d = await authFetch("/vancheck/config").then(r => r.json());
+      if (d.ok) { CFG = d; g("dueBox").className = "due ok"; g("dueBox").textContent = "✅ This week's check is done."; showDone(); }
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't send — " + e.message; }
+    finally { g("submitBtn").disabled = false; }
+  };
+</script>
+</body>
+</html>
