@@ -233,7 +233,8 @@ CREATE TABLE IF NOT EXISTS holidays (
   year         INTEGER NOT NULL,
   start_date   TEXT NOT NULL,
   end_date     TEXT NOT NULL,
-  days         INTEGER,                   -- weekdays inclusive
+  days         REAL,                      -- weekdays inclusive (0.5 = half day)
+  half         TEXT,                      -- 'AM' | 'PM' for half-day bookings
   type         TEXT,                      -- Annual Leave | Sick | ...
   notes        TEXT,
   status       TEXT DEFAULT 'Pending',    -- Pending | Approved | Rejected | Cancelled
