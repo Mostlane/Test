@@ -338,6 +338,8 @@ function normaliseJob(j){
     ref: j.helpdeskRef || "",
     title: j.description || ("Job " + j.id),
     site: j.siteName || j.siteCode || "",
+    siteCode: j.siteCode || "",
+    postcode: (j.postcode || "").replace(/\*+$/,"").trim(),
     address: [j.address, j.postcode].filter(Boolean).join(", "),
     priority: j.priority || "",
     status: j.status || "Pending",
@@ -771,6 +773,72 @@ $("jobForm").addEventListener("submit", async function(e){
 let map = null, mapLayer = null;
 const mapFilter = new Set(MAP_STATUSES);
 
+/* Pins are placed by POSTCODE: the job's own postcode, or its site's postcode
+   when the job doesn't carry one. Postcodes are geocoded with postcodes.io
+   (free UK service) and cached on the device, so each postcode is looked up
+   once ever. Saved lat/lon is only a backstop for jobs with no postcode. */
+let siteMeta = null;                 // "0123" -> { pc, lat, lon }
+const GEO_KEY = "mlPostcodeGeo_v1";
+let geoCache = {};
+try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+
+async function loadSiteMeta(){
+  if(siteMeta) return;
+  siteMeta = {};
+  try{
+    const res = await authFetch("/get-sites?category=all");
+    const sites = await res.json();
+    (Array.isArray(sites) ? sites : []).forEach(s => {
+      const key = String(s.siteNumber || "").replace(/\D/g, "");
+      if(!key) return;
+      const lat = Number(s.lat), lon = Number(s.lon ?? s.lng);
+      siteMeta[key.padStart(4,"0")] = {
+        pc: String(s.postcode || "").replace(/\*+$/,"").trim(),
+        lat: isFinite(lat) ? lat : null,
+        lon: isFinite(lon) ? lon : null
+      };
+    });
+  }catch(e){ /* jobs with their own coords still plot */ }
+}
+function siteFor(job){
+  if(!siteMeta) return null;
+  const digits = (String(job.siteCode || job.site || "").match(/(\d+)\s*$/) || [])[1];
+  return digits ? (siteMeta[digits.padStart(4,"0")] || null) : null;
+}
+function postcodeFor(job){
+  const pc = (job.postcode || "").trim() || ((siteFor(job) || {}).pc || "");
+  return pc.toUpperCase().replace(/\s+/g, " ").trim();
+}
+/* Geocode every postcode we don't know yet, in one bulk call (max 100/req). */
+async function geocodePostcodes(pcs){
+  const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
+  for(let i = 0; i < todo.length; i += 100){
+    const batch = todo.slice(i, i + 100);
+    try{
+      const res = await fetch("https://api.postcodes.io/postcodes", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ postcodes: batch })
+      });
+      const data = await res.json();
+      (data.result || []).forEach(r => {
+        geoCache[(r.query || "").toUpperCase()] =
+          (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
+      });
+    }catch(e){ /* offline — fall back to stored coords below */ }
+  }
+  try{ localStorage.setItem(GEO_KEY, JSON.stringify(geoCache)); }catch{}
+}
+function coordsFor(job){
+  const pc = postcodeFor(job);
+  if(pc && Array.isArray(geoCache[pc])) return geoCache[pc];
+  const lat = Number(job.lat), lon = Number(job.lon);
+  if(isFinite(lat) && isFinite(lon) && (lat || lon)) return [lat, lon];
+  const s = siteFor(job);
+  if(s && s.lat != null && s.lon != null && (s.lat || s.lon)) return [s.lat, s.lon];
+  return null;
+}
+
 function openMap(){
   $("mapOverlay").classList.add("show");
   if(typeof L === "undefined"){
@@ -785,7 +853,13 @@ function openMap(){
     }).addTo(map);
     mapLayer = L.layerGroup().addTo(map);
   }
-  setTimeout(() => { map.invalidateSize(); plotJobs(); }, 60);
+  $("mapNote").textContent = "Placing jobs by postcode…";
+  (async () => {
+    await loadSiteMeta();
+    const mappable = jobs.filter(j => MAP_STATUSES.includes(j.status));
+    await geocodePostcodes(mappable.map(postcodeFor));
+    setTimeout(() => { map.invalidateSize(); plotJobs(); }, 60);
+  })();
 }
 function closeMap(){
   $("mapOverlay").classList.remove("show");
@@ -797,8 +871,9 @@ function plotJobs(){
   const pts = [];
   let noLoc = 0;
   jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status)).forEach(job => {
-    const lat = Number(job.lat), lon = Number(job.lon);
-    if(!isFinite(lat) || !isFinite(lon) || (!lat && !lon)){ noLoc++; return; }
+    const pt = coordsFor(job);
+    if(!pt){ noLoc++; return; }
+    const [lat, lon] = pt;
     const colour = STATUS_COLOUR[job.status] || "#2563eb";
     const marker = L.circleMarker([lat, lon], {
       radius: 9, color: "#ffffff", weight: 2, fillColor: colour, fillOpacity: 0.95
@@ -819,10 +894,10 @@ function plotJobs(){
   });
   if(pts.length){
     map.fitBounds(pts, { padding: [36, 36], maxZoom: 13 });
-    $("mapNote").textContent = `${pts.length} job(s) on the map` + (noLoc ? ` · ${noLoc} without a location (open the job to check the site)` : "") + ". Tap a pin for the summary.";
+    $("mapNote").textContent = `${pts.length} job(s) on the map` + (noLoc ? ` · ${noLoc} with no usable postcode (check the site record)` : "") + ". Tap a pin for the summary.";
   } else {
     map.setView([51.27, -0.75], 9);   // Farnham-ish default
-    $("mapNote").textContent = noLoc ? `No mappable jobs — ${noLoc} job(s) have no location saved.` : "No open jobs to map.";
+    $("mapNote").textContent = noLoc ? `No mappable jobs — ${noLoc} job(s) have no usable postcode.` : "No open jobs to map.";
   }
 }
 function escHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }

@@ -896,7 +896,10 @@ async function renderSite(){
     const a = document.createElement("a"); a.href = "tel:" + info.phone.replace(/\s+/g,""); a.textContent = info.phone;
     $("sitePhone").appendChild(a);
   }
-  const dest = (info.lat != null && info.lon != null) ? `${info.lat},${info.lon}` : info.address;
+  // Postcode/address first — sat-navs route better on postcodes than raw coords.
+  const pc = (job.postcode || "").replace(/\*+$/,"").trim();
+  const dest = [info.address, !info.address.includes(pc) ? pc : ""].filter(Boolean).join(", ")
+    || ((info.lat != null && info.lon != null) ? `${info.lat},${info.lon}` : "");
   if(dest){
     // Google Maps directions: origin defaults to wherever the engineer is now.
     const dirUrl = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(dest) + "&travelmode=driving";
