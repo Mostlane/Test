@@ -3596,6 +3596,28 @@ async function handle13(request, env, ctx, url, sess) {
     await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
     return json({ ok: true, id, ref }, {}, env, request);
   }
+  if (path === "/hs/attention" && method === "GET") {
+    const { results } = await db.prepare(
+      "SELECT id, ref, site, data, created_by FROM hs_documents WHERE tenant_id=? AND doc_type='hotworks' AND status='open'"
+    ).bind(db.tenantId).all();
+    const now = Date.now();
+    const isOffice = perms.FullAccess === "Yes";
+    const me = sess.user.username;
+    const items = [];
+    for (const r of results || []) {
+      let d = {};
+      try {
+        d = r.data ? JSON.parse(r.data) : {};
+      } catch {
+      }
+      const exp = d.expiresAt ? Date.parse(d.expiresAt) : NaN;
+      if (!exp || exp > now) continue;
+      if (!isOffice && r.created_by !== me) continue;
+      items.push({ id: r.id, ref: r.ref, site: r.site, expiresAt: d.expiresAt });
+    }
+    items.sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)));
+    return json({ ok: true, count: items.length, items }, {}, env, request);
+  }
   if (path === "/hs/doc/delete" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     if (!b.id) return error("Missing id", 400, env, request);

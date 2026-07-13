@@ -6,6 +6,7 @@
   <title>H&amp;S Documents</title>
   <script src="/portal-config.js?v=2"></script>
   <script src="auth.js"></script>
+  <script src="hs-rams-library.js?v=1"></script>
   <style>
     :root { --brand:#003366; --line:#e2e8f0; }
     * { box-sizing:border-box; }
@@ -124,7 +125,9 @@
           <div><label>Date</label><input type="date" id="h_date"></div>
           <div><label>Issued by</label><input type="text" id="h_issuedby"></div>
           <div><label>Valid from</label><input type="time" id="h_validfrom"></div>
+          <div><label>Valid until *</label><input type="time" id="h_validuntil"></div>
         </div>
+        <p class="muted" style="margin:8px 0 0; font-size:12.5px;">Once “Valid until” passes and the permit hasn’t been closed out, it’s flagged for close-out (red alert on the H&amp;S tile; office are alerted too).</p>
       </div>
       <div class="card">
         <h3 style="margin-top:0;">1. Description of hot works</h3>
@@ -154,15 +157,7 @@
         <label>Signature</label><div class="sigwrap"><canvas class="sig" id="h_bysig"></canvas></div>
         <button class="btn grey small noprint" type="button" onclick="clearSig('h_bysig')">Clear signature</button>
       </div>
-      <div class="card">
-        <h3 style="margin-top:0;">Close out</h3>
-        <div class="grid2">
-          <div><label>Completion time</label><input type="time" id="h_completion"></div>
-          <div><label class="chk" style="margin-top:26px;"><input type="checkbox" id="h_safe"> Final area declared SAFE</label></div>
-        </div>
-        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="h_mgrsig"></canvas></div>
-        <button class="btn grey small noprint" type="button" onclick="clearSig('h_mgrsig')">Clear signature</button>
-      </div>
+      <p class="muted" style="font-size:12.5px;">The permit is issued as <b>OPEN</b>. Close it out (completion time, area safe, manager signature) from the permit document when the works are finished.</p>
       <p class="msg" id="hwMsg"></p>
       <div class="row">
         <button class="btn" id="hwSave">Save permit</button>
@@ -171,52 +166,72 @@
       </div>
     </div>
 
-    <!-- FORM: RAMS -->
-    <div id="formRams" class="hide">
-      <h2 id="ramsFormTitle">New Risk Assessment / Method Statement</h2>
+    <!-- FORM: Hot Works close-out -->
+    <div id="formHwClose" class="hide">
+      <h2 id="hwCloseTitle">Close out Hot Works Permit</h2>
       <div class="card">
-        <h3 style="margin-top:0;">Details</h3>
+        <p class="muted" id="hwClosePermit"></p>
         <div class="grid2">
-          <div><label>Task / activity *</label><input type="text" id="r_task"></div>
+          <div><label>Completion time</label><input type="time" id="c_completion"></div>
+          <div><label class="chk" style="margin-top:26px;"><input type="checkbox" id="c_safe"> Final area declared SAFE</label></div>
+        </div>
+        <label>Manager signature</label><div class="sigwrap"><canvas class="sig" id="c_mgrsig"></canvas></div>
+        <button class="btn grey small noprint" type="button" onclick="clearSig('c_mgrsig')">Clear signature</button>
+      </div>
+      <p class="msg" id="hwCloseMsg"></p>
+      <div class="row">
+        <button class="btn" id="hwCloseSave">Close out &amp; save</button>
+        <button class="btn grey" id="hwCloseCancel">Cancel</button>
+      </div>
+    </div>
+
+    <!-- FORM: RAMS (Risk Assessment Builder) -->
+    <div id="formRams" class="hide">
+      <h2 id="ramsFormTitle">New Risk Assessment</h2>
+      <div class="card">
+        <h3 style="margin-top:0;">Activity details</h3>
+        <div class="grid2">
+          <div><label>Title / activity *</label><input type="text" id="r_task"></div>
           <div><label>Project / site</label><input type="text" id="r_site"></div>
+        </div>
+        <label>Location of activity</label><input type="text" id="r_location">
+        <label>Description of activity</label><textarea id="r_desc"></textarea>
+        <label>Equipment used</label><input type="text" id="r_equipment">
+        <label>Supporting documents</label><input type="text" id="r_supporting">
+        <div class="grid2">
+          <div><label>Persons affected</label><input type="text" id="r_persons"></div>
+          <div><label>Likely harm(s)</label><input type="text" id="r_harms"></div>
+          <div><label>Total numbers affected</label><input type="text" id="r_totalaffected"></div>
+          <div><label>Frequency of exposure</label><input type="text" id="r_frequency"></div>
+          <div><label>Duration of exposure</label><input type="text" id="r_duration"></div>
           <div><label>Assessor</label><input type="text" id="r_assessor"></div>
           <div><label>Date</label><input type="date" id="r_date"></div>
-          <div><label>Review date</label><input type="date" id="r_review"></div>
+          <div><label>Review before</label><input type="date" id="r_review"></div>
         </div>
       </div>
-      <div class="card brief">
-        <h3 style="margin-top:0;">Persons at risk</h3>
-        <div id="r_persons"></div>
+      <div class="card">
+        <h3 style="margin-top:0;">Select the types of work</h3>
+        <p class="muted" style="font-size:12.5px; margin-top:0;">Tick the work you're doing — the matching hazards and control measures are pulled in below, pre-rated. You can then adjust ratings, edit or add controls, and add your own hazards.</p>
+        <div id="r_tree"></div>
       </div>
       <div class="card">
-        <h3 style="margin-top:0;">Hazards &amp; controls</h3>
-        <div id="r_hazards"></div>
-        <button class="btn ghost small" type="button" onclick="addHazard()">+ Add hazard</button>
-      </div>
-      <div class="card brief">
-        <h3 style="margin-top:0;">PPE required</h3>
-        <div id="r_ppe"></div>
+        <h3 style="margin-top:0;">Hazards &amp; risk rating</h3>
+        <div id="r_assembled"><p class="muted">Select some work above to pull in hazards, or add one manually.</p></div>
+        <button class="btn ghost small" type="button" onclick="addCustomHazard()">+ Add custom hazard</button>
       </div>
       <div class="card">
-        <h3 style="margin-top:0;">Method statement</h3>
-        <label>Sequence of works / order of operations</label><textarea id="r_method"></textarea>
-        <label>Equipment / plant needed</label><textarea id="r_equipment"></textarea>
-        <label>Emergency arrangements</label><textarea id="r_emergency"></textarea>
-      </div>
-      <div class="card">
-        <h3 style="margin-top:0;">Prepared by</h3>
-        <label>Print name</label><input type="text" id="r_byname">
+        <h3 style="margin-top:0;">Assessor sign-off</h3>
         <label>Signature</label><div class="sigwrap"><canvas class="sig" id="r_bysig"></canvas></div>
         <button class="btn grey small noprint" type="button" onclick="clearSig('r_bysig')">Clear signature</button>
       </div>
       <div class="card">
-        <h3 style="margin-top:0;">Operative sign-off <span class="muted" style="font-weight:400;">— "I have read and understood this RAMS"</span></h3>
+        <h3 style="margin-top:0;">Operative sign-off <span class="muted" style="font-weight:400;">— "I have read and understood this risk assessment"</span></h3>
         <div id="r_acks"></div>
         <button class="btn ghost small" type="button" onclick="addAck()">+ Add operative</button>
       </div>
       <p class="msg" id="ramsMsg"></p>
       <div class="row">
-        <button class="btn" id="ramsSave">Save RAMS</button>
+        <button class="btn" id="ramsSave">Save</button>
         <button class="btn ghost" id="ramsSaveView">Save &amp; open document</button>
         <button class="btn grey" onclick="showList('rams')">Cancel</button>
       </div>
@@ -289,7 +304,8 @@
 
     <!-- DOCUMENT VIEW (printable) -->
     <div id="docView" class="hide">
-      <div class="row noprint" style="margin-bottom:10px; justify-content:flex-end;">
+      <div class="row noprint" style="margin-bottom:10px; justify-content:space-between;">
+        <button class="btn hide" id="docCloseBtn" style="background:#0a7d33;">✅ Close out permit</button>
         <button class="btn" onclick="window.print()">🖨️ Print / Save PDF</button>
       </div>
       <div class="doc" id="docBody"></div>
@@ -377,7 +393,7 @@
            <p class="muted">Full project H&amp;S plan (existing tool)</p>
          </button>`;
   }
-  const VIEWS = ["hub","list","formInduction","formHotworks","formRams","formIncident","docView"];
+  const VIEWS = ["hub","list","formInduction","formHotworks","formHwClose","formRams","formIncident","docView"];
   function showHub(){ VIEWS.forEach(i=>g(i).classList.add("hide")); g("hub").classList.remove("hide"); g("backHub").classList.add("hide"); }
   function show(id){ VIEWS.forEach(i=>g(i).classList.add("hide")); g(id).classList.remove("hide"); g("backHub").classList.remove("hide"); }
 
@@ -404,16 +420,20 @@
       const d = await authFetch("/hs/docs?type=" + encodeURIComponent(type)).then(r => r.json());
       const docs = (d && d.docs) || [];
       if (!docs.length) { g("listRows").innerHTML = `<tr><td class="muted">No documents yet — tap “+ New”.</td></tr>`; return; }
-      g("listRows").innerHTML = docs.map(x => `
+      g("listRows").innerHTML = docs.map(x => {
+        const isHw = x.doc_type === "hotworks", closed = x.status === "closed";
+        const status = isHw ? `<br><span style="font-size:12px; font-weight:700; color:${closed?'#0a7d33':'#b00020'};">● ${closed?'Closed':'Open'}</span>` : "";
+        const closeBtn = (isHw && !closed) ? `<button class="btn small" style="background:#0a7d33;" onclick="closeOutPermit('${x.id}')">Close out</button> ` : "";
+        return `
         <tr>
-          <td><b>${esc(x.ref || "—")}</b><br><span class="muted">${esc(x.site || "")}</span></td>
+          <td><b>${esc(x.ref || "—")}</b>${status}<br><span class="muted">${esc(x.site || "")}</span></td>
           <td class="muted">${esc(fmtDate(x.created_at))}<br>${esc(x.created_by || "")}</td>
           <td style="text-align:right; white-space:nowrap;">
-            <button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
+            ${closeBtn}<button class="btn ghost small" onclick="openDoc('${x.id}')">Open</button>
             <button class="btn grey small" onclick="editDoc('${x.id}')">Edit</button>
             <button class="btn red small" onclick="delDoc('${x.id}')">✕</button>
           </td>
-        </tr>`).join("");
+        </tr>`; }).join("");
     } catch (e) { g("listRows").innerHTML = `<tr><td class="muted">⚠️ Couldn't load — try again.</td></tr>`; }
   }
   g("newBtn").onclick = () => {
@@ -445,7 +465,7 @@
   const sigVal = id => pads[id] ? pads[id].get() : "";
 
   // ── Induction form ───────────────────────────────────────────────────────────
-  let editId = null;
+  let editId = null, curDocData = null, curEditStatus = "open";
   function renderBriefing(checked) {
     g("i_brief").innerHTML = BRIEFING.map((t,i) =>
       `<label class="chk"><input type="checkbox" data-brief="${i}" ${(!checked || checked.includes(t)) ? "checked" : ""}> ${esc(t)}</label>`).join("");
@@ -564,57 +584,67 @@
   function addOperative(){ hwOperativeRow(); }
 
   function newHotworks() {
-    editId = null;
+    editId = null; curDocData = null; curEditStatus = "open";
     g("hwFormTitle").textContent = "New Hot Works Permit";
-    ["h_project","h_site","h_client","h_issuedby","h_validfrom","h_location","h_nature","h_equipment","h_watchname","h_byname","h_completion"].forEach(i => g(i).value = "");
+    ["h_project","h_site","h_client","h_issuedby","h_validfrom","h_validuntil","h_location","h_nature","h_equipment","h_watchname","h_byname"].forEach(i => g(i).value = "");
     g("h_date").value = new Date().toISOString().slice(0,10);
-    g("h_safe").checked = false;
     renderChecks("h_fire", HW_FIRE, null);
     renderChecks("h_watch", HW_WATCH, null);
     g("h_operatives").innerHTML = "";
     g("hwMsg").textContent = "";
     show("formHotworks");
-    setTimeout(() => { initSig("h_bysig",""); initSig("h_mgrsig",""); hwOperativeRow(); }, 30);
+    setTimeout(() => { initSig("h_bysig",""); hwOperativeRow(); }, 30);
   }
   function fillHotworks(doc) {
     const x = doc.data || {};
+    curDocData = x; curEditStatus = doc.status || "open";
     g("hwFormTitle").textContent = "Edit Hot Works Permit — " + (doc.ref || "");
     g("h_project").value = x.project || doc.site || ""; g("h_site").value = x.site || "";
     g("h_client").value = x.client || ""; g("h_date").value = x.date || "";
-    g("h_issuedby").value = x.issuedBy || ""; g("h_validfrom").value = x.validFrom || "";
+    g("h_issuedby").value = x.issuedBy || ""; g("h_validfrom").value = x.validFrom || ""; g("h_validuntil").value = x.validUntil || "";
     g("h_location").value = x.location || ""; g("h_nature").value = x.nature || ""; g("h_equipment").value = x.equipment || "";
     g("h_watchname").value = x.watchName || ""; g("h_byname").value = x.issuedByName || "";
-    g("h_completion").value = x.completionTime || ""; g("h_safe").checked = !!x.finalSafe;
     renderChecks("h_fire", HW_FIRE, x.fire || null);
     renderChecks("h_watch", HW_WATCH, x.watch || null);
     g("h_operatives").innerHTML = "";
     show("formHotworks");
     setTimeout(() => {
-      initSig("h_bysig", x.issuedBySignature || ""); initSig("h_mgrsig", x.managerSignature || "");
+      initSig("h_bysig", x.issuedBySignature || "");
       (x.operatives && x.operatives.length ? x.operatives : [{}]).forEach(o => hwOperativeRow(o));
     }, 30);
+  }
+  // Turn the date + "valid until" time into an ISO expiry timestamp.
+  function computeExpiry(dateStr, untilTime) {
+    if (!dateStr || !untilTime) return "";
+    const d = new Date(dateStr + "T" + untilTime);
+    return isNaN(d) ? "" : d.toISOString();
   }
   function collectHotworks() {
     const operatives = [...g("h_operatives").children].map(div => {
       const get = k => { const el = div.querySelector(`[data-o="${k}"]`); return el ? el.value.trim() : ""; };
       return { name:get("name"), company:get("company"), signature: sigVal(div.dataset.sig) };
     }).filter(o => o.name || o.company);
+    const validUntil = g("h_validuntil").value, date = g("h_date").value;
     return {
       project:g("h_project").value.trim(), site:g("h_site").value.trim(), client:g("h_client").value.trim(),
-      date:g("h_date").value, issuedBy:g("h_issuedby").value.trim(), validFrom:g("h_validfrom").value,
+      date, issuedBy:g("h_issuedby").value.trim(), validFrom:g("h_validfrom").value,
+      validUntil, expiresAt: computeExpiry(date, validUntil),
       location:g("h_location").value.trim(), nature:g("h_nature").value.trim(), equipment:g("h_equipment").value.trim(),
       fire: collectChecks("h_fire", HW_FIRE), watch: collectChecks("h_watch", HW_WATCH), watchName:g("h_watchname").value.trim(),
       operatives, issuedByName:g("h_byname").value.trim(), issuedBySignature: sigVal("h_bysig"),
-      completionTime:g("h_completion").value, finalSafe:g("h_safe").checked, managerSignature: sigVal("h_mgrsig"),
     };
   }
   async function saveHotworks(openAfter) {
-    const data = collectHotworks();
+    const collected = collectHotworks();
     const msg = g("hwMsg"); msg.className = "msg";
-    if (!data.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    if (!collected.project) { msg.className = "msg err"; msg.textContent = "Project is required."; return; }
+    if (!collected.validUntil) { msg.className = "msg err"; msg.textContent = "“Valid until” is required so the permit can be chased for close-out."; return; }
+    // Merge over any existing data (e.g. keep close-out fields if this permit
+    // was already closed) and preserve its current status.
+    const data = { ...(curDocData || {}), ...collected };
     g("hwSave").disabled = g("hwSaveView").disabled = true; msg.textContent = "Saving…";
     try {
-      const body = { doc_type:"hotworks", site:(data.site || data.project), data, ...(editId ? { id: editId } : {}) };
+      const body = { doc_type:"hotworks", site:(data.site || data.project), status: curEditStatus, data, ...(editId ? { id: editId } : {}) };
       const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
       const id = editId || r.id;
@@ -626,23 +656,98 @@
   g("hwSave").onclick = () => saveHotworks(false);
   g("hwSaveView").onclick = () => saveHotworks(true);
 
-  // ── RAMS form ────────────────────────────────────────────────────────────────
-  const riskOpts = sel => RISK.map(r => `<option ${r===sel?"selected":""}>${r}</option>`).join("");
-  function ramsHazardRow(h = {}) {
-    const div = document.createElement("div");
-    div.className = "sub";
-    div.innerHTML = `
-      <button class="btn red small rm noprint" type="button" onclick="this.parentNode.remove()">✕</button>
-      <label>Hazard</label><input type="text" data-h="hazard" value="${esc(h.hazard||"")}">
-      <div class="grid2">
-        <div><label>Who is at risk</label><input type="text" data-h="who" value="${esc(h.who||"")}"></div>
-        <div><label>Initial risk</label><select data-h="initial">${riskOpts(h.initial||"Medium")}</select></div>
-      </div>
-      <label>Control measures</label><textarea data-h="controls">${esc(h.controls||"")}</textarea>
-      <div style="max-width:200px;"><label>Residual risk</label><select data-h="residual">${riskOpts(h.residual||"Low")}</select></div>`;
-    g("r_hazards").appendChild(div);
+  // ── Hot Works close-out (distinct step → status closed, updated document) ─────
+  let closeDocId = null, closeDocData = null;
+  async function closeOutPermit(id) {
+    const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
+    if (!d.ok) return alert("Couldn't load that permit.");
+    closeDocId = id; closeDocData = d.doc.data || {};
+    g("hwCloseTitle").textContent = "Close out — " + (d.doc.ref || "");
+    g("hwClosePermit").textContent = "Permit " + (d.doc.ref || "") + (closeDocData.site ? " · " + closeDocData.site : "");
+    const now = new Date();
+    g("c_completion").value = String(now.getHours()).padStart(2,"0") + ":" + String(now.getMinutes()).padStart(2,"0");
+    g("c_safe").checked = true;
+    g("hwCloseMsg").textContent = "";
+    show("formHwClose");
+    setTimeout(() => initSig("c_mgrsig", closeDocData.managerSignature || ""), 30);
   }
-  function addHazard(){ ramsHazardRow(); }
+  g("hwCloseCancel").onclick = () => openDoc(closeDocId);
+  g("hwCloseSave").onclick = async () => {
+    const msg = g("hwCloseMsg"); msg.className = "msg";
+    const data = { ...closeDocData, completionTime:g("c_completion").value, finalSafe:g("c_safe").checked, managerSignature: sigVal("c_mgrsig"), closedAt: new Date().toISOString() };
+    g("hwCloseSave").disabled = true; msg.textContent = "Saving…";
+    try {
+      const r = await authFetch("/hs/doc", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ id: closeDocId, doc_type:"hotworks", site:(data.site||data.project), status:"closed", data }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      openDoc(closeDocId);
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't close out — " + e.message; }
+    finally { g("hwCloseSave").disabled = false; }
+  };
+
+  // ── RAMS — Risk Assessment Builder ───────────────────────────────────────────
+  const HS = window.HS_RAMS;
+  let ramsHazards = [];
+  const bandCol = b => b === "High" ? "#b00020" : b === "Medium" ? "#b26b00" : "#0a7d33";
+  const bandBg = b => b === "High" ? "#fdecea" : b === "Medium" ? "#fff6e5" : "#e6f6ec";
+  function riskPill(sev, lik) {
+    const r = (Number(sev)||0) * (Number(lik)||0), b = HS.band(sev, lik);
+    return `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-weight:700;font-size:13px;color:${bandCol(b)};background:${bandBg(b)};">${b} (${r})</span>`;
+  }
+  const numOpts = (key, sel) => key.map((t, idx) => `<option value="${idx+1}" ${Number(sel)===idx+1?"selected":""}>${idx+1} – ${esc(t)}</option>`).join("");
+
+  function renderTree() {
+    g("r_tree").innerHTML = HS.workTypes.map(wt => `
+      <div style="margin:0 0 10px;">
+        <div style="font-weight:700;color:#003366;">${esc(wt.label)}</div>
+        ${wt.subs.map(sub => `
+          <div style="margin:4px 0 4px 8px;">
+            <div class="muted" style="font-size:12px;font-weight:600;">${esc(sub.label)}</div>
+            ${sub.types.map(t => `<label class="chk" style="margin:3px 0 3px 10px;"><input type="checkbox" data-haz="${esc(t.hazards.join(","))}" onchange="treeAdd(this)"> ${esc(t.label)}</label>`).join("")}
+          </div>`).join("")}
+      </div>`).join("");
+  }
+  // Ticking a sub-type ADDS its hazards (pre-rated). Unticking leaves what's
+  // already added — remove hazards you don't want with their ✕.
+  function treeAdd(cb) {
+    if (!cb.checked) return;
+    cb.dataset.haz.split(",").forEach(id => {
+      if (!id || ramsHazards.some(h => h.id === id)) return;
+      const t = HS.hazards[id]; if (!t) return;
+      ramsHazards.push(hazardFromLib(id, t));
+    });
+    renderAssembled();
+  }
+  function hazardFromLib(id, t) {
+    return { id, name:t.name, persons:(t.persons||[]).join(", "), sevWithout:t.sevWithout, likWithout:t.likWithout, controls:(t.controls||[]).slice(), sevWith:t.sevWith, likWith:t.likWith, custom:false };
+  }
+  function addCustomHazard() { ramsHazards.push({ id:"", name:"", persons:"", sevWithout:3, likWithout:3, controls:[""], sevWith:3, likWith:1, custom:true }); renderAssembled(); }
+  function rmHazard(i) { ramsHazards.splice(i, 1); renderAssembled(); }
+  function hzSet(i, f, v) { ramsHazards[i][f] = v; if (/^(sev|lik)/.test(f)) renderAssembled(); }
+  function ctrlSet(i, j, v) { ramsHazards[i].controls[j] = v; }
+  function addCtrl(i) { ramsHazards[i].controls.push(""); renderAssembled(); }
+  function rmCtrl(i, j) { ramsHazards[i].controls.splice(j, 1); renderAssembled(); }
+  function renderAssembled() {
+    if (!ramsHazards.length) { g("r_assembled").innerHTML = `<p class="muted">Select some work above to pull in hazards, or add one manually.</p>`; return; }
+    g("r_assembled").innerHTML = ramsHazards.map((h, i) => `
+      <div class="sub">
+        <button class="btn red small rm noprint" type="button" onclick="rmHazard(${i})">✕</button>
+        <label>Hazard</label><input type="text" value="${esc(h.name)}" oninput="hzSet(${i},'name',this.value)">
+        <label>Persons affected</label><input type="text" value="${esc(h.persons)}" oninput="hzSet(${i},'persons',this.value)">
+        <div class="grid2">
+          <div><label>Severity — no controls</label><select onchange="hzSet(${i},'sevWithout',this.value)">${numOpts(HS.severityKey, h.sevWithout)}</select></div>
+          <div><label>Likelihood — no controls</label><select onchange="hzSet(${i},'likWithout',this.value)">${numOpts(HS.likelihoodKey, h.likWithout)}</select></div>
+        </div>
+        <div style="margin:6px 0;">Risk without controls: ${riskPill(h.sevWithout, h.likWithout)}</div>
+        <label>Control measures</label>
+        <div>${(h.controls||[]).map((c, j) => `<div class="row" style="align-items:flex-start;margin:4px 0;"><textarea style="flex:1;min-height:46px;" oninput="ctrlSet(${i},${j},this.value)">${esc(c)}</textarea><button class="btn red small noprint" type="button" onclick="rmCtrl(${i},${j})">✕</button></div>`).join("")}</div>
+        <button class="btn ghost small noprint" type="button" onclick="addCtrl(${i})">+ control</button>
+        <div class="grid2" style="margin-top:8px;">
+          <div><label>Severity — with controls</label><select onchange="hzSet(${i},'sevWith',this.value)">${numOpts(HS.severityKey, h.sevWith)}</select></div>
+          <div><label>Likelihood — with controls</label><select onchange="hzSet(${i},'likWith',this.value)">${numOpts(HS.likelihoodKey, h.likWith)}</select></div>
+        </div>
+        <div style="margin:6px 0;">Residual risk: ${riskPill(h.sevWith, h.likWith)}</div>
+      </div>`).join("");
+  }
   function ramsAckRow(a = {}) {
     const idx = g("r_acks").children.length;
     const div = document.createElement("div");
@@ -658,43 +763,40 @@
   }
   function addAck(){ ramsAckRow(); }
   function newRams() {
-    editId = null;
-    g("ramsFormTitle").textContent = "New Risk Assessment / Method Statement";
-    ["r_task","r_site","r_assessor","r_review","r_method","r_equipment","r_emergency","r_byname"].forEach(i => g(i).value = "");
-    g("r_date").value = new Date().toISOString().slice(0,10);
-    renderChecks("r_persons", RAMS_PERSONS, null);
-    renderChecks("r_ppe", RAMS_PPE, null);
-    g("r_hazards").innerHTML = ""; g("r_acks").innerHTML = "";
-    g("ramsMsg").textContent = "";
+    editId = null; ramsHazards = [];
+    g("ramsFormTitle").textContent = "New Risk Assessment";
+    ["r_task","r_site","r_location","r_desc","r_equipment","r_supporting","r_persons","r_harms","r_totalaffected","r_frequency","r_duration","r_assessor"].forEach(i => g(i).value = "");
+    const today = new Date(); g("r_date").value = today.toISOString().slice(0,10);
+    g("r_review").value = new Date(today.getTime() + 365*86400000).toISOString().slice(0,10);
+    renderTree(); renderAssembled(); g("r_acks").innerHTML = ""; g("ramsMsg").textContent = "";
     show("formRams");
-    setTimeout(() => { initSig("r_bysig",""); ramsHazardRow(); }, 30);
+    setTimeout(() => initSig("r_bysig",""), 30);
   }
   function fillRams(doc) {
     const x = doc.data || {};
-    g("ramsFormTitle").textContent = "Edit RAMS — " + (doc.ref || "");
+    g("ramsFormTitle").textContent = "Edit Risk Assessment — " + (doc.ref || "");
     g("r_task").value = x.task || doc.site || ""; g("r_site").value = x.site || "";
+    g("r_location").value = x.location || ""; g("r_desc").value = x.description || "";
+    g("r_equipment").value = x.equipment || ""; g("r_supporting").value = x.supporting || "";
+    g("r_persons").value = x.persons || ""; g("r_harms").value = x.harms || "";
+    g("r_totalaffected").value = x.totalAffected || ""; g("r_frequency").value = x.frequency || ""; g("r_duration").value = x.duration || "";
     g("r_assessor").value = x.assessor || ""; g("r_date").value = x.date || ""; g("r_review").value = x.reviewDate || "";
-    g("r_method").value = x.method || ""; g("r_equipment").value = x.equipment || ""; g("r_emergency").value = x.emergency || "";
-    g("r_byname").value = x.preparedByName || "";
-    renderChecks("r_persons", RAMS_PERSONS, x.persons || null);
-    renderChecks("r_ppe", RAMS_PPE, x.ppe || null);
-    g("r_hazards").innerHTML = ""; g("r_acks").innerHTML = "";
-    (x.hazards && x.hazards.length ? x.hazards : [{}]).forEach(h => ramsHazardRow(h));
+    ramsHazards = (x.hazards || []).map(h => ({ id:h.id||"", name:h.name||"", persons:h.persons||"", sevWithout:h.sevWithout||3, likWithout:h.likWithout||3, controls:(h.controls||[]).slice(), sevWith:h.sevWith||3, likWith:h.likWith||1, custom:!h.id }));
+    renderTree(); renderAssembled(); g("r_acks").innerHTML = "";
     show("formRams");
-    setTimeout(() => { initSig("r_bysig", x.preparedBySignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
+    setTimeout(() => { initSig("r_bysig", x.assessorSignature || ""); (x.acks || []).forEach(a => ramsAckRow(a)); }, 30);
   }
   function collectRams() {
-    const hazards = [...g("r_hazards").children].map(div => {
-      const get = k => { const el = div.querySelector(`[data-h="${k}"]`); return el ? el.value.trim() : ""; };
-      return { hazard:get("hazard"), who:get("who"), initial:get("initial"), controls:get("controls"), residual:get("residual") };
-    }).filter(h => h.hazard);
     const acks = [...g("r_acks").children].map(div => ({ name: (div.querySelector('[data-a="name"]')||{}).value?.trim()||"", signature: sigVal(div.dataset.sig) })).filter(a => a.name);
     return {
-      task:g("r_task").value.trim(), site:g("r_site").value.trim(), assessor:g("r_assessor").value.trim(),
-      date:g("r_date").value, reviewDate:g("r_review").value,
-      persons: collectChecks("r_persons", RAMS_PERSONS), ppe: collectChecks("r_ppe", RAMS_PPE), hazards,
-      method:g("r_method").value.trim(), equipment:g("r_equipment").value.trim(), emergency:g("r_emergency").value.trim(),
-      preparedByName:g("r_byname").value.trim(), preparedBySignature: sigVal("r_bysig"), acks,
+      task:g("r_task").value.trim(), site:g("r_site").value.trim(),
+      location:g("r_location").value.trim(), description:g("r_desc").value.trim(),
+      equipment:g("r_equipment").value.trim(), supporting:g("r_supporting").value.trim(),
+      persons:g("r_persons").value.trim(), harms:g("r_harms").value.trim(),
+      totalAffected:g("r_totalaffected").value.trim(), frequency:g("r_frequency").value.trim(), duration:g("r_duration").value.trim(),
+      assessor:g("r_assessor").value.trim(), date:g("r_date").value, reviewDate:g("r_review").value,
+      hazards: ramsHazards.map(h => ({ id:h.id||"", name:h.name, persons:h.persons, sevWithout:Number(h.sevWithout), likWithout:Number(h.likWithout), controls:(h.controls||[]).filter(c => String(c).trim()), sevWith:Number(h.sevWith), likWith:Number(h.likWith) })).filter(h => h.name),
+      assessorSignature: sigVal("r_bysig"), acks,
     };
   }
   async function saveRams(openAfter) {
@@ -799,6 +901,8 @@
     const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
     if (!d.ok) return alert("Couldn't load that document.");
     show("docView");
+    const cb = g("docCloseBtn"); cb.classList.add("hide");
+    if (d.doc.doc_type === "hotworks" && d.doc.status !== "closed") { cb.classList.remove("hide"); cb.onclick = () => closeOutPermit(id); }
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
     else if (d.doc.doc_type === "hotworks") g("docBody").innerHTML = renderHotworks(d.doc);
     else if (d.doc.doc_type === "rams") g("docBody").innerHTML = renderRams(d.doc);
@@ -837,6 +941,11 @@
   }
   function renderHotworks(doc) {
     const x = doc.data || {};
+    const closed = doc.status === "closed";
+    const expired = !closed && x.expiresAt && Date.parse(x.expiresAt) < Date.now();
+    const banner = closed
+      ? `<div style="background:#e6f6ec;color:#0a7d33;border:1px solid #b6e3c6;padding:8px 12px;border-radius:8px;text-align:center;font-weight:700;margin-bottom:12px;">✅ CLOSED OUT${x.closedAt ? " — " + esc(new Date(x.closedAt).toLocaleString("en-GB")) : ""}</div>`
+      : `<div style="background:${expired?"#fdecea":"#fff6e5"};color:${expired?"#b00020":"#8a5a00"};border:1px solid ${expired?"#f5c2c0":"#f0d9a6"};padding:8px 12px;border-radius:8px;text-align:center;font-weight:700;margin-bottom:12px;">${expired?"⚠️ OPEN — CLOSE-OUT OVERDUE":"🟠 OPEN — not yet closed out"}${x.validUntil ? " · valid until " + esc(x.validUntil) : ""}</div>`;
     const ticks = (all, chosen) => `<div style="font-family:monospace; font-size:13px; line-height:1.7;">` +
       all.map(t => `<div>[${(chosen||[]).includes(t) ? "X" : "&nbsp;"}] ${esc(t)}</div>`).join("") + `</div>`;
     const operatives = (x.operatives || []).map((o,i) => `
@@ -847,11 +956,13 @@
     return `
       <h2>Hot Works Permit</h2>
       <p class="ref">Permit No: ${esc(doc.ref || "—")}</p>
+      ${banner}
       <h3>PROJECT DETAILS</h3>
       <div class="kv">
         <div><b>Project:</b> ${esc(x.project||"")}</div><div><b>Site:</b> ${esc(x.site||"")}</div>
         <div><b>Client / PC:</b> ${esc(x.client||"")}</div><div><b>Date:</b> ${esc(fmtDate(x.date))}</div>
         <div><b>Issued by:</b> ${esc(x.issuedBy||"")}</div><div><b>Valid from:</b> ${esc(x.validFrom||"")}</div>
+        <div><b>Valid until:</b> ${esc(x.validUntil||"")}</div>
       </div>
       <h3>1. DESCRIPTION OF HOT WORKS</h3>
       <div class="kv"><div><b>Location:</b> ${esc(x.location||"")}</div><div><b>Nature of works:</b> ${esc(x.nature||"")}</div><div><b>Equipment:</b> ${esc(x.equipment||"")}</div></div>
@@ -866,53 +977,70 @@
       <div class="kv"><div><b>Print name:</b> ${esc(x.issuedByName||"")}</div></div>
       <div class="sig" style="margin-top:6px;"><b>Signature:</b><br>${sigImg(x.issuedBySignature)}</div>
       <h3>CLOSE OUT</h3>
+      ${closed ? `
       <div class="kv"><div><b>Completion time:</b> ${esc(x.completionTime||"")}</div><div><b>Final area:</b> ${x.finalSafe ? "Area declared SAFE" : "—"}</div></div>
-      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>
+      <div class="sig" style="margin-top:6px;"><b>Manager signature:</b><br>${sigImg(x.managerSignature)}</div>`
+      : `<p class="muted">Not yet closed out.</p>`}
       <div class="foot"><b>${esc(HW_FOOTER)}</b><br>Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
   function renderRams(doc) {
     const x = doc.data || {};
-    const rows = (x.hazards || []).map(h => `
+    const hz = x.hazards || [];
+    const rank = { Low:0, Medium:1, High:2 };
+    const worst = hz.reduce((w,h) => { const b = HS.band(h.sevWith, h.likWith); return rank[b] > rank[w] ? b : w; }, "Low");
+    const rate = (s,l) => { const b = HS.band(s,l); return `<span style="font-weight:700;color:${bandCol(b)};">${b}</span>`; };
+    const td = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;vertical-align:top;"';
+    const tdc = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;text-align:center;"';
+    const summaryRows = hz.map(h => `
       <tr>
-        <td>${esc(h.hazard||"")}</td><td>${esc(h.who||"")}</td>
-        <td style="text-align:center;">${esc(h.initial||"")}</td>
-        <td>${esc(h.controls||"")}</td>
-        <td style="text-align:center;">${esc(h.residual||"")}</td>
-      </tr>`).join("") || `<tr><td colspan="5" class="muted">No hazards recorded.</td></tr>`;
-    const acks = (x.acks || []).map((a,i) => `
-      <div style="display:inline-block; width:48%; margin:6px 1%; vertical-align:top;">
-        <b>${esc(a.name||"")}</b><br>${sigImg(a.signature)}</div>`).join("") || `<p class="muted">No operative sign-offs.</p>`;
+        <td ${td}>${esc(h.name||"")}</td><td ${td}>${esc(h.persons||"")}</td>
+        <td ${tdc}>${esc(h.sevWithout)}</td><td ${tdc}>${esc(h.likWithout)}</td><td ${tdc}>${rate(h.sevWithout,h.likWithout)}</td>
+        <td ${tdc}>${esc(h.sevWith)}</td><td ${tdc}>${esc(h.likWith)}</td><td ${tdc}>${rate(h.sevWith,h.likWith)}</td>
+      </tr>`).join("") || `<tr><td ${td} colspan="8">No hazards recorded.</td></tr>`;
+    const controlRows = hz.flatMap(h => (h.controls||[]).map(c => `<tr><td ${td}>${esc(h.name||"")}</td><td ${td}>${esc(c)}</td></tr>`)).join("") || `<tr><td ${td} colspan="2">No control measures.</td></tr>`;
+    const acks = (x.acks || []).map(a => `<div style="display:inline-block;width:48%;margin:6px 1%;vertical-align:top;"><b>${esc(a.name||"")}</b><br>${sigImg(a.signature)}</div>`).join("");
     return `
-      <h2>Risk Assessment &amp; Method Statement</h2>
+      <div style="text-align:center;color:#667;font-size:12px;">Risk Assessment · Mostlane</div>
+      <h2>${esc(x.task || "Risk Assessment")}</h2>
       <p class="ref">Ref: ${esc(doc.ref || "—")}</p>
-      <h3>DETAILS</h3>
+      <div style="text-align:center;font-weight:800;padding:8px;border-radius:8px;margin-bottom:14px;color:${bandCol(worst)};background:${bandBg(worst)};border:1px solid ${bandCol(worst)};">${worst} Risk Activity</div>
+      <h3>ACTIVITY DETAILS</h3>
+      <p><b>Location of activity:</b> ${esc(x.location||"")}</p>
+      <p><b>Description of activity:</b><br>${esc(x.description||"").replace(/\n/g,"<br>")}</p>
       <div class="kv">
-        <div><b>Task / activity:</b> ${esc(x.task||"")}</div><div><b>Project / site:</b> ${esc(x.site||"")}</div>
-        <div><b>Assessor:</b> ${esc(x.assessor||"")}</div><div><b>Date:</b> ${esc(fmtDate(x.date))}</div>
-        <div><b>Review date:</b> ${esc(fmtDate(x.reviewDate))}</div>
+        <div><b>Equipment used:</b> ${esc(x.equipment||"")}</div><div><b>Supporting documents:</b> ${esc(x.supporting||"")}</div>
+        <div><b>Person(s) affected:</b> ${esc(x.persons||"")}</div><div><b>Likely harm(s):</b> ${esc(x.harms||"")}</div>
+        <div><b>Total numbers affected:</b> ${esc(x.totalAffected||"")}</div><div><b>Frequency of exposure:</b> ${esc(x.frequency||"")}</div>
+        <div><b>Duration of exposure:</b> ${esc(x.duration||"")}</div><div><b>Assessor:</b> ${esc(x.assessor||"")}</div>
+        <div><b>Created:</b> ${esc(fmtDate(x.date))}</div><div><b>Review before:</b> ${esc(fmtDate(x.reviewDate))}</div>
       </div>
-      <h3>PERSONS AT RISK</h3><ul>${(x.persons||[]).map(p=>`<li>${esc(p)}</li>`).join("")||"<li class='muted'>None specified</li>"}</ul>
-      <h3>HAZARDS &amp; CONTROLS</h3>
-      <table style="width:100%; border-collapse:collapse; font-size:13px;">
-        <thead><tr style="background:#eef2f7;">
-          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Hazard</th>
-          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Who at risk</th>
-          <th style="padding:6px; border:1px solid #ddd;">Initial</th>
-          <th style="text-align:left; padding:6px; border:1px solid #ddd;">Control measures</th>
-          <th style="padding:6px; border:1px solid #ddd;">Residual</th>
-        </tr></thead>
-        <tbody>${rows.replace(/<td/g,'<td style="padding:6px; border:1px solid #ddd;"')}</tbody>
+      <h3>RISK SUMMARY</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#eef2f7;"><th ${td} rowspan="2">Hazard</th><th ${td} rowspan="2">Persons affected</th><th ${tdc} colspan="3">Risk WITHOUT controls</th><th ${tdc} colspan="3">Risk WITH controls</th></tr>
+          <tr style="background:#eef2f7;"><th ${tdc}>Sev</th><th ${tdc}>Lik</th><th ${tdc}>Rating</th><th ${tdc}>Sev</th><th ${tdc}>Lik</th><th ${tdc}>Rating</th></tr>
+        </thead>
+        <tbody>${summaryRows}</tbody>
       </table>
-      <h3>PPE REQUIRED</h3><ul>${(x.ppe||[]).map(p=>`<li>${esc(p)}</li>`).join("")||"<li class='muted'>None specified</li>"}</ul>
-      <h3>METHOD STATEMENT</h3>
-      <p><b>Sequence of works:</b><br>${esc(x.method||"").replace(/\n/g,"<br>")}</p>
-      <p><b>Equipment / plant:</b><br>${esc(x.equipment||"").replace(/\n/g,"<br>")}</p>
-      <p><b>Emergency arrangements:</b><br>${esc(x.emergency||"").replace(/\n/g,"<br>")}</p>
-      <h3>PREPARED BY</h3>
-      <div class="kv"><div><b>Print name:</b> ${esc(x.preparedByName||"")}</div></div>
-      <div class="sig" style="margin-top:6px;">${sigImg(x.preparedBySignature)}</div>
-      <h3>OPERATIVE SIGN-OFF <span style="font-weight:400; font-size:12px;">— read &amp; understood</span></h3>
-      ${acks}
+      <h3>KEY</h3>
+      <div class="kv" style="font-size:12px;">
+        <div><b>Severity</b><br>${HS.severityKey.map((t,i)=>`${i+1} = ${esc(t)}`).join("<br>")}</div>
+        <div><b>Likelihood</b><br>${HS.likelihoodKey.map((t,i)=>`${i+1} = ${esc(t)}`).join("<br>")}</div>
+      </div>
+      <p style="font-size:12px;margin-top:8px;"><b>Risk (Severity × Likelihood):</b> 15–25 = High Risk · 8–12 = Medium Risk · 1–6 = Low Risk</p>
+      <h3>RISK CONTROL PLAN</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        ${HS.riskControlPlan.map(p=>`<tr><td ${td} style="width:130px;padding:6px;border:1px solid #ccc;font-weight:700;">${esc(p.band)}</td><td ${td}>${esc(p.text)}</td></tr>`).join("")}
+      </table>
+      <h3>CONTROL MEASURES</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="background:#eef2f7;"><th ${td}>Hazard</th><th ${td}>Control measure</th></tr></thead>
+        <tbody>${controlRows}</tbody>
+      </table>
+      <h3>ASSESSOR</h3>
+      <div class="kv"><div><b>Name:</b> ${esc(x.assessor||"")}</div></div>
+      <div class="sig" style="margin-top:6px;">${sigImg(x.assessorSignature)}</div>
+      ${acks ? `<h3>OPERATIVE SIGN-OFF <span style="font-weight:400;font-size:12px;">— read &amp; understood</span></h3>${acks}` : ""}
       <div class="foot">Generated by the Mostlane portal · ${esc(doc.ref||"")} · Created ${esc(fmtDate(doc.created_at))} by ${esc(doc.created_by||"")}</div>`;
   }
   function renderIncident(doc) {

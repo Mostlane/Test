@@ -570,7 +570,25 @@ const MAP = {
           }).catch(function () {}));
       }
 
-      var ORDER = { "my-assets.html": 1, "holiday-admin.html": 2, "holiday.html": 3 };
+      // Hot Works permits whose "valid until" time has passed but haven't been
+      // closed out. The issuer sees their own; office (FullAccess) sees them all
+      // — the next-morning backstop. Clears automatically when a permit is
+      // closed out (no per-user "seen" marker; it's an action, not an FYI).
+      if (perms.FullAccess === "Yes" || perms.HSPlan === "Yes") {
+        jobs.push(fetch(window.MOSTLANE_API + "/hs/attention", H)
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d || !d.ok) return;
+            dot("HSPlan", d.count);
+            if (d.count > 0) notes.push({
+              n: d.count, icon: "🦺", href: "hs-docs.html",
+              title: d.count > 1 ? d.count + " hot works permits need closing out" : "A hot works permit needs closing out",
+              text: "The permit's valid-until time has passed — close it out (completion time, area safe, manager signature)."
+            });
+          }).catch(function () {}));
+      }
+
+      var ORDER = { "hs-docs.html": 0, "my-assets.html": 1, "holiday-admin.html": 2, "holiday.html": 3 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
