@@ -47,6 +47,7 @@ const ROUTES = [
   ["*", "/asset",      assets.handle],   // /assets, /asset/*, /asset-image, /asset-thumb
   ["*", "/transfer",   assets.handle],   // /transfer, /transfer-log
   ["*", "/upload-asset-image", assets.handle],
+  ["*", "/upload-asset-thumb", assets.handle],
   ["*", "/delete-asset-image", assets.handle],
   ["*", "/sla",        sla.handle],
   ["*", "/get-sites",  sites.handle],
@@ -134,6 +135,7 @@ const AUDIT_SKIP = [
   "/device/check-device", // runs on every page load — a check, not an action
   "/audit",               // this system's own endpoints
   "/auth/refresh",        // token rotation, not a user action
+  "/upload-asset-thumb",  // background thumbnail backfill, not a user action
 ];
 function auditAction(env, ctx, sess, request, url, status, clone) {
   try {
