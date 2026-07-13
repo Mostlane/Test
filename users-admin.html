@@ -428,14 +428,20 @@
     }
 
     // ── Menu visibility for Full Access (shared list) ──────────────────────
+    // Every hideable menu item (main.html tiles + sidebar). Essentials — Home,
+    // Users, My Documents, Settings/Help — are deliberately excluded so an admin
+    // can't hide the way back in. "hs" is the H&S Plans launch tile (no href).
     const MENU_PAGES = [
       ["sla-main.html","SLA / Jobs"], ["sites.html","Sites"], ["customers.html","Customers"],
       ["sitelog.html","SiteLog"], ["my-assets.html","Plant & Equipment"], ["projects.html","Projects"],
-      ["projects-admin.html","Projects Admin"], ["po.html","PO System"], ["office-timesheet.html","Office Timesheet"],
-      ["office-my-hours.html","My Hours"], ["holiday.html","Holiday"], ["holiday-admin.html","Holiday Admin"],
-      ["weekly.html","Weekly Summary"], ["hours-dashboard-simple-v2.html","Hours Dashboard"], ["vehicles.html","Vehicles"],
-      ["stats.html","Stats"], ["device-admin.html","Devices"], ["forms.html","Forms"],
-      ["compliance.html","Compliance"], ["settings.html","Settings (admin)"]
+      ["projects-admin.html","Projects Admin"], ["po.html","PO System"], ["hs","H&S Plans"],
+      ["office-timesheet.html","Office Timesheet"], ["office-my-hours.html","My Hours"],
+      ["engineers-hours-menu.html","Engineers Hours Menu"], ["index.html","Check In / Out"],
+      ["timesheet-admin.html","Timesheet Admin"], ["labour-planning.html","Labour Planning"],
+      ["holiday.html","Holiday"], ["holiday-admin.html","Holiday Admin"],
+      ["weekly.html","Weekly Summary"], ["hours-dashboard-simple-v2.html","Hours Dashboard"],
+      ["vehicles.html","Vehicles"], ["stats.html","Stats"], ["device-admin.html","Devices"],
+      ["forms.html","Forms"], ["compliance.html","Compliance"], ["settings.html","Settings (admin)"]
     ];
     async function initMenuVis() {
       g("menuVisCard").style.display = "block";
