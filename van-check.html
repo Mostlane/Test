@@ -44,6 +44,13 @@
     .msg { font-size:14px; margin:10px 0; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
     .donebox { text-align:center; padding:22px 14px; }
     .donebox .big { font-size:42px; }
+    .slot { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid #f0f3f7; }
+    .slot:first-child { border-top:none; }
+    .slot .lbl { flex:1; font-size:14px; }
+    .slot .lbl .req { color:var(--bad); }
+    .slot img { width:56px; height:56px; object-fit:cover; border-radius:8px; border:2px solid var(--ok); }
+    .slot .cam { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 12px; font:600 13px inherit; font-family:inherit; cursor:pointer; }
+    .slot .redo { background:#5b6b7b; }
   </style>
 </head>
 <body>
@@ -75,9 +82,13 @@
       </div>
       <div class="card">
         <b>Photos</b>
-        <p class="muted" style="font-size:12.5px; margin:4px 0 0;">Add photos of the van (all four sides is ideal) and any defects. Up to 8.</p>
-        <div class="photos" id="photoRow"></div>
-        <button class="btn grey small" type="button" id="addPhoto" style="margin-top:8px;">📷 Add photo</button>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Take each photo with the camera. Items marked * are required.</p>
+        <div id="slotList"></div>
+        <div style="border-top:1px solid #f0f3f7; margin-top:8px; padding-top:8px;">
+          <b style="font-size:13.5px;">Extra photos (defects etc.)</b>
+          <div class="photos" id="photoRow"></div>
+          <button class="btn grey small" type="button" id="addPhoto" style="margin-top:8px;">📷 Add extra photo</button>
+        </div>
       </div>
       <div class="card">
         <b>Safe to drive?</b>
@@ -101,7 +112,7 @@
     opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
     return fetch(API + path, opts);
   }
-  let CFG = null, answers = {}, defectNotes = {}, photos = [], safe = null;
+  let CFG = null, answers = {}, defectNotes = {}, photos = [], slotPhotos = {}, safe = null;
 
   // ── Crash-proof local draft ─────────────────────────────────────────────────
   // Everything (answers, notes, photos, mileage…) is saved on-device as you go,
@@ -118,7 +129,7 @@
     if (!CFG) return;
     if (saveT) clearTimeout(saveT);
     saveT = setTimeout(() => {
-      draftPut({ week: CFG.week, at: Date.now(), answers, defectNotes, photos, safe,
+      draftPut({ week: CFG.week, at: Date.now(), answers, defectNotes, photos, slotPhotos, safe,
         vehicle: g("f_vehicle").value, mileage: g("f_mileage").value, note: g("f_note").value });
     }, 350);
   }
@@ -139,7 +150,8 @@
     const draft = await draftGet();
     if (draft && draft.week === d.week && !(d.myCheck && d.myCheck.source === "portal")) {
       answers = draft.answers || {}; defectNotes = draft.defectNotes || {};
-      photos = draft.photos || []; safe = (draft.safe === true || draft.safe === false) ? draft.safe : null;
+      photos = draft.photos || []; slotPhotos = draft.slotPhotos || {};
+      safe = (draft.safe === true || draft.safe === false) ? draft.safe : null;
       g("f_vehicle").value = draft.vehicle || d.vehicle || "";
       g("f_mileage").value = draft.mileage || ""; g("f_note").value = draft.note || "";
       startForm();
@@ -160,7 +172,10 @@
   function loadExisting() {
     const c = CFG.myCheck || {};
     answers = { ...(c.answers || {}) }; defectNotes = { ...(c.defectNotes || {}) };
-    photos = (c.photos || []).map(k => ({ key: k }));
+    slotPhotos = {};
+    for (const [id, k] of Object.entries(c.slotPhotos || {})) slotPhotos[id] = { key: k };
+    const slotKeys = new Set(Object.values(c.slotPhotos || {}));
+    photos = (c.photos || []).filter(k => !slotKeys.has(k)).map(k => ({ key: k }));
     safe = c.safeToDrive === false ? false : true;
     g("f_vehicle").value = c.vehicle || CFG.vehicle || "";
     g("f_mileage").value = c.mileage || "";
@@ -169,7 +184,7 @@
   function startForm() {
     g("doneBox").style.display = "none"; g("formWrap").style.display = "block";
     if (!g("f_vehicle").value) g("f_vehicle").value = CFG.vehicle || "";
-    renderItems(); renderPhotos(); renderSafe();
+    renderItems(); renderSlots(); renderPhotos(); renderSafe();
   }
 
   function renderItems() {
@@ -200,7 +215,33 @@
   g("safeYes").onclick = () => { safe = true; renderSafe(); saveDraft(); };
   g("safeNo").onclick = () => { safe = false; renderSafe(); saveDraft(); };
 
-  // Photos: capture, shrink client-side (quick on site data), preview, remove.
+  // ── Named photo slots (oil, tyres, cab…) — one camera shot each ──
+  function slotSrc(p) { return p.data ? p.data : API + "/asset-thumb?key=" + encodeURIComponent(p.key); }
+  function renderSlots() {
+    g("slotList").innerHTML = (CFG.photoSlots || []).map(sl => {
+      const p = slotPhotos[sl.id];
+      return `<div class="slot">
+        <span class="lbl">${esc(sl.label)}${sl.required !== false ? ' <span class="req">*</span>' : ""}</span>
+        ${p ? `<img src="${esc(slotSrc(p))}" alt="">` : ""}
+        <button type="button" class="cam ${p ? "redo" : ""}" data-slot="${esc(sl.id)}">${p ? "↻ Retake" : "📷 Take"}</button>
+      </div>`;
+    }).join("");
+  }
+  g("slotList").addEventListener("click", e => {
+    const id = e.target.dataset.slot; if (!id) return;
+    // capture="environment" forces the CAMERA on phones — no gallery picker.
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.onchange = async () => {
+      const f = input.files[0]; if (!f) return;
+      try { slotPhotos[id] = { data: await shrink(f) }; renderSlots(); saveDraft(); }
+      catch (err) { alert("Couldn't read that photo — try again."); }
+    };
+    input.click();
+  });
+
+  // Extra photos: capture, shrink client-side (quick on site data), preview, remove.
   async function shrink(file) {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
@@ -210,7 +251,7 @@
     return c.toDataURL("image/jpeg", 0.75);
   }
   g("addPhoto").onclick = () => {
-    if (photos.length >= 8) { alert("8 photos max."); return; }
+    if (photos.length >= 6) { alert("6 extra photos max."); return; }
     // capture="environment" forces the CAMERA on phones — no gallery picker.
     const input = document.createElement("input");
     input.type = "file"; input.accept = "image/*";
@@ -234,6 +275,8 @@
     const unanswered = CFG.checklist.filter(it => !answers[it.id]);
     if (unanswered.length) { msg.className = "msg err"; msg.textContent = "Answer every item — " + unanswered.length + " left (" + unanswered[0].label + "…)."; return; }
     if (safe === null) { msg.className = "msg err"; msg.textContent = "Tap whether the van is safe to drive."; return; }
+    const missingSlots = (CFG.photoSlots || []).filter(sl => sl.required !== false && !slotPhotos[sl.id]);
+    if (missingSlots.length) { msg.className = "msg err"; msg.textContent = "Photos still needed: " + missingSlots.map(sl => sl.label).join(", "); return; }
     const hasDefects = Object.values(answers).some(v => v === "defect");
     if (hasDefects && safe === true && !confirm("You've reported defects but marked it SAFE to drive. Continue?")) return;
     g("submitBtn").disabled = true; msg.textContent = "Sending…";
@@ -241,7 +284,9 @@
       const r = await authFetch("/vancheck/submit", { method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
           vehicle: g("f_vehicle").value.trim(), mileage: g("f_mileage").value.trim(),
-          answers, defectNotes, photos: photos.map(p => p.data || p.key),
+          answers, defectNotes,
+          photoSlots: Object.fromEntries(Object.entries(slotPhotos).map(([k, p]) => [k, p.data || p.key])),
+          photos: photos.map(p => p.data || p.key),
           safeToDrive: safe, note: g("f_note").value.trim(),
         }) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "send failed");

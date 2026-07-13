@@ -90,7 +90,9 @@
         <div style="flex:1;"><label>Due time</label><input type="time" id="s_time"></div>
       </div>
       <label>Checklist — one item per line</label>
-      <textarea id="s_list" style="min-height:220px; font-size:14px;"></textarea>
+      <textarea id="s_list" style="min-height:160px; font-size:14px;"></textarea>
+      <label>Photo list — one per line (add <b>?</b> at the end to make one optional)</label>
+      <textarea id="s_slots" style="min-height:140px; font-size:14px;"></textarea>
       <p class="msg" id="sMsg"></p>
       <div class="row" style="margin-top:10px;">
         <button class="btn green" id="sSave">Save settings</button>
@@ -170,7 +172,12 @@
       return `<div class="chk"><span>${esc(it.label)}</span><b class="${a === "ok" ? "ok" : "bad"}">${a === "ok" ? "OK" : "DEFECT"}</b></div>`
         + (a === "defect" && c.defectNotes[it.id] ? `<div class="muted" style="font-size:12.5px; padding:0 0 6px;">↳ ${esc(c.defectNotes[it.id])}</div>` : "");
     }).join("");
-    const photos = (c.photos || []).map(k => `<img data-img="${esc(API + "/asset-image?key=" + encodeURIComponent(k))}" src="${esc(API + "/asset-thumb?key=" + encodeURIComponent(k))}" alt="">`).join("");
+    const slotDefs = DATA.settings.photoSlots || [];
+    const slotKeys = new Set(Object.values(c.slotPhotos || {}));
+    const img = (k, cap) => `<span style="text-align:center;"><img data-img="${esc(API + "/asset-image?key=" + encodeURIComponent(k))}" src="${esc(API + "/asset-thumb?key=" + encodeURIComponent(k))}" alt=""><br><span class="muted" style="font-size:11px;">${esc(cap)}</span></span>`;
+    const slotImgs = slotDefs.filter(sl => (c.slotPhotos || {})[sl.id]).map(sl => img(c.slotPhotos[sl.id], sl.label)).join("");
+    const extraImgs = (c.photos || []).filter(k => !slotKeys.has(k)).map(k => img(k, "Extra")).join("");
+    const photos = slotImgs + extraImgs;
     g("vBody").innerHTML = `
       <p class="muted">${esc(fmtDT(c.checkedAt))}${c.mileage ? " · " + esc(c.mileage) + " miles" : ""} · ${c.safeToDrive === false ? "<b style='color:var(--bad)'>marked NOT SAFE TO DRIVE</b>" : "safe to drive"}</p>
       ${c.source === "story" ? "<p class='muted'>Submitted via the My Day guided check.</p>" : ""}
@@ -186,6 +193,7 @@
     g("s_dow").value = String(s.dueDow || 5);
     g("s_time").value = s.dueTime || "17:00";
     g("s_list").value = (s.checklist || []).map(i => i.label).join("\n");
+    g("s_slots").value = (s.photoSlots || []).map(i => i.label + (i.required === false ? " ?" : "")).join("\n");
     g("sMsg").textContent = "";
     g("setModal").classList.add("open");
   };
@@ -193,9 +201,13 @@
     const m = g("sMsg"); m.className = "msg"; m.textContent = "Saving…";
     const checklist = g("s_list").value.split("\n").map(t => t.trim()).filter(Boolean).map(label => ({ label }));
     if (!checklist.length) { m.className = "msg err"; m.textContent = "Add at least one checklist item."; return; }
+    const photoSlots = g("s_slots").value.split("\n").map(t => t.trim()).filter(Boolean).map(t => {
+      const optional = /\?$/.test(t);
+      return { label: t.replace(/\s*\?$/, ""), required: !optional };
+    });
     try {
       const r = await authFetch("/vancheck/settings", { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist }) }).then(r => r.json());
+        body: JSON.stringify({ dueDow: Number(g("s_dow").value), dueTime: g("s_time").value, checklist, photoSlots }) }).then(r => r.json());
       if (!r.ok) throw new Error(r.error || "save failed");
       m.className = "msg ok"; m.textContent = "Saved ✓ — applies to everyone from now.";
       load();
