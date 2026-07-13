@@ -50,8 +50,9 @@
     .doc ul { margin:6px 0; padding-left:20px; font-size:14px; } .doc ul li { margin:3px 0; }
     .doc .sig img { max-height:70px; border-bottom:1px solid #333; }
     .doc .foot { margin-top:18px; font-size:12px; color:#556; border-top:1px solid #ddd; padding-top:8px; }
-    @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; } }
+    @media print { header.page,#backHub,.noprint { display:none !important; } body{ background:#fff; } .wrap{ margin:0; max-width:none; } .doc{ border:none; max-width:none; } }
   </style>
+  <style id="printOrient">@page { size: A4 portrait; margin: 12mm; }</style>
 </head>
 <body>
   <header class="page">
@@ -940,6 +941,8 @@
     const d = await authFetch("/hs/doc?id=" + encodeURIComponent(id)).then(r => r.json());
     if (!d.ok) return alert("Couldn't load that document.");
     show("docView");
+    // RAMS prints best in landscape (wide risk-summary matrix); others portrait.
+    g("printOrient").textContent = "@page { size: A4 " + (d.doc.doc_type === "rams" ? "landscape" : "portrait") + "; margin: 12mm; }";
     const cb = g("docCloseBtn"); cb.classList.add("hide");
     if (d.doc.doc_type === "hotworks" && d.doc.status !== "closed") { cb.classList.remove("hide"); cb.onclick = () => closeOutPermit(id); }
     if (d.doc.doc_type === "induction") g("docBody").innerHTML = renderInduction(d.doc);
@@ -1027,15 +1030,29 @@
     const hz = x.hazards || [];
     const rank = { Low:0, Medium:1, High:2 };
     const worst = hz.reduce((w,h) => { const b = HS.band(h.sevWith, h.likWith); return rank[b] > rank[w] ? b : w; }, "Low");
-    const rate = (s,l) => { const b = HS.band(s,l); return `<span style="font-weight:700;color:${bandCol(b)};">${b}</span>`; };
     const td = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;vertical-align:top;"';
     const tdc = 'style="padding:6px;border:1px solid #ccc;font-size:12.5px;text-align:center;"';
-    const summaryRows = hz.map(h => `
+    const solidBg = b => b === "High" ? "#c62828" : b === "Medium" ? "#f0a000" : "#2e7d32";
+    const solidFg = b => b === "Medium" ? "#3a2b00" : "#ffffff";
+    const rateCell = (s,l) => { const b = HS.band(s,l); return `<td style="padding:6px;border:1px solid #fff;font-size:12.5px;text-align:center;background:${solidBg(b)};color:${solidFg(b)};font-weight:800;">${b} (${(s||0)*(l||0)})</td>`; };
+    const numCell = (n,b) => `<td style="padding:6px;border:1px solid #fff;font-size:12.5px;text-align:center;background:${bandBg(b)};font-weight:700;">${esc(n)}</td>`;
+    const summaryRows = hz.map(h => {
+      const bW = HS.band(h.sevWithout, h.likWithout), bC = HS.band(h.sevWith, h.likWith);
+      return `
       <tr>
         <td ${td}>${esc(h.name||"")}</td><td ${td}>${esc(h.persons||"")}</td>
-        <td ${tdc}>${esc(h.sevWithout)}</td><td ${tdc}>${esc(h.likWithout)}</td><td ${tdc}>${rate(h.sevWithout,h.likWithout)}</td>
-        <td ${tdc}>${esc(h.sevWith)}</td><td ${tdc}>${esc(h.likWith)}</td><td ${tdc}>${rate(h.sevWith,h.likWith)}</td>
-      </tr>`).join("") || `<tr><td ${td} colspan="8">No hazards recorded.</td></tr>`;
+        ${numCell(h.sevWithout,bW)}${numCell(h.likWithout,bW)}${rateCell(h.sevWithout,h.likWithout)}
+        ${numCell(h.sevWith,bC)}${numCell(h.likWith,bC)}${rateCell(h.sevWith,h.likWith)}
+      </tr>`;
+    }).join("") || `<tr><td ${td} colspan="8">No hazards recorded.</td></tr>`;
+    const mCell = (s,l) => { const b = HS.band(s,l); return `<td style="text-align:center;padding:8px 11px;border:1px solid #fff;background:${solidBg(b)};color:${solidFg(b)};font-weight:700;">${s*l}</td>`; };
+    const riskMatrix = `
+      <table style="border-collapse:collapse;margin-top:4px;">
+        <tr><td style="border:none;"></td><td colspan="5" style="text-align:center;font-weight:700;font-size:11px;padding:2px;border:none;">Severity →</td></tr>
+        <tr><td style="border:none;"></td>${[1,2,3,4,5].map(s=>`<td style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #fff;padding:6px 11px;">${s}</td>`).join("")}</tr>
+        ${[5,4,3,2,1].map(l=>`<tr><td style="text-align:center;font-weight:700;background:#eef2f7;border:1px solid #fff;padding:6px 11px;">${l}</td>${[1,2,3,4,5].map(s=>mCell(s,l)).join("")}</tr>`).join("")}
+      </table>
+      <p style="font-size:11px;margin:2px 0 0;">Likelihood ↓ (rows) &middot; Severity → (columns) &middot; number shown = risk rating</p>`;
     const lvlLabel = id => (HS.levels.find(l => l.id === id) || { label:"" }).label;
     const controlRows = hz.flatMap(h => (h.controls||[]).slice().sort((a,b) => (HS.levelRank[a && a.level]??3) - (HS.levelRank[b && b.level]??3)).map(c => {
       const txt = typeof c === "string" ? c : (c.text||"");
@@ -1072,6 +1089,7 @@
         <div><b>Likelihood</b><br>${HS.likelihoodKey.map((t,i)=>`${i+1} = ${esc(t)}`).join("<br>")}</div>
       </div>
       <p style="font-size:12px;margin-top:8px;"><b>Risk (Severity × Likelihood):</b> 15–25 = High Risk · 8–12 = Medium Risk · 1–6 = Low Risk</p>
+      <div style="margin-top:8px;"><b style="font-size:12px;">Risk matrix</b>${riskMatrix}</div>
       <h3>RISK CONTROL PLAN</h3>
       <table style="width:100%;border-collapse:collapse;">
         ${HS.riskControlPlan.map(p=>`<tr><td ${td} style="width:130px;padding:6px;border:1px solid #ccc;font-weight:700;">${esc(p.band)}</td><td ${td}>${esc(p.text)}</td></tr>`).join("")}
