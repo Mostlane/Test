@@ -526,6 +526,7 @@
           var c = document.documentElement.classList.toggle("pnav-collapsed");
           try { localStorage.setItem("pnavCollapsed", c ? "1" : "0"); } catch (e) {}
         });
+        try { initOfficeClock(); } catch (e) {}
       }
       function rebuild() {
         var nav = document.getElementById("pnavNav");
@@ -538,6 +539,143 @@
         if (whoS) whoS.textContent = yes(perms.FullAccess) ? "Full access" : "Team member";
         if (av) av.textContent = initials(name);
         applyBadges();
+      }
+
+      // ── Office clock (desktop office machines) ─────────────────────────────
+      // Start-of-day gate: office-clock users must start their timer before
+      // using the portal (blocking centre-screen modal). While running, a
+      // flashing green light sits at the top of the sidebar; clicking it opens
+      // the modal to stop (two taps — an "are you sure"). Eligibility (office-
+      // flagged device + OfficeClock permission) is decided by /office/config.
+      function initOfficeClock() {
+        if (window.__ocInit) return;
+        if (!window.matchMedia || !window.matchMedia("(min-width:1000px)").matches) return;
+        var token = localStorage.getItem("mostlaneToken"); if (!token) return;
+        window.__ocInit = true;
+        var API = window.MOSTLANE_API;
+        var deviceId = localStorage.getItem("deviceID") || sessionStorage.getItem("deviceID") || "";
+        function af(path, init) { init = init || {}; init.headers = Object.assign({ "Authorization": "Bearer " + token }, init.headers || {}); if (init.body) init.headers["Content-Type"] = "application/json"; return fetch(API + path, init); }
+        function pad(n) { return String(n).padStart(2, "0"); }
+        function hms(s) { s = Math.max(0, Math.floor(s)); return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor(s % 3600 / 60)) + ":" + pad(s % 60); }
+        function today() { var d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+        function promptedToday() { try { return localStorage.getItem("mlClockDay") === today(); } catch (e) { return false; } }
+        function markToday() { try { localStorage.setItem("mlClockDay", today()); } catch (e) {} }
+        injectClockStyles();
+
+        var state = null, tick = null, confirmT = null, mode = null;
+        function stopTick() { if (tick) { clearInterval(tick); tick = null; } }
+        function runSecs() { if (!state || !state.open) return 0; return (state.todayClosedSeconds || 0) + (Date.now() - Date.parse(state.open.clockIn)) / 1000; }
+
+        function ensurePill() {
+          var nav = document.getElementById("pnav"); if (!nav) return null;
+          var p = document.getElementById("ocPill");
+          if (!p) {
+            p = document.createElement("button"); p.id = "ocPill"; p.type = "button";
+            p.addEventListener("click", function () { if (state && state.open) openModal("stop"); else doStart(); });
+            var brand = nav.querySelector(".pn-brand");
+            if (brand && brand.nextSibling) nav.insertBefore(p, brand.nextSibling); else nav.insertBefore(p, nav.firstChild);
+          }
+          return p;
+        }
+        function renderPill() {
+          var p = ensurePill(); if (!p) return;
+          stopTick();
+          if (state && state.open) {
+            p.className = "oc-pill running";
+            p.innerHTML = '<span class="oc-led"></span><span class="oc-txt">On the clock<br><b id="ocPillTime">' + hms(runSecs()) + '</b></span>';
+            tick = setInterval(function () {
+              var t = document.getElementById("ocPillTime"); if (t) t.textContent = hms(runSecs());
+              var mt = document.getElementById("ocModalTime"); if (mt) mt.textContent = hms(runSecs());
+            }, 1000);
+          } else {
+            p.className = "oc-pill idle";
+            p.innerHTML = '<span class="oc-led"></span><span class="oc-txt">Start timer</span>';
+          }
+        }
+        function removeUI() { var p = document.getElementById("ocPill"); if (p) p.remove(); closeModal(); stopTick(); }
+
+        function closeModal() { var o = document.getElementById("ocModal"); if (o) o.remove(); mode = null; if (confirmT) { clearTimeout(confirmT); confirmT = null; } }
+        function openModal(m) {
+          mode = m;
+          var o = document.getElementById("ocModal");
+          if (!o) { o = document.createElement("div"); o.id = "ocModal"; document.body.appendChild(o); }
+          var blocking = (m === "start");
+          o.className = blocking ? "oc-overlay blocking" : "oc-overlay";
+          if (m === "start") {
+            o.innerHTML = '<div class="oc-card"><div class="oc-big">🕒</div><h2>Start your day</h2>'
+              + '<p>Please start your timer to begin — you need to do this before using the portal.</p>'
+              + '<button class="oc-cta" id="ocStartBtn">▶ Start timer</button></div>';
+          } else {
+            o.innerHTML = '<div class="oc-card"><div class="oc-big">🟢</div><h2>On the clock</h2>'
+              + '<div class="oc-modal-time" id="ocModalTime">' + hms(runSecs()) + '</div>'
+              + '<p>Your timer is running. Keep working, or stop it when you\'re done.</p>'
+              + '<button class="oc-stop" id="ocStopBtn">■ Stop the timer</button>'
+              + '<button class="oc-close" id="ocCloseBtn">Keep working</button></div>';
+          }
+          if (!blocking) o.addEventListener("click", function (e) { if (e.target === o) closeModal(); });
+          var sb = document.getElementById("ocStartBtn"); if (sb) sb.onclick = doStart;
+          var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
+          var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
+        }
+        // Two taps to stop — the second confirms (guards against accidental stops).
+        function onStopClick() {
+          var b = document.getElementById("ocStopBtn"); if (!b) return;
+          if (b.getAttribute("data-confirm") === "1") { doStop(); return; }
+          b.setAttribute("data-confirm", "1"); b.textContent = "⚠ Tap again to confirm stop"; b.className = "oc-stop confirm";
+          confirmT = setTimeout(function () { if (b) { b.setAttribute("data-confirm", ""); b.textContent = "■ Stop the timer"; b.className = "oc-stop"; } }, 4000);
+        }
+
+        function doStart() {
+          var b = document.getElementById("ocStartBtn"); if (b) b.disabled = true;
+          af("/office/clock-in", { method: "POST", body: JSON.stringify({ deviceId: deviceId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't start the timer."); if (b) b.disabled = false; return; } markToday(); closeModal(); refresh(); })
+            .catch(function () { alert("Network error — couldn't start the timer."); if (b) b.disabled = false; });
+        }
+        function doStop() {
+          var b = document.getElementById("ocStopBtn"); if (b) b.disabled = true;
+          af("/office/clock-out", { method: "POST", body: JSON.stringify({ deviceId: deviceId }) })
+            .then(function (r) { return r.json(); })
+            .then(function (r) { if (!r || !r.ok) { alert((r && r.error) || "Couldn't stop the timer."); if (b) b.disabled = false; return; } markToday(); closeModal(); refresh(); })
+            .catch(function () { alert("Network error — couldn't stop the timer."); if (b) b.disabled = false; });
+        }
+
+        function refresh() {
+          af("/office/config?device=" + encodeURIComponent(deviceId))
+            .then(function (r) { return r.json(); })
+            .then(function (c) {
+              state = c;
+              if (!state || !state.ok || !state.enabled) { removeUI(); return; }
+              renderPill();
+              if (state.open) { markToday(); if (mode === "start") closeModal(); }
+              else if (!promptedToday()) openModal("start");
+            })
+            .catch(function () {});
+        }
+        refresh();
+      }
+      function injectClockStyles() {
+        if (document.getElementById("oc-style")) return;
+        var s = document.createElement("style"); s.id = "oc-style";
+        s.textContent =
+          "#ocPill{ display:flex; align-items:center; gap:9px; width:calc(100% - 20px); margin:8px 10px 2px; padding:9px 11px; border:none; border-radius:11px; cursor:pointer; font:600 13px 'Segoe UI',system-ui,sans-serif; color:#fff; text-align:left; }"
+          + "#ocPill .oc-led{ width:12px; height:12px; border-radius:50%; flex:none; }"
+          + "#ocPill .oc-txt{ line-height:1.15; } #ocPill .oc-txt b{ font-size:14px; font-variant-numeric:tabular-nums; }"
+          + "#ocPill.running{ background:rgba(20,140,60,.30); box-shadow:0 0 0 1px rgba(60,220,120,.55) inset; }"
+          + "#ocPill.running .oc-led{ background:#38e07b; animation:ocflash 1s ease-in-out infinite; }"
+          + "#ocPill.idle{ background:rgba(255,255,255,.12); } #ocPill.idle .oc-led{ background:#c9d2dc; }"
+          + "@keyframes ocflash{ 0%,100%{ opacity:1; box-shadow:0 0 10px 2px #38e07b; } 50%{ opacity:.3; box-shadow:0 0 2px 0 #38e07b; } }"
+          + "html.pnav-collapsed #ocPill{ justify-content:center; } html.pnav-collapsed #ocPill .oc-txt{ display:none; }"
+          + ".oc-overlay{ position:fixed; inset:0; z-index:4000; display:flex; align-items:center; justify-content:center; background:rgba(8,18,34,.55); font-family:'Segoe UI',system-ui,-apple-system,sans-serif; }"
+          + ".oc-overlay .oc-card{ background:#fff; color:#16202e; width:min(420px,92vw); border-radius:18px; padding:26px 24px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.35); }"
+          + ".oc-overlay .oc-big{ font-size:40px; } .oc-overlay h2{ margin:6px 0 6px; color:#003366; font-size:22px; } .oc-overlay p{ color:#5b6b7b; font-size:14px; margin:0 0 16px; }"
+          + ".oc-modal-time{ font-size:34px; font-weight:800; color:#0a7d33; font-variant-numeric:tabular-nums; margin:4px 0 10px; }"
+          + ".oc-cta{ background:#0a7d33; color:#fff; border:none; border-radius:12px; padding:14px 22px; font-size:17px; font-weight:700; cursor:pointer; width:100%; }"
+          + ".oc-stop{ background:#b00020; color:#fff; border:none; border-radius:12px; padding:13px 20px; font-size:16px; font-weight:700; cursor:pointer; width:100%; margin-bottom:8px; }"
+          + ".oc-stop.confirm{ background:#7a0016; animation:ocflash2 .7s infinite; }"
+          + "@keyframes ocflash2{ 50%{ opacity:.55; } }"
+          + ".oc-close{ background:none; border:none; color:#5b6b7b; font-size:14px; cursor:pointer; text-decoration:underline; }";
+        document.head.appendChild(s);
       }
 
       // ── Red badges on sidebar items ─────────────────────────────────────
