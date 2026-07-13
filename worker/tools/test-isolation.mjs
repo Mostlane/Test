@@ -90,6 +90,7 @@ const CASES = [
   ["hs      GET /hs/docs",            hs,       "/hs/docs"],
   ["hs      GET /hs/docs?type=induction", hs,   "/hs/docs?type=induction"],
   ["hs      GET /hs/attention",       hs,       "/hs/attention"],
+  ["hs      GET /hs/library",         hs,       "/hs/library"],
 ];
 
 let failures = 0, checkedQueries = 0, drove = 0;
