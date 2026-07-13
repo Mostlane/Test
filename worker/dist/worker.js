@@ -3146,16 +3146,6 @@ async function hasOfficePerm(env, tenantId, username) {
   ).bind(tenantId, username).first();
   return !!(row && Number(row.value) === 1);
 }
-async function deviceEnabled(env, tenantId, username, deviceId) {
-  const OWNER = env.OWNER_USERNAME || "Jamie Line";
-  if (username === OWNER) return true;
-  if (!deviceId) return false;
-  const db = tenantDB(env, tenantId);
-  const dev = await db.prepare(
-    "SELECT office_clock FROM devices WHERE tenant_id=? AND device_id=? AND username=?"
-  ).bind(tenantId, deviceId, username).first();
-  return !!(dev && Number(dev.office_clock) === 1);
-}
 async function isTimesheetAdmin(env, tenantId, username) {
   const p = await permissionsFor(env, tenantId, username);
   return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
@@ -3210,9 +3200,8 @@ async function handle10(request, env, ctx, url, sess) {
   const db = tenantDB(env, tenantId);
   const me = sess.user.username;
   if (path === "/office/config" && request.method === "GET") {
-    const deviceId = url.searchParams.get("device") || sess.session.device_id || "";
     const perm = await hasOfficePerm(env, tenantId, me);
-    const enabled = perm && await deviceEnabled(env, tenantId, me, deviceId);
+    const enabled = perm;
     const today = londonDate();
     const open = await openSegmentRow(env, tenantId, me);
     const { results } = await db.prepare(
@@ -3234,8 +3223,6 @@ async function handle10(request, env, ctx, url, sess) {
     const deviceId = b.deviceId || sess.session.device_id || "";
     if (!await hasOfficePerm(env, tenantId, me))
       return error("Office clock isn't enabled for your account.", 403, env, request);
-    if (!await deviceEnabled(env, tenantId, me, deviceId))
-      return error("This device isn't set up for the office clock.", 403, env, request);
     const open = await openSegmentRow(env, tenantId, me);
     if (open) return json({ ok: true, already: true, open: { id: open.id, date: open.date, clockIn: effIn(open) } }, {}, env, request);
     const now = /* @__PURE__ */ new Date();
