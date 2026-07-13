@@ -331,9 +331,9 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true }, headers);
   }
 
-  // Add a new document area (admins only).
+  // Add a new document area (Full access only).
   if (subpath === "/site/area" && method === "POST") {
-    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    if (!(await isFullAccess(env, tenantId, sess))) return jsonResponse({ error: "Only a Full-access user can add new folder areas." }, headers, 403);
     const { area } = await readJson(request);
     const clean = String(area || "").replace(/[\/]/g, "-").trim();
     if (!clean) return jsonResponse({ error: "Area name required" }, headers, 400);
@@ -618,15 +618,21 @@ function siteJobSummary(j) {
     signedBy: (j.signature && j.signature.signedBy) || ""
   };
 }
-async function isSlaAdmin(env, tenantId, sess) {
+async function userPerms(env, tenantId, sess) {
   const username = sess && sess.user && sess.user.username;
-  if (!username) return false;
+  if (!username) return new Set();
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare(
     "SELECT permission FROM user_permissions WHERE tenant_id = ? AND username = ? AND value = 1"
   ).bind(tenantId, username).all();
-  const set = new Set((results || []).map(r => r.permission));
+  return new Set((results || []).map(r => r.permission));
+}
+async function isSlaAdmin(env, tenantId, sess) {
+  const set = await userPerms(env, tenantId, sess);
   return set.has("FullAccess") || set.has("SLAAdmin");
+}
+async function isFullAccess(env, tenantId, sess) {
+  return (await userPerms(env, tenantId, sess)).has("FullAccess");
 }
 async function getSiteAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);
