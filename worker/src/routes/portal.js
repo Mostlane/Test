@@ -47,6 +47,30 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true }, {}, env, request);
   }
 
+  /* ── Menu visibility for Full Access (one shared list) ─────────────────
+     Full-access users otherwise see every tile; this lets an admin hide the
+     irrelevant ones for ALL full-access users at once. GET is open to any
+     session (each page filters its own menu); only Full Access can change it. */
+  if (path === "/menu-config" && method === "GET") {
+    const s = await requireSession(env, request);
+    if (!s) return error("Not authenticated", 401, env, request);
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(db.tenantId, "menu:hidden").first();
+    let hidden = [];
+    try { hidden = row ? JSON.parse(row.value) : []; } catch {}
+    if (!Array.isArray(hidden)) hidden = [];
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+  if (path === "/menu-config" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const hidden = Array.isArray(b.hidden) ? b.hidden.map(String).slice(0, 200) : [];
+    await db.prepare(
+      "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(db.tenantId, "menu:hidden", JSON.stringify(hidden)).run();
+    return json({ ok: true, hidden }, {}, env, request);
+  }
+
   /* ── On-call rota ──────────────────────────────────────────────────── */
   if (path === "/oncall/current" && method === "GET") {
     const sess = await requireSession(env, request);

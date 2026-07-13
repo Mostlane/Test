@@ -324,11 +324,19 @@ const MAP = {
         const fullAccess = String(user.FullAccess || "").toLowerCase() === "yes";
         const isStory = String(user.StoryMode || "").toLowerCase() === "yes";
 
+        // Shared Full-access menu curation (set in Users admin, cached by portal-config).
+        let mlHidden = new Set();
+        try { if (fullAccess) { const v = JSON.parse(localStorage.getItem("mlMenuHidden") || "[]"); if (Array.isArray(v)) mlHidden = new Set(v); } } catch (e) {}
+
         Object.entries(MAP).forEach(([buttonID, keyList]) => {
           const btn = document.getElementById(buttonID);
           if (!btn) return;
           let allowed = fullAccess || keyList.some(k => String(user[k] || "").toLowerCase() === "yes");
           if (isStory && !STORY_ALLOWED.has(buttonID)) allowed = false;
+          if (allowed && fullAccess) {
+            const href = (btn.getAttribute("href") || "").split("/").pop();
+            if (href && mlHidden.has(href)) allowed = false;
+          }
           btn.classList.toggle("visible", allowed);
           if (allowed && buttonID === "MyDocuments" && user.SharePointPath) btn.href = user.SharePointPath;
         });
