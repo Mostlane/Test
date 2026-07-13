@@ -766,8 +766,13 @@
         fetchAuthed("/vancheck/attention").then(function (d) {
           if (d && d.ok) setNavBadge("vehicles.html", (d.mineDue ? 1 : 0) + ((d.missing && d.overdue) ? d.missing.length : 0));
         }).catch(function () {});
-        fetchAuthed("/asset/transfers/pending-count").then(function (d) {
-          if (d && d.ok) setNavBadge("my-assets.html", d.count);
+        Promise.all([
+          fetchAuthed("/asset/transfers/pending-count").catch(function () { return null; }),
+          fetchAuthed("/asset/requests/attention").catch(function () { return null; })
+        ]).then(function (res) {
+          var t = (res[0] && res[0].ok ? res[0].count : 0)
+                + (res[1] && res[1].ok ? (res[1].toAction || 0) + (res[1].decided || 0) : 0);
+          setNavBadge("my-assets.html", t);
         }).catch(function () {});
         var yr = new Date().getFullYear();
         var prefsP = mlPrefs();

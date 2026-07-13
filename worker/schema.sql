@@ -338,6 +338,29 @@ CREATE TABLE IF NOT EXISTS asset_transfer_requests (
 CREATE INDEX IF NOT EXISTS idx_atr_to ON asset_transfer_requests(to_user, status);
 CREATE INDEX IF NOT EXISTS idx_atr_asset ON asset_transfer_requests(asset_id, status);
 
+-- Asset REQUESTS ("can I have that?"): anyone can request a shared/other
+-- user's item; the current holder (or asset admins when it's unassigned) gets
+-- a red-bubble notification and either starts a transfer (feeds the normal
+-- signed-transfer workflow) or rejects with a message. Full request/response
+-- log kept for the admin area.
+CREATE TABLE IF NOT EXISTS asset_requests (
+  tenant_id     INTEGER NOT NULL DEFAULT 1,
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset_id      TEXT NOT NULL,
+  requested_by  TEXT NOT NULL,
+  holder        TEXT,                     -- holder at request time ('' = unassigned/office)
+  message       TEXT,                     -- requester's note
+  status        TEXT DEFAULT 'pending',   -- pending | accepted | rejected | cancelled
+  reject_reason TEXT,
+  requested_at  TEXT,
+  decided_at    TEXT,
+  decided_by    TEXT,
+  seen          INTEGER DEFAULT 0,        -- requester has seen the decision
+  transfer_request_id INTEGER             -- the transfer created on accept
+);
+CREATE INDEX IF NOT EXISTS idx_areq_holder ON asset_requests(tenant_id, holder, status);
+CREATE INDEX IF NOT EXISTS idx_areq_by ON asset_requests(tenant_id, requested_by, status);
+
 -- ── SLA jobs (replaces mostlane-sla Worker's SLA_JOBS KV) ───────────────────
 -- Indexed columns drive the list filters; `data` holds the full job object
 -- (events, statusHistory, signature, etc.) exactly as the front end expects.

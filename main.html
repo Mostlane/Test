@@ -505,11 +505,18 @@ const MAP = {
       var token = localStorage.getItem("mostlaneToken");
       if (!token) return;
       var H = { headers: { "Authorization": "Bearer " + token } };
+      var dotTotals = {};
       function dot(id, n) {
         var btn = document.getElementById(id);
         if (!btn || !(n > 0)) return;
+        // Accumulate: several sources can badge the same tile (e.g. transfers
+        // + requests on Assets) — one bubble with the combined count.
+        dotTotals[id] = (dotTotals[id] || 0) + n;
+        n = dotTotals[id];
+        var old = btn.querySelector(".ml-dot"); if (old) old.remove();
         btn.style.position = "relative";
         var b = document.createElement("span");
+        b.className = "ml-dot";
         b.textContent = n > 9 ? "9+" : n;
         b.style.cssText = "position:absolute;top:-7px;right:-7px;min-width:22px;height:22px;padding:0 5px;" +
           "background:#e11900;color:#fff;border-radius:999px;font:700 12px/22px system-ui,sans-serif;" +
@@ -529,6 +536,25 @@ const MAP = {
         .then(function (r) { return r.json(); })
         .then(function (d) { PREFS = (d && d.ok && d.prefs) || {}; return PREFS; })
         .catch(function () { return {}; });
+
+      // Asset REQUESTS: items other people want from me (act on them), plus
+      // decisions on my own requests I haven't seen yet.
+      jobs.push(fetch(window.MOSTLANE_API + "/asset/requests/attention", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) return;
+          dot("Assets", (d.toAction || 0) + (d.decided || 0));
+          if (d.toAction > 0) notes.push({
+            n: d.toAction, icon: "🙋", href: "asset-requests.html",
+            title: d.toAction > 1 ? d.toAction + " people want items you hold" : "Someone wants an item you hold",
+            text: "Start the transfer or reply with a reason — they're waiting on you."
+          });
+          if (d.decided > 0) notes.push({
+            n: d.decided, icon: "📩", href: "asset-requests.html",
+            title: d.decided > 1 ? "Replies to your item requests" : "A reply to your item request",
+            text: "See whether it was accepted or rejected."
+          });
+        }).catch(function () {}));
 
       jobs.push(fetch(window.MOSTLANE_API + "/asset/transfers/pending-count", H)
         .then(function (r) { return r.json(); })
@@ -628,7 +654,7 @@ const MAP = {
           }
         }).catch(function () {}));
 
-      var ORDER = { "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "holiday-admin.html": 3, "holiday.html": 4, "van-checks.html": 5 };
+      var ORDER = { "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));

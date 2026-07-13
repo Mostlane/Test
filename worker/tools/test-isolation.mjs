@@ -94,6 +94,8 @@ const CASES = [
   ["hs      GET /hs/library",         hs,       "/hs/library"],
   ["vancheck GET /vancheck/attention", vancheck, "/vancheck/attention"],
   ["vancheck GET /vancheck/week",      vancheck, "/vancheck/week"],
+  ["assets  GET /asset/requests",      assets,   "/asset/requests?all=1"],
+  ["assets  GET /asset/requests/attention", assets, "/asset/requests/attention"],
 ];
 
 let failures = 0, checkedQueries = 0, drove = 0;

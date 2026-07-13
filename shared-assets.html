@@ -96,11 +96,16 @@
     const closeM = id => g(id).classList.remove("open");
     function thumbUrl(u) { const m = /[?&]key=([^&]+)/.exec(u || ""); return m ? API + "/asset-thumb?key=" + m[1] : u; }
 
-    let SHARED = [];
+    let SHARED = [], MY_PENDING = new Set();
+    const ME = (sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "").toLowerCase();
 
     async function load() {
       try {
-        const d = await authFetch("/assets").then(r => r.json());
+        const [d, reqs] = await Promise.all([
+          authFetch("/assets").then(r => r.json()),
+          authFetch("/asset/requests").then(r => r.json()).catch(() => null),
+        ]);
+        MY_PENDING = new Set(((reqs && reqs.mine) || []).filter(r => r.status === "pending").map(r => r.assetId));
         const all = (d && d.assets) || [];
         SHARED = all.filter(a =>
           (a.shared && String(a.shared).toLowerCase() === "yes") ||
@@ -136,15 +141,36 @@
           <div class="buttons">
             <button class="btn grey small" data-hist="${esc(a.id)}">History</button>
             ${imgs.length ? `<button class="btn small" data-gallery="${esc(a.id)}">View images</button>` : ""}
+            ${holder.toLowerCase() === ME ? "" : (MY_PENDING.has(a.id)
+              ? `<button class="btn grey small" disabled>⏳ Requested</button>`
+              : `<button class="btn small" style="background:#0a7d33;" data-req="${esc(a.id)}">🙋 Request</button>`)}
           </div>
         </div>`;
       }).join("");
     }
     g("search").addEventListener("input", render);
 
+    // Request an item: goes to whoever holds it (or the office if unassigned)
+    // as a red-bubble notification; they start a transfer or reject with a note.
+    async function requestAsset(id) {
+      const a = SHARED.find(x => x.id === id); if (!a) return;
+      const holder = String(a.assignedTo || "").trim();
+      const toWho = holder && holder.toLowerCase() !== "shared" ? holder : "the office";
+      const message = prompt("Request “" + (a.name || id) + "” from " + toWho + "?\nAdd a note (optional):", "");
+      if (message === null) return;
+      try {
+        const r = await authFetch("/asset/request", { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ assetId: id, message: message.trim() }) }).then(r => r.json());
+        if (!r.ok) { alert(r.error || "Couldn't send the request."); return; }
+        MY_PENDING.add(id); render();
+        alert("Request sent — " + toWho + " will get a notification.");
+      } catch (e) { alert("Network error — try again."); }
+    }
+
     document.addEventListener("click", e => {
       const t = e.target;
-      if (t.dataset.hist) openHistory(t.dataset.hist);
+      if (t.dataset.req) requestAsset(t.dataset.req);
+      else if (t.dataset.hist) openHistory(t.dataset.hist);
       else if (t.dataset.gallery) { const a = SHARED.find(x => x.id === t.dataset.gallery); if (a) gOpen(a.images || []); }
     });
 
