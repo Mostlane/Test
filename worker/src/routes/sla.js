@@ -467,6 +467,14 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.lon !== undefined) job.lon = patch.lon;
   if (patch.priority !== undefined && patch.priority) job.priority = patch.priority;
   if (patch.description !== undefined && patch.description) job.description = patch.description;
+  if (patch.helpdeskRef !== undefined && patch.helpdeskRef) job.helpdeskRef = patch.helpdeskRef;
+  if (patch.raisedAt !== undefined && patch.raisedAt) job.raisedAt = patch.raisedAt;
+  // The SLA target is raised-time + priority window — recompute it whenever
+  // either of those is edited, so the countdown always reflects the truth.
+  if ((patch.priority !== undefined && patch.priority) || (patch.raisedAt !== undefined && patch.raisedAt)) {
+    const cfg = await getConfig(env, tenantId);
+    job.targetAt = computeSlaTarget(job.raisedAt || now, job.priority, cfg);
+  }
   if (patch.quote !== undefined) job.quote = patch.quote;   // quote pack
   if (patch.riskAssessment !== undefined) job.riskAssessment = patch.riskAssessment;  // pre-start RA
   if (patch.hold !== undefined) job.hold = patch.hold;      // on-hold pack (reason / needs / resume)

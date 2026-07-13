@@ -6,6 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
+  <script src="sla-jobedit.js?v=1"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -913,7 +914,10 @@ function onAction(e){
   const id = row.dataset.jobId;
   const a = btn.dataset.action;
   if(a === "assign") openAssign(id);
-  else if(a === "update") openUpdate(id);
+  else if(a === "update"){
+    const job = allJobs.find(j => j.id === id);
+    if(job) window.MLJobEdit.open(job, { onSaved: () => loadJobs() });
+  }
   else if(a === "sheet") openPdfModal(id);
   else if(a === "view") location.href = "job-view.html?jobId=" + encodeURIComponent(id);
 }

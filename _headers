@@ -49,3 +49,5 @@
   Cache-Control: no-cache
 /sla-fix-sites.html
   Cache-Control: no-cache
+/sla-jobedit.js
+  Cache-Control: no-cache
