@@ -31,6 +31,7 @@ import * as office from "./routes/office.js";      // DONE  (office clock in/out
 import * as keys from "./routes/keys.js";           // DONE  (key register: sign out/in)
 import * as theme from "./routes/theme.js";         // DONE  (per-user personalisation)
 import * as hs from "./routes/hs.js";               // DONE  (H&S documents: inductions, permits, RAMS, incidents)
+import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks — replaces Jotform walkaround)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -68,6 +69,7 @@ const ROUTES = [
   ["*", "/key",        keys.handle],     // /keys, /key/* (key register)
   ["*", "/theme",      theme.handle],    // per-user colour theme + background
   ["*", "/hs/",        hs.handle],       // H&S documents hub (inductions, permits, RAMS, incidents)
+  ["*", "/vancheck",   vancheck.handle], // weekly van checks (form, grid, deadline badges)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,
   // Compliance, Projects.
