@@ -412,7 +412,8 @@
         settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/>',
         eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
         paint: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
-        help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.6 2.6c-.8.3-.9 1-.9 1.6"/><path d="M12 17h.01"/>'
+        help: '<circle cx="12" cy="12" r="9"/><path d="M9.3 9.2a2.7 2.7 0 1 1 3.6 2.6c-.8.3-.9 1-.9 1.6"/><path d="M12 17h.01"/>',
+        chart: '<path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/>'
       };
       function svg(name) { return '<svg viewBox="0 0 24 24">' + (ICONS[name] || "") + "</svg>"; }
 
@@ -442,6 +443,7 @@
         ]},
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users"] },
+          { label: "Stats", href: "stats.html", icon: "chart", perms: ["__fullOnly"] },
           { label: "Devices", href: "device-admin.html", icon: "devices", perms: ["DeviceAdmin"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },

@@ -53,3 +53,5 @@
   Cache-Control: no-cache
 /site-folder.html
   Cache-Control: no-cache
+/stats.html
+  Cache-Control: no-cache

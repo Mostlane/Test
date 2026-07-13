@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <meta charset="UTF-8">
+  <title>Mostlane • Stats</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="auth.js"></script>
+  <style>
+    :root{ --ml-blue:#003b82; --ink:#0f172a; --muted:#64748b; --border:#e2e8f0; --panel:#ffffff; --bg:#eef1f5; }
+    *{box-sizing:border-box;}
+    html,body{margin:0;padding:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+    .shell{max-width:1100px;margin:16px auto 48px;padding:0 14px;}
+    header.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    header.top h1{margin:0;font-size:22px;color:var(--ml-blue);display:flex;align-items:center;gap:8px;}
+    .sub{font-size:12px;color:var(--muted);}
+    .btn{border:1px solid var(--border);border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;background:#fff;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
+
+    .grid{display:grid;gap:12px;}
+    .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
+    .cards{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:12px;}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 2px 10px rgba(6,24,54,.05);}
+    .card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
+    .kpi{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:0 2px 10px rgba(6,24,54,.05);}
+    .kpi .v{font-size:28px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums;color:var(--ml-blue);}
+    .kpi .l{font-size:12px;color:var(--muted);margin-top:3px;}
+    .kpi .s{font-size:11px;color:var(--muted);margin-top:2px;}
+
+    /* storage meter */
+    .meter{height:22px;border-radius:8px;overflow:hidden;display:flex;background:#f1f5f9;border:1px solid var(--border);}
+    .meter span{display:block;height:100%;}
+    .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:12px;}
+    .legend .li{display:flex;align-items:center;gap:7px;font-size:13px;}
+    .legend .sw{width:12px;height:12px;border-radius:3px;flex:0 0 auto;}
+    .legend .b{font-variant-numeric:tabular-nums;color:var(--muted);margin-left:auto;padding-left:10px;}
+    .freeline{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;}
+
+    /* bars */
+    .bar{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;}
+    .bar .nm{width:96px;flex:0 0 auto;display:flex;align-items:center;gap:6px;}
+    .bar .track{flex:1;height:14px;background:#f1f5f9;border-radius:7px;overflow:hidden;}
+    .bar .fill{height:100%;border-radius:7px;}
+    .bar .n{width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);}
+    .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;}
+
+    table.mini{width:100%;border-collapse:collapse;font-size:13px;}
+    table.mini td{padding:5px 4px;border-bottom:1px solid #f1f5f9;}
+    table.mini td.r{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);}
+    .rowcounts{columns:2;column-gap:20px;}
+    .rowcounts .rc{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;break-inside:avoid;}
+    .rowcounts .rc b{font-variant-numeric:tabular-nums;}
+    .muted{color:var(--muted);}
+    #err{display:none;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;border-radius:12px;padding:14px;}
+    .donut{display:flex;align-items:center;gap:14px;}
+    .donut svg{flex:0 0 auto;}
+    .donut .big{font-size:26px;font-weight:700;color:var(--ml-blue);}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="top">
+    <div>
+      <h1>📊 Portal stats</h1>
+      <div class="sub" id="genAt">Loading…</div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" id="refresh">↻ Refresh</button>
+      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    </div>
+  </header>
+
+  <div id="err"></div>
+  <div id="body" style="display:none;">
+    <div class="grid kpis" id="kpis"></div>
+    <div class="grid cards" id="cards"></div>
+  </div>
+  <div id="loading" class="muted" style="padding:30px 4px;">Crunching the numbers…</div>
+</div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts = {}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
+  return fetch(API + path, opts);
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmtBytes(b){ if(!b) return "0 B"; const u=["B","KB","MB","GB","TB"]; const i=Math.floor(Math.log(b)/Math.log(1024)); return (b/Math.pow(1024,i)).toFixed(i?2:0)+" "+u[i]; }
+function nm(u){ const p = (u||"").split(/[.\s]/); return (u||"").includes(" ") ? u : (u||"").replace(/\./g," "); }
+
+const STATUS_COLOUR = {"Pending":"#9f1239","Scheduled":"#f59e0b","Travelling":"#3b82f6","In Progress":"#9333ea","On Hold":"#6b7280","Quote":"#dc2626","Order":"#0d9488","Complete":"#84cc16","Invoiced":"#22c55e","Closed Jobs":"#701a75"};
+const PRIORITY_COLOUR = {"Priority 1":"#dc2626","Priority 2":"#f59e0b","Priority 3":"#16a34a","Priority 4":"#2563eb"};
+// A calm categorical palette for the storage breakdown.
+const STORE_COLOURS = ["#2563eb","#0d9488","#9333ea","#f59e0b","#e11d48","#0891b2","#65a30d","#7c3aed","#94a3b8"];
+
+function kpi(v, l, s){ return `<div class="kpi"><div class="v">${v}</div><div class="l">${esc(l)}</div>${s?`<div class="s">${esc(s)}</div>`:""}</div>`; }
+
+async function load(){
+  $("loading").style.display = "block"; $("body").style.display = "none"; $("err").style.display = "none";
+  try{
+    const res = await authFetch("/stats?t=" + Date.now());
+    if(res.status === 403){ throw new Error("This dashboard is for Full-access users only."); }
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+    render(d);
+  }catch(e){
+    $("loading").style.display = "none";
+    $("err").style.display = "block";
+    $("err").textContent = "⚠️ " + e.message + " (If you've just updated the worker, give it a moment and refresh.)";
+  }
+}
+
+function render(d){
+  $("loading").style.display = "none"; $("body").style.display = "block";
+  $("genAt").textContent = "Generated " + new Date(d.generatedAt).toLocaleString("en-GB");
+
+  const st = d.storage, usedPct = Math.min(100, (st.totalBytes / st.freeBytes) * 100);
+  const openJobs = (d.jobs.byStatus||[]).filter(r => !["Complete","Closed Jobs","Invoiced"].includes(r.status)).reduce((s,r)=>s+r.n,0);
+  const slaTotal = d.sla.met + d.sla.late, slaPct = slaTotal ? Math.round(d.sla.met/slaTotal*100) : null;
+
+  // KPI row
+  $("kpis").innerHTML = [
+    kpi(fmtBytes(st.totalBytes), "Storage used", usedPct.toFixed(1) + "% of 10 GB free"),
+    kpi(st.totalFiles.toLocaleString(), "Files stored"),
+    kpi(d.jobs.total.toLocaleString(), "Jobs total", openJobs + " open"),
+    kpi(slaPct === null ? "—" : slaPct + "%", "SLA met", slaTotal ? `${d.sla.met}/${slaTotal} completed` : "no completed jobs yet"),
+    kpi(d.team.active + "/" + d.team.users, "Active users", d.team.logins7 + " logins (7d)"),
+    kpi("£" + d.assets.value.toLocaleString(), "Asset value", d.assets.count + " items"),
+    kpi(d.sites.sites.toLocaleString(), "Sites", d.sites.customers + " customers"),
+    kpi(d.activity.actions7.toLocaleString(), "Actions (7d)", d.activity.pageViews7.toLocaleString() + " page views"),
+  ].join("");
+
+  const cards = [];
+
+  // Storage breakdown
+  const segs = st.categories.map((c,i) => ({ ...c, colour: STORE_COLOURS[i % STORE_COLOURS.length] }));
+  cards.push(`<div class="card">
+    <h2>Storage — ${fmtBytes(st.totalBytes)} of 10 GB${st.truncated ? " (sampled)" : ""}</h2>
+    <div class="meter">${segs.map(s => `<span style="width:${(s.bytes/st.freeBytes*100).toFixed(3)}%;background:${s.colour}" title="${esc(s.name)}"></span>`).join("")}</div>
+    <div class="freeline"><span>${usedPct.toFixed(1)}% used</span><span>${fmtBytes(st.freeBytes - st.totalBytes)} free</span></div>
+    <div class="legend">${segs.map(s => `<div class="li"><span class="sw" style="background:${s.colour}"></span>${esc(s.name)}<span class="b">${fmtBytes(s.bytes)} · ${s.files}</span></div>`).join("") || '<span class="muted">No files yet.</span>'}</div>
+  </div>`);
+
+  // Jobs by status
+  cards.push(barCard("Jobs by status", d.jobs.byStatus.map(r => ({ label: r.status, n: r.n, colour: STATUS_COLOUR[r.status] || "#94a3b8" }))));
+
+  // Jobs by priority + this month
+  cards.push(barCard("Jobs by priority", d.jobs.byPriority.map(r => ({ label: (r.priority||"—").replace("Priority ","P"), n: r.n, colour: PRIORITY_COLOUR[r.priority] || "#94a3b8" })),
+    `<div class="muted" style="margin-top:8px;font-size:12px;">${d.jobs.raisedThisMonth} raised this month</div>`));
+
+  // SLA donut
+  if(slaTotal){
+    const pct = slaPct;
+    const c = 2*Math.PI*34, off = c*(1-pct/100);
+    cards.push(`<div class="card"><h2>SLA performance (all completed)</h2>
+      <div class="donut">
+        <svg width="90" height="90" viewBox="0 0 90 90">
+          <circle cx="45" cy="45" r="34" fill="none" stroke="#f1f5f9" stroke-width="12"/>
+          <circle cx="45" cy="45" r="34" fill="none" stroke="${pct>=90?'#16a34a':pct>=75?'#f59e0b':'#dc2626'}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 45 45)"/>
+        </svg>
+        <div><div class="big">${pct}%</div><div class="muted" style="font-size:13px;">${d.sla.met} on time · ${d.sla.late} late</div></div>
+      </div></div>`);
+  }
+
+  // Top engineers
+  cards.push(topCard("Busiest engineers (by jobs)", d.jobs.topEngineers, "name"));
+  // Most active users
+  cards.push(topCard("Most active users (30d)", d.activity.topUsers, "username"));
+
+  // Other totals
+  cards.push(`<div class="card"><h2>Around the portal</h2>
+    <table class="mini">
+      <tr><td>🚐 Van check photos stored</td><td class="r">${(st.categories.find(c=>c.name==='Van check photos')||{files:0}).files}</td></tr>
+      <tr><td>🔁 Asset transfers logged</td><td class="r">${d.assets.transfers}</td></tr>
+      <tr><td>🏖️ Holiday requests pending</td><td class="r">${d.holidays.pending}</td></tr>
+      <tr><td>🏖️ Holiday days approved (${new Date().getFullYear()})</td><td class="r">${d.holidays.approvedDaysThisYear}</td></tr>
+      <tr><td>📄 Actions logged (30d)</td><td class="r">${d.activity.actions30.toLocaleString()}</td></tr>
+      <tr><td>📚 Total audit entries kept</td><td class="r">${d.activity.totalLogged.toLocaleString()}</td></tr>
+    </table></div>`);
+
+  // Database row counts (the geeky bit)
+  cards.push(`<div class="card"><h2>Database — ${d.database.total.toLocaleString()} rows across ${d.database.tables.length} tables</h2>
+    <div class="rowcounts">${d.database.tables.map(t => `<div class="rc"><span>${esc(t.table)}</span><b>${t.rows.toLocaleString()}</b></div>`).join("")}</div>
+  </div>`);
+
+  $("cards").innerHTML = cards.join("");
+}
+
+function barCard(title, rows, extra){
+  const max = Math.max(1, ...rows.map(r => r.n));
+  return `<div class="card"><h2>${esc(title)}</h2>${
+    rows.length ? rows.map(r => `<div class="bar">
+      <span class="nm"><span class="dot" style="background:${r.colour}"></span>${esc(r.label)}</span>
+      <span class="track"><span class="fill" style="width:${(r.n/max*100).toFixed(1)}%;background:${r.colour}"></span></span>
+      <span class="n">${r.n}</span></div>`).join("") : '<span class="muted">Nothing yet.</span>'
+  }${extra||""}</div>`;
+}
+function topCard(title, rows, key){
+  const max = Math.max(1, ...(rows||[]).map(r => r.n));
+  return `<div class="card"><h2>${esc(title)}</h2>${
+    (rows && rows.length) ? rows.map(r => `<div class="bar">
+      <span class="nm" style="width:120px;">${esc(nm(r[key]))}</span>
+      <span class="track"><span class="fill" style="width:${(r.n/max*100).toFixed(1)}%;background:#2563eb"></span></span>
+      <span class="n">${r.n}</span></div>`).join("") : '<span class="muted">No data.</span>'
+  }</div>`;
+}
+
+$("refresh").addEventListener("click", load);
+window.addEventListener("DOMContentLoaded", load);
+</script>
+</body>
+</html>

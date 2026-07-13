@@ -958,7 +958,7 @@ async function handle4(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
-  const json2 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const json3 = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", ...headers } });
   const text = (msg, status = 200) => new Response(msg, { status, headers });
   const path = url.pathname;
   const method = request.method.toUpperCase();
@@ -1082,7 +1082,7 @@ async function handle4(request, env, ctx, url, sess) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
     `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
     await logAction(id, "Submitted", user);
-    return json2({ success: true, id });
+    return json3({ success: true, id });
   }
   if (path === "/holiday/cancel" && method === "POST") {
     const { id } = await request.json();
@@ -1097,7 +1097,7 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
     await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
-    return json2({ success: true, wasApproved });
+    return json3({ success: true, wasApproved });
   }
   if (path === "/holiday/delete-own" && method === "POST") {
     const { id } = await request.json();
@@ -1110,7 +1110,7 @@ async function handle4(request, env, ctx, url, sess) {
     }
     await db.prepare("DELETE FROM holidays WHERE tenant_id=? AND id=?").bind(db.tenantId, id).run();
     await logAction(id, "Deleted by engineer", user);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/cancel-approved" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1123,7 +1123,7 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), "Cancelled by admin after approval", db.tenantId, id).run();
     await logAction(id, "Approval cancelled by admin", user);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/my" && method === "GET") {
     await ensureSystemDaysForUser(user);
@@ -1135,7 +1135,7 @@ async function handle4(request, env, ctx, url, sess) {
       const db2 = b.date || b.start || "9999-12-31";
       return da.localeCompare(db2);
     });
-    return json2(results);
+    return json3(results);
   }
   if (path === "/holiday/summary" && method === "GET") {
     await ensureSystemDaysForUser(user);
@@ -1155,7 +1155,7 @@ async function handle4(request, env, ctx, url, sess) {
     }
     const used = approvedHoliday + sysDeducted - sysCredited;
     const cfg = await getYearConfig();
-    return json2({
+    return json3({
       allowance,
       used,
       remaining: allowance - used,
@@ -1165,7 +1165,7 @@ async function handle4(request, env, ctx, url, sess) {
   }
   if (path === "/holiday/all" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
-    return json2(await listHolidayRequestsForYear());
+    return json3(await listHolidayRequestsForYear());
   }
   if (["/holiday/approve", "/holiday/reject"].includes(path) && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1180,13 +1180,13 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
     ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
     await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/config" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const cfg = await getYearConfig();
     const [bank, shut, allowances] = await Promise.all([getBankHolidays(), getShutdownDays(), listAllowancesMap()]);
-    return json2({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
+    return json3({ year, defaultAllowance: Number(cfg.defaultAllowance ?? 28), accrualMode: !!cfg.accrualMode, bankholidays: bank, shutdown: shut, allowances });
   }
   if (path === "/holiday/set-year-config" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1198,7 +1198,7 @@ async function handle4(request, env, ctx, url, sess) {
       defaultAllowance,
       accrualMode: "accrualMode" in body ? !!body.accrualMode : !!prev.accrualMode
     });
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/set-allowance" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1209,7 +1209,7 @@ async function handle4(request, env, ctx, url, sess) {
     await db.prepare(
       "INSERT INTO holiday_allowance (tenant_id, year, username, allowance) VALUES (?,?,?,?) ON CONFLICT(year, username) DO UPDATE SET allowance=excluded.allowance"
     ).bind(db.tenantId, year, username, allowance).run();
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/set-bankholidays" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1221,7 +1221,7 @@ async function handle4(request, env, ctx, url, sess) {
     const removed = oldDays.filter((b) => !newDates.has(b.date)).map((b) => b.date);
     if (removed.length) await deleteSystemDays(env, tenantId, "bankholiday", year, removed);
     await cfgPut(`holiday:bankholidays:${year}`, days);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/set-shutdown" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1233,7 +1233,7 @@ async function handle4(request, env, ctx, url, sess) {
     const removed = oldDays.filter((s) => !newDates.has(s.date)).map((s) => s.date);
     if (removed.length) await deleteSystemDays(env, tenantId, "shutdown", year, removed);
     await cfgPut(`holiday:shutdown:${year}`, days);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/toggle-worked" && method === "POST") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1249,7 +1249,7 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holiday_system_days SET worked=?, status=?, updated_by=?, updated_at=? WHERE tenant_id=? AND kind=? AND year=? AND date=? AND username=?"
     ).bind(worked ? 1 : 0, worked ? "Credited" : "Deducted", user, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId, kind, year, date, username).run();
     await logAction(row.id, worked ? "Worked (Credited)" : "Reverted (Deducted)", user);
-    return json2({ success: true });
+    return json3({ success: true });
   }
   if (path === "/holiday/admin-summary" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1276,7 +1276,7 @@ async function handle4(request, env, ctx, url, sess) {
       const used = approvedHoliday + sysDeducted - sysCredited;
       list.push({ username: u, name: u.replace(".", " "), allowance, used, remaining: allowance - used });
     }
-    return json2({ year, engineers: list });
+    return json3({ year, engineers: list });
   }
   if (path === "/holiday/calendar" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1335,7 +1335,7 @@ async function handle4(request, env, ctx, url, sess) {
       }
       engineers.push({ username: u, name: u.replace(".", " "), cells });
     }
-    return json2({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
+    return json3({ year, month, daysInMonth, monthStart: isoDate(monthStart), monthEnd: isoDate(monthEnd), engineers });
   }
   if (path === "/holiday/uk-bank-holidays" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
@@ -1344,7 +1344,7 @@ async function handle4(request, env, ctx, url, sess) {
       if (!resp.ok) return text("GOV.UK unavailable", 502);
       const data = await resp.json();
       const events = ((data["england-and-wales"] || {}).events || []).filter((e) => e.date && e.date.startsWith(String(year))).map((e) => ({ date: e.date, title: e.title }));
-      return json2({ year, events });
+      return json3({ year, events });
     } catch (e) {
       return text("GOV.UK unavailable", 502);
     }
@@ -1352,7 +1352,7 @@ async function handle4(request, env, ctx, url, sess) {
   if (path === "/holiday/debug-users" && method === "GET") {
     if (!isAdmin) return text("Forbidden", 403);
     const activeUsers = await getActiveUsers();
-    return json2({ activeUsersCount: activeUsers.length, activeUsers: activeUsers.slice(0, 10) });
+    return json3({ activeUsersCount: activeUsers.length, activeUsers: activeUsers.slice(0, 10) });
   }
   return text("Not Found", 404);
 }
@@ -1449,7 +1449,7 @@ async function handle5(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
-  const json2 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json3 = (data, code = 200) => new Response(JSON.stringify(data, null, 2), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
   if (method === "POST" && pathname === "/upload-asset-image") {
@@ -1457,7 +1457,7 @@ async function handle5(request, env, ctx, url, sess) {
       const form = await request.formData();
       const file = form.get("file");
       const assetId = form.get("assetId");
-      if (!file || !assetId) return json2({ ok: false, error: "Missing file or assetId" }, 400);
+      if (!file || !assetId) return json3({ ok: false, error: "Missing file or assetId" }, 400);
       const ext = file.name?.split(".").pop() || "jpg";
       const list = await env.ASSET_BUCKET.list({ prefix: `${assetId}/` });
       const nextNum = (list.objects || []).filter((o) => !o.key.endsWith(".thumb")).length + 1;
@@ -1472,14 +1472,14 @@ async function handle5(request, env, ctx, url, sess) {
         });
       }
       const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
-      return json2({ ok: true, url: publicUrl, key: filename });
+      return json3({ ok: true, url: publicUrl, key: filename });
     } catch (err) {
-      return json2({ ok: false, error: err.message }, 500);
+      return json3({ ok: false, error: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/asset-image") {
     const key = searchParams.get("key");
-    if (!key) return json2({ error: "Missing key" }, 400);
+    if (!key) return json3({ error: "Missing key" }, 400);
     const obj = await env.ASSET_BUCKET.get(key);
     if (!obj) return new Response("Not found", { status: 404 });
     return new Response(obj.body, {
@@ -1490,7 +1490,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset-thumb") {
     try {
       const key = searchParams.get("key");
-      if (!key) return json2({ error: "Missing key" }, 400);
+      if (!key) return json3({ error: "Missing key" }, 400);
       const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
       if (thumb) {
         return new Response(thumb.body, {
@@ -1504,7 +1504,7 @@ async function handle5(request, env, ctx, url, sess) {
         cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
       });
     } catch (err) {
-      return json2({ error: "Thumbnail generation failed", details: err.message }, 500);
+      return json3({ error: "Thumbnail generation failed", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/upload-asset-thumb") {
@@ -1513,36 +1513,36 @@ async function handle5(request, env, ctx, url, sess) {
       const key = form.get("key");
       const thumb = form.get("thumb");
       if (!key || !thumb || typeof thumb.arrayBuffer !== "function") {
-        return json2({ ok: false, error: "Missing key or thumb" }, 400);
+        return json3({ ok: false, error: "Missing key or thumb" }, 400);
       }
       const head = await env.ASSET_BUCKET.head(key);
-      if (!head) return json2({ ok: false, error: "Unknown image key" }, 404);
+      if (!head) return json3({ ok: false, error: "Unknown image key" }, 404);
       await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
         httpMetadata: { contentType: "image/jpeg" }
       });
-      return json2({ ok: true });
+      return json3({ ok: true });
     } catch (err) {
-      return json2({ ok: false, error: err.message }, 500);
+      return json3({ ok: false, error: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/delete-asset-image") {
     try {
       const body = await request.json();
       const { assetId, key, url: imageUrl } = body;
-      if (!assetId || !key && !imageUrl) return json2({ ok: false, error: "Missing assetId or url/key" }, 400);
+      if (!assetId || !key && !imageUrl) return json3({ ok: false, error: "Missing assetId or url/key" }, 400);
       let r2Key = key;
       if (!r2Key && imageUrl) r2Key = decodeURIComponent((imageUrl.split("key=")[1] || "").split("&")[0]);
-      if (!r2Key) return json2({ ok: false, error: "Invalid image URL or key" }, 400);
+      if (!r2Key) return json3({ ok: false, error: "Invalid image URL or key" }, 400);
       await env.ASSET_BUCKET.delete(r2Key);
       await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
       const asset = await getAsset(env, tenantId, assetId);
-      if (!asset) return json2({ ok: false, error: "Asset not found" }, 404);
+      if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
       const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
       asset.images = (asset.images || []).filter((u) => u !== fullUrl);
       await putAsset(env, tenantId, asset);
-      return json2({ ok: true, message: "Image deleted", removedKey: r2Key });
+      return json3({ ok: true, message: "Image deleted", removedKey: r2Key });
     } catch (err) {
-      return json2({ ok: false, error: "Failed to delete image", details: err.message }, 500);
+      return json3({ ok: false, error: "Failed to delete image", details: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/assets") {
@@ -1551,25 +1551,25 @@ async function handle5(request, env, ctx, url, sess) {
       const stmt = user ? db.prepare("SELECT data FROM assets WHERE tenant_id = ? AND assigned_to = ?").bind(db.tenantId, user) : db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId);
       const { results } = await stmt.all();
       const assets = (results || []).map((r) => JSON.parse(r.data));
-      return json2({ assets });
+      return json3({ assets });
     } catch (err) {
-      return json2({ error: "Failed to fetch assets", details: err.message }, 500);
+      return json3({ error: "Failed to fetch assets", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/add") {
     try {
       const body = await request.json();
-      if (!body.id) return json2({ error: "Missing ID" }, 400);
+      if (!body.id) return json3({ error: "Missing ID" }, 400);
       await putAsset(env, tenantId, body);
-      return json2({ ok: true, message: `Asset ${body.id} added.` });
+      return json3({ ok: true, message: `Asset ${body.id} added.` });
     } catch (err) {
-      return json2({ error: "Failed to add asset", details: err.message }, 500);
+      return json3({ error: "Failed to add asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/update") {
     try {
       const body = await request.json();
-      if (!body.id) return json2({ error: "Missing ID" }, 400);
+      if (!body.id) return json3({ error: "Missing ID" }, 400);
       const existing = await getAsset(env, tenantId, body.id);
       const updated = { ...existing, ...body };
       await putAsset(env, tenantId, updated);
@@ -1583,15 +1583,15 @@ async function handle5(request, env, ctx, url, sess) {
         };
         await putTransfer(env, tenantId, log);
       }
-      return json2({ ok: true, message: `Asset ${body.id} updated.` });
+      return json3({ ok: true, message: `Asset ${body.id} updated.` });
     } catch (err) {
-      return json2({ error: "Failed to update asset", details: err.message }, 500);
+      return json3({ error: "Failed to update asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/transfer") {
     try {
       const log = await request.json();
-      if (!log.assetID) return json2({ error: "Missing assetID" }, 400);
+      if (!log.assetID) return json3({ error: "Missing assetID" }, 400);
       const asset = await getAsset(env, tenantId, log.assetID);
       if (asset) {
         asset.assignedTo = log.to;
@@ -1600,38 +1600,38 @@ async function handle5(request, env, ctx, url, sess) {
         await putAsset(env, tenantId, asset);
       }
       await putTransfer(env, tenantId, log);
-      return json2({ ok: true, message: `Transfer logged for ${log.assetID}` });
+      return json3({ ok: true, message: `Transfer logged for ${log.assetID}` });
     } catch (err) {
-      return json2({ error: "Failed to log transfer", details: err.message }, 500);
+      return json3({ error: "Failed to log transfer", details: err.message }, 500);
     }
   }
   if (method === "GET" && pathname === "/transfer-log") {
     const assetID = searchParams.get("assetID");
-    if (!assetID) return json2({ error: "Missing assetID" }, 400);
+    if (!assetID) return json3({ error: "Missing assetID" }, 400);
     try {
       const { results } = await db.prepare(
         "SELECT data FROM asset_transfers WHERE tenant_id = ? AND asset_id = ? ORDER BY id ASC"
       ).bind(db.tenantId, assetID).all();
-      return json2((results || []).map((r) => JSON.parse(r.data)));
+      return json3((results || []).map((r) => JSON.parse(r.data)));
     } catch (err) {
-      return json2({ error: "Failed to load logs", details: err.message }, 500);
+      return json3({ error: "Failed to load logs", details: err.message }, 500);
     }
   }
   if (method === "DELETE" && pathname === "/asset/delete") {
     try {
       const id = searchParams.get("id");
-      if (!id) return json2({ error: "Missing ID" }, 400);
+      if (!id) return json3({ error: "Missing ID" }, 400);
       await db.prepare("DELETE FROM assets WHERE tenant_id = ? AND id = ?").bind(db.tenantId, id).run();
-      return json2({ ok: true, message: `Asset ${id} deleted.` });
+      return json3({ ok: true, message: `Asset ${id} deleted.` });
     } catch (err) {
-      return json2({ error: "Failed to delete asset", details: err.message }, 500);
+      return json3({ error: "Failed to delete asset", details: err.message }, 500);
     }
   }
   if (method === "POST" && pathname === "/asset/r2-relink") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
     let cursor, objects = [];
     try {
       do {
@@ -1640,7 +1640,7 @@ async function handle5(request, env, ctx, url, sess) {
         cursor = l.truncated ? l.cursor : null;
       } while (cursor);
     } catch (e) {
-      return json2({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
+      return json3({ ok: false, error: "Couldn't read the image bucket \u2014 check the ASSET_BUCKET binding.", details: e.message }, 500);
     }
     const byAsset = {};
     for (const o of objects) {
@@ -1664,7 +1664,7 @@ async function handle5(request, env, ctx, url, sess) {
       await putAsset(env, tenantId, asset);
       updated++;
     }
-    return json2({
+    return json3({
       ok: true,
       bucketObjects: objects.length,
       assetsInBucket: Object.keys(byAsset).length,
@@ -1674,11 +1674,11 @@ async function handle5(request, env, ctx, url, sess) {
   }
   if (method === "GET" && pathname === "/asset/condition-photos") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
     const assetID = searchParams.get("assetID");
-    if (!assetID) return json2({ ok: false, error: "Missing assetID" }, 400);
+    if (!assetID) return json3({ ok: false, error: "Missing assetID" }, 400);
     const toUrl = (k) => `${url.origin}/asset-image?key=${encodeURIComponent(k)}`;
     const keyOf = (u) => {
       try {
@@ -1720,13 +1720,13 @@ async function handle5(request, env, ctx, url, sess) {
         photos.push({ url: toUrl(k), takenAt: utcify(r.requested_at), by: r.from_user, role: "handover", counterparty: r.to_user, transferId: r.id, pending: true });
     }
     photos.sort((a, b) => String(b.takenAt || "").localeCompare(String(a.takenAt || "")));
-    return json2({ ok: true, assetID, photos });
+    return json3({ ok: true, assetID, photos });
   }
   if (method === "POST" && pathname === "/asset/r2-unlink") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess2.user.username);
-    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json2({ ok: false, error: "Forbidden" }, 403);
+    if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json3({ ok: false, error: "Forbidden" }, 403);
     const { results } = await db.prepare("SELECT id, data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let cleared = 0;
     for (const row of results || []) {
@@ -1741,19 +1741,19 @@ async function handle5(request, env, ctx, url, sess) {
       await putAsset(env, tenantId, asset);
       cleared++;
     }
-    return json2({ ok: true, cleared });
+    return json3({ ok: true, cleared });
   }
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const row = await db.prepare(
       "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
     ).bind(db.tenantId, sess2.user.username).first();
-    return json2({ ok: true, count: Number(row?.n || 0) });
+    return json3({ ok: true, count: Number(row?.n || 0) });
   }
   if (method === "GET" && pathname === "/asset/transfers/pending") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess2.user.username;
     const { results } = await db.prepare(
       "SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND status='pending' AND (lower(to_user)=lower(?) OR lower(from_user)=lower(?)) ORDER BY requested_at DESC"
@@ -1782,7 +1782,7 @@ async function handle5(request, env, ctx, url, sess) {
         direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
       });
     }
-    return json2({
+    return json3({
       ok: true,
       incoming: shaped.filter((s) => s.direction === "incoming"),
       outgoing: shaped.filter((s) => s.direction === "outgoing")
@@ -1790,23 +1790,23 @@ async function handle5(request, env, ctx, url, sess) {
   }
   if (method === "POST" && pathname === "/asset/transfer-request") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    if (!b.assetId || !b.to) return json2({ ok: false, error: "assetId and to required" }, 400);
+    if (!b.assetId || !b.to) return json3({ ok: false, error: "assetId and to required" }, 400);
     const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json2({ ok: false, error: "Asset not found" }, 404);
+    if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
     const me = sess2.user.username;
     const holder = String(asset.assignedTo || "");
     if (holder.toLowerCase() !== me.toLowerCase()) {
       const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json2({ ok: false, error: "Only the current holder can transfer this item" }, 403);
+      if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the current holder can transfer this item" }, 403);
     }
     if (String(b.to).toLowerCase() === holder.toLowerCase())
-      return json2({ ok: false, error: "That person already holds this item" }, 400);
+      return json3({ ok: false, error: "That person already holds this item" }, 400);
     const dup = await db.prepare(
       "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
     ).bind(db.tenantId, b.assetId).first();
-    if (dup) return json2({ ok: false, error: "This item already has a transfer pending" }, 409);
+    if (dup) return json3({ ok: false, error: "This item already has a transfer pending" }, 409);
     const res = await db.prepare(
       "INSERT INTO asset_transfer_requests (asset_id, from_user, to_user, note, requested_at, tenant_id) VALUES (?,?,?,?,?,?)"
     ).bind(b.assetId, holder || me, b.to, b.note || null, (/* @__PURE__ */ new Date()).toISOString(), db.tenantId).run();
@@ -1815,20 +1815,20 @@ async function handle5(request, env, ctx, url, sess) {
     if (senderKeys.length) {
       await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
     }
-    return json2({ ok: true, id: reqId });
+    return json3({ ok: true, id: reqId });
   }
   if (method === "POST" && pathname === "/asset/transfer-accept") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
-    if (!b.id || !b.signature) return json2({ ok: false, error: "id and signature required" }, 400);
+    if (!b.id || !b.signature) return json3({ ok: false, error: "id and signature required" }, 400);
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json2({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
+    if (!req) return json3({ ok: false, error: "Transfer not found (it may have been cancelled)" }, 404);
     const me = sess2.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json2({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+      return json3({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
     const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.signature);
-    if (!m) return json2({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
+    if (!m) return json3({ ok: false, error: "Signature must be a PNG/JPEG data URL" }, 400);
     const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
     const sigKey = `signatures/transfer-${req.id}-${crypto.randomUUID()}.${m[1] === "jpeg" ? "jpg" : "png"}`;
     await env.ASSET_BUCKET.put(sigKey, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
@@ -1876,17 +1876,17 @@ async function handle5(request, env, ctx, url, sess) {
       "UPDATE asset_transfer_requests SET status='accepted', decided_at=?, signature_key=? WHERE tenant_id=? AND id=?"
     ).bind(now, sigKey, db.tenantId, req.id).run();
     note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(sigKey)}`;
-    return json2({ ok: true, note });
+    return json3({ ok: true, note });
   }
   if (method === "POST" && pathname === "/asset/transfer-reject") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json2({ ok: false, error: "Transfer not found" }, 404);
+    if (!req) return json3({ ok: false, error: "Transfer not found" }, 404);
     const me = sess2.user.username;
     if (req.to_user.toLowerCase() !== me.toLowerCase())
-      return json2({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
+      return json3({ ok: false, error: "This transfer is addressed to " + req.to_user }, 403);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare("UPDATE asset_transfer_requests SET status='rejected', decided_at=? WHERE tenant_id=? AND id=?").bind(now, db.tenantId, req.id).run();
     await putTransfer(env, tenantId, {
@@ -1898,31 +1898,31 @@ async function handle5(request, env, ctx, url, sess) {
       reason: b.reason || "",
       timestamp: now
     });
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/transfer-cancel") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const req = await db.prepare("SELECT * FROM asset_transfer_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, b.id).first();
-    if (!req) return json2({ ok: false, error: "Transfer not found" }, 404);
+    if (!req) return json3({ ok: false, error: "Transfer not found" }, 404);
     const me = sess2.user.username;
     if (String(req.from_user || "").toLowerCase() !== me.toLowerCase()) {
       const perms = await permissionsFor(env, tenantId, me);
-      if (perms.FullAccess !== "Yes") return json2({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
+      if (perms.FullAccess !== "Yes") return json3({ ok: false, error: "Only the sender can cancel this transfer" }, 403);
     }
     await db.prepare("UPDATE asset_transfer_requests SET status='cancelled', decided_at=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), db.tenantId, req.id).run();
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
   if (method === "GET" && pathname === "/asset/transfer-note") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const id = searchParams.get("id");
-    if (!id) return json2({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
     const { results } = await db.prepare(
       "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.transferId') = ? AND json_extract(data,'$.type')='TRANSFER_NOTE' LIMIT 1"
     ).bind(db.tenantId, Number(id)).all();
-    if (!results || !results.length) return json2({ ok: false, error: "Note not found" }, 404);
+    if (!results || !results.length) return json3({ ok: false, error: "Note not found" }, 404);
     const note = JSON.parse(results[0].data);
     const me = sess2.user.username, meL = me.toLowerCase();
     const perms = await permissionsFor(env, tenantId, me);
@@ -1935,15 +1935,15 @@ async function handle5(request, env, ctx, url, sess) {
         isCurrentTo = !!(a && String(a.assignedTo || "").toLowerCase() === meL);
       }
       if (!isFrom && !isCurrentTo)
-        return json2({ ok: false, error: "This document isn't linked to you" }, 403);
+        return json3({ ok: false, error: "This document isn't linked to you" }, 403);
     }
     if (note.signatureKey) note.signatureUrl = `${url.origin}/asset-image?key=${encodeURIComponent(note.signatureKey)}`;
     note.requestedAt = utcify(note.requestedAt);
-    return json2({ ok: true, note });
+    return json3({ ok: true, note });
   }
   if (method === "GET" && pathname === "/asset/my-documents") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess2.user.username, meL = me.toLowerCase();
     const { results } = await db.prepare(
       "SELECT data FROM asset_transfers WHERE tenant_id=? AND json_extract(data,'$.type')='TRANSFER_NOTE' AND (lower(json_extract(data,'$.to'))=? OR lower(json_extract(data,'$.from'))=?) ORDER BY at DESC"
@@ -1967,33 +1967,33 @@ async function handle5(request, env, ctx, url, sess) {
         releases.push(n);
       }
     }
-    return json2({ ok: true, acceptance, releases });
+    return json3({ ok: true, acceptance, releases });
   }
   const isRealHolder = (h) => {
     const v = String(h || "").trim();
     return v && v.toLowerCase() !== "shared";
   };
   if (method === "POST" && pathname === "/asset/request") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
-    if (!b.assetId) return json2({ ok: false, error: "assetId required" }, 400);
+    if (!b.assetId) return json3({ ok: false, error: "assetId required" }, 400);
     const asset = await getAsset(env, tenantId, b.assetId);
-    if (!asset) return json2({ ok: false, error: "Asset not found" }, 404);
+    if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
     const holder = String(asset.assignedTo || "").trim();
     if (holder.toLowerCase() === me.toLowerCase())
-      return json2({ ok: false, error: "You already have this item" }, 400);
+      return json3({ ok: false, error: "You already have this item" }, 400);
     const dup = await db.prepare(
       "SELECT id FROM asset_requests WHERE tenant_id=? AND asset_id=? AND requested_by=? AND status='pending'"
     ).bind(db.tenantId, b.assetId, me).first();
-    if (dup) return json2({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
+    if (dup) return json3({ ok: false, error: "You've already requested this \u2014 it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
     await db.prepare(
       "INSERT INTO asset_requests (tenant_id, asset_id, requested_by, holder, message, requested_at) VALUES (?,?,?,?,?,?)"
     ).bind(db.tenantId, b.assetId, me, isRealHolder(holder) ? holder : "", String(b.message || "").trim(), (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json2({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
+    return json3({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
   }
   if (method === "GET" && pathname === "/asset/requests") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
@@ -2030,10 +2030,10 @@ async function handle5(request, env, ctx, url, sess) {
       out.all = [];
       for (const r of allR || []) out.all.push(await shape(r));
     }
-    return json2(out);
+    return json3(out);
   }
   if (method === "GET" && pathname === "/asset/requests/attention") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
@@ -2044,28 +2044,28 @@ async function handle5(request, env, ctx, url, sess) {
     const { results: dec } = await db.prepare(
       "SELECT id, asset_id, status FROM asset_requests WHERE tenant_id=? AND requested_by=? AND status IN ('accepted','rejected') AND seen=0"
     ).bind(db.tenantId, me).all();
-    return json2({ ok: true, toAction: toAction.length, decided: (dec || []).length });
+    return json3({ ok: true, toAction: toAction.length, decided: (dec || []).length });
   }
   if (method === "POST" && pathname === "/asset/request/accept") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json2({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
+    if (!r) return json3({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (!(r.holder === me || !r.holder && admin || admin))
-      return json2({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+      return json3({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
     const asset = await getAsset(env, tenantId, r.asset_id);
-    if (!asset) return json2({ ok: false, error: "Asset no longer exists" }, 404);
+    if (!asset) return json3({ ok: false, error: "Asset no longer exists" }, 404);
     if (String(asset.assignedTo || "").toLowerCase() === r.requested_by.toLowerCase()) {
       await db.prepare("UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=? WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-      return json2({ ok: true, note: "They already hold it \u2014 request closed." });
+      return json3({ ok: true, note: "They already hold it \u2014 request closed." });
     }
     const dupT = await db.prepare(
       "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
     ).bind(db.tenantId, r.asset_id).first();
-    if (dupT) return json2({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
+    if (dupT) return json3({ ok: false, error: "This item already has a transfer pending \u2014 deal with that first." }, 409);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const holderNow = String(asset.assignedTo || "").trim();
     const res = await db.prepare(
@@ -2081,41 +2081,41 @@ async function handle5(request, env, ctx, url, sess) {
     await db.prepare(
       "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
     ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
-    return json2({ ok: true, transferStarted: true });
+    return json3({ ok: true, transferStarted: true });
   }
   if (method === "POST" && pathname === "/asset/request/reject") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const me = sess.user.username;
     const b = await request.json().catch(() => ({}));
     const reason = String(b.reason || "").trim();
-    if (!reason) return json2({ ok: false, error: "Add a short message explaining why." }, 400);
+    if (!reason) return json3({ ok: false, error: "Add a short message explaining why." }, 400);
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json2({ ok: false, error: "Request not found" }, 404);
+    if (!r) return json3({ ok: false, error: "Request not found" }, 404);
     const perms = await permissionsFor(env, tenantId, me);
     const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
     if (!(r.holder === me || !r.holder && admin || admin))
-      return json2({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+      return json3({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
     await db.prepare(
       "UPDATE asset_requests SET status='rejected', reject_reason=?, decided_at=?, decided_by=? WHERE tenant_id=? AND id=?"
     ).bind(reason.slice(0, 300), (/* @__PURE__ */ new Date()).toISOString(), me, db.tenantId, r.id).run();
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/request/cancel") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
-    if (!r) return json2({ ok: false, error: "Request not found" }, 404);
-    if (r.requested_by !== sess.user.username) return json2({ ok: false, error: "Only the requester can cancel" }, 403);
+    if (!r) return json3({ ok: false, error: "Request not found" }, 404);
+    if (r.requested_by !== sess.user.username) return json3({ ok: false, error: "Only the requester can cancel" }, 403);
     await db.prepare("UPDATE asset_requests SET status='cancelled', decided_at=?, decided_by=?, seen=1 WHERE tenant_id=? AND id=?").bind((/* @__PURE__ */ new Date()).toISOString(), sess.user.username, db.tenantId, r.id).run();
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
   if (method === "POST" && pathname === "/asset/request/ack") {
-    if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
     const b = await request.json().catch(() => ({}));
     await db.prepare("UPDATE asset_requests SET seen=1 WHERE tenant_id=? AND id=? AND requested_by=?").bind(db.tenantId, Number(b.id), sess.user.username).run();
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
-  return json2({ error: "Not found" }, 404);
+  return json3({ error: "Not found" }, 404);
 }
 function utcify(s) {
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(String(s || "")) ? s.replace(" ", "T") + "Z" : s;
@@ -3823,10 +3823,10 @@ async function handle11(request, env, ctx, url, sess) {
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
-  const json2 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   if (method === "GET" && pathname === "/keys") {
     const sess2 = await requireSession(env, request);
-    if (!sess2) return json2({ ok: false, error: "Not authenticated" }, 401);
+    if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
     const { results } = await db.prepare("SELECT data FROM portal_keys WHERE tenant_id = ?").bind(db.tenantId).all();
     const keys = [];
     for (const r of results || []) {
@@ -3836,26 +3836,26 @@ async function handle11(request, env, ctx, url, sess) {
       }
     }
     keys.sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
-    return json2({ ok: true, keys });
+    return json3({ ok: true, keys });
   }
   if (method === "GET" && pathname === "/key/log") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
     const keyID = searchParams.get("keyID");
-    if (!keyID) return json2({ ok: false, error: "Missing keyID" }, 400);
+    if (!keyID) return json3({ ok: false, error: "Missing keyID" }, 400);
     const { results } = await db.prepare(
       "SELECT action, holder, by_user, note, at FROM key_log WHERE key_id=? AND tenant_id=? ORDER BY id DESC LIMIT 50"
     ).bind(keyID, db.tenantId).all();
-    return json2({ ok: true, log: results || [] });
+    return json3({ ok: true, log: results || [] });
   }
   if (method === "POST" && (pathname === "/key/add" || pathname === "/key/update")) {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
-    if (!String(b.label || "").trim()) return json2({ ok: false, error: "A key needs a label" }, 400);
+    if (!String(b.label || "").trim()) return json3({ ok: false, error: "A key needs a label" }, 400);
     if (pathname === "/key/add") {
       const id = String(b.id || "").trim() || "K-" + Math.random().toString(36).slice(2, 8).toUpperCase();
-      if (await getKey(env, tenantId, id)) return json2({ ok: false, error: "Key ID already exists" }, 400);
+      if (await getKey(env, tenantId, id)) return json3({ ok: false, error: "Key ID already exists" }, 400);
       const key2 = {
         id,
         label: String(b.label).trim(),
@@ -3869,53 +3869,53 @@ async function handle11(request, env, ctx, url, sess) {
         createdAt: (/* @__PURE__ */ new Date()).toISOString()
       };
       await putKey(env, tenantId, key2);
-      return json2({ ok: true, key: key2 });
+      return json3({ ok: true, key: key2 });
     }
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
     key.label = String(b.label).trim();
     key.type = ["site", "van", "other"].includes(b.type) ? b.type : key.type;
     key.ref = String(b.ref ?? key.ref ?? "").trim();
     key.notes = String(b.notes ?? key.notes ?? "").trim();
     await putKey(env, tenantId, key);
-    return json2({ ok: true, key });
+    return json3({ ok: true, key });
   }
   if (method === "POST" && pathname === "/key/sign-out") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
     const to = String(b.to || "").trim();
-    if (!to) return json2({ ok: false, error: "Choose who the key is signed to" }, 400);
+    if (!to) return json3({ ok: false, error: "Choose who the key is signed to" }, 400);
     key.holder = to;
     key.outSince = (/* @__PURE__ */ new Date()).toISOString();
     await putKey(env, tenantId, key);
     await logMove(env, tenantId, key.id, "out", to, gate.sess.user.username, b.note);
-    return json2({ ok: true, key });
+    return json3({ ok: true, key });
   }
   if (method === "POST" && pathname === "/key/sign-in") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
     const b = await request.json().catch(() => ({}));
     const key = await getKey(env, tenantId, String(b.id || ""));
-    if (!key) return json2({ ok: false, error: "Key not found" }, 404);
+    if (!key) return json3({ ok: false, error: "Key not found" }, 404);
     const wasWith = key.holder || "";
     key.holder = "";
     key.outSince = null;
     await putKey(env, tenantId, key);
     await logMove(env, tenantId, key.id, "in", wasWith, gate.sess.user.username, b.note);
-    return json2({ ok: true, key });
+    return json3({ ok: true, key });
   }
   if (method === "DELETE" && pathname === "/key/delete") {
     const gate = await keyAdmin(env, request);
-    if (gate.error) return json2({ ok: false, error: gate.error }, gate.code);
+    if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
     const id = searchParams.get("id");
-    if (!id) return json2({ ok: false, error: "Missing id" }, 400);
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
     await db.prepare("DELETE FROM portal_keys WHERE id=? AND tenant_id=?").bind(id, db.tenantId).run();
-    return json2({ ok: true });
+    return json3({ ok: true });
   }
-  return json2({ ok: false, error: "Not found: " + pathname }, 404);
+  return json3({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
 // src/routes/theme.js
@@ -3939,9 +3939,9 @@ async function handle12(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
-  const json2 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
   if (!sess) sess = await requireSession(env, request);
-  if (!sess) return json2({ ok: false, error: "Not authenticated" }, 401);
+  if (!sess) return json3({ ok: false, error: "Not authenticated" }, 401);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
   const me = sess.user.username;
@@ -3953,11 +3953,11 @@ async function handle12(request, env, ctx, url, sess) {
       profile = row?.profile ? JSON.parse(row.profile) : {};
     } catch {
     }
-    return json2({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
+    return json3({ ok: true, theme: filterTheme(profile.theme || {}, can), can });
   }
   if (method === "POST" && pathname === "/theme") {
     const can = await caps(env, tenantId, me);
-    if (!can.colour && !can.background) return json2({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
+    if (!can.colour && !can.background) return json3({ ok: false, error: "Personalisation isn't enabled for your account" }, 403);
     const b = await request.json().catch(() => ({}));
     const row = await db.prepare("SELECT profile FROM users WHERE tenant_id=? AND username=?").bind(tenantId, me).first();
     let profile = {};
@@ -3967,7 +3967,7 @@ async function handle12(request, env, ctx, url, sess) {
     }
     const t = profile.theme || {};
     if (b.accent !== void 0 && can.colour) {
-      if (!ACCENTS.includes(b.accent)) return json2({ ok: false, error: "Unknown colour theme" }, 400);
+      if (!ACCENTS.includes(b.accent)) return json3({ ok: false, error: "Unknown colour theme" }, 400);
       t.accent = b.accent;
     }
     if (b.bg !== void 0 && can.background) {
@@ -3975,30 +3975,30 @@ async function handle12(request, env, ctx, url, sess) {
       if (bg.type === "emboss" || !bg.type) delete t.bg;
       else if (bg.type === "colour" && BG_COLOURS.includes(bg.value)) t.bg = { type: "colour", value: bg.value };
       else if (bg.type === "image" && typeof bg.value === "string" && bg.value.startsWith(`theme/${me}/`)) t.bg = { type: "image", value: bg.value };
-      else return json2({ ok: false, error: "Unknown background choice" }, 400);
+      else return json3({ ok: false, error: "Unknown background choice" }, 400);
     }
     profile.theme = t;
     await db.prepare("UPDATE users SET profile=?, updated_at=datetime('now') WHERE tenant_id=? AND username=?").bind(JSON.stringify(profile), tenantId, me).run();
-    return json2({ ok: true, theme: filterTheme(t, can), can });
+    return json3({ ok: true, theme: filterTheme(t, can), can });
   }
   if (method === "POST" && pathname === "/theme/background") {
     const can = await caps(env, tenantId, me);
-    if (!can.background) return json2({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
+    if (!can.background) return json3({ ok: false, error: "Background changes aren't enabled for your account" }, 403);
     const form = await request.formData().catch(() => null);
     const file = form && form.get("file");
-    if (!file || typeof file === "string") return json2({ ok: false, error: "Missing file" }, 400);
-    if (!/^image\//.test(file.type || "")) return json2({ ok: false, error: "That isn't an image" }, 400);
+    if (!file || typeof file === "string") return json3({ ok: false, error: "Missing file" }, 400);
+    if (!/^image\//.test(file.type || "")) return json3({ ok: false, error: "That isn't an image" }, 400);
     const bytes = await file.arrayBuffer();
-    if (bytes.byteLength > 4 * 1024 * 1024) return json2({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
+    if (bytes.byteLength > 4 * 1024 * 1024) return json3({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
     const prefix = `theme/${me}/`;
     const old = await env.ASSET_BUCKET.list({ prefix });
     for (const o of old.objects || []) await env.ASSET_BUCKET.delete(o.key);
     const ext = file.type === "image/png" ? "png" : "jpg";
     const key = `${prefix}bg-${Date.now()}.${ext}`;
     await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: file.type || "image/jpeg" } });
-    return json2({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
+    return json3({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
   }
-  return json2({ ok: false, error: "Not found: " + pathname }, 404);
+  return json3({ ok: false, error: "Not found: " + pathname }, 404);
 }
 
 // src/routes/hs.js
@@ -4371,6 +4371,188 @@ async function handle14(request, env, ctx, url, sess) {
   return error("Unknown van-check route", 404, env, request);
 }
 
+// src/routes/stats.js
+function json2(data, status, env, request) {
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
+  });
+}
+async function handle15(request, env, ctx, url, sess) {
+  if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
+  if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
+  const tenantId = sess.tenantId;
+  const db = tenantDB(env, tenantId);
+  const permRows = await db.prepare(
+    "SELECT permission FROM user_permissions WHERE tenant_id = ? AND username = ? AND value = 1"
+  ).bind(db.tenantId, sess.user.username).all();
+  const perms = new Set((permRows.results || []).map((r) => r.permission));
+  if (!perms.has("FullAccess")) return json2({ error: "Full access only" }, 403, env, request);
+  const now = Date.now();
+  const isoMonthStart = new Date((/* @__PURE__ */ new Date()).getFullYear(), (/* @__PURE__ */ new Date()).getMonth(), 1).toISOString();
+  const iso7 = new Date(now - 7 * 864e5).toISOString();
+  const iso30 = new Date(now - 30 * 864e5).toISOString();
+  const naive7 = iso7.replace("T", " ").slice(0, 19);
+  const year = (/* @__PURE__ */ new Date()).getFullYear();
+  const T = db.tenantId;
+  const first = (sql, ...b) => db.prepare(sql).bind(...b).first();
+  const all = (sql, ...b) => db.prepare(sql).bind(...b).all().then((r) => r.results || []);
+  const [
+    jobsByStatus,
+    jobsByPriority,
+    jobsMonth,
+    slaPerf,
+    topEngineers,
+    jobTotal,
+    usersAgg,
+    logins7,
+    assetCount,
+    assetRows,
+    transfers,
+    siteCount,
+    customerCount,
+    holPending,
+    holApproved,
+    audit7,
+    audit30,
+    views7,
+    topUsers30,
+    auditTotal,
+    rowCounts
+  ] = await Promise.all([
+    all("SELECT status, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY status", T),
+    all("SELECT priority, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? GROUP BY priority", T),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND raised_at >= ?", T, isoMonthStart),
+    first("SELECT SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at <= target_at THEN 1 ELSE 0 END) met, SUM(CASE WHEN closed_at IS NOT NULL AND target_at IS NOT NULL AND closed_at > target_at THEN 1 ELSE 0 END) late FROM sla_jobs WHERE tenant_id = ?", T),
+    all("SELECT assigned_to name, COUNT(*) n FROM sla_jobs WHERE tenant_id = ? AND assigned_to IS NOT NULL AND assigned_to <> '' GROUP BY assigned_to ORDER BY n DESC LIMIT 6", T),
+    first("SELECT COUNT(*) n FROM sla_jobs WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) total, SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) active FROM users WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) n FROM login_history WHERE tenant_id = ? AND outcome = 'success' AND at >= ?", T, naive7),
+    first("SELECT COUNT(*) n FROM assets WHERE tenant_id = ?", T),
+    all("SELECT data FROM assets WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) n FROM asset_transfers WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) n FROM sites WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) n FROM customers WHERE tenant_id = ?", T),
+    first("SELECT COUNT(*) n FROM holidays WHERE tenant_id = ? AND status = 'Pending'", T),
+    first("SELECT COALESCE(SUM(days),0) d FROM holidays WHERE tenant_id = ? AND status = 'Approved' AND year = ?", T, year),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T, iso7),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method <> 'VIEW' AND at >= ?", T, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ? AND method = 'VIEW' AND at >= ?", T, iso7),
+    all("SELECT username, COUNT(*) n FROM audit_log WHERE tenant_id = ? AND at >= ? GROUP BY username ORDER BY n DESC LIMIT 6", T, iso30),
+    first("SELECT COUNT(*) n FROM audit_log WHERE tenant_id = ?", T),
+    tableRowCounts(db, T)
+  ]);
+  let assetValue = 0;
+  for (const r of assetRows) {
+    try {
+      const v = parseFloat(String(JSON.parse(r.data).value || "0").replace(/[£,]/g, ""));
+      if (!isNaN(v)) assetValue += v;
+    } catch {
+    }
+  }
+  const [jobFiles, assetBucket] = await Promise.all([
+    env.JOB_FILES ? sumBucket(env.JOB_FILES, classifyJobFiles) : emptyBucket(),
+    env.ASSET_BUCKET ? sumBucket(env.ASSET_BUCKET, classifyAssetBucket) : emptyBucket()
+  ]);
+  const categories = {};
+  for (const b of [jobFiles, assetBucket]) for (const [k, v] of Object.entries(b.categories)) {
+    categories[k] = categories[k] || { bytes: 0, files: 0 };
+    categories[k].bytes += v.bytes;
+    categories[k].files += v.files;
+  }
+  const totalBytes = jobFiles.bytes + assetBucket.bytes;
+  const totalFiles = jobFiles.files + assetBucket.files;
+  return json2({
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    storage: {
+      totalBytes,
+      totalFiles,
+      freeBytes: 10 * 1024 * 1024 * 1024,
+      // R2 free tier: 10 GB
+      truncated: jobFiles.truncated || assetBucket.truncated,
+      categories: Object.entries(categories).map(([name, v]) => ({ name, bytes: v.bytes, files: v.files })).sort((a, b) => b.bytes - a.bytes)
+    },
+    jobs: {
+      total: jobsByStatus.reduce((s, r) => s + r.n, jobTotal ? 0 : 0) || jobTotal && jobTotal.n || 0,
+      byStatus: jobsByStatus,
+      byPriority: jobsByPriority,
+      raisedThisMonth: jobsMonth.n || 0,
+      topEngineers
+    },
+    sla: { met: slaPerf && slaPerf.met || 0, late: slaPerf && slaPerf.late || 0 },
+    team: { users: usersAgg.total || 0, active: usersAgg.active || 0, logins7: logins7.n || 0 },
+    assets: { count: assetCount.n || 0, value: Math.round(assetValue), transfers: transfers.n || 0 },
+    sites: { sites: siteCount.n || 0, customers: customerCount.n || 0 },
+    holidays: { pending: holPending.n || 0, approvedDaysThisYear: Math.round((holApproved.d || 0) * 2) / 2 },
+    activity: { actions7: audit7.n || 0, actions30: audit30.n || 0, pageViews7: views7.n || 0, totalLogged: auditTotal.n || 0, topUsers: topUsers30 },
+    database: rowCounts
+  }, 200, env, request);
+}
+async function tableRowCounts(db, T) {
+  const tables = [
+    "users",
+    "sla_jobs",
+    "sites",
+    "customers",
+    "assets",
+    "asset_transfers",
+    "holidays",
+    "audit_log",
+    "login_history",
+    "notify_log",
+    "portal_keys",
+    "devices",
+    "sessions"
+  ];
+  const out = [];
+  let total = 0;
+  for (const t of tables) {
+    const row = await db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE tenant_id = ?`).bind(T).first();
+    const n = row && row.n || 0;
+    total += n;
+    out.push({ table: t, rows: n });
+  }
+  return { total, tables: out };
+}
+function emptyBucket() {
+  return { bytes: 0, files: 0, categories: {}, truncated: false };
+}
+async function sumBucket(bucket, classify) {
+  const res = emptyBucket();
+  let cursor, pages = 0;
+  do {
+    const listed = await bucket.list({ limit: 1e3, cursor });
+    for (const o of listed.objects || []) {
+      res.bytes += o.size || 0;
+      res.files += 1;
+      const cat = classify(o.key);
+      res.categories[cat] = res.categories[cat] || { bytes: 0, files: 0 };
+      res.categories[cat].bytes += o.size || 0;
+      res.categories[cat].files += 1;
+    }
+    cursor = listed.truncated ? listed.cursor : null;
+    pages++;
+    if (pages >= 40) {
+      res.truncated = res.truncated || !!cursor;
+      break;
+    }
+  } while (cursor);
+  return res;
+}
+function classifyJobFiles(key) {
+  if (key.startsWith("sitedocs/")) return "Site documents";
+  if (key.startsWith("jobs/") && key.includes("/signature/")) return "Signatures";
+  if (key.startsWith("jobs/")) return "Job photos";
+  if (key.startsWith("sites/")) return "Site images";
+  return "Other files";
+}
+function classifyAssetBucket(key) {
+  if (key.startsWith("vancheck/")) return "Van check photos";
+  if (key.startsWith("theme/")) return "Theme backgrounds";
+  if (key.endsWith(".thumb")) return "Thumbnails";
+  return "Asset photos";
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -4391,6 +4573,7 @@ var ROUTES = [
   ["*", "/upload-asset-thumb", handle5],
   ["*", "/delete-asset-image", handle5],
   ["*", "/sla", handle6],
+  ["*", "/stats", handle15],
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
   ["*", "/update-site", handle7],
