@@ -1137,7 +1137,7 @@ async function handle4(request, env, ctx, url, sess) {
     const all = await listHolidayRequestsForYear();
     let approvedHoliday = 0;
     for (const h of all) {
-      if (h.username === user && h.status === "Approved" && h.type !== "Other") approvedHoliday += h.days || 0;
+      if (h.username === user && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += h.days || 0;
     }
     const sys = await listSystemRecordsForYear();
     let sysDeducted = 0, sysCredited = 0;
@@ -1259,7 +1259,7 @@ async function handle4(request, env, ctx, url, sess) {
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
       const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
       let approvedHoliday = 0;
-      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other") approvedHoliday += h.days || 0;
+      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += h.days || 0;
       let sysDeducted = 0, sysCredited = 0;
       for (const s of sys) {
         if (s.username !== u) continue;

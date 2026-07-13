@@ -233,7 +233,9 @@ export async function handle(request, env, ctx, url, sess) {
     let approvedHoliday = 0;
     for (const h of all) {
       // Approved "Other" leave is agreed as NOT coming off the allowance.
-      if (h.username === user && h.status === "Approved" && h.type !== "Other") approvedHoliday += (h.days || 0);
+      // Only paid Holiday comes off the allowance — "Other" (agreed) and
+      // "Unpaid" don't (matches Timetastic, which deducted 0 for unpaid).
+      if (h.username === user && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += (h.days || 0);
     }
     const sys = await listSystemRecordsForYear();
     let sysDeducted = 0, sysCredited = 0;
@@ -370,7 +372,7 @@ export async function handle(request, env, ctx, url, sess) {
     for (const u of usernames.slice().sort((a, b) => a.localeCompare(b))) {
       const allowance = Number.isFinite(allowMap[u]) ? allowMap[u] : dflt;
       let approvedHoliday = 0;
-      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other") approvedHoliday += (h.days || 0);
+      for (const h of all) if (h.username === u && h.status === "Approved" && h.type !== "Other" && h.type !== "Unpaid") approvedHoliday += (h.days || 0);
       let sysDeducted = 0, sysCredited = 0;
       for (const s of sys) {
         if (s.username !== u) continue;
