@@ -3596,6 +3596,23 @@ async function handle13(request, env, ctx, url, sess) {
     await db.prepare("INSERT INTO hs_documents (tenant_id, id, doc_type, ref, site, status, data, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(db.tenantId, id, docType, ref, site, status, JSON.stringify(data), sess.user.username, now, now).run();
     return json({ ok: true, id, ref }, {}, env, request);
   }
+  if (path === "/hs/library" && method === "GET") {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='hs:rams:library'").bind(db.tenantId).first();
+    let library = null;
+    try {
+      library = row ? JSON.parse(row.value) : null;
+    } catch {
+    }
+    return json({ ok: true, library }, {}, env, request);
+  }
+  if (path === "/hs/library" && method === "POST") {
+    if (perms.FullAccess !== "Yes") return error("Only an admin can edit the H&S library.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!b || typeof b.hazards !== "object" || !Array.isArray(b.workTypes))
+      return error("Invalid library payload", 400, env, request);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, "hs:rams:library", JSON.stringify({ hazards: b.hazards, workTypes: b.workTypes })).run();
+    return json({ ok: true }, {}, env, request);
+  }
   if (path === "/hs/attention" && method === "GET") {
     const { results } = await db.prepare(
       "SELECT id, ref, site, data, created_by FROM hs_documents WHERE tenant_id=? AND doc_type='hotworks' AND status='open'"

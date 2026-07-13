@@ -29,3 +29,5 @@
   Cache-Control: no-cache
 /hs-rams-library.js
   Cache-Control: no-cache
+/hs-rams-admin.html
+  Cache-Control: no-cache

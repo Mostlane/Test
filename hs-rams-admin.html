@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>H&amp;S — Hazard Library</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <script src="hs-rams-library.js?v=2"></script>
+  <style>
+    :root { --brand:#003366; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:1000px; margin:16px auto 90px; padding:0 14px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.red { background:#b00020; } .btn.green { background:#0a7d33; } .btn.small { padding:5px 9px; font-size:13px; }
+    .btn.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    .tabs { display:flex; gap:8px; margin:6px 0 14px; }
+    .tabs .btn { flex:0; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
+    label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],textarea,select { width:100%; padding:9px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    textarea { min-height:52px; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    @media (max-width:640px){ .grid2 { grid-template-columns:1fr; } }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .hzrow { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid #f0f3f7; }
+    .sub { border:1px solid var(--line); border-radius:10px; padding:10px; margin:8px 0; }
+    .chkgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:2px 10px; }
+    .chkgrid label { font-weight:400; display:flex; gap:6px; align-items:center; margin:2px 0; } .chkgrid input { width:auto; }
+    .savebar { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--line); padding:10px 14px; display:flex; gap:10px; align-items:center; box-shadow:0 -2px 10px rgba(6,24,54,.08); }
+    .msg { font-size:14px; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <button class="btn grey small" onclick="location.href='hs-docs.html'">← H&amp;S</button>
+    <h1>🧰 Hazard Library</h1>
+  </header>
+  <div class="wrap">
+    <p class="muted">Add and edit the hazards, control measures, PPE and work-type menu behind the Risk Assessment Builder. Changes apply to your company only. Nothing is live until you tap <b>Save library</b>.</p>
+    <div class="tabs">
+      <button class="btn" id="tabHz" onclick="showTab('hz')">Hazards</button>
+      <button class="btn ghost" id="tabTree" onclick="showTab('tree')">Work-type menu</button>
+    </div>
+
+    <!-- HAZARDS -->
+    <div id="secHazards">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <b>Hazards <span class="muted" id="hzCount"></span></b>
+          <button class="btn small" onclick="newHazard()">+ Add hazard</button>
+        </div>
+        <input type="text" id="hzSearch" placeholder="Search hazards…" style="margin-top:8px;" oninput="renderHzList()">
+        <div id="hzList"></div>
+      </div>
+      <div id="hzEditor"></div>
+    </div>
+
+    <!-- WORK-TYPE TREE -->
+    <div id="secTree" class="hide">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <b>Work-type menu</b>
+          <button class="btn small" onclick="addWorkType()">+ Add work type</button>
+        </div>
+        <p class="muted" style="font-size:12.5px;">Work type → sub-category → sub-type. Tick which hazards each sub-type pulls into a new risk assessment.</p>
+      </div>
+      <div id="treeEditor"></div>
+    </div>
+  </div>
+
+  <div class="savebar">
+    <button class="btn green" id="saveBtn" onclick="saveLibrary()">💾 Save library</button>
+    <button class="btn grey small" onclick="restoreDefaults()">Restore defaults</button>
+    <span class="msg" id="msg"></span>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  const SEED = window.HS_RAMS;
+  const LEVELS = SEED.levels;
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const csv = a => (a || []).join(", ");
+  const fromCsv = s => String(s || "").split(",").map(x => x.trim()).filter(Boolean);
+  const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || ("h" + Math.random().toString(36).slice(2,6));
+  const uid = p => p + Math.random().toString(36).slice(2, 7);
+
+  let LIB = { hazards:{}, workTypes:[] };
+
+  // Access: FullAccess only.
+  (async () => {
+    try {
+      const me = await authFetch("/auth/me").then(r => r.json());
+      if (!me.ok || me.user.FullAccess !== "Yes") { alert("This needs full admin access."); location.href = "hs-docs.html"; return; }
+    } catch (e) { location.href = "hs-docs.html"; return; }
+    let saved = null;
+    try { const r = await authFetch("/hs/library").then(r => r.json()); if (r && r.ok) saved = r.library; } catch (e) {}
+    LIB = {
+      hazards: clone(saved && saved.hazards ? saved.hazards : SEED.hazards),
+      workTypes: clone(saved && saved.workTypes ? saved.workTypes : SEED.workTypes),
+    };
+    renderHzList(); renderTree();
+  })();
+
+  function showTab(t) {
+    g("secHazards").classList.toggle("hide", t !== "hz");
+    g("secTree").classList.toggle("hide", t !== "tree");
+    g("tabHz").className = "btn" + (t === "hz" ? "" : " ghost");
+    g("tabTree").className = "btn" + (t === "tree" ? "" : " ghost");
+    if (t === "tree") renderTree();
+  }
+
+  // ── Hazards ─────────────────────────────────────────────────────────────────
+  let editingHz = null;
+  function renderHzList() {
+    const q = (g("hzSearch").value || "").toLowerCase();
+    const ids = Object.keys(LIB.hazards).sort((a,b) => (LIB.hazards[a].name||"").localeCompare(LIB.hazards[b].name||""));
+    g("hzCount").textContent = "(" + ids.length + ")";
+    const shown = ids.filter(id => !q || (LIB.hazards[id].name||"").toLowerCase().includes(q) || id.includes(q));
+    g("hzList").innerHTML = shown.map(id => `
+      <div class="hzrow">
+        <div><b>${esc(LIB.hazards[id].name||"")}</b> <span class="muted" style="font-size:12px;">${esc(id)}</span></div>
+        <div class="row"><button class="btn ghost small" onclick="editHazard('${id}')">Edit</button><button class="btn red small" onclick="delHazard('${id}')">✕</button></div>
+      </div>`).join("") || `<p class="muted">No hazards${q ? " match." : "."}</p>`;
+  }
+  function newHazard() {
+    const id = uid("hz_");
+    LIB.hazards[id] = { name:"", persons:[], injuries:[], ppe:[], sevWithout:3, likWithout:3, controls:[{level:"admin",text:""}], sevWith:3, likWith:1 };
+    editHazard(id);
+  }
+  function delHazard(id) {
+    if (!confirm("Delete hazard \"" + (LIB.hazards[id].name||id) + "\"? It'll also be removed from the work-type menu.")) return;
+    delete LIB.hazards[id];
+    LIB.workTypes.forEach(wt => wt.subs.forEach(s => s.types.forEach(t => { t.hazards = (t.hazards||[]).filter(h => h !== id); })));
+    if (editingHz === id) { editingHz = null; g("hzEditor").innerHTML = ""; }
+    renderHzList();
+  }
+  const numSel = (val) => [1,2,3,4,5].map(n => `<option value="${n}" ${Number(val)===n?"selected":""}>${n}</option>`).join("");
+  function editHazard(id) {
+    editingHz = id;
+    const h = LIB.hazards[id];
+    g("hzEditor").innerHTML = `
+      <div class="card">
+        <div class="row" style="justify-content:space-between;"><b>Edit hazard</b><span class="muted" style="font-size:12px;">${esc(id)}</span></div>
+        <label>Name</label><input type="text" id="e_name" value="${esc(h.name)}">
+        <div class="grid2">
+          <div><label>Persons affected (comma-separated)</label><input type="text" id="e_persons" value="${esc(csv(h.persons))}"></div>
+          <div><label>Likely injuries (comma-separated)</label><input type="text" id="e_injuries" value="${esc(csv(h.injuries))}"></div>
+        </div>
+        <label>PPE (comma-separated)</label><input type="text" id="e_ppe" value="${esc(csv(h.ppe))}">
+        <div class="grid2">
+          <div><label>Severity — without controls</label><select id="e_sevW">${numSel(h.sevWithout)}</select></div>
+          <div><label>Likelihood — without controls</label><select id="e_likW">${numSel(h.likWithout)}</select></div>
+        </div>
+        <label>Control measures <span class="muted" style="font-weight:400;font-size:11px;">— tagged by hierarchy of control</span></label>
+        <div id="e_controls"></div>
+        <button class="btn ghost small" type="button" onclick="addCtrlRow()">+ control</button>
+        <div class="grid2" style="margin-top:8px;">
+          <div><label>Severity — with controls</label><select id="e_sevWith">${numSel(h.sevWith)}</select></div>
+          <div><label>Likelihood — with controls</label><select id="e_likWith">${numSel(h.likWith)}</select></div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button class="btn green" onclick="commitHazard()">Apply</button>
+          <button class="btn grey" onclick="editingHz=null;g('hzEditor').innerHTML='';">Close</button>
+        </div>
+      </div>`;
+    renderCtrlRows(h.controls || []);
+    window.scrollTo({ top: g("hzEditor").offsetTop - 10, behavior: "smooth" });
+  }
+  function ctrlRowHtml(c) {
+    return `<div class="row" style="align-items:flex-start;margin:4px 0;" data-ctrl>
+      <select style="max-width:120px;" data-clevel>${LEVELS.map(l => `<option value="${l.id}" ${(c.level||'admin')===l.id?'selected':''}>${esc(l.label)}</option>`).join("")}</select>
+      <textarea style="flex:1;" data-ctext>${esc(c.text||"")}</textarea>
+      <button class="btn red small" type="button" onclick="this.closest('[data-ctrl]').remove()">✕</button></div>`;
+  }
+  function renderCtrlRows(list) { g("e_controls").innerHTML = (list.length ? list : [{level:"admin",text:""}]).map(ctrlRowHtml).join(""); }
+  function addCtrlRow() { g("e_controls").insertAdjacentHTML("beforeend", ctrlRowHtml({level:"admin",text:""})); }
+  function commitHazard() {
+    const h = LIB.hazards[editingHz];
+    h.name = g("e_name").value.trim();
+    h.persons = fromCsv(g("e_persons").value);
+    h.injuries = fromCsv(g("e_injuries").value);
+    h.ppe = fromCsv(g("e_ppe").value);
+    h.sevWithout = Number(g("e_sevW").value); h.likWithout = Number(g("e_likW").value);
+    h.sevWith = Number(g("e_sevWith").value); h.likWith = Number(g("e_likWith").value);
+    h.controls = [...g("e_controls").querySelectorAll("[data-ctrl]")].map(r => ({
+      level: r.querySelector("[data-clevel]").value, text: r.querySelector("[data-ctext]").value.trim()
+    })).filter(c => c.text);
+    editingHz = null; g("hzEditor").innerHTML = "";
+    renderHzList();
+    flash("Hazard updated (remember to Save library).", true);
+  }
+
+  // ── Work-type tree ────────────────────────────────────────────────────────────
+  function renderTree() {
+    const hazIds = Object.keys(LIB.hazards).sort((a,b) => (LIB.hazards[a].name||"").localeCompare(LIB.hazards[b].name||""));
+    g("treeEditor").innerHTML = LIB.workTypes.map((wt, wi) => `
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <input type="text" value="${esc(wt.label)}" onchange="LIB.workTypes[${wi}].label=this.value" style="font-weight:700;max-width:70%;">
+          <button class="btn red small" onclick="rmNode('wt',${wi})">Delete work type</button>
+        </div>
+        ${(wt.subs||[]).map((sub, si) => `
+          <div class="sub">
+            <div class="row" style="justify-content:space-between;">
+              <input type="text" value="${esc(sub.label)}" onchange="LIB.workTypes[${wi}].subs[${si}].label=this.value" style="max-width:70%;">
+              <button class="btn red small" onclick="rmNode('sub',${wi},${si})">✕ sub-category</button>
+            </div>
+            ${(sub.types||[]).map((t, ti) => `
+              <div class="sub" style="background:#fafcff;">
+                <div class="row" style="justify-content:space-between;">
+                  <input type="text" value="${esc(t.label)}" onchange="LIB.workTypes[${wi}].subs[${si}].types[${ti}].label=this.value" style="max-width:70%;">
+                  <button class="btn red small" onclick="rmNode('type',${wi},${si},${ti})">✕ sub-type</button>
+                </div>
+                <div class="muted" style="font-size:12px;margin:6px 0 2px;">Hazards included:</div>
+                <div class="chkgrid">
+                  ${hazIds.map(id => `<label><input type="checkbox" ${(t.hazards||[]).includes(id)?"checked":""} onchange="toggleHaz(${wi},${si},${ti},'${id}',this.checked)"> ${esc(LIB.hazards[id].name||id)}</label>`).join("")}
+                </div>
+              </div>`).join("")}
+            <button class="btn ghost small" onclick="addNode('type',${wi},${si})">+ sub-type</button>
+          </div>`).join("")}
+        <button class="btn ghost small" onclick="addNode('sub',${wi})">+ sub-category</button>
+      </div>`).join("") || `<p class="muted">No work types yet — add one.</p>`;
+  }
+  function addWorkType() { LIB.workTypes.push({ id:uid("wt_"), label:"New work type", subs:[] }); renderTree(); }
+  function addNode(kind, wi, si) {
+    if (kind === "sub") LIB.workTypes[wi].subs.push({ id:uid("sub_"), label:"New sub-category", types:[] });
+    if (kind === "type") LIB.workTypes[wi].subs[si].types.push({ id:uid("t_"), label:"New sub-type", hazards:[] });
+    renderTree();
+  }
+  function rmNode(kind, wi, si, ti) {
+    if (kind === "wt") LIB.workTypes.splice(wi, 1);
+    if (kind === "sub") LIB.workTypes[wi].subs.splice(si, 1);
+    if (kind === "type") LIB.workTypes[wi].subs[si].types.splice(ti, 1);
+    renderTree();
+  }
+  function toggleHaz(wi, si, ti, id, on) {
+    const t = LIB.workTypes[wi].subs[si].types[ti];
+    t.hazards = t.hazards || [];
+    if (on) { if (!t.hazards.includes(id)) t.hazards.push(id); }
+    else t.hazards = t.hazards.filter(h => h !== id);
+  }
+
+  // ── Save / restore ────────────────────────────────────────────────────────────
+  function flash(text, ok) { const m = g("msg"); m.className = "msg" + (ok ? " ok" : " err"); m.textContent = text; }
+  async function saveLibrary() {
+    g("saveBtn").disabled = true; flash("Saving…", true);
+    try {
+      const r = await authFetch("/hs/library", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ hazards: LIB.hazards, workTypes: LIB.workTypes }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      flash("Saved. New risk assessments will use this library.", true);
+    } catch (e) { flash("Couldn't save — " + e.message, false); }
+    finally { g("saveBtn").disabled = false; }
+  }
+  function restoreDefaults() {
+    if (!confirm("Reset the library back to the built-in Mostlane defaults? Your customisations will be replaced (you still need to Save to keep it).")) return;
+    LIB = { hazards: clone(SEED.hazards), workTypes: clone(SEED.workTypes) };
+    editingHz = null; g("hzEditor").innerHTML = "";
+    renderHzList(); renderTree();
+    flash("Reset to defaults — tap Save to keep it.", true);
+  }
+</script>
+</body>
+</html>

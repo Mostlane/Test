@@ -75,6 +75,24 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, id, ref }, {}, env, request);
   }
 
+  // ── RAMS hazard/control library (tenant-editable overlay of the seed) ───────
+  // GET is readable by any H&S user (the builder loads it); POST is admin-only.
+  // Stored per-tenant in app_config under 'hs:rams:library' as { hazards, workTypes }.
+  if (path === "/hs/library" && method === "GET") {
+    const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key='hs:rams:library'").bind(db.tenantId).first();
+    let library = null; try { library = row ? JSON.parse(row.value) : null; } catch {}
+    return json({ ok: true, library }, {}, env, request);
+  }
+  if (path === "/hs/library" && method === "POST") {
+    if (perms.FullAccess !== "Yes") return error("Only an admin can edit the H&S library.", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (!b || typeof b.hazards !== "object" || !Array.isArray(b.workTypes))
+      return error("Invalid library payload", 400, env, request);
+    await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(db.tenantId, "hs:rams:library", JSON.stringify({ hazards: b.hazards, workTypes: b.workTypes })).run();
+    return json({ ok: true }, {}, env, request);
+  }
+
   // ── Attention: open hot-works permits past their "valid until" time ─────────
   // Drives the red badge / attention gate. Office (FullAccess) sees ALL of the
   // tenant's overdue permits (the next-morning backstop); everyone else sees

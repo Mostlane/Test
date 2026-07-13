@@ -71,7 +71,10 @@
     <div id="list" class="hide">
       <div class="row" style="justify-content:space-between; margin-bottom:10px;">
         <h2 id="listTitle" style="margin:0;"></h2>
-        <button class="btn" id="newBtn">+ New</button>
+        <div class="row">
+          <button class="btn grey small hide" id="editLibBtn" onclick="location.href='hs-rams-admin.html'">⚙ Edit hazard library</button>
+          <button class="btn" id="newBtn">+ New</button>
+        </div>
       </div>
       <div class="card" style="padding:0; overflow:hidden;">
         <table class="list"><tbody id="listRows"></tbody></table>
@@ -377,6 +380,12 @@
       }
       ME = me.user;
     } catch (e) { location.href = "main.html"; return; }
+    // Overlay the tenant's saved hazard/control library over the seeded one.
+    try {
+      const lib = await authFetch("/hs/library").then(r => r.json());
+      if (lib && lib.ok && lib.library && lib.library.hazards && lib.library.workTypes)
+        Object.assign(window.HS_RAMS, { hazards: lib.library.hazards, workTypes: lib.library.workTypes });
+    } catch (e) {}
     buildHub();
     showHub();
   })();
@@ -414,6 +423,7 @@
     show("list");
     g("listTitle").textContent = meta.title;
     g("newBtn").classList.toggle("hide", !meta.ready);
+    g("editLibBtn").classList.toggle("hide", !(type === "rams" && ME && ME.FullAccess === "Yes"));
     g("listRows").innerHTML = `<tr><td class="muted">Loading…</td></tr>`;
     if (!meta.ready) { g("listRows").innerHTML = `<tr><td class="muted">This document type is coming next — the ${esc(meta.title)} form isn't built yet.</td></tr>`; return; }
     try {
