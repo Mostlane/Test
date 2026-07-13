@@ -167,6 +167,30 @@
   const TOKEN_KEY = "mostlaneToken";
   const nativeFetch = window.fetch.bind(window);
 
+  // Request coalescing: the menu and the sidebar both ask for the same badge /
+  // attention data on load. For a short list of idempotent GET endpoints we
+  // merge truly-CONCURRENT identical requests into one network call. It only
+  // shares a request that's still in flight — once it resolves the entry is
+  // cleared, so there's zero staleness (a later fetch always hits the network).
+  let apiHost = "";
+  try { apiHost = new URL(API).host; } catch (e) {}
+  const inflight = {};
+  const COALESCE = /^\/(theme|prefs|auth\/me|po-config|vancheck\/attention|holiday\/(my|all)|asset\/(transfers\/pending-count|requests\/attention))/;
+  function doFetch(finalUrl, init) {
+    const method = ((init && init.method) || "GET").toUpperCase();
+    let ok = false;
+    if (method === "GET") {
+      try { const uu = new URL(finalUrl, location.href); ok = uu.host === apiHost && COALESCE.test(uu.pathname); } catch (e) {}
+    }
+    if (!ok) return nativeFetch(finalUrl, init);
+    if (inflight[finalUrl]) return inflight[finalUrl].then(r => r.clone());
+    const p = nativeFetch(finalUrl, init);
+    inflight[finalUrl] = p;
+    const clear = () => { delete inflight[finalUrl]; };
+    p.then(clear, clear);
+    return p.then(r => r.clone());
+  }
+
   window.fetch = function (input, init) {
     try {
       const urlStr = (typeof input === "string") ? input : (input && input.url);
@@ -188,8 +212,10 @@
             headers.set("Authorization", "Bearer " + token);
           }
           init.headers = headers;
-          return nativeFetch(newUrl, init);
+          return doFetch(newUrl, init);
         }
+        // Direct calls to the API host (badges/attention) coalesce too.
+        if (typeof input === "string") return doFetch(input, init);
       }
     } catch (e) {
       console.error("[portal-config] fetch bridge error:", e);
@@ -697,11 +723,15 @@
             .catch(function () {});
         }
         refresh();
-        // Near-instant pickup: re-check every 20s, plus the moment the tab
-        // regains focus — so flipping the permission on (or a clock-in from
-        // another tab) takes effect without the user navigating.
-        setInterval(refresh, 20000);
+        // The clock appearing "first thing" is driven by the return-to-computer
+        // triggers below (focus / tab-visible / bfcache restore) — they fire the
+        // instant a user comes back to a tab left open overnight, so the start
+        // gate (or a 19:00 auto-stop to confirm) pops immediately. The interval
+        // is only a slow background fallback, so 60s keeps traffic light without
+        // affecting that first-thing behaviour.
+        setInterval(refresh, 60000);
         window.addEventListener("focus", refresh);
+        window.addEventListener("pageshow", refresh);
         document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
       }
       function injectClockStyles() {
