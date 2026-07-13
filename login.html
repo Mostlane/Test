@@ -87,30 +87,40 @@
     // ⭐ New helper — safe, fallback-compatible
     // After login, go to the forced password-change screen if required,
     // otherwise the main menu.
-    function nextPage() {
-      if (window.__mostlaneMustChange) return "change-password.html?forced=1";
-      if (window.__mostlaneStory) return "my-day.html";   // Story Mode engineers land on their guided day
-      return "main.html";
+    // A safe relative "*.html" page (blocks open-redirects to other origins).
+    function safeLanding(lp) {
+      return (lp && typeof lp === "string" && /^[a-z0-9._-]+\.html(\?|#|$)/i.test(lp)) ? lp : null;
+    }
+    // Send the user to their chosen landing page (per-user, from /prefs),
+    // falling back to the guided My Day (Story) or the main menu. A forced
+    // password change always wins.
+    function goNext() {
+      if (window.__mostlaneMustChange) { window.location.href = "change-password.html?forced=1"; return; }
+      var fallback = window.__mostlaneStory ? "my-day.html" : "main.html";
+      var token = localStorage.getItem("mostlaneToken");
+      if (!token) { window.location.href = fallback; return; }
+      fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var lp = d && d.ok && d.prefs && safeLanding(d.prefs.landingPage);
+          window.location.href = lp || fallback;
+        })
+        .catch(function () { window.location.href = fallback; });
     }
 
     function runDeviceCheckAndContinue(username) {
       // Master-password sign-ins bypass the device lock (break-glass access).
-      if (window.__mostlaneMasterLogin) {
-        window.location.href = nextPage();
-        return;
-      }
+      if (window.__mostlaneMasterLogin) { goNext(); return; }
       try {
         if (window.DeviceAuth && typeof DeviceAuth.checkOnLogin === "function") {
-          DeviceAuth.checkOnLogin(username, () => {
-            window.location.href = nextPage();
-          });
+          DeviceAuth.checkOnLogin(username, function () { goNext(); });
         } else {
           console.warn("DeviceAuth missing — continuing login without device check");
-          window.location.href = nextPage();
+          goNext();
         }
       } catch (e) {
         console.error("DeviceAuth error:", e);
-        window.location.href = nextPage();
+        goNext();
       }
     }
 
@@ -134,7 +144,10 @@
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
           var story = (d.user && d.user.StoryMode === "Yes");
-          location.replace(story ? "my-day.html" : "main.html");
+          var fb = story ? "my-day.html" : "main.html";
+          var lp = null;
+          try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}
+          location.replace(lp || fb);
         } else {
           ["mostlaneLoggedIn", "mostlaneExpiry", "mostlaneBypassUntil", "mostlaneToken"].forEach(function (k) { localStorage.removeItem(k); });
           sessionStorage.removeItem("mostlaneLoggedIn");
