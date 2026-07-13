@@ -66,6 +66,60 @@ async function isTimesheetAdmin(env, tenantId, username) {
   const p = await permissionsFor(env, tenantId, username);
   return p.FullAccess === "Yes" || p.OfficeTimesheet === "Yes";
 }
+
+// ── 19:00 auto-stop ──────────────────────────────────────────────────────────
+// Anyone still clocked in past 19:00 UK time is stopped automatically, the
+// segment is marked (edited_by='auto-stop' + note, visible on the timesheet),
+// and it stays "awaiting confirmation" until the user tells us their real
+// finish time (POST /office/confirm-finish), which lands in edited_out.
+// Applied lazily on every read/write below — no cron needed: the moment
+// anything (their own portal poll, the admin timesheet, tomorrow's login)
+// touches the data after 19:00, the stop is applied and backdated to 19:00.
+const AUTO_BY = "auto-stop";
+const CUTOFF_HM = "19:00";
+function londonHM(d) {
+  return new Date(d).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
+}
+// The real instant of "HH:MM London time on date D" (handles GMT/BST).
+function londonToISO(dateStr, hm) {
+  for (const off of ["+01:00", "+00:00"]) {
+    const d = new Date(`${dateStr}T${hm}:00${off}`);
+    if (!isNaN(d) && londonDate(d) === dateStr && londonHM(d) === hm) return d.toISOString();
+  }
+  return new Date(`${dateStr}T${hm}:00Z`).toISOString();
+}
+// A segment's auto-stop instant: 19:00 of its day — or 23:59 if it only
+// STARTED after 19:00 (late work must not be closed before it began).
+function cutoffISOFor(row) {
+  const cut = londonToISO(row.date, CUTOFF_HM);
+  return Date.parse(row.clock_in) >= Date.parse(cut) ? londonToISO(row.date, "23:59") : cut;
+}
+// Close every overdue open segment (one user's, or the whole tenant's).
+async function autoCloseOverdue(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const stmt = username
+    ? db.prepare("SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0)").bind(tenantId, username)
+    : db.prepare("SELECT * FROM office_shifts WHERE tenant_id=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0)").bind(tenantId);
+  const { results } = await stmt.all();
+  const now = Date.now(), iso = new Date().toISOString();
+  for (const r of results || []) {
+    const cut = cutoffISOFor(r);
+    if (now <= Date.parse(cut)) continue;
+    await db.prepare(
+      "UPDATE office_shifts SET clock_out=?, edited_by=?, edited_at=?, edit_note=?, updated_at=? WHERE id=? AND tenant_id=?"
+    ).bind(cut, AUTO_BY, iso,
+      "Auto-stopped at " + londonHM(cut) + " (didn't clock out) — finish time awaiting the user's confirmation",
+      iso, r.id, tenantId).run();
+  }
+}
+// The most recent auto-stopped segment the user hasn't confirmed yet.
+async function pendingAutoStop(env, tenantId, username) {
+  const db = tenantDB(env, tenantId);
+  const r = await db.prepare(
+    "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND edited_by=? AND edited_out IS NULL AND (voided IS NULL OR voided=0) ORDER BY date DESC LIMIT 1"
+  ).bind(tenantId, username, AUTO_BY).first();
+  return r ? { id: r.id, date: r.date, clockIn: r.clock_in, stoppedAt: r.clock_out, stoppedAtHM: londonHM(r.clock_out) } : null;
+}
 // Most recent segment with no effective clock-out and not voided.
 async function openSegmentRow(env, tenantId, username) {
   const db = tenantDB(env, tenantId);
@@ -120,8 +174,10 @@ export async function handle(request, env, ctx, url, sess) {
   if (path === "/office/config" && request.method === "GET") {
     const perm = await hasOfficePerm(env, tenantId, me);
     const enabled = perm;
+    if (enabled) await autoCloseOverdue(env, tenantId, me);
     const today = londonDate();
     const open = await openSegmentRow(env, tenantId, me);
+    const pending = enabled ? await pendingAutoStop(env, tenantId, me) : null;
     const { results } = await db.prepare(
       "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND date=?"
     ).bind(db.tenantId, me, today).all();
@@ -130,8 +186,31 @@ export async function handle(request, env, ctx, url, sess) {
     return json({
       ok: true, enabled: !!enabled, hasPermission: perm, today,
       open: open ? { id: open.id, date: open.date, clockIn: effIn(open), stale: open.date !== today } : null,
+      pendingAutoStop: pending,
       todayClosedSeconds,
     }, {}, env, request);
+  }
+
+  // ── POST /office/confirm-finish — user confirms when they really finished ──
+  // Completes an auto-stopped segment: their answer becomes edited_out (the
+  // effective end used by every total) and the note records the whole story.
+  if (path === "/office/confirm-finish" && request.method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const id = Number(b.id), hm = String(b.time || "");
+    if (!id || !/^([01]\d|2[0-3]):[0-5]\d$/.test(hm)) return error("Send id and time (HH:MM)", 400, env, request);
+    const row = await db.prepare("SELECT * FROM office_shifts WHERE id=? AND tenant_id=?").bind(id, db.tenantId).first();
+    if (!row || row.username !== me) return error("Segment not found", 404, env, request);
+    if (row.edited_by !== AUTO_BY || row.edited_out) return error("This segment isn't awaiting confirmation.", 409, env, request);
+    const finish = londonToISO(row.date, hm);
+    if (Date.parse(finish) <= Date.parse(effIn(row)))
+      return error("Finish time must be after your clock-in (" + londonHM(effIn(row)) + ").", 400, env, request);
+    const iso = new Date().toISOString();
+    await db.prepare(
+      "UPDATE office_shifts SET edited_out=?, edited_at=?, edit_note=?, updated_at=? WHERE id=? AND tenant_id=?"
+    ).bind(finish, iso,
+      "Auto-stopped (didn't clock out); finish time confirmed by " + me + " as " + hm,
+      iso, id, db.tenantId).run();
+    return json({ ok: true }, {}, env, request);
   }
 
   // ── POST /office/clock-in ─────────────────────────────────────────────────
@@ -140,6 +219,7 @@ export async function handle(request, env, ctx, url, sess) {
     const deviceId = b.deviceId || sess.session.device_id || "";
     if (!(await hasOfficePerm(env, tenantId, me)))
       return error("Office clock isn't enabled for your account.", 403, env, request);
+    await autoCloseOverdue(env, tenantId, me);
     const open = await openSegmentRow(env, tenantId, me);
     if (open) return json({ ok: true, already: true, open: { id: open.id, date: open.date, clockIn: effIn(open) } }, {}, env, request);
     const now = new Date();
@@ -163,6 +243,7 @@ export async function handle(request, env, ctx, url, sess) {
 
   // ── GET /office/my — the caller's OWN week ────────────────────────────────
   if (path === "/office/my" && request.method === "GET") {
+    await autoCloseOverdue(env, tenantId, me);
     const detail = await weekDetail(env, tenantId, me, url.searchParams.get("week") || "");
     return json({ ok: true, ...detail }, {}, env, request);
   }
@@ -172,6 +253,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (!(await isTimesheetAdmin(env, tenantId, me))) return error("Forbidden", 403, env, request);
     const u = url.searchParams.get("u");
     if (!u) return error("Missing ?u=", 400, env, request);
+    await autoCloseOverdue(env, tenantId, u);
     const detail = await weekDetail(env, tenantId, u, url.searchParams.get("week") || "");
     const row = await db.prepare("SELECT first_name, last_name FROM users WHERE tenant_id=? AND username=?").bind(db.tenantId, u).first();
     const name = row ? (`${row.first_name || ""} ${row.last_name || ""}`.trim() || u) : u;
@@ -218,6 +300,7 @@ export async function handle(request, env, ctx, url, sess) {
   // ── GET /office/timesheet?week= — weekly master timesheet (admin) ─────────
   if (path === "/office/timesheet" && request.method === "GET") {
     if (!(await isTimesheetAdmin(env, tenantId, me))) return error("Forbidden", 403, env, request);
+    await autoCloseOverdue(env, tenantId, null);   // whole tenant — the admin view applies any due 19:00 stops
     const monday = mondayOf(isDateStr(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
     const days = weekDays(monday);
     const sunday = days[6];
