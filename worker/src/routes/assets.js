@@ -569,6 +569,159 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, acceptance, releases });
   }
 
+  // ═══ Asset REQUESTS ("can I have that?") ═══════════════════════════════════
+  // Anyone can request an item they don't hold (shared pool or another user's).
+  // The current holder — or the asset admins when it's unassigned — gets the
+  // red-bubble notification and either STARTS A TRANSFER (feeds the normal
+  // signed-transfer workflow) or REJECTS with a message. Everything is logged.
+  const isRealHolder = h => { const v = String(h || "").trim(); return v && v.toLowerCase() !== "shared"; };
+
+  // Create a request.
+  if (method === "POST" && pathname === "/asset/request") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    if (!b.assetId) return json({ ok: false, error: "assetId required" }, 400);
+    const asset = await getAsset(env, tenantId, b.assetId);
+    if (!asset) return json({ ok: false, error: "Asset not found" }, 404);
+    const holder = String(asset.assignedTo || "").trim();
+    if (holder.toLowerCase() === me.toLowerCase())
+      return json({ ok: false, error: "You already have this item" }, 400);
+    const dup = await db.prepare(
+      "SELECT id FROM asset_requests WHERE tenant_id=? AND asset_id=? AND requested_by=? AND status='pending'"
+    ).bind(db.tenantId, b.assetId, me).first();
+    if (dup) return json({ ok: false, error: "You've already requested this — it's waiting on " + (isRealHolder(holder) ? holder : "the office") }, 409);
+    await db.prepare(
+      "INSERT INTO asset_requests (tenant_id, asset_id, requested_by, holder, message, requested_at) VALUES (?,?,?,?,?,?)"
+    ).bind(db.tenantId, b.assetId, me, isRealHolder(holder) ? holder : "", String(b.message || "").trim(), new Date().toISOString()).run();
+    return json({ ok: true, holder: isRealHolder(holder) ? holder : "office" });
+  }
+
+  // Lists: my requests + ones I need to action (+ full log for admins).
+  if (method === "GET" && pathname === "/asset/requests") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    const shape = async r => {
+      const a = await getAsset(env, tenantId, r.asset_id);
+      return { id: r.id, assetId: r.asset_id, assetName: (a && a.name) || r.asset_id,
+        requestedBy: r.requested_by, holder: r.holder || "", message: r.message || "",
+        status: r.status, rejectReason: r.reject_reason || "", requestedAt: utcify(r.requested_at),
+        decidedAt: utcify(r.decided_at), decidedBy: r.decided_by || "", seen: !!Number(r.seen) };
+    };
+    const { results: mineR } = await db.prepare(
+      "SELECT * FROM asset_requests WHERE tenant_id=? AND requested_by=? ORDER BY id DESC LIMIT 100"
+    ).bind(db.tenantId, me).all();
+    const { results: toMe } = await db.prepare(
+      admin
+        ? "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='') ORDER BY id DESC LIMIT 100"
+        : "SELECT * FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=? ORDER BY id DESC LIMIT 100"
+    ).bind(db.tenantId, me).all();
+    const out = { ok: true, mine: [], toAction: [], all: null };
+    for (const r of mineR || []) out.mine.push(await shape(r));
+    for (const r of toMe || []) if (r.requested_by !== me) out.toAction.push(await shape(r));
+    if (admin && url.searchParams.get("all") === "1") {
+      const { results: allR } = await db.prepare(
+        "SELECT * FROM asset_requests WHERE tenant_id=? ORDER BY id DESC LIMIT 300"
+      ).bind(db.tenantId).all();
+      out.all = []; for (const r of allR || []) out.all.push(await shape(r));
+    }
+    return json(out);
+  }
+
+  // Badge data: requests waiting on ME (as holder/admin) + my unseen decisions.
+  if (method === "GET" && pathname === "/asset/requests/attention") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    const { results: toMe } = await db.prepare(
+      admin
+        ? "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND (holder=? OR holder='')"
+        : "SELECT id, asset_id, requested_by FROM asset_requests WHERE tenant_id=? AND status='pending' AND holder=?"
+    ).bind(db.tenantId, me).all();
+    const toAction = (toMe || []).filter(r => r.requested_by !== me);
+    const { results: dec } = await db.prepare(
+      "SELECT id, asset_id, status FROM asset_requests WHERE tenant_id=? AND requested_by=? AND status IN ('accepted','rejected') AND seen=0"
+    ).bind(db.tenantId, me).all();
+    return json({ ok: true, toAction: toAction.length, decided: (dec || []).length });
+  }
+
+  // Holder/admin ACCEPTS -> starts the normal signed transfer to the requester.
+  if (method === "POST" && pathname === "/asset/request/accept") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json({ ok: false, error: "Request not found (it may have been cancelled)" }, 404);
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!(r.holder === me || (!r.holder && admin) || admin))
+      return json({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+    const asset = await getAsset(env, tenantId, r.asset_id);
+    if (!asset) return json({ ok: false, error: "Asset no longer exists" }, 404);
+    if (String(asset.assignedTo || "").toLowerCase() === r.requested_by.toLowerCase()) {
+      await db.prepare("UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=? WHERE tenant_id=? AND id=?")
+        .bind(new Date().toISOString(), me, db.tenantId, r.id).run();
+      return json({ ok: true, note: "They already hold it — request closed." });
+    }
+    const dupT = await db.prepare(
+      "SELECT id FROM asset_transfer_requests WHERE tenant_id=? AND asset_id=? AND status='pending'"
+    ).bind(db.tenantId, r.asset_id).first();
+    if (dupT) return json({ ok: false, error: "This item already has a transfer pending — deal with that first." }, 409);
+    const now = new Date().toISOString();
+    const holderNow = String(asset.assignedTo || "").trim();
+    const res = await db.prepare(
+      "INSERT INTO asset_transfer_requests (tenant_id, asset_id, from_user, to_user, note, requested_at) VALUES (?,?,?,?,?,?)"
+    ).bind(db.tenantId, r.asset_id, isRealHolder(holderNow) ? holderNow : me, r.requested_by,
+      ("Requested" + (r.message ? ": " + r.message : "")).slice(0, 200), now).run();
+    await db.prepare(
+      "UPDATE asset_requests SET status='accepted', decided_at=?, decided_by=?, transfer_request_id=? WHERE tenant_id=? AND id=?"
+    ).bind(now, me, res.meta ? res.meta.last_row_id : null, db.tenantId, r.id).run();
+    return json({ ok: true, transferStarted: true });
+  }
+
+  // Holder/admin REJECTS with a message back to the requester.
+  if (method === "POST" && pathname === "/asset/request/reject") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const me = sess.user.username;
+    const b = await request.json().catch(() => ({}));
+    const reason = String(b.reason || "").trim();
+    if (!reason) return json({ ok: false, error: "Add a short message explaining why." }, 400);
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json({ ok: false, error: "Request not found" }, 404);
+    const perms = await permissionsFor(env, tenantId, me);
+    const admin = perms.FullAccess === "Yes" || perms.AssetAdmin === "Yes";
+    if (!(r.holder === me || (!r.holder && admin) || admin))
+      return json({ ok: false, error: "This request is addressed to " + (r.holder || "the office") }, 403);
+    await db.prepare(
+      "UPDATE asset_requests SET status='rejected', reject_reason=?, decided_at=?, decided_by=? WHERE tenant_id=? AND id=?"
+    ).bind(reason.slice(0, 300), new Date().toISOString(), me, db.tenantId, r.id).run();
+    return json({ ok: true });
+  }
+
+  // Requester cancels their own pending request.
+  if (method === "POST" && pathname === "/asset/request/cancel") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    const r = await db.prepare("SELECT * FROM asset_requests WHERE tenant_id=? AND id=? AND status='pending'").bind(db.tenantId, Number(b.id)).first();
+    if (!r) return json({ ok: false, error: "Request not found" }, 404);
+    if (r.requested_by !== sess.user.username) return json({ ok: false, error: "Only the requester can cancel" }, 403);
+    await db.prepare("UPDATE asset_requests SET status='cancelled', decided_at=?, decided_by=?, seen=1 WHERE tenant_id=? AND id=?")
+      .bind(new Date().toISOString(), sess.user.username, db.tenantId, r.id).run();
+    return json({ ok: true });
+  }
+
+  // Requester acknowledges a decision (clears their red bubble).
+  if (method === "POST" && pathname === "/asset/request/ack") {
+    if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const b = await request.json().catch(() => ({}));
+    await db.prepare("UPDATE asset_requests SET seen=1 WHERE tenant_id=? AND id=? AND requested_by=?")
+      .bind(db.tenantId, Number(b.id), sess.user.username).run();
+    return json({ ok: true });
+  }
+
   return json({ error: "Not found" }, 404);
 }
 

@@ -22,7 +22,7 @@ export const TENANT_TABLES = new Set([
   "customers", "sites", "oncall_log", "daily_logs", "vehicle_checks",
   "password_resets", "devices", "login_history", "holidays",
   "holiday_system_days", "holiday_allowance", "holiday_log", "assets",
-  "asset_transfers", "asset_transfer_requests", "sla_jobs", "app_config",
+  "asset_transfers", "asset_transfer_requests", "asset_requests", "sla_jobs", "app_config",
   "portal_keys", "key_log", "notify_log", "audit_log", "hs_documents",
 ]);
 

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asset Requests</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:760px; margin:14px auto 60px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
+    .card h2 { margin:0 0 4px; font-size:16px; color:var(--brand); }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 13px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.green { background:var(--ok); } .btn.red { background:var(--bad); } .btn.small { padding:6px 10px; font-size:13px; }
+    .muted { color:#6b7a90; } .hide { display:none !important; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .req { padding:12px 0; border-top:1px solid #f0f3f7; }
+    .req:first-child { border-top:none; }
+    .req .top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+    .req b.asset { color:var(--brand); }
+    .req .msgtxt { background:#f6f8fb; border-radius:9px; padding:8px 10px; font-size:13.5px; margin:6px 0; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-weight:700; font-size:12px; }
+    .pill.pending { background:#fff6e5; color:#8a5a00; }
+    .pill.accepted { background:#e6f6ec; color:var(--ok); }
+    .pill.rejected { background:#fdecea; color:var(--bad); }
+    .pill.cancelled { background:#eef1f4; color:#6b7a90; }
+    table.log { width:100%; border-collapse:collapse; font-size:13px; }
+    table.log td, table.log th { padding:8px; border-top:1px solid #f0f3f7; text-align:left; vertical-align:top; }
+    .msg { font-size:13.5px; margin:8px 0 0; } .msg.err { color:var(--bad); }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" data-role="home" href="/my-assets.html" style="color:#fff;text-decoration:none;">←</a>
+    <h1>🙋 Asset Requests</h1>
+  </header>
+  <div class="wrap">
+    <div class="card">
+      <h2>Waiting on you</h2>
+      <p class="muted" style="margin:0; font-size:12.5px;">Items you hold that someone has asked for. Start the transfer (they'll accept &amp; sign as normal) or reply with a reason.</p>
+      <div id="toAction"><p class="muted">Loading…</p></div>
+    </div>
+    <div class="card">
+      <h2>My requests</h2>
+      <div id="mine"><p class="muted">Loading…</p></div>
+    </div>
+    <div class="card hide" id="logCard">
+      <h2>All requests (admin log)</h2>
+      <div style="overflow-x:auto;"><table class="log">
+        <thead><tr><th>When</th><th>Asset</th><th>Requested by</th><th>Holder</th><th>Status</th><th>Response</th></tr></thead>
+        <tbody id="logRows"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  const fmt = s => s ? new Date(s).toLocaleString("en-GB", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) : "—";
+  let ADMIN = false;
+
+  async function load() {
+    let me = null;
+    try { const d = await authFetch("/auth/me").then(r => r.json()); me = d.ok ? d.user : null; } catch (e) {}
+    if (!me) { location.href = "/main.html"; return; }
+    ADMIN = me.FullAccess === "Yes" || me.AssetAdmin === "Yes";
+    g("logCard").classList.toggle("hide", !ADMIN);
+    let d;
+    try { d = await authFetch("/asset/requests" + (ADMIN ? "?all=1" : "")).then(r => r.json()); }
+    catch (e) { g("toAction").innerHTML = "<p class='muted'>⚠️ Couldn't load — try again.</p>"; return; }
+    if (!d.ok) { g("toAction").innerHTML = "<p class='muted'>" + esc(d.error || "Couldn't load.") + "</p>"; return; }
+
+    // ── Waiting on me ──
+    g("toAction").innerHTML = (d.toAction || []).map(r => `
+      <div class="req">
+        <div class="top">
+          <div><b class="asset">${esc(r.assetName)}</b><br>
+            <span class="muted" style="font-size:12.5px;">Requested by <b>${esc(r.requestedBy)}</b> · ${esc(fmt(r.requestedAt))}${r.holder ? "" : " · (item unassigned — office to action)"}</span>
+          </div>
+        </div>
+        ${r.message ? `<div class="msgtxt">“${esc(r.message)}”</div>` : ""}
+        <div class="row" style="margin-top:6px;">
+          <button class="btn green small" data-acc="${r.id}">✓ Start transfer to ${esc(r.requestedBy)}</button>
+          <button class="btn red small" data-rej="${r.id}">✕ Reject with message</button>
+        </div>
+      </div>`).join("") || "<p class='muted'>Nothing waiting on you.</p>";
+
+    // ── My requests ──
+    const mine = (d.mine || []).slice(0, 30);
+    g("mine").innerHTML = mine.map(r => {
+      const decided = r.status === "accepted" || r.status === "rejected";
+      return `
+      <div class="req">
+        <div class="top">
+          <div><b class="asset">${esc(r.assetName)}</b>
+            <span class="pill ${esc(r.status)}">${r.status === "pending" ? "waiting on " + esc(r.holder || "the office") : esc(r.status.toUpperCase())}</span><br>
+            <span class="muted" style="font-size:12.5px;">${esc(fmt(r.requestedAt))}${r.decidedBy ? " · answered by " + esc(r.decidedBy) + " " + esc(fmt(r.decidedAt)) : ""}</span>
+          </div>
+        </div>
+        ${r.status === "rejected" && r.rejectReason ? `<div class="msgtxt">“${esc(r.rejectReason)}”</div>` : ""}
+        ${r.status === "accepted" ? `<p class="muted" style="font-size:12.5px; margin:6px 0 0;">✅ Accepted — the transfer is on its way to you: accept &amp; sign it in <a href="/my-assets.html">Plant &amp; Equipment</a>.</p>` : ""}
+        <div class="row" style="margin-top:6px;">
+          ${r.status === "pending" ? `<button class="btn grey small" data-can="${r.id}">Cancel request</button>` : ""}
+          ${decided && !r.seen ? `<button class="btn small" data-ack="${r.id}">OK, got it</button>` : ""}
+        </div>
+      </div>`;
+    }).join("") || "<p class='muted'>You haven't requested anything. Browse <a href='/shared-assets.html'>Shared Assets</a> and tap 🙋 Request.</p>";
+
+    // ── Admin log ──
+    if (ADMIN && d.all) {
+      g("logRows").innerHTML = d.all.map(r => `
+        <tr>
+          <td class="muted">${esc(fmt(r.requestedAt))}</td>
+          <td><b>${esc(r.assetName)}</b></td>
+          <td>${esc(r.requestedBy)}${r.message ? `<br><span class="muted">“${esc(r.message)}”</span>` : ""}</td>
+          <td>${esc(r.holder || "—")}</td>
+          <td><span class="pill ${esc(r.status)}">${esc(r.status)}</span></td>
+          <td class="muted">${r.decidedBy ? esc(r.decidedBy) + " · " + esc(fmt(r.decidedAt)) : "—"}${r.rejectReason ? `<br>“${esc(r.rejectReason)}”` : ""}</td>
+        </tr>`).join("") || "<tr><td colspan='6' class='muted'>No requests yet.</td></tr>";
+    }
+  }
+
+  document.addEventListener("click", async e => {
+    const t = e.target;
+    const post = (p, body) => authFetch(p, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    if (t.dataset.acc) {
+      if (!confirm("Start the transfer? They'll get it to accept and sign as normal.")) return;
+      const r = await post("/asset/request/accept", { id: Number(t.dataset.acc) });
+      if (!r.ok) alert(r.error || "Couldn't accept."); load();
+    } else if (t.dataset.rej) {
+      const reason = prompt("Why are you rejecting this request? (they'll see this message)");
+      if (reason === null) return;
+      if (!reason.trim()) { alert("A short message is required."); return; }
+      const r = await post("/asset/request/reject", { id: Number(t.dataset.rej), reason: reason.trim() });
+      if (!r.ok) alert(r.error || "Couldn't reject."); load();
+    } else if (t.dataset.can) {
+      if (!confirm("Cancel your request?")) return;
+      await post("/asset/request/cancel", { id: Number(t.dataset.can) }); load();
+    } else if (t.dataset.ack) {
+      await post("/asset/request/ack", { id: Number(t.dataset.ack) }); load();
+    }
+  });
+
+  load();
+</script>
+</body>
+</html>
