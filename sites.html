@@ -734,15 +734,16 @@ cleanPostcode(s).toLowerCase().includes(q) ||
       const tt = (s.travelTimeFromHQMinutes ?? "");
 
       // TABLE ROW (desktop)
+const escX = v => String(v==null?"":v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const tr = document.createElement("tr");
 tr.innerHTML = `
  <td>${s.imageURL
-   ? `<img class="thumb" src="${s.imageURL}" loading="lazy" alt="" data-action="photo">`
+   ? `<img class="thumb" src="${escX(s.imageURL)}" loading="lazy" alt="" data-action="photo">`
    : `<span class="thumb thumb-empty" title="No photo yet">📍</span>`}</td>
  <td>${s.client==="projects" ? (s.jobNumber || "(pending)") : (s.siteNumber || "-")}</td>
  <td>
    <a class="linklike" data-action="details">
-     ${s.siteName || "-"} ${hasFerryFlag(s) ? "🚢" : ""}
+     ${escX(s.siteName || "-")} ${hasFerryFlag(s) ? "🚢" : ""}
    </a>
  </td>
  <td><span class="badge">${ucClient(s.client)}</span></td>
@@ -770,10 +771,10 @@ const card = document.createElement("div");
 card.className = "site-card";
 card.innerHTML = `
   <div class="card-header">
-    ${s.imageURL ? `<img class="thumb" src="${s.imageURL}" loading="lazy" alt="" data-action="photo">` : ``}
+    ${s.imageURL ? `<img class="thumb" src="${escX(s.imageURL)}" loading="lazy" alt="" data-action="photo">` : ``}
     <div class="card-title">
       <span class="card-name" data-action="details">
-        ${s.siteName || "-"} ${hasFerryFlag(s) ? "🚢" : ""}
+        ${escX(s.siteName || "-")} ${hasFerryFlag(s) ? "🚢" : ""}
       </span>
       <span class="card-num">
         ${s.client==="projects"

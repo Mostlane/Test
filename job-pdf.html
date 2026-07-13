@@ -312,28 +312,29 @@ async function load(){
   const job = await fetch(`${API}/jobs/${jobId}`).then(r=>r.json());
   const files = await fetch(`${API}/jobs/${jobId}/files`).then(r=>r.json());
 
+  const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   document.getElementById("headerMeta").innerHTML =
-    `Ref: <strong>${job.helpdeskRef}</strong><br>${new Date().toLocaleString()}`;
+    `Ref: <strong>${escX(job.helpdeskRef)}</strong><br>${new Date().toLocaleString()}`;
 
   document.getElementById("jobDetails").innerHTML = `
   <div>
     <span class="label">Site</span>
-    <div class="value">${job.site || job.siteName || job.siteCode || "-"}</div>
+    <div class="value">${escX(job.site || job.siteName || job.siteCode || "-")}</div>
   </div>
 
   <div>
     <span class="label">Engineer</span>
-    <div class="value">${cleanName(job.assignedTo)}</div>
+    <div class="value">${escX(cleanName(job.assignedTo))}</div>
   </div>
 
   <div>
     <span class="label">Priority</span>
-    <div class="value">${job.priority}</div>
+    <div class="value">${escX(job.priority)}</div>
   </div>
 
   <div>
     <span class="label">Status</span>
-    <div class="value">${job.status}</div>
+    <div class="value">${escX(job.status)}</div>
   </div>
 
   <div style="grid-column:1 / -1; margin-top:6px;">
@@ -341,7 +342,7 @@ async function load(){
   JOB DESCRIPTION
 </span>
     <div class="value job-description">
-  ${job.description || job.summary || job.title || "—"}
+  ${escX(job.description || job.summary || job.title || "—")}
 </div>
   </div>
 `;
@@ -394,9 +395,9 @@ document.getElementById("notes").innerHTML =
 
   if(job.signature){
     document.getElementById("signature").innerHTML = `
-      <img src="https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/${job.signature.fileKey}">
+      <img src="https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev/${encodeURIComponent(job.signature.fileKey).replace(/%2F/g,'/')}">
       <div>
-        <strong>${job.signature.signedBy}</strong><br>
+        <strong>${escX(job.signature.signedBy)}</strong><br>
         ${new Date(job.signature.signedAt).toLocaleString()}
       </div>
     `;

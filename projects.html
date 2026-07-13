@@ -240,14 +240,15 @@ function loadFiles(p){
   fetch(`${API}/projects/${p.id}/files`,{headers:{Authorization:"Bearer "+USER}})
     .then(r=>r.json()).then(d=>{
       FILES=d.files;
+      const escX = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
       d.files.forEach((f,i)=>{
         const row=document.createElement("div");
         row.className="file-row";
         row.innerHTML=`
           <div class="file-info">
-            <div class="file-title">${f.title||f.name}</div>
+            <div class="file-title">${escX(f.title||f.name)}</div>
             <div class="file-meta">
-              ${f.category?`<span class="tag">${f.category}</span>`:""}
+              ${f.category?`<span class="tag">${escX(f.category)}</span>`:""}
               <span class="tag">${fmt(f.uploadedAt)}</span>
               ${!f.downloadable?`<span class="tag lock">View only</span>`:""}
             </div>
