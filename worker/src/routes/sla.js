@@ -322,6 +322,23 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
   }
 
+  // Stream a site document with CORS + inline, so an in-app viewer (PDF.js /
+  // <img>) can fetch it cross-origin. Public like the image routes — the R2
+  // public URL already exposes these; this just adds the CORS headers a
+  // fetch-based viewer needs. Keys are constrained to the sitedocs/ prefix.
+  if (subpath === "/site/doc" && method === "GET") {
+    const key = searchParams.get("key");
+    if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    }});
+  }
+
   // Delete a document (admins only).
   if (subpath === "/site/doc-delete" && method === "POST") {
     if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);

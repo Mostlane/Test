@@ -2453,6 +2453,18 @@ async function handle6(request, env, ctx, url, sess) {
     });
     return jsonResponse({ ok: true, url: r2Url(env, key), key }, headers, 201);
   }
+  if (subpath === "/site/doc" && method === "GET") {
+    const key = searchParams.get("key");
+    if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
   if (subpath === "/site/doc-delete" && method === "POST") {
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
     const { key } = await readJson(request);
@@ -4709,7 +4721,10 @@ var PUBLIC_ROUTES = [
   ["POST", "/onboard"],
   // Image bytes are loaded by <img> tags, which can't send an auth header.
   ["GET", "/asset-image"],
-  ["GET", "/asset-thumb"]
+  ["GET", "/asset-thumb"],
+  // Site documents streamed for the in-app viewer (parity with the public R2
+  // URL these already have; adds CORS for fetch-based rendering).
+  ["GET", "/sla/site/doc"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
