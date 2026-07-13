@@ -343,8 +343,14 @@ function dirUrl(job){
 const GEO_KEY = "mlPostcodeGeo_v1";
 let geoCache = {};
 try{ geoCache = JSON.parse(localStorage.getItem(GEO_KEY)) || {}; }catch{ geoCache = {}; }
+const PC_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
 function jobPostcode(job){
-  return String(job.postcode || "").replace(/\*+$/,"").trim().toUpperCase().replace(/\s+/g," ");
+  let pc = String(job.postcode || "").replace(/\*+$/,"").trim();
+  if(!pc){
+    const m = PC_RE.exec(job.address || "");   // fish it out of the address text
+    if(m) pc = m[0];
+  }
+  return pc.toUpperCase().replace(/\s+/g," ");
 }
 async function geocodePostcodes(pcs){
   const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];

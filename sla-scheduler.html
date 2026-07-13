@@ -792,7 +792,7 @@ async function loadSiteMeta(){
       const key = String(s.siteNumber || "").replace(/\D/g, "");
       if(!key) return;
       const lat = Number(s.lat), lon = Number(s.lon ?? s.lng);
-      siteMeta[key.padStart(4,"0")] = {
+      siteMeta[String(Number(key))] = {
         pc: String(s.postcode || "").replace(/\*+$/,"").trim(),
         lat: isFinite(lat) ? lat : null,
         lon: isFinite(lon) ? lon : null
@@ -803,14 +803,25 @@ async function loadSiteMeta(){
 function siteFor(job){
   if(!siteMeta) return null;
   const digits = (String(job.siteCode || job.site || "").match(/(\d+)\s*$/) || [])[1];
-  return digits ? (siteMeta[digits.padStart(4,"0")] || null) : null;
+  if(!digits) return null;
+  // Site numbers arrive in mixed formats ("123", "0123", "SR00123") — compare
+  // on the number itself so leading zeros never break the match.
+  return siteMeta[String(Number(digits))] || null;
 }
+const PC_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
 function postcodeFor(job){
-  const pc = (job.postcode || "").trim() || ((siteFor(job) || {}).pc || "");
+  let pc = (job.postcode || "").trim() || ((siteFor(job) || {}).pc || "");
+  if(!pc){
+    // Last resort: fish a UK postcode out of the address text.
+    const m = PC_RE.exec(job.address || "");
+    if(m) pc = m[0];
+  }
   return pc.toUpperCase().replace(/\s+/g, " ").trim();
 }
 /* Geocode every postcode we don't know yet, in one bulk call (max 100/req). */
+let geoFetchError = false;
 async function geocodePostcodes(pcs){
+  geoFetchError = false;
   const todo = [...new Set(pcs.filter(pc => pc && geoCache[pc] === undefined))];
   for(let i = 0; i < todo.length; i += 100){
     const batch = todo.slice(i, i + 100);
@@ -825,7 +836,7 @@ async function geocodePostcodes(pcs){
         geoCache[(r.query || "").toUpperCase()] =
           (r.result && isFinite(r.result.latitude)) ? [r.result.latitude, r.result.longitude] : null;
       });
-    }catch(e){ /* offline — fall back to stored coords below */ }
+    }catch(e){ geoFetchError = true; }
   }
   try{ localStorage.setItem(GEO_KEY, JSON.stringify(geoCache)); }catch{}
 }
@@ -870,9 +881,19 @@ function plotJobs(){
   mapLayer.clearLayers();
   const pts = [];
   let noLoc = 0;
+  const problems = [];
   jobs.filter(j => MAP_STATUSES.includes(j.status) && mapFilter.has(j.status)).forEach(job => {
     const pt = coordsFor(job);
-    if(!pt){ noLoc++; return; }
+    if(!pt){
+      noLoc++;
+      const pc = postcodeFor(job);
+      problems.push(`${job.ref || job.id}: ` + (
+        !pc ? "no postcode on the job, its site, or its address"
+            : (geoCache[pc] === null ? `postcode "${pc}" not recognised`
+                                     : `postcode "${pc}" not looked up yet${geoFetchError ? " (postcode lookup unreachable)" : ""}`)
+      ));
+      return;
+    }
     const [lat, lon] = pt;
     const colour = STATUS_COLOUR[job.status] || "#2563eb";
     const marker = L.circleMarker([lat, lon], {
@@ -894,11 +915,18 @@ function plotJobs(){
   });
   if(pts.length){
     map.fitBounds(pts, { padding: [36, 36], maxZoom: 13 });
-    $("mapNote").textContent = `${pts.length} job(s) on the map` + (noLoc ? ` · ${noLoc} with no usable postcode (check the site record)` : "") + ". Tap a pin for the summary.";
+    $("mapNote").textContent = `${pts.length} job(s) on the map` + (noLoc ? ` · ${noLoc} couldn't be placed (tap here for details)` : "") + ". Tap a pin for the summary.";
   } else {
     map.setView([51.27, -0.75], 9);   // Farnham-ish default
-    $("mapNote").textContent = noLoc ? `No mappable jobs — ${noLoc} job(s) have no usable postcode.` : "No open jobs to map.";
+    $("mapNote").textContent = geoFetchError
+      ? "⚠️ Couldn't reach the postcode lookup service — check the connection and reopen the map."
+      : (noLoc ? `No pins — none of the ${noLoc} job(s) could be placed. Tap here to see why.` : "No open jobs to map.");
   }
+  $("mapNote").onclick = problems.length
+    ? () => alert("Jobs that couldn't be placed:\n\n" + problems.slice(0, 20).join("\n") + (problems.length > 20 ? `\n…and ${problems.length - 20} more` : ""))
+    : null;
+  $("mapNote").style.cursor = problems.length ? "pointer" : "default";
+  $("mapNote").style.textDecoration = problems.length ? "underline" : "none";
 }
 function escHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
