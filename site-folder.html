@@ -93,14 +93,15 @@ function authFetch(path, opts = {}){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function qp(k){ return new URLSearchParams(location.search).get(k) || ""; }
-function isAdmin(){
-  try{ const p = JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }catch{ return false; }
-}
+function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch{ return {}; } }
+function isAdmin(){ const p = perms(); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }   // manage/delete docs
+function isFull(){ return perms().FullAccess==="Yes"; }                                       // add folder areas
 const STATUS_COLOUR = {"Pending":"#9f1239","Scheduled":"#f59e0b","Travelling":"#3b82f6","In Progress":"#9333ea","On Hold":"#6b7280","Quote":"#dc2626","Order":"#0d9488","Complete":"#84cc16","Invoiced":"#22c55e","Closed Jobs":"#701a75"};
 
 const siteCode = qp("site");
 const siteNm = qp("name");
 const admin = isAdmin();
+const full = isFull();
 let areas = [], activeTab = "Previous Jobs";
 const cache = {};   // tab -> loaded data
 
@@ -133,7 +134,7 @@ function renderTabs(){
     b.onclick = () => selectTab(t);
     host.appendChild(b);
   });
-  if(admin){
+  if(full){
     const add = document.createElement("button");
     add.className = "tab addtab";
     add.textContent = "➕ Add area";
