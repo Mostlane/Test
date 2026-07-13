@@ -505,7 +505,9 @@
         if (item.always) return true;
         if (yes(perms.FullAccess)) {
           // Hide pages the admin has switched off for Full access.
-          if (item.href && mlMenuHidden().indexOf(item.href) !== -1) return false;
+          var hid = mlMenuHidden();
+          if (item.href && hid.indexOf(item.href) !== -1) return false;
+          if (item.launch && hid.indexOf(item.launch) !== -1) return false;   // e.g. H&S ("hs")
           return true;
         }
         if (!item.perms || !item.perms.length) return true;

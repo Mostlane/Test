@@ -335,7 +335,7 @@ const MAP = {
           if (isStory && !STORY_ALLOWED.has(buttonID)) allowed = false;
           if (allowed && fullAccess) {
             const href = (btn.getAttribute("href") || "").split("/").pop();
-            if (href && mlHidden.has(href)) allowed = false;
+            if ((href && mlHidden.has(href)) || (buttonID === "HSPlan" && mlHidden.has("hs"))) allowed = false;
           }
           btn.classList.toggle("visible", allowed);
           if (allowed && buttonID === "MyDocuments" && user.SharePointPath) btn.href = user.SharePointPath;
