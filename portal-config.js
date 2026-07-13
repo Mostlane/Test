@@ -596,7 +596,11 @@
         function removeUI() { var p = document.getElementById("ocPill"); if (p) p.remove(); closeModal(); stopTick(); }
 
         function closeModal() { var o = document.getElementById("ocModal"); if (o) o.remove(); mode = null; if (confirmT) { clearTimeout(confirmT); confirmT = null; } }
+        function niceDay(d) { try { return new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }); } catch (e) { return d; } }
         function openModal(m) {
+          // Already showing this modal? Don't re-render (a periodic refresh
+          // would wipe what the user is typing into the finish-time box).
+          if (mode === m && document.getElementById("ocModal")) return;
           mode = m;
           var o = document.getElementById("ocModal");
           if (!o) { o = document.createElement("div"); o.id = "ocModal"; document.body.appendChild(o); }
@@ -604,7 +608,15 @@
           // running timer) can be dismissed to keep working.
           var blocking = (m !== "stop");
           o.className = blocking ? "oc-overlay blocking" : "oc-overlay";
-          if (m === "start") {
+          if (m === "confirm") {
+            var pa = (state && state.pendingAutoStop) || {};
+            o.innerHTML = '<div class="oc-card"><div class="oc-big">🕘</div><h2>You didn\'t clock out</h2>'
+              + '<p>On <b>' + niceDay(pa.date) + '</b> your timer was still running, so it was automatically stopped at <b>' + (pa.stoppedAtHM || "19:00") + '</b>.</p>'
+              + '<p>What time did you actually finish that day?</p>'
+              + '<input type="time" id="ocFinishTime" value="17:00" style="font-size:22px;padding:8px 12px;border:1px solid #ccd5dd;border-radius:10px;text-align:center;margin-bottom:14px;">'
+              + '<button class="oc-cta" id="ocConfirmBtn">✔ Confirm finish time</button>'
+              + '<p class="oc-note" style="color:#8a94a3;font-size:12px;margin:10px 0 0;">This goes onto the office timesheet against that day.</p></div>';
+          } else if (m === "start") {
             o.innerHTML = '<div class="oc-card"><div class="oc-big">🕒</div><h2>Start your day</h2>'
               + '<p>Please start your timer to begin — you need to do this before using the portal.</p>'
               + '<button class="oc-cta" id="ocStartBtn">▶ Start timer</button></div>';
@@ -627,6 +639,21 @@
           var cb = document.getElementById("ocCloseBtn"); if (cb) cb.onclick = closeModal;
           var lb = document.getElementById("ocLogoutBtn"); if (lb) lb.onclick = function () { localStorage.removeItem("mostlaneToken"); sessionStorage.clear(); location.href = "/login.html"; };
           var stopB = document.getElementById("ocStopBtn"); if (stopB) stopB.onclick = onStopClick;
+          var kb = document.getElementById("ocConfirmBtn"); if (kb) kb.onclick = doConfirmFinish;
+        }
+        function doConfirmFinish() {
+          var pa = (state && state.pendingAutoStop) || {};
+          var inp = document.getElementById("ocFinishTime");
+          var hm = inp ? inp.value : "";
+          if (!/^\d{2}:\d{2}$/.test(hm)) { alert("Pick the time you finished."); return; }
+          var b = document.getElementById("ocConfirmBtn"); if (b) b.disabled = true;
+          af("/office/confirm-finish", { method: "POST", body: JSON.stringify({ id: pa.id, time: hm }) })
+            .then(function (r) { return r.json(); })
+            .then(function (r) {
+              if (!r || !r.ok) { alert((r && r.error) || "Couldn't save that time."); if (b) b.disabled = false; return; }
+              closeModal(); refresh();   // next pending day, or the start gate
+            })
+            .catch(function () { alert("Network error — couldn't save that time."); if (b) b.disabled = false; });
         }
         // Two taps to stop — the second confirms (guards against accidental stops).
         function onStopClick() {
@@ -658,17 +685,22 @@
               state = c;
               if (!state || !state.ok || !state.enabled) { removeUI(); return; }
               renderPill();
+              // Priority: an unconfirmed 19:00 auto-stop must be answered
+              // first; then the gate blocks until the timer is running.
+              if (state.pendingAutoStop) { openModal("confirm"); return; }
+              if (mode === "confirm") closeModal();
               if (state.open) { if (mode === "start" || mode === "stopped") closeModal(); }
-              // Not clocked in: the gate ALWAYS blocks — the only way past is
-              // starting the timer (or Log out from the just-stopped screen).
               else openModal(mode === "stopped" ? "stopped" : "start");
             })
             .catch(function () {});
         }
         refresh();
-        // Re-check every minute so flipping the permission on (or a clock-in
-        // from another tab/machine) is picked up without navigating.
-        setInterval(refresh, 60000);
+        // Near-instant pickup: re-check every 20s, plus the moment the tab
+        // regains focus — so flipping the permission on (or a clock-in from
+        // another tab) takes effect without the user navigating.
+        setInterval(refresh, 20000);
+        window.addEventListener("focus", refresh);
+        document.addEventListener("visibilitychange", function () { if (!document.hidden) refresh(); });
       }
       function injectClockStyles() {
         if (document.getElementById("oc-style")) return;
