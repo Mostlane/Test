@@ -169,6 +169,24 @@
     </div>
   </div>
 
+  <!-- Equipment-confirmation recipient picker -->
+  <div class="overlay" id="confirmModal">
+    <div class="panel" style="max-width:520px;">
+      <h2>Send confirmation request</h2>
+      <p class="muted" style="margin:0 0 10px;">Everyone below will be asked to confirm each item they hold. Untick anyone you want to skip this round.</p>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button class="btn grey small" type="button" id="confirmAllBtn">Select all</button>
+        <button class="btn grey small" type="button" id="confirmNoneBtn">Select none</button>
+      </div>
+      <div id="confirmHolders" style="max-height:50vh; overflow:auto; border:1px solid #e5e7eb; border-radius:9px; padding:2px 10px;"></div>
+      <p class="msg" id="confirmModalMsg"></p>
+      <div class="acts">
+        <button class="btn grey" onclick="closeM('confirmModal')">Cancel</button>
+        <button class="btn" id="confirmModalSend">Send request</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Condition photos (transfer handover/receipt shots) -->
   <div class="overlay" id="condModal">
     <div class="panel" style="max-width:640px;">
@@ -274,15 +292,53 @@
       } catch (e) { box.innerHTML = '<span class="muted">Couldn\'t load.</span>'; }
     }
     g("confirmRefreshBtn").onclick = loadConfirm;
-    g("confirmSendBtn").onclick = async () => {
-      if (!confirm("Send a confirmation request to everyone who holds equipment? They'll be asked to confirm each item they still have.")) return;
-      g("confirmSendBtn").disabled = true;
+
+    // Everyone who currently holds at least one item (matches the round's own
+    // inclusion rule: a real holder, not the shared pool / unassigned).
+    function currentHolders() {
+      const map = {};   // usernameLower -> { username, count }
+      (ASSETS || []).forEach(a => {
+        const hl = String(a.assignedTo || "").trim().toLowerCase();
+        if (!hl || hl === "shared" || hl === "unassigned") return;
+        if (!map[hl]) map[hl] = { username: a.assignedTo.trim(), count: 0 };
+        map[hl].count++;
+      });
+      return Object.values(map).sort((a, b) => (nameOf(a.username) || a.username).localeCompare(nameOf(b.username) || b.username));
+    }
+    const confirmBoxes = () => [...document.querySelectorAll('#confirmHolders input[type=checkbox]')];
+    g("confirmSendBtn").onclick = () => {
+      const holders = currentHolders();
+      const box = g("confirmHolders");
+      box.innerHTML = holders.length ? holders.map(h =>
+        `<label style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:14px; border-top:1px solid #f0f0f0;">
+           <input type="checkbox" value="${escA(h.username)}" checked>
+           <span style="flex:1;">${escA(nameOf(h.username) || h.username)}</span>
+           <span class="muted" style="font-size:12px; white-space:nowrap;">${h.count} item${h.count === 1 ? '' : 's'}</span>
+         </label>`).join("")
+        : '<p class="muted" style="padding:8px 0;">No one currently holds equipment.</p>';
+      g("confirmModalMsg").textContent = "";
+      openM("confirmModal");
+    };
+    g("confirmAllBtn").onclick = () => confirmBoxes().forEach(b => b.checked = true);
+    g("confirmNoneBtn").onclick = () => confirmBoxes().forEach(b => b.checked = false);
+    g("confirmModalSend").onclick = async () => {
+      const boxes = confirmBoxes();
+      const include = boxes.filter(b => b.checked).map(b => b.value);
+      const exclude = boxes.filter(b => !b.checked).map(b => b.value);
+      if (!include.length) { g("confirmModalMsg").textContent = "Tick at least one person to send to."; return; }
+      const msg = exclude.length
+        ? `Send to ${include.length} ${include.length === 1 ? 'person' : 'people'} and skip ${exclude.length}?`
+        : `Send a confirmation request to all ${include.length} ${include.length === 1 ? 'person' : 'people'}?`;
+      if (!confirm(msg)) return;
+      g("confirmModalSend").disabled = true;
       try {
-        const r = await authFetch("/asset/confirm/request", { method: "POST" }).then(r => r.json());
-        if (r.ok) { alert("Confirmation request sent for " + r.count + " item(s)."); loadConfirm(); }
+        const r = await authFetch("/asset/confirm/request", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exclude })
+        }).then(r => r.json());
+        if (r.ok) { closeM("confirmModal"); alert("Confirmation request sent for " + r.count + " item(s)."); loadConfirm(); }
         else alert(r.error || "Failed to send.");
       } catch (e) { alert("Failed to send."); }
-      g("confirmSendBtn").disabled = false;
+      g("confirmModalSend").disabled = false;
     };
 
     async function loadUsers() {

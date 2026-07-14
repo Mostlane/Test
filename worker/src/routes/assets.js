@@ -392,6 +392,10 @@ export async function handle(request, env, ctx, url, sess) {
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
     const perms = await permissionsFor(env, tenantId, sess.user.username);
     if (perms.FullAccess !== "Yes" && perms.AssetAdmin !== "Yes") return json({ ok: false, error: "Forbidden" }, 403);
+    // Optional: skip specific holders this round (admin unticked them in the picker).
+    const body = await request.json().catch(() => ({}));
+    const exclude = new Set((Array.isArray(body.exclude) ? body.exclude : [])
+      .map(u => String(u || "").trim().toLowerCase()).filter(Boolean));
     const round = new Date().toISOString();
     const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let count = 0;
@@ -399,13 +403,14 @@ export async function handle(request, env, ctx, url, sess) {
       let a; try { a = JSON.parse(r.data); } catch { continue; }
       const holder = String(a.assignedTo || "").trim().toLowerCase();
       if (!holder || holder === "shared" || holder === "unassigned") continue;
+      if (exclude.has(holder)) continue;
       a.confirm = { round, status: "pending", at: null, note: "" };
       await putAsset(env, tenantId, a);
       count++;
     }
     await env.DB.prepare(
       "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-    ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess.user.username, total: count })).run();
+    ).bind(tenantId, CONFIRM_KEY, JSON.stringify({ round, startedAt: round, by: sess.user.username, total: count, excluded: [...exclude] })).run();
     return json({ ok: true, count, round });
   }
 

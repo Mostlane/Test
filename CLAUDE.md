@@ -132,7 +132,13 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   reject/cancel), /asset/condition-photos (admin: every condition photo with
   who/when/handover-or-received), /asset/my-documents, /transfer-log,
   r2-relink/unlink (recovery endpoints; UI buttons removed after the data
-  recovery was completed). **utcify()** pattern: never serve SQLite's naive
+  recovery was completed). **Equipment confirmation rounds**
+  ("do you still hold this?"): /asset/confirm/request (admin starts a round —
+  marks every held item pending; POST body `exclude:[usernames]` skips those
+  holders — recipient picker on assets-admin.html), /asset/confirm/respond
+  (holder confirms/flags), /asset/confirm/pending-count (my badge),
+  /asset/confirm/status (admin dashboard, round stored in app_config
+  `asset_confirm_round:<tid>`). **utcify()** pattern: never serve SQLite's naive
   "YYYY-MM-DD HH:MM:SS" to browsers (hour off in UK summer) — store
   toISOString(), normalise old rows on read.
 - `keys.js` — key register: portal_keys (JSON) + key_log (append-only audit).
