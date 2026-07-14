@@ -119,14 +119,26 @@ function renderList(el, items, type){
   if(!items.length){ el.innerHTML = '<div class="empty">None right now.</div>'; return; }
   el.innerHTML = items.map(it => {
     const muted = isMuted(type, it.user, it.key);
+    // Van checks are "skipped" (logged in Weekly Van Checks); the rest are muted.
+    const btn = type === "vehicle-check"
+      ? `<button class="btn small" data-skip='${esc(JSON.stringify({user:it.user,key:String(it.key)}))}'>Skip this week</button>`
+      : `<button class="btn small" data-add='${esc(JSON.stringify({type,user:it.user,key:String(it.key),label:it.name||String(it.key)}))}'>Dismiss for ${esc(it.user)}</button>`;
     return `<div class="row">
       <span class="who">${esc(it.user)}</span>
       <span class="what">${esc(it.name || it.key)}</span>
-      ${muted ? '<span class="pill">muted</span>'
-        : `<button class="btn small" data-add='${esc(JSON.stringify({type,user:it.user,key:String(it.key),label:it.name||String(it.key)}))}'>Dismiss for ${esc(it.user)}</button>`}
+      ${muted ? '<span class="pill">muted</span>' : btn}
     </div>`;
   }).join("");
   el.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => { const d=JSON.parse(b.getAttribute("data-add")); addRule(d.type,d.user,d.key,d.label); }));
+  el.querySelectorAll("[data-skip]").forEach(b => b.addEventListener("click", () => { const d=JSON.parse(b.getAttribute("data-skip")); skipVanCheck(d.user, d.key); }));
+}
+
+async function skipVanCheck(user, week){
+  try{
+    const r = await (await authFetch("/vancheck/skip", { method:"POST", body: JSON.stringify({ username:user, week }) })).json();
+    if(r.ok){ toast(r.already ? "That person already has a check this week" : "Skipped — logged in Weekly Van Checks"); load(); }
+    else toast(r.error||"Failed");
+  }catch{ toast("Failed"); }
 }
 
 function ruleDesc(r){
