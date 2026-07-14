@@ -17,6 +17,7 @@
 import { json, error } from "../lib/http.js";
 import { permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { getRules, isSuppressed } from "../lib/suppress.js";
 
 const SETTINGS_KEY = "vancheck:settings";
 const DEFAULT_CHECKLIST = [
@@ -260,6 +261,12 @@ export async function handle(request, env, ctx, url, sess) {
       const mine = await db.prepare("SELECT week FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
         .bind(db.tenantId, me, week).first();
       mineDue = !mine;
+    }
+    // An admin can mute a person's van-check reminder (this week's key, all weeks
+    // for the user, or globally) via the notification centre.
+    if (mineDue) {
+      const rules = await getRules(env, tenantId);
+      if (isSuppressed(rules, "vehicle-check", me, week)) mineDue = false;
     }
     let missing = [];
     const p = await permissionsFor(env, tenantId, me);

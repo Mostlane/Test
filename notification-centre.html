@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notification Centre — Mostlane</title>
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
+  a.ml-back{color:#fff;text-decoration:none;}
+  .wrap{max-width:900px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
+  .card h2{margin:0 0 4px;font-size:16px;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  .row{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:#fafbfc;flex-wrap:wrap;}
+  .row .who{font-weight:600;} .row .what{flex:1;min-width:120px;color:#334155;font-size:14px;}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.danger{color:#dc2626;border-color:#fca5a5;}
+  .btn.small{padding:6px 10px;font-size:13px;}
+  .empty{color:var(--muted);font-size:14px;padding:6px 0;}
+  select{font-family:inherit;font-size:14px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;}
+  .pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;}
+  .muteform{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:50;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html">‹ Back</a>
+  <h1>🔕 Notification Centre</h1>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Live reminders right now</h2>
+    <p class="sub">Pop-ups and red badges people currently have. Silence one without removing the item itself.</p>
+    <h3 style="font-size:14px;margin:10px 0 4px;">📦 Pending asset transfers</h3>
+    <div id="transfers"><div class="empty">Loading…</div></div>
+    <h3 style="font-size:14px;margin:16px 0 4px;">📋 Equipment confirmations awaited</h3>
+    <div id="confirms"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Mute a whole type</h2>
+    <p class="sub">Silence a kind of reminder for one person, or for everyone. Useful for van checks and to stop all future reminders of a type.</p>
+    <div class="muteform">
+      <select id="mType">
+        <option value="vehicle-check">Vehicle check</option>
+        <option value="asset-transfer">Asset transfers</option>
+        <option value="asset-confirm">Equipment confirmations</option>
+      </select>
+      <select id="mScope">
+        <option value="user">For one person…</option>
+        <option value="global">Everyone (global)</option>
+      </select>
+      <select id="mUser"></select>
+      <button class="btn primary small" id="mAdd">Mute</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Active mutes</h2>
+    <p class="sub">Everything currently silenced. Remove a mute to switch the reminder back on.</p>
+    <div id="rules"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+function token(){ return localStorage.getItem("mostlaneToken") || ""; }
+function authFetch(path, opts = {}){
+  opts.headers = Object.assign({ "Authorization":"Bearer "+token() }, opts.headers||{});
+  if (opts.body && !opts.headers["Content-Type"]) opts.headers["Content-Type"]="application/json";
+  return fetch(API+path, opts);
+}
+function perms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch{ return {}; } }
+const g = id => document.getElementById(id);
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(m){ const t=g("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2400); }
+
+const TYPE_LABEL = { "asset-transfer":"Asset transfer", "asset-confirm":"Equipment confirmation", "vehicle-check":"Vehicle check" };
+let RULES = [];
+function isMuted(type, user, key){
+  return RULES.some(r => {
+    if (r.type !== type) return false;
+    const ru = r.user || null, rk = r.key || null;
+    if (ru===null && rk===null) return true;
+    if (ru!==null && rk===null && ru.toLowerCase()===String(user||"").toLowerCase()) return true;
+    if (ru!==null && rk!==null && ru.toLowerCase()===String(user||"").toLowerCase() && rk===String(key)) return true;
+    if (ru===null && rk!==null && rk===String(key)) return true;
+    return false;
+  });
+}
+
+async function addRule(type, user, key, label){
+  try{
+    const r = await (await authFetch("/notify/suppress", { method:"POST", body: JSON.stringify({ type, user: user||null, key: key||null, label: label||"" }) })).json();
+    if(r.ok){ RULES=r.rules; toast("Muted"); load(); } else toast(r.error||"Failed");
+  }catch{ toast("Failed"); }
+}
+async function removeRule(id){
+  try{
+    const r = await (await authFetch("/notify/suppress/remove", { method:"POST", body: JSON.stringify({ id }) })).json();
+    if(r.ok){ RULES=r.rules; toast("Reminder switched back on"); load(); } else toast(r.error||"Failed");
+  }catch{ toast("Failed"); }
+}
+
+function renderList(el, items, type){
+  if(!items.length){ el.innerHTML = '<div class="empty">None right now.</div>'; return; }
+  el.innerHTML = items.map(it => {
+    const muted = isMuted(type, it.user, it.key);
+    return `<div class="row">
+      <span class="who">${esc(it.user)}</span>
+      <span class="what">${esc(it.name || it.key)}</span>
+      ${muted ? '<span class="pill">muted</span>'
+        : `<button class="btn small" data-add='${esc(JSON.stringify({type,user:it.user,key:String(it.key),label:it.name||String(it.key)}))}'>Dismiss for ${esc(it.user)}</button>`}
+    </div>`;
+  }).join("");
+  el.querySelectorAll("[data-add]").forEach(b => b.addEventListener("click", () => { const d=JSON.parse(b.getAttribute("data-add")); addRule(d.type,d.user,d.key,d.label); }));
+}
+
+function ruleDesc(r){
+  const t = TYPE_LABEL[r.type] || r.type;
+  if(!r.user && !r.key) return `${t} — <b>everyone</b>`;
+  if(r.user && !r.key) return `${t} — all for <b>${esc(r.user)}</b>`;
+  if(r.user && r.key) return `${t} — <b>${esc(r.label||r.key)}</b> for <b>${esc(r.user)}</b>`;
+  return `${t} — <b>${esc(r.label||r.key)}</b> (everyone)`;
+}
+function renderRules(){
+  const el = g("rules");
+  if(!RULES.length){ el.innerHTML = '<div class="empty">Nothing muted.</div>'; return; }
+  el.innerHTML = RULES.map(r => `<div class="row">
+      <span class="what">${ruleDesc(r)}</span>
+      <button class="btn danger small" data-del="${esc(r.id)}">Remove mute</button>
+    </div>`).join("");
+  el.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => removeRule(b.getAttribute("data-del"))));
+}
+
+async function load(){
+  try{
+    const d = await (await authFetch("/notify/overview")).json();
+    if(!d.ok){ toast(d.error||"Couldn't load"); return; }
+    RULES = d.rules || [];
+    renderList(g("transfers"), d.transfers || [], "asset-transfer");
+    renderList(g("confirms"), d.confirmations || [], "asset-confirm");
+    renderRules();
+  }catch{ toast("Couldn't load"); }
+}
+
+async function loadUsers(){
+  try{
+    const d = await (await authFetch("/users")).json();
+    const users = d.Users || d.users || [];
+    g("mUser").innerHTML = users.map(u => `<option value="${esc(u.Username||u.username)}">${esc(u.Username||u.username)}</option>`).join("");
+  }catch{}
+}
+
+function initMuteForm(){
+  const scope = g("mScope"), userSel = g("mUser");
+  const sync = () => { userSel.style.display = scope.value === "user" ? "" : "none"; };
+  scope.addEventListener("change", sync); sync();
+  g("mAdd").addEventListener("click", () => {
+    const type = g("mType").value;
+    const user = scope.value === "user" ? userSel.value : null;
+    if(scope.value === "user" && !user){ toast("Pick a person"); return; }
+    addRule(type, user, null, "");
+  });
+}
+
+(async function(){
+  // Full-access only.
+  try{
+    const me = await (await authFetch("/auth/me")).json();
+    if(!me.ok || me.user.FullAccess !== "Yes"){ alert("This page needs Full access."); location.href="main.html"; return; }
+  }catch{ location.href="main.html"; return; }
+  initMuteForm();
+  await loadUsers();
+  await load();
+})();
+</script>
+</body>
+</html>
