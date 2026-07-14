@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fleet Report — Mostlane</title>
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<style>
+  :root{--indigo-dark:#1a237e;--indigo-mid:#283593;--indigo-light:#3949ab;--yellow:#ffd600;
+        --green-bg:#d4edda;--green-text:#155724;--amber-bg:#fff3cd;--amber-text:#856404;
+        --red-bg:#f8d7da;--red-text:#721c24;--weekend-bg:#fff8e1;--pool-bg:#fff9c4;--pool-border:#f9a825;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#222;font-size:14px}
+  .topbar{background:#0f172a;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px}
+  .topbar a{color:#fff;text-decoration:none} .topbar h1{font-size:17px;flex:1}
+  .gen{max-width:760px;margin:18px auto;padding:0 16px}
+  .card{background:#fff;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.07);padding:18px;margin-bottom:16px}
+  .drop{border:2px dashed #c7c9e6;border-radius:10px;padding:14px;margin:10px 0;background:#fafbff}
+  .drop label{font-weight:600;color:var(--indigo-dark);display:block;margin-bottom:6px;font-size:14px}
+  .drop .hint{font-size:12px;color:#78809a;margin-top:4px}
+  .drop .file{font-size:12.5px;color:#155724;margin-top:6px;font-weight:600}
+  input[type=file]{font:inherit;font-size:13px}
+  .btn{appearance:none;border:0;border-radius:9px;padding:11px 20px;font:inherit;font-weight:700;cursor:pointer;background:var(--indigo-dark);color:#fff}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.grey{background:#e2e8f0;color:#0f172a}
+  #status{font-size:13px;color:#475569;margin-top:10px;min-height:18px}
+  /* ---- report ---- */
+  .header{background:linear-gradient(135deg,var(--indigo-dark),var(--indigo-mid));color:#fff;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;border-radius:10px}
+  .header h1{font-size:21px} .header p{font-size:13px;opacity:.85;margin-top:4px}
+  .badge{background:var(--yellow);color:var(--indigo-dark);padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
+  .container{max-width:1400px;margin:0 auto;padding:16px}
+  .section-title{font-size:17px;font-weight:700;color:var(--indigo-dark);margin:22px 0 10px;border-left:4px solid var(--indigo-dark);padding-left:10px}
+  table.rt{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);margin-bottom:22px}
+  table.rt th{background:var(--indigo-dark);color:#fff;padding:9px 11px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  table.rt.anom th{background:#c62828}
+  table.rt td{padding:9px 11px;border-bottom:1px solid #e8eaf6;font-size:13px}
+  table.rt tr:hover td{background:#f5f6ff}
+  .flag{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600}
+  .f-warn{background:var(--amber-bg);color:var(--amber-text)} .f-ok{background:var(--green-bg);color:var(--green-text)} .f-red{background:var(--red-bg);color:var(--red-text)}
+  .wknd{background:var(--weekend-bg)}
+  .drv-card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.07);margin-bottom:16px;overflow:hidden}
+  .drv-head{background:linear-gradient(90deg,var(--indigo-mid),var(--indigo-light));color:#fff;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;flex-wrap:wrap;gap:8px}
+  .drv-head .t{font-size:15px;font-weight:700} .drv-head .r{font-size:12px;opacity:.85}
+  .drv-sum{display:flex;gap:14px;font-size:12px;opacity:.92;flex-wrap:wrap}
+  .drv-body{padding:14px 18px;display:none} .drv-body.open{display:block}
+  .day{border:1px solid #e8eaf6;border-radius:8px;margin-bottom:8px;overflow:hidden}
+  .day-h{display:flex;align-items:center;padding:9px 14px;background:#f5f6ff;cursor:pointer;gap:10px;flex-wrap:wrap}
+  .day-h.wk{background:var(--weekend-bg);border-left:4px solid #ffc107}
+  .day-nm{font-weight:700;font-size:13px;min-width:120px;color:var(--indigo-dark)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px}
+  .p-blue{background:#dbeafe;color:#1e40af}.p-green{background:#dcfce7;color:#166534}.p-amber{background:#fef3c7;color:#92400e}
+  .day-b{display:none;padding:8px 14px;overflow-x:auto} .day-b.open{display:block}
+  .notes{background:#fff;border-radius:10px;padding:16px 18px;font-size:12.5px;color:#475569;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  .pool{background:var(--pool-bg);border:1px solid var(--pool-border);border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:13px}
+  .muted{color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="/main.html">‹ Back</a><h1>🚚 Fleet Report</h1></div>
+
+<div class="gen" id="genPane">
+  <div class="card">
+    <p style="font-size:13px;color:#475569;margin-bottom:6px;">Drop in this week's <b>VelocityFleet trip export</b> and the <b>driver score PDF</b>. The report builds below — van-check compliance is pulled in automatically from the portal.</p>
+    <div class="drop">
+      <label>📂 VelocityFleet Trip Export (.xls)</label>
+      <input type="file" id="xlsFile" accept=".xls,.xlsx">
+      <div class="hint">Trip History – Summary Report</div>
+      <div class="file" id="xlsName"></div>
+    </div>
+    <div class="drop">
+      <label>📂 Driver Score PDF</label>
+      <input type="file" id="pdfFile" accept=".pdf">
+      <div class="hint">Driver Performance – Summary Report (optional but recommended)</div>
+      <div class="file" id="pdfName"></div>
+    </div>
+    <button class="btn" id="genBtn" disabled>Generate Report</button>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="report"></div>
+
+<!-- SheetJS + PDF.js (client-side parsing) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+function token(){ return localStorage.getItem("mostlaneToken") || ""; }
+function authFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+token()},o.headers||{}); return fetch(API+p,o); }
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+try{ if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc="https://unpkg.com/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js"; }catch(e){}
+
+/* ═══ Fleet roster + maps (from spec) ═══ */
+const FLEET = [
+  {reg:'LA70FPJ',driver:'Chris Cooke',home:['mengham']},
+  {reg:'WP64 EJD',driver:'Chris Cooke',home:['mengham']},
+  {reg:'LB21 VZU',driver:'Chris F',home:['wigmore','heath end','rg26']},
+  {reg:'LG23 AWK',driver:'Tony',home:['eastbrook close','beacon way','park gate','hill croft']},
+  {reg:'HX69 KHZ',driver:'FIAT Fio',home:['southway','titchfield','holmesland','botley','downland close']},
+  {reg:'HN73 KFO',driver:'Dan Walker',home:['yard']},
+  {reg:'HT75 YMM',driver:'David',home:['bursledon','devonshire gardens','hamble lane','hedge end']},
+  {reg:'LE73 UHX',driver:'Connor',home:['whiteley','lapwing','chaffinch']},
+  {reg:'WM73 VFL',driver:'Transit Tipper',home:['yard','southway','titchfield','st leonards','catisfield']},
+  {reg:'HN69 SYP',driver:'TIPPER',home:['yard']},
+  {reg:'LE73 UHV',driver:'Steve Hyde',home:['northolt gardens',"lord's hill",'so16']},
+  {reg:'BL12 DMZ',driver:'Ryan',home:[]},
+  {reg:'HY25 UTM',driver:'Caddy UTM',home:[]},
+  {reg:'KL07 YJK',driver:'',home:[]},
+];
+const POOL = new Set(['WM73 VFL','HN69 SYP']);
+const LOC_MAP = [
+  {k:['mengham'],l:'Mengham (Home)'},{k:['wigmore','rg26'],l:'Heath End (Home)'},
+  {k:['chaffinch way','lapwing way'],l:'Whiteley (Home)'},{k:['southway','titchfield'],l:'Titchfield (Home/Base)'},
+  {k:['holmesland','botley'],l:'Botley (Home)'},{k:['downland close'],l:'Botley (Home)'},
+  {k:['devonshire gardens'],l:'Bursledon (Home)'},{k:['hamble lane'],l:'Bursledon/Hedge End (Home)'},
+  {k:['eastbrook close','beacon way'],l:'Park Gate (Home)'},{k:['northolt gardens',"lord's hill"],l:'Southampton (Home)'},
+  {k:['upper cornaway'],l:'Fareham (Yard)'},{k:['st leonards close','catisfield'],l:'Catisfield'},
+  {k:['woodlands close','sarisbury'],l:'Sarisbury Green'},{k:['goodwood'],l:'Goodwood Estate'},
+  {k:['alderholt'],l:'Alderholt'},{k:['wimborne'],l:'Wimborne Minster'},{k:['verwood'],l:'Verwood'},
+  {k:['ringwood','eberspächer'],l:'Ringwood'},{k:['brockenhurst','greenways rd'],l:'Brockenhurst Site'},
+  {k:['sandhurst'],l:'Sandhurst'},{k:['camberley','a331'],l:'Camberley'},{k:['basingstoke'],l:'Basingstoke'},
+  {k:['brighton'],l:'Brighton'},{k:['worthing','sompting'],l:'Worthing/Sompting'},{k:['farlington'],l:'Farlington Services'},
+  {k:['fareham'],l:'Fareham'},{k:['portsmouth'],l:'Portsmouth'},{k:['whiteley'],l:'Whiteley'},
+  {k:['southampton'],l:'Southampton'},{k:['gosport'],l:'Gosport'},{k:['warsash','greenaway lane'],l:'Warsash'},
+  {k:['denmead'],l:'Denmead'},{k:['co-operative food','co-op food'],l:'Co-op'},{k:['morrisons'],l:'Morrisons'},
+  {k:['tesco'],l:'Tesco'},{k:['shell,','texaco','esso','bp,'],l:'Petrol Station'},{k:['cams hall','cams hill'],l:'Cams Hill, Fareham'},{k:['m27'],l:'M27 Motorway'},
+];
+function locLabel(s){
+  const raw=String(s||"").trim(); const l=raw.toLowerCase();
+  if(l==="yard")return "Yard"; if(l==="office")return "Office (Fareham)"; if(l.includes("journey in progress"))return "(Journey in progress)";
+  for(const m of LOC_MAP) if(m.k.some(k=>l.includes(k))) return m.l;
+  return raw.split(",").slice(0,2).join(",").slice(0,42);
+}
+
+/* ═══ Parsing / classification (validated vs the real .xls) ═══ */
+const norm = s => String(s||"").replace(/\s+/g,"").toUpperCase();
+const toMin = t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||"").trim());return m?(+m[1])*60+(+m[2]):null;};
+const durMin = d=>{const m=/^(\d{1,3}):(\d{2})/.exec(String(d||"").trim());return m?(+m[1])*60+(+m[2]):0;};
+const parseDate = s=>{const m=/^(\d{2})-(\d{2})-(\d{2})$/.exec(String(s||"").trim());return m?`20${m[3]}-${m[2]}-${m[1]}`:null;};
+const isHome = (loc,homes)=>{const l=String(loc||"").toLowerCase();return homes.some(h=>l.includes(h))||l.includes("yard")||l.includes("office");};
+const hm = m=>m==null?"—":String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+const hmSpan = m=>m==null?"—":Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function dowOf(iso){ return new Date(iso+"T12:00:00Z").getUTCDay(); }
+
+function parseVehicleSheet(rows){
+  const days={}; let cur=null;
+  for(let i=3;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const c0=r[0];
+    if(c0 && String(c0).startsWith("Daily Totals")) continue;
+    const d=parseDate(c0); if(d) cur=d;
+    const start=r[1]; if(!start||!cur) continue;
+    (days[cur]=days[cur]||[]).push({start,end:r[2],from:r[3]||"",to:r[4]||"",drive:durMin(r[5]),stopped:durMin(r[6]),miles:parseFloat(r[7])||0,startMin:toMin(start),endMin:toMin(r[2])});
+  }
+  return days;
+}
+function classifyDay(trips,homes){
+  const real=trips.filter(t=>!(t.miles<0.15 && t.from===t.to));
+  real.forEach(t=>t.type="Day Travel");
+  real.forEach(t=>{ if(t.miles<0.15 && t.from===t.to) t.type="Trivial"; });
+  if(real.length){
+    const f=real[0], last=real[real.length-1];
+    if(isHome(f.from,homes)) f.type="Commute Out";
+    if(isHome(last.to,homes)) last.type=(last===f?f.type:"Commute Home");
+  }
+  const starts=real.map(t=>t.startMin).filter(x=>x!=null), ends=real.map(t=>t.endMin).filter(x=>x!=null);
+  let s=starts.length?Math.min(...starts):null, e=ends.length?Math.max(...ends):null, dataErr=false;
+  if(s!=null&&e!=null&&e<s-60){dataErr=true;e=null;}
+  const span=(s!=null&&e!=null)?e-s:null;
+  const commute=real.filter(t=>t.type&&t.type.indexOf("Commute")===0).reduce((a,t)=>a+t.drive,0);
+  const travel=real.filter(t=>t.type==="Day Travel").reduce((a,t)=>a+t.drive,0);
+  const miles=real.reduce((a,t)=>a+t.miles,0);
+  return {trips:real,startMin:s,endMin:e,span,commute,travel,miles,dataErr,commuteUndetected:real.length>0&&commute===0};
+}
+function anomaliesForDay(reg,d,day,isPool){
+  const out=[]; const dw=dowOf(d); const wknd=dw===0||dw===6;
+  if(day.startMin!=null&&day.startMin<360) out.push(["High","Very early start "+hm(day.startMin)]);
+  else if(day.startMin!=null&&(day.startMin<420||day.startMin>540)) out.push(["Medium","Start "+hm(day.startMin)]);
+  if(day.endMin!=null&&day.endMin>1170) out.push(["High","Late return "+hm(day.endMin)]);
+  else if(day.endMin!=null&&day.endMin>1110) out.push(["Medium","Return "+hm(day.endMin)]);
+  if(day.span!=null&&day.span>720) out.push(["High","Day span "+hmSpan(day.span)]);
+  if(day.miles>150) out.push(["High","Single day "+day.miles.toFixed(0)+" miles"]);
+  if(wknd&&day.trips.length){ out.push([isPool?"High":"Medium",(isPool?"Pool vehicle weekend use":"Weekend working")]); }
+  if(day.dataErr) out.push(["Note","VelocityFleet data error (time inversion)"]);
+  return out;
+}
+
+/* ═══ Van-check compliance from the portal ═══ */
+function mondayOf(iso){ const d=new Date(iso+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7)); return d.toISOString().slice(0,10); }
+function weeksBetween(minISO,maxISO){ const out=[]; let w=mondayOf(minISO); const end=mondayOf(maxISO); let guard=0; while(w<=end && guard++<12){ out.push(w); const d=new Date(w+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+7); w=d.toISOString().slice(0,10);} return out; }
+async function fetchVanChecks(weeks){
+  const byWeek={};
+  for(const wk of weeks){
+    try{ const d=await authFetch("/vancheck/week?week="+wk).then(r=>r.json()); if(d.ok) byWeek[wk]=d; }catch(e){}
+  }
+  return byWeek;
+}
+
+/* ═══ PDF driver scores ═══ */
+async function parseScorePdf(file){
+  const scores={};
+  try{
+    const buf=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    let text=[];
+    for(let p=1;p<=pdf.numPages;p++){ const pg=await pdf.getPage(p); const c=await pg.getTextContent(); text=text.concat(c.items.map(i=>i.str)); }
+    // Find reg patterns and the number after driver name; heuristic: reg, name, score, journeys, miles
+    // Row scan: find each reg token, then the next integer 0-100 is its score.
+    for(let i=0;i<text.length;i++){
+      const reg=FLEET.find(v=>norm(text[i])===norm(v.reg));
+      if(reg){
+        // scan next ~6 tokens for the first integer 0-100 = score
+        for(let j=i+1;j<Math.min(i+8,text.length);j++){ const n=parseInt(text[j],10); if(!isNaN(n)&&n>=0&&n<=100){ scores[reg.reg]=n; break; } }
+      }
+    }
+  }catch(e){ console.warn("pdf parse",e); }
+  return scores;
+}
+
+/* ═══ Build + render ═══ */
+let XLSDATA=null, PDFFILE=null;
+$("xlsFile").addEventListener("change",e=>{ XLSDATA=e.target.files[0]; $("xlsName").textContent=XLSDATA?("✓ "+XLSDATA.name):""; refresh(); });
+$("pdfFile").addEventListener("change",e=>{ PDFFILE=e.target.files[0]; $("pdfName").textContent=PDFFILE?("✓ "+PDFFILE.name):""; refresh(); });
+function refresh(){ $("genBtn").disabled=!XLSDATA; }
+$("genBtn").addEventListener("click",generate);
+
+async function generate(){
+  $("genBtn").disabled=true; $("status").textContent="Reading spreadsheet…";
+  try{
+    const buf=await XLSDATA.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array",cellDates:true,raw:false});
+    const vehicles=[]; let minD=null,maxD=null;
+    for(const v of FLEET){
+      const nm=wb.SheetNames.find(n=>norm(n)===norm(v.reg)); if(!nm) continue;
+      const rows=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,raw:false,blankrows:true,defval:null});
+      const days=parseVehicleSheet(rows);
+      const dayList=Object.keys(days).sort().map(d=>({date:d,...classifyDay(days[d],v.home)}));
+      dayList.forEach(d=>{ if(!minD||d.date<minD)minD=d.date; if(!maxD||d.date>maxD)maxD=d.date; });
+      vehicles.push({...v,isPool:POOL.has(v.reg),days:dayList});
+    }
+    if(!minD){ $("status").textContent="No trip data found in that file."; $("genBtn").disabled=false; return; }
+    $("status").textContent="Reading driver scores…";
+    const scores=PDFFILE?await parseScorePdf(PDFFILE):{};
+    $("status").textContent="Fetching van-check compliance…";
+    const weeks=weeksBetween(minD,maxD);
+    const vanByWeek=await fetchVanChecks(weeks);
+    $("status").textContent="Building report…";
+    renderReport({vehicles,scores,weeks,vanByWeek,minD,maxD});
+    $("genPane").style.display="none";
+    window.scrollTo(0,0);
+  }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
+}
+
+function scoreFlag(s){ if(s==null)return '<span class="flag muted">—</span>'; const c=s>=85?"f-ok":s>=70?"f-warn":"f-red"; return `<span class="flag ${c}">${s}</span>`; }
+function fmtRange(a,b){ const f=iso=>new Date(iso+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}); return f(a)+" – "+f(b)+" "+b.slice(0,4); }
+
+function renderReport(R){
+  const active=R.vehicles.filter(v=>v.days.some(d=>d.trips.length));
+  let h='';
+  // 1. Header
+  h+=`<div class="container"><div class="header"><div><h1>🚚 Mostlane Construction – Fleet Trip Report</h1>
+      <p>${esc(fmtRange(R.minD,R.maxD))} · Generated ${new Date().toLocaleString("en-GB")}</p></div>
+      <span class="badge">${active.length} active vehicles</span></div>`;
+  // 2. Legend
+  h+=`<div class="notes" style="margin:14px 0"><b>🕐 Door-to-door span</b> includes commute · <b>🏠 Est. commute</b> inferred from home base (check day detail if undetected) · <b>🚗 Travel</b> between job locations only</div>`;
+
+  // 3. Weekly hours summary
+  h+=`<div class="section-title">Weekly Working Hours Summary</div><table class="rt"><tr><th>Driver</th><th>Reg</th>${DOWO().map(d=>`<th>${d}</th>`).join("")}<th>Total span<span class="muted"> incl. commute</span></th><th>Est. commute</th><th>Status</th></tr>`;
+  for(const v of active){
+    const byDow={}; v.days.forEach(d=>byDow[dowOf(d.date)]=d);
+    let totalSpan=0, totalCommute=0, undetected=false;
+    const cells=[1,2,3,4,5,6,0].map(dw=>{ const d=byDow[dw]; if(!d||!d.trips.length) return `<td class="${(dw===0||dw===6)?'wknd':''}"><span class="muted">—</span></td>`;
+      if(d.span!=null)totalSpan+=d.span; totalCommute+=d.commute; if(d.commuteUndetected)undetected=true;
+      return `<td class="${(dw===0||dw===6)?'wknd':''}">${hm(d.startMin)}–${hm(d.endMin)}${d.commuteUndetected?' <span class="flag f-warn">⚠</span>':''}</td>`; });
+    const sc=R.scores[v.reg];
+    const status = sc!=null&&sc<70 ? '<span class="flag f-red">Review</span>' : (sc!=null&&sc<85?'<span class="flag f-warn">Monitor</span>':'<span class="flag f-ok">OK</span>');
+    h+=`<tr><td><b>${esc(v.driver||v.reg)}</b> ${scoreFlag(sc)}</td><td>${esc(v.reg)}</td>${cells.join("")}<td><b>${hmSpan(totalSpan)}</b></td><td>${hmSpan(totalCommute)}</td><td>${status}</td></tr>`;
+  }
+  h+=`</table>`;
+
+  // 4. Driver league
+  const league=active.map(v=>({v,s:R.scores[v.reg]})).filter(x=>x.s!=null).sort((a,b)=>b.s-a.s);
+  if(league.length){
+    h+=`<div class="section-title">Driver Performance League</div><table class="rt"><tr><th>Rank</th><th>Driver</th><th>Reg</th><th>Score</th></tr>`;
+    league.forEach((x,i)=>{ const medal=["🥇","🥈","🥉"][i]||(i+1); h+=`<tr><td>${medal}</td><td><b>${esc(x.v.driver||x.v.reg)}</b></td><td>${esc(x.v.reg)}</td><td>${scoreFlag(x.s)}</td></tr>`; });
+    h+=`</table>`;
+  }
+
+  // 5. Van-check compliance
+  h+=`<div class="section-title">Van Check Compliance</div><table class="rt"><tr><th>Driver</th><th>Reg</th>${R.weeks.map(w=>`<th>Wk ${esc(w.slice(5))}</th>`).join("")}<th>Last check</th></tr>`;
+  for(const v of R.vehicles){
+    let last=null, any=false;
+    const cells=R.weeks.map(w=>{ const wk=R.vanByWeek[w]; if(!wk) return '<td class="muted">?</td>';
+      const row=(wk.rows||[]).find(r=>norm(r.vehicle||"")===norm(v.reg) || (r.username&&norm(r.check&&r.check.vehicle)===norm(v.reg)));
+      const c=row&&row.check;
+      if(!c) return '<td><span class="flag f-red">❌</span></td>';
+      any=true; last=c.checkedAt; const dw=dowOf((c.checkedAt||"").slice(0,10)); const onTime=dw>=1&&dw<=3;
+      const wl=c.skipped?'<span class="flag muted">skip</span>':(c.safeToDrive===false?'🔴':'');
+      return `<td><span class="flag ${onTime?'f-ok':'f-warn'}">${onTime?'✅':'⚠️'}</span> ${wl}</td>`; });
+    if(!any && !FLEET.find(f=>f.reg===v.reg&&f.driver)) continue;
+    h+=`<tr style="${!any?'border-left:3px solid #dc2626':''}"><td>${esc(v.driver||"—")}</td><td>${esc(v.reg)}</td>${cells.join("")}<td class="${last?'':'muted'}">${last?esc(last.slice(0,10)):'Never'}</td></tr>`;
+  }
+  h+=`</table>`;
+
+  // 6. Pool analysis
+  const poolActive=active.filter(v=>v.isPool);
+  if(poolActive.length){
+    h+=`<div class="section-title">Pool Vehicle Driver Analysis</div>`;
+    for(const v of poolActive){
+      h+=`<div class="pool"><b>${esc(v.reg)}</b> — active ${v.days.filter(d=>d.trips.length).length} day(s). ⚙️ Suggested driver — confirm with team.<br><span class="muted">Not for payroll or disciplinary use without confirmation.</span></div>`;
+    }
+  }
+
+  // 7. Driver daily breakdown cards
+  h+=`<div class="section-title">Driver Daily Breakdown</div>`;
+  for(const v of active){
+    const act=v.days.filter(d=>d.trips.length);
+    const tMiles=act.reduce((a,d)=>a+d.miles,0), tTrips=act.reduce((a,d)=>a+d.trips.length,0), tSpan=act.reduce((a,d)=>a+(d.span||0),0);
+    const key=norm(v.reg);
+    h+=`<div class="drv-card"><div class="drv-head" onclick="tog('b_${key}')"><div><span class="t">${esc(v.driver||v.reg)}</span> ${scoreFlag(R.scores[v.reg])}<div class="r">${esc(v.reg)}</div></div>
+        <div class="drv-sum"><span>${act.length} days</span><span>${tTrips} trips</span><span>${tMiles.toFixed(1)} mi</span><span>${hmSpan(tSpan)} span</span></div></div>
+        <div class="drv-body" id="b_${key}">`;
+    const byDow={}; v.days.forEach(d=>byDow[dowOf(d.date)]=d);
+    [1,2,3,4,5,6,0].forEach(dw=>{
+      const d=byDow[dw]; const wknd=dw===0||dw===6;
+      if(!d||!d.trips.length){ h+=`<div class="day"><div class="day-h ${wknd?'wk':''}"><span class="day-nm">${DOW[dw]}</span><span class="muted">No activity</span></div></div>`; return; }
+      const dk=key+"_"+d.date;
+      const anoms=anomaliesForDay(v.reg,d.date,d,v.isPool).map(a=>`<span class="flag ${a[0]==='High'?'f-red':a[0]==='Medium'?'f-warn':'f-ok'}">${esc(a[1])}</span>`).join(" ");
+      h+=`<div class="day"><div class="day-h ${wknd?'wk':''}" onclick="tog('d_${dk}')"><span class="day-nm">${DOW[dw]}</span>
+          <span class="pill p-blue">🕐 ${hmSpan(d.span)}</span><span class="pill p-green">🚗 ${hmSpan(d.travel)}</span><span class="pill p-amber">${d.miles.toFixed(1)} mi</span> ${anoms}</div>
+          <div class="day-b" id="d_${dk}"><table class="rt" style="box-shadow:none;margin:0"><tr><th>#</th><th>From</th><th>To</th><th>Start</th><th>End</th><th>Dur</th><th>Miles</th><th>Type</th></tr>
+          ${d.trips.map((t,i)=>{ const pc=t.type&&t.type.indexOf("Commute")===0?'p-blue':t.type==='Day Travel'?'p-green':'p-amber'; return `<tr><td>${i+1}</td><td>${esc(locLabel(t.from))}</td><td>${esc(locLabel(t.to))}</td><td>${esc(t.start)}</td><td>${esc(t.end||"")}</td><td>${hmSpan(t.drive)}</td><td>${t.miles.toFixed(1)}</td><td><span class="pill ${pc}">${esc(t.type||"")}</span></td></tr>`; }).join("")}
+          </table></div></div>`;
+    });
+    h+=`</div></div>`;
+  }
+
+  // 8. Anomalies table
+  const allAnoms=[];
+  active.forEach(v=>v.days.filter(d=>d.trips.length).forEach(d=>anomaliesForDay(v.reg,d.date,d,v.isPool).forEach(a=>allAnoms.push([v.driver||v.reg,d.date,a[1],a[0]]))));
+  allAnoms.sort((a,b)=>({High:0,Medium:1,Note:2}[a[3]]-{High:0,Medium:1,Note:2}[b[3]]));
+  h+=`<div class="section-title">Anomalies</div><table class="rt anom"><tr><th>Driver</th><th>Date</th><th>Anomaly</th><th>Severity</th></tr>`;
+  if(!allAnoms.length) h+=`<tr><td colspan="4" class="muted">None flagged.</td></tr>`;
+  allAnoms.forEach(a=>{ const c=a[3]==='High'?'f-red':a[3]==='Medium'?'f-warn':'f-ok'; h+=`<tr><td>${esc(a[0])}</td><td>${esc(a[1])}</td><td>${esc(a[2])}</td><td><span class="flag ${c}">${a[3]}</span></td></tr>`; });
+  h+=`</table>`;
+
+  // 9. Notes footer
+  const inactive=R.vehicles.filter(v=>!v.days.some(d=>d.trips.length)).map(v=>v.reg);
+  h+=`<div class="notes"><b>Notes</b><br>
+    • Hours = door-to-door span across non-trivial trips (includes commute). Est. commute inferred from home base.<br>
+    • Weekend include toggles and pool-vehicle attribution are indicative only.<br>
+    • <b>FIAT Fio (HX69 KHZ):</b> consistently low driver scores across recent weeks — below fleet average.<br>
+    • <b>Transit Tipper (WM73 VFL):</b> volatile low scores and Titchfield start/end pattern suggests same driver as FIAT Fio — unconfirmed.<br>
+    • Pool-vehicle driver suggestions are inference only. <b>Not for payroll or disciplinary use without verification.</b><br>
+    • Inactive vehicles this period: ${inactive.length?esc(inactive.join(", ")):"none"}.<br>
+    • Data source: VelocityFleet trip export + portal van-check records.</div>`;
+
+  h+=`<div style="margin:20px 0"><button class="btn grey" onclick="location.reload()">↻ New report</button></div></div>`;
+  $("report").innerHTML=h;
+}
+function DOWO(){ return ["Mon","Tue","Wed","Thu","Fri","Sat ⚠️","Sun ⚠️"]; }
+function tog(id){ const el=$(id); if(!el)return; el.classList.toggle("open"); }
+window.tog=tog;
+</script>
+</body>
+</html>

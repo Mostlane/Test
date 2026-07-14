@@ -61,3 +61,5 @@
   Cache-Control: no-cache
 /notification-centre.html
   Cache-Control: no-cache
+/fleet-report.html
+  Cache-Control: no-cache

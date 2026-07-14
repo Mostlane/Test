@@ -465,7 +465,8 @@
           { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
-          { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"] }
+          { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"] },
+          { label: "Fleet Report", href: "fleet-report.html", icon: "vehicles", perms: ["Vehicles"] }
         ]},
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users"] },
