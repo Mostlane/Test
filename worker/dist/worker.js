@@ -5180,8 +5180,39 @@ async function canFleet(env, tid, sess) {
   return p.FullAccess === "Yes" || p.Vehicles === "Yes";
 }
 var DKEY = (tid) => `fleet:drivers:${tid}`;
+var CKEY = (tid) => `fleet:vehcover:${tid}`;
 var prefix = (tid) => `fleetreports/${tid}/`;
-var vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase()}/`;
+var regKey = (reg) => String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+var vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${regKey(reg)}/`;
+var vphotoPrefix = (tid, reg) => `vehiclephotos/${tid}/${regKey(reg)}/`;
+var vphotoRoot = (tid) => `vehiclephotos/${tid}/`;
+async function coverMap(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CKEY(tid)).first();
+    if (row && row.value) return JSON.parse(row.value) || {};
+  } catch {
+  }
+  return {};
+}
+async function saveCoverMap(env, tid, map) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, CKEY(tid), JSON.stringify(map)).run();
+}
+async function photoIndex(env, tid) {
+  const out = {};
+  try {
+    const listed = await env.JOB_FILES.list({ prefix: vphotoRoot(tid), include: ["customMetadata"] });
+    for (const o of listed.objects || []) {
+      const parts = o.key.split("/");
+      const reg = parts[2];
+      if (!reg) continue;
+      const at = o.customMetadata && o.customMetadata.at || (o.uploaded ? new Date(o.uploaded).toISOString() : "");
+      (out[reg] = out[reg] || []).push({ key: o.key, at, name: o.customMetadata && o.customMetadata.name || parts.slice(-1)[0], by: o.customMetadata && o.customMetadata.by || "" });
+    }
+    for (const reg of Object.keys(out)) out[reg].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  } catch {
+  }
+  return out;
+}
 async function handle18(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -5209,6 +5240,19 @@ async function handle18(request, env, ctx, url, sess) {
     return new Response(obj.body, { status: 200, headers: {
       ...headers,
       "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (sub === "/vehicle-photo" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("vehiclephotos/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
       "Content-Disposition": "inline",
       "Cache-Control": "private, max-age=3600"
     } });
@@ -5331,9 +5375,14 @@ async function handle18(request, env, ctx, url, sess) {
     const drv = {};
     for (const r of cur || []) drv[dn(r.reg)] = r.username;
     const miles = await latestMileage(env, tid);
-    const vehicles = (results || []).map((v) => {
+    const photos = await photoIndex(env, tid);
+    const covers = await coverMap(env, tid);
+    const vehicles = await Promise.all((results || []).map(async (v) => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
+      const pics = photos[dn(v.reg)] || [];
+      let coverKey = covers[dn(v.reg)];
+      if (!coverKey || !pics.some((p) => p.key === coverKey)) coverKey = pics.length ? pics[0].key : "";
       return {
         reg: v.reg,
         make: v.make,
@@ -5355,9 +5404,11 @@ async function handle18(request, env, ctx, url, sess) {
         serviceStatus: sv.status,
         serviceReason: sv.reason,
         currentMiles: cm ? cm.miles : null,
-        milesAt: cm ? cm.at : ""
+        milesAt: cm ? cm.at : "",
+        photoCount: pics.length,
+        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : ""
       };
-    });
+    }));
     let order = [];
     try {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:vehorder:${tid}`).first();
@@ -5427,6 +5478,16 @@ async function handle18(request, env, ctx, url, sess) {
     try {
       const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg) });
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      const pics = await env.JOB_FILES.list({ prefix: vphotoPrefix(tid, reg) });
+      for (const o of pics.objects || []) await env.JOB_FILES.delete(o.key);
+    } catch {
+    }
+    try {
+      const covers = await coverMap(env, tid);
+      if (covers[regKey(reg)]) {
+        delete covers[regKey(reg)];
+        await saveCoverMap(env, tid, covers);
+      }
     } catch {
     }
     return jr2({ ok: true }, headers);
@@ -5483,6 +5544,69 @@ async function handle18(request, env, ctx, url, sess) {
     const key = String(b.key || "");
     if (!key || !key.startsWith("vehicledocs/")) return jr2({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/vehicle-photos" && method === "GET") {
+    const reg = q.get("reg") || "";
+    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    const idx = (await photoIndex(env, tid))[rk] || [];
+    const covers = await coverMap(env, tid);
+    let coverKey = covers[rk];
+    if (!coverKey || !idx.some((p) => p.key === coverKey)) coverKey = idx.length ? idx[0].key : "";
+    const photos = [];
+    for (const p of idx) {
+      photos.push({
+        key: p.key,
+        name: p.name,
+        by: p.by,
+        at: p.at,
+        cover: p.key === coverKey,
+        url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
+      });
+    }
+    return jr2({ ok: true, photos, cover: coverKey }, headers);
+  }
+  if (sub === "/vehicle-photo" && method === "POST") {
+    const form = await request.formData();
+    const reg = String(form.get("reg") || "").trim();
+    const file = form.get("file");
+    if (!reg || !file) return jr2({ error: "reg and file required" }, headers, 400);
+    const safe = String(file.name || "photo.jpg").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+    const key = `${vphotoPrefix(tid, reg)}${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "image/jpeg" },
+      customMetadata: { name: file.name || safe, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    const rk = regKey(reg);
+    const covers = await coverMap(env, tid);
+    if (!covers[rk]) {
+      covers[rk] = key;
+      await saveCoverMap(env, tid, covers);
+    }
+    return jr2({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", key) }, headers, 201);
+  }
+  if (sub === "/vehicle-photo-cover" && method === "POST") {
+    const b = await readJson3(request);
+    const reg = String(b.reg || "").trim();
+    const key = String(b.key || "");
+    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr2({ error: "reg and key required" }, headers, 400);
+    const covers = await coverMap(env, tid);
+    covers[regKey(reg)] = key;
+    await saveCoverMap(env, tid, covers);
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/vehicle-photo-delete" && method === "POST") {
+    const b = await readJson3(request);
+    const key = String(b.key || "");
+    if (!key || !key.startsWith("vehiclephotos/")) return jr2({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
+    const rk = key.split("/")[2];
+    const covers = await coverMap(env, tid);
+    if (rk && covers[rk] === key) {
+      delete covers[rk];
+      await saveCoverMap(env, tid, covers);
+    }
     return jr2({ ok: true }, headers);
   }
   if (sub === "/pool-alloc" && method === "GET") {
@@ -5836,7 +5960,9 @@ var PUBLIC_ROUTES = [
   // Saved fleet reports opened in a new tab — signed URL, verified in-handler.
   ["GET", "/fleet/report"],
   // Vehicle repair/invoice documents opened in a new tab — signed URL.
-  ["GET", "/fleet/vehicle-doc"]
+  ["GET", "/fleet/vehicle-doc"],
+  // Vehicle photos (card cover + gallery/lightbox) — signed URL.
+  ["GET", "/fleet/vehicle-photo"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

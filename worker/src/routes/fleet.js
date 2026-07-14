@@ -25,8 +25,37 @@ async function canFleet(env, tid, sess) {
   return p.FullAccess === "Yes" || p.Vehicles === "Yes";
 }
 const DKEY = tid => `fleet:drivers:${tid}`;
+const CKEY = tid => `fleet:vehcover:${tid}`;   // { REGNORM: photoKey } — chosen cover per van
 const prefix = tid => `fleetreports/${tid}/`;
-const vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase()}/`;
+const regKey = reg => String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+const vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${regKey(reg)}/`;
+const vphotoPrefix = (tid, reg) => `vehiclephotos/${tid}/${regKey(reg)}/`;
+const vphotoRoot = tid => `vehiclephotos/${tid}/`;
+
+// Load the chosen-cover map ({ REGNORM: photoKey }) for a tenant.
+async function coverMap(env, tid) {
+  try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CKEY(tid)).first(); if (row && row.value) return JSON.parse(row.value) || {}; } catch {}
+  return {};
+}
+async function saveCoverMap(env, tid, map) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, CKEY(tid), JSON.stringify(map)).run();
+}
+// One R2 list for the whole fleet's photos, grouped by van (newest first).
+async function photoIndex(env, tid) {
+  const out = {};   // REGNORM -> [{ key, at }]  (newest first)
+  try {
+    const listed = await env.JOB_FILES.list({ prefix: vphotoRoot(tid), include: ["customMetadata"] });
+    for (const o of listed.objects || []) {
+      const parts = o.key.split("/");            // vehiclephotos/<tid>/<REG>/<file>
+      const reg = parts[2]; if (!reg) continue;
+      const at = (o.customMetadata && o.customMetadata.at) || (o.uploaded ? new Date(o.uploaded).toISOString() : "");
+      (out[reg] = out[reg] || []).push({ key: o.key, at, name: (o.customMetadata && o.customMetadata.name) || parts.slice(-1)[0], by: (o.customMetadata && o.customMetadata.by) || "" });
+    }
+    for (const reg of Object.keys(out)) out[reg].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+  } catch {}
+  return out;
+}
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -56,6 +85,19 @@ export async function handle(request, env, ctx, url, sess) {
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
       ...headers, "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"
+    }});
+  }
+
+  // ── Open a vehicle photo (public, but access-gated by the signature) ───────
+  if (sub === "/vehicle-photo" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("vehiclephotos/")) return jr({ error: "Bad key" }, headers, 400);
+    if (!sess && !(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
       "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"
     }});
   }
@@ -184,9 +226,15 @@ export async function handle(request, env, ctx, url, sess) {
     const dn = s => String(s || "").replace(/\s+/g, "").toUpperCase();
     const drv = {}; for (const r of cur || []) drv[dn(r.reg)] = r.username;
     const miles = await latestMileage(env, tid);
-    const vehicles = (results || []).map(v => {
+    const photos = await photoIndex(env, tid);
+    const covers = await coverMap(env, tid);
+    const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
+      // Cover photo for the card: the manually-chosen one if it still exists, else newest.
+      const pics = photos[dn(v.reg)] || [];
+      let coverKey = covers[dn(v.reg)];
+      if (!coverKey || !pics.some(p => p.key === coverKey)) coverKey = pics.length ? pics[0].key : "";
       return {
         reg: v.reg, make: v.make, model: v.model, fuel: v.fuel, active: v.active !== 0,
         motDue: v.mot_due || "", taxDue: v.tax_due || "", nextServiceDate: sv.dueDate || "",
@@ -195,9 +243,11 @@ export async function handle(request, env, ctx, url, sess) {
         lastServiceDate: v.last_service_date || "", lastServiceMiles: v.last_service_miles != null ? v.last_service_miles : null,
         warnDays: sv.warnDays, warnMiles: sv.warnMiles,
         serviceDueMiles: sv.dueMiles, serviceStatus: sv.status, serviceReason: sv.reason,
-        currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : ""
+        currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : "",
+        photoCount: pics.length,
+        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : ""
       };
-    });
+    }));
     // Apply the saved manual order (drag-to-reorder); unknown regs fall to the
     // end alphabetically so newly-added vans still appear.
     let order = [];
@@ -247,7 +297,10 @@ export async function handle(request, env, ctx, url, sess) {
     try {
       const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg) });
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      const pics = await env.JOB_FILES.list({ prefix: vphotoPrefix(tid, reg) });
+      for (const o of pics.objects || []) await env.JOB_FILES.delete(o.key);
     } catch {}
+    try { const covers = await coverMap(env, tid); if (covers[regKey(reg)]) { delete covers[regKey(reg)]; await saveCoverMap(env, tid, covers); } } catch {}
     return jr({ ok: true }, headers);
   }
 
@@ -299,6 +352,59 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await readJson(request); const key = String(b.key || "");
     if (!key || !key.startsWith("vehicledocs/")) return jr({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Vehicle photos (gallery; one is the card cover) ───────────────────────
+  if (sub === "/vehicle-photos" && method === "GET") {
+    const reg = q.get("reg") || "";
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    const idx = (await photoIndex(env, tid))[rk] || [];
+    const covers = await coverMap(env, tid);
+    let coverKey = covers[rk];
+    if (!coverKey || !idx.some(p => p.key === coverKey)) coverKey = idx.length ? idx[0].key : "";
+    const photos = [];
+    for (const p of idx) {
+      photos.push({
+        key: p.key, name: p.name, by: p.by, at: p.at, cover: p.key === coverKey,
+        url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
+      });
+    }
+    return jr({ ok: true, photos, cover: coverKey }, headers);
+  }
+  if (sub === "/vehicle-photo" && method === "POST") {
+    const form = await request.formData();
+    const reg = String(form.get("reg") || "").trim();
+    const file = form.get("file");
+    if (!reg || !file) return jr({ error: "reg and file required" }, headers, 400);
+    const safe = String(file.name || "photo.jpg").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+    const key = `${vphotoPrefix(tid, reg)}${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "image/jpeg" },
+      customMetadata: { name: file.name || safe, by: sess.user.username, at: new Date().toISOString() }
+    });
+    // First photo for a van becomes its cover automatically.
+    const rk = regKey(reg);
+    const covers = await coverMap(env, tid);
+    if (!covers[rk]) { covers[rk] = key; await saveCoverMap(env, tid, covers); }
+    return jr({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", key) }, headers, 201);
+  }
+  if (sub === "/vehicle-photo-cover" && method === "POST") {
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim(); const key = String(b.key || "");
+    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr({ error: "reg and key required" }, headers, 400);
+    const covers = await coverMap(env, tid); covers[regKey(reg)] = key; await saveCoverMap(env, tid, covers);
+    return jr({ ok: true }, headers);
+  }
+  if (sub === "/vehicle-photo-delete" && method === "POST") {
+    const b = await readJson(request); const key = String(b.key || "");
+    if (!key || !key.startsWith("vehiclephotos/")) return jr({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
+    // If it was a cover, drop it — /fleet/vehicles falls back to the newest photo.
+    const rk = key.split("/")[2];
+    const covers = await coverMap(env, tid);
+    if (rk && covers[rk] === key) { delete covers[rk]; await saveCoverMap(env, tid, covers); }
     return jr({ ok: true }, headers);
   }
 

@@ -202,6 +202,18 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   (multipart → R2 JOB_FILES `vehicledocs/<tid>/<REG>/…`), `/fleet/vehicle-docs`
   GET (signed URLs), `/fleet/vehicle-doc-delete` POST, `/fleet/vehicle-doc` GET
   (public+signed stream, inline). 📎 Docs button on each card.
+- **Photos** (gallery per van, one is the card cover): `/fleet/vehicle-photo`
+  POST (multipart → R2 JOB_FILES `vehiclephotos/<tid>/<REG>/…`; client shrinks
+  to 1600px JPEG before upload), `/fleet/vehicle-photos` GET (signed URLs +
+  which is cover), `/fleet/vehicle-photo-cover` POST (pick the card cover),
+  `/fleet/vehicle-photo-delete` POST, `/fleet/vehicle-photo` GET (public+signed
+  stream, inline — used by the card `<img>` + lightbox). Cover choice stored in
+  app_config `fleet:vehcover:<tid>` ({REGNORM:key}); first upload auto-covers,
+  deleting the cover falls back to newest. `/fleet/vehicles` returns `photoUrl`
+  (signed cover) + `photoCount` so cards show a thumbnail with no extra round
+  trips (one R2 list for the whole fleet). 📷 Photos button + tap-to-enlarge
+  lightbox on each card; photos purged on vehicle-delete. Both GET stream
+  routes are in index.js PUBLIC_ROUTES (sig-verified in-handler).
 - **Drag-to-reorder**: ⠿ handle on each card, pointer-based (mouse+touch/PWA,
   edge auto-scroll), saves `/fleet/vehicle-order` (app_config
   `fleet:vehorder:<tid>` = [reg,…]); order applied server-side in
@@ -237,9 +249,10 @@ sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
 **vehicles**, **vehicle_assignments**, **van_timesheets**. app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
-`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>` and the notification-suppression
-rules. R2 (JOB_FILES): `fleetreports/<tid>/…`, `vehicledocs/<tid>/<REG>/…`;
-staff docs via hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
+`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>` and the
+notification-suppression rules. R2 (JOB_FILES): `fleetreports/<tid>/…`,
+`vehicledocs/<tid>/<REG>/…`, `vehiclephotos/<tid>/<REG>/…`; staff docs via
+hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
 
 ## Notifications system

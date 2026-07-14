@@ -202,6 +202,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/report"],
   // Vehicle repair/invoice documents opened in a new tab — signed URL.
   ["GET", "/fleet/vehicle-doc"],
+  // Vehicle photos (card cover + gallery/lightbox) — signed URL.
+  ["GET", "/fleet/vehicle-photo"],
 ];
 
 function isPublic(method, pathname) {

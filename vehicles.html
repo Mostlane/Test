@@ -80,6 +80,16 @@
   .doc .nm{flex:1;min-width:0;}
   .doc .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:14px;}
   .doc .nm span{font-size:11.5px;color:var(--muted);}
+  /* vehicle photos */
+  .vphoto{width:100%;height:150px;border-radius:10px;object-fit:cover;display:block;background:#eef2f7;cursor:zoom-in;}
+  .vphoto-empty{width:100%;height:96px;border-radius:10px;background:#f1f5f9;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer;}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
+  .pcell{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#f8fafc;}
+  .pcell img{width:100%;height:100px;object-fit:cover;display:block;cursor:zoom-in;}
+  .pcell .pacts{display:flex;justify-content:space-between;gap:4px;padding:6px;}
+  .pcell .cvr{position:absolute;top:6px;left:6px;background:#166534;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;letter-spacing:.03em;}
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.86);display:none;align-items:center;justify-content:center;z-index:4000;padding:20px;cursor:zoom-out;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:3000;}
   </style>
 </head>
@@ -186,6 +196,25 @@
     </div>
   </div>
 
+  <!-- PHOTOS MODAL -->
+  <div class="backdrop" id="photoBackdrop">
+    <div class="modal">
+      <h3 id="photoTitle">Photos</h3>
+      <div class="hint" style="margin-bottom:10px">Add photos of the van (front, sides, damage). Tap a photo to enlarge. “Make cover” sets the picture shown on the vehicle card.</div>
+      <div id="photoList"><span class="hint">Loading…</span></div>
+      <div class="grp" style="margin-top:12px">
+        <h4>Add a photo</h4>
+        <input type="file" id="photoFile" accept="image/*" style="font:inherit;font-size:14px;margin-bottom:8px">
+        <button class="btn primary small" id="photoUpBtn" onclick="uploadPhoto()">Upload</button>
+        <span id="photoMsg" class="hint" style="margin-left:8px"></span>
+      </div>
+      <div class="mfoot"><span></span><button class="btn small" onclick="closePhotoModal()">Close</button></div>
+    </div>
+  </div>
+
+  <!-- LIGHTBOX -->
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()"><img id="lightboxImg" alt="Vehicle photo"></div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -269,7 +298,11 @@
         ? `<span class="odo">🛣 ${fmtMiles(v.currentMiles)} mi <small>from van check ${v.milesAt?fmtDMY(v.milesAt):""}</small></span>`
         : `<span class="odo"><small>🛣 mileage will show once a van check records it</small></span>`;
       const card=document.createElement("div"); card.className="card"; card.dataset.reg=reg;
+      const photo = v.photoUrl
+        ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="enlarge('${esc(v.photoUrl)}')">`
+        : `<div class="vphoto-empty" onclick="openPhotoModal('${esc(reg)}')">📷 Add a photo</div>`;
       card.innerHTML=`
+        ${photo}
         <div class="reg-row">
           <div style="display:flex;align-items:center;gap:8px;min-width:0">
             ${dragOff?"":`<span class="grip" title="Drag to reorder">⠿</span>`}
@@ -287,6 +320,7 @@
         <div class="card-actions">
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
+          <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
           <button class="btn ghost small" onclick="openDocModal('${esc(reg)}')">📎 Docs</button>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
         </div>`;
@@ -419,6 +453,60 @@
     try{ const r=await aFetch("/fleet/vehicle-doc-delete",{method:"POST",body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadDocs(); }catch(e){}
   }
 
+  /* ── Photos (gallery + cover) ── */
+  let PHOTO_REG=null;
+  // Shrink in the browser so uploads are quick on phone data (same as personalise).
+  async function shrinkImg(file){
+    try{
+      const bmp=await createImageBitmap(file);
+      const scale=Math.min(1,1600/Math.max(bmp.width,bmp.height));
+      const c=document.createElement("canvas");
+      c.width=Math.round(bmp.width*scale); c.height=Math.round(bmp.height*scale);
+      c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+      return await new Promise(res=>c.toBlob(res,"image/jpeg",0.82));
+    }catch(e){ return file; }   // fall back to the raw file if the browser can't decode it
+  }
+  function openPhotoModal(reg){ PHOTO_REG=reg; $("photoTitle").textContent="Photos — "+reg; $("photoMsg").textContent=""; $("photoFile").value=""; $("photoBackdrop").style.display="flex"; loadPhotos(); }
+  function closePhotoModal(){ $("photoBackdrop").style.display="none"; }
+  async function loadPhotos(){
+    const el=$("photoList"); el.innerHTML='<span class="hint">Loading…</span>';
+    try{
+      const d=await aFetch("/fleet/vehicle-photos?reg="+encodeURIComponent(PHOTO_REG)).then(r=>r.json());
+      const photos=d.photos||[];
+      if(!photos.length){ el.innerHTML='<span class="hint">No photos yet.</span>'; return; }
+      el.innerHTML='<div class="pgrid">'+photos.map(p=>`<div class="pcell">
+        ${p.cover?'<span class="cvr">COVER</span>':''}
+        <img src="${esc(p.url)}" alt="photo" loading="lazy" onclick="enlarge('${esc(p.url)}')">
+        <div class="pacts">
+          ${p.cover?'<span class="hint" style="align-self:center">✓ cover</span>':`<button class="btn ghost small" onclick="setCover('${esc(p.key)}')">Make cover</button>`}
+          <button class="btn danger small" onclick="deletePhoto('${esc(p.key)}')">Delete</button>
+        </div></div>`).join("")+'</div>';
+    }catch(e){ el.innerHTML='<span class="hint">Couldn\'t load photos.</span>'; }
+  }
+  async function uploadPhoto(){
+    const f=$("photoFile").files[0]; if(!f){ $("photoMsg").textContent="Choose a photo first."; return; }
+    $("photoUpBtn").disabled=true; $("photoMsg").textContent="Uploading…";
+    try{
+      const blob=await shrinkImg(f);
+      const form=new FormData(); form.append("reg",PHOTO_REG); form.append("file",blob,(f.name||"photo").replace(/\.[^.]+$/,"")+".jpg");
+      const r=await aFetch("/fleet/vehicle-photo",{method:"POST",body:form}).then(r=>r.json());
+      $("photoMsg").textContent=r.ok?"✓ Uploaded":("Failed — "+(r.error||"")); $("photoFile").value="";
+      if(r.ok){ await loadPhotos(); loadFleet(); }
+    }catch(e){ $("photoMsg").textContent="Upload failed."; }
+    $("photoUpBtn").disabled=false;
+  }
+  async function setCover(key){
+    try{ const r=await aFetch("/fleet/vehicle-photo-cover",{method:"POST",body:JSON.stringify({reg:PHOTO_REG,key})}).then(r=>r.json());
+      if(r.ok){ toast("Cover updated"); await loadPhotos(); loadFleet(); } }catch(e){ toast("Couldn't set cover"); }
+  }
+  async function deletePhoto(key){
+    if(!confirm("Delete this photo?")) return;
+    try{ const r=await aFetch("/fleet/vehicle-photo-delete",{method:"POST",body:JSON.stringify({key})}).then(r=>r.json());
+      if(r.ok){ await loadPhotos(); loadFleet(); } }catch(e){}
+  }
+  function enlarge(src){ $("lightboxImg").src=src; $("lightbox").style.display="flex"; }
+  function closeLightbox(){ $("lightbox").style.display="none"; $("lightboxImg").src=""; }
+
   /* ── Import from legacy vehicle worker (one-off) ── */
   async function importOld(){
     if(!confirm("Copy all vehicles (MOT, tax, service) from the old system into the portal? Same-reg records are updated, not duplicated.")) return;
@@ -482,7 +570,7 @@
   }
 
   // expose for inline handlers
-  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,openDocModal,closeDocModal,uploadDoc,deleteDoc,importOld,pClose});
+  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,openDocModal,closeDocModal,uploadDoc,deleteDoc,importOld,pClose,openPhotoModal,closePhotoModal,uploadPhoto,setCover,deletePhoto,enlarge,closeLightbox});
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
