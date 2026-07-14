@@ -5307,6 +5307,88 @@ async function handle18(request, env, ctx, url, sess) {
       return jr2({ ok: true }, headers);
     }
   }
+  if (sub === "/vehicles" && method === "GET") {
+    await ensureVehTable(env);
+    await ensureAssignTable(env);
+    await seedAssignments(env, tid);
+    const { results } = await env.DB.prepare("SELECT * FROM vehicles WHERE tenant_id=?").bind(tid).all();
+    const cur = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
+    const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+    const drv = {};
+    for (const r of cur || []) drv[dn(r.reg)] = r.username;
+    const vehicles = (results || []).map((v) => ({
+      reg: v.reg,
+      make: v.make,
+      model: v.model,
+      fuel: v.fuel,
+      active: v.active !== 0,
+      motDue: v.mot_due || "",
+      taxDue: v.tax_due || "",
+      nextServiceDate: v.next_service || "",
+      notes: v.notes || "",
+      driver: drv[dn(v.reg)] || ""
+    }));
+    return jr2({ ok: true, vehicles }, headers);
+  }
+  if ((sub === "/vehicle" || sub === "/vehicles-import") && method === "POST") {
+    await ensureVehTable(env);
+    const b = await readJson3(request);
+    const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
+    let count = 0;
+    for (const v of list) {
+      const reg = String(v.reg || "").trim();
+      if (!reg) continue;
+      await env.DB.prepare(`INSERT INTO vehicles (tenant_id,reg,make,model,fuel,active,mot_due,tax_due,next_service,notes,at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,reg) DO UPDATE SET
+        make=excluded.make,model=excluded.model,fuel=excluded.fuel,active=excluded.active,
+        mot_due=excluded.mot_due,tax_due=excluded.tax_due,next_service=excluded.next_service,notes=excluded.notes,at=excluded.at`).bind(
+        tid,
+        reg,
+        v.make || "",
+        v.model || "",
+        v.fuel || "",
+        v.active === false ? 0 : 1,
+        v.motDue || v.motDate || "",
+        v.taxDue || v.taxDate || "",
+        v.nextServiceDate || v.serviceDate || "",
+        v.notes || "",
+        (/* @__PURE__ */ new Date()).toISOString()
+      ).run();
+      count++;
+    }
+    return jr2({ ok: true, count }, headers);
+  }
+  if (sub === "/vehicle-delete" && method === "POST") {
+    const b = await readJson3(request);
+    const reg = String(b.reg || "").trim();
+    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM vehicles WHERE tenant_id=? AND reg=?").bind(tid, reg).run();
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/pool-alloc" && method === "GET") {
+    let alloc = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:poolalloc:${tid}`).first();
+      if (row && row.value) alloc = JSON.parse(row.value) || {};
+    } catch {
+    }
+    return jr2({ ok: true, alloc }, headers);
+  }
+  if (sub === "/pool-alloc" && method === "POST") {
+    const b = await readJson3(request);
+    let alloc = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:poolalloc:${tid}`).first();
+      if (row && row.value) alloc = JSON.parse(row.value) || {};
+    } catch {
+    }
+    if (b.key) {
+      if (b.username) alloc[String(b.key)] = String(b.username);
+      else delete alloc[String(b.key)];
+    } else if (b.alloc && typeof b.alloc === "object") alloc = b.alloc;
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:poolalloc:${tid}`, JSON.stringify(alloc)).run();
+    return jr2({ ok: true, alloc }, headers);
+  }
   if (sub === "/paycfg" && method === "GET") {
     let cfg = { defaults: { morningCap: 30, homeCap: 30, lunch: 30, thresholdH: 6 }, byUser: {} };
     try {
@@ -5355,6 +5437,12 @@ async function handle18(request, env, ctx, url, sess) {
     }
   }
   return jr2({ error: "Not found: " + sub }, headers, 404);
+}
+async function ensureVehTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (
+    tenant_id INTEGER NOT NULL DEFAULT 1, reg TEXT NOT NULL, make TEXT, model TEXT, fuel TEXT,
+    active INTEGER DEFAULT 1, mot_due TEXT, tax_due TEXT, next_service TEXT, notes TEXT, at TEXT,
+    PRIMARY KEY (tenant_id, reg))`).run();
 }
 async function ensureTsTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS van_timesheets (

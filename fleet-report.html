@@ -262,28 +262,43 @@ async function parseScorePdf(file){
 }
 
 /* ═══ Vehicle drivers (reg → user, remembered) ═══ */
-let USERS=[], DRIVERMAP={};
+const POOL_VAL="__pool__";                 // dropdown value marking a shared/pool vehicle
+let USERS=[], DRIVERMAP={}, POOLALLOC={};  // POOLALLOC: "REG|YYYY-MM-DD" → username
 function userLabel(u){ const n=((u.FirstName||"")+" "+(u.LastName||"")).trim(); return n||u.Username; }
 function driverName(username){ if(!username) return ""; const u=USERS.find(x=>x.Username===username); return u?userLabel(u):username; }
+function isPoolSel(reg){ return DRIVERMAP[reg]===POOL_VAL; }
 async function loadUsers(){
   try{ const d=await authFetch("/users").then(r=>r.json()); USERS=(d.Users||d.users||[]).filter(u=>u.Username); }catch(e){ USERS=[]; }
 }
 async function loadDriverMap(){
-  // Pre-fill drivers from the central vehicle registry (current assignments).
-  try{ const d=await authFetch("/fleet/current").then(r=>r.json()); if(d.ok) DRIVERMAP=d.map||{}; }catch(e){}
+  // Base = central vehicle registry (current assignments); saved report overrides
+  // (incl. "🚚 Fleet/pool" marks) layer on top and win. Also load per-day pool allocation.
+  let base={}, saved={};
+  try{ const d=await authFetch("/fleet/current").then(r=>r.json()); if(d.ok) base=d.map||{}; }catch(e){}
+  try{ const d=await authFetch("/fleet/drivers").then(r=>r.json()); if(d.ok) saved=d.map||{}; }catch(e){}
+  DRIVERMAP=Object.assign({},base,saved);
+  try{ const d=await authFetch("/fleet/pool-alloc").then(r=>r.json()); if(d.ok) POOLALLOC=d.alloc||{}; }catch(e){}
 }
 function renderDriverTable(){
-  const opts=['<option value="">— unassigned —</option>'].concat(USERS.map(u=>`<option value="${esc(u.Username)}">${esc(userLabel(u))}</option>`)).join("");
+  const uOpts=USERS.map(u=>`<option value="${esc(u.Username)}">${esc(userLabel(u))}</option>`).join("");
+  const opts='<option value="">— unassigned —</option><option value="'+POOL_VAL+'">🚚 Fleet / pool (allocate per day)</option>'+uOpts;
   $("driverMap").innerHTML=`<table class="rt" style="box-shadow:none;margin:0"><tr><th>Vehicle</th><th>Driver this week</th></tr>`+
     FLEET.map(v=>`<tr><td><b>${esc(v.reg)}</b>${v.driver?` <span class="muted" style="font-size:11px">(${esc(v.driver)})</span>`:""}</td>
       <td><select data-reg="${esc(v.reg)}" style="font:inherit;padding:6px;border:1px solid #cdd2e6;border-radius:7px;min-width:180px">${opts}</select></td></tr>`).join("")+`</table>`;
-  // Pre-select from saved map.
-  $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ const v=DRIVERMAP[s.getAttribute("data-reg")]; if(v) s.value=v; });
+  // Pre-select from saved map (default hardcoded pool vans to pool if not overridden).
+  $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ const reg=s.getAttribute("data-reg"); const v=DRIVERMAP[reg]!=null?DRIVERMAP[reg]:(POOL.has(reg)?POOL_VAL:""); if(v) s.value=v; });
 }
 function getDriverSelections(){
   const map={}; $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ if(s.value) map[s.getAttribute("data-reg")]=s.value; }); return map;
 }
 async function saveDriverMap(map){ try{ await authFetch("/fleet/drivers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({map})}); }catch(e){} }
+// Per-day pool allocation: remember which driver used a shared van on a given date.
+async function savePoolAlloc(reg,date,username){
+  const key=reg+"|"+date;
+  if(username) POOLALLOC[key]=username; else delete POOLALLOC[key];
+  try{ await authFetch("/fleet/pool-alloc",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,username:username||""})}); }catch(e){}
+}
+window.savePoolAlloc=savePoolAlloc;
 
 /* ═══ Saved reports ═══ */
 async function loadPastReports(){
@@ -330,8 +345,11 @@ async function saveTimesheet(){
   const R=window.__reportData; if(!R){ return; }
   const byWeek={};
   for(const v of R.vehicles){
-    const un=R.dmap&&R.dmap[v.reg]; if(!un) continue;   // only vehicles with a chosen driver
+    const single=(R.dmap&&R.dmap[v.reg]&&R.dmap[v.reg]!==POOL_VAL)?R.dmap[v.reg]:null;
     for(const d of v.days){ if(!d.trips.length) continue;
+      // Pool vans: the driver is whoever was allocated that specific day. Others: the fixed driver.
+      const un=v.isPool?(POOLALLOC[v.reg+"|"+d.date]||null):single;
+      if(!un) continue;
       const wk=mondayOf(d.date);
       const morning=(d.trips.find(t=>t.type==="Commute Out")||{}).drive||0;
       const home=(d.trips.find(t=>t.type==="Commute Home")||{}).drive||0;
@@ -385,6 +403,7 @@ async function generate(){
     const buf=await XLSDATA.arrayBuffer();
     const wb=XLSX.read(buf,{type:"array",cellDates:true,raw:false});
     const dmap=getDriverSelections();   // pre-filled from the central registry; editable per report
+    DRIVERMAP=Object.assign({},DRIVERMAP,dmap); saveDriverMap(dmap);   // remember choices (incl. pool marks)
     const vehicles=[]; let minD=null,maxD=null;
     for(const v of FLEET){
       const nm=wb.SheetNames.find(n=>norm(n)===norm(v.reg)); if(!nm) continue;
@@ -392,7 +411,9 @@ async function generate(){
       const days=parseVehicleSheet(rows);
       const dayList=Object.keys(days).sort().map(d=>({date:d,...classifyDay(days[d],v.home)}));
       dayList.forEach(d=>{ if(!minD||d.date<minD)minD=d.date; if(!maxD||d.date>maxD)maxD=d.date; });
-      vehicles.push({...v, driver: dmap[v.reg]?driverName(dmap[v.reg]):v.driver, isPool:POOL.has(v.reg), days:dayList});
+      const pool=dmap[v.reg]===POOL_VAL||POOL.has(v.reg);
+      const driver=pool?"🚚 Fleet (pool)":(dmap[v.reg]?driverName(dmap[v.reg]):v.driver);
+      vehicles.push({...v, driver, isPool:pool, days:dayList});
     }
     if(!minD){ $("status").textContent="No trip data found in that file."; $("genBtn").disabled=false; return; }
     $("status").textContent="Reading driver scores…";
@@ -514,13 +535,40 @@ function renderReport(R){
 
   h+=`</div>`;   // close .container
   window.__lastReport={ inner:h, title:"Fleet Trip Report "+R.minD+" – "+R.maxD, weekStart:R.minD, weekEnd:R.maxD };
+
+  // Interactive pool-vehicle allocation (LIVE ONLY — not baked into the saved report).
+  const poolUI=buildPoolAllocUI(R);
+
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button class="btn" onclick="saveReport()">💾 Save to portal</button>
     <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
     <button class="btn grey" onclick="location.reload()">↻ New report</button>
     <span id="saveMsg" style="font-size:13px;color:#475569"></span></div></div>`;
-  $("report").innerHTML=h+bar;
+  $("report").innerHTML=h+poolUI+bar;
+}
+
+// For each pool/Fleet vehicle, one row per active day with a driver dropdown.
+// Selections persist to /fleet/pool-alloc and feed the van timesheet.
+function buildPoolAllocUI(R){
+  const pools=R.vehicles.filter(v=>v.isPool&&v.days.some(d=>d.trips.length));
+  if(!pools.length) return "";
+  const optsFor=sel=>'<option value="">— unallocated —</option>'+USERS.map(u=>`<option value="${esc(u.Username)}"${u.Username===sel?" selected":""}>${esc(userLabel(u))}</option>`).join("");
+  let h=`<div class="container"><div class="section-title">🚚 Allocate pool-vehicle days to drivers</div>
+    <div class="notes" style="margin:6px 0 14px">Pick who actually drove each shared van each day. Saved as you change them and used for that person's van timesheet.</div>`;
+  for(const v of pools){
+    const act=v.days.filter(d=>d.trips.length).sort((a,b)=>a.date<b.date?-1:1);
+    h+=`<table class="rt" style="margin:0 0 16px"><tr><th>${esc(v.reg)} — day</th><th>Span</th><th>Miles</th><th>Driver that day</th></tr>`;
+    for(const d of act){
+      const sel=POOLALLOC[v.reg+"|"+d.date]||"";
+      const dn=new Date(d.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+      h+=`<tr><td><b>${esc(dn)}</b></td><td>${hmSpan(d.span)}</td><td>${d.miles.toFixed(1)}</td>
+        <td><select data-poolreg="${esc(v.reg)}" data-pooldate="${esc(d.date)}" onchange="savePoolAlloc(this.getAttribute('data-poolreg'),this.getAttribute('data-pooldate'),this.value)" style="font:inherit;padding:6px;border:1px solid #cdd2e6;border-radius:7px;min-width:170px">${optsFor(sel)}</select></td></tr>`;
+    }
+    h+=`</table>`;
+  }
+  h+=`</div>`;
+  return h;
 }
 function DOWO(){ return ["Mon","Tue","Wed","Thu","Fri","Sat ⚠️","Sun ⚠️"]; }
 function tog(id){ const el=$(id); if(!el)return; el.classList.toggle("open"); }
