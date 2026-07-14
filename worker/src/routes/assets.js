@@ -16,6 +16,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { getRules, isSuppressed } from "../lib/suppress.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -372,10 +373,12 @@ export async function handle(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
-    ).bind(db.tenantId, sess.user.username).first();
-    return json({ ok: true, count: Number(row?.n || 0) });
+    const rules = await getRules(env, tenantId);
+    const { results } = await db.prepare(
+      "SELECT asset_id FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
+    ).bind(db.tenantId, sess.user.username).all();
+    const count = (results || []).filter(r => !isSuppressed(rules, "asset-transfer", sess.user.username, String(r.asset_id))).length;
+    return json({ ok: true, count });
   }
 
   // ── Equipment re-confirmation ("do you still hold this?") ──────────────────
@@ -433,11 +436,17 @@ export async function handle(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset/confirm/pending-count") {
     const sess = await requireSession(env, request);
     if (!sess) return json({ ok: false, error: "Not authenticated" }, 401);
+    const rules = await getRules(env, tenantId);
     const { results } = await db.prepare(
       "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
     ).bind(db.tenantId, sess.user.username).all();
     let n = 0;
-    for (const r of results || []) { try { const a = JSON.parse(r.data); if (a.confirm && a.confirm.status === "pending") n++; } catch {} }
+    for (const r of results || []) {
+      try {
+        const a = JSON.parse(r.data);
+        if (a.confirm && a.confirm.status === "pending" && !isSuppressed(rules, "asset-confirm", sess.user.username, String(a.id))) n++;
+      } catch {}
+    }
     return json({ ok: true, count: n });
   }
 
@@ -485,9 +494,11 @@ export async function handle(request, env, ctx, url, sess) {
         direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
       });
     }
+    const rules = await getRules(env, tenantId);
     return json({
       ok: true,
-      incoming: shaped.filter(s => s.direction === "incoming"),
+      // Suppressed transfers stop showing (and stop counting) for the recipient.
+      incoming: shaped.filter(s => s.direction === "incoming" && !isSuppressed(rules, "asset-transfer", me, String(s.assetId))),
       outgoing: shaped.filter(s => s.direction === "outgoing")
     });
   }

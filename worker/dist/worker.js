@@ -1459,6 +1459,41 @@ function weekdayOverlapCount(startISO, endISO, monthStart, monthEnd) {
   return days;
 }
 
+// src/lib/suppress.js
+var KEY = (tid) => `notify:suppress:${tid}`;
+async function getRules(env, tenantId) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(KEY(tenantId)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      if (Array.isArray(v)) return v;
+    }
+  } catch {
+  }
+  return [];
+}
+async function saveRules(env, tenantId, rules) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, KEY(tenantId), JSON.stringify(rules)).run();
+  return rules;
+}
+function isSuppressed(rules, type, user, key) {
+  if (!rules || !rules.length) return false;
+  const u = String(user || "").toLowerCase();
+  const k = key == null ? null : String(key);
+  for (const r of rules) {
+    if (r.type !== type) continue;
+    const ru = r.user == null || r.user === "" ? null : String(r.user).toLowerCase();
+    const rk = r.key == null || r.key === "" ? null : String(r.key);
+    if (ru === null && rk === null) return true;
+    if (ru !== null && rk === null && ru === u) return true;
+    if (ru !== null && rk !== null && ru === u && rk === k) return true;
+    if (ru === null && rk !== null && rk === k) return true;
+  }
+  return false;
+}
+
 // src/routes/assets.js
 async function handle5(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -1761,10 +1796,12 @@ async function handle5(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset/transfers/pending-count") {
     const sess2 = await requireSession(env, request);
     if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
-    const row = await db.prepare(
-      "SELECT COUNT(*) AS n FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
-    ).bind(db.tenantId, sess2.user.username).first();
-    return json3({ ok: true, count: Number(row?.n || 0) });
+    const rules = await getRules(env, tenantId);
+    const { results } = await db.prepare(
+      "SELECT asset_id FROM asset_transfer_requests WHERE tenant_id=? AND lower(to_user)=lower(?) AND status='pending'"
+    ).bind(db.tenantId, sess2.user.username).all();
+    const count = (results || []).filter((r) => !isSuppressed(rules, "asset-transfer", sess2.user.username, String(r.asset_id))).length;
+    return json3({ ok: true, count });
   }
   const CONFIRM_KEY = `asset_confirm_round:${tenantId}`;
   if (method === "POST" && pathname === "/asset/confirm/request") {
@@ -1817,6 +1854,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset/confirm/pending-count") {
     const sess2 = await requireSession(env, request);
     if (!sess2) return json3({ ok: false, error: "Not authenticated" }, 401);
+    const rules = await getRules(env, tenantId);
     const { results } = await db.prepare(
       "SELECT data FROM assets WHERE tenant_id = ? AND lower(assigned_to)=lower(?)"
     ).bind(db.tenantId, sess2.user.username).all();
@@ -1824,7 +1862,7 @@ async function handle5(request, env, ctx, url, sess) {
     for (const r of results || []) {
       try {
         const a = JSON.parse(r.data);
-        if (a.confirm && a.confirm.status === "pending") n++;
+        if (a.confirm && a.confirm.status === "pending" && !isSuppressed(rules, "asset-confirm", sess2.user.username, String(a.id))) n++;
       } catch {
       }
     }
@@ -1894,9 +1932,11 @@ async function handle5(request, env, ctx, url, sess) {
         direction: r.to_user.toLowerCase() === me.toLowerCase() ? "incoming" : "outgoing"
       });
     }
+    const rules = await getRules(env, tenantId);
     return json3({
       ok: true,
-      incoming: shaped.filter((s) => s.direction === "incoming"),
+      // Suppressed transfers stop showing (and stop counting) for the recipient.
+      incoming: shaped.filter((s) => s.direction === "incoming" && !isSuppressed(rules, "asset-transfer", me, String(s.assetId))),
       outgoing: shaped.filter((s) => s.direction === "outgoing")
     });
   }
@@ -3373,6 +3413,7 @@ function prettify(id) {
 }
 
 // src/routes/portal.js
+var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
 var SETTINGS_KEY = "portal:settings";
 async function requireFullAccess(env, request) {
   const sess = await requireSession(env, request);
@@ -3592,6 +3633,72 @@ async function handle8(request, env, ctx, url, sess) {
       "SELECT username, action, surface, items, at FROM notify_log WHERE " + conds.join(" AND ") + " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "GET") {
+    const sess2 = await requireSession(env, request);
+    if (!sess2) return error("Not authenticated", 401, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const type = String(b.type || "");
+    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
+    const rule = {
+      id: "s" + Date.now(),
+      type,
+      user: b.user ? String(b.user) : null,
+      key: b.key != null && b.key !== "" ? String(b.key) : null,
+      label: String(b.label || "").slice(0, 140),
+      by: gate.sess.user.username,
+      at: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const rules = (await getRules(env, tenantId)).filter((r) => !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
+    rules.push(rule);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/suppress/remove" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rules = (await getRules(env, tenantId)).filter((r) => r.id !== id);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/overview" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const assetMap = {};
+    const confirmations = [];
+    try {
+      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const r of results || []) {
+        let a;
+        try {
+          a = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        assetMap[a.id] = a.name || a.assetName || a.id;
+        const holder = String(a.assignedTo || "").trim();
+        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
+          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
+      }
+    } catch {
+    }
+    const transfers = [];
+    try {
+      const { results } = await db.prepare(
+        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+      ).bind(db.tenantId).all();
+      for (const t of results || [])
+        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
+    } catch {
+    }
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations }, {}, env, request);
   }
   return error("Unknown portal route", 404, env, request);
 }
@@ -4543,6 +4650,10 @@ async function handle14(request, env, ctx, url, sess) {
     if (myVehicle) {
       const mine = await db.prepare("SELECT week FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, me, week).first();
       mineDue = !mine;
+    }
+    if (mineDue) {
+      const rules = await getRules(env, tenantId);
+      if (isSuppressed(rules, "vehicle-check", me, week)) mineDue = false;
     }
     let missing = [];
     const p = await permissionsFor(env, tenantId, me);

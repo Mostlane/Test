@@ -10,6 +10,9 @@
 import { json, error } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { getRules, saveRules } from "../lib/suppress.js";
+
+const SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
 
 const SETTINGS_KEY = "portal:settings";
 
@@ -226,6 +229,70 @@ export async function handle(request, env, ctx, url, sess) {
       " ORDER BY id DESC LIMIT 1000"
     ).bind(...binds).all();
     return json({ ok: true, log: results || [] }, {}, env, request);
+  }
+
+  /* ── Notification suppression (admin mutes a pop-up + its red badge) ── */
+  if (path === "/notify/suppress" && method === "GET") {
+    const sess = await requireSession(env, request);
+    if (!sess) return error("Not authenticated", 401, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId) }, {}, env, request);
+  }
+  if (path === "/notify/suppress" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const type = String(b.type || "");
+    if (SUPPRESS_TYPES.indexOf(type) === -1) return error("Bad type", 400, env, request);
+    const rule = {
+      id: "s" + Date.now(),
+      type,
+      user: b.user ? String(b.user) : null,
+      key: (b.key != null && b.key !== "") ? String(b.key) : null,
+      label: String(b.label || "").slice(0, 140),
+      by: gate.sess.user.username,
+      at: new Date().toISOString()
+    };
+    const rules = (await getRules(env, tenantId)).filter(r =>
+      !(r.type === rule.type && (r.user || null) === (rule.user || null) && (r.key || null) === (rule.key || null)));
+    rules.push(rule);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+  if (path === "/notify/suppress/remove" && method === "POST") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    const rules = (await getRules(env, tenantId)).filter(r => r.id !== id);
+    await saveRules(env, tenantId, rules);
+    return json({ ok: true, rules }, {}, env, request);
+  }
+
+  /* ── Notification overview (what's live right now, per person) ──────── */
+  if (path === "/notify/overview" && method === "GET") {
+    const gate = await requireFullAccess(env, request);
+    if (gate.err) return gate.err;
+    const assetMap = {};
+    const confirmations = [];
+    try {
+      const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id=?").bind(db.tenantId).all();
+      for (const r of results || []) {
+        let a; try { a = JSON.parse(r.data); } catch { continue; }
+        assetMap[a.id] = a.name || a.assetName || a.id;
+        const holder = String(a.assignedTo || "").trim();
+        if (a.confirm && a.confirm.status === "pending" && holder && holder.toLowerCase() !== "shared")
+          confirmations.push({ user: holder, key: String(a.id), name: assetMap[a.id] });
+      }
+    } catch {}
+    const transfers = [];
+    try {
+      const { results } = await db.prepare(
+        "SELECT id, asset_id, to_user, requested_at FROM asset_transfer_requests WHERE tenant_id=? AND status='pending'"
+      ).bind(db.tenantId).all();
+      for (const t of results || [])
+        transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || ("Asset " + t.asset_id), at: t.requested_at });
+    } catch {}
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations }, {}, env, request);
   }
 
   return error("Unknown portal route", 404, env, request);

@@ -470,6 +470,7 @@
         { title: "Admin", items: [
           { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users"] },
           { label: "Stats", href: "stats.html", icon: "chart", perms: ["__fullOnly"] },
+          { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
           { label: "Devices", href: "device-admin.html", icon: "devices", perms: ["DeviceAdmin"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
