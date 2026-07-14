@@ -3414,6 +3414,12 @@ function prettify(id) {
 
 // src/routes/portal.js
 var SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
+function vanWeek() {
+  const dateStr = (/* @__PURE__ */ new Date()).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
+  return d.toISOString().slice(0, 10);
+}
 var SETTINGS_KEY = "portal:settings";
 async function requireFullAccess(env, request) {
   const sess = await requireSession(env, request);
@@ -3698,7 +3704,21 @@ async function handle8(request, env, ctx, url, sess) {
         transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || "Asset " + t.asset_id, at: t.requested_at });
     } catch {
     }
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations }, {}, env, request);
+    const week = vanWeek();
+    const vehicleChecks = [];
+    try {
+      const { results: drivers } = await db.prepare(
+        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+      ).bind(db.tenantId).all();
+      const { results: done } = await db.prepare(
+        "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      ).bind(db.tenantId, week).all();
+      const doneSet = new Set((done || []).map((r) => r.username));
+      for (const u of drivers || [])
+        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
+    } catch {
+    }
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, week }, {}, env, request);
   }
   return error("Unknown portal route", 404, env, request);
 }

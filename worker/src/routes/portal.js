@@ -14,6 +14,15 @@ import { getRules, saveRules } from "../lib/suppress.js";
 
 const SUPPRESS_TYPES = ["asset-transfer", "asset-confirm", "vehicle-check"];
 
+// Current van-check week — MUST match vancheck.js so a "skip this week" mute
+// (key = week) lines up with the reminder it silences.
+function vanWeek() {
+  const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
 const SETTINGS_KEY = "portal:settings";
 
 async function requireFullAccess(env, request) {
@@ -292,7 +301,21 @@ export async function handle(request, env, ctx, url, sess) {
       for (const t of results || [])
         transfers.push({ user: t.to_user, key: String(t.asset_id), name: assetMap[t.asset_id] || ("Asset " + t.asset_id), at: t.requested_at });
     } catch {}
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations }, {}, env, request);
+    // Vehicle checks outstanding this week — one row per driver still to do it.
+    const week = vanWeek();
+    const vehicleChecks = [];
+    try {
+      const { results: drivers } = await db.prepare(
+        "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
+      ).bind(db.tenantId).all();
+      const { results: done } = await db.prepare(
+        "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      ).bind(db.tenantId, week).all();
+      const doneSet = new Set((done || []).map(r => r.username));
+      for (const u of drivers || [])
+        if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check — week of " + week });
+    } catch {}
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, week }, {}, env, request);
   }
 
   return error("Unknown portal route", 404, env, request);
