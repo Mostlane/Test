@@ -14,8 +14,12 @@ database_id e483b3b5-2cfd-4742-ae51-427c31598c87) + R2, with three satellite
 systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
 
 ## How things deploy — CRITICAL CONVENTIONS
-- **Pages**: merging to `main` deploys the site automatically. Work on the
-  `claude/...` branch, `merge --no-ff` into `main`, push both.
+- **Pages**: the site is **Cloudflare Pages connected to this GitHub repo
+  (Mostlane/Test)** — GitHub holds the code, Cloudflare builds + serves
+  mostlane-portal.com on every push to `main`. It is NOT GitHub Pages
+  (no CNAME, no Actions workflow) so **`_headers` IS honoured** (its no-cache
+  rules are real, not dead files). Work on the `claude/...` branch,
+  `merge --no-ff` into `main`, push both.
 - **Worker (`mostlane-api`)**: NOT auto-deployed. Source `worker/src/`
   (entry `src/index.js`); build:
   `npx esbuild src/index.js --bundle --format=esm --outfile=dist/worker.js`
