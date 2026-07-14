@@ -65,3 +65,5 @@
   Cache-Control: no-cache
 /van-timesheet.html
   Cache-Control: no-cache
+/vehicles.html
+  Cache-Control: no-cache
