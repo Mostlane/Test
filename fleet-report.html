@@ -109,7 +109,7 @@
 
   <div class="card">
     <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🧑‍🔧 Vehicle drivers</h3>
-    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pick who was driving each vehicle. Choices are remembered for next time — just change any that differ this week. The report uses these names.</p>
+    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pre-filled from the <b>Vehicles</b> registry (current drivers). Change any that differ for this report's week — the report uses these names. To change a driver permanently, do it on the Vehicles page (it keeps a history).</p>
     <div id="driverMap"><span class="muted">Loading…</span></div>
   </div>
 
@@ -269,7 +269,8 @@ async function loadUsers(){
   try{ const d=await authFetch("/users").then(r=>r.json()); USERS=(d.Users||d.users||[]).filter(u=>u.Username); }catch(e){ USERS=[]; }
 }
 async function loadDriverMap(){
-  try{ const d=await authFetch("/fleet/drivers").then(r=>r.json()); if(d.ok) DRIVERMAP=d.map||{}; }catch(e){}
+  // Pre-fill drivers from the central vehicle registry (current assignments).
+  try{ const d=await authFetch("/fleet/current").then(r=>r.json()); if(d.ok) DRIVERMAP=d.map||{}; }catch(e){}
 }
 function renderDriverTable(){
   const opts=['<option value="">— unassigned —</option>'].concat(USERS.map(u=>`<option value="${esc(u.Username)}">${esc(userLabel(u))}</option>`)).join("");
@@ -358,7 +359,7 @@ async function generate(){
   try{
     const buf=await XLSDATA.arrayBuffer();
     const wb=XLSX.read(buf,{type:"array",cellDates:true,raw:false});
-    const dmap=getDriverSelections(); saveDriverMap(dmap);   // remember for next time
+    const dmap=getDriverSelections();   // pre-filled from the central registry; editable per report
     const vehicles=[]; let minD=null,maxD=null;
     for(const v of FLEET){
       const nm=wb.SheetNames.find(n=>norm(n)===norm(v.reg)); if(!nm) continue;

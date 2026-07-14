@@ -348,6 +348,46 @@ body{ padding:16px; }
   let FLEET = [];
   let EDIT_REG = null;
 
+  // ── Portal driver registry (source of truth for who drives what + history) ──
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+pTok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  let PORTAL_DRIVERS={}, PUSERS=[];
+  function pLabel(u){ const n=((u.FirstName||"")+" "+(u.LastName||"")).trim(); return n||u.Username; }
+  function pName(username){ if(!username)return ""; const u=PUSERS.find(x=>x.Username===username); return u?pLabel(u):username; }
+  const pNorm = r => String(r||"").replace(/\s+/g,"").toUpperCase();
+  function portalDriverFor(reg){ const n=pNorm(reg); for(const k in PORTAL_DRIVERS){ if(pNorm(k)===n) return PORTAL_DRIVERS[k]; } return ""; }
+  async function loadPortalDrivers(){
+    try{ const [c,us]=await Promise.all([aFetch("/fleet/current").then(r=>r.json()),aFetch("/users").then(r=>r.json())]);
+      if(c.ok)PORTAL_DRIVERS=c.map||{}; PUSERS=(us.Users||us.users||[]).filter(u=>u.Username); }catch(e){}
+  }
+  function pModal(html){ let m=document.getElementById("pModal"); if(!m){ m=document.createElement("div"); m.id="pModal"; m.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px"; document.body.appendChild(m);} m.innerHTML=`<div style="background:#fff;border-radius:12px;max-width:430px;width:100%;padding:18px;max-height:85vh;overflow:auto">${html}</div>`; m.style.display="flex"; m.onclick=e=>{ if(e.target===m) m.style.display="none"; }; }
+  function pClose(){ const m=document.getElementById("pModal"); if(m)m.style.display="none"; }
+  function openAssign(reg){
+    const cur=portalDriverFor(reg);
+    const opts=['<option value="">— Unassigned —</option>'].concat(PUSERS.map(u=>`<option value="${u.Username}" ${u.Username===cur?"selected":""}>${pLabel(u)}</option>`)).join("");
+    const today=new Date().toISOString().slice(0,10);
+    pModal(`<h3 style="margin:0 0 4px">Driver for ${reg}</h3><p style="color:#64748b;font-size:13px;margin:0 0 10px">Set who drives this vehicle from a date. The previous driver stays in the history.</p>
+      <label style="font-size:13px;font-weight:600">Driver</label><select id="asgUser" style="width:100%;padding:9px;margin:4px 0 10px;border:1px solid #cbd5e1;border-radius:8px">${opts}</select>
+      <label style="font-size:13px;font-weight:600">From date</label><input id="asgDate" type="date" value="${today}" style="width:100%;padding:9px;margin:4px 0 12px;border:1px solid #cbd5e1;border-radius:8px">
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button onclick="pClose()" style="padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;cursor:pointer">Cancel</button>
+      <button onclick="saveAssign('${reg}')" style="padding:9px 16px;border:0;background:#1a237e;color:#fff;border-radius:8px;cursor:pointer;font-weight:600">Save</button></div>`);
+  }
+  async function saveAssign(reg){
+    const username=document.getElementById("asgUser").value, fromDate=document.getElementById("asgDate").value;
+    try{ const r=await aFetch("/fleet/assign",{method:"POST",body:JSON.stringify({reg,username,fromDate})}).then(r=>r.json());
+      if(r.ok){ pClose(); await loadPortalDrivers(); updateSummary(); renderFleet(); } else alert(r.error||"Failed to save"); }catch(e){ alert("Failed to save"); }
+  }
+  function openHistory(reg){
+    pModal(`<h3 style="margin:0 0 8px">${reg} — driver history</h3><div id="histBody" style="font-size:13px;color:#64748b">Loading…</div><div style="text-align:right;margin-top:12px"><button onclick="pClose()" style="padding:9px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;cursor:pointer">Close</button></div>`);
+    aFetch("/fleet/assignments?reg="+encodeURIComponent(reg)).then(r=>r.json()).then(d=>{
+      const el=document.getElementById("histBody"); if(!el)return;
+      const h=d.history||[];
+      el.innerHTML = h.length ? h.map(a=>`<div style="padding:8px 0;border-top:1px solid #eef"><b style="color:#0f172a">${pName(a.username)||"Unassigned"}</b><br><span>${a.start_date} → ${a.end_date||"present"}</span></div>`).join("") : "No history yet.";
+    }).catch(()=>{ const el=document.getElementById("histBody"); if(el)el.textContent="Couldn't load history."; });
+  }
+  window.openAssign=openAssign; window.saveAssign=saveAssign; window.openHistory=openHistory; window.pClose=pClose;
+
   function goMain(){ window.location.href="main.html"; }
 
   async function loadFleet(){
@@ -356,6 +396,7 @@ body{ padding:16px; }
       const res = await fetch(`${VEHICLE_WORKER}/fleet`);
       if (!res.ok) throw new Error("failed");
       FLEET = await res.json();
+      await loadPortalDrivers();
       updateSummary();
       renderFleet();
       document.getElementById("statusLine").textContent = "Fleet loaded.";
@@ -368,7 +409,7 @@ body{ padding:16px; }
   function updateSummary(){
     sumTotal.textContent = FLEET.length;
     sumActive.textContent = FLEET.filter(v => v.active !== false).length;
-    sumUnassigned.textContent = FLEET.filter(v => !v.driver).length;
+    sumUnassigned.textContent = FLEET.filter(v => !portalDriverFor(v.reg)).length;
   }
 
   function formatDMY(dateStr){
@@ -445,7 +486,8 @@ body{ padding:16px; }
       card.className="card";
 
       const reg = v.reg || "UNKNOWN";
-      const driver = (v.driver || "Unassigned").replace(/\./g," ");
+      const pd = portalDriverFor(reg);
+      const driver = pd ? pName(pd) : "Unassigned";
 
       // MOT + Tax tags
       const motTag = tagWithLogic(v.motDue, "MOT");
@@ -485,9 +527,9 @@ body{ padding:16px; }
   ${issuesTag}
 </div>
         <div class="card-actions">
-          <button class="btn-ghost" onclick="openVehicle('${reg}')">Open</button>
+          <button class="btn-pill main" onclick="openAssign('${reg}')">👤 Driver</button>
+          <button class="btn-ghost" onclick="openHistory('${reg}')">History</button>
           <button class="btn-pill sub" onclick="openEditModal('${reg}')">Edit</button>
-          <button class="btn-pill main" onclick="openVehicle('${reg}')">Details →</button>
         </div>
       `;
 
