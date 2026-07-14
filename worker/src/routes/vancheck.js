@@ -276,6 +276,22 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week: wk, skippedBy: me }, {}, env, request);
   }
 
+  // ── Admin: undo a skip (van check becomes due again) ────────────────────────
+  if (path === "/vancheck/unskip" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const wk = mondayOf(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate());
+    const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
+      .bind(db.tenantId, who, wk).first();
+    if (!existing) return json({ ok: true, notSkipped: true }, {}, env, request);
+    let it = {}; try { it = existing.items ? JSON.parse(existing.items) : {}; } catch {}
+    if (!it.skipped) return json({ ok: false, error: "That is a real check, not a skip." }, {}, env, request);
+    await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
+    return json({ ok: true, week: wk }, {}, env, request);
+  }
+
   // ── Attention (badges + gate) ───────────────────────────────────────────────
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);

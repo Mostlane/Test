@@ -90,6 +90,7 @@ function toast(m){ const t=g("toast"); t.textContent=m; t.style.display="block";
 
 const TYPE_LABEL = { "asset-transfer":"Asset transfer", "asset-confirm":"Equipment confirmation", "vehicle-check":"Vehicle check" };
 let RULES = [];
+let SKIPPED = [];
 function isMuted(type, user, key){
   return RULES.some(r => {
     if (r.type !== type) return false;
@@ -150,12 +151,25 @@ function ruleDesc(r){
 }
 function renderRules(){
   const el = g("rules");
-  if(!RULES.length){ el.innerHTML = '<div class="empty">Nothing muted.</div>'; return; }
-  el.innerHTML = RULES.map(r => `<div class="row">
+  const ruleRows = RULES.map(r => `<div class="row">
       <span class="what">${ruleDesc(r)}</span>
       <button class="btn danger small" data-del="${esc(r.id)}">Remove mute</button>
-    </div>`).join("");
+    </div>`);
+  const skipRows = SKIPPED.map(s => `<div class="row">
+      <span class="what">Vehicle check — <b>skipped this week</b> for <b>${esc(s.user)}</b>${s.by ? ` (by ${esc(s.by)})` : ""}</span>
+      <button class="btn danger small" data-unskip='${esc(JSON.stringify({user:s.user,week:s.week}))}'>Undo skip</button>
+    </div>`);
+  const all = ruleRows.concat(skipRows);
+  if(!all.length){ el.innerHTML = '<div class="empty">Nothing muted.</div>'; return; }
+  el.innerHTML = all.join("");
   el.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => removeRule(b.getAttribute("data-del"))));
+  el.querySelectorAll("[data-unskip]").forEach(b => b.addEventListener("click", () => { const d=JSON.parse(b.getAttribute("data-unskip")); unskipVanCheck(d.user, d.week); }));
+}
+async function unskipVanCheck(user, week){
+  try{
+    const r = await (await authFetch("/vancheck/unskip", { method:"POST", body: JSON.stringify({ username:user, week }) })).json();
+    if(r.ok){ toast("Skip removed — the van check is due again"); load(); } else toast(r.error||"Failed");
+  }catch{ toast("Failed"); }
 }
 
 async function load(){
@@ -163,6 +177,7 @@ async function load(){
     const d = await (await authFetch("/notify/overview")).json();
     if(!d.ok){ toast(d.error||"Couldn't load"); return; }
     RULES = d.rules || [];
+    SKIPPED = d.skippedVanChecks || [];
     renderList(g("transfers"), d.transfers || [], "asset-transfer");
     renderList(g("confirms"), d.confirmations || [], "asset-confirm");
     renderList(g("vchecks"), d.vehicleChecks || [], "vehicle-check");
