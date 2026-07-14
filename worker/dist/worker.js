@@ -2330,15 +2330,15 @@ function fileSecret(env) {
   return env && (env.FILE_SIGNING_SECRET || env.PORTAL_BRIDGE_SECRET) || "";
 }
 async function hmacHex(secret, msg) {
-  const enc2 = new TextEncoder();
+  const enc3 = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    enc2.encode(secret),
+    enc3.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc2.encode(msg));
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(msg));
   return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 async function signedFileUrl(env, origin, streamPath, key, ttlSec = 604800) {
@@ -3799,16 +3799,16 @@ function b64u(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 async function signBridgeToken(secret, payload) {
-  const enc2 = new TextEncoder();
-  const body = "v1." + b64u(enc2.encode(JSON.stringify(payload)));
+  const enc3 = new TextEncoder();
+  const body = "v1." + b64u(enc3.encode(JSON.stringify(payload)));
   const key = await crypto.subtle.importKey(
     "raw",
-    enc2.encode(secret),
+    enc3.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc2.encode(body));
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(body));
   return body + "." + b64u(sig);
 }
 
@@ -5791,6 +5791,198 @@ async function seedAssignments(env, tid) {
   }
 }
 
+// src/lib/webpush.js
+var enc2 = new TextEncoder();
+function b64urlToBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? 4 - s.length % 4 : 0;
+  s += "=".repeat(pad);
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64url(buf) {
+  const a = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < a.length; i++) bin += String.fromCharCode(a[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function concat(...arrs) {
+  let len = 0;
+  for (const a of arrs) len += a.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const a of arrs) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+}
+async function hmac(keyBytes, dataBytes) {
+  const k = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, dataBytes));
+}
+async function hkdf(salt, ikm, info, length) {
+  const prk = await hmac(salt, ikm);
+  const t = await hmac(prk, concat(info, new Uint8Array([1])));
+  return t.slice(0, length);
+}
+async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey) {
+  const asPubRaw = new Uint8Array(await crypto.subtle.exportKey("raw", asKey.publicKey));
+  const uaPubKey = await crypto.subtle.importKey("raw", uaPublicRaw, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaPubKey }, asKey.privateKey, 256));
+  const keyInfo = concat(enc2.encode("WebPush: info\0"), uaPublicRaw, asPubRaw);
+  const ikm = await hkdf(authSecret, shared, keyInfo, 32);
+  const cek = await hkdf(salt, ikm, enc2.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, enc2.encode("Content-Encoding: nonce\0"), 12);
+  const plaintext = concat(payloadBytes, new Uint8Array([2]));
+  const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
+  const rs = 4096;
+  const header = concat(
+    salt,
+    new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
+    new Uint8Array([asPubRaw.length]),
+    asPubRaw
+  );
+  return concat(header, ciphertext);
+}
+async function importVapidPrivate(env) {
+  const pub = b64urlToBytes(env.VAPID_PUBLIC);
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    x: bytesToB64url(pub.slice(1, 33)),
+    y: bytesToB64url(pub.slice(33, 65)),
+    d: env.VAPID_PRIVATE,
+    ext: true,
+    key_ops: ["sign"]
+  };
+  return crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+}
+async function vapidAuth(env, endpoint) {
+  const aud = new URL(endpoint).origin;
+  const header = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
+  const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
+  const signingInput = header + "." + payload;
+  const key = await importVapidPrivate(env);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
+  return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
+}
+async function sendPush(env, sub, payloadStr, ttl = 86400) {
+  const uaPublic = b64urlToBytes(sub.keys.p256dh);
+  const auth = b64urlToBytes(sub.keys.auth);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const asKey = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const body = await encryptPayload(enc2.encode(payloadStr), uaPublic, auth, salt, asKey);
+  return fetch(sub.endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": await vapidAuth(env, sub.endpoint),
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+      "TTL": String(ttl)
+    },
+    body
+  });
+}
+
+// src/routes/push.js
+function jr3(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson4(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
+async function ensureTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    ua TEXT,
+    created_at TEXT,
+    last_ok TEXT)`).run();
+}
+async function sendToUser(env, tenantId, username, payload) {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  await ensureTable(env);
+  const { results } = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id=? AND lower(username)=lower(?)"
+  ).bind(tenantId, username).all();
+  const subs = results || [];
+  if (!subs.length) return { sent: 0, failed: 0, gone: 0 };
+  const body = JSON.stringify(payload);
+  let sent = 0, failed = 0, gone = 0;
+  await Promise.allSettled(subs.map(async (row) => {
+    const sub = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
+    try {
+      const res = await sendPush(env, sub, body);
+      if (res.status === 404 || res.status === 410) {
+        gone++;
+        await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=?").bind(row.endpoint).run();
+      } else if (res.ok || res.status === 201) {
+        sent++;
+        await env.DB.prepare("UPDATE push_subscriptions SET last_ok=? WHERE endpoint=?").bind((/* @__PURE__ */ new Date()).toISOString(), row.endpoint).run();
+      } else {
+        failed++;
+      }
+    } catch {
+      failed++;
+    }
+  }));
+  return { sent, failed, gone };
+}
+async function handle19(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/push(?=\/|$)/, "") || "/";
+  if (!sess) return jr3({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  if (sub === "/public-key" && method === "GET") {
+    return jr3({ ok: true, key: env.VAPID_PUBLIC || "", configured: !!(env.VAPID_PUBLIC && env.VAPID_PRIVATE) }, headers);
+  }
+  if (sub === "/subscribe" && method === "POST") {
+    await ensureTable(env);
+    const b = await readJson4(request);
+    const s = b.subscription || b;
+    const endpoint = s && s.endpoint;
+    const p256dh = s && s.keys && s.keys.p256dh;
+    const auth = s && s.keys && s.keys.auth;
+    if (!endpoint || !p256dh || !auth) return jr3({ error: "Bad subscription" }, headers, 400);
+    await env.DB.prepare(`INSERT INTO push_subscriptions (endpoint, tenant_id, username, p256dh, auth, ua, created_at, last_ok)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(endpoint) DO UPDATE SET username=excluded.username, p256dh=excluded.p256dh, auth=excluded.auth, ua=excluded.ua, tenant_id=excluded.tenant_id`).bind(endpoint, tid, me, p256dh, auth, String(b.ua || "").slice(0, 200), (/* @__PURE__ */ new Date()).toISOString(), null).run();
+    return jr3({ ok: true }, headers, 201);
+  }
+  if (sub === "/unsubscribe" && method === "POST") {
+    await ensureTable(env);
+    const b = await readJson4(request);
+    if (!b.endpoint) return jr3({ error: "endpoint required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND lower(username)=lower(?)").bind(b.endpoint, me).run();
+    return jr3({ ok: true }, headers);
+  }
+  if (sub === "/test" && method === "POST") {
+    if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return jr3({ ok: false, error: "Push isn't configured on the server yet (VAPID keys missing)." }, headers, 400);
+    const r = await sendToUser(env, tid, me, {
+      title: "Mostlane Portal",
+      body: "\u2705 Test notification \u2014 push is working on this device.",
+      url: "/main.html"
+    });
+    if (!r.sent && !r.failed && !r.gone) return jr3({ ok: false, error: "No devices registered on this account yet \u2014 enable notifications first." }, headers, 400);
+    return jr3({ ok: r.sent > 0, ...r }, headers);
+  }
+  return jr3({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -5818,6 +6010,8 @@ var ROUTES = [
   // GDPR data export + erasure
   ["*", "/fleet", handle18],
   // fleet reports + driver mapping
+  ["*", "/push", handle19],
+  // web push subscriptions + test send
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
   ["*", "/update-site", handle7],

@@ -67,3 +67,9 @@
   Cache-Control: no-cache
 /vehicles.html
   Cache-Control: no-cache
+/pwa.js
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/service-worker.js
+  Cache-Control: no-cache

@@ -507,5 +507,19 @@ CREATE TABLE IF NOT EXISTS hs_documents (
 );
 CREATE INDEX IF NOT EXISTS idx_hs_tenant ON hs_documents(tenant_id, doc_type, id);
 
+-- Web Push subscriptions (one row per device/browser). Self-migrating in
+-- routes/push.js (ensureTable) — this is the reference definition.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  username TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  ua TEXT,
+  created_at TEXT,
+  last_ok TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(tenant_id, username);
+
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.

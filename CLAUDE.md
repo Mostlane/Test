@@ -34,8 +34,9 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   headlessly before publishing); (c) **straight from GitHub** — dist/worker.js
   is committed, so link the blob (has a copy-raw button):
   github.com/Mostlane/Test/blob/main/worker/dist/worker.js.
-  **Worker last sent ≈ commit 4121cd0 (fleet/vehicles + emboss build, 5,849
-  lines)** — confirm with Jamie what's actually pasted before assuming.
+  **Worker last sent ≈ the Web Push Phase-1 build (routes/push.js +
+  lib/webpush.js, ~6,174 lines) — needs VAPID_PUBLIC/VAPID_PRIVATE set in the
+  dashboard.** Confirm with Jamie what's actually pasted before assuming.
 - **Schema changes**: worker/schema.sql is the reference. Create tables LIVE
   via the D1 connector (done for all current tables), then update schema.sql.
 - **External workers (PO, SiteLog)**: never retype their code. Deliver changes
@@ -322,10 +323,36 @@ personalise.html had to replace theme.html).
 
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
-SITELOG_ADMIN_SECRET (secrets); EMAIL_FROM, R2_PUBLIC_BASE, optionally
+SITELOG_ADMIN_SECRET, **VAPID_PRIVATE** (secrets); EMAIL_FROM, R2_PUBLIC_BASE,
+**VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
 (mostlane). After changing dashboard secrets you must hit Deploy.
+
+## Push notifications (Web Push — routes/push.js + lib/webpush.js + sw.js)
+Phase 1 (plumbing + test) DONE. Real OS notifications on installed PWAs
+(iOS 16.4+ Home-Screen only; Android Chrome). Icon = the Mostlane "M":
+iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
+`icon`/`badge` (both /icons/icon-192.png).
+- **lib/webpush.js** — VAPID ES256 JWT (RFC 8292) + aes128gcm payload
+  encryption (RFC 8291) on WebCrypto only (no libs). `sendPush(env, sub, str)`.
+  Verified against http_ece + RFC-style round-trips.
+- **routes/push.js** — /push/public-key (VAPID pub for subscribe),
+  /push/subscribe, /push/unsubscribe, /push/test. Table push_subscriptions
+  (self-migrating: endpoint PK, username, p256dh, auth, ua). `sendToUser(env,
+  tid, username, {title,body,url})` fans out to a user's devices + prunes dead
+  (404/410) — **Phase 2 event hooks will call this**.
+- **VAPID keys** are worker config (VAPID_PUBLIC var + VAPID_PRIVATE secret;
+  optional PUSH_CONTACT). Client fetches the public key from /push/public-key.
+- **sw.js is now the single service worker** (cache + push + notificationclick);
+  service-worker.js is kept as an identical copy so any cached page still works.
+  main.html + pwa.js both register /sw.js (idempotent). Payload JSON =
+  {title, body, url, tag?}; notificationclick focuses/opens url.
+- **notification-centre.html** has the per-device "🔔 Push notifications" card
+  (Enable / Turn off / Send test), iOS "add to Home Screen first" guidance.
+  Phase 1 lives here (FullAccess); Phase 2 exposes the toggle to all staff +
+  wires real events (transfer requested → recipient, holiday decision → staff,
+  confirmation round → holders, etc.).
 
 ## Satellite systems
 1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV

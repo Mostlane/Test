@@ -36,6 +36,7 @@ import * as stats from "./routes/stats.js";        // DONE  (Full-access portal 
 import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + company documents)
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
+import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -58,6 +59,7 @@ const ROUTES = [
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
+  ["*", "/push",       push.handle],      // web push subscriptions + test send
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],

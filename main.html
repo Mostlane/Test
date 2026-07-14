@@ -837,15 +837,12 @@ const MAP = {
   </script>
 
   <script>
-    // ✅ PWA Push – Service Worker registration (STEP 2)
+    // Service Worker registration — single canonical SW (/sw.js does cache + push).
+    // pwa.js also registers /sw.js; registering the same URL twice is idempotent.
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/service-worker.js")
-        .then(reg => {
-          console.log("Service Worker registered:", reg.scope);
-        })
-        .catch(err => {
-          console.error("Service Worker registration failed:", err);
-        });
+      navigator.serviceWorker.register("/sw.js")
+        .then(reg => { console.log("Service Worker registered:", reg.scope); })
+        .catch(err => { console.error("Service Worker registration failed:", err); });
     }
   </script>
   
