@@ -44,6 +44,8 @@
     <div id="transfers"><div class="empty">Loading…</div></div>
     <h3 style="font-size:14px;margin:16px 0 4px;">📋 Equipment confirmations awaited</h3>
     <div id="confirms"><div class="empty">Loading…</div></div>
+    <h3 style="font-size:14px;margin:16px 0 4px;">🚐 Vehicle checks outstanding this week</h3>
+    <div id="vchecks"><div class="empty">Loading…</div></div>
   </div>
 
   <div class="card">
@@ -151,6 +153,7 @@ async function load(){
     RULES = d.rules || [];
     renderList(g("transfers"), d.transfers || [], "asset-transfer");
     renderList(g("confirms"), d.confirmations || [], "asset-confirm");
+    renderList(g("vchecks"), d.vehicleChecks || [], "vehicle-check");
     renderRules();
   }catch{ toast("Couldn't load"); }
 }
