@@ -367,6 +367,15 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   - holidays.js `/holiday/approve|reject` → the staff member (`record.username`).
   Add new event pushes the same way: import sendToUser/sendToPermission from
   ./push.js and `ctx?.waitUntil(...)` after the action succeeds.
+- **Scheduled reminders (cron)** — `index.js` exports a `scheduled(event,env,ctx)`
+  handler calling `vancheck.js sendWeeklyReminders(env)`: pushes every driver
+  (Active + vehicle_assigned) who hasn't done/​been-skipped for THIS week's van
+  check (honours mute rules). Self-gates to **07:00 London** and dedupes per
+  calendar day (app_config `vancheck:reminded:<tid>`), so it's BST/GMT-safe and
+  retry-safe. **Needs a Cron Trigger on the worker** (dashboard → Settings →
+  Triggers): `0 6,7 * * 1,4` = Mon & Thu, delivered 7am UK. Change days/time via
+  the cron; the 07:00-London gate means the cron must fire at the UTC hours
+  bracketing 7am London (6 and 7). New scheduled jobs hang off the same handler.
 
 ## Satellite systems
 1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV

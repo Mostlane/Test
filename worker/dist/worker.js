@@ -5001,6 +5001,60 @@ async function handle15(request, env, ctx, url, sess) {
   }
   return error("Unknown van-check route", 404, env, request);
 }
+async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
+  const lonHour = Number(new Date(now).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  if (lonHour !== 7) return { ran: false, reason: "not-7am-london", lonHour };
+  const today = new Date(now).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const week = mondayOf2(today);
+  let tenants = [];
+  try {
+    const r = await env.DB.prepare(
+      "SELECT DISTINCT tenant_id FROM users WHERE status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
+    ).all();
+    tenants = (r.results || []).map((t) => t.tenant_id);
+  } catch {
+    return { ran: false, reason: "no-users" };
+  }
+  const out = [];
+  for (const tid of tenants) {
+    const mkey = `vancheck:reminded:${tid}`;
+    let sentDays = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, mkey).first();
+      if (row && row.value) sentDays = JSON.parse(row.value) || [];
+    } catch {
+    }
+    if (sentDays.includes(today)) {
+      out.push({ tid, skipped: "already-today" });
+      continue;
+    }
+    const { results: drivers } = await env.DB.prepare(
+      "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
+    ).bind(tid).all();
+    const { results: checks } = await env.DB.prepare(
+      "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+    ).bind(tid, week).all();
+    const handled = new Set((checks || []).map((c) => c.username));
+    const rules = await getRules(env, tid);
+    let reminded = 0;
+    for (const d of drivers || []) {
+      if (handled.has(d.username)) continue;
+      if (isSuppressed(rules, "vehicle-check", d.username, week)) continue;
+      await sendToUser(env, tid, d.username, {
+        title: "Weekly van check due",
+        body: "Please complete your weekly van check \u2014 tap to start.",
+        url: "/van-check.html",
+        tag: "vehicle-check"
+      });
+      reminded++;
+    }
+    sentDays.push(today);
+    sentDays = sentDays.slice(-14);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, mkey, JSON.stringify(sentDays)).run();
+    out.push({ tid, reminded });
+  }
+  return { ran: true, today, week, tenants: out };
+}
 
 // src/routes/stats.js
 function json2(data, status, env, request) {
@@ -6132,6 +6186,13 @@ var index_default = {
       auditAction(env, ctx, sess, request, url, 500, auditClone);
       return error("Server error: " + err.message, 500, env, request);
     }
+  },
+  // ── Cron trigger: scheduled push reminders ────────────────────────────────
+  // Set a Cron Trigger on the worker (dashboard → Settings → Triggers):
+  //   0 6,7 * * 1,4   → Monday & Thursday, sends at 07:00 UK (BST + GMT safe;
+  //                     sendWeeklyReminders self-gates to 7am London + dedupes).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
   }
 };
 var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];

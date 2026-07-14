@@ -37,6 +37,7 @@ import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + co
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
+import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -131,6 +132,14 @@ export default {
       auditAction(env, ctx, sess, request, url, 500, auditClone);
       return error("Server error: " + err.message, 500, env, request);
     }
+  },
+
+  // ── Cron trigger: scheduled push reminders ────────────────────────────────
+  // Set a Cron Trigger on the worker (dashboard → Settings → Triggers):
+  //   0 6,7 * * 1,4   → Monday & Thursday, sends at 07:00 UK (BST + GMT safe;
+  //                     sendWeeklyReminders self-gates to 7am London + dedupes).
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
   },
 };
 
