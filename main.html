@@ -144,6 +144,7 @@ a.button {
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#003366">
 <script src="/pwa.js" defer></script>
+<script src="/push-client.js"></script>
   <!-- PWA APPLE SUPPORT -->
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -196,6 +197,36 @@ a.button {
     })();
   </script>
 
+  <div id="pushBanner" style="display:none;max-width:calc(100% - 24px);margin:0 auto 16px;background:#0f172a;color:#fff;border-radius:12px;padding:12px 16px;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.18);">
+    <span style="flex:1;font-size:14px;font-weight:600;line-height:1.35;">🔔 Turn on notifications so you don't miss equipment transfers, holiday decisions and equipment checks.</span>
+    <button id="pushBannerEnable" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:9px 14px;font:600 14px system-ui;cursor:pointer;white-space:nowrap;">Turn on</button>
+    <button id="pushBannerLater" style="background:transparent;color:#cbd5e1;border:none;font:600 13px system-ui;cursor:pointer;">Later</button>
+  </div>
+  <script>
+    (function(){
+      var KEY="mlPushBannerDismissed";
+      document.addEventListener("DOMContentLoaded", async function(){
+        var banner=document.getElementById("pushBanner");
+        if(!banner || !window.MostlanePush || localStorage.getItem(KEY)==="1") return;
+        try{
+          var s=await MostlanePush.state();
+          if(!(s.supported && !s.on && !s.denied && !s.needsInstall)) return;
+        }catch(e){ return; }
+        banner.style.display="flex";
+        var enable=document.getElementById("pushBannerEnable");
+        enable.addEventListener("click", async function(){
+          enable.disabled=true; enable.textContent="…";
+          var r=await MostlanePush.enable();
+          enable.disabled=false; enable.textContent="Turn on";
+          if(r.ok || r.error==="not-configured") banner.style.display="none";
+        });
+        document.getElementById("pushBannerLater").addEventListener("click", function(){
+          localStorage.setItem(KEY,"1"); banner.style.display="none";
+        });
+      });
+    })();
+  </script>
+
   <div class="menu-grid" id="menuGrid">
     
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
@@ -243,6 +274,7 @@ a.button {
   <span class="emoji">📈</span> Labour Planning
 </a>
 -->
+    <a class="button visible" href="notifications.html" id="NotifSettings"><span class="emoji">🔔</span> Notifications</a>
     <a class="button visible" href="my-documents.html" id="MyDocs"><span class="emoji">📄</span> My Documents</a>
     <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
     <a class="button visible" href="help.html"><span class="emoji">❓</span> Help</a>

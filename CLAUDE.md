@@ -330,7 +330,8 @@ SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane). After changing dashboard secrets you must hit Deploy.
 
 ## Push notifications (Web Push — routes/push.js + lib/webpush.js + sw.js)
-Phase 1 (plumbing + test) DONE. Real OS notifications on installed PWAs
+Phase 1 (plumbing + test) + Phase 2 (real events + all-staff) DONE. Real OS
+notifications on installed PWAs
 (iOS 16.4+ Home-Screen only; Android Chrome). Icon = the Mostlane "M":
 iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
 `icon`/`badge` (both /icons/icon-192.png).
@@ -348,11 +349,24 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   service-worker.js is kept as an identical copy so any cached page still works.
   main.html + pwa.js both register /sw.js (idempotent). Payload JSON =
   {title, body, url, tag?}; notificationclick focuses/opens url.
-- **notification-centre.html** has the per-device "🔔 Push notifications" card
-  (Enable / Turn off / Send test), iOS "add to Home Screen first" guidance.
-  Phase 1 lives here (FullAccess); Phase 2 exposes the toggle to all staff +
-  wires real events (transfer requested → recipient, holiday decision → staff,
-  confirmation round → holders, etc.).
+- **Client:** `push-client.js` = shared `window.MostlanePush`
+  (state/enable/disable/test), included on pages that offer the toggle.
+  **notifications.html** = the all-staff per-device toggle page (Turn on / off /
+  Send test); linked from an always-visible "🔔 Notifications" tile on main.html.
+  **main.html** also shows a dismissible "Turn on notifications" banner when a
+  device is off (hidden once on / "Later" dismissed via localStorage
+  mlPushBannerDismissed). notification-centre.html keeps its own (admin) copy of
+  the card. All entry points share the same /push endpoints.
+- **Phase 2 events (live)** — pushes fire on the same moments as the popups,
+  via `ctx.waitUntil` so they never block/​break the action:
+  - assets.js `/asset/transfer-request` → recipient (`b.to`).
+  - assets.js `/asset/confirm/request` → each held-item holder (one push, item
+    count in the body).
+  - holidays.js `/holiday/request` + `/holiday/cancel` → holiday admins
+    (`sendToPermission(["FullAccess","HolidayAdmin"])`, actor excluded).
+  - holidays.js `/holiday/approve|reject` → the staff member (`record.username`).
+  Add new event pushes the same way: import sendToUser/sendToPermission from
+  ./push.js and `ctx?.waitUntil(...)` after the action succeeds.
 
 ## Satellite systems
 1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV

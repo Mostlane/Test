@@ -968,8 +968,225 @@ async function deviceSettings(env, tenantId, username) {
   };
 }
 
-// src/routes/holidays.js
+// src/lib/webpush.js
+var enc2 = new TextEncoder();
+function b64urlToBytes(s) {
+  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? 4 - s.length % 4 : 0;
+  s += "=".repeat(pad);
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function bytesToB64url(buf) {
+  const a = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < a.length; i++) bin += String.fromCharCode(a[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function concat(...arrs) {
+  let len = 0;
+  for (const a of arrs) len += a.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const a of arrs) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+}
+async function hmac(keyBytes, dataBytes) {
+  const k = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, dataBytes));
+}
+async function hkdf(salt, ikm, info, length) {
+  const prk = await hmac(salt, ikm);
+  const t = await hmac(prk, concat(info, new Uint8Array([1])));
+  return t.slice(0, length);
+}
+async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey) {
+  const asPubRaw = new Uint8Array(await crypto.subtle.exportKey("raw", asKey.publicKey));
+  const uaPubKey = await crypto.subtle.importKey("raw", uaPublicRaw, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaPubKey }, asKey.privateKey, 256));
+  const keyInfo = concat(enc2.encode("WebPush: info\0"), uaPublicRaw, asPubRaw);
+  const ikm = await hkdf(authSecret, shared, keyInfo, 32);
+  const cek = await hkdf(salt, ikm, enc2.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, enc2.encode("Content-Encoding: nonce\0"), 12);
+  const plaintext = concat(payloadBytes, new Uint8Array([2]));
+  const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
+  const rs = 4096;
+  const header = concat(
+    salt,
+    new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
+    new Uint8Array([asPubRaw.length]),
+    asPubRaw
+  );
+  return concat(header, ciphertext);
+}
+async function importVapidPrivate(env) {
+  const pub = b64urlToBytes(env.VAPID_PUBLIC);
+  const jwk = {
+    kty: "EC",
+    crv: "P-256",
+    x: bytesToB64url(pub.slice(1, 33)),
+    y: bytesToB64url(pub.slice(33, 65)),
+    d: env.VAPID_PRIVATE,
+    ext: true,
+    key_ops: ["sign"]
+  };
+  return crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+}
+async function vapidAuth(env, endpoint) {
+  const aud = new URL(endpoint).origin;
+  const header = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
+  const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
+  const signingInput = header + "." + payload;
+  const key = await importVapidPrivate(env);
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
+  return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
+}
+async function sendPush(env, sub, payloadStr, ttl = 86400) {
+  const uaPublic = b64urlToBytes(sub.keys.p256dh);
+  const auth = b64urlToBytes(sub.keys.auth);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const asKey = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const body = await encryptPayload(enc2.encode(payloadStr), uaPublic, auth, salt, asKey);
+  return fetch(sub.endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": await vapidAuth(env, sub.endpoint),
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+      "TTL": String(ttl)
+    },
+    body
+  });
+}
+
+// src/routes/push.js
+function jr(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
+async function ensureTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    ua TEXT,
+    created_at TEXT,
+    last_ok TEXT)`).run();
+}
+async function sendToUser(env, tenantId, username, payload) {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  await ensureTable(env);
+  const { results } = await env.DB.prepare(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id=? AND lower(username)=lower(?)"
+  ).bind(tenantId, username).all();
+  const subs = results || [];
+  if (!subs.length) return { sent: 0, failed: 0, gone: 0 };
+  const body = JSON.stringify(payload);
+  let sent = 0, failed = 0, gone = 0;
+  await Promise.allSettled(subs.map(async (row) => {
+    const sub = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
+    try {
+      const res = await sendPush(env, sub, body);
+      if (res.status === 404 || res.status === 410) {
+        gone++;
+        await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=?").bind(row.endpoint).run();
+      } else if (res.ok || res.status === 201) {
+        sent++;
+        await env.DB.prepare("UPDATE push_subscriptions SET last_ok=? WHERE endpoint=?").bind((/* @__PURE__ */ new Date()).toISOString(), row.endpoint).run();
+      } else {
+        failed++;
+      }
+    } catch {
+      failed++;
+    }
+  }));
+  return { sent, failed, gone };
+}
+async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  const keys = (permKeys || []).filter(Boolean);
+  if (!keys.length) return { sent: 0, failed: 0, gone: 0 };
+  const ph = keys.map(() => "?").join(",");
+  let usernames = [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT username FROM user_permissions WHERE tenant_id=? AND value=1 AND permission IN (${ph})`
+    ).bind(tenantId, ...keys).all();
+    usernames = (results || []).map((r) => r.username);
+  } catch {
+    return { sent: 0, failed: 0, gone: 0 };
+  }
+  const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
+  const totals = { sent: 0, failed: 0, gone: 0 };
+  for (const u of usernames) {
+    if (ex && u.toLowerCase() === ex) continue;
+    const r = await sendToUser(env, tenantId, u, payload);
+    totals.sent += r.sent || 0;
+    totals.failed += r.failed || 0;
+    totals.gone += r.gone || 0;
+  }
+  return totals;
+}
 async function handle4(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/push(?=\/|$)/, "") || "/";
+  if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  if (sub === "/public-key" && method === "GET") {
+    return jr({ ok: true, key: env.VAPID_PUBLIC || "", configured: !!(env.VAPID_PUBLIC && env.VAPID_PRIVATE) }, headers);
+  }
+  if (sub === "/subscribe" && method === "POST") {
+    await ensureTable(env);
+    const b = await readJson(request);
+    const s = b.subscription || b;
+    const endpoint = s && s.endpoint;
+    const p256dh = s && s.keys && s.keys.p256dh;
+    const auth = s && s.keys && s.keys.auth;
+    if (!endpoint || !p256dh || !auth) return jr({ error: "Bad subscription" }, headers, 400);
+    await env.DB.prepare(`INSERT INTO push_subscriptions (endpoint, tenant_id, username, p256dh, auth, ua, created_at, last_ok)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(endpoint) DO UPDATE SET username=excluded.username, p256dh=excluded.p256dh, auth=excluded.auth, ua=excluded.ua, tenant_id=excluded.tenant_id`).bind(endpoint, tid, me, p256dh, auth, String(b.ua || "").slice(0, 200), (/* @__PURE__ */ new Date()).toISOString(), null).run();
+    return jr({ ok: true }, headers, 201);
+  }
+  if (sub === "/unsubscribe" && method === "POST") {
+    await ensureTable(env);
+    const b = await readJson(request);
+    if (!b.endpoint) return jr({ error: "endpoint required" }, headers, 400);
+    await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND lower(username)=lower(?)").bind(b.endpoint, me).run();
+    return jr({ ok: true }, headers);
+  }
+  if (sub === "/test" && method === "POST") {
+    if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return jr({ ok: false, error: "Push isn't configured on the server yet (VAPID keys missing)." }, headers, 400);
+    const r = await sendToUser(env, tid, me, {
+      title: "Mostlane Portal",
+      body: "\u2705 Test notification \u2014 push is working on this device.",
+      url: "/main.html"
+    });
+    if (!r.sent && !r.failed && !r.gone) return jr({ ok: false, error: "No devices registered on this account yet \u2014 enable notifications first." }, headers, 400);
+    return jr({ ok: r.sent > 0, ...r }, headers);
+  }
+  return jr({ error: "Not found: " + sub }, headers, 404);
+}
+
+// src/routes/holidays.js
+async function handle5(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
@@ -1097,6 +1314,12 @@ async function handle4(request, env, ctx, url, sess) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
     `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, (/* @__PURE__ */ new Date()).toISOString()).run();
     await logAction(id, "Submitted", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday request",
+      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} \u2192 ${end}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin"
+    }, user));
     return json3({ success: true, id });
   }
   if (path === "/holiday/cancel" && method === "POST") {
@@ -1112,6 +1335,12 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, (/* @__PURE__ */ new Date()).toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
     await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday cancelled",
+      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} \u2192 ${record.end_date}).`,
+      url: "/holiday-admin.html",
+      tag: "holiday-admin"
+    }, user));
     return json3({ success: true, wasApproved });
   }
   if (path === "/holiday/delete-own" && method === "POST") {
@@ -1195,6 +1424,12 @@ async function handle4(request, env, ctx, url, sess) {
       "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
     ).bind(status, user, (/* @__PURE__ */ new Date()).toISOString(), newType, db.tenantId, id).run();
     await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
+    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `Your holiday ${record.start_date} \u2192 ${record.end_date} was ${status.toLowerCase()}.`,
+      url: "/holiday.html",
+      tag: "holiday-decision"
+    }));
     return json3({ success: true });
   }
   if (path === "/holiday/config" && method === "GET") {
@@ -1495,7 +1730,7 @@ function isSuppressed(rules, type, user, key) {
 }
 
 // src/routes/assets.js
-async function handle5(request, env, ctx, url, sess) {
+async function handle6(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -1817,6 +2052,7 @@ async function handle5(request, env, ctx, url, sess) {
     const round = (/* @__PURE__ */ new Date()).toISOString();
     const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let count = 0;
+    const holderCounts = {};
     for (const r of results || []) {
       let a;
       try {
@@ -1824,12 +2060,22 @@ async function handle5(request, env, ctx, url, sess) {
       } catch {
         continue;
       }
-      const holder = String(a.assignedTo || "").trim().toLowerCase();
+      const holderRaw = String(a.assignedTo || "").trim();
+      const holder = holderRaw.toLowerCase();
       if (!holder || holder === "shared" || holder === "unassigned") continue;
       if (exclude.has(holder)) continue;
       a.confirm = { round, status: "pending", at: null, note: "" };
       await putAsset(env, tenantId, a);
       count++;
+      holderCounts[holderRaw] = (holderCounts[holderRaw] || 0) + 1;
+    }
+    for (const [holderName, n] of Object.entries(holderCounts)) {
+      ctx?.waitUntil(sendToUser(env, tenantId, holderName, {
+        title: "Equipment check",
+        body: `Please confirm the ${n} item${n === 1 ? "" : "s"} you still hold \u2014 tap to review.`,
+        url: "/my-assets.html",
+        tag: "asset-confirm"
+      }));
     }
     await env.DB.prepare(
       "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
@@ -1973,6 +2219,12 @@ async function handle5(request, env, ctx, url, sess) {
     if (senderKeys.length) {
       await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?").bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
     }
+    ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
+      title: "Equipment sent to you",
+      body: `${me} sent you ${asset.name || asset.assetName || asset.id} \u2014 tap to accept.`,
+      url: "/my-assets.html",
+      tag: "asset-transfer"
+    }));
     return json3({ ok: true, id: reqId });
   }
   if (method === "POST" && pathname === "/asset/transfer-accept") {
@@ -2364,7 +2616,7 @@ async function verifyFileSig(env, key, params) {
 }
 
 // src/routes/sla.js
-async function handle6(request, env, ctx, url, sess) {
+async function handle7(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -2373,10 +2625,10 @@ async function handle6(request, env, ctx, url, sess) {
   const searchParams = url.searchParams;
   if (subpath === "/config") {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
-    if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
+    if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
   if (subpath === "/jobs" && method === "POST") {
-    const job = await createOrUpdateJobFromPayload(env, tenantId, await readJson(request));
+    const job = await createOrUpdateJobFromPayload(env, tenantId, await readJson2(request));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
   if (subpath === "/jobs" && method === "GET") {
@@ -2412,7 +2664,7 @@ async function handle6(request, env, ctx, url, sess) {
     return jsonResponse({ shift: await getShift(env, tenantId, engineer, date) }, headers);
   }
   if (subpath === "/shift/clock-on" && method === "POST") {
-    const b = await readJson(request);
+    const b = await readJson2(request);
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
     await db.prepare(`
@@ -2426,7 +2678,7 @@ async function handle6(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, shift: await getShift(env, tenantId, b.engineer, date) }, headers, 201);
   }
   if (subpath === "/shift/clock-off" && method === "POST") {
-    const b = await readJson(request);
+    const b = await readJson2(request);
     if (!b.engineer) return jsonResponse({ error: "engineer required" }, headers, 400);
     const date = b.date || todayStr();
     await db.prepare(
@@ -2464,7 +2716,7 @@ async function handle6(request, env, ctx, url, sess) {
     return jsonResponse({ check: row || null }, headers);
   }
   if (subpath === "/vehicle-check" && method === "POST") {
-    const b = await readJson(request);
+    const b = await readJson2(request);
     if (!b.engineer || !b.week) return jsonResponse({ error: "engineer and week required" }, headers, 400);
     await db.prepare(`
       INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
@@ -2487,7 +2739,7 @@ async function handle6(request, env, ctx, url, sess) {
   if (subpath.startsWith("/job/") && method === "PUT") {
     const id = subpath.split("/").filter(Boolean)[1];
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
-    const body = await readJson(request);
+    const body = await readJson2(request);
     const patch = {
       scheduledAt: body.scheduledStart || body.scheduledAt,
       scheduledEnd: body.scheduledEnd,
@@ -2550,7 +2802,7 @@ async function handle6(request, env, ctx, url, sess) {
       })) }, headers);
     }
     if (parts[2] === "signature" && method === "POST") {
-      const { signedBy, signedAt, signatureBase64 } = await readJson(request);
+      const { signedBy, signedAt, signatureBase64 } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -2569,7 +2821,7 @@ async function handle6(request, env, ctx, url, sess) {
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
     if (method === "PATCH") {
-      const updated = await patchJob(env, tenantId, id, await readJson(request));
+      const updated = await patchJob(env, tenantId, id, await readJson2(request));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
   }
@@ -2666,14 +2918,14 @@ async function handle6(request, env, ctx, url, sess) {
   }
   if (subpath === "/site/doc-delete" && method === "POST") {
     if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
-    const { key } = await readJson(request);
+    const { key } = await readJson2(request);
     if (!key || !String(key).startsWith("sitedocs/")) return jsonResponse({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
     return jsonResponse({ ok: true }, headers);
   }
   if (subpath === "/site/area" && method === "POST") {
     if (!await isFullAccess(env, tenantId, sess)) return jsonResponse({ error: "Only a Full-access user can add new folder areas." }, headers, 403);
-    const { area } = await readJson(request);
+    const { area } = await readJson2(request);
     const clean = String(area || "").replace(/[\/]/g, "-").trim();
     if (!clean) return jsonResponse({ error: "Area name required" }, headers, 400);
     if (["Previous Jobs", "Site Photos"].some((r) => r.toLowerCase() === clean.toLowerCase()))
@@ -2681,7 +2933,7 @@ async function handle6(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, areas: await addSiteArea(env, tenantId, clean) }, headers);
   }
   if (subpath === "/pdf" && method === "POST") {
-    const { html, filename } = await readJson(request);
+    const { html, filename } = await readJson2(request);
     if (!html) return jsonResponse({ error: "Missing HTML" }, headers, 400);
     const pdf = await htmlToPdf(env, html);
     if (!pdf.ok) return jsonResponse({ error: "PDF generation failed" }, headers, 500);
@@ -2693,7 +2945,7 @@ async function handle6(request, env, ctx, url, sess) {
   }
   return jsonResponse({ error: "Not found" }, headers, 404);
 }
-async function readJson(r) {
+async function readJson2(r) {
   const t = await r.text();
   return t ? JSON.parse(t) : {};
 }
@@ -3141,7 +3393,7 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 
 // src/routes/sites.js
 var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
-async function handle7(request, env, ctx, url, sess) {
+async function handle8(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -3434,7 +3686,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle8(request, env, ctx, url, sess) {
+async function handle9(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -3744,7 +3996,7 @@ function num(v) {
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -3958,7 +4210,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal };
 }
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -4148,7 +4400,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -4266,7 +4518,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -4334,7 +4586,7 @@ async function handle12(request, env, ctx, url, sess) {
 
 // src/routes/hs.js
 var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
@@ -4547,7 +4799,7 @@ function shapeCheck(r) {
     skippedBy: items.skippedBy || ""
   };
 }
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -4757,7 +5009,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -4934,10 +5186,10 @@ function classifyAssetBucket(key) {
 
 // src/routes/hrdocs.js
 var DEFAULT_CATEGORIES = ["Employment Contract", "Policies", "Payslips", "Other"];
-function jr(obj, headers, status = 200) {
+function jr2(obj, headers, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { ...headers, "Content-Type": "application/json" } });
 }
-async function readJson2(req) {
+async function readJson3(req) {
   try {
     return await req.json();
   } catch {
@@ -4997,7 +5249,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -5005,8 +5257,8 @@ async function handle16(request, env, ctx, url, sess) {
   const q = url.searchParams;
   if (sub === "/doc" && method === "GET") {
     const key = q.get("key");
-    if (!key || !String(key).startsWith("staffdocs/")) return jr({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr({ error: "Link expired or invalid" }, headers, 403);
+    if (!key || !String(key).startsWith("staffdocs/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -5016,47 +5268,47 @@ async function handle16(request, env, ctx, url, sess) {
       "Cache-Control": "private, max-age=3600"
     } });
   }
-  if (!sess) return jr({ error: "Not authenticated" }, headers, 401);
+  if (!sess) return jr2({ error: "Not authenticated" }, headers, 401);
   const full = await isFull(env, tenantId, sess);
   if (sub === "/docs" && method === "GET") {
     const who = (q.get("user") || sess.user.username).trim();
-    if (who !== sess.user.username && !full) return jr({ error: "Forbidden" }, headers, 403);
+    if (who !== sess.user.username && !full) return jr2({ error: "Forbidden" }, headers, 403);
     const categories = await getCategories(env, tenantId);
     const personal = await signGroups(env, url.origin, await listUnder(env, personalPrefix(tenantId, who)));
     const company = await signGroups(env, url.origin, await listUnder(env, companyPrefix(tenantId)));
-    return jr({ user: who, categories, personal, company, canManage: full }, headers);
+    return jr2({ user: who, categories, personal, company, canManage: full }, headers);
   }
   if (sub === "/docs" && method === "POST") {
-    if (!full) return jr({ error: "Only a Full-access user can upload staff documents." }, headers, 403);
+    if (!full) return jr2({ error: "Only a Full-access user can upload staff documents." }, headers, 403);
     const scope = (q.get("scope") || "personal") === "company" ? "company" : "personal";
     const category = cleanCat(q.get("category")) || "Other";
     const who = (q.get("user") || "").trim();
-    if (scope === "personal" && !who) return jr({ error: "Missing user" }, headers, 400);
+    if (scope === "personal" && !who) return jr2({ error: "Missing user" }, headers, 400);
     const form = await request.formData();
     const file = form.get("file");
-    if (!file) return jr({ error: "Missing file" }, headers, 400);
+    if (!file) return jr2({ error: "Missing file" }, headers, 400);
     const base = scope === "company" ? companyPrefix(tenantId) : personalPrefix(tenantId, who);
     const key = `${base}${category}/${Date.now()}-${safeName(file.name)}`;
     await env.JOB_FILES.put(key, file.stream(), {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
       customMetadata: { name: file.name || safeName(file.name), by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
     });
-    return jr({ ok: true, key, url: await signedFileUrl(env, url.origin, "/staff/doc", key) }, headers, 201);
+    return jr2({ ok: true, key, url: await signedFileUrl(env, url.origin, "/staff/doc", key) }, headers, 201);
   }
   if (sub === "/doc-delete" && method === "POST") {
-    if (!full) return jr({ error: "Forbidden" }, headers, 403);
-    const { key } = await readJson2(request);
-    if (!key || !String(key).startsWith("staffdocs/")) return jr({ error: "Bad key" }, headers, 400);
+    if (!full) return jr2({ error: "Forbidden" }, headers, 403);
+    const { key } = await readJson3(request);
+    if (!key || !String(key).startsWith("staffdocs/")) return jr2({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
-    return jr({ ok: true }, headers);
+    return jr2({ ok: true }, headers);
   }
   if (sub === "/category" && method === "POST") {
-    if (!full) return jr({ error: "Only a Full-access user can add categories." }, headers, 403);
-    const { name } = await readJson2(request);
-    if (!cleanCat(name)) return jr({ error: "Category name required" }, headers, 400);
-    return jr({ ok: true, categories: await addCategory(env, tenantId, name) }, headers);
+    if (!full) return jr2({ error: "Only a Full-access user can add categories." }, headers, 403);
+    const { name } = await readJson3(request);
+    if (!cleanCat(name)) return jr2({ error: "Category name required" }, headers, 400);
+    return jr2({ ok: true, categories: await addCategory(env, tenantId, name) }, headers);
   }
-  return jr({ error: "Not found: " + sub }, headers, 404);
+  return jr2({ error: "Not found: " + sub }, headers, 404);
 }
 async function deletePersonalDocs(env, tenantId, username) {
   let n = 0;
@@ -5110,7 +5362,7 @@ function redact(rows) {
     return o;
   });
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -5170,10 +5422,10 @@ async function handle17(request, env, ctx, url, sess) {
 }
 
 // src/routes/fleet.js
-function jr2(o, h, s = 200) {
+function jr3(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
 }
-async function readJson3(req) {
+async function readJson4(req) {
   try {
     return await req.json();
   } catch {
@@ -5219,7 +5471,7 @@ async function photoIndex(env, tid) {
   }
   return out;
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -5227,8 +5479,8 @@ async function handle18(request, env, ctx, url, sess) {
   const q = url.searchParams;
   if (sub === "/report" && method === "GET") {
     const key = q.get("key");
-    if (!key || !String(key).startsWith("fleetreports/")) return jr2({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    if (!key || !String(key).startsWith("fleetreports/")) return jr3({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr3({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -5239,8 +5491,8 @@ async function handle18(request, env, ctx, url, sess) {
   }
   if (sub === "/vehicle-doc" && method === "GET") {
     const key = q.get("key");
-    if (!key || !String(key).startsWith("vehicledocs/")) return jr2({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    if (!key || !String(key).startsWith("vehicledocs/")) return jr3({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr3({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -5252,8 +5504,8 @@ async function handle18(request, env, ctx, url, sess) {
   }
   if (sub === "/vehicle-photo" && method === "GET") {
     const key = q.get("key");
-    if (!key || !String(key).startsWith("vehiclephotos/")) return jr2({ error: "Bad key" }, headers, 400);
-    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    if (!key || !String(key).startsWith("vehiclephotos/")) return jr3({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr3({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
     return new Response(obj.body, { status: 200, headers: {
@@ -5263,8 +5515,8 @@ async function handle18(request, env, ctx, url, sess) {
       "Cache-Control": "private, max-age=3600"
     } });
   }
-  if (!sess) return jr2({ error: "Not authenticated" }, headers, 401);
-  if (!await canFleet(env, tid, sess)) return jr2({ error: "Forbidden" }, headers, 403);
+  if (!sess) return jr3({ error: "Not authenticated" }, headers, 401);
+  if (!await canFleet(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
   if (sub === "/drivers" && method === "GET") {
     let map = {};
     try {
@@ -5272,18 +5524,18 @@ async function handle18(request, env, ctx, url, sess) {
       if (row && row.value) map = JSON.parse(row.value) || {};
     } catch {
     }
-    return jr2({ ok: true, map }, headers);
+    return jr3({ ok: true, map }, headers);
   }
   if (sub === "/drivers" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const map = b && b.map && typeof b.map === "object" ? b.map : {};
     await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DKEY(tid), JSON.stringify(map)).run();
-    return jr2({ ok: true, map }, headers);
+    return jr3({ ok: true, map }, headers);
   }
   if (sub === "/report" && method === "POST") {
     const form = await request.formData();
     const file = form.get("html");
-    if (!file) return jr2({ error: "Missing report" }, headers, 400);
+    if (!file) return jr3({ error: "Missing report" }, headers, 400);
     const weekStart = String(form.get("weekStart") || "");
     const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
     await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
@@ -5296,7 +5548,7 @@ async function handle18(request, env, ctx, url, sess) {
         at: (/* @__PURE__ */ new Date()).toISOString()
       }
     });
-    return jr2({ ok: true, key }, headers, 201);
+    return jr3({ ok: true, key }, headers, 201);
   }
   if (sub === "/reports" && method === "GET") {
     const listed = await env.JOB_FILES.list({ prefix: prefix(tid), include: ["customMetadata"] });
@@ -5315,13 +5567,13 @@ async function handle18(request, env, ctx, url, sess) {
       });
     }
     reports.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
-    return jr2({ ok: true, reports }, headers);
+    return jr3({ ok: true, reports }, headers);
   }
   if (sub === "/report-delete" && method === "POST") {
-    const { key } = await readJson3(request);
-    if (!key || !String(key).startsWith("fleetreports/")) return jr2({ error: "Bad key" }, headers, 400);
+    const { key } = await readJson4(request);
+    if (!key || !String(key).startsWith("fleetreports/")) return jr3({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/current" || sub === "/assignments" || sub === "/assign") {
     await ensureAssignTable(env);
@@ -5341,7 +5593,7 @@ async function handle18(request, env, ctx, url, sess) {
       }
       const map = {};
       for (const r of rows || []) map[r.reg] = r.username;
-      return jr2({ ok: true, map }, headers);
+      return jr3({ ok: true, map }, headers);
     }
     if (sub === "/assignments" && method === "GET") {
       const reg = q.get("reg");
@@ -5349,17 +5601,17 @@ async function handle18(request, env, ctx, url, sess) {
         const history = (await env.DB.prepare(
           "SELECT reg, username, start_date, end_date, assigned_by, at FROM vehicle_assignments WHERE tenant_id=? AND reg=? ORDER BY start_date DESC, id DESC"
         ).bind(tid, reg).all()).results;
-        return jr2({ ok: true, history: history || [] }, headers);
+        return jr3({ ok: true, history: history || [] }, headers);
       }
       const current = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
-      return jr2({ ok: true, current: current || [] }, headers);
+      return jr3({ ok: true, current: current || [] }, headers);
     }
     if (sub === "/assign" && method === "POST") {
-      const b = await readJson3(request);
+      const b = await readJson4(request);
       const reg = String(b.reg || "").trim();
       const username = String(b.username || "").trim();
       const from = /^\d{4}-\d{2}-\d{2}$/.test(b.fromDate || "") ? b.fromDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-      if (!reg) return jr2({ error: "reg required" }, headers, 400);
+      if (!reg) return jr3({ error: "reg required" }, headers, 400);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind(from, tid, reg).run();
       await env.DB.prepare("UPDATE users SET vehicle_assigned='' WHERE tenant_id=? AND vehicle_assigned=?").bind(tid, reg).run();
@@ -5368,7 +5620,7 @@ async function handle18(request, env, ctx, url, sess) {
         await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, username, from, null, sess.user.username, now).run();
         await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
       }
-      return jr2({ ok: true }, headers);
+      return jr3({ ok: true }, headers);
     }
   }
   if (sub === "/vehicles" && method === "GET") {
@@ -5430,11 +5682,11 @@ async function handle18(request, env, ctx, url, sess) {
       if (ib == null) return -1;
       return ia - ib;
     });
-    return jr2({ ok: true, vehicles }, headers);
+    return jr3({ ok: true, vehicles }, headers);
   }
   if ((sub === "/vehicle" || sub === "/vehicles-import") && method === "POST") {
     await ensureVehTable(env);
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
     const num2 = (x) => {
       const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
@@ -5473,12 +5725,12 @@ async function handle18(request, env, ctx, url, sess) {
       ).run();
       count++;
     }
-    return jr2({ ok: true, count }, headers);
+    return jr3({ ok: true, count }, headers);
   }
   if (sub === "/vehicle-delete" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
-    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
     await env.DB.prepare("DELETE FROM vehicles WHERE tenant_id=? AND reg=?").bind(tid, reg).run();
     await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 10), tid, reg).run();
     try {
@@ -5496,7 +5748,7 @@ async function handle18(request, env, ctx, url, sess) {
       }
     } catch {
     }
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-order" && method === "GET") {
     let order = [];
@@ -5505,17 +5757,17 @@ async function handle18(request, env, ctx, url, sess) {
       if (row && row.value) order = JSON.parse(row.value) || [];
     } catch {
     }
-    return jr2({ ok: true, order }, headers);
+    return jr3({ ok: true, order }, headers);
   }
   if (sub === "/vehicle-order" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const order = Array.isArray(b.order) ? b.order.map(String) : [];
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:vehorder:${tid}`, JSON.stringify(order)).run();
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-docs" && method === "GET") {
     const reg = q.get("reg") || "";
-    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg), include: ["customMetadata"] });
     const docs = [];
     for (const o of listed.objects || []) {
@@ -5530,31 +5782,31 @@ async function handle18(request, env, ctx, url, sess) {
       });
     }
     docs.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
-    return jr2({ ok: true, docs }, headers);
+    return jr3({ ok: true, docs }, headers);
   }
   if (sub === "/vehicle-doc" && method === "POST") {
     const form = await request.formData();
     const reg = String(form.get("reg") || "").trim();
     const file = form.get("file");
-    if (!reg || !file) return jr2({ error: "reg and file required" }, headers, 400);
+    if (!reg || !file) return jr3({ error: "reg and file required" }, headers, 400);
     const safe = String(file.name || "document").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
     const key = `${vdocPrefix(tid, reg)}${Date.now()}-${safe}`;
     await env.JOB_FILES.put(key, file.stream(), {
       httpMetadata: { contentType: file.type || "application/octet-stream" },
       customMetadata: { name: file.name || safe, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
     });
-    return jr2({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-doc", key) }, headers, 201);
+    return jr3({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-doc", key) }, headers, 201);
   }
   if (sub === "/vehicle-doc-delete" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const key = String(b.key || "");
-    if (!key || !key.startsWith("vehicledocs/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!key || !key.startsWith("vehicledocs/")) return jr3({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-photos" && method === "GET") {
     const reg = q.get("reg") || "";
-    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
     const rk = regKey(reg);
     const idx = (await photoIndex(env, tid))[rk] || [];
     const covers = await coverMap(env, tid);
@@ -5571,13 +5823,13 @@ async function handle18(request, env, ctx, url, sess) {
         url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", p.key)
       });
     }
-    return jr2({ ok: true, photos, cover: coverKey }, headers);
+    return jr3({ ok: true, photos, cover: coverKey }, headers);
   }
   if (sub === "/vehicle-photo" && method === "POST") {
     const form = await request.formData();
     const reg = String(form.get("reg") || "").trim();
     const file = form.get("file");
-    if (!reg || !file) return jr2({ error: "reg and file required" }, headers, 400);
+    if (!reg || !file) return jr3({ error: "reg and file required" }, headers, 400);
     const safe = String(file.name || "photo.jpg").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
     const key = `${vphotoPrefix(tid, reg)}${Date.now()}-${safe}`;
     await env.JOB_FILES.put(key, file.stream(), {
@@ -5590,22 +5842,22 @@ async function handle18(request, env, ctx, url, sess) {
       covers[rk] = key;
       await saveCoverMap(env, tid, covers);
     }
-    return jr2({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", key) }, headers, 201);
+    return jr3({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", key) }, headers, 201);
   }
   if (sub === "/vehicle-photo-cover" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const reg = String(b.reg || "").trim();
     const key = String(b.key || "");
-    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr2({ error: "reg and key required" }, headers, 400);
+    if (!reg || !key || !key.startsWith("vehiclephotos/")) return jr3({ error: "reg and key required" }, headers, 400);
     const covers = await coverMap(env, tid);
     covers[regKey(reg)] = key;
     await saveCoverMap(env, tid, covers);
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-photo-delete" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const key = String(b.key || "");
-    if (!key || !key.startsWith("vehiclephotos/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!key || !key.startsWith("vehiclephotos/")) return jr3({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
     const rk = key.split("/")[2];
     const covers = await coverMap(env, tid);
@@ -5613,7 +5865,7 @@ async function handle18(request, env, ctx, url, sess) {
       delete covers[rk];
       await saveCoverMap(env, tid, covers);
     }
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/pool-alloc" && method === "GET") {
     let alloc = {};
@@ -5622,10 +5874,10 @@ async function handle18(request, env, ctx, url, sess) {
       if (row && row.value) alloc = JSON.parse(row.value) || {};
     } catch {
     }
-    return jr2({ ok: true, alloc }, headers);
+    return jr3({ ok: true, alloc }, headers);
   }
   if (sub === "/pool-alloc" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     let alloc = {};
     try {
       const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:poolalloc:${tid}`).first();
@@ -5637,7 +5889,7 @@ async function handle18(request, env, ctx, url, sess) {
       else delete alloc[String(b.key)];
     } else if (b.alloc && typeof b.alloc === "object") alloc = b.alloc;
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:poolalloc:${tid}`, JSON.stringify(alloc)).run();
-    return jr2({ ok: true, alloc }, headers);
+    return jr3({ ok: true, alloc }, headers);
   }
   if (sub === "/paycfg" && method === "GET") {
     let cfg = { defaults: { morningCap: 30, homeCap: 30, lunch: 30, thresholdH: 6 }, byUser: {} };
@@ -5650,13 +5902,13 @@ async function handle18(request, env, ctx, url, sess) {
       }
     } catch {
     }
-    return jr2({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser }, headers);
+    return jr3({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser }, headers);
   }
   if (sub === "/paycfg" && method === "POST") {
-    const b = await readJson3(request);
+    const b = await readJson4(request);
     const cfg = { defaults: b.defaults || { morningCap: 30, homeCap: 30, lunch: 30, thresholdH: 6 }, byUser: b.byUser || {} };
     await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:paycfg:${tid}`, JSON.stringify(cfg)).run();
-    return jr2({ ok: true }, headers);
+    return jr3({ ok: true }, headers);
   }
   if (sub === "/timesheet") {
     await ensureTsTable(env);
@@ -5671,22 +5923,22 @@ async function handle18(request, env, ctx, url, sess) {
         }
         return { username: r.username, days: d.days || {} };
       });
-      return jr2({ ok: true, week, rows: out }, headers);
+      return jr3({ ok: true, week, rows: out }, headers);
     }
     if (method === "POST") {
-      const b = await readJson3(request);
+      const b = await readJson4(request);
       const week = String(b.week || "");
-      if (!week) return jr2({ error: "week required" }, headers, 400);
+      if (!week) return jr3({ error: "week required" }, headers, 400);
       for (const row of b.rows || []) {
         if (!row.username) continue;
         await env.DB.prepare(
           "INSERT INTO van_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
         ).bind(tid, week, row.username, JSON.stringify({ days: row.days || {} }), (/* @__PURE__ */ new Date()).toISOString()).run();
       }
-      return jr2({ ok: true }, headers);
+      return jr3({ ok: true }, headers);
     }
   }
-  return jr2({ error: "Not found: " + sub }, headers, 404);
+  return jr3({ error: "Not found: " + sub }, headers, 404);
 }
 async function ensureVehTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicles (
@@ -5791,198 +6043,6 @@ async function seedAssignments(env, tid) {
   }
 }
 
-// src/lib/webpush.js
-var enc2 = new TextEncoder();
-function b64urlToBytes(s) {
-  s = String(s).replace(/-/g, "+").replace(/_/g, "/");
-  const pad = s.length % 4 ? 4 - s.length % 4 : 0;
-  s += "=".repeat(pad);
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-function bytesToB64url(buf) {
-  const a = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < a.length; i++) bin += String.fromCharCode(a[i]);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-function concat(...arrs) {
-  let len = 0;
-  for (const a of arrs) len += a.length;
-  const out = new Uint8Array(len);
-  let o = 0;
-  for (const a of arrs) {
-    out.set(a, o);
-    o += a.length;
-  }
-  return out;
-}
-async function hmac(keyBytes, dataBytes) {
-  const k = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return new Uint8Array(await crypto.subtle.sign("HMAC", k, dataBytes));
-}
-async function hkdf(salt, ikm, info, length) {
-  const prk = await hmac(salt, ikm);
-  const t = await hmac(prk, concat(info, new Uint8Array([1])));
-  return t.slice(0, length);
-}
-async function encryptPayload(payloadBytes, uaPublicRaw, authSecret, salt, asKey) {
-  const asPubRaw = new Uint8Array(await crypto.subtle.exportKey("raw", asKey.publicKey));
-  const uaPubKey = await crypto.subtle.importKey("raw", uaPublicRaw, { name: "ECDH", namedCurve: "P-256" }, false, []);
-  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaPubKey }, asKey.privateKey, 256));
-  const keyInfo = concat(enc2.encode("WebPush: info\0"), uaPublicRaw, asPubRaw);
-  const ikm = await hkdf(authSecret, shared, keyInfo, 32);
-  const cek = await hkdf(salt, ikm, enc2.encode("Content-Encoding: aes128gcm\0"), 16);
-  const nonce = await hkdf(salt, ikm, enc2.encode("Content-Encoding: nonce\0"), 12);
-  const plaintext = concat(payloadBytes, new Uint8Array([2]));
-  const aesKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, aesKey, plaintext));
-  const rs = 4096;
-  const header = concat(
-    salt,
-    new Uint8Array([rs >>> 24 & 255, rs >>> 16 & 255, rs >>> 8 & 255, rs & 255]),
-    new Uint8Array([asPubRaw.length]),
-    asPubRaw
-  );
-  return concat(header, ciphertext);
-}
-async function importVapidPrivate(env) {
-  const pub = b64urlToBytes(env.VAPID_PUBLIC);
-  const jwk = {
-    kty: "EC",
-    crv: "P-256",
-    x: bytesToB64url(pub.slice(1, 33)),
-    y: bytesToB64url(pub.slice(33, 65)),
-    d: env.VAPID_PRIVATE,
-    ext: true,
-    key_ops: ["sign"]
-  };
-  return crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
-}
-async function vapidAuth(env, endpoint) {
-  const aud = new URL(endpoint).origin;
-  const header = bytesToB64url(enc2.encode(JSON.stringify({ typ: "JWT", alg: "ES256" })));
-  const exp = Math.floor(Date.now() / 1e3) + 12 * 3600;
-  const payload = bytesToB64url(enc2.encode(JSON.stringify({ aud, exp, sub: env.PUSH_CONTACT || "mailto:admin@mostlane-portal.com" })));
-  const signingInput = header + "." + payload;
-  const key = await importVapidPrivate(env);
-  const sig = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc2.encode(signingInput)));
-  return `vapid t=${signingInput}.${bytesToB64url(sig)}, k=${env.VAPID_PUBLIC}`;
-}
-async function sendPush(env, sub, payloadStr, ttl = 86400) {
-  const uaPublic = b64urlToBytes(sub.keys.p256dh);
-  const auth = b64urlToBytes(sub.keys.auth);
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const asKey = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
-  const body = await encryptPayload(enc2.encode(payloadStr), uaPublic, auth, salt, asKey);
-  return fetch(sub.endpoint, {
-    method: "POST",
-    headers: {
-      "Authorization": await vapidAuth(env, sub.endpoint),
-      "Content-Encoding": "aes128gcm",
-      "Content-Type": "application/octet-stream",
-      "TTL": String(ttl)
-    },
-    body
-  });
-}
-
-// src/routes/push.js
-function jr3(o, h, s = 200) {
-  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
-}
-async function readJson4(req) {
-  try {
-    return await req.json();
-  } catch {
-    return {};
-  }
-}
-async function ensureTable(env) {
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_subscriptions (
-    endpoint TEXT PRIMARY KEY,
-    tenant_id INTEGER NOT NULL DEFAULT 1,
-    username TEXT NOT NULL,
-    p256dh TEXT NOT NULL,
-    auth TEXT NOT NULL,
-    ua TEXT,
-    created_at TEXT,
-    last_ok TEXT)`).run();
-}
-async function sendToUser(env, tenantId, username, payload) {
-  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
-  await ensureTable(env);
-  const { results } = await env.DB.prepare(
-    "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id=? AND lower(username)=lower(?)"
-  ).bind(tenantId, username).all();
-  const subs = results || [];
-  if (!subs.length) return { sent: 0, failed: 0, gone: 0 };
-  const body = JSON.stringify(payload);
-  let sent = 0, failed = 0, gone = 0;
-  await Promise.allSettled(subs.map(async (row) => {
-    const sub = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
-    try {
-      const res = await sendPush(env, sub, body);
-      if (res.status === 404 || res.status === 410) {
-        gone++;
-        await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=?").bind(row.endpoint).run();
-      } else if (res.ok || res.status === 201) {
-        sent++;
-        await env.DB.prepare("UPDATE push_subscriptions SET last_ok=? WHERE endpoint=?").bind((/* @__PURE__ */ new Date()).toISOString(), row.endpoint).run();
-      } else {
-        failed++;
-      }
-    } catch {
-      failed++;
-    }
-  }));
-  return { sent, failed, gone };
-}
-async function handle19(request, env, ctx, url, sess) {
-  const headers = corsHeaders(env, request);
-  const method = request.method.toUpperCase();
-  const sub = url.pathname.replace(/^\/push(?=\/|$)/, "") || "/";
-  if (!sess) return jr3({ error: "Not authenticated" }, headers, 401);
-  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
-  const me = sess.user.username;
-  if (sub === "/public-key" && method === "GET") {
-    return jr3({ ok: true, key: env.VAPID_PUBLIC || "", configured: !!(env.VAPID_PUBLIC && env.VAPID_PRIVATE) }, headers);
-  }
-  if (sub === "/subscribe" && method === "POST") {
-    await ensureTable(env);
-    const b = await readJson4(request);
-    const s = b.subscription || b;
-    const endpoint = s && s.endpoint;
-    const p256dh = s && s.keys && s.keys.p256dh;
-    const auth = s && s.keys && s.keys.auth;
-    if (!endpoint || !p256dh || !auth) return jr3({ error: "Bad subscription" }, headers, 400);
-    await env.DB.prepare(`INSERT INTO push_subscriptions (endpoint, tenant_id, username, p256dh, auth, ua, created_at, last_ok)
-      VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(endpoint) DO UPDATE SET username=excluded.username, p256dh=excluded.p256dh, auth=excluded.auth, ua=excluded.ua, tenant_id=excluded.tenant_id`).bind(endpoint, tid, me, p256dh, auth, String(b.ua || "").slice(0, 200), (/* @__PURE__ */ new Date()).toISOString(), null).run();
-    return jr3({ ok: true }, headers, 201);
-  }
-  if (sub === "/unsubscribe" && method === "POST") {
-    await ensureTable(env);
-    const b = await readJson4(request);
-    if (!b.endpoint) return jr3({ error: "endpoint required" }, headers, 400);
-    await env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint=? AND lower(username)=lower(?)").bind(b.endpoint, me).run();
-    return jr3({ ok: true }, headers);
-  }
-  if (sub === "/test" && method === "POST") {
-    if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return jr3({ ok: false, error: "Push isn't configured on the server yet (VAPID keys missing)." }, headers, 400);
-    const r = await sendToUser(env, tid, me, {
-      title: "Mostlane Portal",
-      body: "\u2705 Test notification \u2014 push is working on this device.",
-      url: "/main.html"
-    });
-    if (!r.sent && !r.failed && !r.gone) return jr3({ ok: false, error: "No devices registered on this account yet \u2014 enable notifications first." }, headers, 400);
-    return jr3({ ok: r.sent > 0, ...r }, headers);
-  }
-  return jr3({ error: "Not found: " + sub }, headers, 404);
-}
-
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -5994,55 +6054,55 @@ var ROUTES = [
   ["*", "/hs-plan-config", handle2],
   ["*", "/po-config", handle2],
   ["*", "/device", handle3],
-  ["*", "/holiday", handle4],
-  ["*", "/asset", handle5],
+  ["*", "/holiday", handle5],
+  ["*", "/asset", handle6],
   // /assets, /asset/*, /asset-image, /asset-thumb
-  ["*", "/transfer", handle5],
+  ["*", "/transfer", handle6],
   // /transfer, /transfer-log
-  ["*", "/upload-asset-image", handle5],
-  ["*", "/upload-asset-thumb", handle5],
-  ["*", "/delete-asset-image", handle5],
-  ["*", "/sla", handle6],
-  ["*", "/stats", handle15],
-  ["*", "/staff", handle16],
+  ["*", "/upload-asset-image", handle6],
+  ["*", "/upload-asset-thumb", handle6],
+  ["*", "/delete-asset-image", handle6],
+  ["*", "/sla", handle7],
+  ["*", "/stats", handle16],
+  ["*", "/staff", handle17],
   // staff personal + company documents
-  ["*", "/privacy", handle17],
+  ["*", "/privacy", handle18],
   // GDPR data export + erasure
-  ["*", "/fleet", handle18],
+  ["*", "/fleet", handle19],
   // fleet reports + driver mapping
-  ["*", "/push", handle19],
+  ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/get-sites", handle7],
-  ["*", "/add-site", handle7],
-  ["*", "/update-site", handle7],
-  ["*", "/next-project-job-number", handle7],
-  ["*", "/upload-image", handle7],
-  ["*", "/customers", handle7],
-  ["*", "/import-sites", handle7],
-  ["*", "/sites", handle7],
+  ["*", "/get-sites", handle8],
+  ["*", "/add-site", handle8],
+  ["*", "/update-site", handle8],
+  ["*", "/next-project-job-number", handle8],
+  ["*", "/upload-image", handle8],
+  ["*", "/customers", handle8],
+  ["*", "/import-sites", handle8],
+  ["*", "/sites", handle8],
   // /sites/street-images (bulk imagery)
-  ["*", "/settings", handle8],
-  ["*", "/oncall", handle8],
-  ["*", "/daily-logs", handle8],
-  ["*", "/notify", handle8],
+  ["*", "/settings", handle9],
+  ["*", "/oncall", handle9],
+  ["*", "/daily-logs", handle9],
+  ["*", "/notify", handle9],
   // notification audit log
-  ["*", "/prefs", handle8],
+  ["*", "/prefs", handle9],
   // per-user cross-device markers
-  ["*", "/menu-config", handle8],
+  ["*", "/menu-config", handle9],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle8],
+  ["*", "/audit", handle9],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle9],
-  ["*", "/sitelog-launch", handle9],
-  ["*", "/office", handle10],
+  ["*", "/sitelog", handle10],
+  ["*", "/sitelog-launch", handle10],
+  ["*", "/office", handle11],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle11],
+  ["*", "/key", handle12],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle12],
+  ["*", "/theme", handle13],
   // per-user colour theme + background
-  ["*", "/hs/", handle13],
+  ["*", "/hs/", handle14],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle14]
+  ["*", "/vancheck", handle15]
   // weekly van checks (form, grid, deadline badges)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,

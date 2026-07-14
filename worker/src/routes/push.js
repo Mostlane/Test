@@ -59,6 +59,30 @@ export async function sendToUser(env, tenantId, username, payload) {
   return { sent, failed, gone };
 }
 
+// Send to every user holding any of the given permissions (value=1), e.g.
+// notify holiday admins. Optionally skip one user (usually the actor).
+export async function sendToPermission(env, tenantId, permKeys, payload, excludeUser) {
+  if (!env.VAPID_PUBLIC || !env.VAPID_PRIVATE) return { sent: 0, failed: 0, gone: 0, disabled: true };
+  const keys = (permKeys || []).filter(Boolean);
+  if (!keys.length) return { sent: 0, failed: 0, gone: 0 };
+  const ph = keys.map(() => "?").join(",");
+  let usernames = [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT username FROM user_permissions WHERE tenant_id=? AND value=1 AND permission IN (${ph})`
+    ).bind(tenantId, ...keys).all();
+    usernames = (results || []).map(r => r.username);
+  } catch { return { sent: 0, failed: 0, gone: 0 }; }
+  const ex = excludeUser ? String(excludeUser).toLowerCase() : null;
+  const totals = { sent: 0, failed: 0, gone: 0 };
+  for (const u of usernames) {
+    if (ex && u.toLowerCase() === ex) continue;
+    const r = await sendToUser(env, tenantId, u, payload);
+    totals.sent += r.sent || 0; totals.failed += r.failed || 0; totals.gone += r.gone || 0;
+  }
+  return totals;
+}
+
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();

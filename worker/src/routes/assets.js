@@ -17,6 +17,7 @@ import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { getRules, isSuppressed } from "../lib/suppress.js";
+import { sendToUser } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
@@ -405,14 +406,25 @@ export async function handle(request, env, ctx, url, sess) {
     const round = new Date().toISOString();
     const { results } = await db.prepare("SELECT data FROM assets WHERE tenant_id = ?").bind(db.tenantId).all();
     let count = 0;
+    const holderCounts = {};   // originalUsername -> item count
     for (const r of results || []) {
       let a; try { a = JSON.parse(r.data); } catch { continue; }
-      const holder = String(a.assignedTo || "").trim().toLowerCase();
+      const holderRaw = String(a.assignedTo || "").trim();
+      const holder = holderRaw.toLowerCase();
       if (!holder || holder === "shared" || holder === "unassigned") continue;
       if (exclude.has(holder)) continue;
       a.confirm = { round, status: "pending", at: null, note: "" };
       await putAsset(env, tenantId, a);
       count++;
+      holderCounts[holderRaw] = (holderCounts[holderRaw] || 0) + 1;
+    }
+    // Push each holder once with how many items they need to confirm.
+    for (const [holderName, n] of Object.entries(holderCounts)) {
+      ctx?.waitUntil(sendToUser(env, tenantId, holderName, {
+        title: "Equipment check",
+        body: `Please confirm the ${n} item${n === 1 ? "" : "s"} you still hold — tap to review.`,
+        url: "/my-assets.html", tag: "asset-confirm"
+      }));
     }
     await env.DB.prepare(
       "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
@@ -545,6 +557,12 @@ export async function handle(request, env, ctx, url, sess) {
       await db.prepare("UPDATE asset_transfer_requests SET condition_photos=? WHERE tenant_id=? AND id=?")
         .bind(JSON.stringify({ sender: senderKeys, recipient: [] }), db.tenantId, reqId).run();
     }
+    // Push the recipient (fires the same "pending transfer" popup as an OS notification).
+    ctx?.waitUntil(sendToUser(env, tenantId, b.to, {
+      title: "Equipment sent to you",
+      body: `${me} sent you ${asset.name || asset.assetName || asset.id} — tap to accept.`,
+      url: "/my-assets.html", tag: "asset-transfer"
+    }));
     return json({ ok: true, id: reqId });
   }
 

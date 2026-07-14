@@ -20,6 +20,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { requireSession, permissionsFor } from "../lib/auth.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { sendToUser, sendToPermission } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -163,6 +164,11 @@ export async function handle(request, env, ctx, url, sess) {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,'Pending',?)
     `).bind(db.tenantId, id, user.replace(".", " "), user, year, start, end, days, half, body.type || null, note, new Date().toISOString()).run();
     await logAction(id, "Submitted", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday request",
+      body: `${user.replace(".", " ")} requested ${days} day(s) off (${start} → ${end}).`,
+      url: "/holiday-admin.html", tag: "holiday-admin"
+    }, user));
     return json({ success: true, id });
   }
 
@@ -182,6 +188,11 @@ export async function handle(request, env, ctx, url, sess) {
       "UPDATE holidays SET status='Cancelled', cancelled_by=?, decision_at=?, cancel_note=? WHERE tenant_id=? AND id=?"
     ).bind(user, new Date().toISOString(), wasApproved ? "Approved holiday cancelled by staff member" : null, db.tenantId, id).run();
     await logAction(id, wasApproved ? "Approved holiday cancelled by engineer" : "Cancelled by engineer", user);
+    ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "HolidayAdmin"], {
+      title: "Holiday cancelled",
+      body: `${user.replace(".", " ")} cancelled ${wasApproved ? "an approved" : "a pending"} holiday (${record.start_date} → ${record.end_date}).`,
+      url: "/holiday-admin.html", tag: "holiday-admin"
+    }, user));
     return json({ success: true, wasApproved });
   }
 
@@ -280,6 +291,11 @@ export async function handle(request, env, ctx, url, sess) {
       "UPDATE holidays SET status=?, approved_by=?, decision_at=?, type=COALESCE(?, type) WHERE tenant_id=? AND id=?"
     ).bind(status, user, new Date().toISOString(), newType, db.tenantId, id).run();
     await logAction(id, status + (newType && newType !== record.type ? ` (as ${newType})` : ""), user);
+    ctx?.waitUntil(sendToUser(env, tenantId, record.username, {
+      title: `Holiday ${status.toLowerCase()}`,
+      body: `Your holiday ${record.start_date} → ${record.end_date} was ${status.toLowerCase()}.`,
+      url: "/holiday.html", tag: "holiday-decision"
+    }));
     return json({ success: true });
   }
 

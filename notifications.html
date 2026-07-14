@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notifications — Mostlane</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<script src="/push-client.js"></script>
+<style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
+  a.ml-back{color:#fff;text-decoration:none;}
+  .wrap{max-width:620px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .card h2{margin:0 0 4px;font-size:16px;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;}
+  .state{font-weight:700;font-size:15px;margin:6px 0 14px;}
+  .state.on{color:#16a34a;} .state.off{color:#334155;} .state.warn{color:#b45309;}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:11px 16px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;}
+  .hint{font-size:13px;color:var(--muted);margin-top:12px;line-height:1.5;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:50;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html">‹ Back</a>
+  <h1>🔔 Notifications</h1>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>Notifications on this device</h2>
+    <p class="sub">Get the portal's reminders — new equipment sent to you, holiday decisions, equipment checks — as notifications on this phone or computer, even when the portal is closed. Turn it on once per device.</p>
+    <p id="state" class="state off">Checking…</p>
+    <div class="row">
+      <button class="btn primary" id="enable" style="display:none;">Turn on notifications</button>
+      <button class="btn" id="disable" style="display:none;">Turn off</button>
+      <button class="btn" id="test" style="display:none;">Send test</button>
+    </div>
+    <p id="hint" class="hint"></p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const g = id => document.getElementById(id);
+function toast(m){ const t=g("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
+
+async function refresh(){
+  const s = await MostlanePush.state();
+  const state=g("state"), enable=g("enable"), disable=g("disable"), test=g("test"), hint=g("hint");
+  enable.style.display="none"; disable.style.display="none"; test.style.display="none"; hint.textContent="";
+  state.className="state off";
+  if(!s.supported){
+    state.textContent="Not supported on this browser."; state.className="state warn";
+    hint.textContent="Use Chrome on Android, or install Mostlane to your Home Screen on iPhone/iPad (iOS 16.4 or newer).";
+    return;
+  }
+  if(s.needsInstall){
+    state.textContent="Add Mostlane to your Home Screen first."; state.className="state warn";
+    hint.textContent="On iPhone/iPad: tap the Share icon → Add to Home Screen, then open Mostlane from the Home Screen and come back here to turn notifications on.";
+    return;
+  }
+  if(s.denied){
+    state.textContent="Notifications are blocked."; state.className="state warn";
+    hint.textContent="Notifications are turned off for this site in your device settings — allow them there, then reload this page.";
+    return;
+  }
+  if(s.on){ state.textContent="On for this device ✓"; state.className="state on"; disable.style.display=""; test.style.display=""; }
+  else { state.textContent="Off for this device."; enable.style.display=""; }
+}
+
+g("enable").addEventListener("click", async () => {
+  g("enable").disabled=true;
+  const r = await MostlanePush.enable();
+  g("enable").disabled=false;
+  if(r.ok) toast("Notifications on for this device");
+  else if(r.error==="not-granted") toast("Permission not granted");
+  else if(r.error==="not-configured") toast("Push isn't set up on the server yet");
+  else toast("Couldn't enable ("+(r.error||"error")+")");
+  refresh();
+});
+g("disable").addEventListener("click", async () => { await MostlanePush.disable(); toast("Notifications off for this device"); refresh(); });
+g("test").addEventListener("click", async () => { const r = await MostlanePush.test(); toast(r.ok ? "Test sent — watch for the notification" : (r.error || "Test failed")); });
+
+refresh();
+</script>
+</body>
+</html>
