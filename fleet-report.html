@@ -78,6 +78,18 @@
     <button class="btn" id="genBtn" disabled>Generate Report</button>
     <div id="status"></div>
   </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🧑‍🔧 Vehicle drivers</h3>
+    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Pick who was driving each vehicle. Choices are remembered for next time — just change any that differ this week. The report uses these names.</p>
+    <div id="driverMap"><span class="muted">Loading…</span></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:4px;color:var(--indigo-dark);font-size:15px;">🗂️ Saved reports</h3>
+    <p style="font-size:12.5px;color:#78809a;margin-bottom:8px;">Reports you've saved to the portal. Open to view any past week, or delete.</p>
+    <div id="pastReports"><span class="muted">Loading…</span></div>
+  </div>
 </div>
 
 <div id="report"></div>
@@ -221,6 +233,73 @@ async function parseScorePdf(file){
   return scores;
 }
 
+/* ═══ Vehicle drivers (reg → user, remembered) ═══ */
+let USERS=[], DRIVERMAP={};
+function userLabel(u){ const n=((u.FirstName||"")+" "+(u.LastName||"")).trim(); return n||u.Username; }
+function driverName(username){ if(!username) return ""; const u=USERS.find(x=>x.Username===username); return u?userLabel(u):username; }
+async function loadUsers(){
+  try{ const d=await authFetch("/users").then(r=>r.json()); USERS=(d.Users||d.users||[]).filter(u=>u.Username); }catch(e){ USERS=[]; }
+}
+async function loadDriverMap(){
+  try{ const d=await authFetch("/fleet/drivers").then(r=>r.json()); if(d.ok) DRIVERMAP=d.map||{}; }catch(e){}
+}
+function renderDriverTable(){
+  const opts=['<option value="">— unassigned —</option>'].concat(USERS.map(u=>`<option value="${esc(u.Username)}">${esc(userLabel(u))}</option>`)).join("");
+  $("driverMap").innerHTML=`<table class="rt" style="box-shadow:none;margin:0"><tr><th>Vehicle</th><th>Driver this week</th></tr>`+
+    FLEET.map(v=>`<tr><td><b>${esc(v.reg)}</b>${v.driver?` <span class="muted" style="font-size:11px">(${esc(v.driver)})</span>`:""}</td>
+      <td><select data-reg="${esc(v.reg)}" style="font:inherit;padding:6px;border:1px solid #cdd2e6;border-radius:7px;min-width:180px">${opts}</select></td></tr>`).join("")+`</table>`;
+  // Pre-select from saved map.
+  $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ const v=DRIVERMAP[s.getAttribute("data-reg")]; if(v) s.value=v; });
+}
+function getDriverSelections(){
+  const map={}; $("driverMap").querySelectorAll("select[data-reg]").forEach(s=>{ if(s.value) map[s.getAttribute("data-reg")]=s.value; }); return map;
+}
+async function saveDriverMap(map){ try{ await authFetch("/fleet/drivers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({map})}); }catch(e){} }
+
+/* ═══ Saved reports ═══ */
+async function loadPastReports(){
+  const el=$("pastReports");
+  try{
+    const d=await authFetch("/fleet/reports").then(r=>r.json());
+    if(!d.ok){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; return; }
+    if(!d.reports.length){ el.innerHTML='<span class="muted">No saved reports yet — generate one below and press “Save to portal”.</span>'; return; }
+    el.innerHTML=d.reports.map(r=>`<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #eef">
+        <div style="flex:1"><b>${esc(r.title)}</b><br><span class="muted" style="font-size:12px">${esc((r.at||"").slice(0,10))}${r.by?" · "+esc(r.by):""}</span></div>
+        <a class="btn grey" style="text-decoration:none;padding:7px 12px" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a>
+        <button class="btn grey" style="padding:7px 12px;color:#dc2626" data-del="${esc(r.key)}">Delete</button>
+      </div>`).join("");
+    el.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>deleteReport(b.getAttribute("data-del"))));
+  }catch(e){ el.innerHTML='<span class="muted">Couldn\'t load.</span>'; }
+}
+async function deleteReport(key){
+  if(!confirm("Delete this saved report? This cannot be undone.")) return;
+  try{ const r=await authFetch("/fleet/report-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadPastReports(); }catch(e){}
+}
+function buildStandalone(){
+  const css=document.querySelector("style").textContent;
+  const L=window.__lastReport||{inner:"",title:"Fleet report"};
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(L.title)}</title><style>${css}</style></head><body><div id="report">${L.inner}</div>`+
+    `<`+`script>function tog(id){var el=document.getElementById(id);if(el)el.classList.toggle('open');}window.tog=tog;<`+`/script></body></html>`;
+}
+async function saveReport(){
+  if(!window.__lastReport){ return; }
+  const msg=$("saveMsg"); if(msg)msg.textContent="Saving…";
+  try{
+    const form=new FormData();
+    form.append("html", new Blob([buildStandalone()],{type:"text/html"}), "report.html");
+    form.append("title", window.__lastReport.title);
+    form.append("weekStart", window.__lastReport.weekStart);
+    form.append("weekEnd", window.__lastReport.weekEnd);
+    const r=await authFetch("/fleet/report",{method:"POST",body:form}).then(r=>r.json());
+    if(msg)msg.textContent = r.ok ? "✓ Saved to portal" : ("Save failed — "+(r.error||""));
+  }catch(e){ if($("saveMsg"))$("saveMsg").textContent="Save failed"; }
+}
+window.saveReport=saveReport;
+
+async function initPage(){
+  await loadUsers(); await loadDriverMap(); renderDriverTable(); loadPastReports();
+}
+
 /* ═══ Build + render ═══ */
 let XLSDATA=null, PDFFILE=null;
 function setXls(f){ if(!f)return; XLSDATA=f; $("xlsName").textContent="✓ "+f.name; refresh(); }
@@ -251,6 +330,7 @@ async function generate(){
   try{
     const buf=await XLSDATA.arrayBuffer();
     const wb=XLSX.read(buf,{type:"array",cellDates:true,raw:false});
+    const dmap=getDriverSelections(); saveDriverMap(dmap);   // remember for next time
     const vehicles=[]; let minD=null,maxD=null;
     for(const v of FLEET){
       const nm=wb.SheetNames.find(n=>norm(n)===norm(v.reg)); if(!nm) continue;
@@ -258,7 +338,7 @@ async function generate(){
       const days=parseVehicleSheet(rows);
       const dayList=Object.keys(days).sort().map(d=>({date:d,...classifyDay(days[d],v.home)}));
       dayList.forEach(d=>{ if(!minD||d.date<minD)minD=d.date; if(!maxD||d.date>maxD)maxD=d.date; });
-      vehicles.push({...v,isPool:POOL.has(v.reg),days:dayList});
+      vehicles.push({...v, driver: dmap[v.reg]?driverName(dmap[v.reg]):v.driver, isPool:POOL.has(v.reg), days:dayList});
     }
     if(!minD){ $("status").textContent="No trip data found in that file."; $("genBtn").disabled=false; return; }
     $("status").textContent="Reading driver scores…";
@@ -377,12 +457,18 @@ function renderReport(R){
     • Inactive vehicles this period: ${inactive.length?esc(inactive.join(", ")):"none"}.<br>
     • Data source: VelocityFleet trip export + portal van-check records.</div>`;
 
-  h+=`<div style="margin:20px 0"><button class="btn grey" onclick="location.reload()">↻ New report</button></div></div>`;
-  $("report").innerHTML=h;
+  h+=`</div>`;   // close .container
+  window.__lastReport={ inner:h, title:"Fleet Trip Report "+R.minD+" – "+R.maxD, weekStart:R.minD, weekEnd:R.maxD };
+  const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button class="btn" onclick="saveReport()">💾 Save to portal</button>
+    <button class="btn grey" onclick="location.reload()">↻ New report</button>
+    <span id="saveMsg" style="font-size:13px;color:#475569"></span></div></div>`;
+  $("report").innerHTML=h+bar;
 }
 function DOWO(){ return ["Mon","Tue","Wed","Thu","Fri","Sat ⚠️","Sun ⚠️"]; }
 function tog(id){ const el=$(id); if(!el)return; el.classList.toggle("open"); }
 window.tog=tog;
+initPage();
 </script>
 </body>
 </html>
