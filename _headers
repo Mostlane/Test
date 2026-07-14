@@ -63,3 +63,5 @@
   Cache-Control: no-cache
 /fleet-report.html
   Cache-Control: no-cache
+/van-timesheet.html
+  Cache-Control: no-cache
