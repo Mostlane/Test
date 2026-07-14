@@ -370,12 +370,14 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
 - **Scheduled reminders (cron)** — `index.js` exports a `scheduled(event,env,ctx)`
   handler calling `vancheck.js sendWeeklyReminders(env)`: pushes every driver
   (Active + vehicle_assigned) who hasn't done/​been-skipped for THIS week's van
-  check (honours mute rules). Self-gates to **07:00 London** and dedupes per
-  calendar day (app_config `vancheck:reminded:<tid>`), so it's BST/GMT-safe and
-  retry-safe. **Needs a Cron Trigger on the worker** (dashboard → Settings →
-  Triggers): `0 6,7 * * 1,4` = Mon & Thu, delivered 7am UK. Change days/time via
-  the cron; the 07:00-London gate means the cron must fire at the UTC hours
-  bracketing 7am London (6 and 7). New scheduled jobs hang off the same handler.
+  check (honours mute rules). Two nudges: **Monday 07:00 London** (fixed) + a
+  **dynamic chase within 2h BEFORE the portal deadline** (deadlineFor = the
+  van-check settings dueDow/dueTime; never after — already missed). Self-gates
+  on London time, deduped per week per slot (app_config `vancheck:reminded:<tid>`
+  = ["mon:<week>","chase:<week>"]), so BST/GMT-safe and retry-safe. **Needs an
+  HOURLY Cron Trigger** (dashboard → Settings → Triggers): `0 * * * *` — hourly
+  so the chase tracks whatever due-time is set. New scheduled jobs hang off the
+  same handler.
 
 ## Satellite systems
 1. **PO system** — single-file worker (own D1 `mostlane-po`; legacy KV

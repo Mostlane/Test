@@ -135,9 +135,11 @@ export default {
   },
 
   // ── Cron trigger: scheduled push reminders ────────────────────────────────
-  // Set a Cron Trigger on the worker (dashboard → Settings → Triggers):
-  //   0 6,7 * * 1,4   → Monday & Thursday, sends at 07:00 UK (BST + GMT safe;
-  //                     sendWeeklyReminders self-gates to 7am London + dedupes).
+  // Set an HOURLY Cron Trigger on the worker (dashboard → Settings → Triggers):
+  //   0 * * * *   → sendWeeklyReminders self-gates to the right moments: Monday
+  //                 07:00 UK, plus a chase within 2h before the portal deadline.
+  //                 (Hourly so the dynamic chase tracks whatever due-time is set;
+  //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
   },

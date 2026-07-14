@@ -331,17 +331,30 @@ export async function handle(request, env, ctx, url, sess) {
   return error("Unknown van-check route", 404, env, request);
 }
 
-// ── Scheduled weekly reminders (called from the worker's cron handler) ────────
-// Pushes every driver who still owes THIS week's van check. Sends only at 07:00
-// UK time (so a cron firing at 06:00+07:00 UTC hits 7am London year-round, BST
-// and GMT) and dedupes per calendar day so a retried cron can't double-notify.
+// ── Scheduled van-check reminders (called from the worker's cron handler) ─────
+// Two nudges per week, each to drivers who still owe THIS week's check:
+//   1. a fixed "start of week" reminder — Monday 07:00 UK;
+//   2. a dynamic chase — within 2 hours BEFORE the week's deadline (the "due by"
+//      day/time set in the portal), never after it (already missed by then).
+// Meant to run off an HOURLY cron ("0 * * * *"); each slot self-gates on London
+// time and is deduped per week, so a retried/extra cron can't double-notify.
 // `now` is injectable for testing. Honours admin skips (they write a check row)
 // and mute rules (notification-centre "vehicle-check" suppression).
+const CHASE_LEAD_MS = 2 * 60 * 60 * 1000;   // send the chase up to 2h before the deadline
+
+async function readVanSettings(env, tid) {
+  try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, SETTINGS_KEY).first(); return row ? (JSON.parse(row.value) || {}) : {}; }
+  catch { return {}; }
+}
+
 export async function sendWeeklyReminders(env, now = new Date()) {
-  const lonHour = Number(new Date(now).toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
-  if (lonHour !== 7) return { ran: false, reason: "not-7am-london", lonHour };
-  const today = new Date(now).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); // YYYY-MM-DD (London)
-  const week = mondayOf(today);
+  const d = new Date(now);
+  const nowMs = d.getTime();
+  const lonDate = londonDate(d);                              // YYYY-MM-DD (London)
+  const lonHour = Number(d.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
+  const lonDow = d.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" }); // "Mon"…
+  const week = mondayOf(lonDate);
+  const isMonday7 = lonDow === "Mon" && lonHour === 7;
 
   let tenants = [];
   try {
@@ -353,11 +366,17 @@ export async function sendWeeklyReminders(env, now = new Date()) {
 
   const out = [];
   for (const tid of tenants) {
-    // Per-day dedupe marker.
+    const settings = await readVanSettings(env, tid);
+    const deadlineMs = Date.parse(deadlineFor(week, settings));
+    const withinChase = nowMs < deadlineMs && (deadlineMs - nowMs) <= CHASE_LEAD_MS;
+
+    // Per-week dedupe slots.
     const mkey = `vancheck:reminded:${tid}`;
-    let sentDays = [];
-    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, mkey).first(); if (row && row.value) sentDays = JSON.parse(row.value) || []; } catch {}
-    if (sentDays.includes(today)) { out.push({ tid, skipped: "already-today" }); continue; }
+    let slots = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE tenant_id=? AND key=?").bind(tid, mkey).first(); if (row && row.value) slots = JSON.parse(row.value) || []; } catch {}
+    const mondayDue = isMonday7 && !slots.includes(`mon:${week}`);
+    const chaseDue = withinChase && !slots.includes(`chase:${week}`);
+    if (!mondayDue && !chaseDue) { out.push({ tid, skipped: true }); continue; }
 
     const { results: drivers } = await env.DB.prepare(
       "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
@@ -368,21 +387,24 @@ export async function sendWeeklyReminders(env, now = new Date()) {
     const handled = new Set((checks || []).map(c => c.username));   // done OR skipped both write a row
     const rules = await getRules(env, tid);
 
+    const dueBy = londonHM(deadlineMs);
+    const payload = chaseDue
+      ? { title: "Van check due soon", body: `Last reminder — your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" }
+      : { title: "Weekly van check due", body: "Please complete your weekly van check — tap to start.", url: "/van-check.html", tag: "vehicle-check" };
+
     let reminded = 0;
-    for (const d of drivers || []) {
-      if (handled.has(d.username)) continue;
-      if (isSuppressed(rules, "vehicle-check", d.username, week)) continue;
-      await sendToUser(env, tid, d.username, {
-        title: "Weekly van check due",
-        body: "Please complete your weekly van check — tap to start.",
-        url: "/van-check.html", tag: "vehicle-check"
-      });
+    for (const drv of drivers || []) {
+      if (handled.has(drv.username)) continue;
+      if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
+      await sendToUser(env, tid, drv.username, payload);
       reminded++;
     }
-    sentDays.push(today); sentDays = sentDays.slice(-14);
+    if (mondayDue) slots.push(`mon:${week}`);
+    if (chaseDue) slots.push(`chase:${week}`);
+    slots = slots.slice(-30);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
-      .bind(tid, mkey, JSON.stringify(sentDays)).run();
-    out.push({ tid, reminded });
+      .bind(tid, mkey, JSON.stringify(slots)).run();
+    out.push({ tid, reminded, reason: chaseDue ? "chase" : "monday" });
   }
-  return { ran: true, today, week, tenants: out };
+  return { ran: true, week, tenants: out };
 }
