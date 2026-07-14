@@ -136,10 +136,11 @@ function renderList(el, items, type){
 
 async function skipVanCheck(user, week){
   try{
-    const r = await (await authFetch("/vancheck/skip", { method:"POST", body: JSON.stringify({ username:user, week }) })).json();
-    if(r.ok){ toast(r.already ? "That person already has a check this week" : "Skipped — logged in Weekly Van Checks"); load(); }
-    else toast(r.error||"Failed");
-  }catch{ toast("Failed"); }
+    const res = await authFetch("/vancheck/skip", { method:"POST", body: JSON.stringify({ username:user, week }) });
+    let r = null; try{ r = await res.json(); }catch(e){}
+    if(res.ok && r && r.ok){ toast(r.already ? "That person already has a check this week" : "Skipped — logged in Weekly Van Checks"); load(); }
+    else toast("Skip failed — " + (r && r.error ? r.error : ("server said HTTP " + res.status)));
+  }catch(e){ toast("Skip failed — " + (e && e.message ? e.message : "couldn't reach the server")); }
 }
 
 function ruleDesc(r){
@@ -167,9 +168,11 @@ function renderRules(){
 }
 async function unskipVanCheck(user, week){
   try{
-    const r = await (await authFetch("/vancheck/unskip", { method:"POST", body: JSON.stringify({ username:user, week }) })).json();
-    if(r.ok){ toast("Skip removed — the van check is due again"); load(); } else toast(r.error||"Failed");
-  }catch{ toast("Failed"); }
+    const res = await authFetch("/vancheck/unskip", { method:"POST", body: JSON.stringify({ username:user, week }) });
+    let r = null; try{ r = await res.json(); }catch(e){}
+    if(res.ok && r && r.ok){ toast("Skip removed — the van check is due again"); load(); }
+    else toast("Undo failed — " + (r && r.error ? r.error : ("server said HTTP " + res.status)));
+  }catch(e){ toast("Undo failed — " + (e && e.message ? e.message : "couldn't reach the server")); }
 }
 
 async function load(){
