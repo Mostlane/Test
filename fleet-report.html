@@ -21,6 +21,12 @@
   .drop label{font-weight:600;color:var(--indigo-dark);display:block;margin-bottom:6px;font-size:14px}
   .drop .hint{font-size:12px;color:#78809a;margin-top:4px}
   .drop .file{font-size:12.5px;color:#155724;margin-top:6px;font-weight:600}
+  .howto{margin-top:8px;font-size:12.5px}
+  .howto summary{cursor:pointer;color:var(--indigo-light);font-weight:600;user-select:none;list-style:none}
+  .howto summary::-webkit-details-marker{display:none}
+  .howto[open] summary{margin-bottom:6px}
+  .howto ol{margin:0 0 2px 18px;color:#475569;line-height:1.6}
+  .howto a{color:var(--indigo-dark);font-weight:600}
   input[type=file]{font:inherit;font-size:13px}
   .btn{appearance:none;border:0;border-radius:9px;padding:11px 20px;font:inherit;font-weight:700;cursor:pointer;background:var(--indigo-dark);color:#fff}
   .btn:disabled{opacity:.5;cursor:default}
@@ -68,12 +74,34 @@
       <input type="file" id="xlsFile" accept=".xls,.xlsx">
       <div class="hint">Trip History – Summary Report · <b>or drag &amp; drop the file here</b></div>
       <div class="file" id="xlsName"></div>
+      <details class="howto">
+        <summary>❓ How to get this file</summary>
+        <ol>
+          <li>Go to <a href="https://www.velocityfleet.com/app/telematics/" target="_blank" rel="noopener">velocityfleet.com</a> and select <b>Trip History</b>.</li>
+          <li>Select <b>Drivers/Vehicles</b>.</li>
+          <li>Select <b>All Vehicles</b>.</li>
+          <li>Enter a <b>Specific Date Range</b> (previous Monday – Sunday).</li>
+          <li>Select <b>Download</b>, then <b>Excel</b>.</li>
+          <li>Upload that file here.</li>
+        </ol>
+      </details>
     </div>
     <div class="drop" id="dropPdf">
       <label>📂 Driver Score PDF</label>
       <input type="file" id="pdfFile" accept=".pdf">
       <div class="hint">Driver Performance – Summary Report (optional) · <b>or drag &amp; drop here</b></div>
       <div class="file" id="pdfName"></div>
+      <details class="howto">
+        <summary>❓ How to get this file</summary>
+        <ol>
+          <li>Go to <a href="https://www.velocityfleet.com/app/telematics/" target="_blank" rel="noopener">velocityfleet.com</a> and select <b>Trip History</b>.</li>
+          <li>Select <b>Driver Performance</b>.</li>
+          <li>Select <b>All Drivers</b>.</li>
+          <li>Enter a <b>Specific Date Range</b> (previous Monday – Sunday).</li>
+          <li>Select <b>Download</b>, then <b>PDF</b>.</li>
+          <li>Upload that file here.</li>
+        </ol>
+      </details>
     </div>
     <button class="btn" id="genBtn" disabled>Generate Report</button>
     <div id="status"></div>
