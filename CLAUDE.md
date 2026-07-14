@@ -138,7 +138,10 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   holders — recipient picker on assets-admin.html), /asset/confirm/respond
   (holder confirms/flags), /asset/confirm/pending-count (my badge),
   /asset/confirm/status (admin dashboard, round stored in app_config
-  `asset_confirm_round:<tid>`). **utcify()** pattern: never serve SQLite's naive
+  `asset_confirm_round:<tid>`). Flagged items ("not held") are resolved on the
+  dashboard: **Reassign** (opens the asset edit modal — /asset/update clears
+  `confirm` whenever assignedTo changes) or **Still held** (/asset/confirm/respond
+  held:true). **utcify()** pattern: never serve SQLite's naive
   "YYYY-MM-DD HH:MM:SS" to browsers (hour off in UK summer) — store
   toISOString(), normalise old rows on read.
 - `keys.js` — key register: portal_keys (JSON) + key_log (append-only audit).

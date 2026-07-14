@@ -1622,6 +1622,9 @@ async function handle5(request, env, ctx, url, sess) {
       if (!body.id) return json3({ error: "Missing ID" }, 400);
       const existing = await getAsset(env, tenantId, body.id);
       const updated = { ...existing, ...body };
+      if (existing && String(existing.assignedTo || "") !== String(body.assignedTo || "") && updated.confirm) {
+        delete updated.confirm;
+      }
       await putAsset(env, tenantId, updated);
       if (existing && existing.assignedTo !== body.assignedTo) {
         const log = {

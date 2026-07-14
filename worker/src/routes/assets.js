@@ -192,6 +192,12 @@ export async function handle(request, env, ctx, url, sess) {
 
       const existing = await getAsset(env, tenantId, body.id);
       const updated = { ...existing, ...body };
+      // Reallocating an item supersedes any outstanding "do you still hold this?"
+      // confirmation state (flagged/pending) — clear it so it drops off the admin
+      // review list once it's been reassigned to the right person.
+      if (existing && String(existing.assignedTo || "") !== String(body.assignedTo || "") && updated.confirm) {
+        delete updated.confirm;
+      }
       await putAsset(env, tenantId, updated);
 
       if (existing && existing.assignedTo !== body.assignedTo) {
