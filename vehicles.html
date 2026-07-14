@@ -98,9 +98,8 @@
     <a class="ml-back" href="main.html" title="Back">‹ Back</a>
     <h1>🚐 Vehicles</h1>
     <div class="head-actions">
-      <a class="btn small" href="van-checks.html">All checks</a>
+      <a class="btn small" href="van-checks.html">Van Checks</a>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
-      <button class="btn small" onclick="importOld()" title="One-off: copy MOT/tax/service from the old system">⤵ Import old data</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
     </div>
   </header>
@@ -244,7 +243,7 @@
       FLEET=(d&&d.vehicles)?d.vehicles:[];
       try{ const us=await aFetch("/users").then(r=>r.json()); PUSERS=(us.Users||us.users||[]).filter(u=>u.Username); }catch(e){}
       updateSummary(); renderFleet();
-      $("statusLine").textContent=FLEET.length?("Fleet loaded ("+FLEET.length+").") : "No vehicles yet — use “Import old data” or “Add vehicle”.";
+      $("statusLine").textContent=FLEET.length?("Fleet loaded ("+FLEET.length+").") : "No vehicles yet — use “Add vehicle”.";
     }catch(e){ console.error(e); $("statusLine").textContent="Failed to load fleet."; }
   }
 
