@@ -212,6 +212,8 @@ body{ padding:16px; }
         <a class="ml-back" data-role="home" href="main.html">← Menu</a>
         <a class="btn primary" href="van-check.html" style="text-decoration:none;">🚐 My weekly check</a>
         <a class="btn primary" href="van-checks.html" style="text-decoration:none;">📋 All checks</a>
+        <button class="btn primary" onclick="openAddModal()">＋ Add vehicle</button>
+        <button class="btn primary" onclick="importOld()" title="One-off: copy MOT/tax/service from the old system into the portal">⤵ Import old data</button>
         <button class="btn primary" onclick="loadFleet()">⟳ Refresh</button>
       </div>
     </div>
@@ -393,18 +395,36 @@ body{ padding:16px; }
   async function loadFleet(){
     try{
       document.getElementById("statusLine").textContent = "Loading fleet...";
-      const res = await fetch(`${VEHICLE_WORKER}/fleet`);
-      if (!res.ok) throw new Error("failed");
-      FLEET = await res.json();
+      const d = await aFetch("/fleet/vehicles").then(r=>r.json());
+      FLEET = (d && d.vehicles) ? d.vehicles : [];
       await loadPortalDrivers();
       updateSummary();
       renderFleet();
-      document.getElementById("statusLine").textContent = "Fleet loaded.";
+      document.getElementById("statusLine").textContent = FLEET.length ? "Fleet loaded." : "No vehicles yet — use “Import old data” or “Add vehicle”.";
     }catch(e){
       console.error(e);
       document.getElementById("statusLine").textContent = "Failed to load fleet.";
     }
   }
+  async function importOld(){
+    if(!confirm("Copy all vehicles (MOT, tax, service) from the old system into the portal? Same-reg records are updated, not duplicated.")) return;
+    document.getElementById("statusLine").textContent = "Importing from old system...";
+    try{
+      const old = await (await fetch(`${VEHICLE_WORKER}/fleet`)).json();
+      const r = await aFetch("/fleet/vehicles-import",{method:"POST",body:JSON.stringify({vehicles:old})}).then(r=>r.json());
+      alert("Imported "+(r.count||0)+" vehicles into the portal.");
+      await loadFleet();
+    }catch(e){ alert("Import failed — couldn't reach the old system."); document.getElementById("statusLine").textContent="Import failed."; }
+  }
+  function openAddModal(){
+    EDIT_REG = null;
+    editReg.value=""; editReg.readOnly=false;
+    editMake.value=""; editModel.value=""; editFuel.value=""; editActive.value="true";
+    editService.value=""; editMOT.value=""; editTax.value=""; editNotes.value="";
+    if(typeof editDriver!=="undefined" && editDriver) editDriver.value="";
+    document.getElementById("editBackdrop").style.display="flex";
+  }
+  window.importOld=importOld; window.openAddModal=openAddModal;
 
   function updateSummary(){
     sumTotal.textContent = FLEET.length;
@@ -547,6 +567,7 @@ body{ padding:16px; }
     if (!v) return;
 
     editReg.value = v.reg || "";
+    editReg.readOnly = true;
     editMake.value = v.make || "";
     editModel.value = v.model || "";
     editFuel.value = v.fuel || "";
@@ -565,9 +586,11 @@ body{ padding:16px; }
   }
 
   async function saveVehicleEdits(){
-    if (!EDIT_REG) return;
+    const reg = (EDIT_REG || editReg.value || "").trim().toUpperCase();
+    if (!reg){ alert("Enter a registration."); return; }
 
-    const updates = {
+    const body = {
+      reg,
       make: editMake.value.trim(),
       model: editModel.value.trim(),
       fuel: editFuel.value.trim(),
@@ -580,20 +603,16 @@ body{ padding:16px; }
     };
 
     try{
-      const res = await fetch(`${VEHICLE_WORKER}/update-vehicle`, {
+      const res = await aFetch("/fleet/vehicle", {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
-        body:JSON.stringify({ reg: EDIT_REG, updates })
+        body:JSON.stringify(body)
       });
 
       if (!res.ok) throw new Error("fail");
 
-      const newObj = await res.json();
-      const idx = FLEET.findIndex(v => v.reg === EDIT_REG);
-      if (idx !== -1) FLEET[idx] = newObj;
-
       closeEditModal();
-      renderFleet();
+      await loadFleet();
 
     }catch(err){
       console.error(err);
