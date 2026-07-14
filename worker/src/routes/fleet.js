@@ -198,6 +198,18 @@ export async function handle(request, env, ctx, url, sess) {
         currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : ""
       };
     });
+    // Apply the saved manual order (drag-to-reorder); unknown regs fall to the
+    // end alphabetically so newly-added vans still appear.
+    let order = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:vehorder:${tid}`).first(); if (row && row.value) order = JSON.parse(row.value) || []; } catch {}
+    const oidx = {}; order.forEach((r, i) => oidx[dn(r)] = i);
+    vehicles.sort((a, b) => {
+      const ia = oidx[dn(a.reg)], ib = oidx[dn(b.reg)];
+      if (ia == null && ib == null) return String(a.reg).localeCompare(String(b.reg));
+      if (ia == null) return 1;
+      if (ib == null) return -1;
+      return ia - ib;
+    });
     return jr({ ok: true, vehicles }, headers);
   }
   if ((sub === "/vehicle" || sub === "/vehicles-import") && method === "POST") {
@@ -236,6 +248,20 @@ export async function handle(request, env, ctx, url, sess) {
       const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg) });
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
     } catch {}
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Manual card order (drag-to-reorder on the Vehicles page) ──────────────
+  if (sub === "/vehicle-order" && method === "GET") {
+    let order = [];
+    try { const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:vehorder:${tid}`).first(); if (row && row.value) order = JSON.parse(row.value) || []; } catch {}
+    return jr({ ok: true, order }, headers);
+  }
+  if (sub === "/vehicle-order" && method === "POST") {
+    const b = await readJson(request);
+    const order = Array.isArray(b.order) ? b.order.map(String) : [];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, `fleet:vehorder:${tid}`, JSON.stringify(order)).run();
     return jr({ ok: true }, headers);
   }
 

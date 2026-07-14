@@ -56,6 +56,11 @@
   .tag.bad{background:#fee2e2;color:#b91c1c;}
   .tag.info{background:#e0f2fe;color:#075985;}
   .card-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:8px;border-top:1px dashed var(--line);}
+  .grip{cursor:grab;color:var(--muted);font-size:18px;line-height:1;touch-action:none;user-select:none;padding:2px;}
+  .grip:active{cursor:grabbing;}
+  .card.dragging{box-shadow:0 14px 40px rgba(15,28,48,.28);opacity:.96;}
+  .drop-ph{border:2px dashed var(--accent);border-radius:14px;background:rgba(37,99,235,.06);}
+  .reorder-hint{font-size:12.5px;color:var(--muted);margin:-4px 0 12px;}
 
   .status-line{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:14px;}
 
@@ -111,6 +116,7 @@
       <div class="scard alert"><div class="lbl">Service due</div><div class="val" id="sumDue">0</div><div class="note">Due soon or overdue</div></div>
     </div>
 
+    <div class="reorder-hint" id="reorderHint">Tip: drag the <b>⠿</b> handle on a card to reorder the fleet — the order is saved and shared across the portal. (Clear the search/filter to reorder.)</div>
     <div class="grid" id="fleetGrid"></div>
     <div class="status-line"><span id="statusLine">Loading fleet…</span><span>Mostlane • Vehicles</span></div>
   </div>
@@ -253,7 +259,8 @@
     if(filt==="inactive") list=list.filter(v=>v.active===false);
     if(filt==="due") list=list.filter(v=>v.serviceStatus==="warn"||v.serviceStatus==="bad");
     if(!list.length){ grid.innerHTML=`<div class="hint">No vehicles found.</div>`; return; }
-    list.sort((a,b)=>String(a.reg).localeCompare(String(b.reg)));
+    // Order comes from the server (manual drag order); no client re-sort here.
+    const dragOff = !!qv || filt!=="all";   // reordering only makes sense on the full, unfiltered list
 
     for(const v of list){
       const reg=v.reg||"UNKNOWN";
@@ -261,10 +268,13 @@
       const odo = v.currentMiles!=null
         ? `<span class="odo">🛣 ${fmtMiles(v.currentMiles)} mi <small>from van check ${v.milesAt?fmtDMY(v.milesAt):""}</small></span>`
         : `<span class="odo"><small>🛣 mileage will show once a van check records it</small></span>`;
-      const card=document.createElement("div"); card.className="card";
+      const card=document.createElement("div"); card.className="card"; card.dataset.reg=reg;
       card.innerHTML=`
         <div class="reg-row">
-          <div class="reg ${v.active===false?'inactive':''}">${esc(reg)}</div>
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            ${dragOff?"":`<span class="grip" title="Drag to reorder">⠿</span>`}
+            <div class="reg ${v.active===false?'inactive':''}">${esc(reg)}</div>
+          </div>
           <div class="driver"><small>Current driver</small><b>${esc(drv)}</b></div>
         </div>
         <div class="meta">
@@ -420,8 +430,60 @@
     }catch(e){ alert("Import failed — couldn't reach the old system."); $("statusLine").textContent="Import failed."; }
   }
 
+  /* ── Drag-to-reorder cards (pointer-based → works on mouse and touch/PWA) ── */
+  let drag=null, lastX=0, lastY=0, scrollRAF=null, scrollVel=0;
+  function placePlaceholder(x,y){
+    const grid=$("fleetGrid");
+    const cards=[...grid.querySelectorAll(".card")].filter(c=>c!==drag.card);
+    let before=null;
+    for(const c of cards){ const r=c.getBoundingClientRect();
+      // insert before the first card whose centre is below/right of the pointer
+      if(y < r.top + r.height/2 || (y < r.bottom && x < r.left + r.width/2)){ before=c; break; } }
+    if(before) grid.insertBefore(drag.ph,before); else grid.appendChild(drag.ph);
+  }
+  function autoScroll(){ if(!drag||!scrollVel){ scrollRAF=null; return; } window.scrollBy(0,scrollVel); placePlaceholder(lastX,lastY); scrollRAF=requestAnimationFrame(autoScroll); }
+  function onGripDown(e){
+    const grip=e.target.closest(".grip"); if(!grip) return;
+    const card=grip.closest(".card"); if(!card) return;
+    e.preventDefault();
+    const rect=card.getBoundingClientRect();
+    const ph=document.createElement("div"); ph.className="card drop-ph"; ph.style.height=rect.height+"px";
+    drag={card,ph,offX:e.clientX-rect.left,offY:e.clientY-rect.top};
+    card.parentNode.insertBefore(ph,card.nextSibling);
+    card.classList.add("dragging");
+    Object.assign(card.style,{position:"fixed",zIndex:"9999",width:rect.width+"px",left:rect.left+"px",top:rect.top+"px",pointerEvents:"none",margin:"0"});
+    document.body.style.userSelect="none";
+    window.addEventListener("pointermove",onGripMove,{passive:false});
+    window.addEventListener("pointerup",onGripUp,{once:true});
+  }
+  function onGripMove(e){
+    if(!drag) return; e.preventDefault();
+    lastX=e.clientX; lastY=e.clientY;
+    drag.card.style.left=(lastX-drag.offX)+"px"; drag.card.style.top=(lastY-drag.offY)+"px";
+    placePlaceholder(lastX,lastY);
+    const EDGE=90, MAX=28, vh=window.innerHeight; let v=0;
+    if(lastY<EDGE) v=-MAX*(1-lastY/EDGE); else if(lastY>vh-EDGE) v=MAX*(1-(vh-lastY)/EDGE);
+    scrollVel=v; if(v&&!scrollRAF) scrollRAF=requestAnimationFrame(autoScroll);
+  }
+  async function onGripUp(){
+    if(!drag) return;
+    window.removeEventListener("pointermove",onGripMove);
+    scrollVel=0; if(scrollRAF){ cancelAnimationFrame(scrollRAF); scrollRAF=null; }
+    const {card,ph}=drag; ph.parentNode.insertBefore(card,ph); ph.remove();
+    card.classList.remove("dragging");
+    ["position","zIndex","width","left","top","pointerEvents","margin"].forEach(p=>card.style[p]="");
+    document.body.style.userSelect=""; drag=null;
+    // Persist the new order (all cards, in DOM order).
+    const order=[...$("fleetGrid").querySelectorAll(".card")].map(c=>c.dataset.reg).filter(Boolean);
+    // reflect locally so a refresh/filter keeps the order without a round-trip
+    FLEET.sort((a,b)=>order.indexOf(a.reg)-order.indexOf(b.reg));
+    try{ const r=await aFetch("/fleet/vehicle-order",{method:"POST",body:JSON.stringify({order})}).then(r=>r.json());
+      toast(r&&r.ok?"Order saved":"Couldn't save order"); }catch(e){ toast("Couldn't save order"); }
+  }
+
   // expose for inline handlers
   Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,openDocModal,closeDocModal,uploadDoc,deleteDoc,importOld,pClose});
+  document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);
   </script>
