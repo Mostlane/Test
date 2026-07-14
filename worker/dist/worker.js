@@ -5307,7 +5307,59 @@ async function handle18(request, env, ctx, url, sess) {
       return jr2({ ok: true }, headers);
     }
   }
+  if (sub === "/paycfg" && method === "GET") {
+    let cfg = { defaults: { morningCap: 30, homeCap: 30, lunch: 30, thresholdH: 6 }, byUser: {} };
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:paycfg:${tid}`).first();
+      if (row && row.value) {
+        const v = JSON.parse(row.value);
+        cfg.defaults = Object.assign(cfg.defaults, v.defaults || {});
+        cfg.byUser = v.byUser || {};
+      }
+    } catch {
+    }
+    return jr2({ ok: true, defaults: cfg.defaults, byUser: cfg.byUser }, headers);
+  }
+  if (sub === "/paycfg" && method === "POST") {
+    const b = await readJson3(request);
+    const cfg = { defaults: b.defaults || { morningCap: 30, homeCap: 30, lunch: 30, thresholdH: 6 }, byUser: b.byUser || {} };
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:paycfg:${tid}`, JSON.stringify(cfg)).run();
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/timesheet") {
+    await ensureTsTable(env);
+    if (method === "GET") {
+      const week = q.get("week") || "";
+      const rows = (await env.DB.prepare("SELECT username, data FROM van_timesheets WHERE tenant_id=? AND week=?").bind(tid, week).all()).results;
+      const out = (rows || []).map((r) => {
+        let d = {};
+        try {
+          d = JSON.parse(r.data);
+        } catch {
+        }
+        return { username: r.username, days: d.days || {} };
+      });
+      return jr2({ ok: true, week, rows: out }, headers);
+    }
+    if (method === "POST") {
+      const b = await readJson3(request);
+      const week = String(b.week || "");
+      if (!week) return jr2({ error: "week required" }, headers, 400);
+      for (const row of b.rows || []) {
+        if (!row.username) continue;
+        await env.DB.prepare(
+          "INSERT INTO van_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+        ).bind(tid, week, row.username, JSON.stringify({ days: row.days || {} }), (/* @__PURE__ */ new Date()).toISOString()).run();
+      }
+      return jr2({ ok: true }, headers);
+    }
+  }
   return jr2({ error: "Not found: " + sub }, headers, 404);
+}
+async function ensureTsTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS van_timesheets (
+    tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
+    data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
 }
 async function ensureAssignTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_assignments (

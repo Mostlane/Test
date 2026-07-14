@@ -325,6 +325,31 @@ async function saveReport(){
 }
 window.saveReport=saveReport;
 
+// Push the report's door-to-door hours into the Van Timesheet (per week).
+async function saveTimesheet(){
+  const R=window.__reportData; if(!R){ return; }
+  const byWeek={};
+  for(const v of R.vehicles){
+    const un=R.dmap&&R.dmap[v.reg]; if(!un) continue;   // only vehicles with a chosen driver
+    for(const d of v.days){ if(!d.trips.length) continue;
+      const wk=mondayOf(d.date);
+      const morning=(d.trips.find(t=>t.type==="Commute Out")||{}).drive||0;
+      const home=(d.trips.find(t=>t.type==="Commute Home")||{}).drive||0;
+      byWeek[wk]=byWeek[wk]||{}; byWeek[wk][un]=byWeek[wk][un]||{};
+      byWeek[wk][un][d.date]={startMin:d.startMin,endMin:d.endMin,morningCommute:morning,homeCommute:home,leavingHome:true,arrivingHome:true};
+    }
+  }
+  const weeks=Object.keys(byWeek);
+  const msg=$("saveMsg");
+  if(!weeks.length){ if(msg)msg.textContent="No assigned drivers to put on a timesheet — set drivers above and regenerate."; return; }
+  if(msg)msg.textContent="Saving van timesheet…";
+  try{
+    for(const wk of weeks){ const rows=Object.keys(byWeek[wk]).map(un=>({username:un,days:byWeek[wk][un]})); await authFetch("/fleet/timesheet",{method:"POST",body:JSON.stringify({week:wk,rows})}); }
+    if(msg)msg.textContent="✓ Van timesheet saved — open Van Timesheet to review/edit.";
+  }catch(e){ if(msg)msg.textContent="Timesheet save failed"; }
+}
+window.saveTimesheet=saveTimesheet;
+
 async function initPage(){
   await loadUsers(); await loadDriverMap(); renderDriverTable(); loadPastReports();
 }
@@ -376,7 +401,7 @@ async function generate(){
     const weeks=weeksBetween(minD,maxD);
     const vanByWeek=await fetchVanChecks(weeks);
     $("status").textContent="Building report…";
-    renderReport({vehicles,scores,weeks,vanByWeek,minD,maxD});
+    renderReport({vehicles,scores,weeks,vanByWeek,minD,maxD,dmap});
     $("genPane").style.display="none";
     window.scrollTo(0,0);
   }catch(e){ console.error(e); $("status").textContent="Couldn't build the report: "+(e.message||e); $("genBtn").disabled=false; }
@@ -386,6 +411,7 @@ function scoreFlag(s){ if(s==null)return '<span class="flag muted">—</span>'; 
 function fmtRange(a,b){ const f=iso=>new Date(iso+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}); return f(a)+" – "+f(b)+" "+b.slice(0,4); }
 
 function renderReport(R){
+  window.__reportData=R;
   const active=R.vehicles.filter(v=>v.days.some(d=>d.trips.length));
   let h='';
   // 1. Header
@@ -490,6 +516,8 @@ function renderReport(R){
   window.__lastReport={ inner:h, title:"Fleet Trip Report "+R.minD+" – "+R.maxD, weekStart:R.minD, weekEnd:R.maxD };
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button class="btn" onclick="saveReport()">💾 Save to portal</button>
+    <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
+    <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
     <button class="btn grey" onclick="location.reload()">↻ New report</button>
     <span id="saveMsg" style="font-size:13px;color:#475569"></span></div></div>`;
   $("report").innerHTML=h+bar;

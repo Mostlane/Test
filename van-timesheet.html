@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Van Timesheet — Mostlane</title>
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<style>
+  :root{--ink:#0f172a;--line:#e2e8f0;--brand:#1a237e;--muted:#64748b}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f0f2f5;color:var(--ink);font-size:14px}
+  .top{background:#0f172a;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:12px}
+  .top a{color:#fff;text-decoration:none}.top h1{font-size:17px;flex:1}
+  .wrap{max-width:1200px;margin:16px auto;padding:0 12px}
+  .bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 13px;font:inherit;cursor:pointer}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+  th{background:var(--brand);color:#fff;padding:9px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;text-align:center}
+  th.name,td.name{text-align:left}
+  td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:center;font-variant-numeric:tabular-nums}
+  td.name{font-weight:600}
+  tr:hover td{background:#f5f6ff}
+  .tot{font-weight:700;color:var(--brand)}
+  .wknd{background:#fff8e1}
+  .empty{color:var(--muted);text-align:center;padding:22px}
+  .note{color:var(--muted);font-size:12.5px;margin-top:10px;line-height:1.6}
+  /* modal */
+  .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-start;justify-content:center;padding:20px;z-index:100;overflow:auto}
+  .ov.show{display:flex}
+  .panel{background:#fff;border-radius:12px;max-width:640px;width:100%;padding:18px}
+  .panel h2{font-size:17px;margin-bottom:4px}
+  .eday{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:8px 0}
+  .eday.wk{background:#fff8e1}
+  .eday h4{font-size:13px;color:var(--brand);margin-bottom:6px}
+  .erow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+  input[type=time]{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
+  label.ck{display:inline-flex;align-items:center;gap:5px;font-size:12.5px}
+  .ded{font-size:12px;color:var(--muted)}
+  .paid{font-weight:700;color:#166534;margin-left:auto}
+  select,input.num{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
+</style>
+</head>
+<body>
+<div class="top"><a href="/main.html">‹ Back</a><h1>🚚 Van Timesheet</h1></div>
+<div class="wrap">
+  <div class="bar">
+    <button class="btn" id="prevWk">‹ Prev</button>
+    <b id="wkLabel" style="min-width:230px;text-align:center"></b>
+    <button class="btn" id="nextWk">Next ›</button>
+    <span style="flex:1"></span>
+    <button class="btn" id="cfgBtn">⚙️ Pay settings</button>
+  </div>
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
+  </table>
+  <p class="note">Hours are <b>door-to-door</b> from the fleet report, minus each driver's morning commute (max 30m or the actual leg), home commute (same), and lunch (30m on 6h+ days) — all editable per driver in <b>Pay settings</b>. Generate &amp; <b>Save</b> a Fleet Report for a week to fill this in. Click <b>Edit</b> to correct recorded times or mark a day as “left site” vs “arrived home”.</p>
+</div>
+
+<!-- Edit modal -->
+<div class="ov" id="editOv"><div class="panel">
+  <h2 id="editTitle">Edit</h2>
+  <p class="note" id="editSub"></p>
+  <div id="editBody"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <button class="btn" onclick="closeEdit()">Cancel</button>
+    <button class="btn primary" id="saveEdit">Save</button>
+  </div>
+</div></div>
+
+<!-- Pay settings modal -->
+<div class="ov" id="cfgOv"><div class="panel">
+  <h2>Pay settings</h2>
+  <p class="note">Deductions in minutes. Commute values are the maximum unpaid each way — if the actual leg is shorter, only that shorter time is deducted. Blank = use the default.</p>
+  <div id="cfgBody"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+    <button class="btn" onclick="document.getElementById('cfgOv').classList.remove('show')">Cancel</button>
+    <button class="btn primary" id="saveCfg">Save settings</button>
+  </div>
+</div></div>
+
+<script>
+const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
+function tok(){return localStorage.getItem("mostlaneToken")||"";}
+function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{});if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json";return fetch(API+p,o);}
+const g=id=>document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+const DOW=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.toISOString().slice(0,10);}
+function addDays(iso,n){const d=new Date(iso+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
+const hm=m=>m==null?"—":String(Math.floor(m/60)).padStart(2,"0")+":"+String(Math.round(m%60)).padStart(2,"0");
+const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).padStart(2,"0")+"m";
+const toMin=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(String(t||""));return m?(+m[1])*60+(+m[2]):null;};
+
+let WEEK=mondayOf(new Date()), USERS=[], CFG={defaults:{morningCap:30,homeCap:30,lunch:30,thresholdH:6},byUser:{}}, ROWS={}, EDIT_U=null;
+function uLabel(u){const n=((u.FirstName||"")+" "+(u.LastName||"")).trim();return n||u.Username;}
+function nameOf(un){const u=USERS.find(x=>x.Username===un);return u?uLabel(u):un;}
+function cfgFor(un){return Object.assign({},CFG.defaults,CFG.byUser[un]||{});}
+function vanPay(day,c){
+  const s=day.editStart!=null?day.editStart:day.startMin, e=day.editEnd!=null?day.editEnd:day.endMin;
+  if(s==null||e==null) return {paid:0,span:0,morning:0,home:0,lunch:0};
+  const span=Math.max(0,e-s);
+  const morning=(day.leavingHome!==false)?Math.min(c.morningCap, day.morningCommute||0):0;
+  const home=(day.arrivingHome!==false)?Math.min(c.homeCap, day.homeCommute||0):0;
+  const lunch=(span>=c.thresholdH*60)?c.lunch:0;
+  return {paid:Math.max(0,span-morning-home-lunch),span,morning,home,lunch};
+}
+
+async function load(){
+  g("wkLabel").textContent="Week of "+new Date(WEEK+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+  const [ts,cfg,us]=await Promise.all([
+    authFetch("/fleet/timesheet?week="+WEEK).then(r=>r.json()).catch(()=>({rows:[]})),
+    authFetch("/fleet/paycfg").then(r=>r.json()).catch(()=>null),
+    authFetch("/users").then(r=>r.json()).catch(()=>({Users:[]}))
+  ]);
+  USERS=(us.Users||us.users||[]).filter(u=>u.Username);
+  if(cfg&&cfg.ok){CFG.defaults=Object.assign(CFG.defaults,cfg.defaults||{});CFG.byUser=cfg.byUser||{};}
+  ROWS={}; (ts.rows||[]).forEach(r=>ROWS[r.username]=r.days||{});
+  render();
+}
+function render(){
+  const dates=DOW.map((_,i)=>addDays(WEEK,i));
+  g("head").innerHTML=`<th class="name">Driver</th>`+DOW.map((d,i)=>`<th class="${i>4?'wknd':''}">${d}</th>`).join("")+`<th>Total</th><th></th>`;
+  const names=Object.keys(ROWS);
+  if(!names.length){ g("body").innerHTML=`<tr><td class="empty" colspan="9">No van hours saved for this week. Generate &amp; save a Fleet Report for it, and they'll appear here.</td></tr>`; return; }
+  g("body").innerHTML=names.sort((a,b)=>nameOf(a).localeCompare(nameOf(b))).map(un=>{
+    const c=cfgFor(un); let total=0;
+    const cells=dates.map((dt,i)=>{ const day=ROWS[un][dt]; if(!day){return `<td class="${i>4?'wknd':''}"><span style="color:#cbd5e1">—</span></td>`;} const p=vanPay(day,c); total+=p.paid; return `<td class="${i>4?'wknd':''}">${hmS(p.paid)}</td>`; });
+    return `<tr><td class="name">${esc(nameOf(un))}</td>${cells.join("")}<td class="tot">${hmS(total)}</td><td><button class="btn" style="padding:5px 10px" onclick="openEdit('${esc(un)}')">Edit</button></td></tr>`;
+  }).join("");
+}
+
+function openEdit(un){
+  EDIT_U=un; const c=cfgFor(un); const dates=DOW.map((_,i)=>addDays(WEEK,i));
+  g("editTitle").textContent=nameOf(un)+" — hours";
+  g("editSub").textContent="Recorded times shown; edit if the tracker was wrong. Untick “Arrived home” if the last time is them leaving site (no home-commute deduction).";
+  g("editBody").innerHTML=dates.map((dt,i)=>{
+    const day=ROWS[un][dt];
+    if(!day) return `<div class="eday ${i>4?'wk':''}"><h4>${DOW[i]} · ${dt.slice(8)}/${dt.slice(5,7)}</h4><span class="ded">No activity recorded.</span></div>`;
+    const s=day.editStart!=null?day.editStart:day.startMin, e=day.editEnd!=null?day.editEnd:day.endMin;
+    const p=vanPay(day,c);
+    return `<div class="eday ${i>4?'wk':''}" data-d="${dt}"><h4>${DOW[i]} · ${dt.slice(8)}/${dt.slice(5,7)}</h4>
+      <div class="erow">
+        <span>In <input type="time" value="${hm(s)}" data-f="in"></span>
+        <span>Out <input type="time" value="${hm(e)}" data-f="out"></span>
+        <label class="ck"><input type="checkbox" data-f="lh" ${day.leavingHome!==false?'checked':''}> Left home</label>
+        <label class="ck"><input type="checkbox" data-f="ah" ${day.arrivingHome!==false?'checked':''}> Arrived home</label>
+        <span class="paid" data-paid>${hmS(p.paid)}</span>
+      </div>
+      <div class="ded" data-ded>door-to-door ${hmS(p.span)} · −am ${p.morning}m · −home ${p.home}m · −lunch ${p.lunch}m</div>
+    </div>`;
+  }).join("");
+  g("editBody").querySelectorAll(".eday[data-d] input").forEach(inp=>inp.addEventListener("input",()=>recalcRow(inp.closest(".eday"),un)));
+  g("editOv").classList.add("show");
+}
+function recalcRow(el,un){
+  const dt=el.getAttribute("data-d"); const day=Object.assign({},ROWS[un][dt]);
+  const inp=f=>el.querySelector(`[data-f="${f}"]`);
+  day.editStart=toMin(inp("in").value); day.editEnd=toMin(inp("out").value);
+  day.leavingHome=inp("lh").checked; day.arrivingHome=inp("ah").checked;
+  el._draft=day;
+  const p=vanPay(day,cfgFor(un));
+  el.querySelector("[data-paid]").textContent=hmS(p.paid);
+  el.querySelector("[data-ded]").textContent=`door-to-door ${hmS(p.span)} · −am ${p.morning}m · −home ${p.home}m · −lunch ${p.lunch}m`;
+}
+function closeEdit(){g("editOv").classList.remove("show");}
+g("saveEdit").addEventListener("click",async()=>{
+  const un=EDIT_U;
+  g("editBody").querySelectorAll(".eday[data-d]").forEach(el=>{ const dt=el.getAttribute("data-d"); const draft=el._draft; if(draft) ROWS[un][dt]=draft; else { const day=Object.assign({},ROWS[un][dt]); const inp=f=>el.querySelector(`[data-f="${f}"]`); if(inp("in")){ day.editStart=toMin(inp("in").value); day.editEnd=toMin(inp("out").value); day.leavingHome=inp("lh").checked; day.arrivingHome=inp("ah").checked; ROWS[un][dt]=day; } } });
+  await saveAll(); closeEdit(); render();
+});
+async function saveAll(){
+  const rows=Object.keys(ROWS).map(un=>({username:un,days:ROWS[un]}));
+  try{ await authFetch("/fleet/timesheet",{method:"POST",body:JSON.stringify({week:WEEK,rows})}); }catch(e){}
+}
+
+// Pay settings
+g("cfgBtn").addEventListener("click",()=>{
+  const d=CFG.defaults;
+  let html=`<div class="eday"><h4>Default (all drivers)</h4><div class="erow">
+    <span>Morning max <input class="num" style="width:60px" data-cf="morningCap" data-u="" value="${d.morningCap}">m</span>
+    <span>Home max <input class="num" style="width:60px" data-cf="homeCap" data-u="" value="${d.homeCap}">m</span>
+    <span>Lunch <input class="num" style="width:60px" data-cf="lunch" data-u="" value="${d.lunch}">m</span>
+    <span>Lunch after <input class="num" style="width:55px" data-cf="thresholdH" data-u="" value="${d.thresholdH}">h</span></div></div>`;
+  const drivers=Object.keys(ROWS).length?Object.keys(ROWS):USERS.map(u=>u.Username);
+  html+=drivers.map(un=>{const b=CFG.byUser[un]||{};return `<div class="eday"><h4>${esc(nameOf(un))}</h4><div class="erow">
+    <span>Morning <input class="num" style="width:55px" data-cf="morningCap" data-u="${esc(un)}" value="${b.morningCap??''}" placeholder="${d.morningCap}">m</span>
+    <span>Home <input class="num" style="width:55px" data-cf="homeCap" data-u="${esc(un)}" value="${b.homeCap??''}" placeholder="${d.homeCap}">m</span>
+    <span>Lunch <input class="num" style="width:55px" data-cf="lunch" data-u="${esc(un)}" value="${b.lunch??''}" placeholder="${d.lunch}">m</span>
+    <span>after <input class="num" style="width:50px" data-cf="thresholdH" data-u="${esc(un)}" value="${b.thresholdH??''}" placeholder="${d.thresholdH}">h</span></div></div>`;}).join("");
+  g("cfgBody").innerHTML=html; g("cfgOv").classList.add("show");
+});
+g("saveCfg").addEventListener("click",async()=>{
+  const defs={},byUser={};
+  g("cfgBody").querySelectorAll("input[data-cf]").forEach(inp=>{
+    const f=inp.getAttribute("data-cf"), u=inp.getAttribute("data-u"), v=inp.value.trim();
+    if(!u){ defs[f]=Number(v)||0; } else if(v!==""){ (byUser[u]=byUser[u]||{})[f]=Number(v)||0; }
+  });
+  CFG.defaults=Object.assign(CFG.defaults,defs); CFG.byUser=byUser;
+  try{ await authFetch("/fleet/paycfg",{method:"POST",body:JSON.stringify({defaults:CFG.defaults,byUser:CFG.byUser})}); }catch(e){}
+  g("cfgOv").classList.remove("show"); render();
+});
+
+g("prevWk").addEventListener("click",()=>{WEEK=addDays(WEEK,-7);load();});
+g("nextWk").addEventListener("click",()=>{WEEK=addDays(WEEK,7);load();});
+window.openEdit=openEdit; window.closeEdit=closeEdit;
+load();
+</script>
+</body>
+</html>
