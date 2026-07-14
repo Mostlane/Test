@@ -185,6 +185,47 @@ CREATE TABLE IF NOT EXISTS vehicle_checks (
   PRIMARY KEY (username, week)
 );
 
+-- Portal vehicle registry (MOT/tax/service moved off the old standalone worker).
+-- Self-migrating via ensureVehTable() in routes/fleet.js; this is the reference.
+CREATE TABLE IF NOT EXISTS vehicles (
+  tenant_id          INTEGER NOT NULL DEFAULT 1,
+  reg                TEXT NOT NULL,
+  make TEXT, model TEXT, fuel TEXT,
+  active             INTEGER DEFAULT 1,
+  mot_due TEXT, tax_due TEXT,
+  next_service       TEXT,            -- fixed date, used only when no interval set
+  notes              TEXT,
+  svc_interval_days  INTEGER,         -- service every N days (or…)
+  svc_interval_miles INTEGER,         -- …every N miles (whichever comes first)
+  last_service_date  TEXT,
+  last_service_miles INTEGER,
+  warn_days          INTEGER,         -- pre-warning window (default 30)
+  warn_miles         INTEGER,         -- pre-warning window (default 1000)
+  at                 TEXT,
+  PRIMARY KEY (tenant_id, reg)
+);
+-- Current odometer per vehicle is derived from vehicle_checks.items.mileage
+-- (latest checked_at wins) — not stored on the vehicles row.
+
+-- Driver assignment history: who drives which reg, and when (routes/fleet.js).
+CREATE TABLE IF NOT EXISTS vehicle_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id  INTEGER NOT NULL DEFAULT 1,
+  reg TEXT NOT NULL, username TEXT NOT NULL,
+  start_date TEXT NOT NULL, end_date TEXT,   -- end_date NULL = current
+  assigned_by TEXT, at TEXT
+);
+
+-- Van driver timesheets (door-to-door pay from the fleet report; routes/fleet.js).
+CREATE TABLE IF NOT EXISTS van_timesheets (
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  week TEXT NOT NULL, username TEXT NOT NULL,
+  data TEXT, at TEXT,                          -- data = JSON { days: {...} }
+  PRIMARY KEY (tenant_id, week, username)
+);
+-- Vehicle repair/invoice documents live in R2 (JOB_FILES) under
+-- vehicledocs/<tenant>/<REG>/… — no D1 table.
+
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (
   tenant_id  INTEGER NOT NULL DEFAULT 1,

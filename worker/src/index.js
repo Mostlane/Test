@@ -200,6 +200,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/staff/doc"],
   // Saved fleet reports opened in a new tab — signed URL, verified in-handler.
   ["GET", "/fleet/report"],
+  // Vehicle repair/invoice documents opened in a new tab — signed URL.
+  ["GET", "/fleet/vehicle-doc"],
 ];
 
 function isPublic(method, pathname) {

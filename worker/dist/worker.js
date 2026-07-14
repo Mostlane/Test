@@ -5181,6 +5181,7 @@ async function canFleet(env, tid, sess) {
 }
 var DKEY = (tid) => `fleet:drivers:${tid}`;
 var prefix = (tid) => `fleetreports/${tid}/`;
+var vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase()}/`;
 async function handle18(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
@@ -5196,6 +5197,19 @@ async function handle18(request, env, ctx, url, sess) {
     return new Response(obj.body, { status: 200, headers: {
       ...headers,
       "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (sub === "/vehicle-doc" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("vehicledocs/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
       "Cache-Control": "private, max-age=3600"
     } });
   }
@@ -5316,32 +5330,57 @@ async function handle18(request, env, ctx, url, sess) {
     const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
     const drv = {};
     for (const r of cur || []) drv[dn(r.reg)] = r.username;
-    const vehicles = (results || []).map((v) => ({
-      reg: v.reg,
-      make: v.make,
-      model: v.model,
-      fuel: v.fuel,
-      active: v.active !== 0,
-      motDue: v.mot_due || "",
-      taxDue: v.tax_due || "",
-      nextServiceDate: v.next_service || "",
-      notes: v.notes || "",
-      driver: drv[dn(v.reg)] || ""
-    }));
+    const miles = await latestMileage(env, tid);
+    const vehicles = (results || []).map((v) => {
+      const cm = miles[dn(v.reg)] || null;
+      const sv = serviceView(v, cm);
+      return {
+        reg: v.reg,
+        make: v.make,
+        model: v.model,
+        fuel: v.fuel,
+        active: v.active !== 0,
+        motDue: v.mot_due || "",
+        taxDue: v.tax_due || "",
+        nextServiceDate: sv.dueDate || "",
+        notes: v.notes || "",
+        driver: drv[dn(v.reg)] || "",
+        svcIntervalDays: v.svc_interval_days || null,
+        svcIntervalMiles: v.svc_interval_miles || null,
+        lastServiceDate: v.last_service_date || "",
+        lastServiceMiles: v.last_service_miles != null ? v.last_service_miles : null,
+        warnDays: sv.warnDays,
+        warnMiles: sv.warnMiles,
+        serviceDueMiles: sv.dueMiles,
+        serviceStatus: sv.status,
+        serviceReason: sv.reason,
+        currentMiles: cm ? cm.miles : null,
+        milesAt: cm ? cm.at : ""
+      };
+    });
     return jr2({ ok: true, vehicles }, headers);
   }
   if ((sub === "/vehicle" || sub === "/vehicles-import") && method === "POST") {
     await ensureVehTable(env);
     const b = await readJson3(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
+    const num2 = (x) => {
+      const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
+      return isNaN(n) ? null : n;
+    };
     let count = 0;
     for (const v of list) {
       const reg = String(v.reg || "").trim();
       if (!reg) continue;
-      await env.DB.prepare(`INSERT INTO vehicles (tenant_id,reg,make,model,fuel,active,mot_due,tax_due,next_service,notes,at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,reg) DO UPDATE SET
+      await env.DB.prepare(`INSERT INTO vehicles
+        (tenant_id,reg,make,model,fuel,active,mot_due,tax_due,next_service,notes,
+         svc_interval_days,svc_interval_miles,last_service_date,last_service_miles,warn_days,warn_miles,at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,reg) DO UPDATE SET
         make=excluded.make,model=excluded.model,fuel=excluded.fuel,active=excluded.active,
-        mot_due=excluded.mot_due,tax_due=excluded.tax_due,next_service=excluded.next_service,notes=excluded.notes,at=excluded.at`).bind(
+        mot_due=excluded.mot_due,tax_due=excluded.tax_due,next_service=excluded.next_service,notes=excluded.notes,
+        svc_interval_days=excluded.svc_interval_days,svc_interval_miles=excluded.svc_interval_miles,
+        last_service_date=excluded.last_service_date,last_service_miles=excluded.last_service_miles,
+        warn_days=excluded.warn_days,warn_miles=excluded.warn_miles,at=excluded.at`).bind(
         tid,
         reg,
         v.make || "",
@@ -5352,6 +5391,12 @@ async function handle18(request, env, ctx, url, sess) {
         v.taxDue || v.taxDate || "",
         v.nextServiceDate || v.serviceDate || "",
         v.notes || "",
+        num2(v.svcIntervalDays),
+        num2(v.svcIntervalMiles),
+        v.lastServiceDate || "",
+        num2(v.lastServiceMiles),
+        num2(v.warnDays),
+        num2(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
       count++;
@@ -5363,6 +5408,51 @@ async function handle18(request, env, ctx, url, sess) {
     const reg = String(b.reg || "").trim();
     if (!reg) return jr2({ error: "reg required" }, headers, 400);
     await env.DB.prepare("DELETE FROM vehicles WHERE tenant_id=? AND reg=?").bind(tid, reg).run();
+    await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 10), tid, reg).run();
+    try {
+      const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg) });
+      for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+    } catch {
+    }
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/vehicle-docs" && method === "GET") {
+    const reg = q.get("reg") || "";
+    if (!reg) return jr2({ error: "reg required" }, headers, 400);
+    const listed = await env.JOB_FILES.list({ prefix: vdocPrefix(tid, reg), include: ["customMetadata"] });
+    const docs = [];
+    for (const o of listed.objects || []) {
+      const m = o.customMetadata || {};
+      docs.push({
+        key: o.key,
+        name: m.name || o.key.split("/").pop(),
+        by: m.by || "",
+        at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""),
+        size: o.size,
+        url: await signedFileUrl(env, url.origin, "/fleet/vehicle-doc", o.key)
+      });
+    }
+    docs.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return jr2({ ok: true, docs }, headers);
+  }
+  if (sub === "/vehicle-doc" && method === "POST") {
+    const form = await request.formData();
+    const reg = String(form.get("reg") || "").trim();
+    const file = form.get("file");
+    if (!reg || !file) return jr2({ error: "reg and file required" }, headers, 400);
+    const safe = String(file.name || "document").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+    const key = `${vdocPrefix(tid, reg)}${Date.now()}-${safe}`;
+    await env.JOB_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || "application/octet-stream" },
+      customMetadata: { name: file.name || safe, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    return jr2({ ok: true, key, url: await signedFileUrl(env, url.origin, "/fleet/vehicle-doc", key) }, headers, 201);
+  }
+  if (sub === "/vehicle-doc-delete" && method === "POST") {
+    const b = await readJson3(request);
+    const key = String(b.key || "");
+    if (!key || !key.startsWith("vehicledocs/")) return jr2({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
     return jr2({ ok: true }, headers);
   }
   if (sub === "/pool-alloc" && method === "GET") {
@@ -5443,6 +5533,77 @@ async function ensureVehTable(env) {
     tenant_id INTEGER NOT NULL DEFAULT 1, reg TEXT NOT NULL, make TEXT, model TEXT, fuel TEXT,
     active INTEGER DEFAULT 1, mot_due TEXT, tax_due TEXT, next_service TEXT, notes TEXT, at TEXT,
     PRIMARY KEY (tenant_id, reg))`).run();
+  const cols = [
+    "svc_interval_days INTEGER",
+    "svc_interval_miles INTEGER",
+    "last_service_date TEXT",
+    "last_service_miles INTEGER",
+    "warn_days INTEGER",
+    "warn_miles INTEGER"
+  ];
+  for (const c of cols) {
+    try {
+      await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run();
+    } catch {
+    }
+  }
+}
+async function latestMileage(env, tid) {
+  const dn = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!='' ORDER BY checked_at ASC"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let m = "";
+      try {
+        m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, "");
+      } catch {
+      }
+      if (!m) continue;
+      out[dn(r.vehicle)] = { miles: parseInt(m, 10), at: r.checked_at };
+    }
+  } catch {
+  }
+  return out;
+}
+function serviceView(v, cur) {
+  const today = /* @__PURE__ */ new Date();
+  today.setHours(0, 0, 0, 0);
+  const warnDays = v.warn_days != null ? v.warn_days : 30;
+  const warnMiles = v.warn_miles != null ? v.warn_miles : 1e3;
+  let dueDate = v.next_service || "";
+  if (v.svc_interval_days && v.last_service_date) {
+    const d = new Date(v.last_service_date);
+    d.setDate(d.getDate() + v.svc_interval_days);
+    dueDate = d.toISOString().slice(0, 10);
+  }
+  let dueMiles = null;
+  if (v.svc_interval_miles && v.last_service_miles != null) dueMiles = v.last_service_miles + v.svc_interval_miles;
+  let status = "none", reasons = [];
+  const rank = { none: 0, ok: 1, warn: 2, bad: 3 };
+  const bump = (s, why) => {
+    if (rank[s] > rank[status]) status = s;
+    if (why) reasons.push(why);
+  };
+  if (dueDate) {
+    const dd = new Date(dueDate);
+    dd.setHours(0, 0, 0, 0);
+    const days = Math.ceil((dd - today) / 864e5);
+    if (days < 0) bump("bad", "Service overdue by date");
+    else if (days <= warnDays) bump("warn", `Service due in ${days} day(s)`);
+    else bump("ok");
+  }
+  if (dueMiles != null && cur && cur.miles != null) {
+    const left = dueMiles - cur.miles;
+    if (left <= 0) bump("bad", "Service overdue by mileage");
+    else if (left <= warnMiles) bump("warn", `Service due in ${left} mile(s)`);
+    else bump("ok");
+  } else if (dueMiles != null) {
+    bump("ok");
+  }
+  return { dueDate, dueMiles, status, reason: reasons.join(" \xB7 "), warnDays, warnMiles };
 }
 async function ensureTsTable(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS van_timesheets (
@@ -5643,7 +5804,9 @@ var PUBLIC_ROUTES = [
   // header needed"; an unsigned/expired link is refused inside the handler.
   ["GET", "/staff/doc"],
   // Saved fleet reports opened in a new tab — signed URL, verified in-handler.
-  ["GET", "/fleet/report"]
+  ["GET", "/fleet/report"],
+  // Vehicle repair/invoice documents opened in a new tab — signed URL.
+  ["GET", "/fleet/vehicle-doc"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
