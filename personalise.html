@@ -213,7 +213,7 @@
     function renderBg() {
       const cur = bgKey();
       let html = `<button class="bgopt ${cur === "emboss:" ? "sel" : ""}" data-bg="emboss">
-        <span class="tile" style="background-image:url('Mostlane_Embossed.png');background-color:#e6e8eb;"></span>
+        <span class="tile" style="background-image: ;background-color:#e6e8eb;"></span>
         <span>Mostlane</span></button>`;
       html += Object.keys(BGCOLS).map(k =>
         `<button class="bgopt ${cur === "colour:" + k ? "sel" : ""}" data-bg="colour" data-val="${k}">

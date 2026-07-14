@@ -19,6 +19,29 @@
   // ⬇️ The deployed API worker (separate from the site worker).
   window.MOSTLANE_API = "https://mostlane-api.jamie-def.workers.dev";
 
+  // ── Mostlane embossed logo watermark, on every page ──────────────────────
+  // One fixed layer behind all content (html::before) rather than touching each
+  // page's body background — so it works everywhere without fighting per-page
+  // themes (e.g. the personalised main.html menu background) and every page
+  // keeps its own base colour. Pages that used to set the emboss on <body>
+  // themselves have had it removed, so there is no doubling.
+  (function embossBackground() {
+    var css =
+      'html::before{content:"";position:fixed;top:0;left:0;right:0;bottom:0;' +
+      'z-index:-1;pointer-events:none;' +
+      "background:url('/Mostlane_Embossed.png') no-repeat center center;" +
+      'background-size:min(180%,900px);opacity:.9;}';
+    function inject() {
+      if (document.getElementById("mlEmbossCss")) return;
+      var st = document.createElement("style");
+      st.id = "mlEmbossCss";
+      st.textContent = css;
+      (document.head || document.documentElement).appendChild(st);
+    }
+    inject();
+    document.addEventListener("DOMContentLoaded", inject);
+  })();
+
   // ── Canonical people order, shared by every page/dropdown ────────────────
   // Office staff first, then field, each by the manual drag order set in Users
   // admin (StaffType + SortOrder from /users), name as a fallback. Pages that

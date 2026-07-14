@@ -5358,6 +5358,21 @@ async function handle18(request, env, ctx, url, sess) {
         milesAt: cm ? cm.at : ""
       };
     });
+    let order = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:vehorder:${tid}`).first();
+      if (row && row.value) order = JSON.parse(row.value) || [];
+    } catch {
+    }
+    const oidx = {};
+    order.forEach((r, i) => oidx[dn(r)] = i);
+    vehicles.sort((a, b) => {
+      const ia = oidx[dn(a.reg)], ib = oidx[dn(b.reg)];
+      if (ia == null && ib == null) return String(a.reg).localeCompare(String(b.reg));
+      if (ia == null) return 1;
+      if (ib == null) return -1;
+      return ia - ib;
+    });
     return jr2({ ok: true, vehicles }, headers);
   }
   if ((sub === "/vehicle" || sub === "/vehicles-import") && method === "POST") {
@@ -5414,6 +5429,21 @@ async function handle18(request, env, ctx, url, sess) {
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
     } catch {
     }
+    return jr2({ ok: true }, headers);
+  }
+  if (sub === "/vehicle-order" && method === "GET") {
+    let order = [];
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`fleet:vehorder:${tid}`).first();
+      if (row && row.value) order = JSON.parse(row.value) || [];
+    } catch {
+    }
+    return jr2({ ok: true, order }, headers);
+  }
+  if (sub === "/vehicle-order" && method === "POST") {
+    const b = await readJson3(request);
+    const order = Array.isArray(b.order) ? b.order.map(String) : [];
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, `fleet:vehorder:${tid}`, JSON.stringify(order)).run();
     return jr2({ ok: true }, headers);
   }
   if (sub === "/vehicle-docs" && method === "GET") {
