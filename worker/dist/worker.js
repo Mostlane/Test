@@ -5259,7 +5259,75 @@ async function handle18(request, env, ctx, url, sess) {
     await env.JOB_FILES.delete(key);
     return jr2({ ok: true }, headers);
   }
+  if (sub === "/current" || sub === "/assignments" || sub === "/assign") {
+    await ensureAssignTable(env);
+    if (method === "GET") await seedAssignments(env, tid);
+    if (sub === "/current" && method === "GET") {
+      const week = q.get("week");
+      let rows;
+      if (week && /^\d{4}-\d{2}-\d{2}$/.test(week)) {
+        const d = /* @__PURE__ */ new Date(week + "T12:00:00Z");
+        d.setUTCDate(d.getUTCDate() + 6);
+        const wkEnd = d.toISOString().slice(0, 10);
+        rows = (await env.DB.prepare(
+          "SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND start_date<=? AND (end_date IS NULL OR end_date>=?) ORDER BY start_date"
+        ).bind(tid, wkEnd, week).all()).results;
+      } else {
+        rows = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
+      }
+      const map = {};
+      for (const r of rows || []) map[r.reg] = r.username;
+      return jr2({ ok: true, map }, headers);
+    }
+    if (sub === "/assignments" && method === "GET") {
+      const reg = q.get("reg");
+      if (reg) {
+        const history = (await env.DB.prepare(
+          "SELECT reg, username, start_date, end_date, assigned_by, at FROM vehicle_assignments WHERE tenant_id=? AND reg=? ORDER BY start_date DESC, id DESC"
+        ).bind(tid, reg).all()).results;
+        return jr2({ ok: true, history: history || [] }, headers);
+      }
+      const current = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
+      return jr2({ ok: true, current: current || [] }, headers);
+    }
+    if (sub === "/assign" && method === "POST") {
+      const b = await readJson3(request);
+      const reg = String(b.reg || "").trim();
+      const username = String(b.username || "").trim();
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(b.fromDate || "") ? b.fromDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      if (!reg) return jr2({ error: "reg required" }, headers, 400);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind(from, tid, reg).run();
+      await env.DB.prepare("UPDATE users SET vehicle_assigned='' WHERE tenant_id=? AND vehicle_assigned=?").bind(tid, reg).run();
+      if (username) {
+        await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND username=? AND end_date IS NULL").bind(from, tid, username).run();
+        await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, reg, username, from, null, sess.user.username, now).run();
+        await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
+      }
+      return jr2({ ok: true }, headers);
+    }
+  }
   return jr2({ error: "Not found: " + sub }, headers, 404);
+}
+async function ensureAssignTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT NOT NULL, username TEXT NOT NULL, start_date TEXT NOT NULL,
+    end_date TEXT, assigned_by TEXT, at TEXT)`).run();
+}
+async function seedAssignments(env, tid) {
+  try {
+    const cnt = await env.DB.prepare("SELECT COUNT(*) AS n FROM vehicle_assignments WHERE tenant_id=?").bind(tid).first();
+    if (cnt && Number(cnt.n) > 0) return;
+    const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const { results } = await env.DB.prepare(
+      "SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
+    ).bind(tid).all();
+    for (const u of results || []) {
+      await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)").bind(tid, String(u.vehicle_assigned).trim(), u.username, today, null, "seed", (/* @__PURE__ */ new Date()).toISOString()).run();
+    }
+  } catch {
+  }
 }
 
 // src/index.js

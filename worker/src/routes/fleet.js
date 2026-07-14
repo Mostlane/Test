@@ -106,5 +106,84 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true }, headers);
   }
 
+  // ── Central driver-assignment registry (with history) ─────────────────────
+  // Source of truth for "who drives which vehicle, when". Van checks read the
+  // synced users.vehicle_assigned; the Fleet Report reads /fleet/current.
+  if (sub === "/current" || sub === "/assignments" || sub === "/assign") {
+    await ensureAssignTable(env);
+    if (method === "GET") await seedAssignments(env, tid);
+
+    if (sub === "/current" && method === "GET") {
+      const week = q.get("week");
+      let rows;
+      if (week && /^\d{4}-\d{2}-\d{2}$/.test(week)) {
+        const d = new Date(week + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + 6);
+        const wkEnd = d.toISOString().slice(0, 10);
+        rows = (await env.DB.prepare(
+          "SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND start_date<=? AND (end_date IS NULL OR end_date>=?) ORDER BY start_date"
+        ).bind(tid, wkEnd, week).all()).results;
+      } else {
+        rows = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
+      }
+      const map = {}; for (const r of rows || []) map[r.reg] = r.username;
+      return jr({ ok: true, map }, headers);
+    }
+
+    if (sub === "/assignments" && method === "GET") {
+      const reg = q.get("reg");
+      if (reg) {
+        const history = (await env.DB.prepare(
+          "SELECT reg, username, start_date, end_date, assigned_by, at FROM vehicle_assignments WHERE tenant_id=? AND reg=? ORDER BY start_date DESC, id DESC"
+        ).bind(tid, reg).all()).results;
+        return jr({ ok: true, history: history || [] }, headers);
+      }
+      const current = (await env.DB.prepare("SELECT reg, username FROM vehicle_assignments WHERE tenant_id=? AND end_date IS NULL").bind(tid).all()).results;
+      return jr({ ok: true, current: current || [] }, headers);
+    }
+
+    if (sub === "/assign" && method === "POST") {
+      const b = await readJson(request);
+      const reg = String(b.reg || "").trim();
+      const username = String(b.username || "").trim();
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(b.fromDate || "") ? b.fromDate : new Date().toISOString().slice(0, 10);
+      if (!reg) return jr({ error: "reg required" }, headers, 400);
+      const now = new Date().toISOString();
+      // End the vehicle's current driver, and clear that person's vehicle field.
+      await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND reg=? AND end_date IS NULL").bind(from, tid, reg).run();
+      await env.DB.prepare("UPDATE users SET vehicle_assigned='' WHERE tenant_id=? AND vehicle_assigned=?").bind(tid, reg).run();
+      if (username) {
+        // The new driver moves off any other van they currently hold.
+        await env.DB.prepare("UPDATE vehicle_assignments SET end_date=? WHERE tenant_id=? AND username=? AND end_date IS NULL").bind(from, tid, username).run();
+        await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)")
+          .bind(tid, reg, username, from, null, sess.user.username, now).run();
+        await env.DB.prepare("UPDATE users SET vehicle_assigned=? WHERE tenant_id=? AND username=?").bind(reg, tid, username).run();
+      }
+      return jr({ ok: true }, headers);
+    }
+  }
+
   return jr({ error: "Not found: " + sub }, headers, 404);
+}
+
+async function ensureAssignTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT NOT NULL, username TEXT NOT NULL, start_date TEXT NOT NULL,
+    end_date TEXT, assigned_by TEXT, at TEXT)`).run();
+}
+// Bootstrap current assignments from the existing users.vehicle_assigned field
+// the first time the registry is used, so history starts from today's reality.
+async function seedAssignments(env, tid) {
+  try {
+    const cnt = await env.DB.prepare("SELECT COUNT(*) AS n FROM vehicle_assignments WHERE tenant_id=?").bind(tid).first();
+    if (cnt && Number(cnt.n) > 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const { results } = await env.DB.prepare(
+      "SELECT username, vehicle_assigned FROM users WHERE tenant_id=? AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
+    ).bind(tid).all();
+    for (const u of results || []) {
+      await env.DB.prepare("INSERT INTO vehicle_assignments (tenant_id, reg, username, start_date, end_date, assigned_by, at) VALUES (?,?,?,?,?,?,?)")
+        .bind(tid, String(u.vehicle_assigned).trim(), u.username, today, null, "seed", new Date().toISOString()).run();
+    }
+  } catch { /* seeding is best-effort */ }
 }
