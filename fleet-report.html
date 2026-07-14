@@ -16,7 +16,8 @@
   .topbar a{color:#fff;text-decoration:none} .topbar h1{font-size:17px;flex:1}
   .gen{max-width:760px;margin:18px auto;padding:0 16px}
   .card{background:#fff;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.07);padding:18px;margin-bottom:16px}
-  .drop{border:2px dashed #c7c9e6;border-radius:10px;padding:14px;margin:10px 0;background:#fafbff}
+  .drop{border:2px dashed #c7c9e6;border-radius:10px;padding:14px;margin:10px 0;background:#fafbff;transition:.12s}
+  .drop.drag{border-color:var(--indigo-dark);background:#e8eaff;box-shadow:0 0 0 3px rgba(26,35,126,.12)}
   .drop label{font-weight:600;color:var(--indigo-dark);display:block;margin-bottom:6px;font-size:14px}
   .drop .hint{font-size:12px;color:#78809a;margin-top:4px}
   .drop .file{font-size:12.5px;color:#155724;margin-top:6px;font-weight:600}
@@ -62,16 +63,16 @@
 <div class="gen" id="genPane">
   <div class="card">
     <p style="font-size:13px;color:#475569;margin-bottom:6px;">Drop in this week's <b>VelocityFleet trip export</b> and the <b>driver score PDF</b>. The report builds below — van-check compliance is pulled in automatically from the portal.</p>
-    <div class="drop">
+    <div class="drop" id="dropXls">
       <label>📂 VelocityFleet Trip Export (.xls)</label>
       <input type="file" id="xlsFile" accept=".xls,.xlsx">
-      <div class="hint">Trip History – Summary Report</div>
+      <div class="hint">Trip History – Summary Report · <b>or drag &amp; drop the file here</b></div>
       <div class="file" id="xlsName"></div>
     </div>
-    <div class="drop">
+    <div class="drop" id="dropPdf">
       <label>📂 Driver Score PDF</label>
       <input type="file" id="pdfFile" accept=".pdf">
-      <div class="hint">Driver Performance – Summary Report (optional but recommended)</div>
+      <div class="hint">Driver Performance – Summary Report (optional) · <b>or drag &amp; drop here</b></div>
       <div class="file" id="pdfName"></div>
     </div>
     <button class="btn" id="genBtn" disabled>Generate Report</button>
@@ -222,9 +223,27 @@ async function parseScorePdf(file){
 
 /* ═══ Build + render ═══ */
 let XLSDATA=null, PDFFILE=null;
-$("xlsFile").addEventListener("change",e=>{ XLSDATA=e.target.files[0]; $("xlsName").textContent=XLSDATA?("✓ "+XLSDATA.name):""; refresh(); });
-$("pdfFile").addEventListener("change",e=>{ PDFFILE=e.target.files[0]; $("pdfName").textContent=PDFFILE?("✓ "+PDFFILE.name):""; refresh(); });
+function setXls(f){ if(!f)return; XLSDATA=f; $("xlsName").textContent="✓ "+f.name; refresh(); }
+function setPdf(f){ if(!f)return; PDFFILE=f; $("pdfName").textContent="✓ "+f.name; refresh(); }
+$("xlsFile").addEventListener("change",e=>setXls(e.target.files[0]));
+$("pdfFile").addEventListener("change",e=>setPdf(e.target.files[0]));
 function refresh(){ $("genBtn").disabled=!XLSDATA; }
+// Drag & drop onto either zone.
+function wireDrop(zoneId, exts, setter){
+  const z=$(zoneId); if(!z) return;
+  ["dragenter","dragover"].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); e.stopPropagation(); z.classList.add("drag"); }));
+  ["dragleave","dragend"].forEach(ev=>z.addEventListener(ev,e=>{ e.preventDefault(); z.classList.remove("drag"); }));
+  z.addEventListener("drop",e=>{
+    e.preventDefault(); e.stopPropagation(); z.classList.remove("drag");
+    const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return;
+    if(!exts.some(x=>f.name.toLowerCase().endsWith(x))){ $("status").textContent="That file doesn't look right here — expected "+exts.join(" or ")+"."; return; }
+    setter(f);
+  });
+}
+wireDrop("dropXls",[".xls",".xlsx"],setXls);
+wireDrop("dropPdf",[".pdf"],setPdf);
+// Stop the browser opening a file if it's dropped outside a zone.
+["dragover","drop"].forEach(ev=>window.addEventListener(ev,e=>{ if(!e.target.closest || !e.target.closest(".drop")) e.preventDefault(); }));
 $("genBtn").addEventListener("click",generate);
 
 async function generate(){
