@@ -3706,19 +3706,27 @@ async function handle8(request, env, ctx, url, sess) {
     }
     const week = vanWeek();
     const vehicleChecks = [];
+    const skippedVanChecks = [];
     try {
       const { results: drivers } = await db.prepare(
         "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
       ).bind(db.tenantId).all();
-      const { results: done } = await db.prepare(
-        "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      const { results: doneRows } = await db.prepare(
+        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
       ).bind(db.tenantId, week).all();
-      const doneSet = new Set((done || []).map((r) => r.username));
+      const doneSet = new Set((doneRows || []).map((r) => r.username));
       for (const u of drivers || [])
         if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check \u2014 week of " + week });
+      for (const r of doneRows || []) {
+        try {
+          const it = r.items ? JSON.parse(r.items) : {};
+          if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" });
+        } catch {
+        }
+      }
     } catch {
     }
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, week }, {}, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
   }
   return error("Unknown portal route", 404, env, request);
 }
@@ -4686,6 +4694,23 @@ async function handle14(request, env, ctx, url, sess) {
       ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
     `).bind(db.tenantId, who, wk, veh && veh.vehicle_assigned || "", now, null, items, "Skipped by " + me).run();
     return json({ ok: true, week: wk, skippedBy: me }, {}, env, request);
+  }
+  if (path === "/vancheck/unskip" && method === "POST") {
+    if (!await canViewAll()) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const wk = mondayOf2(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
+    if (!existing) return json({ ok: true, notSkipped: true }, {}, env, request);
+    let it = {};
+    try {
+      it = existing.items ? JSON.parse(existing.items) : {};
+    } catch {
+    }
+    if (!it.skipped) return json({ ok: false, error: "That is a real check, not a skip." }, {}, env, request);
+    await db.prepare("DELETE FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).run();
+    return json({ ok: true, week: wk }, {}, env, request);
   }
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);

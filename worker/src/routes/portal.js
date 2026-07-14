@@ -304,18 +304,23 @@ export async function handle(request, env, ctx, url, sess) {
     // Vehicle checks outstanding this week — one row per driver still to do it.
     const week = vanWeek();
     const vehicleChecks = [];
+    const skippedVanChecks = [];
     try {
       const { results: drivers } = await db.prepare(
         "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
       ).bind(db.tenantId).all();
-      const { results: done } = await db.prepare(
-        "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+      const { results: doneRows } = await db.prepare(
+        "SELECT username, items FROM vehicle_checks WHERE tenant_id=? AND week=?"
       ).bind(db.tenantId, week).all();
-      const doneSet = new Set((done || []).map(r => r.username));
+      const doneSet = new Set((doneRows || []).map(r => r.username));
       for (const u of drivers || [])
         if (!doneSet.has(u.username)) vehicleChecks.push({ user: u.username, key: week, name: "Van check — week of " + week });
+      // Van checks that were skipped this week — shown as reversible in Active mutes.
+      for (const r of doneRows || []) {
+        try { const it = r.items ? JSON.parse(r.items) : {}; if (it.skipped) skippedVanChecks.push({ user: r.username, week, by: it.skippedBy || "" }); } catch {}
+      }
     } catch {}
-    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, week }, {}, env, request);
+    return json({ ok: true, rules: await getRules(env, tenantId), transfers, confirmations, vehicleChecks, skippedVanChecks, week }, {}, env, request);
   }
 
   return error("Unknown portal route", 404, env, request);
