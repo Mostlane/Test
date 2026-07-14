@@ -4315,11 +4315,11 @@ async function handle12(request, env, ctx, url, sess) {
     if (!/^image\//.test(file.type || "")) return json3({ ok: false, error: "That isn't an image" }, 400);
     const bytes = await file.arrayBuffer();
     if (bytes.byteLength > 4 * 1024 * 1024) return json3({ ok: false, error: "Image too large \u2014 try again (it should be under 4 MB)" }, 400);
-    const prefix = `theme/${me}/`;
-    const old = await env.ASSET_BUCKET.list({ prefix });
+    const prefix2 = `theme/${me}/`;
+    const old = await env.ASSET_BUCKET.list({ prefix: prefix2 });
     for (const o of old.objects || []) await env.ASSET_BUCKET.delete(o.key);
     const ext = file.type === "image/png" ? "png" : "jpg";
-    const key = `${prefix}bg-${Date.now()}.${ext}`;
+    const key = `${prefix2}bg-${Date.now()}.${ext}`;
     await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: file.type || "image/jpeg" } });
     return json3({ ok: true, key, url: `${url.origin}/asset-image?key=${encodeURIComponent(key)}` });
   }
@@ -4422,13 +4422,13 @@ async function handle13(request, env, ctx, url, sess) {
   return error("Unknown H&S route", 404, env, request);
 }
 async function mintRef(db, docType, site) {
-  const prefix = PREFIX[docType];
+  const prefix2 = PREFIX[docType];
   if (docType === "hotworks") {
     const code = (site.replace(/[^A-Za-z0-9]/g, "").toUpperCase() + "SITE").slice(0, 6);
     const d = /* @__PURE__ */ new Date();
     const ymd = d.getUTCFullYear().toString() + String(d.getUTCMonth() + 1).padStart(2, "0") + String(d.getUTCDate()).padStart(2, "0");
     const n = String(Math.floor(100 + Math.random() * 900));
-    return `${prefix}-${code}-${ymd}-${n}`;
+    return `${prefix2}-${code}-${ymd}-${n}`;
   }
   const { results } = await db.prepare(
     "SELECT ref FROM hs_documents WHERE tenant_id=? AND doc_type=? AND ref IS NOT NULL"
@@ -4438,7 +4438,7 @@ async function mintRef(db, docType, site) {
     const m = /(\d+)\s*$/.exec(String(r.ref || ""));
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
-  return `${prefix}-${String(max + 1).padStart(4, "0")}`;
+  return `${prefix2}-${String(max + 1).padStart(4, "0")}`;
 }
 
 // src/routes/vancheck.js
@@ -4967,11 +4967,11 @@ async function addCategory(env, tenantId, name) {
 }
 var personalPrefix = (tid, user) => `staffdocs/${tid}/user/${user}/`;
 var companyPrefix = (tid) => `staffdocs/${tid}/company/`;
-async function listUnder(env, prefix) {
+async function listUnder(env, prefix2) {
   const out = {};
-  const listed = await env.JOB_FILES.list({ prefix, include: ["customMetadata"] });
+  const listed = await env.JOB_FILES.list({ prefix: prefix2, include: ["customMetadata"] });
   for (const o of listed.objects || []) {
-    const rest = o.key.slice(prefix.length);
+    const rest = o.key.slice(prefix2.length);
     const slash = rest.indexOf("/");
     const category = slash > 0 ? rest.slice(0, slash) : "Other";
     (out[category] = out[category] || []).push({
@@ -5163,6 +5163,105 @@ async function handle17(request, env, ctx, url, sess) {
   return error("Not found: " + path, 404, env, request);
 }
 
+// src/routes/fleet.js
+function jr2(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson3(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+}
+async function canFleet(env, tid, sess) {
+  if (!sess) return false;
+  const p = await permissionsFor(env, tid, sess.user.username);
+  return p.FullAccess === "Yes" || p.Vehicles === "Yes";
+}
+var DKEY = (tid) => `fleet:drivers:${tid}`;
+var prefix = (tid) => `fleetreports/${tid}/`;
+async function handle18(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  const method = request.method.toUpperCase();
+  const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const sub = url.pathname.replace(/^\/fleet(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  if (sub === "/report" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("fleetreports/")) return jr2({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr2({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) return jr2({ error: "Not authenticated" }, headers, 401);
+  if (!await canFleet(env, tid, sess)) return jr2({ error: "Forbidden" }, headers, 403);
+  if (sub === "/drivers" && method === "GET") {
+    let map = {};
+    try {
+      const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(DKEY(tid)).first();
+      if (row && row.value) map = JSON.parse(row.value) || {};
+    } catch {
+    }
+    return jr2({ ok: true, map }, headers);
+  }
+  if (sub === "/drivers" && method === "POST") {
+    const b = await readJson3(request);
+    const map = b && b.map && typeof b.map === "object" ? b.map : {};
+    await env.DB.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, DKEY(tid), JSON.stringify(map)).run();
+    return jr2({ ok: true, map }, headers);
+  }
+  if (sub === "/report" && method === "POST") {
+    const form = await request.formData();
+    const file = form.get("html");
+    if (!file) return jr2({ error: "Missing report" }, headers, 400);
+    const weekStart = String(form.get("weekStart") || "");
+    const key = `${prefix(tid)}${Date.now()}-${(weekStart || "report").replace(/[^0-9-]/g, "")}.html`;
+    await env.JOB_FILES.put(key, typeof file.stream === "function" ? file.stream() : file, {
+      httpMetadata: { contentType: "text/html; charset=utf-8" },
+      customMetadata: {
+        title: String(form.get("title") || "Fleet report").slice(0, 160),
+        weekStart,
+        weekEnd: String(form.get("weekEnd") || ""),
+        by: sess.user.username,
+        at: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+    return jr2({ ok: true, key }, headers, 201);
+  }
+  if (sub === "/reports" && method === "GET") {
+    const listed = await env.JOB_FILES.list({ prefix: prefix(tid), include: ["customMetadata"] });
+    const reports = [];
+    for (const o of listed.objects || []) {
+      const m = o.customMetadata || {};
+      reports.push({
+        key: o.key,
+        title: m.title || "Fleet report",
+        weekStart: m.weekStart || "",
+        weekEnd: m.weekEnd || "",
+        by: m.by || "",
+        at: m.at || (o.uploaded ? new Date(o.uploaded).toISOString() : ""),
+        size: o.size,
+        url: await signedFileUrl(env, url.origin, "/fleet/report", o.key)
+      });
+    }
+    reports.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    return jr2({ ok: true, reports }, headers);
+  }
+  if (sub === "/report-delete" && method === "POST") {
+    const { key } = await readJson3(request);
+    if (!key || !String(key).startsWith("fleetreports/")) return jr2({ error: "Bad key" }, headers, 400);
+    await env.JOB_FILES.delete(key);
+    return jr2({ ok: true }, headers);
+  }
+  return jr2({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -5188,6 +5287,8 @@ var ROUTES = [
   // staff personal + company documents
   ["*", "/privacy", handle17],
   // GDPR data export + erasure
+  ["*", "/fleet", handle18],
+  // fleet reports + driver mapping
   ["*", "/get-sites", handle7],
   ["*", "/add-site", handle7],
   ["*", "/update-site", handle7],
@@ -5236,7 +5337,7 @@ var index_default = {
       sess = await requireSession(env, request);
       if (!sess) return error("Not authenticated", 401, env, request);
     }
-    const match = ROUTES.filter(([, prefix]) => url.pathname === prefix || url.pathname.startsWith(prefix + "/") || url.pathname.startsWith(prefix)).sort((a, b) => b[1].length - a[1].length)[0];
+    const match = ROUTES.filter(([, prefix2]) => url.pathname === prefix2 || url.pathname.startsWith(prefix2 + "/") || url.pathname.startsWith(prefix2)).sort((a, b) => b[1].length - a[1].length)[0];
     if (!match) return error("Not found: " + url.pathname, 404, env, request);
     const auditClone = sess && AUDIT_METHODS.includes(request.method.toUpperCase()) ? request.clone() : null;
     try {
@@ -5332,7 +5433,9 @@ var PUBLIC_ROUTES = [
   // Staff documents streamed for the in-app viewer — access-gated by the
   // signed URL (see filesign.js), so being "public" only means "no session
   // header needed"; an unsigned/expired link is refused inside the handler.
-  ["GET", "/staff/doc"]
+  ["GET", "/staff/doc"],
+  // Saved fleet reports opened in a new tab — signed URL, verified in-handler.
+  ["GET", "/fleet/report"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

@@ -35,6 +35,7 @@ import * as vancheck from "./routes/vancheck.js"; // DONE  (weekly van checks �
 import * as stats from "./routes/stats.js";        // DONE  (Full-access portal stats dashboard)
 import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + company documents)
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
+import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
 // Longest prefix wins; handlers receive (request, env, ctx, url).
@@ -56,6 +57,7 @@ const ROUTES = [
   ["*", "/stats",      stats.handle],
   ["*", "/staff",      hrdocs.handle],   // staff personal + company documents
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
+  ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
@@ -196,6 +198,8 @@ const PUBLIC_ROUTES = [
   // signed URL (see filesign.js), so being "public" only means "no session
   // header needed"; an unsigned/expired link is refused inside the handler.
   ["GET", "/staff/doc"],
+  // Saved fleet reports opened in a new tab — signed URL, verified in-handler.
+  ["GET", "/fleet/report"],
 ];
 
 function isPublic(method, pathname) {
