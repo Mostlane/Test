@@ -100,6 +100,7 @@ function shapeCheck(r) {
     photos: items.photos || [], slotPhotos: items.slotPhotos || {},
     mileage: items.mileage || "", source: items.source || "story",
     defectCount: defects.length,
+    skipped: !!items.skipped, skippedBy: items.skippedBy || "",
   };
 }
 
@@ -247,6 +248,32 @@ export async function handle(request, env, ctx, url, sess) {
     }
     const dueAt = deadlineFor(week, s);
     return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows }, {}, env, request);
+  }
+
+  // ── Admin: skip a driver's van check for a week (logged in the grid) ────────
+  if (path === "/vancheck/skip" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const who = String(b.username || "").trim();
+    if (!who) return error("username required", 400, env, request);
+    const wk = mondayOf(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate());
+    // Never overwrite a real completed check.
+    const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?")
+      .bind(db.tenantId, who, wk).first();
+    if (existing) {
+      let it = {}; try { it = existing.items ? JSON.parse(existing.items) : {}; } catch {}
+      if (!it.skipped) return json({ ok: true, already: true }, {}, env, request);
+    }
+    const veh = await db.prepare("SELECT vehicle_assigned FROM users WHERE tenant_id=? AND username=?")
+      .bind(db.tenantId, who).first();
+    const now = new Date().toISOString();
+    const items = JSON.stringify({ skipped: true, skippedBy: me, skippedAt: now, source: "skip" });
+    await db.prepare(`
+      INSERT INTO vehicle_checks (tenant_id, username, week, vehicle, checked_at, safe_to_drive, items, note)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(username, week) DO UPDATE SET checked_at=excluded.checked_at, items=excluded.items, note=excluded.note
+    `).bind(db.tenantId, who, wk, (veh && veh.vehicle_assigned) || "", now, null, items, "Skipped by " + me).run();
+    return json({ ok: true, week: wk, skippedBy: me }, {}, env, request);
   }
 
   // ── Attention (badges + gate) ───────────────────────────────────────────────

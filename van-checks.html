@@ -141,6 +141,7 @@
       const c = r.check;
       let status;
       if (!c) status = `<span class="pill missing">${d.overdue ? "MISSING — overdue" : "Not done yet"}</span>`;
+      else if (c.skipped) status = `<span class="pill" style="background:#e0e7ff;color:#3730a3;">Skipped this week${c.skippedBy ? " by " + esc(c.skippedBy) : ""}</span>`;
       else if (c.safeToDrive === false) status = `<span class="pill unsafe">NOT SAFE</span>`;
       else if (c.defectCount) status = `<span class="pill defect">${c.defectCount} defect${c.defectCount === 1 ? "" : "s"}</span>`;
       else status = `<span class="pill done">✓ OK</span>`;
