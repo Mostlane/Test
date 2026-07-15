@@ -2628,7 +2628,11 @@ async function handle7(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
   if (subpath === "/jobs" && method === "POST") {
-    const job = await createOrUpdateJobFromPayload(env, tenantId, await readJson2(request));
+    const payload = await readJson2(request);
+    const beforeId = payload.id || payload.reference;
+    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
   if (subpath === "/jobs" && method === "GET") {
@@ -2747,7 +2751,9 @@ async function handle7(request, env, ctx, url, sess) {
       assignedEngineers: Array.isArray(body.assignedEngineers) ? body.assignedEngineers.filter(Boolean) : body.assignedTo !== void 0 ? body.assignedTo ? [body.assignedTo] : [] : void 0,
       changedBy: body.changedBy || "scheduler"
     };
+    const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch);
+    if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
   }
   if (subpath.startsWith("/jobs/")) {
@@ -2981,6 +2987,34 @@ function assignedList(job) {
     return job.assignedEngineers.filter(Boolean);
   }
   return job.assignedTo ? [job.assignedTo] : [];
+}
+async function notifyNewlyAssigned(env, tid, before, after) {
+  if (!after) return;
+  const prior = new Set(assignedList(before || {}).map(normId));
+  const added = assignedList(after).filter((a) => !prior.has(normId(a)));
+  if (!added.length) return;
+  const map = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      map[normId(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId(full)] = u.username;
+    }
+  } catch {
+  }
+  const ref = after.helpdeskRef || after.id;
+  const site = after.siteName || after.siteCode || "";
+  const body = `${ref}${site ? " \u2014 " + site : ""}${after.priority ? " \xB7 " + after.priority : ""}. Tap to view.`;
+  for (const eng of added) {
+    const username = map[normId(eng)] || eng;
+    await sendToUser(env, tid, username, {
+      title: "New job assigned to you",
+      body,
+      url: "/engineer-jobs.html",
+      tag: "sla-job:" + after.id
+    });
+  }
 }
 async function getJob(env, tenantId, id) {
   const db = tenantDB(env, tenantId);

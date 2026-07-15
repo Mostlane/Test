@@ -17,6 +17,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { sendToUser } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -37,7 +38,11 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* POST /sla/jobs */
   if (subpath === "/jobs" && method === "POST") {
-    const job = await createOrUpdateJobFromPayload(env, tenantId, await readJson(request));
+    const payload = await readJson(request);
+    const beforeId = payload.id || payload.reference;
+    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
 
@@ -156,7 +161,9 @@ export async function handle(request, env, ctx, url, sess) {
         : (body.assignedTo !== undefined ? (body.assignedTo ? [body.assignedTo] : []) : undefined),
       changedBy: body.changedBy || "scheduler"
     };
+    const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch);
+    if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -420,6 +427,36 @@ function assignedList(job) {
     return job.assignedEngineers.filter(Boolean);
   }
   return job.assignedTo ? [job.assignedTo] : [];
+}
+
+// Push every engineer NEWLY added to a job (added since `before`), so editing a
+// job for other reasons doesn't re-notify. SLA stores engineer ids as names or
+// dotted forms; resolve each to the canonical portal username the push
+// subscription is keyed by. Run via ctx.waitUntil (never blocks the save).
+export async function notifyNewlyAssigned(env, tid, before, after) {
+  if (!after) return;
+  const prior = new Set(assignedList(before || {}).map(normId));
+  const added = assignedList(after).filter(a => !prior.has(normId(a)));
+  if (!added.length) return;
+  const map = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      map[normId(u.username)] = u.username;
+      const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+      if (full) map[normId(full)] = u.username;
+    }
+  } catch {}
+  const ref = after.helpdeskRef || after.id;
+  const site = after.siteName || after.siteCode || "";
+  const body = `${ref}${site ? " — " + site : ""}${after.priority ? " · " + after.priority : ""}. Tap to view.`;
+  for (const eng of added) {
+    const username = map[normId(eng)] || eng;
+    await sendToUser(env, tid, username, {
+      title: "New job assigned to you", body,
+      url: "/engineer-jobs.html", tag: "sla-job:" + after.id
+    });
+  }
 }
 
 /* ================= STORAGE (D1) ================= */

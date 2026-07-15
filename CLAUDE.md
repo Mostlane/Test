@@ -374,6 +374,10 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   - holidays.js `/holiday/request` + `/holiday/cancel` → holiday admins
     (`sendToPermission(["FullAccess","HolidayAdmin"])`, actor excluded).
   - holidays.js `/holiday/approve|reject` → the staff member (`record.username`).
+  - sla.js `/sla/jobs` (POST) + `/sla/job/{id}` (PUT scheduler) →
+    `notifyNewlyAssigned` pushes each engineer NEWLY added to a job (diff
+    before/after so edits don't re-notify), resolving the SLA name/dotted id to
+    the canonical portal username the subscription is keyed by.
   Add new event pushes the same way: import sendToUser/sendToPermission from
   ./push.js and `ctx?.waitUntil(...)` after the action succeeds.
 - **Scheduled reminders (cron)** — `index.js` exports a `scheduled(event,env,ctx)`
