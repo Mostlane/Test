@@ -2627,8 +2627,22 @@ async function handle7(request, env, ctx, url, sess) {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/inbound" && method === "GET") {
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    let fp = null;
+    if (secret) {
+      const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+      fp = [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+    }
+    return jsonResponse({
+      ok: true,
+      configured: !!secret,
+      tokenFingerprint: fp,
+      use: "POST JSON with header Authorization: Bearer <token>"
+    }, headers);
+  }
   if (subpath === "/inbound" && method === "POST") {
-    const secret = env.JOBS_INBOUND_TOKEN || "";
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return jsonResponse({ ok: false, error: "Inbound jobs aren't configured (JOBS_INBOUND_TOKEN missing)" }, headers, 503);
     const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
     let diff = tok.length === secret.length ? 0 : 1;
@@ -6393,7 +6407,9 @@ var PUBLIC_ROUTES = [
   // Vehicle photos (card cover + gallery/lightbox) — signed URL.
   ["GET", "/fleet/vehicle-photo"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
-  ["POST", "/sla/inbound"]
+  ["POST", "/sla/inbound"],
+  ["GET", "/sla/inbound"]
+  // connection self-check (fingerprint only, no secret)
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

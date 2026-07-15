@@ -41,8 +41,24 @@ export async function handle(request, env, ctx, url, sess) {
      secret sent as "Authorization: Bearer <token>". Same create/update logic as
      the office's add-job (upserts by reference — a re-sent email updates rather
      than duplicates), with zap-friendly slack on priority/date formats. */
+  // GET /sla/inbound — connection self-check (no secret leaked): says whether a
+  // token is configured and gives an 8-char fingerprint of it, so a mismatch
+  // between the dashboard secret and the sender's token is diagnosable.
+  if (subpath === "/inbound" && method === "GET") {
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
+    let fp = null;
+    if (secret) {
+      const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+      fp = [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+    }
+    return jsonResponse({ ok: true, configured: !!secret, tokenFingerprint: fp,
+      use: "POST JSON with header Authorization: Bearer <token>" }, headers);
+  }
+
   if (subpath === "/inbound" && method === "POST") {
-    const secret = env.JOBS_INBOUND_TOKEN || "";
+    // Tolerate the two classic dashboard paste slips: stray whitespace/newline
+    // around the secret, and the word "Bearer " pasted into the secret box.
+    const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     if (!secret) return jsonResponse({ ok: false, error: "Inbound jobs aren't configured (JOBS_INBOUND_TOKEN missing)" }, headers, 503);
     const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
     let diff = tok.length === secret.length ? 0 : 1;
