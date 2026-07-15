@@ -49,6 +49,12 @@
   Cache-Control: no-cache
 /sla-fix-sites.html
   Cache-Control: no-cache
+/sla-data-tools.html
+  Cache-Control: no-cache
+/job-archive.html
+  Cache-Control: no-cache
+/xlsx-lite.js
+  Cache-Control: no-cache
 /sla-jobedit.js
   Cache-Control: no-cache
 /site-folder.html

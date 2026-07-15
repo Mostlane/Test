@@ -135,6 +135,81 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(jobs, headers);
   }
 
+  /* ================= ARCHIVE (imported historical jobs) =================
+     Historical jobs (e.g. the 22k Commusoft export) live in a SEPARATE table,
+     sla_jobs_archive, that the live scheduler / day-view / dashboard never read
+     — those paths load the whole sla_jobs table each request, so keeping the
+     archive out of it means no slowdown to daily work. Self-migrating; all
+     routes admin-gated (FullAccess | SLAAdmin). */
+  if (subpath.startsWith("/archive")) {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    await ensureArchive(env, tenantId);
+
+    // POST /sla/archive/import — { jobs:[…] } upsert a batch (keyed by id).
+    if (subpath === "/archive/import" && method === "POST") {
+      const body = await readJson(request);
+      const rows = Array.isArray(body?.jobs) ? body.jobs : [];
+      if (!rows.length) return jsonResponse({ ok: false, error: "no jobs" }, headers, 400);
+      const imported = await archiveImport(env, tenantId, rows);
+      return jsonResponse({ ok: true, imported }, headers);
+    }
+    // GET /sla/archive/count
+    if (subpath === "/archive/count" && method === "GET") {
+      const r = await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first();
+      return jsonResponse({ ok: true, count: r?.n || 0 }, headers);
+    }
+    // POST /sla/archive/clear — wipe the archive (lets a bad import be redone).
+    if (subpath === "/archive/clear" && method === "POST") {
+      await db.prepare("DELETE FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).run();
+      return jsonResponse({ ok: true }, headers);
+    }
+    // GET /sla/archive?q=&limit=&offset= — paged text search (index-friendly LIKE).
+    if (subpath === "/archive" && method === "GET") {
+      const q = (searchParams.get("q") || "").trim().toLowerCase();
+      const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
+      const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
+      let total, rows;
+      if (q) {
+        const like = "%" + q.replace(/[%_\\]/g, "") + "%";
+        total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ?").bind(tenantId, like).first())?.n || 0;
+        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, like, limit, offset).all());
+      } else {
+        total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first())?.n || 0;
+        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, limit, offset).all());
+      }
+      return jsonResponse({ ok: true, total, limit, offset, jobs: (rows || []).map(r => JSON.parse(r.data)) }, headers);
+    }
+    return jsonResponse({ error: "Not found" }, headers, 404);
+  }
+
+  /* POST /sla/jobs/bulk-delete — remove many LIVE jobs at once (test-data
+     cleanup). Admin-only. Chunk-capped per call (subrequest safety) and
+     re-runnable: returns `remaining` so the caller loops until it hits 0.
+     Must precede the generic /jobs/{id} matcher below. */
+  if (subpath === "/jobs/bulk-delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson(request);
+    const CAP = 300;
+    let targetIds = Array.isArray(body?.ids) ? body.ids.map(String) : [];
+    if (body?.all === true) {
+      const { results } = await db.prepare("SELECT id FROM sla_jobs WHERE tenant_id=?").bind(tenantId).all();
+      targetIds = (results || []).map(r => r.id);
+    }
+    const batch = targetIds.slice(0, CAP);
+    let deleted = 0;
+    for (const id of batch) {
+      const res = await db.prepare("DELETE FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+      if (res.meta?.changes) deleted++;
+      try {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
+        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {}
+    }
+    return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
+  }
+
   /* GET /sla/jobs/for-engineer (must precede /jobs/{id}) */
   if (subpath === "/jobs/for-engineer" && method === "GET") {
     // Match if the engineer is ANY of the job's assigned engineers. Both sides
@@ -813,6 +888,59 @@ async function isSlaAdmin(env, tenantId, sess) {
 }
 async function isFullAccess(env, tenantId, sess) {
   return (await userPerms(env, tenantId, sess)).has("FullAccess");
+}
+
+/* ===== Job archive (imported history) ===== */
+let _archiveReady = false;
+async function ensureArchive(env, tenantId) {
+  if (_archiveReady) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS sla_jobs_archive (
+    tenant_id   INTEGER NOT NULL DEFAULT 1,
+    id          TEXT PRIMARY KEY,
+    ref         TEXT,
+    status      TEXT,
+    assigned_to TEXT,
+    site_name   TEXT,
+    postcode    TEXT,
+    created_at  TEXT,
+    completed_at TEXT,
+    search      TEXT,            -- lowercased haystack for LIKE search
+    data        TEXT NOT NULL    -- full imported job JSON
+  )`).run();
+  try { await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_created ON sla_jobs_archive(tenant_id, created_at)").run(); } catch {}
+  _archiveReady = true;
+}
+
+// Upsert a batch of imported jobs (keyed by id). Chunked db.batch() calls keep
+// each within D1's statement limits; the whole POST is one worker invocation.
+async function archiveImport(env, tenantId, rows) {
+  const db = tenantDB(env, tenantId);
+  const stmts = [];
+  for (const j of rows) {
+    if (!j || j.id == null || j.id === "") continue;
+    const search = [
+      j.id, j.helpdeskRef, j.jobName, j.description, j.notes, j.status,
+      j.siteName, j.postcode, j.assignedTo,
+      j.customer && j.customer.name, j.customer && j.customer.postcode, j.address
+    ].filter(Boolean).join(" ").toLowerCase().slice(0, 2000);
+    stmts.push(db.prepare(`INSERT INTO sla_jobs_archive
+      (tenant_id,id,ref,status,assigned_to,site_name,postcode,created_at,completed_at,search,data)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET ref=excluded.ref, status=excluded.status,
+        assigned_to=excluded.assigned_to, site_name=excluded.site_name,
+        postcode=excluded.postcode, created_at=excluded.created_at,
+        completed_at=excluded.completed_at, search=excluded.search, data=excluded.data`)
+      .bind(tenantId, String(j.id), j.helpdeskRef || null, j.status || null,
+        j.assignedTo || null, j.siteName || null, j.postcode || null,
+        j.createdAt || null, j.completionDate || null, search, JSON.stringify(j)));
+  }
+  let done = 0;
+  for (let i = 0; i < stmts.length; i += 50) {
+    await db.batch(stmts.slice(i, i + 50));
+    done += Math.min(50, stmts.length - i);
+  }
+  return done;
 }
 async function getSiteAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);

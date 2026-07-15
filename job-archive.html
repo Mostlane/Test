@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Job Archive – Mostlane</title>
+  <style>
+    html{background:#eef1f4}
+    body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;color:#1f2937;background:transparent}
+    header.page{display:flex;align-items:center;gap:12px;padding:14px 18px;background:#003b82;color:#fff}
+    header.page h1{font-size:18px;margin:0;flex:1}
+    .ml-back{color:#fff;text-decoration:none;font-weight:600;background:rgba(255,255,255,.15);padding:8px 12px;border-radius:9px}
+    .wrap{max-width:960px;margin:16px auto 80px;padding:0 14px}
+    .muted{color:#6b7280;font-size:13px}
+    .searchbar{display:flex;gap:10px;position:sticky;top:0;background:#eef1f4;padding:10px 0;z-index:5}
+    #q{flex:1;padding:12px 14px;border:1px solid #cfd8e0;border-radius:10px;font-size:16px;font-family:inherit}
+    .btn{border:1px solid #cfd8e0;background:#fff;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+    .btn.primary{background:#0066cc;color:#fff;border-color:#0066cc}
+    .btn:disabled{opacity:.5;cursor:default}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+    .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .ref{font-family:monospace;font-size:12px;background:#f1f5f9;padding:2px 7px;border-radius:6px}
+    .status{font-size:11px;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#3730a3}
+    .status.closed{background:#f1f5f9;color:#475569}
+    .name{font-weight:700}
+    .desc{margin:6px 0;font-size:14px}
+    .meta{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#475569;margin-top:4px}
+    .detail{margin-top:10px;border-top:1px dashed #e5e7eb;padding-top:10px;display:none;font-size:13px}
+    .detail.show{display:block}
+    .detail dt{font-weight:600;color:#334155}
+    .detail dd{margin:0 0 8px 0}
+    .msg{padding:14px;text-align:center;color:#6b7280}
+    .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin:14px 0}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>🗄️ Job Archive</h1>
+    <a class="ml-back" data-role="home" href="sla-main.html">← SLA</a>
+  </header>
+
+  <div class="wrap">
+    <div id="denied" style="display:none" class="msg">This page is for SLA admins (Full Access or SLA Admin).</div>
+    <div id="app" style="display:none">
+      <div class="searchbar">
+        <input id="q" placeholder="Search job number, customer, site, postcode, engineer, description…" autocomplete="off" />
+        <button class="btn primary" id="go">Search</button>
+      </div>
+      <div id="count" class="muted" style="margin:4px 2px 10px"></div>
+      <div id="results"></div>
+      <div class="pager" id="pager" style="display:none">
+        <button class="btn" id="prev">← Newer</button>
+        <span id="pageInfo" class="muted"></span>
+        <button class="btn" id="next">Older →</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SLA = "https://mostlane-sla.jamie-def.workers.dev";
+const $ = id => document.getElementById(id);
+const LIMIT = 50;
+let offset = 0, total = 0, curQ = "";
+
+function cachedPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); }catch(e){ return {}; } }
+(function gate(){
+  const p = cachedPerms(); const yes = v => String(v||"").toLowerCase()==="yes";
+  const ok = yes(p.FullAccess) || yes(p.SLAAdmin);
+  $("app").style.display = ok ? "" : "none";
+  $("denied").style.display = ok ? "none" : "";
+  if (ok) search(true);
+})();
+
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fmtDate(iso){ if(!iso) return ""; const d=new Date(iso); return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}); }
+function engineersOf(j){ return (Array.isArray(j.assignedEngineers)&&j.assignedEngineers.length)?j.assignedEngineers.join(", "):(j.assignedTo||""); }
+function money(v){ if(v==null||v==="") return ""; const n=parseFloat(v); return isFinite(n)?("£"+n.toFixed(2)):esc(v); }
+
+function detailHtml(j){
+  const c = j.customer||{}, s = j.signed||{}, f = j.financials||{};
+  const rows = [];
+  const add = (k,v)=>{ if(v) rows.push(`<dt>${k}</dt><dd>${esc(v)}</dd>`); };
+  add("Job name", j.jobName);
+  add("Customer", c.name);
+  add("Customer address", [c.address, c.postcode].filter(Boolean).join(", "));
+  add("Customer phone", c.phone);
+  add("Customer email", (c.email && c.email!=="-") ? c.email : "");
+  add("Site", [j.siteName, j.address, j.postcode].filter(Boolean).join(", "));
+  add("Contact", [j.contact&&j.contact.name, j.contact&&j.contact.phone].filter(Boolean).join(" · "));
+  add("Notes", j.notes);
+  add("Job type", j.jobType);
+  add("Invoice status", j.invoiceStatus);
+  const tot = money(f.total); if(tot) add("Total", tot);
+  add("Created", [fmtDate(j.createdAt), j.createdBy].filter(Boolean).join(" · "));
+  add("Completed", fmtDate(j.completionDate));
+  if (s.date) add("Signed off", [s.date, s.time, s.name].filter(Boolean).join(" "));
+  return `<dl class="detail">${rows.join("")}</dl>`;
+}
+
+function render(jobs){
+  if (!jobs.length){ $("results").innerHTML = `<div class="msg">No matching jobs.</div>`; return; }
+  $("results").innerHTML = jobs.map((j,i)=>{
+    const closed = /closed|complete|invoiced/i.test(j.status||"");
+    return `<div class="card" data-i="${i}">
+      <div class="top">
+        <span class="ref">${esc(j.helpdeskRef||j.id)}</span>
+        <span class="name">${esc(j.siteName||j.jobName||"")}</span>
+        <span style="flex:1"></span>
+        <span class="status ${closed?"closed":""}">${esc(j.status||"")}</span>
+      </div>
+      <div class="desc">${esc(j.description||"")}</div>
+      <div class="meta">
+        ${engineersOf(j)?`<span>👷 ${esc(engineersOf(j))}</span>`:""}
+        ${j.postcode?`<span>📍 ${esc(j.postcode)}</span>`:""}
+        ${j.createdAt?`<span>📅 ${fmtDate(j.createdAt)}</span>`:""}
+      </div>
+      ${detailHtml(j)}
+    </div>`;
+  }).join("");
+  // tap a card to expand
+  document.querySelectorAll("#results .card").forEach(card=>{
+    card.addEventListener("click", ()=> card.querySelector(".detail").classList.toggle("show"));
+  });
+}
+
+async function search(reset){
+  if (reset) offset = 0;
+  curQ = $("q").value.trim();
+  $("results").innerHTML = `<div class="msg">Searching…</div>`;
+  try{
+    const url = SLA + "/archive?limit=" + LIMIT + "&offset=" + offset + (curQ ? "&q="+encodeURIComponent(curQ) : "");
+    const d = await (await fetch(url, { cache:"no-store" })).json();
+    if (!d.ok) throw new Error(d.error||"failed");
+    total = d.total||0;
+    render(d.jobs||[]);
+    $("count").textContent = total.toLocaleString() + (curQ ? " match"+(total===1?"":"es") : " jobs in the archive");
+    const pages = Math.ceil(total/LIMIT) || 1, page = Math.floor(offset/LIMIT)+1;
+    $("pager").style.display = total > LIMIT ? "flex" : "none";
+    $("pageInfo").textContent = "Page " + page + " of " + pages;
+    $("prev").disabled = offset <= 0;
+    $("next").disabled = offset + LIMIT >= total;
+  }catch(e){
+    $("results").innerHTML = `<div class="msg">Couldn't load the archive: ${esc(e.message)}</div>`;
+  }
+}
+
+$("go").onclick = () => search(true);
+$("q").addEventListener("keydown", e => { if(e.key==="Enter") search(true); });
+let deb; $("q").addEventListener("input", ()=>{ clearTimeout(deb); deb=setTimeout(()=>search(true), 350); });
+$("prev").onclick = () => { if(offset>0){ offset -= LIMIT; search(false); window.scrollTo(0,0);} };
+$("next").onclick = () => { if(offset+LIMIT<total){ offset += LIMIT; search(false); window.scrollTo(0,0);} };
+</script>
+</body>
+</html>

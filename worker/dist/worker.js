@@ -2704,6 +2704,65 @@ async function handle7(request, env, ctx, url, sess) {
     if (overdueFilter === "true") jobs = jobs.filter((j) => j.sla?.state === "BREACHED");
     return jsonResponse(jobs, headers);
   }
+  if (subpath.startsWith("/archive")) {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    await ensureArchive(env, tenantId);
+    if (subpath === "/archive/import" && method === "POST") {
+      const body = await readJson2(request);
+      const rows = Array.isArray(body?.jobs) ? body.jobs : [];
+      if (!rows.length) return jsonResponse({ ok: false, error: "no jobs" }, headers, 400);
+      const imported = await archiveImport(env, tenantId, rows);
+      return jsonResponse({ ok: true, imported }, headers);
+    }
+    if (subpath === "/archive/count" && method === "GET") {
+      const r = await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first();
+      return jsonResponse({ ok: true, count: r?.n || 0 }, headers);
+    }
+    if (subpath === "/archive/clear" && method === "POST") {
+      await db.prepare("DELETE FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).run();
+      return jsonResponse({ ok: true }, headers);
+    }
+    if (subpath === "/archive" && method === "GET") {
+      const q = (searchParams.get("q") || "").trim().toLowerCase();
+      const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
+      const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
+      let total, rows;
+      if (q) {
+        const like = "%" + q.replace(/[%_\\]/g, "") + "%";
+        total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ?").bind(tenantId, like).first())?.n || 0;
+        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, like, limit, offset).all());
+      } else {
+        total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first())?.n || 0;
+        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, limit, offset).all());
+      }
+      return jsonResponse({ ok: true, total, limit, offset, jobs: (rows || []).map((r) => JSON.parse(r.data)) }, headers);
+    }
+    return jsonResponse({ error: "Not found" }, headers, 404);
+  }
+  if (subpath === "/jobs/bulk-delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson2(request);
+    const CAP = 300;
+    let targetIds = Array.isArray(body?.ids) ? body.ids.map(String) : [];
+    if (body?.all === true) {
+      const { results } = await db.prepare("SELECT id FROM sla_jobs WHERE tenant_id=?").bind(tenantId).all();
+      targetIds = (results || []).map((r) => r.id);
+    }
+    const batch = targetIds.slice(0, CAP);
+    let deleted = 0;
+    for (const id of batch) {
+      const res = await db.prepare("DELETE FROM sla_jobs WHERE tenant_id=? AND id=?").bind(tenantId, id).run();
+      if (res.meta?.changes) deleted++;
+      try {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
+        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {
+      }
+    }
+    return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
+  }
   if (subpath === "/jobs/for-engineer" && method === "GET") {
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");
@@ -3327,6 +3386,75 @@ async function isSlaAdmin(env, tenantId, sess) {
 }
 async function isFullAccess(env, tenantId, sess) {
   return (await userPerms(env, tenantId, sess)).has("FullAccess");
+}
+var _archiveReady = false;
+async function ensureArchive(env, tenantId) {
+  if (_archiveReady) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS sla_jobs_archive (
+    tenant_id   INTEGER NOT NULL DEFAULT 1,
+    id          TEXT PRIMARY KEY,
+    ref         TEXT,
+    status      TEXT,
+    assigned_to TEXT,
+    site_name   TEXT,
+    postcode    TEXT,
+    created_at  TEXT,
+    completed_at TEXT,
+    search      TEXT,            -- lowercased haystack for LIKE search
+    data        TEXT NOT NULL    -- full imported job JSON
+  )`).run();
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_created ON sla_jobs_archive(tenant_id, created_at)").run();
+  } catch {
+  }
+  _archiveReady = true;
+}
+async function archiveImport(env, tenantId, rows) {
+  const db = tenantDB(env, tenantId);
+  const stmts = [];
+  for (const j of rows) {
+    if (!j || j.id == null || j.id === "") continue;
+    const search = [
+      j.id,
+      j.helpdeskRef,
+      j.jobName,
+      j.description,
+      j.notes,
+      j.status,
+      j.siteName,
+      j.postcode,
+      j.assignedTo,
+      j.customer && j.customer.name,
+      j.customer && j.customer.postcode,
+      j.address
+    ].filter(Boolean).join(" ").toLowerCase().slice(0, 2e3);
+    stmts.push(db.prepare(`INSERT INTO sla_jobs_archive
+      (tenant_id,id,ref,status,assigned_to,site_name,postcode,created_at,completed_at,search,data)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET ref=excluded.ref, status=excluded.status,
+        assigned_to=excluded.assigned_to, site_name=excluded.site_name,
+        postcode=excluded.postcode, created_at=excluded.created_at,
+        completed_at=excluded.completed_at, search=excluded.search, data=excluded.data`).bind(
+      tenantId,
+      String(j.id),
+      j.helpdeskRef || null,
+      j.status || null,
+      j.assignedTo || null,
+      j.siteName || null,
+      j.postcode || null,
+      j.createdAt || null,
+      j.completionDate || null,
+      search,
+      JSON.stringify(j)
+    ));
+  }
+  let done = 0;
+  for (let i = 0; i < stmts.length; i += 50) {
+    await db.batch(stmts.slice(i, i + 50));
+    done += Math.min(50, stmts.length - i);
+  }
+  return done;
 }
 async function getSiteAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);

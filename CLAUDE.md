@@ -166,6 +166,25 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   "zapier". Returns {ok, created, id, reference, status, priority, targetAt}.
   **DELETE /sla/jobs/{id}** (FullAccess|SLAAdmin): removes the job + purges
   its R2 files (jobs/{id}/…); 🗑 button in the shared editor (admin-only).
+  **POST /sla/jobs/bulk-delete** (FullAccess|SLAAdmin): `{ids:[…]}` or
+  `{all:true}`; chunk-capped (300/call) + returns `remaining` so the caller
+  loops — used to clear test data before the history import.
+  **Job archive (imported history)**: 22k+ historical jobs (the Commusoft
+  `jobreport…xlsx`) live in a SEPARATE self-migrating table **sla_jobs_archive**
+  (indexed cols + `search` haystack + full JSON in `data`), deliberately NOT on
+  the live `listJobs` hot path (scheduler/day-view/dashboard load the whole
+  sla_jobs table each request — the archive must never bloat that). Routes
+  (FullAccess|SLAAdmin): **POST /sla/archive/import** (`{jobs:[…]}` upsert by
+  id), **GET /sla/archive?q=&limit=&offset=** (paged LIKE search), **GET
+  /sla/archive/count**, **POST /sla/archive/clear**. Front-end:
+  **sla-data-tools.html** (admin: review + bulk-delete live jobs, then import
+  the spreadsheet) parses the .xlsx entirely in-browser via **xlsx-lite.js**
+  (dependency-free ZIP+inflate+XML reader — customer data never touches the
+  public repo or an external tool; import batches 200 rows, dedupes duplicate
+  MOS numbers by id-suffix so all rows survive). **job-archive.html** = the
+  everyday search page. Both linked from sla-main header (🗄️ Archive / 🧰 Data,
+  SLA-admin-gated). Jobs keep their real status so closed history stays out of
+  engineers' active views.
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,
@@ -276,7 +295,8 @@ sessions, devices, login_history, password_resets, holidays(+config/log/
 allowance/system_days), assets, asset_transfers, asset_transfer_requests,
 sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
-**vehicles**, **vehicle_assignments**, **van_timesheets**. app_config also
+**vehicles**, **vehicle_assignments**, **van_timesheets**, **sla_jobs_archive**
+(imported job history — separate from live sla_jobs). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
 `fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>` and the
 notification-suppression rules. R2 (JOB_FILES): `fleetreports/<tid>/…`,

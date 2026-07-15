@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <script src="/xlsx-lite.js?v=1"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SLA Data Tools – Mostlane</title>
+  <style>
+    html{background:#eef1f4}
+    body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;color:#1f2937;background:transparent}
+    header.page{display:flex;align-items:center;gap:12px;padding:14px 18px;background:#003b82;color:#fff}
+    header.page h1{font-size:18px;margin:0;flex:1}
+    .ml-back{color:#fff;text-decoration:none;font-weight:600;background:rgba(255,255,255,.15);padding:8px 12px;border-radius:9px}
+    .wrap{max-width:1000px;margin:18px auto 80px;padding:0 14px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin-bottom:18px;box-shadow:0 4px 12px rgba(0,0,0,.05)}
+    .card h2{margin:0 0 4px;font-size:16px}
+    .muted{color:#6b7280;font-size:13px}
+    .btn{border:1px solid #cfd8e0;background:#fff;border-radius:9px;padding:9px 14px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+    .btn.primary{background:#0066cc;color:#fff;border-color:#0066cc}
+    .btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+    .btn:disabled{opacity:.5;cursor:default}
+    .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f4;vertical-align:top}
+    th{position:sticky;top:0;background:#f8fafc;font-size:12px;color:#475569}
+    .scroll{max-height:52vh;overflow:auto;border:1px solid #eef1f4;border-radius:10px}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f1f5f9;font-size:11px}
+    .prog{height:12px;background:#eef1f4;border-radius:999px;overflow:hidden;margin-top:8px}
+    .prog > i{display:block;height:100%;width:0;background:#0066cc;transition:width .2s}
+    .msg{font-size:13px;margin-top:8px;min-height:18px}
+    .ok{color:#047857}.err{color:#b91c1c}
+    input[type=file]{font-size:14px}
+    .warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:10px;padding:10px 12px;font-size:13px}
+    code{background:#f1f5f9;padding:1px 5px;border-radius:5px}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <h1>🧰 SLA Data Tools</h1>
+    <a class="btn" href="job-archive.html" style="text-decoration:none">🗄️ Job Archive</a>
+    <a class="ml-back" data-role="home" href="sla-main.html">← SLA</a>
+  </header>
+
+  <div class="wrap">
+    <div id="denied" class="card" style="display:none">
+      <h2>Not available</h2>
+      <p class="muted">This page is for SLA admins (Full Access or SLA Admin). Ask an admin if you need it.</p>
+    </div>
+
+    <div id="tools" style="display:none">
+
+      <!-- ============ Clean up current jobs ============ -->
+      <div class="card">
+        <h2>1 · Current live jobs</h2>
+        <p class="muted">These are the jobs in the live scheduler right now. Review them and remove any test/fake jobs before importing your history. <b>Deletions are permanent</b> and also remove that job's photos/signatures.</p>
+        <div class="bar">
+          <button class="btn" id="reload">↻ Reload</button>
+          <span id="liveCount" class="pill">…</span>
+          <span style="flex:1"></span>
+          <button class="btn" id="delSel">🗑 Delete selected</button>
+          <button class="btn danger" id="delAll">Delete ALL live jobs…</button>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr>
+              <th style="width:34px"><input type="checkbox" id="selAll"></th>
+              <th>Ref</th><th>Status</th><th>Engineer(s)</th><th>Site</th><th>Created</th>
+            </tr></thead>
+            <tbody id="liveBody"><tr><td colspan="6" class="muted" style="padding:14px">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="msg" id="delMsg"></div>
+      </div>
+
+      <!-- ============ Import archive ============ -->
+      <div class="card">
+        <h2>2 · Import job history (archive)</h2>
+        <p class="muted">Load your previous jobs from the exported spreadsheet. They go into a <b>separate archive</b> — searchable on the Job Archive page, but kept out of the live scheduler so daily work stays fast. Safe to re-run: jobs are matched by their <code>MOS</code> number, so nothing duplicates.</p>
+        <div class="warn">Do this on a computer (not a phone). The file is large — leave the tab open until it finishes.</div>
+        <div class="bar">
+          <input type="file" id="file" accept=".xlsx" />
+          <span id="archCount" class="pill">archive: …</span>
+        </div>
+        <div class="bar">
+          <button class="btn primary" id="startImport" disabled>Import all jobs</button>
+          <button class="btn" id="clearArch">Empty the archive…</button>
+        </div>
+        <div class="prog"><i id="progBar"></i></div>
+        <div class="msg" id="impMsg"></div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+const SLA = "https://mostlane-sla.jamie-def.workers.dev"; // bridge → mostlane-api/sla/* (+ Bearer token)
+const $ = id => document.getElementById(id);
+
+/* ---- permission gate (server still enforces) ---- */
+function cachedPerms(){
+  try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}"); }
+  catch(e){ return {}; }
+}
+(function gate(){
+  const p = cachedPerms(); const yes = v => String(v||"").toLowerCase()==="yes";
+  const allowed = yes(p.FullAccess) || yes(p.SLAAdmin);
+  $("tools").style.display = allowed ? "" : "none";
+  $("denied").style.display = allowed ? "none" : "";
+  if (allowed) { loadLive(); refreshArchCount(); }
+})();
+
+/* ================= SECTION 1: live jobs ================= */
+let LIVE = [];
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function engineersOf(j){
+  if (Array.isArray(j.assignedEngineers) && j.assignedEngineers.length) return j.assignedEngineers.join(", ");
+  return j.assignedTo || "";
+}
+async function loadLive(){
+  $("liveBody").innerHTML = `<tr><td colspan="6" class="muted" style="padding:14px">Loading…</td></tr>`;
+  try{
+    const res = await fetch(SLA + "/jobs", { cache:"no-store" });
+    LIVE = await res.json();
+    if (!Array.isArray(LIVE)) LIVE = [];
+    $("liveCount").textContent = LIVE.length + " live job" + (LIVE.length===1?"":"s");
+    if (!LIVE.length){ $("liveBody").innerHTML = `<tr><td colspan="6" class="muted" style="padding:14px">No live jobs.</td></tr>`; return; }
+    $("liveBody").innerHTML = LIVE.map(j => `
+      <tr>
+        <td><input type="checkbox" class="rowchk" data-id="${esc(j.id)}"></td>
+        <td><b>${esc(j.helpdeskRef || j.id)}</b></td>
+        <td>${esc(j.status || "")}</td>
+        <td>${esc(engineersOf(j))}</td>
+        <td>${esc(j.siteName || j.siteCode || "")}</td>
+        <td>${esc((j.createdAt||"").slice(0,10))}</td>
+      </tr>`).join("");
+  }catch(e){
+    $("liveBody").innerHTML = `<tr><td colspan="6" class="err" style="padding:14px">Couldn't load jobs: ${esc(e.message)}</td></tr>`;
+  }
+}
+$("reload").onclick = loadLive;
+$("selAll").onchange = e => document.querySelectorAll(".rowchk").forEach(c => c.checked = e.target.checked);
+
+async function bulkDelete(payload, label){
+  $("delMsg").className = "msg";
+  $("delMsg").textContent = "Deleting…";
+  let total = 0;
+  // loop until the server reports nothing remaining (chunk-capped per call)
+  for (let guard = 0; guard < 500; guard++){
+    const res = await fetch(SLA + "/jobs/bulk-delete", {
+      method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload)
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok){ throw new Error(d.error || ("HTTP " + res.status)); }
+    total += d.deleted || 0;
+    $("delMsg").textContent = `Deleted ${total}${d.remaining ? " (…" + d.remaining + " to go)" : ""}`;
+    if (!d.remaining) break;
+  }
+  $("delMsg").className = "msg ok";
+  $("delMsg").textContent = `✓ Deleted ${total} ${label}.`;
+  await loadLive();
+}
+$("delSel").onclick = async () => {
+  const ids = [...document.querySelectorAll(".rowchk:checked")].map(c => c.getAttribute("data-id"));
+  if (!ids.length){ $("delMsg").className="msg"; $("delMsg").textContent="Nothing selected."; return; }
+  if (!confirm(`Permanently delete ${ids.length} selected job(s)? This can't be undone.`)) return;
+  try{ await bulkDelete({ ids }, "selected job(s)"); }
+  catch(e){ $("delMsg").className="msg err"; $("delMsg").textContent="Error: "+e.message; }
+};
+$("delAll").onclick = async () => {
+  if (!LIVE.length){ $("delMsg").textContent="No live jobs to delete."; return; }
+  if (!confirm(`Permanently delete ALL ${LIVE.length} live jobs? Use this only if they're all test data. This can't be undone.`)) return;
+  if (!confirm("Really delete every live job? Last chance.")) return;
+  try{ await bulkDelete({ all:true }, "live jobs"); }
+  catch(e){ $("delMsg").className="msg err"; $("delMsg").textContent="Error: "+e.message; }
+};
+
+/* ================= SECTION 2: import archive ================= */
+async function refreshArchCount(){
+  try{
+    const d = await (await fetch(SLA + "/archive/count", { cache:"no-store" })).json();
+    $("archCount").textContent = "archive: " + (d.count||0).toLocaleString() + " jobs";
+  }catch(e){ $("archCount").textContent = "archive: ?"; }
+}
+
+/* --- transform one spreadsheet row (cells keyed by column letter) --- */
+function parseDT(s){ // "06/05/2020 - 13:53" (dd/mm/yyyy)
+  const m = (s||"").match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s*-\s*(\d{1,2}):(\d{2}))?/);
+  if(!m) return null;
+  const [,dd,mm,yy,hh,mi] = m;
+  const d = new Date(Date.UTC(+yy, +mm-1, +dd, +(hh||0), +(mi||0)));
+  return isNaN(d) ? null : d.toISOString();
+}
+function excelSerial(n){
+  const f = parseFloat(n); if(!isFinite(f)) return null;
+  const d = new Date(Date.UTC(1899,11,30) + Math.round(f*86400000));
+  return isNaN(d) ? null : d.toISOString();
+}
+function transform(c, seen){
+  const g = k => (c[k]==null ? "" : String(c[k])).trim();
+  let id = g("B") || g("A"); // MOS number; fall back to name if ever blank
+  if (!id) return null;
+  if (seen.has(id)){ let i=2; while(seen.has(id+"-"+i)) i++; id = id+"-"+i; } // keep both of any dup MOS
+  seen.add(id);
+  const joinNE = arr => arr.filter(Boolean).join(", ");
+  return {
+    id,
+    helpdeskRef: g("B"),
+    jobName: g("A"),
+    description: g("W"),
+    notes: g("X"),
+    status: g("L"),
+    jobType: g("AB"),
+    invoiceStatus: g("M"),
+    quoteConversion: g("K"),
+    assignedTo: g("T"),
+    priority: "Priority 4",
+    customer: { name:g("C"), phone:g("D"), email:g("E"),
+                address: joinNE([g("F"),g("G"),g("H"),g("I")]), postcode:g("J") },
+    siteName: g("AC"),
+    address: joinNE([g("AD"),g("AE"),g("AF"),g("AG")]),
+    postcode: g("AH"),
+    contact: { name:g("Y"), phone:g("Z"), email:g("AA") },
+    financials: { cost:g("N"), tax:g("O"), total:g("P"),
+                  profit:g("AK"), expenses:g("AL"), profitLoss:g("AM") },
+    trackedTime: g("AI"),
+    scheduleDate: g("Q"),
+    dueDate: g("AJ"),
+    signed: { date:g("AN"), time:g("AO"), name:g("AP") },
+    createdBy: g("U"),
+    createdAt: parseDT(g("V")),
+    completionDate: excelSerial(g("BC")),
+    source: "import:commusoft",
+    importBatch: "jobreport"
+  };
+}
+
+$("file").onchange = () => { $("startImport").disabled = !$("file").files.length; $("impMsg").textContent=""; };
+
+$("clearArch").onclick = async () => {
+  if (!confirm("Empty the entire job archive? (You can re-import from the spreadsheet afterwards.)")) return;
+  try{
+    const d = await (await fetch(SLA + "/archive/clear", { method:"POST" })).json();
+    if(!d.ok) throw new Error(d.error||"failed");
+    $("impMsg").className="msg ok"; $("impMsg").textContent="Archive emptied.";
+    refreshArchCount();
+  }catch(e){ $("impMsg").className="msg err"; $("impMsg").textContent="Error: "+e.message; }
+};
+
+$("startImport").onclick = async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  $("startImport").disabled = true; $("delAll").disabled = true;
+  $("impMsg").className = "msg"; $("impMsg").textContent = "Reading spreadsheet…";
+  $("progBar").style.width = "0%";
+  try{
+    const buf = await f.arrayBuffer();
+    const wb = await XLSXLite.parse(buf);
+    const total = Math.max(0, wb.rowCount - 1); // minus header
+    const seen = new Set();
+    let batch = [], sent = 0, imported = 0, first = true;
+    const BATCH = 200;
+
+    const flush = async () => {
+      if (!batch.length) return;
+      const res = await fetch(SLA + "/archive/import", {
+        method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ jobs: batch })
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error || ("HTTP " + res.status));
+      imported += d.imported || 0;
+      batch = [];
+    };
+
+    for await (const row of wb.rows()){
+      if (first){ first = false; continue; } // header row
+      const job = transform(row.cells, seen);
+      if (job) batch.push(job);
+      if (batch.length >= BATCH){
+        await flush();
+        sent += BATCH;
+        $("progBar").style.width = Math.min(100, Math.round(sent/total*100)) + "%";
+        $("impMsg").textContent = `Imported ${imported.toLocaleString()} of ~${total.toLocaleString()}…`;
+      }
+    }
+    await flush();
+    $("progBar").style.width = "100%";
+    $("impMsg").className = "msg ok";
+    $("impMsg").textContent = `✓ Done — ${imported.toLocaleString()} jobs in the archive.`;
+    refreshArchCount();
+  }catch(e){
+    $("impMsg").className = "msg err";
+    $("impMsg").textContent = "Import failed: " + e.message;
+  }finally{
+    $("startImport").disabled = false; $("delAll").disabled = false;
+  }
+};
+</script>
+</body>
+</html>

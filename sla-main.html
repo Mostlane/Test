@@ -209,10 +209,23 @@
         <a href="sla-scheduler.html#map" class="btn">🗺️ Map</a>
         <a href="engineer-jobs.html" class="btn">📝 My Jobs</a>
         <a href="sla-settings.html" class="btn">⚙️ Settings</a>
+        <a href="job-archive.html" class="btn" id="archiveLink" style="display:none">🗄️ Archive</a>
+        <a href="sla-data-tools.html" class="btn" id="dataToolsLink" style="display:none">🧰 Data</a>
         <a href="add-job.html" class="btn orange">＋ Add Job</a>
         <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
     </header>
+    <script>
+      // Archive search + data tools are SLA-admin only (server enforces too).
+      (function(){ try{
+        var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+        var yes = v => String(v||"").toLowerCase() === "yes";
+        if (yes(p.FullAccess) || yes(p.SLAAdmin)) {
+          document.getElementById("archiveLink").style.display = "";
+          document.getElementById("dataToolsLink").style.display = "";
+        }
+      }catch(e){} })();
+    </script>
 
     <div class="chips" id="statusChips"></div>
 
