@@ -144,6 +144,41 @@
     .status-open{background:#dcfce7;color:#166534;}
     .status-overdue{background:#fee2e2;color:#b91c1c;}
     .status-complete{background:#e5e7eb;color:#374151;}
+
+    /* Tap-to-change status chips (mobile-first, auto-saving). */
+    .status-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(116px,1fr));
+      gap:8px;
+      margin-top:6px;
+    }
+    .status-chip{
+      display:flex;align-items:center;justify-content:center;gap:7px;
+      min-height:54px;padding:10px 10px;
+      border-radius:13px;border:1.5px solid #e5e7eb;background:#fff;
+      font-size:14px;font-weight:600;color:#374151;cursor:pointer;
+      font-family:inherit;line-height:1.15;text-align:center;
+      transition:transform .06s ease, box-shadow .15s ease, background .15s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .status-chip .chip-e{font-size:18px;line-height:1}
+    .status-chip:active{transform:scale(.95)}
+    .status-chip[aria-pressed="true"]{color:#fff;border-color:transparent;box-shadow:0 5px 14px rgba(0,0,0,.20)}
+    .status-chip[aria-pressed="true"] .chip-e{filter:drop-shadow(0 1px 1px rgba(0,0,0,.25))}
+    /* light per-type borders when unselected, solid fill when selected */
+    .chip-grey{border-color:#e2e5e9}    .chip-grey[aria-pressed="true"]{background:#6b7280}
+    .chip-blue{border-color:#c7dbfd}    .chip-blue[aria-pressed="true"]{background:#2563eb}
+    .chip-indigo{border-color:#cdd0fb}  .chip-indigo[aria-pressed="true"]{background:#4f46e5}
+    .chip-green{border-color:#bbf7d0}   .chip-green[aria-pressed="true"]{background:#16a34a}
+    .chip-amber{border-color:#fde3b0}   .chip-amber[aria-pressed="true"]{background:#d97706}
+    .chip-teal{border-color:#a7e6dd}    .chip-teal[aria-pressed="true"]{background:#0d9488}
+    .chip-slate{border-color:#cbd5e1}   .chip-slate[aria-pressed="true"]{background:#475569}
+    .chip-orange{border-color:#fdd0ab}  .chip-orange[aria-pressed="true"]{background:#ea580c}
+    .chip-purple{border-color:#ddd0fb}  .chip-purple[aria-pressed="true"]{background:#7c3aed}
+    .status-hint{font-weight:400;color:var(--muted);font-size:11px}
+    #statusBar.saving{color:#2563eb;font-weight:600}
+    #statusBar.saved{color:#166534;font-weight:600}
+    #statusBar.err{color:#b91c1c;font-weight:600}
     .section-title{
       font-size:14px;
       font-weight:600;
@@ -444,26 +479,25 @@
     <p class="section-sub">
       Any change you make here is logged in the job event history with your name and a timestamp.
     </p>
-    <div class="row">
-      <div class="col">
-        <div class="field-label">Status</div>
-        <select id="statusSelect">
-          <option value="Pending">Pending</option>
-          <option value="Scheduled">Scheduled</option>
-          <option value="Travelling">Travelling</option>
-          <option value="In Progress">In Progress</option>
-          <option value="On Hold">On Hold</option>
-          <option value="Complete">Complete</option>
-          <option value="Closed Jobs">Closed Jobs</option>
-          <option value="Invoiced">Invoiced</option>
-          <option value="Order">Order</option>
-          <option value="Quote">Quote</option>
-        </select>
-      </div>
-      <div class="col">
-        <div class="field-label">Note / Update</div>
-        <textarea id="noteInput" placeholder="e.g. Arrived on site, waiting on materials…"></textarea>
-      </div>
+    <div class="field-label">Status <span class="status-hint">— tap to change, saves automatically</span></div>
+    <div class="status-grid" id="statusGrid"></div>
+    <!-- Hidden mirror of the tapped status, so the save/validation logic below
+         keeps reading $("statusSelect").value exactly as before. -->
+    <select id="statusSelect" style="display:none">
+      <option value="Pending">Pending</option>
+      <option value="Scheduled">Scheduled</option>
+      <option value="Travelling">Travelling</option>
+      <option value="In Progress">In Progress</option>
+      <option value="On Hold">On Hold</option>
+      <option value="Complete">Complete</option>
+      <option value="Closed Jobs">Closed Jobs</option>
+      <option value="Invoiced">Invoiced</option>
+      <option value="Order">Order</option>
+      <option value="Quote">Quote</option>
+    </select>
+    <div style="margin-top:12px">
+      <div class="field-label">Note / Update <span class="status-hint">(optional)</span></div>
+      <textarea id="noteInput" placeholder="e.g. Arrived on site, waiting on materials…"></textarea>
     </div>
     <div id="quotePanel" style="display:none;margin-top:14px;padding:14px;border:1px solid #cdd7e2;border-radius:10px;background:#f7faff;">
       <div style="font-weight:700;color:#003b82;margin-bottom:8px;">Quote details — so the office can quote the works</div>
@@ -507,7 +541,7 @@
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:700;color:#92500a;"><input type="checkbox" id="ra_safe"> I've assessed the site and it's safe to proceed</label>
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;">
-      <button class="btn primary" id="saveBtn">Save Update</button>
+      <button class="btn primary" id="saveBtn" style="display:none">Save Update</button>
     </div>
     <div id="statusBar">Ready.</div>
   </div>
@@ -749,6 +783,8 @@ function renderJob(){
   } else {
     $("noteInput").value = "";
   }
+  highlightStatus(statusSelect.value);
+  updateSaveButton();
 
   fillQuoteFromJob();
   fillRAFromJob();
@@ -1042,6 +1078,86 @@ function syncPanels(){
   if($("raPanel"))    $("raPanel").style.display    = (s === "In Progress") ? "block" : "none";
   if($("holdPanel"))  $("holdPanel").style.display  = (s === "On Hold") ? "block" : "none";
 }
+
+/* ---------- Tap-to-change status chips (auto-save) ---------- */
+// Statuses that need a details pack first: never silent-save — reveal the panel
+// and let the engineer confirm once it's filled in.
+const STATUS_META = {
+  "Pending":    { e:"🕓", c:"grey"   },
+  "Scheduled":  { e:"📅", c:"blue"   },
+  "Travelling": { e:"🚚", c:"indigo" },
+  "In Progress":{ e:"🔧", c:"green"  },
+  "On Hold":    { e:"⏸️", c:"amber"  },
+  "Complete":   { e:"✅", c:"teal"   },
+  "Closed Jobs":{ e:"🔒", c:"slate"  },
+  "Invoiced":   { e:"💷", c:"teal"   },
+  "Order":      { e:"📦", c:"orange" },
+  "Quote":      { e:"📝", c:"purple" }
+};
+function isPackStatus(s){ return s === "Quote" || s === "On Hold" || s === "In Progress"; }
+
+function buildStatusChips(){
+  const grid = $("statusGrid");
+  if(!grid) return;
+  grid.innerHTML = "";
+  Array.from($("statusSelect").options).forEach(opt => {
+    const m = STATUS_META[opt.value] || { e:"•", c:"grey" };
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "status-chip chip-" + m.c;
+    b.dataset.status = opt.value;
+    b.setAttribute("aria-pressed", "false");
+    b.innerHTML = `<span class="chip-e">${m.e}</span><span>${opt.textContent}</span>`;
+    b.addEventListener("click", () => pickStatus(opt.value));
+    grid.appendChild(b);
+  });
+}
+function highlightStatus(value){
+  document.querySelectorAll("#statusGrid .status-chip").forEach(c =>
+    c.setAttribute("aria-pressed", c.dataset.status === value ? "true" : "false"));
+}
+// Show the Save button only when it's genuinely needed: a details-pack status,
+// or a note typed against the unchanged status (so the note can be saved).
+function updateSaveButton(){
+  const s = $("statusSelect").value;
+  const note = $("noteInput").value.trim();
+  const btn = $("saveBtn");
+  if(!btn) return;
+  let show = false, label = "Save update";
+  if(isPackStatus(s)){
+    show = true;
+    label = s === "Quote" ? "Save quote details"
+          : s === "On Hold" ? "Save on-hold details"
+          : "Confirm & start work";
+  } else if(note && job && s === (job.status || "")){
+    show = true; label = "Save note";
+  }
+  btn.style.display = show ? "" : "none";
+  btn.textContent = label;
+}
+function pickStatus(value){
+  $("statusSelect").value = value;
+  highlightStatus(value);
+  syncPanels();
+  updateSaveButton();
+  if(isPackStatus(value)){
+    // Reveal the relevant panel and let them fill it, then hit the button.
+    const panel = value === "Quote" ? $("quotePanel")
+                : value === "On Hold" ? $("holdPanel") : $("raPanel");
+    if(panel) panel.scrollIntoView({ behavior:"smooth", block:"center" });
+    $("statusBar").className = "";
+    $("statusBar").textContent = "Fill in the details, then confirm.";
+    return;
+  }
+  // Simple status → save straight away (no button needed).
+  const current = job ? (job.status || "") : "";
+  if(value === current && !$("noteInput").value.trim()){
+    $("statusBar").className = "";
+    $("statusBar").textContent = "Already set to “" + value + "”.";
+    return;
+  }
+  saveUpdate();
+}
 function collectHold(){
   return {
     reason: $("h_reason").value.trim(),
@@ -1196,7 +1312,8 @@ async function saveUpdate(){
     }
   }
 
-  $("statusBar").textContent = "Saving update…";
+  $("statusBar").className = "saving";
+  $("statusBar").textContent = "Saving “" + status + "”…";
 
   try{
     const payload = {
@@ -1217,12 +1334,14 @@ async function saveUpdate(){
     );
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
     job = await res.json();
-    $("statusBar").textContent = "✅ Update saved.";
-    renderJob();
+    renderJob();               // re-highlights the saved status, clears the note
     $("noteInput").value = "";
+    $("statusBar").className = "saved";
+    $("statusBar").textContent = "✅ Saved — status is now “" + (job.status || status) + "”.";
   }catch(err){
     console.error("save error", err);
-    $("statusBar").textContent = "❌ Error saving update.";
+    $("statusBar").className = "err";
+    $("statusBar").textContent = "❌ Couldn't save — check your signal and try again.";
   }
 }
 
@@ -1316,7 +1435,8 @@ function isOfficeAdmin(){
 }
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
-  $("statusSelect").addEventListener("change", syncPanels);
+  buildStatusChips();
+  $("noteInput").addEventListener("input", updateSaveButton);
   // Office admins can edit ANY job detail — including the full site address —
   // from the job view, the same editor used on the dashboard and scheduler.
   if(isOfficeAdmin()){
