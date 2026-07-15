@@ -249,9 +249,11 @@ export async function handle(request, env, ctx, url, sess) {
                  : jsonResponse({ error: "Not found" }, headers, 404);
     }
 
-    // PATCH /sla/jobs/{id}
+    // PATCH /sla/jobs/{id}  (the scheduler's assign / drag-drop path)
     if (method === "PATCH") {
+      const before = await getJob(env, tenantId, id);
       const updated = await patchJob(env, tenantId, id, await readJson(request));
+      if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers)
                      : jsonResponse({ error: "Not found" }, headers, 404);
     }

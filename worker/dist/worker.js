@@ -2827,7 +2827,9 @@ async function handle7(request, env, ctx, url, sess) {
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
     if (method === "PATCH") {
+      const before = await getJob(env, tenantId, id);
       const updated = await patchJob(env, tenantId, id, await readJson2(request));
+      if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
   }
