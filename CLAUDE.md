@@ -157,7 +157,15 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   notifySnooze — POST shallow-merges, null deletes, 8KB cap), **/notify/log**
   (notification audit POST any session / GET FullAccess), **/audit/pageview**
   + **/audit/log** (activity log; GET FullAccess, filters user/days/type).
-- `sla.js` (jobs, multi-engineer, shifts, vehicle checks, packs, PDF),
+- `sla.js` (jobs, multi-engineer, shifts, vehicle checks, packs, PDF).
+  Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
+  job-view) is the ONE-HIT editor — every Edit button opens it and it edits
+  everything in one save: ref, description, priority, status, raised,
+  **schedule (date · start · finish, Clear = unschedule) + assigned engineers
+  (multi-tick)**, full site, note — one PATCH /sla/jobs/{id}. Exposes
+  `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
+  (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
+  quick modal. Finish ≤ start rolls to next day (evening access windows).
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,

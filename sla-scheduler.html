@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Scheduler</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=1"></script>
+  <script src="sla-jobedit.js?v=2"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
     :root{
@@ -242,7 +242,7 @@
       <textarea id="jobNotes"></textarea>
 
       <div class="buttons" style="justify-content:space-between;">
-        <button type="button" class="btn" id="jobEditDetails">✏️ Edit details &amp; site</button>
+        <button type="button" class="btn" id="jobEditDetails">✏️ Edit everything</button>
         <span style="display:flex;gap:8px;">
           <button type="button" class="btn" id="jobCancel">Cancel</button>
           <button type="submit" class="btn btn-primary">Save</button>
@@ -731,6 +731,9 @@ function openJobModal(jobId){
 }
 function closeJobModal(){ modalJobId = null; $("jobModalBackdrop").style.display = "none"; }
 $("jobCancel").addEventListener("click", closeJobModal);
+// Mouse-wheel stepping on the quick modal's date/time/duration boxes
+// (15 min / 1 day / step-attr per notch — shared helper from sla-jobedit.js).
+if (window.MLJobEdit && window.MLJobEdit.wheelify) window.MLJobEdit.wheelify($("jobModalBackdrop"));
 /* Full "edit any detail + site" editor — reuses the shared office component.
    Pass the raw server job (with all site fields) so the editor is complete. */
 $("jobEditDetails").addEventListener("click", async () => {

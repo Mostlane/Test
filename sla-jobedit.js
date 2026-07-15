@@ -46,6 +46,11 @@
   .mlje-body input,.mlje-body select,.mlje-body textarea{width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:8px;padding:8px 9px;font-size:14px;font-family:inherit;background:#fff;}
   .mlje-body textarea{min-height:52px;resize:vertical;}
   .mlje-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .mlje-3{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:8px;}
+  .mlje-engs{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;max-height:150px;overflow-y:auto;background:#fff;}
+  .mlje-engs label{display:flex;align-items:center;gap:7px;margin:0;font-size:13px;font-weight:500;cursor:pointer;}
+  .mlje-engs input{width:auto;margin:0;flex:0 0 auto;transform:scale(1.15);}
+  .mlje-hint a{color:#2563eb;font-weight:600;text-decoration:none;}
   .mlje-site{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-top:12px;background:#f8fafc;}
   .mlje-site h3{margin:0 0 4px;font-size:13px;color:#003b82;}
   .mlje-chk{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#334155;margin-top:10px;cursor:pointer;}
@@ -83,6 +88,20 @@
 
       <label for="mljeRaised">Raised (date &amp; time)</label>
       <input id="mljeRaised" type="datetime-local">
+
+      <div class="mlje-site">
+        <h3>Schedule &amp; engineers</h3>
+        <label>Assigned engineers (tick all that will attend)</label>
+        <div class="mlje-engs" id="mljeEngineers"><span class="mlje-hint">Loading engineers…</span></div>
+
+        <label for="mljeSchedDate">Scheduled date &amp; times</label>
+        <div class="mlje-3">
+          <input id="mljeSchedDate" type="date" aria-label="Scheduled date">
+          <input id="mljeSchedStart" type="time" step="300" aria-label="Start time">
+          <input id="mljeSchedEnd" type="time" step="300" aria-label="Finish time">
+        </div>
+        <div class="mlje-hint">Date · start · finish. Scroll the mouse wheel over a box to nudge it (15&nbsp;min / 1&nbsp;day steps). <a href="javascript:void(0)" id="mljeSchedClear">Clear schedule</a><span id="mljeDueHint"></span></div>
+      </div>
 
       <div class="mlje-site">
         <h3>Site</h3>
@@ -124,7 +143,7 @@
     <div class="mlje-msg" id="mljeMsg"></div>
   </div>`;
 
-  let sites = null, customers = null, currentJob = null, onSavedCb = null, pickMap = [];
+  let sites = null, customers = null, engineers = null, currentJob = null, onSavedCb = null, pickMap = [];
 
   function inject() {
     if ($("mljeBack")) return;
@@ -152,7 +171,50 @@
     $("mljeSiteCust").addEventListener("change", () => {
       $("mljeSiteCustNew").style.display = $("mljeSiteCust").value === "__new__" ? "block" : "none";
     });
+    $("mljeSchedClear").addEventListener("click", () => {
+      $("mljeSchedDate").value = ""; $("mljeSchedStart").value = ""; $("mljeSchedEnd").value = "";
+    });
     document.addEventListener("keydown", e => { if (e.key === "Escape" && $("mljeBack").classList.contains("show")) close(); });
+    wheelify(back);
+  }
+
+  /* ---- mouse-wheel stepping on date/time boxes ----
+     Hover a box and scroll: times step 15 min (hold Shift for 1 h), dates step
+     1 day, numbers step by their step attribute. Beats the tiny spinner arrows. */
+  const p2 = n => String(n).padStart(2, "0");
+  function stepTime(v, mins, fallback) {
+    const m = /^(\d{2}):(\d{2})/.exec(v || "");
+    let t = m ? (Number(m[1]) * 60 + Number(m[2])) : fallback;
+    t = ((t + mins) % 1440 + 1440) % 1440;
+    return p2(Math.floor(t / 60)) + ":" + p2(t % 60);
+  }
+  function wheelify(root) {
+    root.addEventListener("wheel", e => {
+      const el = e.target;
+      if (!el || !el.matches || !el.matches('input[type=time],input[type=date],input[type=datetime-local],input[type=number]')) return;
+      e.preventDefault();
+      const dir = e.deltaY < 0 ? 1 : -1;
+      if (el.type === "time") {
+        el.value = stepTime(el.value, dir * (e.shiftKey ? 60 : 15), 8 * 60);
+      } else if (el.type === "date") {
+        const d = el.value ? new Date(el.value + "T12:00:00") : new Date();
+        d.setDate(d.getDate() + dir);
+        el.value = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+      } else if (el.type === "datetime-local") {
+        const d = el.value ? new Date(el.value) : new Date();
+        if (!isNaN(d)) {
+          d.setMinutes(d.getMinutes() + dir * (e.shiftKey ? 60 : 15));
+          el.value = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+        }
+      } else if (el.type === "number") {
+        const step = parseFloat(el.step) || 1;
+        const min = el.min !== "" ? parseFloat(el.min) : -Infinity;
+        const cur = parseFloat(el.value);
+        el.value = String(Math.max(min, (isNaN(cur) ? (parseFloat(el.min) || 0) : cur) + dir * step));
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, { passive: false });
   }
 
   function mapSite(s) {
@@ -179,6 +241,15 @@
         sites = (Array.isArray(raw) ? raw : []).filter(s => s.active !== false).map(mapSite)
           .sort((a, b) => a.name.localeCompare(b.name));
       } catch (e) { sites = []; }
+    }
+    if (!engineers) {
+      try {
+        const r = await authFetch("/users");
+        const d = await r.json();
+        let list = (d.Users || d.users || []).filter(u => u.Username && (u.Status || "").toLowerCase() === "active");
+        if (window.mlOrderUsers) list = window.mlOrderUsers(list);
+        engineers = list.map(u => ({ username: u.Username, name: ((u.FirstName || "") + " " + (u.LastName || "")).trim() || u.Username }));
+      } catch (e) { engineers = []; }
     }
     if (!customers) {
       customers = [];
@@ -234,8 +305,11 @@
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  let closeTimer = null;
   async function open(job, opts) {
     inject();
+    clearTimeout(closeTimer);            // a just-saved modal's delayed close must not shut this one
+    $("mljeSave").disabled = false;      // re-enable after a previous successful save
     currentJob = job;
     onSavedCb = (opts && opts.onSaved) || null;
     pickedSite = null;
@@ -245,6 +319,17 @@
     $("mljePriority").value = job.priority || "Priority 4";
     $("mljeStatus").value = job.status || "Pending";
     $("mljeRaised").value = toLocalInput(job.raisedAt);
+    // Schedule (date · start · finish) — empty boxes mean "not scheduled".
+    const sAt = job.scheduledAt ? new Date(job.scheduledAt) : null;
+    const sEnd = job.scheduledEnd ? new Date(job.scheduledEnd) : null;
+    const pd = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+    $("mljeSchedDate").value = (sAt && !isNaN(sAt)) ? pd(sAt) : "";
+    $("mljeSchedStart").value = (sAt && !isNaN(sAt)) ? p2(sAt.getHours()) + ":" + p2(sAt.getMinutes()) : "";
+    $("mljeSchedEnd").value = (sEnd && !isNaN(sEnd)) ? p2(sEnd.getHours()) + ":" + p2(sEnd.getMinutes()) : "";
+    const tgt = job.targetAt ? new Date(job.targetAt) : null;
+    $("mljeDueHint").textContent = (tgt && !isNaN(tgt))
+      ? ` · SLA due by ${pd(tgt)} ${p2(tgt.getHours())}:${p2(tgt.getMinutes())}` : "";
+    $("mljeEngineers").innerHTML = '<span class="mlje-hint">Loading engineers…</span>';
     $("mljeSiteName").value = job.siteName || "";
     $("mljeSiteAddr").value = job.address || "";
     $("mljeSitePc").value = (job.postcode || "").replace(/\*+$/, "");
@@ -261,6 +346,23 @@
     await ensureData();
     fillSitePicker("");
     fillCustomers();
+    // Engineer tick-list (multi — same as the scheduler).
+    const assigned = (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length
+      ? job.assignedEngineers : (job.assignedTo ? [job.assignedTo] : []))
+      .filter(Boolean).map(a => String(a).toLowerCase());
+    const box = $("mljeEngineers");
+    box.innerHTML = "";
+    (engineers || []).forEach(e => {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = e.username;
+      input.checked = assigned.includes(e.username.toLowerCase());
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(" " + e.name));
+      box.appendChild(label);
+    });
+    if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
   }
   function close() { const b = $("mljeBack"); if (b) b.classList.remove("show"); currentJob = null; }
 
@@ -318,6 +420,29 @@
       }
     }
 
+    // Schedule from the date · start · finish boxes. Empty boxes = unscheduled
+    // (explicit nulls clear the server fields). A finish at-or-before the start
+    // rolls to the next day (evening access windows).
+    const schedDate = $("mljeSchedDate").value;
+    const schedStart = $("mljeSchedStart").value;
+    const schedEnd = $("mljeSchedEnd").value;
+    let scheduledAt = null, scheduledEnd = null;
+    if (schedDate || schedStart) {
+      const dateStr = schedDate || (() => { const d = new Date(); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; })();
+      const start = new Date(dateStr + "T" + (schedStart || "08:00") + ":00");
+      if (!isNaN(start)) {
+        scheduledAt = start.toISOString();
+        if (schedEnd) {
+          const end = new Date(dateStr + "T" + schedEnd + ":00");
+          if (!isNaN(end)) {
+            if (end <= start) end.setDate(end.getDate() + 1);
+            scheduledEnd = end.toISOString();
+          }
+        }
+      }
+    }
+    const assignedEngineers = [...document.querySelectorAll("#mljeEngineers input:checked")].map(c => c.value);
+
     // Patch the job with every edited detail.
     const raisedLocal = $("mljeRaised").value;
     const payload = {
@@ -334,6 +459,12 @@
       lat: (lat != null ? lat : undefined),
       lon: (lon != null ? lon : undefined),
       note: $("mljeNote").value.trim() || undefined,
+      scheduledAt: scheduledAt,
+      // No finish typed: omit the field so the server keeps the job's duration
+      // (sending null would erase the finish time). Cleared schedule: null both.
+      scheduledEnd: scheduledAt === null ? null : (scheduledEnd || undefined),
+      assignedEngineers: assignedEngineers,
+      assignedTo: assignedEngineers[0] || "",
       changedBy: currentUser()
     };
     try {
@@ -346,7 +477,7 @@
       msg.textContent = "✅ Saved.";
       msg.className = "mlje-msg ok";
       if (onSavedCb) { try { onSavedCb(saved); } catch (e) {} }
-      setTimeout(close, 400);
+      closeTimer = setTimeout(close, 400);
     } catch (e) {
       msg.textContent = "❌ Couldn't save the job (" + e.message + ").";
       msg.className = "mlje-msg err";
@@ -354,5 +485,5 @@
     }
   }
 
-  window.MLJobEdit = { open };
+  window.MLJobEdit = { open, wheelify };
 })();
