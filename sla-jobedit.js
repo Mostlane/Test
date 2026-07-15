@@ -59,6 +59,7 @@
   .mlje-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px;}
   .mlje-btn{border:1px solid #cbd5e1;border-radius:999px;padding:9px 16px;font-size:14px;cursor:pointer;background:#f8fafc;color:#0f172a;}
   .mlje-btn.primary{background:#003b82;color:#fff;border-color:#003b82;}
+  .mlje-btn.danger{color:#b91c1c;border-color:#fca5a5;background:#fff;margin-right:auto;}
   .mlje-btn:disabled{opacity:.5;cursor:default;}
   .mlje-msg{font-size:13px;margin-top:8px;}
   .mlje-msg.err{color:#b91c1c;}
@@ -137,13 +138,14 @@
       <textarea id="mljeNote"></textarea>
     </div>
     <div class="mlje-actions">
+      <button type="button" class="mlje-btn danger" id="mljeDelete" style="display:none;">🗑 Delete job</button>
       <button type="button" class="mlje-btn" id="mljeCancel">Cancel</button>
       <button type="button" class="mlje-btn primary" id="mljeSave">Save changes</button>
     </div>
     <div class="mlje-msg" id="mljeMsg"></div>
   </div>`;
 
-  let sites = null, customers = null, engineers = null, currentJob = null, onSavedCb = null, pickMap = [];
+  let sites = null, customers = null, engineers = null, me = null, currentJob = null, onSavedCb = null, onDeletedCb = null, pickMap = [];
 
   function inject() {
     if ($("mljeBack")) return;
@@ -163,6 +165,7 @@
     $("mljeCancel").addEventListener("click", close);
     back.addEventListener("click", e => { if (e.target === back) close(); });
     $("mljeSave").addEventListener("click", save);
+    $("mljeDelete").addEventListener("click", del);
     $("mljeSiteFilter").addEventListener("input", () => fillSitePicker($("mljeSiteFilter").value));
     $("mljeSitePick").addEventListener("change", onPickSite);
     $("mljeSaveSite").addEventListener("change", () => {
@@ -242,6 +245,10 @@
           .sort((a, b) => a.name.localeCompare(b.name));
       } catch (e) { sites = []; }
     }
+    if (!me) {
+      try { const r = await authFetch("/auth/me"); const d = await r.json(); me = (d && d.ok && d.user) || {}; }
+      catch (e) { me = {}; }
+    }
     if (!engineers) {
       try {
         const r = await authFetch("/users");
@@ -310,8 +317,11 @@
     inject();
     clearTimeout(closeTimer);            // a just-saved modal's delayed close must not shut this one
     $("mljeSave").disabled = false;      // re-enable after a previous successful save
+    $("mljeDelete").disabled = false;
+    $("mljeDelete").style.display = "none";   // shown after the admin check below
     currentJob = job;
     onSavedCb = (opts && opts.onSaved) || null;
+    onDeletedCb = (opts && opts.onDeleted) || (opts && opts.onSaved) || null;
     pickedSite = null;
     $("mljeTitle").textContent = `Edit job — ${job.helpdeskRef || job.id}`;
     $("mljeRef").value = job.helpdeskRef || "";
@@ -363,6 +373,8 @@
       box.appendChild(label);
     });
     if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
+    // Deleting is for SLA admins only (the server enforces this too).
+    if (currentJob && me && (me.FullAccess === "Yes" || me.SLAAdmin === "Yes")) $("mljeDelete").style.display = "";
   }
   function close() { const b = $("mljeBack"); if (b) b.classList.remove("show"); currentJob = null; }
 
@@ -482,6 +494,29 @@
       msg.textContent = "❌ Couldn't save the job (" + e.message + ").";
       msg.className = "mlje-msg err";
       $("mljeSave").disabled = false;
+    }
+  }
+
+  async function del() {
+    if (!currentJob) return;
+    const ref = currentJob.helpdeskRef || currentJob.id;
+    if (!confirm(`Delete job ${ref} completely?\n\nThis permanently removes the job, its history and its photos/files. It cannot be undone.`)) return;
+    const msg = $("mljeMsg");
+    msg.className = "mlje-msg";
+    msg.textContent = "Deleting…";
+    $("mljeDelete").disabled = true;
+    try {
+      const r = await authFetch("/sla/jobs/" + encodeURIComponent(currentJob.id), { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || ("HTTP " + r.status));
+      msg.textContent = "🗑 Deleted.";
+      msg.className = "mlje-msg ok";
+      if (onDeletedCb) { try { onDeletedCb(null); } catch (e) {} }
+      closeTimer = setTimeout(close, 400);
+    } catch (e) {
+      msg.textContent = "❌ Couldn't delete the job (" + e.message + ").";
+      msg.className = "mlje-msg err";
+      $("mljeDelete").disabled = false;
     }
   }
 

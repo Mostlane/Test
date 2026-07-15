@@ -17,6 +17,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 
 export async function handle(request, env, ctx, url, sess) {
@@ -312,6 +313,25 @@ export async function handle(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers)
                  : jsonResponse({ error: "Not found" }, headers, 404);
+    }
+
+    // DELETE /sla/jobs/{id} — permanently remove a job + its stored files.
+    // Destructive, so gated to the SLA admins (FullAccess | SLAAdmin); the
+    // audit middleware records who deleted what automatically.
+    if (method === "DELETE" && !parts[2]) {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const perms = await permissionsFor(env, tenantId, sess.user.username);
+      if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
+        return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).run();
+      // Purge the job's uploads (photos, signatures, files) from R2.
+      try {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
+        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {}
+      return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
     }
 
     // PATCH /sla/jobs/{id}  (the scheduler's assign / drag-drop path)

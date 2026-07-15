@@ -2879,6 +2879,21 @@ async function handle7(request, env, ctx, url, sess) {
       const job = await getJob(env, tenantId, id);
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
+    if (method === "DELETE" && !parts[2]) {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const perms = await permissionsFor(env, tenantId, sess.user.username);
+      if (perms.FullAccess !== "Yes" && perms.SLAAdmin !== "Yes")
+        return jsonResponse({ error: "Only SLA admins can delete jobs" }, headers, 403);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      await db.prepare("DELETE FROM sla_jobs WHERE tenant_id = ? AND id = ?").bind(tenantId, id).run();
+      try {
+        const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/` });
+        for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
+      } catch {
+      }
+      return jsonResponse({ ok: true, deleted: id, reference: job.helpdeskRef || id }, headers);
+    }
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
       const updated = await patchJob(env, tenantId, id, await readJson2(request));

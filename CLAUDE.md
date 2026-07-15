@@ -164,6 +164,8 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (re-sent email updates, never duplicates), forgiving priority ("P1"→
   "Priority 1") and date parsing, fires the assignment push, changedBy
   "zapier". Returns {ok, created, id, reference, status, priority, targetAt}.
+  **DELETE /sla/jobs/{id}** (FullAccess|SLAAdmin): removes the job + purges
+  its R2 files (jobs/{id}/…); 🗑 button in the shared editor (admin-only).
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,
