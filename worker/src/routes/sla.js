@@ -76,8 +76,14 @@ export async function handle(request, env, ctx, url, sess) {
     const priority = pm ? `Priority ${pm[1]}` : (PRIORITY_SET.has(b.priority) ? b.priority : undefined);
     const raisedAt = b.raisedAt && Number.isFinite(Date.parse(b.raisedAt)) ? new Date(b.raisedAt).toISOString() : undefined;
 
+    // Email parsers can smuggle invisible characters (\r, tabs, zero-width
+    // spaces) into the reference — and the reference becomes the job id, so
+    // scrub them and collapse whitespace runs. Visible characters are kept.
+    const cleanRef = String(b.reference || "")
+      .replace(/[\u0000-\u001F\u007F\u00A0\u200B-\u200D\uFEFF]/g, " ")
+      .replace(/\s+/g, " ").trim();
     const payload = {
-      reference: String(b.reference || "").trim() || undefined,
+      reference: cleanRef || undefined,
       description: String(b.description || "").trim() || undefined,
       priority, raisedAt,
       status: b.status || undefined,
@@ -213,9 +219,27 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true }, headers, 201);
   }
 
+  /* GET /sla/jobs-diag?id=… — admin diagnostic: how a job id is really stored.
+     Compares the exact by-id lookup with a scan of every job, showing each
+     candidate id in hex so invisible characters are visible. */
+  if (subpath === "/jobs-diag" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const perms = await permissionsFor(env, tenantId, sess.user.username);
+    if (perms.FullAccess !== "Yes") return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const q = safeDecode(searchParams.get("id") || "");
+    const hexOf = s => [...String(s)].map(c => c.codePointAt(0).toString(16).padStart(2, "0")).join(" ");
+    const byId = q ? await getJob(env, tenantId, q) : null;
+    const needle = q.toLowerCase();
+    const near = (await listJobs(env, tenantId))
+      .filter(j => String(j.id).toLowerCase().includes(needle) || String(j.helpdeskRef || "").toLowerCase().includes(needle))
+      .slice(0, 5)
+      .map(j => ({ id: j.id, idHex: hexOf(j.id), ref: j.helpdeskRef, status: j.status, exactMatch: j.id === q }));
+    return jsonResponse({ ok: true, lookedUp: q, lookedUpHex: hexOf(q), foundById: !!byId, similar: near }, headers);
+  }
+
   /* PUT /sla/job/{id} (scheduler drag/drop) */
   if (subpath.startsWith("/job/") && method === "PUT") {
-    const id = subpath.split("/").filter(Boolean)[1];
+    const id = safeDecode(subpath.split("/").filter(Boolean)[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
     const body = await readJson(request);
     const patch = {
@@ -238,7 +262,9 @@ export async function handle(request, env, ctx, url, sess) {
   /* /sla/jobs/{id}/... */
   if (subpath.startsWith("/jobs/")) {
     const parts = subpath.split("/").filter(Boolean); // [jobs, id, sub]
-    const id = parts[1];
+    // Pages send encodeURIComponent(job.id); pathname keeps it percent-encoded.
+    // Decode so ids with spaces/commas/etc. (e.g. zap references) resolve.
+    const id = safeDecode(parts[1]);
     if (!id) return jsonResponse({ error: "Missing ID" }, headers, 400);
 
     // GET /sla/jobs/{id}/export  -> downloadable HTML
@@ -509,6 +535,9 @@ const normId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
 
 // Canonical priority strings (the inbound route accepts these verbatim).
 const PRIORITY_SET = new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
+
+// URL-decode a path segment; a lone "%" must not crash the route.
+function safeDecode(s) { try { return decodeURIComponent(s ?? ""); } catch { return s ?? ""; } }
 
 // A job may have many assigned engineers (assignedEngineers[]); fall back to the
 // legacy single assignedTo for older records.
