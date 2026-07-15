@@ -167,7 +167,10 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   grid, badges. **/vancheck/skip** (admin skips a driver's week → writes a
   "skipped" row into vehicle_checks with items.skipped/skippedBy, shows in the
   Vehicles weekly grid) + **/vancheck/unskip**. Attention gate honours
-  vehicle-check suppression.
+  vehicle-check suppression. **/vancheck/remind-now** (admin: Vehicles|
+  FullAccess) fires this week's reminder to all still-outstanding drivers on
+  demand (no time-gate/dedupe) — "🔔 Remind now" button on van-checks.html;
+  shares `remindDrivers()` with the cron. `sendWeeklyReminders` is the cron path.
 - `fleet.js` — the whole Vehicles/Fleet backend (gate: FullAccess|Vehicles).
   See the **Fleet / Vehicles** section below for the endpoint list.
 - `hrdocs.js` — staff personal + company documents (R2, signed URLs);
@@ -349,6 +352,12 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
   service-worker.js is kept as an identical copy so any cached page still works.
   main.html + pwa.js both register /sw.js (idempotent). Payload JSON =
   {title, body, url, tag?}; notificationclick focuses/opens url.
+- **Offline hardening (cache v3)**: navigations are network-first **with a 3.5s
+  timeout** → cached page → **offline.html** (fixes the blank-white-screen on
+  weak signal — a slow fetch used to hang forever). Scripts/styles are
+  stale-while-revalidate (shell boots from cache; `?v=N` bump still busts it).
+  Precaches the shell + offline.html + icon. Bump CACHE_NAME when changing SW
+  caching. offline.html is a standalone branded "you're offline" page.
 - **Client:** `push-client.js` = shared `window.MostlanePush`
   (state/enable/disable/test), included on pages that offer the toggle.
   **notifications.html** = the all-staff per-device toggle page (Turn on / off /

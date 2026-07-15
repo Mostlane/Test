@@ -77,3 +77,5 @@
   Cache-Control: no-cache
 /notifications.html
   Cache-Control: no-cache
+/offline.html
+  Cache-Control: no-cache

@@ -44,6 +44,7 @@
   <header class="page">
     <a class="ml-back" data-role="home" href="/vehicles.html" style="color:#fff;text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
+    <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
     <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
   </header>
   <div class="wrap">
@@ -126,6 +127,20 @@
     WEEK = mondayOf(new Date().toISOString().slice(0, 10));
     load();
   })();
+
+  g("remindBtn").onclick = async () => {
+    if (!confirm("Send a van-check reminder now to everyone who hasn't done this week's check?")) return;
+    const btn = g("remindBtn"), orig = btn.textContent;
+    btn.disabled = true; btn.textContent = "Sending…";
+    try {
+      const r = await authFetch("/vancheck/remind-now", { method: "POST" }).then(r => r.json());
+      if (r.ok) alert(r.reminded
+        ? ("Reminder sent to " + r.reminded + " driver" + (r.reminded === 1 ? "" : "s") + " (who have notifications on).")
+        : "No reminders sent — everyone's either done it, been skipped, or has notifications off.");
+      else alert(r.error || "Failed to send.");
+    } catch (e) { alert("Failed to send."); }
+    btn.disabled = false; btn.textContent = orig;
+  };
 
   async function load() {
     g("wkLabel").textContent = "w/c " + new Date(WEEK + "T12:00:00Z").toLocaleDateString("en-GB", { day:"numeric", month:"long" });

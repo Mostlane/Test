@@ -251,6 +251,19 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week, dueAt, overdue: Date.now() > Date.parse(dueAt), settings: s, rows }, {}, env, request);
   }
 
+  // ── Admin: fire this week's reminder to everyone still outstanding, NOW ──────
+  // On-demand version of the scheduled nudge (no time-gate, no weekly dedupe).
+  if (path === "/vancheck/remind-now" && method === "POST") {
+    if (!(await canViewAll())) return error("Forbidden", 403, env, request);
+    const week = mondayOf(londonDate());
+    const r = await remindDrivers(env, tenantId, week, {
+      title: "Weekly van check due",
+      body: "Please complete your weekly van check — tap to start.",
+      url: "/van-check.html", tag: "vehicle-check"
+    });
+    return json({ ok: true, week, ...r }, {}, env, request);
+  }
+
   // ── Admin: skip a driver's van check for a week (logged in the grid) ────────
   if (path === "/vancheck/skip" && method === "POST") {
     if (!(await canViewAll())) return error("Forbidden", 403, env, request);
@@ -347,6 +360,28 @@ async function readVanSettings(env, tid) {
   catch { return {}; }
 }
 
+// Push `payload` to every driver (Active + vehicle allocated) who still owes the
+// given week's check — skipping those who've done it, been skipped (both write a
+// vehicle_checks row) or been muted. Shared by the cron and the on-demand button.
+async function remindDrivers(env, tid, week, payload) {
+  const { results: drivers } = await env.DB.prepare(
+    "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
+  ).bind(tid).all();
+  const { results: checks } = await env.DB.prepare(
+    "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
+  ).bind(tid, week).all();
+  const handled = new Set((checks || []).map(c => c.username));
+  const rules = await getRules(env, tid);
+  const recipients = [];
+  for (const drv of drivers || []) {
+    if (handled.has(drv.username)) continue;
+    if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
+    await sendToUser(env, tid, drv.username, payload);
+    recipients.push(drv.username);
+  }
+  return { reminded: recipients.length, recipients };
+}
+
 export async function sendWeeklyReminders(env, now = new Date()) {
   const d = new Date(now);
   const nowMs = d.getTime();
@@ -378,27 +413,12 @@ export async function sendWeeklyReminders(env, now = new Date()) {
     const chaseDue = withinChase && !slots.includes(`chase:${week}`);
     if (!mondayDue && !chaseDue) { out.push({ tid, skipped: true }); continue; }
 
-    const { results: drivers } = await env.DB.prepare(
-      "SELECT username FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned!=''"
-    ).bind(tid).all();
-    const { results: checks } = await env.DB.prepare(
-      "SELECT username FROM vehicle_checks WHERE tenant_id=? AND week=?"
-    ).bind(tid, week).all();
-    const handled = new Set((checks || []).map(c => c.username));   // done OR skipped both write a row
-    const rules = await getRules(env, tid);
-
     const dueBy = londonHM(deadlineMs);
     const payload = chaseDue
       ? { title: "Van check due soon", body: `Last reminder — your weekly van check is due by ${dueBy} today. Tap to complete it.`, url: "/van-check.html", tag: "vehicle-check" }
       : { title: "Weekly van check due", body: "Please complete your weekly van check — tap to start.", url: "/van-check.html", tag: "vehicle-check" };
 
-    let reminded = 0;
-    for (const drv of drivers || []) {
-      if (handled.has(drv.username)) continue;
-      if (isSuppressed(rules, "vehicle-check", drv.username, week)) continue;
-      await sendToUser(env, tid, drv.username, payload);
-      reminded++;
-    }
+    const { reminded } = await remindDrivers(env, tid, week, payload);
     if (mondayDue) slots.push(`mon:${week}`);
     if (chaseDue) slots.push(`chase:${week}`);
     slots = slots.slice(-30);
