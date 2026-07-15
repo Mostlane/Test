@@ -67,6 +67,12 @@
   Cache-Control: no-cache
 /vehicles.html
   Cache-Control: no-cache
+/office-timesheet.html
+  Cache-Control: no-cache
+/users-admin.html
+  Cache-Control: no-cache
+/projects.html
+  Cache-Control: no-cache
 /pwa.js
   Cache-Control: no-cache
 /sw.js
