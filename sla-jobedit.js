@@ -29,6 +29,13 @@
     return sessionStorage.getItem("mostlaneUser") || sessionStorage.getItem("mostlaneUsername") ||
            localStorage.getItem("mostlaneUser") || "Portal User";
   }
+  // Cached permission set (portal-config keeps it fresh) — lets admin-only UI
+  // appear instantly and work on weak signal; the server enforces regardless.
+  function cachedPerms() {
+    try { return JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "null") || {}; }
+    catch (e) { return {}; }
+  }
+  const isSlaAdmin = p => p && (String(p.FullAccess || "").toLowerCase() === "yes" || String(p.SLAAdmin || "").toLowerCase() === "yes");
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function slug(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
@@ -318,7 +325,9 @@
     clearTimeout(closeTimer);            // a just-saved modal's delayed close must not shut this one
     $("mljeSave").disabled = false;      // re-enable after a previous successful save
     $("mljeDelete").disabled = false;
-    $("mljeDelete").style.display = "none";   // shown after the admin check below
+    // Admin-only: show straight away from the cached permissions (works on weak
+    // signal); the /auth/me check below can only ADD it, never depends on it.
+    $("mljeDelete").style.display = isSlaAdmin(cachedPerms()) ? "" : "none";
     currentJob = job;
     onSavedCb = (opts && opts.onSaved) || null;
     onDeletedCb = (opts && opts.onDeleted) || (opts && opts.onSaved) || null;
@@ -373,8 +382,11 @@
       box.appendChild(label);
     });
     if (!engineers || !engineers.length) box.innerHTML = '<span class="mlje-hint">Couldn’t load the engineer list.</span>';
-    // Deleting is for SLA admins only (the server enforces this too).
-    if (currentJob && me && (me.FullAccess === "Yes" || me.SLAAdmin === "Yes")) $("mljeDelete").style.display = "";
+    // Deleting is for SLA admins only (the server enforces this too). This
+    // server-confirmed check only ever ADDS the button (e.g. first login on a
+    // new device before the permission cache exists) — it never removes it,
+    // so a failed fetch on weak signal can't hide it from a real admin.
+    if (currentJob && isSlaAdmin(me)) $("mljeDelete").style.display = "";
   }
   function close() { const b = $("mljeBack"); if (b) b.classList.remove("show"); currentJob = null; }
 
