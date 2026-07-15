@@ -158,6 +158,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (notification audit POST any session / GET FullAccess), **/audit/pageview**
   + **/audit/log** (activity log; GET FullAccess, filters user/days/type).
 - `sla.js` (jobs, multi-engineer, shifts, vehicle checks, packs, PDF).
+  **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
+  JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
+  the Zapier email-parser zap POSTs jobs straight in. Upserts by reference
+  (re-sent email updates, never duplicates), forgiving priority ("P1"→
+  "Priority 1") and date parsing, fires the assignment push, changedBy
+  "zapier". Returns {ok, created, id, reference, status, priority, targetAt}.
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,
@@ -334,7 +340,7 @@ personalise.html had to replace theme.html).
 
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
-SITELOG_ADMIN_SECRET, **VAPID_PRIVATE** (secrets); EMAIL_FROM, R2_PUBLIC_BASE,
+SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN** (secrets); EMAIL_FROM, R2_PUBLIC_BASE,
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB

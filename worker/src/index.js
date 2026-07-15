@@ -217,6 +217,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-doc"],
   // Vehicle photos (card cover + gallery/lightbox) — signed URL.
   ["GET", "/fleet/vehicle-photo"],
+  // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
+  ["POST", "/sla/inbound"],
 ];
 
 function isPublic(method, pathname) {

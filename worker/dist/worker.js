@@ -2627,6 +2627,45 @@ async function handle7(request, env, ctx, url, sess) {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/inbound" && method === "POST") {
+    const secret = env.JOBS_INBOUND_TOKEN || "";
+    if (!secret) return jsonResponse({ ok: false, error: "Inbound jobs aren't configured (JOBS_INBOUND_TOKEN missing)" }, headers, 503);
+    const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    let diff = tok.length === secret.length ? 0 : 1;
+    for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+    if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
+    const b = await readJson2(request);
+    if (!b || !String(b.reference || "").trim() && !String(b.description || "").trim())
+      return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
+    const pm = /^p(?:riority)?\s*[.:-]?\s*([1-4])$/i.exec(String(b.priority || "").trim());
+    const priority = pm ? `Priority ${pm[1]}` : PRIORITY_SET.has(b.priority) ? b.priority : void 0;
+    const raisedAt = b.raisedAt && Number.isFinite(Date.parse(b.raisedAt)) ? new Date(b.raisedAt).toISOString() : void 0;
+    const payload = {
+      reference: String(b.reference || "").trim() || void 0,
+      description: String(b.description || "").trim() || void 0,
+      priority,
+      raisedAt,
+      status: b.status || void 0,
+      siteCode: b.siteCode != null ? String(b.siteCode).trim() : void 0,
+      siteName: b.siteName || void 0,
+      address: b.address || void 0,
+      postcode: b.postcode || void 0,
+      telephone: b.telephone || void 0,
+      storeType: b.storeType || void 0,
+      originator: b.originator || "zapier",
+      originatorEmail: b.originatorEmail || void 0,
+      assignedTo: b.assignedTo || void 0,
+      assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : void 0,
+      scheduledAt: b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : void 0,
+      durationMinutes: b.durationMinutes || void 0,
+      changedBy: "zapier"
+    };
+    const beforeId = payload.reference;
+    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
+    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+  }
   if (subpath === "/jobs" && method === "POST") {
     const payload = await readJson2(request);
     const beforeId = payload.id || payload.reference;
@@ -2984,6 +3023,7 @@ function normalizeStatus(status) {
   return CANONICAL_STATUSES.find((x) => x.toLowerCase() === s) || "Pending";
 }
 var normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+var PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
 function assignedList(job) {
   if (Array.isArray(job.assignedEngineers) && job.assignedEngineers.length) {
     return job.assignedEngineers.filter(Boolean);
@@ -6351,7 +6391,9 @@ var PUBLIC_ROUTES = [
   // Vehicle repair/invoice documents opened in a new tab — signed URL.
   ["GET", "/fleet/vehicle-doc"],
   // Vehicle photos (card cover + gallery/lightbox) — signed URL.
-  ["GET", "/fleet/vehicle-photo"]
+  ["GET", "/fleet/vehicle-photo"],
+  // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
+  ["POST", "/sla/inbound"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

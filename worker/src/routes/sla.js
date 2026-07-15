@@ -36,6 +36,55 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
   }
 
+  /* POST /sla/inbound — machine-to-machine job intake (the Zapier email
+     parser). PUBLIC route (no portal session): guarded by the JOBS_INBOUND_TOKEN
+     secret sent as "Authorization: Bearer <token>". Same create/update logic as
+     the office's add-job (upserts by reference — a re-sent email updates rather
+     than duplicates), with zap-friendly slack on priority/date formats. */
+  if (subpath === "/inbound" && method === "POST") {
+    const secret = env.JOBS_INBOUND_TOKEN || "";
+    if (!secret) return jsonResponse({ ok: false, error: "Inbound jobs aren't configured (JOBS_INBOUND_TOKEN missing)" }, headers, 503);
+    const tok = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    let diff = tok.length === secret.length ? 0 : 1;
+    for (let i = 0; i < Math.min(tok.length, secret.length); i++) diff |= tok.charCodeAt(i) ^ secret.charCodeAt(i);
+    if (diff !== 0) return jsonResponse({ ok: false, error: "Bad token" }, headers, 401);
+
+    const b = await readJson(request);
+    if (!b || (!String(b.reference || "").trim() && !String(b.description || "").trim()))
+      return jsonResponse({ ok: false, error: "reference or description required" }, headers, 400);
+
+    // Forgiving inputs: "P1" / "1" / "priority 2" → "Priority N"; only pass a
+    // raisedAt the Date parser actually accepts (else it defaults to now).
+    const pm = /^p(?:riority)?\s*[.:-]?\s*([1-4])$/i.exec(String(b.priority || "").trim());
+    const priority = pm ? `Priority ${pm[1]}` : (PRIORITY_SET.has(b.priority) ? b.priority : undefined);
+    const raisedAt = b.raisedAt && Number.isFinite(Date.parse(b.raisedAt)) ? new Date(b.raisedAt).toISOString() : undefined;
+
+    const payload = {
+      reference: String(b.reference || "").trim() || undefined,
+      description: String(b.description || "").trim() || undefined,
+      priority, raisedAt,
+      status: b.status || undefined,
+      siteCode: b.siteCode != null ? String(b.siteCode).trim() : undefined,
+      siteName: b.siteName || undefined,
+      address: b.address || undefined,
+      postcode: b.postcode || undefined,
+      telephone: b.telephone || undefined,
+      storeType: b.storeType || undefined,
+      originator: b.originator || "zapier",
+      originatorEmail: b.originatorEmail || undefined,
+      assignedTo: b.assignedTo || undefined,
+      assignedEngineers: Array.isArray(b.assignedEngineers) ? b.assignedEngineers.filter(Boolean) : undefined,
+      scheduledAt: b.scheduledAt && Number.isFinite(Date.parse(b.scheduledAt)) ? new Date(b.scheduledAt).toISOString() : undefined,
+      durationMinutes: b.durationMinutes || undefined,
+      changedBy: "zapier"
+    };
+    const beforeId = payload.reference;
+    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
+    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
+    return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
+  }
+
   /* POST /sla/jobs */
   if (subpath === "/jobs" && method === "POST") {
     const payload = await readJson(request);
@@ -421,6 +470,9 @@ function normalizeStatus(status) {
 // Normalise an engineer identifier so "John Thorn", "john.thorn" and "JOHN.THORN"
 // all compare equal.
 const normId = s => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
+
+// Canonical priority strings (the inbound route accepts these verbatim).
+const PRIORITY_SET = new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
 
 // A job may have many assigned engineers (assignedEngineers[]); fall back to the
 // legacy single assignedTo for older records.
