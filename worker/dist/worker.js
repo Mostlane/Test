@@ -3101,7 +3101,7 @@ async function notifyNewlyAssigned(env, tid, before, after) {
     await sendToUser(env, tid, username, {
       title: "New job assigned to you",
       body,
-      url: "/engineer-jobs.html",
+      url: "/engineer-jobs.html?job=" + encodeURIComponent(after.id),
       tag: "sla-job:" + after.id
     });
   }

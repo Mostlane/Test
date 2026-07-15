@@ -573,7 +573,7 @@ export async function notifyNewlyAssigned(env, tid, before, after) {
     const username = map[normId(eng)] || eng;
     await sendToUser(env, tid, username, {
       title: "New job assigned to you", body,
-      url: "/engineer-jobs.html", tag: "sla-job:" + after.id
+      url: "/engineer-jobs.html?job=" + encodeURIComponent(after.id), tag: "sla-job:" + after.id
     });
   }
 }

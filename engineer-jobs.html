@@ -132,6 +132,20 @@
       margin-bottom:10px;
       box-shadow:0 4px 10px rgba(0,0,0,0.05);
     }
+    /* Highlight the job a push notification pointed you at: scroll target +
+       a few attention pulses (blue glow ring + tint), then settle. */
+    .job-card.job-flash{
+      animation:mlJobFlash 1s ease-in-out 0s 4;
+      border-color:#1e66ff;
+      scroll-margin-top:80px;
+    }
+    @keyframes mlJobFlash{
+      0%,100%{ box-shadow:0 4px 10px rgba(0,0,0,0.05); background:#fff; }
+      50%    { box-shadow:0 0 0 4px rgba(30,102,255,0.55), 0 8px 22px rgba(30,102,255,0.35); background:#eef4ff; }
+    }
+    @media (prefers-reduced-motion:reduce){
+      .job-card.job-flash{ animation:none; box-shadow:0 0 0 4px rgba(30,102,255,0.55); background:#eef4ff; }
+    }
     .job-top{
       display:flex;
       justify-content:space-between;
@@ -516,6 +530,7 @@ function renderDay(dateStr, jobs, mode){
 
     const card = document.createElement("div");
     card.className = "job-card";
+    card.dataset.jobId = job.id;
     card.innerHTML = `
       <div class="job-top">
         <span class="ref">${job.helpdeskRef || job.id}</span>
@@ -915,6 +930,7 @@ async function loadUnscheduled(){
       const slaInfo = computeSlaCountdown(job.targetAt || job.sla?.targetAt);
       const card = document.createElement("div");
       card.className = "job-card";
+      card.dataset.jobId = job.id;
       card.style.borderColor = "#fdba74";
       card.innerHTML = `
         <div class="job-top">
@@ -957,6 +973,30 @@ async function checkBlocked(){
       banner.style.display = "none";
     }
   }catch{}
+}
+
+// A push notification links here as ?job=<id>. Once that job's card has been
+// rendered (day loads + the unscheduled box are async), scroll it into view and
+// pulse it so it's easy to spot. Polls briefly because the cards stream in.
+function focusJobFromUrl(){
+  let jid = null;
+  try { jid = new URLSearchParams(location.search).get("job"); } catch (e) {}
+  if(!jid) return;
+  let tries = 0;
+  const attempt = () => {
+    const card = Array.from(document.querySelectorAll(".job-card"))
+      .find(c => c.dataset.jobId === jid);
+    if(card){
+      card.scrollIntoView({ behavior:"smooth", block:"center" });
+      card.classList.remove("job-flash");   // restart the animation if re-run
+      void card.offsetWidth;
+      card.classList.add("job-flash");
+      setTimeout(() => card.classList.remove("job-flash"), 4500);
+      return;
+    }
+    if(tries++ < 30) setTimeout(attempt, 300);   // ~9s of retries as jobs stream in
+  };
+  attempt();
 }
 
 function init(){
@@ -1029,6 +1069,9 @@ function init(){
       loading = false;
     }
   })();
+
+  // If we arrived from a "new job" push (?job=…), find that card and pulse it.
+  focusJobFromUrl();
 }
 
 window.addEventListener("DOMContentLoaded", init);
