@@ -30,7 +30,7 @@
       'html::before{content:"";position:fixed;top:0;left:0;right:0;bottom:0;' +
       'z-index:-1;pointer-events:none;' +
       "background:url('/Mostlane_Embossed.png') no-repeat center center;" +
-      'background-size:min(180%,900px);opacity:.9;}';
+      'background-size:cover;opacity:.9;}';
     function inject() {
       if (document.getElementById("mlEmbossCss")) return;
       var st = document.createElement("style");
