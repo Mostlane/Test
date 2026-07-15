@@ -231,8 +231,6 @@ a.button {
     
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
-    <a class="button" href="fleet-report.html" id="FleetReport"><span class="emoji">🚚</span> Fleet Report</a>
-    <a class="button" href="van-timesheet.html" id="VanTimesheet"><span class="emoji">🕐</span> Van Timesheet</a>
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
     <a class="button" href="holiday-admin.html" id="HolidayAdmin"><span class="emoji">🗂️</span> Holiday Admin</a>
     <a class="button" href="engineers-hours-menu.html" id="EngineersHoursMenu"><span class="emoji">🛠️</span> Engineers Hours Menu</a>
@@ -252,29 +250,22 @@ a.button {
     <a class="button" id="Projects" href="projects.html">
   <span class="emoji">📁</span> Projects
 </a>
-    <a class="button" href="projects-admin.html" id="ProjectsAdmin">
-  <span class="emoji">🗂️</span> Projects Admin
-</a>
     <a class="button" href="weekly.html" id="Weekly"><span class="emoji">📊</span> Weekly Summary</a>
     <a class="button" href="forms.html" id="Forms"><span class="emoji">📝</span> Forms</a>
     <a class="button" href="compliance.html" id="Compliance"><span class="emoji">✔️</span> Compliance</a>
     <a class="button" href="hours-dashboard-simple-v2.html" id="HoursDashboard"><span class="emoji">⏳</span> Hours Dashboard</a>
     <a class="button" href="users-admin.html" id="Users"><span class="emoji">👥</span> Users</a>
-    <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Office Timesheet</a>
+    <a class="button" href="office-timesheet.html" id="OfficeTimesheet"><span class="emoji">💼</span> Timesheet</a>
 
     <!-- ⭐ NEW SLA BUTTON ⭐ -->
     <a class="button" href="sla-main.html" id="SLA"><span class="emoji">🚨</span> SLA</a>
     <a class="button" href="stats.html" id="Stats"><span class="emoji">📊</span> Stats</a>
     <a class="button" href="notification-centre.html" id="Notifications"><span class="emoji">🔕</span> Notification Centre</a>
-    <a class="button" href="device-admin.html" id="DeviceAdmin">
-      <span class="emoji">🔐</span> Device Management
-    </a>
 <!-- Unlinked on request (legacy, unused). Page file kept — uncomment to restore.
 <a class="button" href="labour-planning.html" id="LabourPlanning">
   <span class="emoji">📈</span> Labour Planning
 </a>
 -->
-    <a class="button visible" href="notifications.html" id="NotifSettings"><span class="emoji">🔔</span> Notifications</a>
     <a class="button visible" href="my-documents.html" id="MyDocs"><span class="emoji">📄</span> My Documents</a>
     <a class="button visible" href="personalise.html" id="Personalise"><span class="emoji">⚙️</span> Settings</a>
     <a class="button visible" href="help.html"><span class="emoji">❓</span> Help</a>
@@ -301,8 +292,6 @@ a.button {
 const MAP = {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
   Vehicles: ["Vehicles", "vehiclesBtn"],
-  FleetReport: ["Vehicles"],
-  VanTimesheet: ["Vehicles"],
   Holiday: ["HolidayRequests", "Holiday", "holidayBtn"],
   EngineersHoursMenu: ["EngineersHoursMenu", "engineersHoursMenu", "engineersHoursMenuBtn"],
   HoursDashboard: ["HoursDashboard", "hours-dashboard-btn"],
@@ -310,13 +299,12 @@ const MAP = {
   Sites: ["Sites", "AddSite", "sitesBtn", "Customers"],
   Assets: ["Assets", "Plant&Equipment", "assetsBtn", "assetmenuhtml", "myassetshtml", "assetsadminhtml"],
   MyDocuments: ["MyDocuments", "my-documents-btn"],
-  Projects: ["Projects", "ProjectsAccess", "projects", "projectsBtn"],
-  ProjectsAdmin: ["ProjectsAdmin","ProjectsAdminAccess","projectsAdmin","projectsAdminBtn"],
+  Projects: ["Projects", "ProjectsAccess", "projects", "projectsBtn", "ProjectsAdmin", "ProjectsAdminAccess", "projectsAdmin"],
   HolidayAdmin: ["HolidayAdmin", "HolidayAdminAccess", "holidayAdmin", "HolidayAdminBtn"],
   Weekly: ["Weekly"],
   Forms: ["Forms", "formsBtn"],
   Compliance: ["Compliance", "complianceBtn", "complianceformshtml"],
-  Users: ["Users", "usersAdmin", "usersAdminBtn"],
+  Users: ["Users", "usersAdmin", "usersAdminBtn", "DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
   TimesheetAdmin: [
   "TimesheetAdmin",
   "TimesheetAdminAccess",
@@ -325,7 +313,6 @@ const MAP = {
   "Payroll",
   "Office"
 ],
-  DeviceAdmin: ["DeviceAdmin", "deviceAdmin", "deviceAdminAccess", "deviceadmin"],
   LabourPlanning: ["LabourPlanning", "labourplanning", "Labour", "Labour Planning", "LabourPlanningAccess"],
   SLA: ["SLA", "SLAAdmin", "slaMenu", "slaAccess"],
   Stats: ["__fullOnly"],
@@ -335,9 +322,10 @@ const MAP = {
   Customers: ["Sites", "AddSite"],
   PurchaseOrders2: ["PurchaseOrders"],
   SiteLog: ["SiteLog"],
-  // Weekly master office timesheet — visible to holders of the OfficeTimesheet
-  // permission (and FullAccess, which unlocks every button).
-  OfficeTimesheet: ["OfficeTimesheet"]
+  // Merged "Timesheet" tile — office + van timesheets. Visible to holders of
+  // either OfficeTimesheet or Vehicles (van pay). applyGate points it at the
+  // page the user can actually open; each page cross-links to the other.
+  OfficeTimesheet: ["OfficeTimesheet", "Vehicles"]
   // Settings (was Personalise) is now ALWAYS visible (class "button visible")
   // so every user can set their landing page; the appearance options inside
   // stay permission-gated. It is deliberately NOT in this MAP.
@@ -378,6 +366,19 @@ const MAP = {
           btn.classList.toggle("visible", allowed);
           if (allowed && buttonID === "MyDocuments" && user.SharePointPath) btn.href = user.SharePointPath;
         });
+
+        // Merged tiles: point each at the page THIS user can actually open, so a
+        // holder of only the "child" permission still reaches it in one tap (and
+        // never lands on a page their permission would block). First match wins.
+        const has = k => fullAccess || String(user[k] || "").toLowerCase() === "yes";
+        const setHref = (id, choices) => {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          for (const [perm, href] of choices) { if (has(perm)) { btn.href = href; return; } }
+        };
+        setHref("OfficeTimesheet", [["OfficeTimesheet", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]]);
+        setHref("Users",          [["Users", "users-admin.html"],              ["DeviceAdmin", "device-admin.html"]]);
+        setHref("Projects",       [["Projects", "projects.html"],              ["ProjectsAdmin", "projects-admin.html"]]);
 
         // Story Mode: guided users get a pinned "Back to My Day" at the top.
         const existing = document.getElementById("backToMyDay");

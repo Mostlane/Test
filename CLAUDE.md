@@ -330,6 +330,31 @@ MAP object: KEY = element id, list = permission names (any-of; FullAccess
 sees all). Hardcoded `class="button visible"` = always shown (Logout, Help).
 Story users: STORY_ALLOWED set only + pinned "Back to My Day". Personalise
 tile gated by ThemeColour/ThemeBackground.
+- **Consolidated tiles (Jul 2026)** — five standalone pages were nested behind
+  parents to cut top-level clutter. A merged tile is visible to holders of
+  EITHER the parent OR child permission (its MAP key list carries both), and
+  applyGate() sets a **per-user dynamic href** (`setHref`) so a child-only
+  holder lands straight on the child page (never orphaned, never on a page
+  their permission blocks). Same pattern in portal-config.js sidebar via
+  `resolveHref(item)` + `item.hrefBy`. The merges:
+  - **Timesheet** (id `OfficeTimesheet`, keys OfficeTimesheet|Vehicles):
+    Office Timesheet default, Vehicles-only → van-timesheet.html. Each page
+    cross-links the other (`vanTsLink` / `officeTsLink`, gated by the other
+    perm). van-timesheet.html has no server perm-guard; office-timesheet needs
+    OfficeTimesheet|FullAccess.
+  - **Users** (keys Users|DeviceAdmin): users-admin default, DeviceAdmin-only →
+    device-admin.html (its guard accepts DeviceAdmin). users-admin toolbar has a
+    `devicesLink` (gated DeviceAdmin|FullAccess). Removed standalone Devices.
+  - **Projects** (keys Projects|ProjectsAdmin): projects default, ProjectsAdmin-
+    only → projects-admin.html. projects.html topbar `⚙ Admin` btn `projAdminBtn`
+    (gated ProjectsAdmin|FullAccess). Removed standalone Project Admin.
+  - **Vehicles**: Fleet Report is a `🚚 Fleet Report` button in vehicles.html
+    head-actions (page-gated by the Vehicles tile). Removed standalone tile.
+  - **Notifications**: the all-staff per-device push toggle (notifications.html)
+    moved into Settings (personalise.html `notifCard`, everyone). The admin
+    **Notification Centre** tile (notification-centre.html, `__fullOnly`) stays.
+  Child-page link gates read cached `mostlanePermissions` at parse time (inline
+  script), matching the delete-button/projAdmin pattern.
 
 ## _headers (Cloudflare Pages cache rules)
 no-cache on: portal-config.js, auth.js, device-auth.js, docviewer.js,

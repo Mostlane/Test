@@ -475,28 +475,24 @@
           { label: "Customers", href: "customers.html", icon: "customers", perms: ["Sites", "AddSite"] },
           { label: "SiteLog", href: "sitelog.html", icon: "sitelog", perms: ["SiteLog"] },
           { label: "Plant & Equipment", href: "my-assets.html", icon: "assets", perms: ["Assets"], match: ["my-assets.html", "asset-menu.html", "assets-admin.html", "shared-assets.html"] },
-          { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects"] },
-          { label: "Projects Admin", href: "projects-admin.html", icon: "projects", perms: ["ProjectsAdmin"] },
+          { label: "Projects", href: "projects.html", icon: "projects", perms: ["Projects", "ProjectsAdmin"], hrefBy: [["Projects", "projects.html"], ["ProjectsAdmin", "projects-admin.html"]], match: ["projects.html", "projects-admin.html"] },
           { label: "PO System", href: "po.html", icon: "po", perms: ["PurchaseOrders"], match: ["po.html"] },
           { label: "H&S Plans", launch: "hs", icon: "hs", perms: ["HSPlan"] }
         ]},
         { title: "Time & HR", items: [
-          { label: "Office Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["OfficeTimesheet"] },
+          { label: "Timesheet", href: "office-timesheet.html", icon: "timesheet", perms: ["OfficeTimesheet", "Vehicles"], hrefBy: [["OfficeTimesheet", "office-timesheet.html"], ["Vehicles", "van-timesheet.html"]], match: ["office-timesheet.html", "van-timesheet.html"] },
           { label: "My Hours", href: "office-my-hours.html", icon: "clock", perms: ["OfficeClock"] },
           { label: "Holiday", href: "holiday.html", icon: "holiday", perms: ["Holiday"] },
           { label: "Holiday Admin", href: "holiday-admin.html", icon: "holidayAdmin", perms: ["HolidayAdmin"], match: ["holiday-admin.html", "holiday-config.html"] },
           { label: "Weekly Summary", href: "weekly.html", icon: "weekly", perms: ["Weekly"] },
           { label: "Hours Dashboard", href: "hours-dashboard-simple-v2.html", icon: "gauge", perms: ["HoursDashboard"] },
           // Labour Planning unlinked on request (legacy, unused) — page file kept.
-          { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"] },
-          { label: "Fleet Report", href: "fleet-report.html", icon: "vehicles", perms: ["Vehicles"] },
-          { label: "Van Timesheet", href: "van-timesheet.html", icon: "timesheet", perms: ["Vehicles"] }
+          { label: "Vehicles", href: "vehicles.html", icon: "vehicles", perms: ["Vehicles"], match: ["vehicles.html", "fleet-report.html", "van-checks.html", "van-timesheet.html"] }
         ]},
         { title: "Admin", items: [
-          { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users"] },
+          { label: "Users", href: "users-admin.html", icon: "users", perms: ["Users", "DeviceAdmin"], hrefBy: [["Users", "users-admin.html"], ["DeviceAdmin", "device-admin.html"]], match: ["users-admin.html", "device-admin.html"] },
           { label: "Stats", href: "stats.html", icon: "chart", perms: ["__fullOnly"] },
           { label: "Notification Centre", href: "notification-centre.html", icon: "forms", perms: ["__fullOnly"] },
-          { label: "Devices", href: "device-admin.html", icon: "devices", perms: ["DeviceAdmin"] },
           { label: "Forms", href: "forms.html", icon: "forms", perms: ["Forms"] },
           { label: "Compliance", href: "compliance.html", icon: "compliance", perms: ["Compliance"] },
           { label: "Settings", href: "settings.html", icon: "settings", perms: ["__fullOnly"] },
@@ -540,6 +536,16 @@
         for (var i = 0; i < item.perms.length; i++) if (yes(perms[item.perms[i]])) return true;
         return false;
       }
+      // Merged items point at the page THIS user can open (first perm they hold
+      // wins), so a child-only permission still lands somewhere valid.
+      function resolveHref(item) {
+        if (item.hrefBy) {
+          for (var i = 0; i < item.hrefBy.length; i++) {
+            if (yes(perms.FullAccess) || yes(perms[item.hrefBy[i][0]])) return item.hrefBy[i][1];
+          }
+        }
+        return item.href;
+      }
       function isActive(item) {
         if ((item.href || "").toLowerCase() === page) return true;
         return !!(item.match && item.match.indexOf(page) !== -1);
@@ -556,7 +562,7 @@
             // Root-absolute hrefs: the sidebar also renders inside sub-app
             // folders (e.g. /hs-plan/), where a relative "main.html" would
             // resolve to /hs-plan/main.html and 404.
-            var attrs = it.launch ? 'href="#" data-launch="' + it.launch + '"' : 'href="/' + esc(it.href) + '"';
+            var attrs = it.launch ? 'href="#" data-launch="' + it.launch + '"' : 'href="/' + esc(resolveHref(it)) + '"';
             out += '<a class="pn-item' + (isActive(it) ? " active" : "") + '" ' + attrs + ' title="' + esc(it.label) + '">'
               + svg(it.icon) + '<span class="pn-label">' + esc(it.label) + "</span></a>";
           });

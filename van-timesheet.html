@@ -43,7 +43,15 @@
 </style>
 </head>
 <body>
-<div class="top"><a href="/main.html">‹ Back</a><h1>🚚 Van Timesheet</h1></div>
+<div class="top"><a href="/main.html">‹ Back</a><h1>🚚 Van Timesheet</h1><a id="officeTsLink" href="office-timesheet.html" style="display:none;margin-left:auto;">💼 Office timesheet →</a></div>
+<script>
+  // Both timesheets live under one menu tile; cross-link where permitted.
+  (function(){ try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = v => String(v||"").toLowerCase() === "yes";
+    if (yes(p.FullAccess) || yes(p.OfficeTimesheet)) document.getElementById("officeTsLink").style.display = "";
+  }catch(e){} })();
+</script>
 <div class="wrap">
   <div class="bar">
     <button class="btn" id="prevWk">‹ Prev</button>

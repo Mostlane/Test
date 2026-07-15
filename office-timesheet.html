@@ -64,8 +64,19 @@
 <body>
   <header>
     <h1>💼 Office Timesheet</h1>
-    <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <a class="btn grey" id="vanTsLink" href="van-timesheet.html" style="display:none;text-decoration:none;" title="Door-to-door van timesheets">🚚 Van timesheets →</a>
+      <a class="ml-back" data-role="home" href="main.html">← Menu</a>
+    </div>
   </header>
+  <script>
+    // Both timesheets live under one menu tile; cross-link where permitted.
+    (function(){ try{
+      var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+      var yes = v => String(v||"").toLowerCase() === "yes";
+      if (yes(p.FullAccess) || yes(p.Vehicles)) document.getElementById("vanTsLink").style.display = "";
+    }catch(e){} })();
+  </script>
 
   <div class="wrap">
     <div class="bar">

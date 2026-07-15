@@ -169,7 +169,16 @@
   <a class="ml-back" data-role="home" href="main.html">← Menu</a>
   <strong style="color:#004a99">Projects</strong>
   <button class="btn" onclick="loadProjects()">⟲</button>
+  <a class="btn" id="projAdminBtn" href="projects-admin.html" style="display:none">⚙ Admin</a>
 </div>
+<script>
+  // Show the admin shortcut only to project admins (server still enforces).
+  (function(){ try{
+    var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+    var yes = v => String(v||"").toLowerCase() === "yes";
+    if (yes(p.FullAccess) || yes(p.ProjectsAdmin)) document.getElementById("projAdminBtn").style.display = "";
+  }catch(e){} })();
+</script>
 
 <div class="wrap">
   <div class="grid">

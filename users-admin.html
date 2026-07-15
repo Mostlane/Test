@@ -120,9 +120,19 @@
       <input id="search" placeholder="Search by name, username or email…" />
       <button class="btn" id="addBtn">+ Add user</button>
       <button class="btn grey" id="saveOrderBtn" style="display:none;">Save order</button>
+      <a class="btn grey" id="devicesLink" href="device-admin.html" style="display:none;text-decoration:none;" title="Manage which devices each user can log in on">🔐 Devices</a>
       <a class="btn grey" href="notify-log.html" style="text-decoration:none;" title="Who was shown which notifications, when">🔔 Notification log</a>
       <a class="btn grey" href="activity-log.html" style="text-decoration:none;" title="Everything done on the portal, with timestamps">📜 Activity log</a>
     </div>
+    <script>
+      // Device-lock management now lives behind Users Admin. Show the shortcut
+      // only to Device Admins / Full Access (server still enforces on the page).
+      (function(){ try{
+        var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}");
+        var yes = v => String(v||"").toLowerCase() === "yes";
+        if (yes(p.FullAccess) || yes(p.DeviceAdmin)) document.getElementById("devicesLink").style.display = "";
+      }catch(e){} })();
+    </script>
 
     <div id="menuVisCard" class="notice" style="display:none; background:#eef2ff; border-color:#c7d2fe;">
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
