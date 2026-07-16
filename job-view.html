@@ -473,7 +473,7 @@
         <div class="sub" id="jobSub">Loading…</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <a href="engineer-jobs.html" class="btn">← My Jobs</a>
+        <a href="engineer-jobs.html" class="btn" id="backBtn">← Back</a>
         <button id="editJobBtn" class="btn" style="display:none;">✏️ Edit details</button>
         <a id="headerMapBtn" class="btn" target="_blank" rel="noopener" style="display:none;">🧭 Directions</a>
         <a id="poBtn" class="btn primary" href="#">Raise PO for this job</a>
@@ -515,10 +515,8 @@
       </div>
     </div>
 
-    <div style="margin-top:10px;">
-      <div class="field-label">Description</div>
-      <div class="field-value" id="jobDesc">—</div>
-    </div>
+    <!-- Description is kept in the Edit box (✏️ Edit details); not shown here. -->
+    <div class="field-value" id="jobDesc" hidden></div>
   </div>
 
   <!-- SITE DETAILS -->
@@ -1535,6 +1533,15 @@ function isOfficeAdmin(){
 }
 function init(){
   $("saveBtn").addEventListener("click", saveUpdate);
+  // Back button: return to wherever they came from (dashboard, scheduler,
+  // My Jobs, archive, site photos…). Falls back to the href when there's no
+  // in-app history to go back to (e.g. opened fresh from a push notification).
+  const backBtn = $("backBtn");
+  if(backBtn){
+    backBtn.addEventListener("click", e => {
+      if(history.length > 1){ e.preventDefault(); history.back(); }
+    });
+  }
   buildStatusChips();
   $("noteInput").addEventListener("input", updateSaveButton);
   // Office admins can edit ANY job detail — including the full site address —
