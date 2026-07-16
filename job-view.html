@@ -632,6 +632,7 @@
 </div>
 <script>
 const SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+const MIN_COMPLETE_NOTE = 15;   // completion note must be at least this many chars
 let job = null;
 let countdownTimerId = null;
 
@@ -1095,6 +1096,10 @@ const STATUS_META = {
   "Quote":      { e:"📝", c:"purple" }
 };
 function isPackStatus(s){ return s === "Quote" || s === "On Hold" || s === "In Progress"; }
+// Statuses that must be confirmed rather than silently auto-saved, because they
+// need something first: a details pack (Quote/On Hold/In Progress) or the
+// completion evidence (Complete = photo + note).
+function needsConfirm(s){ return isPackStatus(s) || s === "Complete"; }
 
 function buildStatusChips(){
   const grid = $("statusGrid");
@@ -1124,11 +1129,12 @@ function updateSaveButton(){
   const btn = $("saveBtn");
   if(!btn) return;
   let show = false, label = "Save update";
-  if(isPackStatus(s)){
+  if(needsConfirm(s)){
     show = true;
     label = s === "Quote" ? "Save quote details"
           : s === "On Hold" ? "Save on-hold details"
-          : "Confirm & start work";
+          : s === "In Progress" ? "Confirm & start work"
+          : "✅ Mark complete";
   } else if(note && job && s === (job.status || "")){
     show = true; label = "Save note";
   }
@@ -1140,13 +1146,19 @@ function pickStatus(value){
   highlightStatus(value);
   syncPanels();
   updateSaveButton();
-  if(isPackStatus(value)){
-    // Reveal the relevant panel and let them fill it, then hit the button.
-    const panel = value === "Quote" ? $("quotePanel")
-                : value === "On Hold" ? $("holdPanel") : $("raPanel");
-    if(panel) panel.scrollIntoView({ behavior:"smooth", block:"center" });
-    $("statusBar").className = "";
-    $("statusBar").textContent = "Fill in the details, then confirm.";
+  if(needsConfirm(value)){
+    if(isPackStatus(value)){
+      // Reveal the relevant panel and let them fill it, then hit the button.
+      const panel = value === "Quote" ? $("quotePanel")
+                  : value === "On Hold" ? $("holdPanel") : $("raPanel");
+      if(panel) panel.scrollIntoView({ behavior:"smooth", block:"center" });
+      $("statusBar").className = "";
+      $("statusBar").textContent = "Fill in the details, then confirm.";
+    } else {
+      // Complete: needs a photo + a note. Nudge, then they hit "Mark complete".
+      $("statusBar").className = "";
+      $("statusBar").textContent = `Add at least one photo and a completion note (${MIN_COMPLETE_NOTE}+ characters), then tap “Mark complete”.`;
+    }
     return;
   }
   // Simple status → save straight away (no button needed).
@@ -1173,18 +1185,31 @@ function fillHoldFromJob(){
   $("h_needs").value  = h.needs || "";
   $("h_resume").value = h.resume || "";
 }
-/* A job "blocks" its engineer if it was parked without the info the office
-   needs: On Hold with no hold pack, or Quote with no quote pack. */
-function jobIsBlocking(j){
-  if(j.status === "On Hold") return !(j.hold && j.hold.reason && j.hold.needs);
-  if(j.status === "Quote")   return !(j.quote && j.quote.description && j.quote.reason && j.quote.materials);
-  return false;
+/* Why an OTHER of the engineer's jobs blocks them from starting or completing
+   this one: it was started but never finished (In Progress / Travelling), or
+   parked without the info the office needs (On Hold / Quote with no pack).
+   Returns a short human reason, or null if the job is fine. */
+function jobBlockReason(j){
+  const s = j.status || "";
+  if(s === "In Progress" || s === "Travelling") return "still open (" + s + ")";
+  if(s === "On Hold" && !(j.hold && j.hold.reason && j.hold.needs))
+    return "On Hold without the required details";
+  if(s === "Quote" && !(j.quote && j.quote.description && j.quote.reason && j.quote.materials))
+    return "a Quote without the required details";
+  return null;
 }
+// Legacy name kept for any other callers: true if the job needs closing out.
+function jobIsBlocking(j){ return !!jobBlockReason(j); }
 async function findBlockingJob(currentJobId, engineer){
   try{
     const res = await fetch(`${SLA_API}/jobs/for-engineer?engineer=${encodeURIComponent(engineer)}`, { cache:"no-store" });
     const list = await res.json();
-    return (Array.isArray(list) ? list : []).find(j => j.id !== currentJobId && jobIsBlocking(j)) || null;
+    for(const j of (Array.isArray(list) ? list : [])){
+      if(j.id === currentJobId) continue;
+      const reason = jobBlockReason(j);
+      if(reason) return { job: j, reason };
+    }
+    return null;
   }catch{ return null; }
 }
 function collectRA(){
@@ -1245,14 +1270,18 @@ async function saveUpdate(){
   const note = $("noteInput").value.trim();
   const user = getUser();
 
-  // Starting a job? First check no OTHER job was parked without its info —
-  // an On Hold / Quote job with missing details blocks everything else.
-  if(status === "Travelling" || status === "In Progress"){
+  // You can't start (Travelling / In Progress) or complete another job while a
+  // previous one is still open or parked without its details. Warn about that
+  // job and take the engineer straight into it to finish it off first.
+  if(status === "Travelling" || status === "In Progress" || status === "Complete"){
     const blocking = await findBlockingJob(job.id, user);
     if(blocking){
-      const ref = blocking.helpdeskRef || blocking.id;
-      alert(`⚠️ Job ${ref} is "${blocking.status}" but is missing the required details.\n\nComplete it before starting another job — taking you there now.`);
-      location.href = "job-view.html?jobId=" + encodeURIComponent(blocking.id);
+      const bj = blocking.job;
+      const ref = bj.helpdeskRef || bj.id;
+      $("statusBar").className = "err";
+      $("statusBar").textContent = `⚠️ Finish job ${ref} first — taking you to it…`;
+      alert(`⚠️ Job ${ref} is ${blocking.reason}.\n\nYou need to finish it before you start or complete another job.\n\nTaking you to it now.`);
+      location.href = "job-view.html?jobId=" + encodeURIComponent(bj.id);
       return;
     }
   }
@@ -1300,14 +1329,17 @@ async function saveUpdate(){
     }
   }
 
-  // Story Mode: marking a job Complete needs evidence — note + photo + signature.
-  if(status === "Complete" && isStoryMode()){
+  // Marking a job Complete needs evidence — a proper completion note AND at
+  // least one photo (Story Mode also needs a customer signature). Applies to
+  // every engineer so closed jobs always carry a record of what was done.
+  if(status === "Complete"){
     const missing = [];
-    if(!note) missing.push("a completion note");
+    if(note.length < MIN_COMPLETE_NOTE) missing.push(`a completion note (at least ${MIN_COMPLETE_NOTE} characters — say what you did)`);
     if(!photoGallery.length) missing.push("at least one photo");
-    if(!(job && job.signature)) missing.push("a customer signature");
+    if(isStoryMode() && !(job && job.signature)) missing.push("a customer signature");
     if(missing.length){
-      $("statusBar").textContent = "⚠️ To mark Complete you need: " + missing.join(", ") + ". Add them below, then save.";
+      $("statusBar").className = "err";
+      $("statusBar").textContent = "⚠️ Before you can mark this Complete, add: " + missing.join(", ") + ".";
       return;
     }
   }

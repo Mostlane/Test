@@ -193,6 +193,18 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   `MLJobEdit.wheelify(root)`: mouse-wheel stepping on date/time/number inputs
   (15 min per notch, Shift = 1 h, dates 1 day) — also wired to the scheduler's
   quick modal. Finish ≤ start rolls to next day (evening access windows).
+  **job-view.html status control (engineer, mobile-first)**: the status dropdown
+  is a grid of colour-coded **tap-to-change chips** that **auto-save on tap**
+  (`pickStatus`/`buildStatusChips`; a hidden `#statusSelect` mirrors the value so
+  the save/validation code is untouched). Statuses that need something first are
+  `needsConfirm` (no silent save — show a labelled confirm button instead):
+  Quote / On Hold (details pack), In Progress (risk assessment), and **Complete**
+  (requires ≥1 photo + a completion note ≥ `MIN_COMPLETE_NOTE` chars for EVERY
+  engineer, not just Story Mode; Story also needs a signature). Cross-job guard:
+  moving a job to **Travelling / In Progress / Complete** is blocked while ANOTHER
+  of the engineer's jobs is unfinished (`jobBlockReason`: still In Progress/
+  Travelling, or On Hold/Quote without its pack) — it alerts naming that job and
+  redirects straight into it to finish first.
   `sites.js` (get/add/update-site, customers, street-images, auto geofence
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
