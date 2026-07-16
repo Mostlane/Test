@@ -109,8 +109,19 @@
         <div class="msg" id="photoMsg"></div>
         <div style="margin-top:14px;border-top:1px solid #eef1f4;padding-top:12px;">
           <p class="muted" style="margin:0 0 8px;">Once the photos are imported, link them to their <b>store's Site Photos</b> gallery — matched by store number (signatures stay on the job in the Archive, not in the site gallery). Safe to run any time.</p>
-          <button class="btn" id="linkSites">🔗 Link photos to sites</button>
+          <div class="bar">
+            <button class="btn" id="linkSites">🔗 Link photos to sites</button>
+            <button class="btn" id="unlinkSites">✂️ Unlink (re-pair)</button>
+          </div>
           <div class="msg" id="linkMsg"></div>
+          <div style="margin-top:12px;">
+            <p class="muted" style="margin:0 0 6px;">Check a store — how many archive jobs are tagged to it and how many photos are linked.</p>
+            <div class="bar">
+              <input type="text" id="checkCode" placeholder="Store number e.g. 0032" style="max-width:180px;padding:6px 8px;border:1px solid #ccd2d8;border-radius:6px;" />
+              <button class="btn" id="checkStore">Check</button>
+            </div>
+            <div class="msg" id="checkMsg"></div>
+          </div>
         </div>
       </div>
 
@@ -391,12 +402,57 @@ $("linkSites").onclick = async () => {
       $("linkMsg").textContent = `Linked ${done.toLocaleString()} jobs${d.remaining ? " (…" + d.remaining.toLocaleString() + " to go)" : ""}`;
       if(!d.remaining) break;
     }
+    // report how the linking landed
+    let stat = "";
+    try{
+      const s = await (await fetch(SLA + "/archive/site-stats", { cache:"no-store" })).json();
+      if(s && s.ok) stat = ` — ${Number(s.tagged||0).toLocaleString()} jobs tagged across ${Number(s.stores||0).toLocaleString()} stores` + (s.untagged ? `, ${Number(s.untagged).toLocaleString()} still untagged` : "");
+    }catch(e){}
     $("linkMsg").className = "msg ok";
-    $("linkMsg").textContent = `✓ Done — photos are now linked to their store's Site Photos. Open a site → Site Documents → Site Photos to see them.`;
+    $("linkMsg").textContent = `✓ Done${stat}. Open a site → Site Documents → Site Photos to see them.`;
   }catch(e){
     $("linkMsg").className = "msg err"; $("linkMsg").textContent = "Error: " + e.message;
   }finally{ $("linkSites").disabled = false; }
 };
+
+$("unlinkSites").onclick = async () => {
+  if(!confirm("Unlink ALL archive jobs from their stores?\n\nThis clears every store tag so you can re-pair from scratch with the 🔗 button. Photos are not deleted.")) return;
+  $("unlinkSites").disabled = true; $("linkSites").disabled = true;
+  $("linkMsg").className = "msg"; $("linkMsg").textContent = "Unlinking…";
+  try{
+    const res = await fetch(SLA + "/archive/unlink-sites", { method:"POST" });
+    const d = await res.json();
+    if(!res.ok || !d.ok) throw new Error(d.error || ("HTTP " + res.status));
+    $("linkMsg").className = "msg ok";
+    $("linkMsg").textContent = `✓ Unlinked ${Number(d.cleared||0).toLocaleString()} jobs — press 🔗 Link photos to sites to re-pair.`;
+  }catch(e){
+    $("linkMsg").className = "msg err"; $("linkMsg").textContent = "Error: " + e.message;
+  }finally{ $("unlinkSites").disabled = false; $("linkSites").disabled = false; }
+};
+
+$("checkStore").onclick = async () => {
+  const code = ($("checkCode").value || "").trim();
+  if(!code){ $("checkMsg").className="msg"; $("checkMsg").textContent="Type a store number first."; return; }
+  $("checkStore").disabled = true;
+  $("checkMsg").className = "msg"; $("checkMsg").textContent = "Checking…";
+  try{
+    const s = await (await fetch(SLA + "/archive/site-stats?code=" + encodeURIComponent(code), { cache:"no-store" })).json();
+    if(!s || !s.ok) throw new Error(s && s.error ? s.error : "lookup failed");
+    if(!s.jobs){
+      $("checkMsg").className = "msg err";
+      $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): 0 jobs tagged. Run 🔗 Link photos to sites — if it stays 0, no archive job's customer name contains this number.`;
+    } else if(!s.photos){
+      $("checkMsg").className = "msg err";
+      $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): ${s.jobs} jobs tagged but 0 photos linked. Photos may not be imported yet, or none of these jobs had photos.`;
+    } else {
+      $("checkMsg").className = "msg ok";
+      $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): ${s.jobs} jobs, ${s.photos.toLocaleString()} photos linked ✓`;
+    }
+  }catch(e){
+    $("checkMsg").className = "msg err"; $("checkMsg").textContent = "Error: " + e.message;
+  }finally{ $("checkStore").disabled = false; }
+};
+$("checkCode").addEventListener("keydown", e => { if(e.key === "Enter") $("checkStore").click(); });
 
 $("startPhotos").onclick = async () => {
   if(!PHOTO_FILES.length) return;
