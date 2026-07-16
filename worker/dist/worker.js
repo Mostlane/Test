@@ -2728,10 +2728,12 @@ async function handle7(request, env, ctx, url, sess) {
       const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
       const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
       let total, rows;
-      if (q) {
-        const like = "%" + q.replace(/[%_\\]/g, "") + "%";
-        total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ?").bind(tenantId, like).first())?.n || 0;
-        ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND search LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, like, limit, offset).all());
+      const terms = q.split(/\s+/).map((t) => t.replace(/[%_\\]/g, "")).filter(Boolean).slice(0, 8);
+      if (terms.length) {
+        const where = terms.map(() => "search LIKE ?").join(" AND ");
+        const likes = terms.map((t) => "%" + t + "%");
+        total = (await db.prepare(`SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND ${where}`).bind(tenantId, ...likes).first())?.n || 0;
+        ({ results: rows } = await db.prepare(`SELECT data FROM sla_jobs_archive WHERE tenant_id=? AND ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).bind(tenantId, ...likes, limit, offset).all());
       } else {
         total = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=?").bind(tenantId).first())?.n || 0;
         ({ results: rows } = await db.prepare("SELECT data FROM sla_jobs_archive WHERE tenant_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?").bind(tenantId, limit, offset).all());

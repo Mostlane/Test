@@ -563,7 +563,9 @@ function filteredJobs(){
     if(search){
       const blob = [j.helpdeskRef, j.id, j.description, j.siteName, j.siteCode, j.address,
                     j.status, (j.assignedEngineers||[]).join(" ")].join(" ").toLowerCase();
-      if(!blob.includes(search)) return false;
+      // Every word must match somewhere, so "0126 hatch" finds store 0126's
+      // hatch job even though the words live in different fields.
+      if(!search.split(/\s+/).every(t => blob.includes(t))) return false;
     }
     return true;
   }).sort((a,b) => new Date(b.raisedAt||0) - new Date(a.raisedAt||0));
