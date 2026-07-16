@@ -381,12 +381,9 @@ $("startPhotos").onclick = async () => {
   const BATCH = 40, LANES = 2;   // 2 batches in flight; the server retries + fetches 4 at a time within each
   let done = 0, imported = 0, skipped = 0, failed = 0, lastErr = "";
 
-  // Resume where a previous run of THIS manifest left off.
-  const sig = total + ":" + (PHOTO_FILES[0] && PHOTO_FILES[0].id || "");
-  let start = 0;
-  try { if(localStorage.getItem("wev_photo_sig") === sig) start = parseInt(localStorage.getItem("wev_photo_idx")||"0",10)||0; } catch(e){}
-  localStorage.setItem("wev_photo_sig", sig);
-
+  // Always run from the start; the SERVER skips whatever's already stored (it's
+  // the single source of truth). No browser-side resume marker — that could get
+  // out of sync with the DB and skip files that were never actually imported.
   async function sendBatch(from){
     const slice = PHOTO_FILES.slice(from, from + BATCH);
     if(!slice.length) return;
@@ -402,14 +399,13 @@ $("startPhotos").onclick = async () => {
 
   $("photoMsg").className = "msg";
   try{
-    let idx = start;
+    let idx = 0;
     while(idx < total && !photoStop){
       // launch up to LANES batches concurrently
       const jobs = [];
       for(let l=0; l<LANES && idx<total; l++){ jobs.push(sendBatch(idx)); idx += BATCH; }
       await Promise.all(jobs);
       const processed = Math.min(idx, total);
-      try{ localStorage.setItem("wev_photo_idx", String(processed)); }catch(e){}
       $("photoBar").style.width = Math.round(processed/total*100) + "%";
       $("photoMsg").textContent = `Processed ${processed.toLocaleString()}/${total.toLocaleString()} — imported ${imported.toLocaleString()}, skipped ${skipped.toLocaleString()}${failed?`, ${failed} failed (retry on next run; last: ${lastErr})`:""}`;
       refreshPhotoCount();
