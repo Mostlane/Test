@@ -107,6 +107,11 @@
         </div>
         <div class="prog"><i id="photoBar"></i></div>
         <div class="msg" id="photoMsg"></div>
+        <div style="margin-top:14px;border-top:1px solid #eef1f4;padding-top:12px;">
+          <p class="muted" style="margin:0 0 8px;">Once the photos are imported, link them to their <b>store's Site Photos</b> gallery — matched by store number (signatures stay on the job in the Archive, not in the site gallery). Safe to run any time.</p>
+          <button class="btn" id="linkSites">🔗 Link photos to sites</button>
+          <div class="msg" id="linkMsg"></div>
+        </div>
       </div>
 
     </div>
@@ -371,6 +376,26 @@ $("clearPhotos").onclick = async () => {
     try{ localStorage.removeItem("wev_photo_idx"); localStorage.removeItem("wev_photo_sig"); }catch(e){}
     $("photoMsg").className="msg ok"; $("photoMsg").textContent="Cleared — press Import photos to start over."; refreshPhotoCount();
   }catch(e){ $("photoMsg").className="msg err"; $("photoMsg").textContent="Error: "+e.message; }
+};
+
+$("linkSites").onclick = async () => {
+  $("linkSites").disabled = true;
+  $("linkMsg").className = "msg"; $("linkMsg").textContent = "Tagging jobs with their store number…";
+  let done = 0;
+  try{
+    for(let guard = 0; guard < 200; guard++){
+      const res = await fetch(SLA + "/archive/backfill-sites", { method:"POST" });
+      const d = await res.json();
+      if(!res.ok || !d.ok) throw new Error(d.error || ("HTTP " + res.status));
+      done += d.done || 0;
+      $("linkMsg").textContent = `Linked ${done.toLocaleString()} jobs${d.remaining ? " (…" + d.remaining.toLocaleString() + " to go)" : ""}`;
+      if(!d.remaining) break;
+    }
+    $("linkMsg").className = "msg ok";
+    $("linkMsg").textContent = `✓ Done — photos are now linked to their store's Site Photos. Open a site → Site Documents → Site Photos to see them.`;
+  }catch(e){
+    $("linkMsg").className = "msg err"; $("linkMsg").textContent = "Error: " + e.message;
+  }finally{ $("linkSites").disabled = false; }
 };
 
 $("startPhotos").onclick = async () => {

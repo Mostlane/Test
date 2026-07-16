@@ -201,6 +201,21 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   sig-verified, streams from R2). sla-data-tools.html §3 loads the manifest and
   loops batches (80/call × 3 lanes, localStorage resume). job-archive.html shows
   each job's photos/signatures as a thumbnail grid + lightbox, PDFs as links.
+  **Serving speed**: /sla/archive-file edge-caches via the Cache API (immutable);
+  job-archive caps a job's grid at 8 thumbs + "show all". The same edge-cache was
+  retrofitted to /asset-image + /asset-thumb (purgeAssetCache busts it on
+  delete/upload/thumb-backfill) to fix the slow assets grids.
+  **Dashboard 📷 + unified search**: POST /sla/jobs/photo-flags returns which live
+  jobs have photos (own R2 jobs/<id>/ folder OR archive photos matching the ref);
+  sla-main shows a 📷 badge (fetched once per load, applied per render). The
+  dashboard search box also searches the archive (/sla/archive?q=), showing
+  matches as read-only "🗄️ archive" rows; View opens job-archive.html?q=.
+  **Site Photos linking**: sla_jobs_archive gains a `site_code` column
+  (digitsOf(customer name), same convention as portal site codes), backfilled via
+  POST /sla/archive/backfill-sites (🔗 button on sla-data-tools). /sla/site/photos
+  then also returns that store's archive photos (kind='photo' only — signatures/
+  PDFs stay on the job, not the site gallery). ~90% of jobs match a store; one-off
+  customers with no store number stay in the Job Archive only.
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,

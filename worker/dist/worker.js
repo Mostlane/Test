@@ -2795,6 +2795,10 @@ async function handle7(request, env, ctx, url, sess) {
       const r = await db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes),0) AS b FROM sla_archive_files WHERE tenant_id=?").bind(tenantId).first();
       return jsonResponse({ ok: true, count: r?.n || 0, bytes: r?.b || 0 }, headers);
     }
+    if (subpath === "/archive/backfill-sites" && method === "POST") {
+      const r = await backfillArchiveSites(env, tenantId, 500);
+      return jsonResponse({ ok: true, ...r }, headers);
+    }
     if (subpath === "/archive/photos/clear" && method === "POST") {
       await db.prepare("DELETE FROM sla_archive_files WHERE tenant_id=?").bind(tenantId).run();
       return jsonResponse({ ok: true }, headers);
@@ -3122,6 +3126,30 @@ async function handle7(request, env, ctx, url, sess) {
           by: o.customMetadata && o.customMetadata.by,
           source: "upload"
         });
+      }
+      try {
+        await ensureArchive(env, tenantId);
+        await ensureArchiveFiles(env, tenantId);
+        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
+        const mos = (aj || []).map((r) => r.id);
+        for (let i = 0; i < mos.length && photos.length < 2e3; i += 100) {
+          const chunk = mos.slice(i, i + 100);
+          const ph = chunk.map(() => "?").join(",");
+          const { results: af } = await db.prepare(
+            `SELECT r2_key, name, taken_at, mos FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph}) LIMIT 2000`
+          ).bind(tenantId, ...chunk).all();
+          for (const f of af || []) {
+            photos.push({
+              url: await signedFileUrl(env, url.origin, "/sla/archive-file", f.r2_key),
+              key: f.r2_key,
+              name: f.name || f.r2_key.split("/").pop(),
+              at: f.taken_at || null,
+              jobRef: f.mos,
+              source: "archive"
+            });
+          }
+        }
+      } catch {
       }
     }
     photos.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
@@ -3520,7 +3548,37 @@ async function ensureArchive(env, tenantId) {
     await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_created ON sla_jobs_archive(tenant_id, created_at)").run();
   } catch {
   }
+  try {
+    await db.prepare("ALTER TABLE sla_jobs_archive ADD COLUMN site_code TEXT").run();
+  } catch {
+  }
+  try {
+    await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_sitecode ON sla_jobs_archive(tenant_id, site_code)").run();
+  } catch {
+  }
   _archiveReady = true;
+}
+function archiveSiteCode(job) {
+  const c = job && job.customer && job.customer.name || "";
+  return digitsOf(c) || "";
+}
+async function backfillArchiveSites(env, tenantId, cap = 500) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='') LIMIT ?"
+  ).bind(tenantId, cap).all();
+  const rows = results || [];
+  const stmts = rows.map((r) => {
+    let code = "-";
+    try {
+      code = archiveSiteCode(JSON.parse(r.data)) || "-";
+    } catch {
+    }
+    return db.prepare("UPDATE sla_jobs_archive SET site_code=? WHERE tenant_id=? AND id=?").bind(code, tenantId, r.id);
+  });
+  for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));
+  const left = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='')").bind(tenantId).first())?.n || 0;
+  return { done: rows.length, remaining: left };
 }
 async function archiveImport(env, tenantId, rows) {
   const db = tenantDB(env, tenantId);

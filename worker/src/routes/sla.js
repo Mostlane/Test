@@ -228,6 +228,12 @@ export async function handle(request, env, ctx, url, sess) {
       const r = await db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes),0) AS b FROM sla_archive_files WHERE tenant_id=?").bind(tenantId).first();
       return jsonResponse({ ok: true, count: r?.n || 0, bytes: r?.b || 0 }, headers);
     }
+    // POST /sla/archive/backfill-sites — tag archived jobs with their store code
+    // so their photos show under the matching site. Chunk-capped; loop on `remaining`.
+    if (subpath === "/archive/backfill-sites" && method === "POST") {
+      const r = await backfillArchiveSites(env, tenantId, 500);
+      return jsonResponse({ ok: true, ...r }, headers);
+    }
     // POST /sla/archive/photos/clear — drop the file records (R2 objects are left;
     // re-import overwrites them). Lets a bad run be redone.
     if (subpath === "/archive/photos/clear" && method === "POST") {
@@ -583,6 +589,25 @@ export async function handle(request, env, ctx, url, sess) {
         photos.push({ url: await fileUrl(env, url, o.key), key: o.key, name: (o.customMetadata && o.customMetadata.name) || o.key.split("/").pop(),
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null, by: o.customMetadata && o.customMetadata.by, source: "upload" });
       }
+      // Imported historical photos for this store (photos only — signatures and
+      // PDFs stay on the job in the Archive, not in the site gallery).
+      try {
+        await ensureArchive(env, tenantId);
+        await ensureArchiveFiles(env, tenantId);
+        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
+        const mos = (aj || []).map(r => r.id);
+        for (let i = 0; i < mos.length && photos.length < 2000; i += 100) {
+          const chunk = mos.slice(i, i + 100);
+          const ph = chunk.map(() => "?").join(",");
+          const { results: af } = await db.prepare(
+            `SELECT r2_key, name, taken_at, mos FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph}) LIMIT 2000`
+          ).bind(tenantId, ...chunk).all();
+          for (const f of af || []) {
+            photos.push({ url: await signedFileUrl(env, url.origin, "/sla/archive-file", f.r2_key), key: f.r2_key,
+              name: f.name || f.r2_key.split("/").pop(), at: f.taken_at || null, jobRef: f.mos, source: "archive" });
+          }
+        }
+      } catch {}
     }
     photos.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     return jsonResponse({ photos }, headers);
@@ -1015,7 +1040,37 @@ async function ensureArchive(env, tenantId) {
     data        TEXT NOT NULL    -- full imported job JSON
   )`).run();
   try { await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_created ON sla_jobs_archive(tenant_id, created_at)").run(); } catch {}
+  // site_code = the store number pulled from the customer name; links a job's
+  // archive photos to its store's Site Photos. Backfilled via /archive/backfill-sites.
+  try { await db.prepare("ALTER TABLE sla_jobs_archive ADD COLUMN site_code TEXT").run(); } catch {}
+  try { await db.prepare("CREATE INDEX IF NOT EXISTS idx_arch_sitecode ON sla_jobs_archive(tenant_id, site_code)").run(); } catch {}
   _archiveReady = true;
+}
+
+// Compute a job's store code the same way the portal reads site codes
+// (digitsOf), from the customer name — that's where the store number lives.
+function archiveSiteCode(job) {
+  const c = (job && job.customer && job.customer.name) || "";
+  return digitsOf(c) || "";
+}
+
+// Backfill site_code for archived jobs that don't have one yet. Chunk-capped +
+// returns `remaining` so the caller loops. No-code jobs are marked "-" so they
+// aren't reprocessed.
+async function backfillArchiveSites(env, tenantId, cap = 500) {
+  const db = tenantDB(env, tenantId);
+  const { results } = await db.prepare(
+    "SELECT id, data FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='') LIMIT ?"
+  ).bind(tenantId, cap).all();
+  const rows = results || [];
+  const stmts = rows.map(r => {
+    let code = "-";
+    try { code = archiveSiteCode(JSON.parse(r.data)) || "-"; } catch {}
+    return db.prepare("UPDATE sla_jobs_archive SET site_code=? WHERE tenant_id=? AND id=?").bind(code, tenantId, r.id);
+  });
+  for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));
+  const left = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='')").bind(tenantId).first())?.n || 0;
+  return { done: rows.length, remaining: left };
 }
 
 // Upsert a batch of imported jobs (keyed by id). Chunked db.batch() calls keep
