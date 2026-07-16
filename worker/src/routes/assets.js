@@ -60,6 +60,10 @@ export async function handle(request, env, ctx, url, sess) {
         });
       }
 
+      // Bust any edge-cached copies at this key (guards the "next number reuses a
+      // deleted slot" case, so a fresh upload never shows a stale image).
+      await purgeAssetCache(url, filename);
+
       const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
       return json({ ok: true, url: publicUrl, key: filename });
     } catch (err) {
@@ -71,12 +75,18 @@ export async function handle(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset-image") {
     const key = searchParams.get("key");
     if (!key) return json({ error: "Missing key" }, 400);
+    // Edge-cache so repeat views (any user) skip R2 — the fix for the slow grids.
+    const cache = caches.default;
+    const hit = await cache.match(request);
+    if (hit) return hit;
     const obj = await env.ASSET_BUCKET.get(key);
     if (!obj) return new Response("Not found", { status: 404 });
-    return new Response(obj.body, {
+    const resp = new Response(obj.body, {
       status: 200,
-      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=3600" }
+      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=604800" }
     });
+    ctx?.waitUntil(cache.put(request, resp.clone()));
+    return resp;
   }
 
   // ── Thumbnail ──────────────────────────────────────────────────────────────
@@ -90,19 +100,30 @@ export async function handle(request, env, ctx, url, sess) {
       const key = searchParams.get("key");
       if (!key) return json({ error: "Missing key" }, 400);
 
+      const cache = caches.default;
+      const hit = await cache.match(request);
+      if (hit) return hit;
+
       const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
       if (thumb) {
-        return new Response(thumb.body, {
+        const resp = new Response(thumb.body, {
           headers: { ...cors, "Content-Type": thumb.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" }
         });
+        ctx?.waitUntil(cache.put(request, resp.clone()));
+        return resp;
       }
 
+      // No stored thumb yet (legacy image): serve the original, edge-cached for a
+      // day so it's only slow once — and the page's thumb-backfill will replace
+      // it with a tiny stored thumb, which takes over as the cache expires.
       const obj = await env.ASSET_BUCKET.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
-      return new Response(obj.body, {
+      const resp = new Response(obj.body, {
         headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" },
         cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
       });
+      ctx?.waitUntil(cache.put(request, resp.clone()));
+      return resp;
     } catch (err) {
       return json({ error: "Thumbnail generation failed", details: err.message }, 500);
     }
@@ -125,6 +146,8 @@ export async function handle(request, env, ctx, url, sess) {
       await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
         httpMetadata: { contentType: "image/jpeg" }
       });
+      // Drop the cached full-image fallback so the new small thumb takes over now.
+      await purgeAssetCache(url, key);
       return json({ ok: true });
     } catch (err) {
       return json({ ok: false, error: err.message }, 500);
@@ -144,6 +167,7 @@ export async function handle(request, env, ctx, url, sess) {
 
       await env.ASSET_BUCKET.delete(r2Key);
       await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
+      await purgeAssetCache(url, r2Key);   // don't let a deleted image linger in the edge cache
 
       const asset = await getAsset(env, tenantId, assetId);
       if (!asset) return json({ ok: false, error: "Asset not found" }, 404);
@@ -911,6 +935,18 @@ async function getAsset(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM assets WHERE tenant_id=? AND id = ?").bind(db.tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+
+// Best-effort edge-cache purge for an image key (both the full image and thumb
+// routes). caches.default is per-colo, so this clears the colo doing the write —
+// enough to stop a just-changed image showing stale to the person who changed it.
+async function purgeAssetCache(url, key) {
+  try {
+    const c = caches.default;
+    const enc = encodeURIComponent(key);
+    await c.delete(`${url.origin}/asset-image?key=${enc}`);
+    await c.delete(`${url.origin}/asset-thumb?key=${enc}`);
+  } catch {}
 }
 
 async function putAsset(env, tenantId, asset) {

@@ -1756,6 +1756,7 @@ async function handle6(request, env, ctx, url, sess) {
           httpMetadata: { contentType: "image/jpeg" }
         });
       }
+      await purgeAssetCache(url, filename);
       const publicUrl = `${url.origin}/asset-image?key=${encodeURIComponent(filename)}`;
       return json3({ ok: true, url: publicUrl, key: filename });
     } catch (err) {
@@ -1765,29 +1766,41 @@ async function handle6(request, env, ctx, url, sess) {
   if (method === "GET" && pathname === "/asset-image") {
     const key = searchParams.get("key");
     if (!key) return json3({ error: "Missing key" }, 400);
+    const cache = caches.default;
+    const hit = await cache.match(request);
+    if (hit) return hit;
     const obj = await env.ASSET_BUCKET.get(key);
     if (!obj) return new Response("Not found", { status: 404 });
-    return new Response(obj.body, {
+    const resp = new Response(obj.body, {
       status: 200,
-      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=3600" }
+      headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=604800" }
     });
+    ctx?.waitUntil(cache.put(request, resp.clone()));
+    return resp;
   }
   if (method === "GET" && pathname === "/asset-thumb") {
     try {
       const key = searchParams.get("key");
       if (!key) return json3({ error: "Missing key" }, 400);
+      const cache = caches.default;
+      const hit = await cache.match(request);
+      if (hit) return hit;
       const thumb = await env.ASSET_BUCKET.get(`${key}.thumb`);
       if (thumb) {
-        return new Response(thumb.body, {
+        const resp2 = new Response(thumb.body, {
           headers: { ...cors, "Content-Type": thumb.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=31536000, immutable" }
         });
+        ctx?.waitUntil(cache.put(request, resp2.clone()));
+        return resp2;
       }
       const obj = await env.ASSET_BUCKET.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
-      return new Response(obj.body, {
+      const resp = new Response(obj.body, {
         headers: { ...cors, "Content-Type": obj.httpMetadata?.contentType || "image/jpeg", "Cache-Control": "public, max-age=86400" },
         cf: { image: { width: 300, height: 300, fit: "cover", quality: 55, format: "auto" } }
       });
+      ctx?.waitUntil(cache.put(request, resp.clone()));
+      return resp;
     } catch (err) {
       return json3({ error: "Thumbnail generation failed", details: err.message }, 500);
     }
@@ -1805,6 +1818,7 @@ async function handle6(request, env, ctx, url, sess) {
       await env.ASSET_BUCKET.put(`${key}.thumb`, await thumb.arrayBuffer(), {
         httpMetadata: { contentType: "image/jpeg" }
       });
+      await purgeAssetCache(url, key);
       return json3({ ok: true });
     } catch (err) {
       return json3({ ok: false, error: err.message }, 500);
@@ -1820,6 +1834,7 @@ async function handle6(request, env, ctx, url, sess) {
       if (!r2Key) return json3({ ok: false, error: "Invalid image URL or key" }, 400);
       await env.ASSET_BUCKET.delete(r2Key);
       await env.ASSET_BUCKET.delete(`${r2Key}.thumb`);
+      await purgeAssetCache(url, r2Key);
       const asset = await getAsset(env, tenantId, assetId);
       if (!asset) return json3({ ok: false, error: "Asset not found" }, 404);
       const fullUrl = imageUrl || `${url.origin}/asset-image?key=${encodeURIComponent(r2Key)}`;
@@ -2534,6 +2549,15 @@ async function getAsset(env, tenantId, id) {
   const db = tenantDB(env, tenantId);
   const row = await db.prepare("SELECT data FROM assets WHERE tenant_id=? AND id = ?").bind(db.tenantId, id).first();
   return row ? JSON.parse(row.data) : null;
+}
+async function purgeAssetCache(url, key) {
+  try {
+    const c = caches.default;
+    const enc3 = encodeURIComponent(key);
+    await c.delete(`${url.origin}/asset-image?key=${enc3}`);
+    await c.delete(`${url.origin}/asset-thumb?key=${enc3}`);
+  } catch {
+  }
 }
 async function putAsset(env, tenantId, asset) {
   const db = tenantDB(env, tenantId);
