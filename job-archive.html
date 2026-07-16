@@ -31,6 +31,19 @@
     .detail.show{display:block}
     .detail dt{font-weight:600;color:#334155}
     .detail dd{margin:0 0 8px 0}
+    .files{margin-top:10px}
+    .files h4{margin:0 0 6px;font-size:12px;color:#475569;text-transform:uppercase;letter-spacing:.03em}
+    .thumbs{display:flex;flex-wrap:wrap;gap:8px}
+    .thumb{width:84px;height:84px;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;cursor:pointer;background:#f1f5f9;flex:0 0 auto}
+    .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .doclink{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:8px;text-decoration:none;color:#1d4ed8;font-size:13px;font-weight:600;margin:0 6px 6px 0}
+    .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:100;flex-direction:column}
+    .lightbox.show{display:flex}
+    .lightbox img{max-width:94vw;max-height:82vh;object-fit:contain}
+    .lightbox .lb-bar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;font-size:14px}
+    .lightbox .lb-btn{background:rgba(255,255,255,.15);border:none;color:#fff;font-size:22px;width:44px;height:44px;border-radius:50%;cursor:pointer}
+    .lb-nav{position:absolute;top:50%;transform:translateY(-50%);font-size:34px;color:#fff;background:rgba(255,255,255,.12);border:none;width:52px;height:52px;border-radius:50%;cursor:pointer}
+    .lb-prev{left:14px}.lb-next{right:14px}
     .msg{padding:14px;text-align:center;color:#6b7280}
     .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin:14px 0}
   </style>
@@ -56,6 +69,13 @@
         <button class="btn" id="next">Older →</button>
       </div>
     </div>
+  </div>
+
+  <div class="lightbox" id="lightbox">
+    <div class="lb-bar"><span id="lbCount"></span><button class="lb-btn" id="lbClose">✕</button></div>
+    <button class="lb-nav lb-prev" id="lbPrev">‹</button>
+    <img id="lbImg" alt="">
+    <button class="lb-nav lb-next" id="lbNext">›</button>
   </div>
 
 <script>
@@ -116,13 +136,65 @@ function render(jobs){
         ${j.createdAt?`<span>📅 ${fmtDate(j.createdAt)}</span>`:""}
       </div>
       ${detailHtml(j)}
+      <div class="files" data-mos="${esc(j.helpdeskRef||j.id)}" data-loaded="0"></div>
     </div>`;
   }).join("");
-  // tap a card to expand
+  // tap a card to expand (and lazily load its photos/files the first time)
   document.querySelectorAll("#results .card").forEach(card=>{
-    card.addEventListener("click", ()=> card.querySelector(".detail").classList.toggle("show"));
+    card.addEventListener("click", (e)=>{
+      if(e.target.closest(".thumb, .doclink")) return;   // don't collapse when opening a file
+      const detail = card.querySelector(".detail");
+      detail.classList.toggle("show");
+      if(detail.classList.contains("show")) loadFiles(card.querySelector(".files"));
+    });
   });
 }
+
+/* ---- per-job files (photos / signatures / PDFs imported from Workever) ---- */
+const GALLERIES = {};   // mos → [photo urls] for the lightbox
+async function loadFiles(box){
+  if(!box || box.dataset.loaded === "1") return;
+  box.dataset.loaded = "1";
+  const mos = box.dataset.mos;
+  box.innerHTML = `<div class="muted" style="font-size:12px">Loading files…</div>`;
+  try{
+    const d = await (await fetch(SLA + "/archive/files?mos=" + encodeURIComponent(mos), { cache:"no-store" })).json();
+    const files = (d && d.files) || [];
+    if(!files.length){ box.innerHTML = ""; return; }
+    const photos = files.filter(f => f.kind==="photo");
+    const sigs   = files.filter(f => f.kind==="signature");
+    const docs   = files.filter(f => f.kind==="document");
+    GALLERIES[mos] = photos.map(p => p.url);
+    let html = "";
+    const thumbs = (arr, from) => `<div class="thumbs">` + arr.map((f,i)=>
+      `<div class="thumb" data-mos="${esc(mos)}" data-i="${from+i}"><img loading="lazy" src="${esc(f.url)}" alt="${esc(f.name)}"></div>`).join("") + `</div>`;
+    if(photos.length) html += `<h4>Photos (${photos.length})</h4>` + thumbs(photos, 0);
+    if(sigs.length){ // signatures go into the same lightbox array after photos
+      GALLERIES[mos] = GALLERIES[mos].concat(sigs.map(s=>s.url));
+      html += `<h4 style="margin-top:10px">Signatures (${sigs.length})</h4>` + thumbs(sigs, photos.length);
+    }
+    if(docs.length) html += `<h4 style="margin-top:10px">Documents (${docs.length})</h4>` +
+      docs.map(f=>`<a class="doclink" href="${esc(f.url)}" target="_blank" rel="noopener">📄 ${esc(f.name)}</a>`).join("");
+    box.innerHTML = html;
+    box.querySelectorAll(".thumb").forEach(t=>{
+      t.addEventListener("click", ()=> openLightbox(t.dataset.mos, +t.dataset.i));
+    });
+  }catch(e){
+    box.innerHTML = `<div class="muted" style="font-size:12px">Couldn't load files.</div>`;
+  }
+}
+
+/* ---- lightbox ---- */
+let lbMos = null, lbIdx = 0;
+function openLightbox(mos, i){ lbMos = mos; lbIdx = i; showLb(); document.getElementById("lightbox").classList.add("show"); }
+function showLb(){
+  const arr = GALLERIES[lbMos] || [];
+  if(!arr.length) return;
+  if(lbIdx < 0) lbIdx = arr.length-1; if(lbIdx >= arr.length) lbIdx = 0;
+  document.getElementById("lbImg").src = arr[lbIdx];
+  document.getElementById("lbCount").textContent = (lbIdx+1) + " / " + arr.length;
+}
+function closeLb(){ document.getElementById("lightbox").classList.remove("show"); document.getElementById("lbImg").src=""; }
 
 async function search(reset){
   if (reset) offset = 0;
@@ -150,6 +222,17 @@ $("q").addEventListener("keydown", e => { if(e.key==="Enter") search(true); });
 let deb; $("q").addEventListener("input", ()=>{ clearTimeout(deb); deb=setTimeout(()=>search(true), 350); });
 $("prev").onclick = () => { if(offset>0){ offset -= LIMIT; search(false); window.scrollTo(0,0);} };
 $("next").onclick = () => { if(offset+LIMIT<total){ offset += LIMIT; search(false); window.scrollTo(0,0);} };
+
+$("lbClose").onclick = closeLb;
+$("lbPrev").onclick = () => { lbIdx--; showLb(); };
+$("lbNext").onclick = () => { lbIdx++; showLb(); };
+$("lightbox").addEventListener("click", e => { if(e.target.id === "lightbox") closeLb(); });
+document.addEventListener("keydown", e => {
+  if(!$("lightbox").classList.contains("show")) return;
+  if(e.key==="Escape") closeLb();
+  if(e.key==="ArrowLeft"){ lbIdx--; showLb(); }
+  if(e.key==="ArrowRight"){ lbIdx++; showLb(); }
+});
 </script>
 </body>
 </html>

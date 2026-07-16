@@ -91,6 +91,24 @@
         <div class="msg" id="impMsg"></div>
       </div>
 
+      <!-- ============ Import photos (from the Workever manifest) ============ -->
+      <div class="card">
+        <h2>3 · Import job photos &amp; files</h2>
+        <p class="muted">Pull the historical <b>photos, signatures and PDFs</b> in from the manifest produced by the browser harvester (<code>workever-manifest.json</code>). The server fetches each file straight from storage and attaches it to the matching job by MOS number — shown on the Job Archive page. <b>Safe to re-run</b>: files already brought in are skipped, so if it stops you just start it again and it carries on.</p>
+        <div class="warn">This moves a lot of data (tens of GB across ~80k files) — it can take a while. Keep this tab open; it resumes if interrupted.</div>
+        <div class="bar">
+          <input type="file" id="photoFile" accept=".json,application/json" />
+          <span id="photoCount" class="pill">stored: …</span>
+        </div>
+        <div class="bar">
+          <button class="btn primary" id="startPhotos" disabled>Import photos</button>
+          <button class="btn" id="stopPhotos" style="display:none">Stop</button>
+          <button class="btn" id="clearPhotos">Remove imported photos…</button>
+        </div>
+        <div class="prog"><i id="photoBar"></i></div>
+        <div class="msg" id="photoMsg"></div>
+      </div>
+
     </div>
   </div>
 
@@ -108,7 +126,7 @@ function cachedPerms(){
   const allowed = yes(p.FullAccess) || yes(p.SLAAdmin);
   $("tools").style.display = allowed ? "" : "none";
   $("denied").style.display = allowed ? "none" : "";
-  if (allowed) { loadLive(); refreshArchCount(); }
+  if (allowed) { loadLive(); refreshArchCount(); refreshPhotoCount(); }
 })();
 
 /* ================= SECTION 1: live jobs ================= */
@@ -294,6 +312,112 @@ $("startImport").onclick = async () => {
     $("impMsg").textContent = "Import failed: " + e.message;
   }finally{
     $("startImport").disabled = false; $("delAll").disabled = false;
+  }
+};
+
+/* ================= SECTION 3: import photos from the manifest ================= */
+let PHOTO_FILES = [];      // flattened [{id,mos,name,url,type,bytes,kind}]
+let photoStop = false;
+const gb = n => (n/1073741824).toFixed(2) + " GB";
+
+async function refreshPhotoCount(){
+  try{
+    const d = await (await fetch(SLA + "/archive/photos/count", { cache:"no-store" })).json();
+    $("photoCount").textContent = "stored: " + (d.count||0).toLocaleString() + " files · " + gb(d.bytes||0);
+  }catch(e){ $("photoCount").textContent = "stored: ?"; }
+}
+
+$("photoFile").onchange = async () => {
+  const f = $("photoFile").files[0];
+  if(!f){ $("startPhotos").disabled = true; return; }
+  $("photoMsg").className = "msg"; $("photoMsg").textContent = "Reading manifest…";
+  try{
+    const manifest = JSON.parse(await f.text());
+    PHOTO_FILES = [];
+    for(const j of (manifest.jobs||[])){
+      for(const file of (j.files||[])){
+        if(file && file.id && file.url) PHOTO_FILES.push({
+          id:file.id, mos:j.mos||"", name:file.name||"", url:file.url,
+          type:file.type||"", bytes:+file.bytes||0, kind:file.kind||"photo", date:file.date||"", by:file.by||""
+        });
+      }
+    }
+    const bytes = PHOTO_FILES.reduce((s,f)=>s+f.bytes,0);
+    $("photoMsg").className = "msg";
+    $("photoMsg").textContent = `Manifest has ${PHOTO_FILES.length.toLocaleString()} files (${gb(bytes)}) across ${(manifest.jobsWithFiles||manifest.jobs.length).toLocaleString()} jobs. Ready to import.`;
+    $("startPhotos").disabled = !PHOTO_FILES.length;
+  }catch(e){
+    $("photoMsg").className = "msg err"; $("photoMsg").textContent = "Couldn't read that file: " + e.message;
+    $("startPhotos").disabled = true;
+  }
+};
+
+$("stopPhotos").onclick = () => { photoStop = true; $("photoMsg").textContent = "Stopping after the current batches…"; };
+
+$("clearPhotos").onclick = async () => {
+  if(!confirm("Remove the imported-photo records? (The image files stay in storage; re-importing re-links them.)")) return;
+  try{
+    const d = await (await fetch(SLA + "/archive/photos/clear", { method:"POST" })).json();
+    if(!d.ok) throw new Error(d.error||"failed");
+    $("photoMsg").className="msg ok"; $("photoMsg").textContent="Cleared."; refreshPhotoCount();
+  }catch(e){ $("photoMsg").className="msg err"; $("photoMsg").textContent="Error: "+e.message; }
+};
+
+$("startPhotos").onclick = async () => {
+  if(!PHOTO_FILES.length) return;
+  photoStop = false;
+  $("startPhotos").disabled = true; $("stopPhotos").style.display = ""; $("photoFile").disabled = true;
+  const total = PHOTO_FILES.length;
+  const BATCH = 80, LANES = 3;   // 3 batches in flight; server fetches 8 at a time within each
+  let done = 0, imported = 0, skipped = 0, failed = 0;
+
+  // Resume where a previous run of THIS manifest left off.
+  const sig = total + ":" + (PHOTO_FILES[0] && PHOTO_FILES[0].id || "");
+  let start = 0;
+  try { if(localStorage.getItem("wev_photo_sig") === sig) start = parseInt(localStorage.getItem("wev_photo_idx")||"0",10)||0; } catch(e){}
+  localStorage.setItem("wev_photo_sig", sig);
+
+  async function sendBatch(from){
+    const slice = PHOTO_FILES.slice(from, from + BATCH);
+    if(!slice.length) return;
+    const res = await fetch(SLA + "/archive/photos/import", {
+      method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ files: slice })
+    });
+    const d = await res.json();
+    if(!res.ok || !d.ok) throw new Error(d.error || ("HTTP " + res.status));
+    imported += d.imported||0; skipped += d.skipped||0; failed += (d.failed||[]).length;
+    done += slice.length;
+  }
+
+  $("photoMsg").className = "msg";
+  try{
+    let idx = start;
+    while(idx < total && !photoStop){
+      // launch up to LANES batches concurrently
+      const jobs = [];
+      for(let l=0; l<LANES && idx<total; l++){ jobs.push(sendBatch(idx)); idx += BATCH; }
+      await Promise.all(jobs);
+      const processed = Math.min(idx, total);
+      try{ localStorage.setItem("wev_photo_idx", String(processed)); }catch(e){}
+      $("photoBar").style.width = Math.round(processed/total*100) + "%";
+      $("photoMsg").textContent = `Processed ${processed.toLocaleString()}/${total.toLocaleString()} — imported ${imported.toLocaleString()}, skipped ${skipped.toLocaleString()}${failed?`, ${failed} failed`:""}`;
+      refreshPhotoCount();
+    }
+    if(photoStop){
+      $("photoMsg").className = "msg";
+      $("photoMsg").textContent = `Stopped at ${done.toLocaleString()}. Press “Import photos” again to resume.`;
+    }else{
+      $("photoBar").style.width = "100%";
+      $("photoMsg").className = "msg ok";
+      $("photoMsg").textContent = `✓ Finished — ${imported.toLocaleString()} newly imported, ${skipped.toLocaleString()} already there${failed?`, ${failed} couldn't be fetched`:""}.`;
+      try{ localStorage.removeItem("wev_photo_idx"); }catch(e){}
+    }
+    refreshPhotoCount();
+  }catch(e){
+    $("photoMsg").className = "msg err";
+    $("photoMsg").textContent = "Import paused on an error (press Import photos to resume): " + e.message;
+  }finally{
+    $("startPhotos").disabled = false; $("stopPhotos").style.display = "none"; $("photoFile").disabled = false;
   }
 };
 </script>

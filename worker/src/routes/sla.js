@@ -135,6 +135,21 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse(jobs, headers);
   }
 
+  /* PUBLIC (signed) stream of an imported archive file — the <img>/links on the
+     Job Archive page point here. In PUBLIC_ROUTES; sig-verified in-handler.
+     MUST precede the admin `/archive` block (this path also startsWith /archive). */
+  if (subpath === "/archive-file" && method === "GET") {
+    const key = searchParams.get("key") || "";
+    if (!key.startsWith("archivephoto/")) return jsonResponse({ error: "Bad key" }, headers, 400);
+    if (!sess && !(await verifyFileSig(env, key, searchParams))) return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers, "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline", "Cache-Control": "private, max-age=86400"
+    }});
+  }
+
   /* ================= ARCHIVE (imported historical jobs) =================
      Historical jobs (e.g. the 22k Commusoft export) live in a SEPARATE table,
      sla_jobs_archive, that the live scheduler / day-view / dashboard never read
@@ -184,6 +199,48 @@ export async function handle(request, env, ctx, url, sess) {
       }
       return jsonResponse({ ok: true, total, limit, offset, jobs: (rows || []).map(r => JSON.parse(r.data)) }, headers);
     }
+
+    /* ===== Imported job FILES (photos/signatures/PDFs migrated from Workever) =====
+       Streamed from public S3 straight into R2 and keyed by MOS number. */
+    await ensureArchiveFiles(env, tenantId);
+
+    // POST /sla/archive/photos/import — { files:[{id,mos,name,url,type,bytes,kind,...}] }
+    // Fetches each file from its (public) URL into R2 and records it. Idempotent:
+    // files already present are skipped, so the caller can loop/resume freely.
+    if (subpath === "/archive/photos/import" && method === "POST") {
+      const body = await readJson(request);
+      const files = Array.isArray(body?.files) ? body.files.filter(f => f && f.id && f.url) : [];
+      if (!files.length) return jsonResponse({ ok: false, error: "no files" }, headers, 400);
+      const result = await archivePhotosImport(env, tenantId, files);
+      return jsonResponse({ ok: true, ...result }, headers);
+    }
+    // GET /sla/archive/photos/count — how many files are imported so far (+ bytes).
+    if (subpath === "/archive/photos/count" && method === "GET") {
+      const r = await db.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes),0) AS b FROM sla_archive_files WHERE tenant_id=?").bind(tenantId).first();
+      return jsonResponse({ ok: true, count: r?.n || 0, bytes: r?.b || 0 }, headers);
+    }
+    // POST /sla/archive/photos/clear — drop the file records (R2 objects are left;
+    // re-import overwrites them). Lets a bad run be redone.
+    if (subpath === "/archive/photos/clear" && method === "POST") {
+      await db.prepare("DELETE FROM sla_archive_files WHERE tenant_id=?").bind(tenantId).run();
+      return jsonResponse({ ok: true }, headers);
+    }
+    // GET /sla/archive/files?mos=MOS123 — a job's files with signed view URLs.
+    if (subpath === "/archive/files" && method === "GET") {
+      const mos = (searchParams.get("mos") || "").trim();
+      if (!mos) return jsonResponse({ ok: true, files: [] }, headers);
+      const { results } = await db.prepare(
+        "SELECT id,r2_key,name,kind,type,bytes,taken_at,uploaded_by FROM sla_archive_files WHERE tenant_id=? AND mos=? ORDER BY kind, taken_at"
+      ).bind(tenantId, mos).all();
+      const out = [];
+      for (const r of results || []) {
+        out.push({ id: r.id, name: r.name, kind: r.kind, type: r.type, bytes: r.bytes,
+          takenAt: r.taken_at, by: r.uploaded_by,
+          url: await signedFileUrl(env, url.origin, "/sla/archive-file", r.r2_key) });
+      }
+      return jsonResponse({ ok: true, mos, files: out }, headers);
+    }
+
     return jsonResponse({ error: "Not found" }, headers, 404);
   }
 
@@ -945,6 +1002,83 @@ async function archiveImport(env, tenantId, rows) {
     done += Math.min(50, stmts.length - i);
   }
   return done;
+}
+
+/* ===== Imported job files (photos/signatures/PDFs) ===== */
+let _archiveFilesReady = false;
+async function ensureArchiveFiles(env, tenantId) {
+  if (_archiveFilesReady) return;
+  const db = tenantDB(env, tenantId);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS sla_archive_files (
+    tenant_id   INTEGER NOT NULL DEFAULT 1,
+    id          TEXT PRIMARY KEY,   -- source file id (Workever uuid); dedupe/resume key
+    mos         TEXT,               -- job MOS number (links to sla_jobs_archive)
+    r2_key      TEXT,               -- object key in JOB_FILES
+    name        TEXT,
+    kind        TEXT,               -- photo | signature | document
+    type        TEXT,               -- mime type
+    bytes       INTEGER,
+    taken_at    TEXT,
+    uploaded_by TEXT
+  )`).run();
+  try { await db.prepare("CREATE INDEX IF NOT EXISTS idx_archfiles_mos ON sla_archive_files(tenant_id, mos)").run(); } catch {}
+  _archiveFilesReady = true;
+}
+
+const _safeSeg = s => String(s || "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
+function _extFromName(name, type) {
+  const m = /\.([A-Za-z0-9]{1,5})$/.exec(name || "");
+  if (m) return "." + m[1].toLowerCase();
+  if (/png/.test(type)) return ".png"; if (/pdf/.test(type)) return ".pdf";
+  return ".jpg";
+}
+
+// Import a batch of files: skip any already stored, else stream each from its
+// (public) URL straight into R2 and record it. Small internal concurrency keeps
+// the wall-clock down; total subrequests stay well within a single invocation.
+async function archivePhotosImport(env, tenantId, files) {
+  const db = tenantDB(env, tenantId);
+  // Which of these are already imported? One query for the whole batch.
+  const ids = files.map(f => String(f.id));
+  const have = new Set();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const ph = chunk.map(() => "?").join(",");
+    const { results } = await db.prepare(`SELECT id FROM sla_archive_files WHERE tenant_id=? AND id IN (${ph})`).bind(tenantId, ...chunk).all();
+    for (const r of results || []) have.add(r.id);
+  }
+  const todo = files.filter(f => !have.has(String(f.id)));
+  let imported = 0, skipped = files.length - todo.length;
+  const failed = [];
+  const rows = [];
+
+  const CONC = 8;
+  for (let i = 0; i < todo.length; i += CONC) {
+    const slice = todo.slice(i, i + CONC);
+    await Promise.all(slice.map(async (f) => {
+      try {
+        const res = await fetch(f.url);
+        if (!res.ok || !res.body) { failed.push({ id: f.id, error: "HTTP " + res.status }); return; }
+        const mos = _safeSeg(f.mos || "unknown");
+        const key = `archivephoto/${mos}/${_safeSeg(f.id)}${_extFromName(f.name, f.type)}`;
+        await env.JOB_FILES.put(key, res.body, { httpMetadata: { contentType: f.type || "application/octet-stream" } });
+        rows.push({ id: String(f.id), mos: f.mos || "", key, name: f.name || "", kind: f.kind || "photo",
+          type: f.type || "", bytes: +f.bytes || 0, date: f.date || "", by: f.by || "" });
+      } catch (e) {
+        failed.push({ id: f.id, error: String(e && e.message || e).slice(0, 120) });
+      }
+    }));
+  }
+  // Record the successful puts (batched insert; OR IGNORE guards a race/retry).
+  for (let i = 0; i < rows.length; i += 50) {
+    const stmts = rows.slice(i, i + 50).map(r => db.prepare(
+      `INSERT OR IGNORE INTO sla_archive_files (tenant_id,id,mos,r2_key,name,kind,type,bytes,taken_at,uploaded_by)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(tenantId, r.id, r.mos, r.key, r.name, r.kind, r.type, r.bytes, r.date, r.by));
+    if (stmts.length) await db.batch(stmts);
+  }
+  imported = rows.length;
+  return { imported, skipped, failed };
 }
 async function getSiteAreas(env, tenantId) {
   const db = tenantDB(env, tenantId);

@@ -220,6 +220,8 @@ const PUBLIC_ROUTES = [
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)
+  // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
+  ["GET", "/sla/archive-file"],
 ];
 
 function isPublic(method, pathname) {

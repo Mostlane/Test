@@ -182,9 +182,25 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (dependency-free ZIP+inflate+XML reader — customer data never touches the
   public repo or an external tool; import batches 200 rows, dedupes duplicate
   MOS numbers by id-suffix so all rows survive). **job-archive.html** = the
-  everyday search page. Both linked from sla-main header (🗄️ Archive / 🧰 Data,
-  SLA-admin-gated). Jobs keep their real status so closed history stays out of
-  engineers' active views.
+  everyday search page (multi-term AND search; card title = spreadsheet Job
+  Name). Both linked from sla-main header (🗄️ Archive / 🧰 Data, SLA-admin-gated).
+  Jobs keep their real status so closed history stays out of engineers' active
+  views.
+  **Archive job FILES (photos/signatures/PDFs migrated off Workever)**: table
+  **sla_archive_files** (id=source file id, mos, r2_key, kind photo|signature|
+  document, type, bytes). Workever stored files on a PUBLIC S3 bucket
+  (`s3.eu-west-2.amazonaws.com/workforcefmbucket/mostlane/photo/…`, the
+  `_compressed` copies are real JPEG/PNG/PDF even for HEIC originals). A browser
+  console **harvester** (scratchpad `workever-harvest.js`) walks Workever's
+  `/api/v1/jobs-list` + `/documents/{uuid}/job/photos` and produces
+  `workever-manifest.json` (MOS → file URLs; ~85k files / ~33GB). Import path
+  (all FullAccess|SLAAdmin): **POST /sla/archive/photos/import** streams each S3
+  url → R2 `archivephoto/<mos>/<fileId>` (skips already-stored, so re-runnable),
+  **GET /sla/archive/photos/count**, **POST /sla/archive/photos/clear**, **GET
+  /sla/archive/files?mos=** (signed URLs). **GET /sla/archive-file** (PUBLIC_ROUTES,
+  sig-verified, streams from R2). sla-data-tools.html §3 loads the manifest and
+  loops batches (80/call × 3 lanes, localStorage resume). job-archive.html shows
+  each job's photos/signatures as a thumbnail grid + lightbox, PDFs as links.
   Front-end: **sla-jobedit.js** (`?v=2`, shared by sla-main / sla-scheduler /
   job-view) is the ONE-HIT editor — every Edit button opens it and it edits
   everything in one save: ref, description, priority, status, raised,
