@@ -1061,13 +1061,30 @@ async function archivePhotosImport(env, tenantId, files) {
   const failed = [];
   const rows = [];
 
-  const CONC = 8;
+  // Fetch with retries + backoff: S3 throttles under load (503/429) and TCP
+  // resets happen — a couple of retries turns most "failures" into successes.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function fetchRetry(u) {
+    let last = "";
+    for (let a = 0; a < 4; a++) {
+      try {
+        const r = await fetch(u);
+        if (r.ok && r.body) return r;
+        last = "HTTP " + r.status;
+        if (r.status && r.status < 500 && r.status !== 429) return { ok: false, status: r.status, _err: last }; // 4xx won't improve
+      } catch (e) { last = String(e && e.message || e).slice(0, 80); }
+      await sleep(300 * (a + 1) * (a + 1));   // 300 / 1200 / 2700 ms
+    }
+    return { ok: false, status: 0, _err: last || "failed" };
+  }
+
+  const CONC = 4;   // gentle on S3 (the browser also caps its lanes); big files stream, so memory stays low
   for (let i = 0; i < todo.length; i += CONC) {
     const slice = todo.slice(i, i + CONC);
     await Promise.all(slice.map(async (f) => {
       try {
-        const res = await fetch(f.url);
-        if (!res.ok || !res.body) { failed.push({ id: f.id, error: "HTTP " + res.status }); return; }
+        const res = await fetchRetry(f.url);
+        if (!res.ok || !res.body) { failed.push({ id: f.id, error: res._err || "fetch failed" }); return; }
         const mos = _safeSeg(f.mos || "unknown");
         const key = `archivephoto/${mos}/${_safeSeg(f.id)}${_extFromName(f.name, f.type)}`;
         await env.JOB_FILES.put(key, res.body, { httpMetadata: { contentType: f.type || "application/octet-stream" } });

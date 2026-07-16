@@ -3582,14 +3582,30 @@ async function archivePhotosImport(env, tenantId, files) {
   let imported = 0, skipped = files.length - todo.length;
   const failed = [];
   const rows = [];
-  const CONC = 8;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function fetchRetry(u) {
+    let last = "";
+    for (let a = 0; a < 4; a++) {
+      try {
+        const r = await fetch(u);
+        if (r.ok && r.body) return r;
+        last = "HTTP " + r.status;
+        if (r.status && r.status < 500 && r.status !== 429) return { ok: false, status: r.status, _err: last };
+      } catch (e) {
+        last = String(e && e.message || e).slice(0, 80);
+      }
+      await sleep(300 * (a + 1) * (a + 1));
+    }
+    return { ok: false, status: 0, _err: last || "failed" };
+  }
+  const CONC = 4;
   for (let i = 0; i < todo.length; i += CONC) {
     const slice = todo.slice(i, i + CONC);
     await Promise.all(slice.map(async (f) => {
       try {
-        const res = await fetch(f.url);
+        const res = await fetchRetry(f.url);
         if (!res.ok || !res.body) {
-          failed.push({ id: f.id, error: "HTTP " + res.status });
+          failed.push({ id: f.id, error: res._err || "fetch failed" });
           return;
         }
         const mos = _safeSeg(f.mos || "unknown");

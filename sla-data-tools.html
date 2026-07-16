@@ -376,8 +376,8 @@ $("startPhotos").onclick = async () => {
   photoStop = false;
   $("startPhotos").disabled = true; $("stopPhotos").style.display = ""; $("photoFile").disabled = true;
   const total = PHOTO_FILES.length;
-  const BATCH = 80, LANES = 3;   // 3 batches in flight; server fetches 8 at a time within each
-  let done = 0, imported = 0, skipped = 0, failed = 0;
+  const BATCH = 40, LANES = 2;   // 2 batches in flight; the server retries + fetches 4 at a time within each
+  let done = 0, imported = 0, skipped = 0, failed = 0, lastErr = "";
 
   // Resume where a previous run of THIS manifest left off.
   const sig = total + ":" + (PHOTO_FILES[0] && PHOTO_FILES[0].id || "");
@@ -393,7 +393,8 @@ $("startPhotos").onclick = async () => {
     });
     const d = await res.json();
     if(!res.ok || !d.ok) throw new Error(d.error || ("HTTP " + res.status));
-    imported += d.imported||0; skipped += d.skipped||0; failed += (d.failed||[]).length;
+    imported += d.imported||0; skipped += d.skipped||0;
+    if(d.failed && d.failed.length){ failed += d.failed.length; lastErr = d.failed[d.failed.length-1].error || ""; }
     done += slice.length;
   }
 
@@ -408,7 +409,7 @@ $("startPhotos").onclick = async () => {
       const processed = Math.min(idx, total);
       try{ localStorage.setItem("wev_photo_idx", String(processed)); }catch(e){}
       $("photoBar").style.width = Math.round(processed/total*100) + "%";
-      $("photoMsg").textContent = `Processed ${processed.toLocaleString()}/${total.toLocaleString()} — imported ${imported.toLocaleString()}, skipped ${skipped.toLocaleString()}${failed?`, ${failed} failed`:""}`;
+      $("photoMsg").textContent = `Processed ${processed.toLocaleString()}/${total.toLocaleString()} — imported ${imported.toLocaleString()}, skipped ${skipped.toLocaleString()}${failed?`, ${failed} failed (retry on next run; last: ${lastErr})`:""}`;
       refreshPhotoCount();
     }
     if(photoStop){
@@ -416,8 +417,10 @@ $("startPhotos").onclick = async () => {
       $("photoMsg").textContent = `Stopped at ${done.toLocaleString()}. Press “Import photos” again to resume.`;
     }else{
       $("photoBar").style.width = "100%";
-      $("photoMsg").className = "msg ok";
-      $("photoMsg").textContent = `✓ Finished — ${imported.toLocaleString()} newly imported, ${skipped.toLocaleString()} already there${failed?`, ${failed} couldn't be fetched`:""}.`;
+      $("photoMsg").className = failed ? "msg" : "msg ok";
+      $("photoMsg").textContent = failed
+        ? `Done this pass — ${imported.toLocaleString()} imported, ${skipped.toLocaleString()} already there, ${failed.toLocaleString()} still failed. Press “Import photos” again to retry just those (last error: ${lastErr}).`
+        : `✓ Finished — ${imported.toLocaleString()} newly imported, ${skipped.toLocaleString()} already there. All files are in.`;
       try{ localStorage.removeItem("wev_photo_idx"); }catch(e){}
     }
     refreshPhotoCount();
