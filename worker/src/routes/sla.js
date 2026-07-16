@@ -1074,11 +1074,22 @@ async function ensureArchive(env, tenantId) {
   _archiveReady = true;
 }
 
-// Compute a job's store code the same way the portal reads site codes
-// (digitsOf), from the customer name — that's where the store number lives.
+// Compute a job's store code from the customer name. In the Commusoft export
+// the store number is ALWAYS a 4-digit code at the very start of the customer
+// name ("0032 Fareham Gudge Heath Lane", "4050 East Devon Crematorium",
+// "9501 Bedford Place - Starbucks"). We must match EXACTLY four leading digits:
+// house-number addresses like "32 Archers Road" / "32d High Street" also begin
+// with a number, and the old digitsOf() (first digit-run anywhere, leading
+// zeros stripped) folded those onto real store codes — e.g. "32 Archers Road"
+// collided with store "0032", pulling the wrong store's photos into a gallery.
+// Requiring exactly 4 digits followed by a boundary excludes 2-3 digit house
+// numbers, letter-suffixed ones ("32a"), and 5+ digit account ids ("80473 …").
+// Normalised with Number() so it matches digitsOf() on the lookup side
+// ("0032"->"32", "4050"->"4050").
 function archiveSiteCode(job) {
-  const c = (job && job.customer && job.customer.name) || "";
-  return digitsOf(c) || "";
+  const c = ((job && job.customer && job.customer.name) || "").trim();
+  const m = c.match(/^(\d{4})(?=$|\D)/);
+  return m ? String(Number(m[1])) : "";
 }
 
 // Backfill site_code for archived jobs that don't have one yet. Chunk-capped +

@@ -3584,8 +3584,9 @@ async function ensureArchive(env, tenantId) {
   _archiveReady = true;
 }
 function archiveSiteCode(job) {
-  const c = job && job.customer && job.customer.name || "";
-  return digitsOf(c) || "";
+  const c = (job && job.customer && job.customer.name || "").trim();
+  const m = c.match(/^(\d{4})(?=$|\D)/);
+  return m ? String(Number(m[1])) : "";
 }
 async function backfillArchiveSites(env, tenantId, cap = 500) {
   const db = tenantDB(env, tenantId);

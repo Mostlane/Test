@@ -440,7 +440,7 @@ $("checkStore").onclick = async () => {
     if(!s || !s.ok) throw new Error(s && s.error ? s.error : "lookup failed");
     if(!s.jobs){
       $("checkMsg").className = "msg err";
-      $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): 0 jobs tagged. Run 🔗 Link photos to sites — if it stays 0, no archive job's customer name contains this number.`;
+      $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): 0 jobs tagged. Run 🔗 Link photos to sites — if it stays 0, no archive job's customer name begins with this 4-digit store number.`;
     } else if(!s.photos){
       $("checkMsg").className = "msg err";
       $("checkMsg").textContent = `Store ${esc(code)} (→ code ${esc(String(s.code))}): ${s.jobs} jobs tagged but 0 photos linked. Photos may not be imported yet, or none of these jobs had photos.`;
