@@ -102,6 +102,10 @@
     .small{font-size:11px;}
     .nowrap{white-space:nowrap;}
     .noalloc{color:#dc2626;font-weight:600;}
+    .cam{font-size:13px;} /* 📷 badge for jobs with photos */
+    .arch-tag{display:inline-block;font-size:10px;font-weight:700;color:#475569;background:#eef2f7;border:1px solid #d7dee7;border-radius:999px;padding:1px 7px;margin-left:4px;vertical-align:middle;}
+    tr.archrow{background:#fafbfc;} tr.archrow td{color:#475569;}
+    .archrow .jobdesc{cursor:pointer;}
     .sla-badge{
       border-radius:999px;padding:2px 7px;font-size:11px;display:inline-block;
       font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:2px;
@@ -418,6 +422,8 @@ const STATUSES = [
 const STATUS_COLOUR = Object.fromEntries(STATUSES);
 
 let allJobs = [];
+let archiveMatches = [];        // archived jobs matching the current search
+let archiveSeq = 0;             // guards against out-of-order async archive results
 let cachedUsers = [];
 let activeStatus = "open";     // "open" = everything not complete/closed/invoiced
 let activePriority = "all";
@@ -498,6 +504,7 @@ async function loadJobs(){
         : (j.assignedTo ? [j.assignedTo] : [])
     }));
     render();
+    fetchPhotoFlags();   // once per load; render() then just applies the cached set
   }catch(err){
     console.error(err);
     $("statusBar").textContent = "❌ Error loading jobs.";
@@ -594,7 +601,7 @@ function render(){
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
         <div class="jobdesc viewlink" data-action="view">${esc(j.description || "(no description)")}</div>
-        <span class="ref">${ref}</span>
+        <span class="ref">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}</div>
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
@@ -623,7 +630,7 @@ function render(){
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
-        <span class="ref">${ref}</span>
+        <span class="ref">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${prShort(j.priority)}</span>
       </div>
       <div class="mjob-title">${esc(j.description||"")}</div>
@@ -642,8 +649,70 @@ function render(){
     cards.appendChild(card);
   }
 
-  $("statusBar").textContent = list.length ? `${list.length} job(s) shown` : "No jobs match the filters.";
+  // Archived jobs matching the search — read-only, tagged 🗄️, shown after live.
+  for(const j of archiveMatches){
+    const ref = esc(j.helpdeskRef || j.id);
+    const site = esc(j.siteName || "");
+    const created = esc((j.createdAt||"").slice(0,10));
+    const tr = document.createElement("tr");
+    tr.className = "archrow"; tr.dataset.archref = ref;
+    tr.innerHTML = `
+      <td></td>
+      <td>
+        <div class="jobdesc" data-action="archive-view">${esc(j.jobName || j.description || "(no description)")}</div>
+        <span class="ref">${ref}</span> <span class="arch-tag">🗄️ archive</span>
+        <div class="statusline small muted">${esc(j.status||"")}</div>
+      </td>
+      <td class="nowrap small muted">—</td>
+      <td><div>${site}</div><div class="small muted">${esc(j.postcode||"")}</div></td>
+      <td class="nowrap small muted">${created}</td>
+      <td class="nowrap small muted">—</td>
+      <td class="small muted">${esc(j.assignedTo||"")}</td>
+      <td><div class="rowactions"><button class="btn small" data-action="archive-view">🗄️ View</button></div></td>`;
+    tbody.appendChild(tr);
+
+    const card = document.createElement("div");
+    card.className = "mjob archrow"; card.dataset.archref = ref;
+    card.innerHTML = `
+      <div class="mjob-top"><span class="ref">${ref}</span> <span class="arch-tag">🗄️ archive</span></div>
+      <div class="mjob-title">${esc(j.jobName || j.description || "")}</div>
+      <div class="small muted">${site}${j.postcode ? " · " + esc(j.postcode) : ""}</div>
+      <div class="mjob-meta small muted">${esc(j.status||"")}${created ? " · " + created : ""}</div>
+      <div class="mjob-actions"><button class="btn small primary" data-action="archive-view">🗄️ View in Archive</button></div>`;
+    cards.appendChild(card);
+  }
+
+  const liveN = list.length, archN = archiveMatches.length;
+  $("statusBar").textContent = liveN || archN
+    ? `${liveN} job(s)` + (archN ? ` · ${archN} in archive` : "") + " shown"
+    : "No jobs match the filters.";
   startCountdown();
+  applyPhotoFlags();
+}
+
+/* 📷 badge. The set of jobs-with-photos is fetched once per data load
+   (fetchPhotoFlags) and just applied on every render (applyPhotoFlags), so
+   typing in the search box doesn't hammer the server. "Has photos" = the job's
+   own uploads OR imported archive photos for the same job number. */
+let photoFlagSet = new Set();
+function applyPhotoFlags(){
+  document.querySelectorAll("[data-cam]").forEach(el => {
+    const on = photoFlagSet.has(el.getAttribute("data-cam"));
+    el.textContent = on ? "📷" : "";
+    if(on) el.title = "This job has photos";
+  });
+}
+async function fetchPhotoFlags(){
+  if(!allJobs.length){ photoFlagSet = new Set(); return; }
+  try{
+    const res = await authFetch("/sla/jobs/photo-flags", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ items: allJobs.map(j => ({ id: j.id, ref: j.helpdeskRef || j.id })) })
+    });
+    const d = await res.json();
+    photoFlagSet = new Set((d && d.ids) || []);
+    applyPhotoFlags();
+  }catch(e){}
 }
 
 function startCountdown(){
@@ -924,14 +993,42 @@ async function applyBulk(){
   await loadJobs();
 }
 
+/* ============ search (live + archive together) ============ */
+let searchDeb = null;
+function onSearchInput(){
+  render();   // instant live filter
+  clearTimeout(searchDeb);
+  const q = $("searchBox").value.trim();
+  if(q.length < 2){ if(archiveMatches.length){ archiveMatches = []; render(); } return; }
+  searchDeb = setTimeout(() => fetchArchiveMatches(q), 300);
+}
+async function fetchArchiveMatches(q){
+  const seq = ++archiveSeq;
+  try{
+    const res = await authFetch("/sla/archive?limit=25&q=" + encodeURIComponent(q));
+    const d = await res.json();
+    if(seq !== archiveSeq) return;                 // a newer search superseded this
+    if($("searchBox").value.trim() !== q) return;
+    // Don't double-show a job that's also live (match by ref).
+    const liveRefs = new Set(allJobs.map(j => (j.helpdeskRef || j.id)));
+    archiveMatches = ((d && d.jobs) || []).filter(j => !liveRefs.has(j.helpdeskRef || j.id));
+    render();
+  }catch(e){}
+}
+
 /* ============ events ============ */
 function onAction(e){
   const btn = e.target.closest("[data-action]");
   if(!btn) return;
+  const a = btn.dataset.action;
+  if(a === "archive-view"){
+    const row = e.target.closest("[data-archref]");
+    if(row) location.href = "job-archive.html?q=" + encodeURIComponent(row.dataset.archref);
+    return;
+  }
   const row = e.target.closest("[data-job-id]");
   if(!row) return;
   const id = row.dataset.jobId;
-  const a = btn.dataset.action;
   if(a === "assign") openAssign(id);
   else if(a === "update"){
     const job = allJobs.find(j => j.id === id);
@@ -959,10 +1056,10 @@ function init(){
   });
   $("bulkApply").addEventListener("click", applyBulk);
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
-  $("searchBox").addEventListener("input", render);
+  $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", () => {
     activeStatus = "open"; activePriority = "all";
-    $("priorityFilter").value = "all"; $("searchBox").value = ""; render();
+    $("priorityFilter").value = "all"; $("searchBox").value = ""; archiveMatches = []; render();
   });
   $("assignClose").addEventListener("click", closeAssign);
   $("assignCancel").addEventListener("click", closeAssign);

@@ -2845,6 +2845,36 @@ async function handle7(request, env, ctx, url, sess) {
     }
     return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
   }
+  if (subpath === "/jobs/photo-flags" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const body = await readJson2(request);
+    const items = Array.isArray(body?.items) ? body.items : [];
+    if (!items.length) return jsonResponse({ ok: true, ids: [] }, headers);
+    const live = /* @__PURE__ */ new Set();
+    try {
+      let cursor;
+      do {
+        const r = await env.JOB_FILES.list({ prefix: "jobs/", delimiter: "/", cursor });
+        for (const p of r.delimitedPrefixes || []) {
+          const id = p.slice(5).replace(/\/$/, "");
+          if (id) live.add(id);
+        }
+        cursor = r.truncated ? r.cursor : null;
+      } while (cursor);
+    } catch {
+    }
+    await ensureArchiveFiles(env, tenantId);
+    const refs = [...new Set(items.flatMap((it) => [it.id, it.ref].filter(Boolean).map(String)))];
+    const archHas = /* @__PURE__ */ new Set();
+    for (let i = 0; i < refs.length; i += 100) {
+      const chunk = refs.slice(i, i + 100);
+      const ph = chunk.map(() => "?").join(",");
+      const { results } = await db.prepare(`SELECT DISTINCT mos FROM sla_archive_files WHERE tenant_id=? AND mos IN (${ph})`).bind(tenantId, ...chunk).all();
+      for (const r of results || []) archHas.add(String(r.mos));
+    }
+    const ids = items.filter((it) => live.has(String(it.id)) || archHas.has(String(it.ref)) || archHas.has(String(it.id))).map((it) => it.id);
+    return jsonResponse({ ok: true, ids }, headers);
+  }
   if (subpath === "/jobs/for-engineer" && method === "GET") {
     const engineer = normId(searchParams.get("engineer"));
     const date = searchParams.get("date");

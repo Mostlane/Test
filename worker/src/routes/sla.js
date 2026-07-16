@@ -280,6 +280,42 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
   }
 
+  /* POST /sla/jobs/photo-flags — of the given jobs, which have photos? For the
+     dashboard 📷 badge. "Has photos" = live files in R2 jobs/<id>/, OR imported
+     archive photos matching the job's ref/id (a repeat visit to a historical
+     job). One delimited R2 list + one indexed archive query — cheap. */
+  if (subpath === "/jobs/photo-flags" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    const body = await readJson(request);
+    const items = Array.isArray(body?.items) ? body.items : [];
+    if (!items.length) return jsonResponse({ ok: true, ids: [] }, headers);
+    // live: one delimited list yields the set of job folders that hold any file
+    const live = new Set();
+    try {
+      let cursor;
+      do {
+        const r = await env.JOB_FILES.list({ prefix: "jobs/", delimiter: "/", cursor });
+        for (const p of (r.delimitedPrefixes || [])) {
+          const id = p.slice(5).replace(/\/$/, "");
+          if (id) live.add(id);
+        }
+        cursor = r.truncated ? r.cursor : null;
+      } while (cursor);
+    } catch {}
+    // archive: which of these refs have imported archive files
+    await ensureArchiveFiles(env, tenantId);
+    const refs = [...new Set(items.flatMap(it => [it.id, it.ref].filter(Boolean).map(String)))];
+    const archHas = new Set();
+    for (let i = 0; i < refs.length; i += 100) {
+      const chunk = refs.slice(i, i + 100);
+      const ph = chunk.map(() => "?").join(",");
+      const { results } = await db.prepare(`SELECT DISTINCT mos FROM sla_archive_files WHERE tenant_id=? AND mos IN (${ph})`).bind(tenantId, ...chunk).all();
+      for (const r of results || []) archHas.add(String(r.mos));
+    }
+    const ids = items.filter(it => live.has(String(it.id)) || archHas.has(String(it.ref)) || archHas.has(String(it.id))).map(it => it.id);
+    return jsonResponse({ ok: true, ids }, headers);
+  }
+
   /* GET /sla/jobs/for-engineer (must precede /jobs/{id}) */
   if (subpath === "/jobs/for-engineer" && method === "GET") {
     // Match if the engineer is ANY of the job's assigned engineers. Both sides

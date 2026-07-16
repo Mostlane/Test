@@ -90,7 +90,11 @@ function cachedPerms(){ try{ return JSON.parse(sessionStorage.getItem("mostlaneP
   const ok = yes(p.FullAccess) || yes(p.SLAAdmin);
   $("app").style.display = ok ? "" : "none";
   $("denied").style.display = ok ? "none" : "";
-  if (ok) search(true);
+  if (ok){
+    // Prefill from ?q= (e.g. opened from the dashboard's archive result).
+    try{ const q = new URLSearchParams(location.search).get("q"); if(q) $("q").value = q; }catch(e){}
+    search(true);
+  }
 })();
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
