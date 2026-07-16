@@ -10,261 +10,175 @@
 
   <style>
     :root{
-      --ml-blue:#003b82;
-      --ml-blue-light:#1e66ff;
-      --ml-bg:#e6e8eb;
-      --panel:rgba(255,255,255,0.9);
-      --text:#0f172a;
-      --muted:#6b7280;
-      --border:#d1d5db;
-      --ok:#16a34a;
-      --warn:#f97316;
-      --bad:#dc2626;
+      --brand:#003b82;
+      --accent:#1766ff;
+      --accent-press:#0f52d6;
+      --ml-bg:#eff3f8;
+      --panel:#ffffff;
+      --text:#0e1728;
+      --muted:#8a94a6;
+      --muted-2:#4a5568;
+      --border:#e2e7ef;
+      --chip:#eef2f8;
+      --chip-ink:#41506a;
+      --ok:#15803d;   --ok-bg:#e7f7ec;
+      --warn:#b45309;  --warn-bg:#fdf1e0;
+      --bad:#d11f2d;   --bad-bg:#fdebed;
+      --radius:16px;
+      --tap:54px;
+      --shadow:0 6px 18px rgba(14,23,40,.07), 0 1px 3px rgba(14,23,40,.05);
     }
-    html{background:#e6e8eb;}
+    html{background:var(--ml-bg);}
     *{box-sizing:border-box;}
     html,body{
       margin:0;padding:0;
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
       color:var(--text);
       background:transparent;
-      background-size:180%;
+      -webkit-font-smoothing:antialiased;
     }
-    .shell{
-      max-width:1100px;
-      margin:24px auto;
-      padding:0 16px;
-    }
-    .card{
-      background:var(--panel);
-      border-radius:14px;
-      box-shadow:0 12px 28px rgba(0,0,0,0.12);
-      border:1px solid rgba(15,23,42,0.05);
-      overflow:hidden;
-    }
+    .shell{ max-width:560px; margin:0 auto; padding:0 14px 40px; }
+    .card{ background:transparent; }
+
     header.main-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:16px 20px;
-      background:linear-gradient(90deg,#ffffff,#f3f4f6);
-      border-bottom:1px solid #e5e7eb;
+      position:sticky; top:0; z-index:20;
+      display:flex; justify-content:space-between; align-items:center; gap:12px;
+      padding:14px 16px; margin:0 -14px 14px;
+      background:var(--panel); border-bottom:1px solid var(--border);
     }
-    header h1{
-      margin:0;
-      font-size:20px;
-      color:var(--ml-blue);
-    }
-    header .sub{
-      font-size:12px;
-      color:var(--muted);
-    }
+    header h1{ margin:0; font-size:22px; letter-spacing:-.02em; color:var(--brand); }
+    header .sub{ font-size:12.5px; color:var(--muted); margin-top:1px; }
+
     .btn{
-      border-radius:999px;
-      padding:8px 14px;
-      font-size:13px;
-      border:1px solid #d1d5db;
-      background:#f9fafb;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      text-decoration:none;
-      color:var(--text);
-      font-weight:500;
-      white-space:nowrap;
-      user-select:none;
-      -webkit-user-select:none;
-      -webkit-touch-callout:none;
-      touch-action:manipulation;
+      border-radius:12px; padding:0 14px; min-height:44px; font-size:14px;
+      border:1px solid var(--border); background:#fff; cursor:pointer;
+      display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      text-decoration:none; color:var(--muted-2); font-weight:650; white-space:nowrap;
+      user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;
     }
-    .btn.primary{
-      background:var(--ml-blue);
-      color:#fff;
-      border-color:var(--ml-blue);
+    .btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 4px 12px rgba(23,102,255,.30); }
+    .btn.primary:active{ background:var(--accent-press); transform:translateY(1px); }
+    .icon-btn{
+      width:46px; height:46px; padding:0; border-radius:13px; border:1px solid var(--border);
+      background:#fff; color:var(--muted-2); font-size:20px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; touch-action:manipulation;
     }
-    .content{
-      padding:14px 18px 16px;
-    }
+    .content{ padding:0; }
 
     /* === Controls === */
-    .nav-row{
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-bottom:10px;
+    .nav-row{ display:flex; gap:10px; margin-bottom:8px; }
+    .nav-row .btn{ flex:1; min-height:48px; font-size:14.5px; }
+    .older-btn{
+      width:100%; min-height:46px; margin-bottom:14px;
+      border-radius:13px; border:1px dashed #cdd6e3; background:transparent;
+      color:var(--muted); font-size:14px; font-weight:650; cursor:pointer; touch-action:manipulation;
     }
-    .nav-row .btn{
-      flex:1 1 180px;
-      justify-content:center;
+    .hint{ text-align:center; font-size:11px; color:var(--muted); margin:4px 0 12px; }
+
+    /* === Day groups === */
+    .day-group{ margin-top:6px; }
+    .day-banner{
+      position:sticky; top:72px; z-index:10;
+      display:flex; align-items:baseline; gap:8px;
+      background:var(--ml-bg); padding:9px 4px; margin:14px 0 10px;
+      font-size:16px; font-weight:800; letter-spacing:-.01em; color:var(--text);
     }
-    .hint{
-      text-align:center;
-      font-size:11px;
-      color:var(--muted);
-      margin-top:4px;
-      margin-bottom:12px;
+    .day-banner .d-count{ font-size:13px; font-weight:650; color:var(--muted); }
+    .day-banner.today::after{
+      content:"TODAY"; font-size:10.5px; font-weight:800; letter-spacing:.08em;
+      color:#fff; background:var(--accent); padding:2px 8px; border-radius:999px; align-self:center;
     }
 
-    /* === Timeline Styles === */
-    .day-group{
-      margin-top:18px;
-    }
-    .day-banner{
-      position:sticky;
-      top:0;
-      z-index:5;
-      background:#f1f5f9;
-      padding:6px 12px;
-      font-size:12px;
-      font-weight:600;
-      color:#334155;
-      border-radius:8px;
-      margin-bottom:8px;
-      border:1px solid #e5e7eb;
-    }
+    /* === Job card === */
     .job-card{
-      background:#fff;
-      border:1px solid #e5e7eb;
-      border-radius:12px;
-      padding:12px;
-      margin-bottom:10px;
-      box-shadow:0 4px 10px rgba(0,0,0,0.05);
+      position:relative; background:var(--panel); border:1px solid var(--border);
+      border-radius:var(--radius); box-shadow:var(--shadow);
+      padding:15px 16px 15px 19px; margin-bottom:12px; overflow:hidden;
     }
-    /* Highlight the job a push notification pointed you at: scroll target +
-       a few attention pulses (blue glow ring + tint), then settle. */
-    .job-card.job-flash{
-      animation:mlJobFlash 1s ease-in-out 0s 4;
-      border-color:#1e66ff;
-      scroll-margin-top:80px;
-    }
+    .job-card::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:7px; background:var(--strip,var(--border)); }
+    .job-card.strip-ok{--strip:var(--ok);}
+    .job-card.strip-warn{--strip:var(--warn);}
+    .job-card.strip-bad{--strip:var(--bad);}
+    .job-card.strip-done{--strip:#b9c2d0;}
+    .job-card.strip-none{--strip:#cbd5e5;}
+
+    .job-card.job-flash{ animation:mlJobFlash 1s ease-in-out 0s 4; scroll-margin-top:150px; }
     @keyframes mlJobFlash{
-      0%,100%{ box-shadow:0 4px 10px rgba(0,0,0,0.05); background:#fff; }
-      50%    { box-shadow:0 0 0 4px rgba(30,102,255,0.55), 0 8px 22px rgba(30,102,255,0.35); background:#eef4ff; }
+      0%,100%{ box-shadow:var(--shadow); }
+      50%    { box-shadow:0 0 0 4px rgba(23,102,255,.55), 0 8px 22px rgba(23,102,255,.35); }
     }
     @media (prefers-reduced-motion:reduce){
-      .job-card.job-flash{ animation:none; box-shadow:0 0 0 4px rgba(30,102,255,0.55); background:#eef4ff; }
+      .job-card.job-flash{ animation:none; box-shadow:0 0 0 4px rgba(23,102,255,.55); }
     }
-    .job-top{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:8px;
-      margin-bottom:6px;
-    }
-    .ref{
-      font-family:monospace;
-      font-size:12px;
-      background:#f9fafb;
-      padding:2px 6px;
-      border-radius:999px;
-      display:inline-block;
-    }
-    .priority-badge{
-      border-radius:999px;
-      padding:2px 7px;
-      font-size:11px;
-      font-weight:600;
-      display:inline-flex;
-      align-items:center;
-    }
-    .p1{background:#fef2f2;color:#b91c1c;}
-    .p2{background:#fffbeb;color:#92400e;}
-    .p3{background:#ecfdf5;color:#166534;}
-    .p4{background:#eff6ff;color:#1d4ed8;}
 
-    .job-desc{
-      font-size:14px;
-      font-weight:500;
+    .job-top{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+    .job-top .grow{ flex:1; }
+    .ref{
+      font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12px; font-weight:600;
+      color:var(--muted); background:var(--chip); padding:3px 9px; border-radius:8px; display:inline-block;
     }
-    .job-site{
-      font-size:12px;
-      color:var(--muted);
-      margin-top:2px;
-    }
-    .job-meta{
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      margin-top:10px;
-      align-items:center;
-    }
+    .priority-badge{ font-size:11.5px; font-weight:800; letter-spacing:.03em; padding:4px 10px; border-radius:999px; display:inline-flex; align-items:center; }
+    .p1{background:var(--bad-bg);color:var(--bad);}
+    .p2{background:var(--warn-bg);color:var(--warn);}
+    .p3{background:var(--ok-bg);color:var(--ok);}
+    .p4{background:var(--chip);color:var(--muted-2);}
+
+    .job-site{ font-size:20px; font-weight:750; letter-spacing:-.02em; line-height:1.22; color:var(--text); }
+    .job-addr{ font-size:13.5px; color:var(--muted); margin-top:3px; }
+    .job-desc{ font-size:14.5px; color:var(--muted-2); margin-top:9px; }
+
+    .job-meta{ display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; align-items:center; }
     .sla-badge{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      font-variant-numeric:tabular-nums;
-      white-space:nowrap;
+      border-radius:999px; padding:6px 11px; font-size:12.5px; font-weight:650;
+      display:inline-flex; align-items:center; gap:5px;
+      font-variant-numeric:tabular-nums; white-space:nowrap;
     }
-    .sla-green{background:#ecfdf5;color:#166534;}
-    .sla-amber{background:#fffbeb;color:#92400e;}
-    .sla-red{background:#fef2f2;color:#b91c1c;}
-    .sla-none{background:#e5e7eb;color:#4b5563;}
+    .sla-green{background:var(--ok-bg);color:var(--ok);}
+    .sla-amber{background:var(--warn-bg);color:var(--warn);}
+    .sla-red{background:var(--bad-bg);color:var(--bad);}
+    .sla-none{background:var(--chip);color:var(--chip-ink);}
 
     .status-pill{
-      border-radius:999px;
-      padding:3px 8px;
-      font-size:11px;
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      background:#e5e7eb;
-      color:#111827;
+      border-radius:999px; padding:6px 11px; font-size:12.5px; font-weight:650;
+      display:inline-flex; align-items:center; gap:5px; background:var(--chip); color:var(--chip-ink);
     }
-    .status-open{background:#dcfce7;color:#166534;}
-    .status-overdue{background:#fee2e2;color:#b91c1c;}
-    .status-complete{background:#e5e7eb;color:#374151;}
+    .status-open{background:#e7f2ff;color:#1256b8;}
+    .status-overdue{background:var(--bad-bg);color:var(--bad);}
+    .status-complete{background:var(--chip);color:var(--muted-2);}
+
+    /* actions */
+    .job-actions{ display:flex; gap:10px; margin-top:14px; }
+    .act{
+      min-height:var(--tap); border-radius:14px; font-size:16px; font-weight:750;
+      display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
+      border:1px solid var(--border); background:#fff; color:var(--text); text-decoration:none;
+      touch-action:manipulation;
+    }
+    .act.dir{ flex:0 0 auto; padding:0 18px; font-size:22px; color:var(--muted-2); }
+    .act.open{
+      flex:1; background:var(--accent); border-color:var(--accent); color:#fff; letter-spacing:-.01em;
+      box-shadow:0 4px 12px rgba(23,102,255,.30);
+    }
+    .act.open:active{ background:var(--accent-press); transform:translateY(1px); }
+    .act:focus-visible{ outline:3px solid rgba(23,102,255,.45); outline-offset:2px; }
 
     .small{font-size:11px;}
     .muted{color:var(--muted);}
 
     /* === Modal === */
     .modal-backdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(15,23,42,0.45);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      padding:16px;
-      z-index:9999;
+      position:fixed; inset:0; background:rgba(14,23,40,.5);
+      display:none; align-items:center; justify-content:center; padding:16px; z-index:9999;
     }
     .modal-card{
-      width:min(520px, 100%);
-      background:rgba(255,255,255,0.95);
-      border:1px solid rgba(15,23,42,0.08);
-      border-radius:14px;
-      box-shadow:0 18px 40px rgba(0,0,0,0.18);
-      padding:14px;
+      width:min(520px,100%); background:#fff; border:1px solid var(--border);
+      border-radius:var(--radius); box-shadow:0 18px 44px rgba(0,0,0,.22); padding:16px;
     }
-    .modal-title{
-      margin:0 0 6px 0;
-      font-size:16px;
-      color:var(--ml-blue);
-    }
-    .modal-sub{
-      margin:0 0 12px 0;
-      font-size:12px;
-      color:var(--muted);
-    }
-    .modal-actions{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .modal-actions .btn{
-      flex:1 1 140px;
-      justify-content:center;
-    }
-    .btn.danger{
-      background:#fff;
-      border-color:#ef4444;
-      color:#b91c1c;
-    }
+    .modal-title{ margin:0 0 6px; font-size:17px; color:var(--brand); }
+    .modal-sub{ margin:0 0 12px; font-size:12.5px; color:var(--muted); }
+    .modal-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+    .modal-actions .btn{ flex:1 1 140px; }
+    .btn.danger{ background:#fff; border-color:#ef4444; color:#b91c1c; }
   </style>
 </head>
 
@@ -279,7 +193,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <a class="btn" id="adminDashBtn" href="sla-main.html" style="display:none;">📋 Dashboard</a>
         <a class="btn" id="adminSchedBtn" href="sla-scheduler.html" style="display:none;">🗓️ Scheduler</a>
-        <button type="button" class="btn" id="dayMapBtn">🗺️ Today's map</button>
+        <button type="button" class="icon-btn" id="dayMapBtn" title="Today's map" aria-label="Today's map">🗺️</button>
         <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
     </header>
@@ -289,9 +203,10 @@
 <div id="dayBar" style="display:none;margin-bottom:12px;"></div>
 <div id="unschedBox" style="display:none;margin-bottom:14px;"></div>
 <div class="nav-row">
-  <button type="button" class="btn" id="prevWeekBtn">← Load Previous Week</button>
-  <button type="button" class="btn" id="nextWeekBtn">Load Next Week →</button>
+  <button type="button" class="btn" id="prevWeekBtn">← Previous week</button>
+  <button type="button" class="btn" id="nextWeekBtn">Next week →</button>
 </div>
+<button type="button" class="older-btn" id="olderBtn">↓ Load older jobs (30 / 60 / 90 days)</button>
 
       <div id="jobsTimeline"></div>
 
@@ -473,6 +388,44 @@ function statusClass(status, slaStatus){
   }
   return "status-pill status-open";
 }
+// Priority "Priority 2" / "P2" / 2 → p2 class + P2 label (defaults P4).
+function prioClass(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "p"+m[1] : "p4"; }
+function prioLabel(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "P"+m[1] : "P4"; }
+// Left-edge urgency stripe class for a card: done/overdue/soon/ok/none.
+function stripClass(status, slaStatus){
+  const s = (status || "").toLowerCase();
+  if(s.includes("complete") || s.includes("closed") || s.includes("invoiced")) return "strip-done";
+  if(slaStatus === "overdue" || slaStatus === "overdueSoon") return "strip-bad";
+  if(slaStatus === "warn") return "strip-warn";
+  if(slaStatus === "none") return "strip-none";
+  return "strip-ok";
+}
+// Big card markup shared by the day timeline and the "not booked in" box.
+function jobCardInner(job, slaInfo, target){
+  const site = escH(job.siteName || job.address || job.description || "Job");
+  const addrBits = [job.address, String(job.postcode||"").replace(/\*+$/,"").trim()]
+    .map(x => String(x||"").trim()).filter(Boolean);
+  const addr = escH([...new Set(addrBits)].join(" · "));
+  const desc = escH(job.description || "");
+  const dir = dirUrl(job);
+  return `
+      <div class="job-top">
+        <span class="ref">${escH(job.helpdeskRef || job.id)}</span>
+        <span class="grow"></span>
+        <span class="priority-badge ${prioClass(job.priority)}">${prioLabel(job.priority)}</span>
+      </div>
+      <div class="job-site">${site}</div>
+      ${addr ? `<div class="job-addr">${addr}</div>` : ""}
+      ${desc && desc !== site ? `<div class="job-desc">${desc}</div>` : ""}
+      <div class="job-meta">
+        <span class="${slaInfo.cls}" data-sla-target="${target || ""}">${slaInfo.text}</span>
+        <span class="${statusClass(job.status, slaInfo.status)}">${escH(job.status || "Open")}</span>
+      </div>
+      <div class="job-actions">
+        ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
+        <a class="act open" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open job →</a>
+      </div>`;
+}
 
 function isoDate(d){
   return d.toISOString().slice(0,10);
@@ -509,17 +462,20 @@ function renderDay(dateStr, jobs, mode){
   group.className = "day-group";
 
   const banner = document.createElement("div");
-  banner.className = "day-banner";
-  banner.textContent = new Date(dateStr).toLocaleDateString("en-GB", {
-    weekday:"long", day:"2-digit", month:"short", year:"numeric"
+  const isToday = dateStr === isoDate(new Date());
+  banner.className = "day-banner" + (isToday ? " today" : "");
+  const label = new Date(dateStr).toLocaleDateString("en-GB", {
+    weekday:"short", day:"2-digit", month:"short"
   });
+  banner.innerHTML = `<span>${escH(label)}</span>` +
+    (jobs.length ? `<span class="d-count">${jobs.length} job${jobs.length===1?"":"s"}</span>` : "");
 
   group.appendChild(banner);
 
   if(!jobs.length){
     const empty = document.createElement("div");
     empty.className = "muted small";
-    empty.style.padding = "8px 12px";
+    empty.style.padding = "2px 4px 6px";
     empty.textContent = "No jobs";
     group.appendChild(empty);
   }
@@ -529,28 +485,9 @@ function renderDay(dateStr, jobs, mode){
     const slaInfo = computeSlaCountdown(target);
 
     const card = document.createElement("div");
-    card.className = "job-card";
+    card.className = "job-card " + stripClass(job.status, slaInfo.status);
     card.dataset.jobId = job.id;
-    card.innerHTML = `
-      <div class="job-top">
-        <span class="ref">${job.helpdeskRef || job.id}</span>
-        <span class="priority-badge ${job.priority?.toLowerCase() || "p4"}">${job.priority || "P4"}</span>
-      </div>
-
-      <div class="job-desc">${escH(job.description || "")}</div>
-      <div class="job-site">${escH(job.siteName || job.address || "")}</div>
-
-      <div class="job-meta">
-        <span class="${slaInfo.cls}" data-sla-target="${target || ""}">
-          ${slaInfo.text}
-        </span>
-        <span class="${statusClass(job.status, slaInfo.status)}">
-          ${job.status || "Open"}
-        </span>
-        ${dirUrl(job) ? `<a class="btn" href="${dirUrl(job)}" target="_blank" rel="noopener">🧭 Directions</a>` : ""}
-        <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
-      </div>
-    `;
+    card.innerHTML = jobCardInner(job, slaInfo, target);
     group.appendChild(card);
   }
 
@@ -662,6 +599,14 @@ function startCountdownLoop(){
       const info = computeSlaCountdown(iso);
       el.textContent = info.text;
       el.className = info.cls;
+      // keep the card's left urgency stripe in sync as the clock ticks
+      const card = el.closest(".job-card");
+      if(card){
+        const statusTxt = (card.querySelector(".status-pill")?.textContent || "").trim();
+        const strip = stripClass(statusTxt, info.status);
+        card.classList.remove("strip-ok","strip-warn","strip-bad","strip-done","strip-none");
+        card.classList.add(strip);
+      }
     });
   };
   tick();
@@ -925,26 +870,14 @@ async function loadUnscheduled(){
     const box = $("unschedBox");
     if(!open.length){ box.style.display = "none"; box.innerHTML = ""; return; }
     box.style.display = "block";
-    box.innerHTML = `<div class="day-banner" style="background:#fff7ed;border-color:#fdba74;color:#9a3412;">📌 Assigned to you — not booked in yet (${open.length})</div>`;
+    box.innerHTML = `<div class="day-banner"><span>📌 Assigned — not booked in</span><span class="d-count">${open.length} job${open.length===1?"":"s"}</span></div>`;
     for(const job of open){
-      const slaInfo = computeSlaCountdown(job.targetAt || job.sla?.targetAt);
+      const target = job.targetAt || job.sla?.targetAt;
+      const slaInfo = computeSlaCountdown(target);
       const card = document.createElement("div");
-      card.className = "job-card";
+      card.className = "job-card " + stripClass(job.status, slaInfo.status);
       card.dataset.jobId = job.id;
-      card.style.borderColor = "#fdba74";
-      card.innerHTML = `
-        <div class="job-top">
-          <span class="ref">${job.helpdeskRef || job.id}</span>
-          <span class="priority-badge ${job.priority?.toLowerCase().replace("riority ","") || "p4"}">${(job.priority||"P4").replace("Priority ","P")}</span>
-        </div>
-        <div class="job-desc">${escH(job.description || "")}</div>
-        <div class="job-site">${escH(job.siteName || job.address || "")}</div>
-        <div class="job-meta">
-          <span class="${slaInfo.cls}" data-sla-target="${job.targetAt || ""}">${slaInfo.text}</span>
-          <span class="${statusClass(job.status, slaInfo.status)}">${job.status || "Open"}</span>
-          ${dirUrl(job) ? `<a class="btn" href="${dirUrl(job)}" target="_blank" rel="noopener">🧭 Directions</a>` : ""}
-          <a class="btn primary" href="job-view.html?jobId=${encodeURIComponent(job.id)}">Open</a>
-        </div>`;
+      card.innerHTML = jobCardInner(job, slaInfo, target);
       box.appendChild(card);
     }
     startCountdownLoop();
@@ -1033,7 +966,10 @@ function init(){
   prevBtn.addEventListener("click", () => loadWeek(-1));
   nextBtn.addEventListener("click", () => loadWeek(+1));
 
-  // Hold (3s) = modal
+  // Visible "older jobs" button opens the range modal (30/60/90).
+  const olderBtn = $("olderBtn");
+  if(olderBtn) olderBtn.addEventListener("click", openModal);
+  // Hold (3s) on the week buttons still opens it too (kept for muscle memory).
   addLongPress(prevBtn, openModal);
   addLongPress(nextBtn, openModal);
 
