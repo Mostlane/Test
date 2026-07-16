@@ -234,6 +234,32 @@ export async function handle(request, env, ctx, url, sess) {
       const r = await backfillArchiveSites(env, tenantId, 500);
       return jsonResponse({ ok: true, ...r }, headers);
     }
+    // POST /sla/archive/unlink-sites — clear all site tags so linking can be redone.
+    if (subpath === "/archive/unlink-sites" && method === "POST") {
+      const res = await db.prepare("UPDATE sla_jobs_archive SET site_code=NULL WHERE tenant_id=?").bind(tenantId).run();
+      return jsonResponse({ ok: true, cleared: res.meta?.changes || 0 }, headers);
+    }
+    // GET /sla/archive/site-stats[?code=32] — how the linking landed. With ?code,
+    // returns that store's tagged-job + photo counts (the definitive diagnostic).
+    if (subpath === "/archive/site-stats" && method === "GET") {
+      const qc = searchParams.get("code");
+      if (qc != null && qc !== "") {
+        const code = digitsOf(qc);
+        const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
+        const mos = (aj || []).map(r => r.id);
+        let photos = 0;
+        for (let i = 0; i < mos.length; i += 100) {
+          const chunk = mos.slice(i, i + 100);
+          const ph = chunk.map(() => "?").join(",");
+          photos += (await db.prepare(`SELECT COUNT(*) AS n FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph})`).bind(tenantId, ...chunk).first())?.n || 0;
+        }
+        return jsonResponse({ ok: true, code, jobs: mos.length, photos, sampleMos: mos.slice(0, 5) }, headers);
+      }
+      const tagged = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND site_code IS NOT NULL AND site_code<>'-' AND site_code<>''").bind(tenantId).first())?.n || 0;
+      const stores = (await db.prepare("SELECT COUNT(DISTINCT site_code) AS n FROM sla_jobs_archive WHERE tenant_id=? AND site_code IS NOT NULL AND site_code<>'-' AND site_code<>''").bind(tenantId).first())?.n || 0;
+      const untagged = (await db.prepare("SELECT COUNT(*) AS n FROM sla_jobs_archive WHERE tenant_id=? AND (site_code IS NULL OR site_code='')").bind(tenantId).first())?.n || 0;
+      return jsonResponse({ ok: true, tagged, stores, untagged }, headers);
+    }
     // POST /sla/archive/photos/clear — drop the file records (R2 objects are left;
     // re-import overwrites them). Lets a bad run be redone.
     if (subpath === "/archive/photos/clear" && method === "POST") {
