@@ -164,20 +164,30 @@ async function loadFiles(box){
     const photos = files.filter(f => f.kind==="photo");
     const sigs   = files.filter(f => f.kind==="signature");
     const docs   = files.filter(f => f.kind==="document");
-    GALLERIES[mos] = photos.map(p => p.url);
+    GALLERIES[mos] = photos.map(p => p.url).concat(sigs.map(s => s.url));
+    const CAP = 8;   // only load this many thumbnails up front (rest on demand)
     let html = "";
-    const thumbs = (arr, from) => `<div class="thumbs">` + arr.map((f,i)=>
-      `<div class="thumb" data-mos="${esc(mos)}" data-i="${from+i}"><img loading="lazy" src="${esc(f.url)}" alt="${esc(f.name)}"></div>`).join("") + `</div>`;
-    if(photos.length) html += `<h4>Photos (${photos.length})</h4>` + thumbs(photos, 0);
-    if(sigs.length){ // signatures go into the same lightbox array after photos
-      GALLERIES[mos] = GALLERIES[mos].concat(sigs.map(s=>s.url));
-      html += `<h4 style="margin-top:10px">Signatures (${sigs.length})</h4>` + thumbs(sigs, photos.length);
+    const thumb = (f, i) => `<div class="thumb" data-mos="${esc(mos)}" data-i="${i}"><img loading="lazy" decoding="async" src="${esc(f.url)}" alt="${esc(f.name)}"></div>`;
+    if(photos.length){
+      const shown = photos.slice(0, CAP);
+      html += `<h4>Photos (${photos.length})</h4><div class="thumbs">` + shown.map((f,i)=>thumb(f,i)).join("") + `</div>`;
+      if(photos.length > CAP) html += `<button class="doclink showmore" data-mos="${esc(mos)}" data-kind="photo" style="cursor:pointer;background:#fff">Show all ${photos.length} photos</button>`;
+    }
+    if(sigs.length){
+      html += `<h4 style="margin-top:10px">Signatures (${sigs.length})</h4><div class="thumbs">` + sigs.map((f,i)=>thumb(f, photos.length+i)).join("") + `</div>`;
     }
     if(docs.length) html += `<h4 style="margin-top:10px">Documents (${docs.length})</h4>` +
       docs.map(f=>`<a class="doclink" href="${esc(f.url)}" target="_blank" rel="noopener">📄 ${esc(f.name)}</a>`).join("");
     box.innerHTML = html;
-    box.querySelectorAll(".thumb").forEach(t=>{
-      t.addEventListener("click", ()=> openLightbox(t.dataset.mos, +t.dataset.i));
+    box._photos = photos;   // stash for "show all"
+    box.querySelectorAll(".thumb").forEach(t=> t.addEventListener("click", ()=> openLightbox(t.dataset.mos, +t.dataset.i)));
+    const more = box.querySelector(".showmore");
+    if(more) more.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const grid = box.querySelector(".thumbs");
+      grid.innerHTML = box._photos.map((f,i)=>thumb(f,i)).join("");
+      grid.querySelectorAll(".thumb").forEach(t=> t.addEventListener("click", ()=> openLightbox(t.dataset.mos, +t.dataset.i)));
+      more.remove();
     });
   }catch(e){
     box.innerHTML = `<div class="muted" style="font-size:12px">Couldn't load files.</div>`;

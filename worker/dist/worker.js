@@ -2708,14 +2708,20 @@ async function handle7(request, env, ctx, url, sess) {
     const key = searchParams.get("key") || "";
     if (!key.startsWith("archivephoto/")) return jsonResponse({ error: "Bad key" }, headers, 400);
     if (!sess && !await verifyFileSig(env, key, searchParams)) return jsonResponse({ error: "Link expired or invalid" }, headers, 403);
+    const cache = caches.default;
+    const cacheKey = new Request(url.origin + "/sla/archive-file?key=" + encodeURIComponent(key));
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
-    return new Response(obj.body, { status: 200, headers: {
+    const resp = new Response(obj.body, { status: 200, headers: {
       ...headers,
       "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
       "Content-Disposition": "inline",
-      "Cache-Control": "private, max-age=86400"
+      "Cache-Control": "public, max-age=31536000, immutable"
     } });
+    ctx?.waitUntil(cache.put(cacheKey, resp.clone()));
+    return resp;
   }
   if (subpath.startsWith("/archive")) {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
