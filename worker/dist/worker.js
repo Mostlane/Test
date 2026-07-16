@@ -3102,7 +3102,7 @@ async function handle7(request, env, ctx, url, sess) {
     const jobsHere = all.filter((j) => siteMatches(j, code, name));
     const photos = [];
     for (const j of jobsHere) {
-      const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/` });
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${j.id}/photos/`, include: ["customMetadata"] });
       for (const o of listed.objects || []) {
         photos.push({
           url: await fileUrl(env, url, o.key),
@@ -3111,6 +3111,7 @@ async function handle7(request, env, ctx, url, sess) {
           jobRef: j.helpdeskRef || j.id,
           jobId: j.id,
           at: o.uploaded ? new Date(o.uploaded).toISOString() : null,
+          by: o.customMetadata && (o.customMetadata.by || o.customMetadata.uploadedBy) || "",
           source: "job"
         });
       }
@@ -3136,7 +3137,7 @@ async function handle7(request, env, ctx, url, sess) {
           const chunk = mos.slice(i, i + 100);
           const ph = chunk.map(() => "?").join(",");
           const { results: af } = await db.prepare(
-            `SELECT r2_key, name, taken_at, mos FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph}) LIMIT 2000`
+            `SELECT r2_key, name, taken_at, mos, uploaded_by FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph}) LIMIT 2000`
           ).bind(tenantId, ...chunk).all();
           for (const f of af || []) {
             photos.push({
@@ -3145,6 +3146,7 @@ async function handle7(request, env, ctx, url, sess) {
               name: f.name || f.r2_key.split("/").pop(),
               at: f.taken_at || null,
               jobRef: f.mos,
+              by: f.uploaded_by || "",
               source: "archive"
             });
           }

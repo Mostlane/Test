@@ -215,7 +215,9 @@ async function renderPhotos(){
   const grid = document.createElement("div"); grid.className = "grid";
   photos.forEach(p => {
     const g = document.createElement("div"); g.className = "gitem";
-    g.innerHTML = `<img loading="lazy" decoding="async" src="${esc(p.url)}" alt=""><span class="tag">${esc(p.jobRef || (p.by ? "uploaded" : "photo"))}</span>`;
+    const label = p.by ? esc(p.by) : (p.jobRef ? esc(p.jobRef) : "photo");
+    const tip = [p.by ? "Uploaded by " + p.by : "", p.jobRef ? "Job " + p.jobRef : ""].filter(Boolean).join(" · ");
+    g.innerHTML = `<img loading="lazy" decoding="async" src="${esc(p.url)}" alt="" title="${esc(tip)}"><span class="tag" title="${esc(tip)}">${label}</span>`;
     g.querySelector("img").addEventListener("click", () => openLb(p.url));
     grid.appendChild(g);
   });
