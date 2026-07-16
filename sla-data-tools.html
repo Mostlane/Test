@@ -363,11 +363,13 @@ $("photoFile").onchange = async () => {
 $("stopPhotos").onclick = () => { photoStop = true; $("photoMsg").textContent = "Stopping after the current batches…"; };
 
 $("clearPhotos").onclick = async () => {
-  if(!confirm("Remove the imported-photo records? (The image files stay in storage; re-importing re-links them.)")) return;
+  if(!confirm("Remove ALL imported-photo records and start the photo import over from scratch? (The image files stay in storage; re-importing re-links them.)")) return;
   try{
     const d = await (await fetch(SLA + "/archive/photos/clear", { method:"POST" })).json();
     if(!d.ok) throw new Error(d.error||"failed");
-    $("photoMsg").className="msg ok"; $("photoMsg").textContent="Cleared."; refreshPhotoCount();
+    // Reset the resume marker too, so the next run re-processes from the very start.
+    try{ localStorage.removeItem("wev_photo_idx"); localStorage.removeItem("wev_photo_sig"); }catch(e){}
+    $("photoMsg").className="msg ok"; $("photoMsg").textContent="Cleared — press Import photos to start over."; refreshPhotoCount();
   }catch(e){ $("photoMsg").className="msg err"; $("photoMsg").textContent="Error: "+e.message; }
 };
 
