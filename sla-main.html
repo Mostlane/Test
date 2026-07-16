@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- build:2026-07-16T22:22:44Z -->
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=2"></script>
@@ -587,7 +586,11 @@ function render(){
   tbody.innerHTML = ""; cards.innerHTML = "";
 
   for(const j of list){
-    const ref = esc(j.helpdeskRef || j.id);
+    const rawRef = String(j.helpdeskRef || j.id || "").trim();
+    // A real reference is short. Jobs that arrived with the whole fault report
+    // in the reference field would otherwise show that text as a giant grey
+    // "reference" box — suppress it when it's clearly not a ticket number.
+    const ref = (rawRef.length <= 24) ? esc(rawRef) : "";
     const colour = STATUS_COLOUR[j.status] || "#9ca3af";
     const sched = fmtSched(j);
     const engs = (j.assignedEngineers||[]);
@@ -601,7 +604,7 @@ function render(){
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        <span class="ref viewlink" data-action="view">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref viewlink" data-action="view">${ref}</span>` : `<span class="viewlink" data-action="view">Open</span>`} <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}</div>
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
@@ -630,7 +633,7 @@ function render(){
     card.dataset.jobId = j.id;
     card.innerHTML = `
       <div class="mjob-top">
-        <span class="ref">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
+        ${ref ? `<span class="ref">${ref}</span> ` : ""}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${prShort(j.priority)}</span>
       </div>
       <div class="mjob-title" data-action="view">${site || "(no site)"}</div>
