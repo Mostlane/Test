@@ -82,7 +82,7 @@ function detailHtml(j){
   const c = j.customer||{}, s = j.signed||{}, f = j.financials||{};
   const rows = [];
   const add = (k,v)=>{ if(v) rows.push(`<dt>${k}</dt><dd>${esc(v)}</dd>`); };
-  add("Job name", j.jobName);
+  add("Job number", j.helpdeskRef || j.id);
   add("Customer", c.name);
   add("Customer address", [c.address, c.postcode].filter(Boolean).join(", "));
   add("Customer phone", c.phone);
@@ -105,8 +105,7 @@ function render(jobs){
     const closed = /closed|complete|invoiced/i.test(j.status||"");
     return `<div class="card" data-i="${i}">
       <div class="top">
-        <span class="ref">${esc(j.helpdeskRef||j.id)}</span>
-        <span class="name">${esc(j.siteName||j.jobName||"")}</span>
+        <span class="name">${esc(j.jobName||j.siteName||j.helpdeskRef||j.id)}</span>
         <span style="flex:1"></span>
         <span class="status ${closed?"closed":""}">${esc(j.status||"")}</span>
       </div>
