@@ -271,7 +271,7 @@ export async function handle(request, env, ctx, url, sess) {
       const mos = (searchParams.get("mos") || "").trim();
       if (!mos) return jsonResponse({ ok: true, files: [] }, headers);
       const { results } = await db.prepare(
-        "SELECT id,r2_key,name,kind,type,bytes,taken_at,uploaded_by FROM sla_archive_files WHERE tenant_id=? AND mos=? ORDER BY kind, taken_at"
+        "SELECT id,r2_key,name,kind,type,bytes,taken_at,uploaded_by FROM sla_archive_files WHERE tenant_id=? AND mos=? ORDER BY kind, taken_at DESC"
       ).bind(tenantId, mos).all();
       const out = [];
       for (const r of results || []) {
