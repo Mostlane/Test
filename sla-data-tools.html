@@ -336,8 +336,16 @@ $("photoFile").onchange = async () => {
     PHOTO_FILES = [];
     for(const j of (manifest.jobs||[])){
       for(const file of (j.files||[])){
-        if(file && file.id && file.url) PHOTO_FILES.push({
-          id:file.id, mos:j.mos||"", name:file.name||"", url:file.url,
+        if(!file || !file.url) continue;
+        // The manifest files have no explicit id — derive a stable, unique one
+        // from the S3 object name (carries a hash prefix) namespaced by MOS, so
+        // the odd shared filename across two jobs doesn't collide. Used as the
+        // dedupe/resume key and the R2 filename.
+        const base = decodeURIComponent(String(file.url).split("/").pop().split("?")[0]);
+        const id = file.id || ((j.mos ? j.mos + ":" : "") + base);
+        if(!id) continue;
+        PHOTO_FILES.push({
+          id, mos:j.mos||"", name:file.name||"", url:file.url,
           type:file.type||"", bytes:+file.bytes||0, kind:file.kind||"photo", date:file.date||"", by:file.by||""
         });
       }
