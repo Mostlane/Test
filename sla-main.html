@@ -126,7 +126,7 @@
       border:1px solid #e5e7eb;box-shadow:0 4px 10px rgba(15,23,42,0.08);
     }
     .mjob-top{display:flex;justify-content:space-between;gap:6px;align-items:center;margin-bottom:4px;}
-    .mjob-title{font-size:13px;font-weight:600;}
+    .mjob-title{font-size:14px;font-weight:700;color:#1d4ed8;cursor:pointer;margin-bottom:2px;}
     .mjob-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:11px;color:#4b5563;align-items:center;}
     .mjob-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
 
@@ -600,8 +600,7 @@ function render(){
     tr.innerHTML = `
       <td><input type="checkbox" class="rowcheck" data-id="${esc(j.id)}" ${selected.has(j.id)?"checked":""}></td>
       <td>
-        <div class="jobdesc viewlink" data-action="view">${esc(j.description || "(no description)")}</div>
-        <span class="ref">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
+        <span class="ref viewlink" data-action="view">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
         <div class="statusline"><span class="dot" style="background:${colour}"></span>${esc(j.status)}</div>
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
@@ -633,8 +632,8 @@ function render(){
         <span class="ref">${ref}</span> <span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${prShort(j.priority)}</span>
       </div>
-      <div class="mjob-title">${esc(j.description||"")}</div>
-      <div class="small muted">${site}${addr ? " · " + addr : ""}</div>
+      <div class="mjob-title" data-action="view">${site || "(no site)"}</div>
+      ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
         <span class="dot" style="background:${colour}"></span>${esc(j.status)}
         ${sla.text ? `<span class="${sla.cls}">${sla.text}</span>` : ""}
