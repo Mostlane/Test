@@ -2810,8 +2810,8 @@ async function handle7(request, env, ctx, url, sess) {
         const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
         const mos = (aj || []).map((r) => r.id);
         let photos = 0;
-        for (let i = 0; i < mos.length; i += 100) {
-          const chunk = mos.slice(i, i + 100);
+        for (let i = 0; i < mos.length; i += 90) {
+          const chunk = mos.slice(i, i + 90);
           const ph = chunk.map(() => "?").join(",");
           photos += (await db.prepare(`SELECT COUNT(*) AS n FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph})`).bind(tenantId, ...chunk).first())?.n || 0;
         }
@@ -2893,8 +2893,8 @@ async function handle7(request, env, ctx, url, sess) {
     await ensureArchiveFiles(env, tenantId);
     const refs = [...new Set(items.flatMap((it) => [it.id, it.ref].filter(Boolean).map(String)))];
     const archHas = /* @__PURE__ */ new Set();
-    for (let i = 0; i < refs.length; i += 100) {
-      const chunk = refs.slice(i, i + 100);
+    for (let i = 0; i < refs.length; i += 90) {
+      const chunk = refs.slice(i, i + 90);
       const ph = chunk.map(() => "?").join(",");
       const { results } = await db.prepare(`SELECT DISTINCT mos FROM sla_archive_files WHERE tenant_id=? AND mos IN (${ph})`).bind(tenantId, ...chunk).all();
       for (const r of results || []) archHas.add(String(r.mos));
@@ -3156,8 +3156,8 @@ async function handle7(request, env, ctx, url, sess) {
         await ensureArchiveFiles(env, tenantId);
         const { results: aj } = await db.prepare("SELECT id FROM sla_jobs_archive WHERE tenant_id=? AND site_code=?").bind(tenantId, code).all();
         const mos = (aj || []).map((r) => r.id);
-        for (let i = 0; i < mos.length && photos.length < 2e3; i += 100) {
-          const chunk = mos.slice(i, i + 100);
+        for (let i = 0; i < mos.length && photos.length < 2e3; i += 90) {
+          const chunk = mos.slice(i, i + 90);
           const ph = chunk.map(() => "?").join(",");
           const { results: af } = await db.prepare(
             `SELECT r2_key, name, taken_at, mos, uploaded_by FROM sla_archive_files WHERE tenant_id=? AND kind='photo' AND mos IN (${ph}) LIMIT 2000`
@@ -3685,8 +3685,8 @@ async function archivePhotosImport(env, tenantId, files) {
   const db = tenantDB(env, tenantId);
   const ids = files.map((f) => String(f.id));
   const have = /* @__PURE__ */ new Set();
-  for (let i = 0; i < ids.length; i += 100) {
-    const chunk = ids.slice(i, i + 100);
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
     const ph = chunk.map(() => "?").join(",");
     const { results } = await db.prepare(`SELECT id FROM sla_archive_files WHERE tenant_id=? AND id IN (${ph})`).bind(tenantId, ...chunk).all();
     for (const r of results || []) have.add(r.id);
