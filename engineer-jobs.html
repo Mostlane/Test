@@ -402,11 +402,14 @@ function stripClass(status, slaStatus){
 }
 // Big card markup shared by the day timeline and the "not booked in" box.
 function jobCardInner(job, slaInfo, target){
-  const site = escH(job.siteName || job.address || job.description || "Job");
-  const addrBits = [job.address, String(job.postcode||"").replace(/\*+$/,"").trim()]
-    .map(x => String(x||"").trim()).filter(Boolean);
-  const addr = escH([...new Set(addrBits)].join(" · "));
-  const desc = escH(job.description || "");
+  // The store/site line is the title (e.g. "25826 Portsmouth, Copnor Road 331").
+  // The fault description is deliberately NOT shown on the dashboard.
+  const siteRaw = job.siteName || job.address || ("Job " + (job.helpdeskRef || job.id));
+  const site = escH(siteRaw);
+  const pc = String(job.postcode||"").replace(/\*+$/,"").trim();
+  // Address/postcode line — skip anything already in the title so it doesn't repeat.
+  const addr = escH([...new Set([job.address, pc].map(x => String(x||"").trim()).filter(Boolean))]
+    .filter(a => !String(siteRaw).includes(a)).join(" · "));
   const dir = dirUrl(job);
   return `
       <div class="job-top">
@@ -416,7 +419,6 @@ function jobCardInner(job, slaInfo, target){
       </div>
       <div class="job-site">${site}</div>
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
-      ${desc && desc !== site ? `<div class="job-desc">${desc}</div>` : ""}
       <div class="job-meta">
         <span class="${slaInfo.cls}" data-sla-target="${target || ""}">${slaInfo.text}</span>
         <span class="${statusClass(job.status, slaInfo.status)}">${escH(job.status || "Open")}</span>

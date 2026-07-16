@@ -801,11 +801,13 @@ function renderJob(){
     return;
   }
   const ref = job.helpdeskRef || job.reference || job.id;
-  $("jobTitle").textContent = `Job ${ref}`;
+  const site = job.siteName || job.siteCode || job.address || job.location || "";
+  // Title = the store/site (e.g. "25826 Portsmouth, Copnor Road 331"); the
+  // reference sits underneath. Description stays secondary, lower down.
+  $("jobTitle").textContent = site || `Job ${ref}`;
+  $("jobSub").textContent = ref;
   $("jobRef").textContent = ref;
-
-  const site = job.siteName || job.siteCode || job.address || job.location || "—";
-  $("jobSite").textContent = site;
+  $("jobSite").textContent = site || "—";
 
   const desc = job.description || job.rawPayload?.description || "—";
   $("jobDesc").textContent = desc;
@@ -924,7 +926,6 @@ async function loadJob(){
     const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}?t=${Date.now()}`, { cache:"no-store" });
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
     job = await res.json();
-    $("jobSub").textContent = `From SLA worker • ID: ${job.id}`;
     $("statusBar").textContent = "Loaded.";
     renderJob();
     loadExistingPhotos();
