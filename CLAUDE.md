@@ -15,11 +15,24 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
 
 ## How things deploy — CRITICAL CONVENTIONS
 - **Pages**: the site is **Cloudflare Pages connected to this GitHub repo
-  (Mostlane/Test)** — GitHub holds the code, Cloudflare builds + serves
-  mostlane-portal.com on every push to `main`. It is NOT GitHub Pages
-  (no CNAME, no Actions workflow) so **`_headers` IS honoured** (its no-cache
-  rules are real, not dead files). Work on the `claude/...` branch,
-  `merge --no-ff` into `main`, push both.
+  (Mostlane/Test)** — GitHub holds the code and **GitHub Pages builds + serves
+  mostlane-portal.com on every push to `main`** (the "pages build and
+  deployment" Actions workflow; deploy on push to `main`). Work on the
+  `claude/...` branch, `merge --no-ff` into `main`, push both.
+  - **CORRECTION (17 Jul):** it is **GitHub Pages, NOT Cloudflare Pages** — an
+    earlier note here was wrong and cost a long debugging detour. Consequences:
+    (a) **`_headers` is a DEAD file** — GitHub Pages ignores it, so its no-cache
+    rules were never applied (GitHub Pages sets its own ~10-min HTML cache).
+    Client freshness relies on the **service worker cache version** (`sw.js` /
+    `service-worker.js` `CACHE_NAME`, currently `mostlane-v5`) + `?v=` query
+    bumps — bump those to force phones to refresh, NOT `_headers`.
+    (b) A **`.nojekyll`** file (repo root) disables the Jekyll build so the site
+    is published as-is. **Keep it.** Without it, GitHub ran Jekyll, whose
+    `github-metadata` plugin calls the GitHub API mid-build; a transient API
+    503 then crashed the build, the **deploy step was skipped**, and the live
+    site silently froze on the last good build while still accepting commits.
+    (c) Check deploys with the **GitHub Actions "pages build and deployment"**
+    runs (mcp__github__actions_list / get_job_logs), not a Cloudflare dashboard.
 - **Worker (`mostlane-api`)**: NOT auto-deployed. Source `worker/src/`
   (entry `src/index.js`); build:
   `npx esbuild src/index.js --bundle --format=esm --outfile=dist/worker.js`
