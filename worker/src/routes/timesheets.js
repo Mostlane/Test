@@ -318,6 +318,69 @@ async function poSiteRows(env, term, limit) {
   return [];
 }
 
+// ── Site names written on the purchase orders themselves ─────────────────────
+// The PO database's sites table doesn't hold every place — plenty of sites
+// exist only as text typed on a PO (e.g. "Lakeside Surgery, Verwood"). So we
+// also discover the PO/orders table (name matching po/purchase/order, or any
+// remaining table with a site-ish column; columnar or JSON rows) and harvest
+// DISTINCT site names from the most recent rows, cached 5 min per isolate.
+let PO_ORD;        // undefined = not probed, null = nothing usable
+let PO_ORD_CACHE;  // { at, list } — harvested site names
+async function poOrderDiscover(env) {
+  if (!env.PO_DB) return null;
+  if (PO_ORD !== undefined) return PO_ORD;
+  PO_ORD = null;
+  try {
+    const sitesTable = (await poDiscover(env)) ? PO_MAP.table : null;   // populates PO_TABLES too
+    let best = null;
+    for (const t of PO_TABLES || []) {
+      if (t.name === sitesTable) continue;
+      const lower = (t.cols || []).map(n => n.toLowerCase());
+      const pick = (...cands) => {
+        for (const c of cands) { const i = lower.indexOf(c); if (i >= 0) return t.cols[i]; }
+        for (const c of cands) { const i = lower.findIndex(n => n.includes(c)); if (i >= 0) return t.cols[i]; }
+        return null;
+      };
+      const isPo = /po|purchase|order/i.test(t.name);
+      const siteCol = pick("site_name", "sitename", "site", "location");
+      const jsonCol = pick("data", "value", "json", "body", "payload");
+      if (siteCol) {
+        const score = 5 + (isPo ? 5 : 0);
+        if (!best || score > best.score) best = { mode: "col", table: t.name, siteCol, score };
+      } else if (jsonCol && isPo) {
+        const score = 6;
+        if (!best || score > best.score) best = { mode: "json", table: t.name, jsonCol, score };
+      }
+    }
+    PO_ORD = best;
+  } catch { PO_ORD = null; }
+  return PO_ORD;
+}
+async function poOrderSiteNames(env) {
+  const m = await poOrderDiscover(env);
+  if (!m) return [];
+  if (PO_ORD_CACHE && Date.now() - PO_ORD_CACHE.at < 5 * 60 * 1000) return PO_ORD_CACHE.list;
+  const names = new Map();   // lower-cased -> display text
+  try {
+    const safe = m.table.replace(/"/g, "");
+    const add = v => { const s = String(v || "").trim(); if (s.length > 2 && !names.has(s.toLowerCase())) names.set(s.toLowerCase(), s); };
+    if (m.mode === "col") {
+      const { results } = await env.PO_DB.prepare(
+        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 800`).all();
+      for (const r of results || []) add(r.s);
+    } else {
+      const { results } = await env.PO_DB.prepare(
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 800`).all();
+      for (const r of results || []) {
+        let o = null; try { o = JSON.parse(r.v); } catch { continue; }
+        if (o && typeof o === "object") add(o.site ?? o.siteName ?? o.site_name ?? o.Site ?? o.location ?? "");
+      }
+    }
+  } catch {}
+  PO_ORD_CACHE = { at: Date.now(), list: [...names.values()] };
+  return PO_ORD_CACHE.list;
+}
+
 // ── Mileage estimate (postcodes.io + haversine × road factor) ────────────────
 async function lookupPostcode(pc) {
   const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
@@ -504,6 +567,17 @@ export async function handle(request, env, ctx, url, sess) {
       sites.push({ name, code: r.job != null ? String(r.job) : "", postcode: String(r.pc || "").toUpperCase(), source: "po" });
       if (sites.length >= 25) break;
     }
+    // Site names typed on POs (no postcode of their own — engineer enters it).
+    try {
+      const T = term.toLowerCase();
+      for (const n of await poOrderSiteNames(env)) {
+        if (sites.length >= 25) break;
+        if (T && !n.toLowerCase().includes(T)) continue;
+        if (seen.has(n.trim().toLowerCase())) continue;
+        seen.add(n.trim().toLowerCase());
+        sites.push({ name: n, code: "", postcode: "", source: "po-order" });
+      }
+    } catch {}
     return json({ ok: true, sites }, {}, env, request);
   }
 
@@ -519,6 +593,11 @@ export async function handle(request, env, ctx, url, sess) {
       out.discovered = { mode: m.mode, table: m.table, nameCol: m.nameCol || null, pcCol: m.pcCol || null,
         jobCol: m.jobCol || null, jsonCol: m.jsonCol || null, blobKey: m.blobKey || null };
       out.samples = (await poSiteRows(env, "", 5)).map(s => s.name + (s.pc ? " (" + s.pc + ")" : ""));
+    }
+    const om = await poOrderDiscover(env);
+    if (om) {
+      const names = await poOrderSiteNames(env);
+      out.orderSites = { table: om.table, mode: om.mode, count: names.length, samples: names.slice(0, 3) };
     }
     return json(out, {}, env, request);
   }
@@ -561,6 +640,16 @@ export async function handle(request, env, ctx, url, sess) {
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
         jobs.push({ ref, label: ((r.job != null && r.job !== "") ? r.job + " — " : "") + String(r.name || "PO site").slice(0, 48), kind: "po" });
+      }
+      // …and site names typed straight onto purchase orders.
+      const T2 = term.toLowerCase();
+      for (const n of await poOrderSiteNames(env)) {
+        if (jobs.length >= 12) break;
+        if (!n.toLowerCase().includes(T2)) continue;
+        const ref = nameRef(n);
+        if (!ref || seen.has(ref.toLowerCase())) continue;
+        seen.add(ref.toLowerCase());
+        jobs.push({ ref, label: n.slice(0, 60), kind: "po-order" });
       }
     } catch {}
     // Exact/prefix matches float to the top; cap the list for the dropdown.

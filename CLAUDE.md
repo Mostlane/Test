@@ -300,7 +300,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   NAME with or without a job number (engineers are "on" places — a name-only
   match inserts the site name, commas softened to " – " so the
   comma-separated box doesn't split it); the page also merges
-  compliance-store names into the jobs chips client-side. The admin
+  compliance-store names into the jobs chips client-side. PO_DB suggestions
+  come from TWO discoveries: the PO sites table AND site names harvested off
+  the PO rows themselves (poOrderDiscover/poOrderSiteNames: po/purchase/order
+  table, columnar `site` col or JSON rows, last 800 rows deduped, 5-min
+  isolate cache) — plenty of PO sites exist ONLY as text on POs (e.g.
+  "Lakeside Surgery, Verwood"); /ts/po-status reports both discoveries. The admin
   Settings column for the mileage switch is labelled **"Fuel (mileage)"** —
   that's Jamie's word for it. **PO sites (17 Jul)**: portal→PO site sync is
   add-only, so sites created inside the PO system never reach the portal —
