@@ -81,8 +81,8 @@
   <h2 id="editTitle">Edit week</h2>
   <p class="note" id="editSub"></p>
   <div id="editBody"></div>
-  <div class="foot"><button class="btn" onclick="document.getElementById('editOv').classList.remove('show')">Cancel</button>
-  <button class="btn primary" id="editSave">Save</button></div>
+  <div class="foot"><span class="muted" id="editState" style="margin-right:auto;align-self:center">Changes save automatically</span>
+  <button class="btn primary" onclick="closeEdit()">Close</button></div>
 </div></div>
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
@@ -91,8 +91,8 @@
   <div id="poStatus" style="border-radius:9px;padding:9px 12px;margin-bottom:10px;font-size:13px;background:#f1f5f9;border:1px solid var(--line)">Checking the PO system link…</div>
   <div class="defs" id="defs"></div>
   <div style="max-height:52vh;overflow:auto"><table class="cfgTable" id="cfgTable"></table></div>
-  <div class="foot"><button class="btn" onclick="document.getElementById('cfgOv').classList.remove('show')">Cancel</button>
-  <button class="btn primary" id="cfgSave">Save settings</button></div>
+  <div class="foot"><span class="muted" id="cfgState" style="margin-right:auto;align-self:center">Changes save automatically</span>
+  <button class="btn primary" onclick="closeCfg()">Close</button></div>
 </div></div>
 
 <div class="ov" id="invOv"><div class="panel">
@@ -156,7 +156,7 @@ function openEdit(username){
   g("editSub").textContent=u.invoice?"This week is invoiced (#"+u.invoice.number+") — delete the invoice first to make changes.":"Times are as the engineer entered them; deductions are applied automatically from Settings.";
   g("editBody").innerHTML=DATA.days.map((date,i)=>{
     const d=u.days[date]||{};
-    const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove()">✕</button></div>`).join("");
+    const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button></div>`).join("");
     return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}</h4>
       <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
       <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
@@ -164,16 +164,19 @@ function openEdit(username){
   }).join("");
   const locked=!!u.invoice;
   g("editBody").querySelectorAll("input,button").forEach(el=>el.disabled=locked);
-  g("editSave").disabled=locked;
+  g("editState").textContent=locked?"Week locked (invoiced)":"Changes save automatically";
+  editDirty=false;editBusy=false;clearTimeout(editTimer);clearTimeout(editRetry);
   g("editOv").classList.add("show");
 }
 function addMi(btn){
   const host=btn.parentNode.querySelector(".mihost");
   const div=document.createElement("div");div.className="erow mirow";
-  div.innerHTML='<input type="text" class="m-site" placeholder="Site" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" style="width:76px"><button class="btn" onclick="this.parentNode.remove()">✕</button>';
+  div.innerHTML='<input type="text" class="m-site" placeholder="Site" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" style="width:76px"><button class="btn" onclick="this.parentNode.remove();queueEditSave()">✕</button>';
   host.appendChild(div);
 }
-g("editSave").onclick=async()=>{
+// Autosave the edit modal: debounced as the admin types, retry on failure.
+let editTimer=null,editRetry=null,editBusy=false,editDirty=false;
+function collectEditDays(){
   const days={};
   g("editBody").querySelectorAll(".eday").forEach(ed=>{
     const d={start:ed.querySelector(".e-start").value,finish:ed.querySelector(".e-finish").value,
@@ -185,11 +188,39 @@ g("editSave").onclick=async()=>{
     });
     if(d.start||d.finish||d.jobs||d.mileage.length)days[ed.dataset.date]=d;
   });
-  const r=await authFetchTO("/ts/admin/save",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,days})}).then(x=>x.json()).catch(()=>null);
-  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't save.");
+  return days;
+}
+function queueEditSave(){
+  if(!EDIT_U||EDIT_U.invoice)return;
+  editDirty=true;
+  clearTimeout(editTimer);
+  editTimer=setTimeout(()=>doEditSave(),900);
+}
+async function doEditSave(){
+  if(!EDIT_U)return;
+  clearTimeout(editTimer);clearTimeout(editRetry);
+  if(editBusy){editDirty=true;return;}
+  editBusy=true;editDirty=false;
+  const st=g("editState");if(st)st.textContent="Saving…";
+  const r=await authFetchTO("/ts/admin/save",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,days:collectEditDays()})}).then(x=>x.json()).catch(()=>null);
+  editBusy=false;
+  if(r&&r.ok){
+    if(st)st.textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    if(editDirty)doEditSave();
+  }else{
+    editDirty=true;
+    if(st)st.textContent=(r&&r.error)||"⚠️ Couldn't save — retrying…";
+    editRetry=setTimeout(()=>doEditSave(),8000);
+  }
+}
+async function closeEdit(){
+  if(editDirty||editBusy){clearTimeout(editTimer);await doEditSave();}
   g("editOv").classList.remove("show");
+  EDIT_U=null;
   load();
-};
+}
+document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest("#editBody"))queueEditSave();});
+document.addEventListener("change",e=>{if(e.target.closest&&e.target.closest("#editBody"))queueEditSave();});
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 let CFG=null;
@@ -219,6 +250,8 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="text" class="c-home" value="${esc(e.homePostcode||"")}"></td>
         <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
     }).join("");
+  cfgDirty=false;cfgBusy=false;clearTimeout(cfgTimer);clearTimeout(cfgRetry);
+  const cst=g("cfgState");if(cst)cst.textContent="Changes save automatically";
   g("cfgOv").classList.add("show");
   poStatusCheck();
 };
@@ -260,7 +293,9 @@ async function poStatusCheck(){
   el.innerHTML=`<div style="margin-bottom:2px"><b>Site &amp; job suggestions</b></div>`+rows+
     `<div style="opacity:.55;font-size:11px;margin-top:3px">[page p8 · worker ${esc((r&&r.build)||"pre-w5")}]</div>`;
 }
-g("cfgSave").onclick=async()=>{
+// Autosave the settings modal: debounced on any tick/typing, retry on failure.
+let cfgTimer=null,cfgRetry=null,cfgBusy=false,cfgDirty=false;
+function collectCfg(){
   const byUser={};
   g("cfgTable").querySelectorAll("tr[data-u]").forEach(tr=>{
     byUser[tr.dataset.u]={
@@ -276,11 +311,36 @@ g("cfgSave").onclick=async()=>{
   });
   const defaults={commuteMins:+g("d-commute").value||30,lunchMins:+g("d-lunch").value||30,
     lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,company:g("d-company").value};
-  const r=await authFetchTO("/ts/admin/config",{method:"POST",body:JSON.stringify({defaults,byUser})}).then(x=>x.json()).catch(()=>null);
-  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't save settings.");
+  return {defaults,byUser};
+}
+function queueCfgSave(){
+  cfgDirty=true;
+  clearTimeout(cfgTimer);
+  cfgTimer=setTimeout(()=>doCfgSave(),900);
+}
+async function doCfgSave(){
+  clearTimeout(cfgTimer);clearTimeout(cfgRetry);
+  if(cfgBusy){cfgDirty=true;return;}
+  cfgBusy=true;cfgDirty=false;
+  const st=g("cfgState");if(st)st.textContent="Saving…";
+  const r=await authFetchTO("/ts/admin/config",{method:"POST",body:JSON.stringify(collectCfg())}).then(x=>x.json()).catch(()=>null);
+  cfgBusy=false;
+  if(r&&r.ok){
+    if(st)st.textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    if(cfgDirty)doCfgSave();
+  }else{
+    cfgDirty=true;
+    if(st)st.textContent="⚠️ Couldn't save — retrying…";
+    cfgRetry=setTimeout(()=>doCfgSave(),8000);
+  }
+}
+async function closeCfg(){
+  if(cfgDirty||cfgBusy){clearTimeout(cfgTimer);await doCfgSave();}
   g("cfgOv").classList.remove("show");
   load();
-};
+}
+document.addEventListener("input",e=>{if(e.target.closest&&(e.target.closest("#cfgTable")||e.target.closest("#defs")))queueCfgSave();});
+document.addEventListener("change",e=>{if(e.target.closest&&(e.target.closest("#cfgTable")||e.target.closest("#defs")))queueCfgSave();});
 
 // ── Invoices list ────────────────────────────────────────────────────────────
 g("invBtn").onclick=async()=>{

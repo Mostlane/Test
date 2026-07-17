@@ -80,7 +80,7 @@
   <p class="muted" style="font-size:11.5px;margin:0 2px 20px" id="srcNote"></p>
 </div>
 <datalist id="siteList"></datalist>
-<div class="savebar"><span class="st" id="saveState"></span><button class="btn primary" id="saveBtn">💾 Save week</button></div>
+<div class="savebar"><span class="st" id="saveState">All changes save automatically</span></div>
 
 <script>
 const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
@@ -187,7 +187,7 @@ function render(){
   }
   g("invBanner").innerHTML=locked?`<div class="banner">✅ Invoice <b>${INVOICE.number}</b> has been generated for this week (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>. The week is locked; ask the office if something needs correcting.</div>`:"";
   document.querySelectorAll(".card[data-date] input,.card[data-date] .btn").forEach(el=>{if(locked)el.disabled=true;});
-  g("saveBtn").disabled=locked;
+  g("saveState").textContent=locked?"Week locked (invoiced)":"All changes save automatically";
   renderInvoiceCard();
   refreshTotals();
   const fn=[];
@@ -209,16 +209,19 @@ function renderInvoiceCard(){
         :`<div class="invrow"><label>Your rate £ <input type="number" id="rateIn" min="0" step="0.5" style="width:90px"></label>
            <select id="rateType"><option value="hour">per hour</option><option value="day">per day</option></select></div>`}
       <div class="invrow"><label>Next invoice number <input type="number" id="nextNo" min="1" step="1" value="${ME.nextInvoice}" style="width:110px" ${ME.canSetNumber?"":"disabled"}></label>
-        ${ME.canSetNumber?`<button class="btn" id="setNoBtn">Set</button><span class="muted" style="font-size:12.5px">Set your starting number once — it counts up from there.</span>`:""}</div>
+        <span class="muted" style="font-size:12.5px" id="noMsg">${ME.canSetNumber?"Set your starting number once — it saves as you type and counts up from there.":""}</span></div>
       <div class="invrow"><button class="btn primary" id="genBtn">Generate invoice PDF</button></div>
       <div class="invlist" id="invList"></div>`;
-    if(ME.canSetNumber) g("setNoBtn").onclick=async()=>{
-      const n=parseInt(g("nextNo").value,10);
-      if(!n)return alert("Enter a whole number.");
-      const r=await authFetchTO("/ts/invoice/next",{method:"POST",body:JSON.stringify({next:n})}).then(r=>r.json()).catch(()=>null);
-      if(r&&r.ok){ME.nextInvoice=n;alert("Your next invoice will be number "+n+".");}
-      else alert((r&&r.error)||"Couldn't save that number.");
-    };
+    if(ME.canSetNumber){
+      let noTimer=null;
+      g("nextNo").oninput=()=>{clearTimeout(noTimer);noTimer=setTimeout(async()=>{
+        const n=parseInt(g("nextNo").value,10);
+        if(!n)return;
+        const r=await authFetchTO("/ts/invoice/next",{method:"POST",body:JSON.stringify({next:n})}).then(r=>r.json()).catch(()=>null);
+        if(r&&r.ok){ME.nextInvoice=n;g("noMsg").textContent="Saved ✓ — your next invoice will be number "+n+".";}
+        else g("noMsg").textContent=(r&&r.error)||"⚠️ Couldn't save that number — check your signal.";
+      },900);};
+    }
     g("genBtn").onclick=generateInvoice;
   }
   loadInvoiceList();
@@ -233,6 +236,7 @@ async function loadInvoiceList(){
 }
 
 async function generateInvoice(){
+  clearTimeout(saveTimer);saveDirty=false;   // our own save below covers anything pending
   const days=collect();
   // Save first so the invoice matches exactly what's on screen.
   const sv=await authFetchTO("/ts/my",{method:"POST",body:JSON.stringify({week:WEEK,days})}).then(r=>r.json()).catch(()=>null);
@@ -253,12 +257,45 @@ async function generateInvoice(){
   await load();
 }
 
-async function saveWeek(){
-  g("saveState").textContent="Saving…";
-  const r=await authFetchTO("/ts/my",{method:"POST",body:JSON.stringify({week:WEEK,days:collect()})}).then(r=>r.json()).catch(()=>null);
-  if(r&&r.ok){g("saveState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});}
-  else{g("saveState").textContent="";alert((r&&r.error)||"Couldn't save — check your signal and try again.");}
+// ── Autosave (no save button): debounced as you type, instant on taps,
+// retries on weak signal, flushes when the app is hidden/closed. ────────────
+let saveTimer=null,retryTimer=null,saveBusy=false,saveDirty=false;
+function queueSave(){
+  if(INVOICE)return;
+  saveDirty=true;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>doSave(),900);
 }
+async function doSave(opts={}){
+  if(INVOICE)return;
+  clearTimeout(saveTimer);clearTimeout(retryTimer);
+  if(saveBusy){saveDirty=true;return;}
+  saveBusy=true;saveDirty=false;
+  const week=WEEK,days=collect();
+  g("saveState").textContent="Saving…";
+  let ok=false,status=0;
+  try{
+    const r=await fetch(API+"/ts/my",{method:"POST",keepalive:!!opts.keepalive,
+      headers:{Authorization:"Bearer "+tok(),"Content-Type":"application/json"},
+      body:JSON.stringify({week,days})});
+    status=r.status;
+    const j=await r.json().catch(()=>null);
+    ok=!!(j&&j.ok);
+  }catch(e){}
+  saveBusy=false;
+  if(status===409){await load();return;}   // invoiced on another device — show the lock
+  if(ok){
+    g("saveState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    if(saveDirty)doSave();
+  }else{
+    saveDirty=true;
+    g("saveState").textContent="⚠️ Couldn't save — retrying…";
+    retryTimer=setTimeout(()=>doSave(),8000);
+  }
+}
+async function flushSave(opts){if(saveDirty||saveBusy){clearTimeout(saveTimer);await doSave(opts);}}
+window.addEventListener("pagehide",()=>{if(saveDirty)doSave({keepalive:true});});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"&&saveDirty)doSave({keepalive:true});});
 
 // ── Job suggestions (project job numbers + live SLA jobs) ────────────────────
 // Suggests for the part being typed after the last comma, so several jobs can
@@ -298,7 +335,7 @@ document.addEventListener("input",e=>{
       ev.preventDefault();
       const parts=inp.value.split(",");parts[parts.length-1]=b.dataset.ref;
       inp.value=parts.map(s=>s.trim()).filter(Boolean).join(", ");
-      hideAllSug();inp.focus();
+      hideAllSug();inp.focus();queueSave();
     });
   },250);
 });
@@ -378,10 +415,11 @@ document.addEventListener("change",e=>{
     if(hit&&hit.postcode)e.target.closest(".mirow").querySelector(".pc").value=hit.postcode;
   }
   refreshTotals();
+  if(e.target.closest&&e.target.closest(".card[data-date]"))queueSave();
 });
 document.addEventListener("click",async e=>{
   const b=e.target.closest("button");if(!b)return;
-  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();return;}
+  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();queueSave();return;}
   if(!b.classList.contains("calc"))return;
   e.preventDefault();
   const row=b.closest(".mirow");
@@ -400,8 +438,9 @@ document.addEventListener("click",async e=>{
   if(!r||!r.ok)return alert((r&&r.error)||"Couldn't estimate that journey — enter the miles by hand.");
   row.querySelector(".miles").value=r.roundTrip;
   refreshTotals();
+  queueSave();
 });
-document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]"))refreshTotals();});
+document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();queueSave();}});
 
 async function load(){
   g("saveState").textContent="";
@@ -419,9 +458,8 @@ async function load(){
   }
   render();
 }
-g("prevWk").onclick=()=>{WEEK=addDays(WEEK,-7);load();};
-g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
-g("saveBtn").onclick=saveWeek;
+g("prevWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,-7);load();};
+g("nextWk").onclick=async()=>{await flushSave();WEEK=addDays(WEEK,7);load();};
 load();
 loadCSites();   // prewarm the store lists so the first keystroke suggests instantly
 </script>
