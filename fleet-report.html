@@ -452,15 +452,36 @@ async function generate(){
 
 function scoreFlag(s){ if(s==null)return '<span class="flag muted">—</span>'; const c=s>=85?"f-ok":s>=70?"f-warn":"f-red"; return `<span class="flag ${c}">${s}</span>`; }
 function fmtRange(a,b){ const f=iso=>new Date(iso+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}); return f(a)+" – "+f(b)+" "+b.slice(0,4); }
+// Short date with ordinal for the filename/title: "Mon 1st Jan 26".
+function fmtDayOrd(iso){
+  const d=new Date(iso+"T12:00:00Z");
+  const wd=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getUTCDay()];
+  const day=d.getUTCDate();
+  const ord=(day%10===1&&day!==11)?"st":(day%10===2&&day!==12)?"nd":(day%10===3&&day!==13)?"rd":"th";
+  const mon=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()];
+  return `${wd} ${day}${ord} ${mon} ${String(d.getUTCFullYear()).slice(2)}`;
+}
+function fmtRangeName(a,b){ return fmtDayOrd(a)+" - "+fmtDayOrd(b); }   // "Mon 1st Jan 26 - Sun 7th Jan 26"
+// "17-07-26 @ 11:22" for the "created" stamp.
+function fmtCreated(d){ const p=n=>String(n).padStart(2,"0"); return `${p(d.getDate())}-${p(d.getMonth()+1)}-${String(d.getFullYear()).slice(2)} @ ${p(d.getHours())}:${p(d.getMinutes())}`; }
+// Who's logged in (full name if we can resolve it).
+function currentUserName(){
+  const un=sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";
+  const u=USERS.find(x=>x.Username===un); return u?userLabel(u):un;
+}
 
 function renderReport(R){
   window.__reportData=R;
   const active=R.vehicles.filter(v=>v.days.some(d=>d.trips.length));
   let h='';
+  const now=new Date();
+  const createdBy=currentUserName();
   // 1. Header
   h+=`<div class="container"><div class="header"><div><h1>🚚 Mostlane Construction – Fleet Trip Report</h1>
-      <p>${esc(fmtRange(R.minD,R.maxD))} · Generated ${new Date().toLocaleString("en-GB")}</p></div>
+      <p>${esc(fmtRange(R.minD,R.maxD))}</p></div>
       <span class="badge">${active.length} active vehicles</span></div>`;
+  // Small greyed-out provenance line (baked into the saved/exported file).
+  h+=`<div style="font-size:11.5px;color:#94a3b8;margin:6px 2px 2px">${createdBy?esc(createdBy)+" · ":""}Created ${esc(fmtCreated(now))}</div>`;
   // 2. Legend
   h+=`<div class="notes" style="margin:14px 0"><b>🕐 Door-to-door span</b> includes commute · <b>🏠 Est. commute</b> inferred from home base (check day detail if undetected) · <b>🚗 Travel</b> between job locations only</div>`;
 
@@ -556,7 +577,9 @@ function renderReport(R){
     • Data source: VelocityFleet trip export + portal van-check records.</div>`;
 
   h+=`</div>`;   // close .container
-  window.__lastReport={ inner:h, title:"Fleet Trip Report "+R.minD+" – "+R.maxD, weekStart:R.minD, weekEnd:R.maxD };
+  // Title = the report's date range ("Mon 1st Jan 26 - Sun 7th Jan 26") — used
+  // as the download filename, the saved-report name, and the browser tab title.
+  window.__lastReport={ inner:h, title:fmtRangeName(R.minD,R.maxD), weekStart:R.minD, weekEnd:R.maxD };
 
   // Interactive pool-vehicle allocation (LIVE ONLY — not baked into the saved report).
   const poolUI=buildPoolAllocUI(R);
