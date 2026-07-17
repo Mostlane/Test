@@ -286,7 +286,7 @@ async function poStatusCheck(){
   rows+=row("PO system",poOk,poNote);
   // Store lists (compliance worker)
   const sOk=storesN!=null&&storesN>0;
-  rows+=row("Store lists",sOk,sOk?(storesN+" stores"):"couldn't reach the store lists (mostlane-pos worker)");
+  rows+=row("Store lists",sOk,sOk?(storesN+" sites"):"couldn't reach the store lists (mostlane-pos worker)");
   const allOk=pOk&&poOk&&sOk;
   el.style.background=allOk?"#ecfdf5":"#fef2f2";
   el.style.borderColor=allOk?"#a7f3d0":"#fecaca";
