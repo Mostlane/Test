@@ -88,6 +88,7 @@
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
   <h2>⚙️ Timesheet settings</h2>
   <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). <b>Fuel</b> is the per-person switch for whether they get paid mileage — tick it for the self-employed engineers who claim fuel, and set their pence per mile. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
+  <div id="poStatus" style="border-radius:9px;padding:9px 12px;margin-bottom:10px;font-size:13px;background:#f1f5f9;border:1px solid var(--line)">Checking the PO system link…</div>
   <div class="defs" id="defs"></div>
   <div style="max-height:52vh;overflow:auto"><table class="cfgTable" id="cfgTable"></table></div>
   <div class="foot"><button class="btn" onclick="document.getElementById('cfgOv').classList.remove('show')">Cancel</button>
@@ -219,7 +220,26 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
     }).join("");
   g("cfgOv").classList.add("show");
+  poStatusCheck();
 };
+// Plain-English health check of the PO-site suggestions (worker build,
+// PO_DB binding, and whether a site table was recognised in the PO database).
+async function poStatusCheck(){
+  const el=g("poStatus");
+  let r=null,http=0;
+  try{const resp=await authFetchTO("/ts/po-status");http=resp.status;r=await resp.json();}catch(e){}
+  const bad=(m)=>{el.style.background="#fef2f2";el.style.borderColor="#fecaca";el.innerHTML=m;};
+  const good=(m)=>{el.style.background="#ecfdf5";el.style.borderColor="#a7f3d0";el.innerHTML=m;};
+  if(!r||(http===404)||(r.error&&/unknown timesheet route/i.test(r.error||"")))
+    return bad("⚠️ <b>PO sites:</b> the worker on Cloudflare is an older build that doesn't have the PO code — paste the latest worker.js into mostlane-api and Deploy.");
+  if(!r.ok&&http===403) return bad("PO status needs Timesheet admin access.");
+  if(!r.bound) return bad("⚠️ <b>PO sites:</b> no <code>PO_DB</code> binding on mostlane-api. Dashboard → mostlane-api → Settings → Bindings → Add → D1 database → variable name <b>PO_DB</b> → database <b>mostlane-po</b> → Save, then Deploy.");
+  if(!r.discovered){
+    const t=(r.tables||[]).map(t=>`<b>${esc(t.name)}</b> (${esc((t.cols||[]).join(", "))})`).join(" · ")||"none visible";
+    return bad("⚠️ <b>PO sites:</b> connected to the PO database, but no site list was recognised in it. Show Claude this line — tables found: "+t);
+  }
+  good("✅ <b>PO sites connected</b> — reading “"+esc(r.discovered.table)+"”"+(r.samples&&r.samples.length?". Examples: "+esc(r.samples.slice(0,3).join(" · ")):"")+".");
+}
 g("cfgSave").onclick=async()=>{
   const byUser={};
   g("cfgTable").querySelectorAll("tr[data-u]").forEach(tr=>{
