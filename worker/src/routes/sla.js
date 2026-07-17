@@ -312,6 +312,59 @@ export async function handle(request, env, ctx, url, sess) {
     return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
   }
 
+  /* POST /sla/jobs/legacy-fix — one-time cleanup of old email-intake jobs whose
+     fields were mapped the wrong way round (fault text in the reference, the
+     store in the description). Rewrites each matching job to the new layout:
+       helpdeskRef = "Number - Street"  (e.g. "25886/1 - Gatwick Road")
+       description = the fault text
+       siteName    = the street,  siteCode = the number (if not already set)
+     Preview-first: {apply:false} (default) returns before/after and writes
+     nothing. Conservative + idempotent: only jobs that clearly match the old
+     layout are touched (short store-like description + long fault-like
+     reference, or the store sitting in siteName); already-clean or ambiguous
+     jobs are skipped. The job id is never changed, so photos stay linked. */
+  if (subpath === "/jobs/legacy-fix" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson(request);
+    const apply = body?.apply === true;
+    const isCleanRef = r => /^[0-9][0-9./-]*\s+-\s+\S/.test(String(r || "").trim());
+    const reformat = store => {
+      store = String(store || "").trim();
+      let m = store.match(/^([0-9][0-9\/.\-]*)\s+(.+)$/);          // "25886/1 Gatwick Road"
+      if (m) return { num: m[1], site: m[2].trim(), ref: m[1] + " - " + m[2].trim() };
+      m = store.match(/^(.+?)[ ,]+([0-9][0-9\/.\-]*)$/);          // "Portsmouth, Copnor Road 331"
+      if (m) { const site = m[1].trim().replace(/,+$/, ""); return { num: m[2], site, ref: m[2] + " - " + site }; }
+      return { num: "", site: store, ref: store };
+    };
+    const jobs = await listJobs(env, tenantId);
+    const changes = []; let changed = 0, skipped = 0;
+    for (const job of jobs) {
+      const ref = String(job.helpdeskRef || "").trim();
+      const descr = String(job.description || "").trim();
+      const site = String(job.siteName || "").trim();
+      if (isCleanRef(ref)) { skipped++; continue; }                // already in the new layout
+      let store = "";
+      if (descr && descr.length <= 50 && /\d/.test(descr) && ref.length > 50) store = descr;   // store in description
+      else if (site && /\d/.test(site) && ref.length > 50) store = site;                        // store in siteName
+      if (!store) { skipped++; continue; }                         // ambiguous → leave it alone
+      const rf = reformat(store);
+      const before = { helpdeskRef: ref, description: descr, siteName: site, siteCode: job.siteCode || "" };
+      const after = { helpdeskRef: rf.ref, description: ref, siteName: rf.site || site, siteCode: job.siteCode || rf.num || "" };
+      changes.push({ id: job.id, before, after });
+      if (apply) {
+        job.helpdeskRef = after.helpdeskRef;
+        job.description = after.description;
+        job.siteName = after.siteName;
+        if (!job.siteCode && rf.num) job.siteCode = rf.num;
+        job.updatedAt = new Date().toISOString();
+        await saveJob(env, tenantId, job);
+        changed++;
+      }
+    }
+    return jsonResponse({ ok: true, apply, total: jobs.length, matched: changes.length, changed, skipped, changes: changes.slice(0, 200) }, headers);
+  }
+
   /* POST /sla/jobs/photo-flags — of the given jobs, which have photos? For the
      dashboard 📷 badge. "Has photos" = live files in R2 jobs/<id>/, OR imported
      archive photos matching the job's ref/id (a repeat visit to a historical
