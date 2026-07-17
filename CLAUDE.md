@@ -275,6 +275,33 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
   /office/timesheet), `email.js` lib (Resend templates).
+- `timesheets.js` (**added 17 Jul**) — engineer weekly timesheets at **/ts/***
+  (+ `lib/pdf.js`, a dependency-free PDF writer — base-14 Helvetica, WinAnsi,
+  no PDFShift/external API). Engineers enter start/finish + job(s) per day
+  (page: **engineer-timesheet.html**, tile "⏱️ My Timesheet", NEW permission
+  **EngTimesheet**); admin (**timesheets-admin.html**, tile "🧾 Engineer
+  Timesheets", existing TimesheetAdmin|FullAccess perm) sees everyone's week.
+  Per-user deduction switches (app_config `engts:cfg:<tid>` — no schema churn):
+  **commute** (30 min each way, shown greyed/read-only on the engineer's page),
+  **lunch** (30 min on days ≥ 6 h), **mileage** allowed, rate (£/hour or /day),
+  pence-per-mile, home postcode, next invoice number; defaults + the invoice
+  "To" company block editable in the admin ⚙️ Settings modal. Tables (live in
+  D1 + schema.sql): **eng_timesheets** (PK tid/week/username, data JSON) and
+  **eng_invoices** (UNIQUE per user+number and per user+week). Self-employed
+  (users.employment_type ~ "Self Employed"): invoice card on their page —
+  set-once **starting invoice number** (POST /ts/invoice/next; numbers then
+  count up: next = max(existing)+1, so deleting the newest frees its number),
+  **POST /ts/invoice** re-saves the week, computes totals server-side, builds
+  the PDF, stores R2 `invoices/<tid>/<user>/INV-<n>-<week>.pdf`, and LOCKS the
+  week (saves 409 until admin deletes the invoice via /ts/invoice/delete).
+  Retrieval: GET /ts/invoices (own; admin ?u=all), signed URLs → **GET
+  /ts/invoice-file** (PUBLIC_ROUTES, sig-verified). **Mileage**: engineer picks
+  a site (GET /ts/sites suggests name+postcode from the sites table) or types a
+  postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
+  worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,
+  always editable before saving. Home postcode self-set on first calc (POST
+  /ts/me) or by admin. No new worker secrets needed (filesign reuses
+  PORTAL_BRIDGE_SECRET). Activity-log FRIENDLY entries added.
 - `vancheck.js` — weekly van checks (replaces the old Jotform walkaround):
   driver form (mileage + photo slots → R2 vancheck/…), /vancheck/week admin
   grid, badges. **/vancheck/skip** (admin skips a driver's week → writes a
@@ -374,7 +401,9 @@ allowance/system_days), assets, asset_transfers, asset_transfer_requests,
 sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
 **vehicles**, **vehicle_assignments**, **van_timesheets**, **sla_jobs_archive**
-(imported job history — separate from live sla_jobs). app_config also
+(imported job history — separate from live sla_jobs), **eng_timesheets**,
+**eng_invoices** (engineer weekly timesheets + self-employed invoice register;
+PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
 `fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>` and the
 notification-suppression rules. R2 (JOB_FILES): `fleetreports/<tid>/…`,

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Engineer Timesheets — Mostlane</title>
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<style>
+  :root{--ink:#16202e;--line:#e2e8f0;--brand:#1A4F8F;--muted:#64748b;--ok:#166534}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;background:#eef1f5;color:var(--ink);font-size:14px}
+  header.page{background:linear-gradient(180deg,#1A4F8F,#003468);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}
+  header.page a{color:#fff;text-decoration:none}
+  header.page h1{font-size:18px;flex:1}
+  .wrap{max-width:1150px;margin:14px auto;padding:0 12px}
+  .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:9px;padding:8px 13px;font:inherit;cursor:pointer}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:600}
+  .wk{font-weight:700;min-width:220px;text-align:center}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+  th{background:var(--brand);color:#fff;padding:9px 7px;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  th.name,td.name{text-align:left;padding-left:12px}
+  td{padding:8px 7px;border-bottom:1px solid var(--line);text-align:center;font-variant-numeric:tabular-nums}
+  td.name{font-weight:600}
+  td .se{display:inline-block;font-size:10.5px;background:#fef3c7;color:#92400e;border-radius:6px;padding:1px 6px;margin-left:6px;font-weight:600}
+  .tot{font-weight:700;color:var(--brand)}
+  tr:hover td{background:#f5f7ff}
+  .empty{color:var(--muted);text-align:center;padding:22px}
+  .muted{color:var(--muted)}
+  a.inv{color:var(--ok);font-weight:700;text-decoration:none}
+  .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-start;justify-content:center;padding:16px;z-index:100;overflow:auto}
+  .ov.show{display:flex}
+  .panel{background:#fff;border-radius:12px;max-width:820px;width:100%;padding:16px 18px;margin-bottom:40px}
+  .panel h2{font-size:17px;margin-bottom:6px}
+  .panel .note{color:var(--muted);font-size:12.5px;margin-bottom:10px;line-height:1.5}
+  .eday{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:7px 0}
+  .eday.wk2{background:#fffdf2}
+  .eday h4{font-size:13px;color:var(--brand);margin-bottom:5px}
+  .erow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0}
+  .erow input[type=time]{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
+  .erow input[type=text],.erow input[type=number]{font:inherit;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px}
+  .erow input.jobs{flex:1;min-width:160px}
+  .foot{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  /* settings table */
+  .cfgTable{width:100%;border-collapse:collapse;font-size:13px}
+  .cfgTable th{background:#f1f5f9;color:var(--ink);font-size:11px;padding:6px 5px;position:sticky;top:0}
+  .cfgTable td{padding:5px;border-bottom:1px solid #f1f5f9}
+  .cfgTable input[type=number]{width:72px;padding:5px;border:1px solid #cbd5e1;border-radius:6px}
+  .cfgTable input[type=text]{width:92px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;text-transform:uppercase}
+  .cfgTable select{padding:5px;border:1px solid #cbd5e1;border-radius:6px}
+  .defs{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:12px;font-size:13px}
+  .defs label{display:flex;flex-direction:column;gap:3px}
+  .defs input,.defs textarea{font:inherit;padding:6px;border:1px solid #cbd5e1;border-radius:7px}
+  .invTable{width:100%;border-collapse:collapse;font-size:13.5px}
+  .invTable th{background:#f1f5f9;color:var(--ink);padding:7px}
+  .invTable td{padding:7px;border-bottom:1px solid #f1f5f9;text-align:center}
+  @media(max-width:700px){ .hideS{display:none} }
+</style>
+</head>
+<body>
+<header class="page"><a href="/main.html">‹ Back</a><h1>🧾 Engineer Timesheets</h1></header>
+<div class="wrap">
+  <div class="bar">
+    <button class="btn" id="prevWk">‹ Prev</button>
+    <span class="wk" id="wkLabel"></span>
+    <button class="btn" id="nextWk">Next ›</button>
+    <label style="margin-left:8px;font-size:13px"><input type="checkbox" id="showAll"> Show everyone</label>
+    <span style="flex:1"></span>
+    <button class="btn" id="invBtn">🧾 Invoices</button>
+    <button class="btn" id="cfgBtn">⚙️ Settings</button>
+  </div>
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"><tr><td class="empty" colspan="12">Loading…</td></tr></tbody>
+  </table>
+  <p class="muted" style="font-size:12.5px;margin-top:10px">Hours shown are <b>paid</b> hours — after each person's travel/lunch deductions (set in ⚙️ Settings). Self-employed engineers generate their own numbered invoice PDFs from their timesheet; open them from the Invoice column or the 🧾 Invoices list. A week locks once it's invoiced — delete the invoice (🧾 Invoices) to unlock it for corrections.</p>
+</div>
+
+<div class="ov" id="editOv"><div class="panel">
+  <h2 id="editTitle">Edit week</h2>
+  <p class="note" id="editSub"></p>
+  <div id="editBody"></div>
+  <div class="foot"><button class="btn" onclick="document.getElementById('editOv').classList.remove('show')">Cancel</button>
+  <button class="btn primary" id="editSave">Save</button></div>
+</div></div>
+
+<div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
+  <h2>⚙️ Timesheet settings</h2>
+  <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). Tick <b>Mileage</b> for self-employed engineers who claim mileage. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
+  <div class="defs" id="defs"></div>
+  <div style="max-height:52vh;overflow:auto"><table class="cfgTable" id="cfgTable"></table></div>
+  <div class="foot"><button class="btn" onclick="document.getElementById('cfgOv').classList.remove('show')">Cancel</button>
+  <button class="btn primary" id="cfgSave">Save settings</button></div>
+</div></div>
+
+<div class="ov" id="invOv"><div class="panel">
+  <h2>🧾 Invoices</h2>
+  <p class="note">Every invoice generated by a self-employed engineer, newest first. Deleting an invoice unlocks that week and frees its number (their next invoice re-uses it).</p>
+  <div style="max-height:60vh;overflow:auto"><table class="invTable" id="invTable"></table></div>
+  <div class="foot"><button class="btn" onclick="document.getElementById('invOv').classList.remove('show')">Close</button></div>
+</div></div>
+
+<script>
+const API=(window.MOSTLANE_API||"https://mostlane-api.jamie-def.workers.dev");
+function tok(){return localStorage.getItem("mostlaneToken")||"";}
+function authFetch(p,o={}){o.headers=Object.assign({Authorization:"Bearer "+tok()},o.headers||{});if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json";return fetch(API+p,o);}
+function authFetchTO(p,o={},ms=9000){return Promise.race([authFetch(p,o),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);}
+const g=id=>document.getElementById(id);
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function mondayOf(d){const x=new Date(d);x.setHours(12,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return x.toISOString().slice(0,10);}
+function addDays(iso,n){const d=new Date(iso+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
+const hmS=m=>(!m||m<=0)?"—":Math.floor(m/60)+"h"+String(Math.round(m%60)).padStart(2,"0");
+const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
+const DOW=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+let WEEK=mondayOf(new Date()), DATA=null, EDIT_U=null;
+
+async function load(){
+  g("wkLabel").textContent="Week of "+new Date(WEEK+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+  let r=null;
+  try{r=await authFetchTO("/ts/admin/overview?week="+WEEK).then(x=>x.json());}catch(e){}
+  if(!r||!r.ok){g("body").innerHTML='<tr><td class="empty" colspan="12">'+esc((r&&r.error)||"Couldn't load — check your connection or permissions.")+"</td></tr>";return;}
+  DATA=r;
+  renderTable();
+}
+
+function renderTable(){
+  const days=DATA.days;
+  g("head").innerHTML='<th class="name">Engineer</th>'+days.map((d,i)=>`<th>${DOW[i]}<br><span style="font-weight:400">${d.slice(8)}</span></th>`).join("")+
+    '<th>Total</th><th class="hideS">Miles</th><th>Invoice</th><th></th>';
+  const showAll=g("showAll").checked;
+  const rows=DATA.users.filter(u=>showAll||u.totals.daysWorked>0||u.totals.miles>0||u.selfEmployed||u.cfg.commute||u.cfg.lunch);
+  if(!rows.length){g("body").innerHTML='<tr><td class="empty" colspan="12">No timesheets for this week yet.</td></tr>';return;}
+  g("body").innerHTML=rows.map(u=>{
+    const cells=days.map(d=>{
+      const p=u.perDay[d];
+      return "<td>"+(p&&p.worked?hmS(p.paid):"<span class='muted'>—</span>")+(p&&p.miles?`<br><span class="muted" style="font-size:11px">${p.miles}mi</span>`:"")+"</td>";
+    }).join("");
+    const inv=u.invoice?`<a class="inv" href="${esc(u.invoice.url)}" target="_blank" title="Open invoice PDF">#${u.invoice.number}</a>`
+      :(u.selfEmployed?"<span class='muted'>—</span>":"");
+    const pay=u.selfEmployed&&u.totals.total!=null?`<br><span class="muted" style="font-size:11px">${money(u.totals.total)}</span>`:"";
+    return `<tr><td class="name">${esc(u.name)}${u.selfEmployed?'<span class="se">S/E</span>':""}</td>${cells}
+      <td class="tot">${hmS(u.totals.paidMins)}${pay}</td><td class="hideS">${u.totals.miles||"—"}</td>
+      <td>${inv}</td><td><button class="btn" onclick="openEdit('${esc(u.username).replace(/'/g,"\\'")}')" title="Edit this week">✎</button></td></tr>`;
+  }).join("");
+}
+g("showAll").onchange=renderTable;
+
+// ── Edit a user's week ───────────────────────────────────────────────────────
+function openEdit(username){
+  const u=DATA.users.find(x=>x.username===username);if(!u)return;
+  EDIT_U=u;
+  g("editTitle").textContent="Edit — "+u.name;
+  g("editSub").textContent=u.invoice?"This week is invoiced (#"+u.invoice.number+") — delete the invoice first to make changes.":"Times are as the engineer entered them; deductions are applied automatically from Settings.";
+  g("editBody").innerHTML=DATA.days.map((date,i)=>{
+    const d=u.days[date]||{};
+    const mi=(d.mileage||[]).map(m=>`<div class="erow mirow"><input type="text" class="m-site" placeholder="Site" value="${esc(m.site||"")}" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" value="${esc(m.postcode||"")}" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" value="${m.miles||""}" style="width:76px"><button class="btn" onclick="this.parentNode.remove()">✕</button></div>`).join("");
+    return `<div class="eday${i>=5?" wk2":""}" data-date="${date}"><h4>${DOW[i]} ${date.slice(8)}</h4>
+      <div class="erow"><input type="time" class="e-start" value="${esc(d.start||"")}"><span>→</span><input type="time" class="e-finish" value="${esc(d.finish||"")}">
+      <input type="text" class="jobs e-jobs" placeholder="Job(s)" value="${esc(d.jobs||"")}"></div>
+      <div class="mihost">${mi}</div><button class="btn" style="font-size:12px" onclick="addMi(this)">＋ mileage</button></div>`;
+  }).join("");
+  const locked=!!u.invoice;
+  g("editBody").querySelectorAll("input,button").forEach(el=>el.disabled=locked);
+  g("editSave").disabled=locked;
+  g("editOv").classList.add("show");
+}
+function addMi(btn){
+  const host=btn.parentNode.querySelector(".mihost");
+  const div=document.createElement("div");div.className="erow mirow";
+  div.innerHTML='<input type="text" class="m-site" placeholder="Site" style="flex:1.6"><input type="text" class="m-pc" placeholder="Postcode" style="width:96px"><input type="number" class="m-miles" step="0.1" min="0" style="width:76px"><button class="btn" onclick="this.parentNode.remove()">✕</button>';
+  host.appendChild(div);
+}
+g("editSave").onclick=async()=>{
+  const days={};
+  g("editBody").querySelectorAll(".eday").forEach(ed=>{
+    const d={start:ed.querySelector(".e-start").value,finish:ed.querySelector(".e-finish").value,
+      jobs:ed.querySelector(".e-jobs").value.trim(),mileage:[]};
+    ed.querySelectorAll(".mirow").forEach(r=>{
+      const site=r.querySelector(".m-site").value.trim(),pc=r.querySelector(".m-pc").value.trim().toUpperCase(),
+        miles=parseFloat(r.querySelector(".m-miles").value)||0;
+      if(site||pc||miles)d.mileage.push({site,postcode:pc,miles});
+    });
+    if(d.start||d.finish||d.jobs||d.mileage.length)days[ed.dataset.date]=d;
+  });
+  const r=await authFetchTO("/ts/admin/save",{method:"POST",body:JSON.stringify({username:EDIT_U.username,week:WEEK,days})}).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't save.");
+  g("editOv").classList.remove("show");
+  load();
+};
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+let CFG=null;
+g("cfgBtn").onclick=async()=>{
+  const r=await authFetchTO("/ts/admin/config").then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok)return alert("Couldn't load settings.");
+  CFG=r;
+  g("defs").innerHTML=`
+    <label>Travel deduction (mins each way) <input type="number" id="d-commute" value="${r.defaults.commuteMins}" style="width:80px"></label>
+    <label>Lunch deduction (mins) <input type="number" id="d-lunch" value="${r.defaults.lunchMins}" style="width:80px"></label>
+    <label>Lunch applies from (hours) <input type="number" id="d-thresh" value="${r.defaults.lunchThresholdH}" style="width:80px"></label>
+    <label>Default mileage (p/mile) <input type="number" id="d-ppm" value="${r.defaults.pencePerMile}" style="width:80px"></label>
+    <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
+      <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Mileage</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+    r.users.map(u=>{
+      const o=(r.byUser&&r.byUser[u.username])||{};
+      const e=u.effective;
+      return `<tr data-u="${esc(u.username)}"><td style="text-align:left;font-weight:600">${esc(u.name)}</td>
+        <td class="muted">${esc(u.employment)}</td>
+        <td><input type="checkbox" class="c-commute" ${e.commute?"checked":""}></td>
+        <td><input type="checkbox" class="c-lunch" ${e.lunch?"checked":""}></td>
+        <td><input type="checkbox" class="c-mileage" ${e.mileage?"checked":""}></td>
+        <td><input type="number" class="c-rate" step="0.5" min="0" value="${o.rate!=null?o.rate:(e.rate!=null?e.rate:"")}"></td>
+        <td><select class="c-ratetype"><option value="hour" ${e.rateType!=="day"?"selected":""}>hour</option><option value="day" ${e.rateType==="day"?"selected":""}>day</option></select></td>
+        <td><input type="number" class="c-ppm" value="${o.pencePerMile!=null?o.pencePerMile:""}" placeholder="${e.pencePerMile}"></td>
+        <td><input type="text" class="c-home" value="${esc(e.homePostcode||"")}"></td>
+        <td><input type="number" class="c-next" min="1" value="${o.nextNumber!=null?o.nextNumber:""}"></td></tr>`;
+    }).join("");
+  g("cfgOv").classList.add("show");
+};
+g("cfgSave").onclick=async()=>{
+  const byUser={};
+  g("cfgTable").querySelectorAll("tr[data-u]").forEach(tr=>{
+    byUser[tr.dataset.u]={
+      commute:tr.querySelector(".c-commute").checked,
+      lunch:tr.querySelector(".c-lunch").checked,
+      mileage:tr.querySelector(".c-mileage").checked,
+      rate:tr.querySelector(".c-rate").value,
+      rateType:tr.querySelector(".c-ratetype").value,
+      pencePerMile:tr.querySelector(".c-ppm").value,
+      homePostcode:tr.querySelector(".c-home").value,
+      nextNumber:tr.querySelector(".c-next").value,
+    };
+  });
+  const defaults={commuteMins:+g("d-commute").value||30,lunchMins:+g("d-lunch").value||30,
+    lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,company:g("d-company").value};
+  const r=await authFetchTO("/ts/admin/config",{method:"POST",body:JSON.stringify({defaults,byUser})}).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't save settings.");
+  g("cfgOv").classList.remove("show");
+  load();
+};
+
+// ── Invoices list ────────────────────────────────────────────────────────────
+g("invBtn").onclick=async()=>{
+  const r=await authFetchTO("/ts/invoices?u=all").then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok)return alert("Couldn't load invoices.");
+  g("invTable").innerHTML="<tr><th style='text-align:left'>Engineer</th><th>No.</th><th>Week</th><th>Hours</th><th>Miles</th><th>Total</th><th>Created</th><th></th><th></th></tr>"+
+    (r.invoices.length?r.invoices.map(i=>`<tr><td style="text-align:left;font-weight:600">${esc(i.username)}</td><td><b>#${i.number}</b></td>
+      <td>${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</td>
+      <td>${i.hours||0}</td><td>${i.miles||0}</td><td>${money(i.total||0)}</td>
+      <td>${new Date(i.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})}</td>
+      <td><a href="${esc(i.url)}" target="_blank">Open</a></td>
+      <td><button class="btn" onclick="delInv(${i.id},'${esc(i.username).replace(/'/g,"\\'")}',${i.number})">🗑</button></td></tr>`).join("")
+    :'<tr><td colspan="9" class="empty">No invoices yet.</td></tr>');
+  g("invOv").classList.add("show");
+};
+async function delInv(id,user,number){
+  if(!confirm("Delete invoice #"+number+" from "+user+"? This unlocks their week and frees the number."))return;
+  const r=await authFetchTO("/ts/invoice/delete",{method:"POST",body:JSON.stringify({id})}).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't delete.");
+  g("invOv").classList.remove("show");
+  load();
+}
+
+g("prevWk").onclick=()=>{WEEK=addDays(WEEK,-7);load();};
+g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
+load();
+</script>
+</body>
+</html>
