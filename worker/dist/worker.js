@@ -2872,6 +2872,57 @@ async function handle7(request, env, ctx, url, sess) {
     }
     return jsonResponse({ ok: true, deleted, remaining: Math.max(0, targetIds.length - batch.length) }, headers);
   }
+  if (subpath === "/jobs/legacy-fix" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson2(request);
+    const apply = body?.apply === true;
+    const isCleanRef = (r) => /^[0-9][0-9./-]*\s+-\s+\S/.test(String(r || "").trim());
+    const reformat = (store) => {
+      store = String(store || "").trim();
+      let m = store.match(/^([0-9][0-9\/.\-]*)\s+(.+)$/);
+      if (m) return { num: m[1], site: m[2].trim(), ref: m[1] + " - " + m[2].trim() };
+      m = store.match(/^(.+?)[ ,]+([0-9][0-9\/.\-]*)$/);
+      if (m) {
+        const site = m[1].trim().replace(/,+$/, "");
+        return { num: m[2], site, ref: m[2] + " - " + site };
+      }
+      return { num: "", site: store, ref: store };
+    };
+    const jobs = await listJobs(env, tenantId);
+    const changes = [];
+    let changed = 0, skipped = 0;
+    for (const job of jobs) {
+      const ref = String(job.helpdeskRef || "").trim();
+      const descr = String(job.description || "").trim();
+      const site = String(job.siteName || "").trim();
+      if (isCleanRef(ref)) {
+        skipped++;
+        continue;
+      }
+      let store = "";
+      if (descr && descr.length <= 50 && /\d/.test(descr) && ref.length > 50) store = descr;
+      else if (site && /\d/.test(site) && ref.length > 50) store = site;
+      if (!store) {
+        skipped++;
+        continue;
+      }
+      const rf = reformat(store);
+      const before = { helpdeskRef: ref, description: descr, siteName: site, siteCode: job.siteCode || "" };
+      const after = { helpdeskRef: rf.ref, description: ref, siteName: rf.site || site, siteCode: job.siteCode || rf.num || "" };
+      changes.push({ id: job.id, before, after });
+      if (apply) {
+        job.helpdeskRef = after.helpdeskRef;
+        job.description = after.description;
+        job.siteName = after.siteName;
+        if (!job.siteCode && rf.num) job.siteCode = rf.num;
+        job.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+        await saveJob(env, tenantId, job);
+        changed++;
+      }
+    }
+    return jsonResponse({ ok: true, apply, total: jobs.length, matched: changes.length, changed, skipped, changes: changes.slice(0, 200) }, headers);
+  }
   if (subpath === "/jobs/photo-flags" && method === "POST") {
     if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
     const body = await readJson2(request);

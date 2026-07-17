@@ -74,6 +74,23 @@
         <div class="msg" id="delMsg"></div>
       </div>
 
+      <!-- ============ Fix legacy job fields ============ -->
+      <div class="card">
+        <h2>1b · Fix legacy job fields</h2>
+        <p class="muted">Older email-intake jobs came in with the fields swapped — the <b>fault text in the reference</b> and the <b>store in the description</b>. This rewrites those jobs to the new layout (reference → <b>"Number - Site"</b>, description → <b>the fault</b>, site name/number cleaned), matching how new jobs arrive from the updated zap. <b>Preview first — nothing changes until you press Apply.</b> Already-clean and ambiguous jobs are left untouched.</p>
+        <div class="bar">
+          <button class="btn" id="legacyPreview">🔍 Preview changes</button>
+          <button class="btn primary" id="legacyApply" style="display:none">✓ Apply</button>
+        </div>
+        <div class="msg" id="legacyMsg"></div>
+        <div class="scroll" id="legacyPreviewBox" style="display:none;margin-top:8px">
+          <table>
+            <thead><tr><th>Job id</th><th>Before</th><th>After</th></tr></thead>
+            <tbody id="legacyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- ============ Import archive ============ -->
       <div class="card">
         <h2>2 · Import job history (archive)</h2>
@@ -175,6 +192,40 @@ async function loadLive(){
 }
 $("reload").onclick = loadLive;
 $("selAll").onchange = e => document.querySelectorAll(".rowchk").forEach(c => c.checked = e.target.checked);
+
+/* ===== Fix legacy job fields (preview → apply) ===== */
+let LEGACY_MATCHED = 0;
+function legacyCell(o){
+  return `<b>ref:</b> ${esc((o.helpdeskRef||"").slice(0,44))}<br><b>desc:</b> ${esc((o.description||"").slice(0,44))}<br><b>site:</b> ${esc(o.siteName||"")}${o.siteCode?(' · #'+esc(String(o.siteCode))):''}`;
+}
+$("legacyPreview").onclick = async () => {
+  $("legacyMsg").className="msg"; $("legacyMsg").textContent="Checking…";
+  $("legacyApply").style.display="none"; $("legacyPreviewBox").style.display="none";
+  try{
+    const d = await (await fetch(SLA + "/jobs/legacy-fix", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({apply:false}) })).json();
+    if(!d.ok) throw new Error(d.error || "failed");
+    LEGACY_MATCHED = d.matched || 0;
+    if(!LEGACY_MATCHED){ $("legacyMsg").className="msg ok"; $("legacyMsg").textContent = `Nothing to fix — all ${d.total} live job(s) are already in the new layout.`; return; }
+    $("legacyBody").innerHTML = (d.changes||[]).map(c =>
+      `<tr><td style="font-family:monospace;font-size:11px">${esc(String(c.id).slice(0,18))}</td><td>${legacyCell(c.before)}</td><td>${legacyCell(c.after)}</td></tr>`).join("");
+    $("legacyPreviewBox").style.display="block";
+    $("legacyApply").textContent = `✓ Apply to ${LEGACY_MATCHED} job${LEGACY_MATCHED===1?"":"s"}`;
+    $("legacyApply").style.display="";
+    $("legacyMsg").className="msg"; $("legacyMsg").textContent = `${LEGACY_MATCHED} job(s) would change · ${d.skipped} left as-is. Review below, then Apply.`;
+  }catch(e){ $("legacyMsg").className="msg err"; $("legacyMsg").textContent="Error: "+e.message; }
+};
+$("legacyApply").onclick = async () => {
+  if(!confirm(`Rewrite ${LEGACY_MATCHED} live job(s) to the new layout?\n\nThis changes their stored reference / description / site fields. Photos and schedules are kept.`)) return;
+  $("legacyApply").disabled=true; $("legacyMsg").className="msg"; $("legacyMsg").textContent="Applying…";
+  try{
+    const d = await (await fetch(SLA + "/jobs/legacy-fix", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({apply:true}) })).json();
+    if(!d.ok) throw new Error(d.error || "failed");
+    $("legacyMsg").className="msg ok"; $("legacyMsg").textContent = `✓ Fixed ${d.changed} job(s). They now match the new layout — reopen the dashboard to see them.`;
+    $("legacyApply").style.display="none"; $("legacyPreviewBox").style.display="none";
+    if(typeof loadLive==="function") loadLive();
+  }catch(e){ $("legacyMsg").className="msg err"; $("legacyMsg").textContent="Error: "+e.message; }
+  finally{ $("legacyApply").disabled=false; }
+};
 
 async function bulkDelete(payload, label){
   $("delMsg").className = "msg";
