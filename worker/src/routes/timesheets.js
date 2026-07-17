@@ -189,51 +189,133 @@ async function isTsAdmin(env, tid, sess) {
 // containing site/store/branch score higher). The discovery is cached for the
 // isolate's lifetime and everything fails soft — no binding, no match, or a
 // query error just means suggestions fall back to portal sites only.
-let PO_MAP;   // undefined = not probed yet, null = nothing usable found
+// Three storage shapes are recognised, because the PO worker grew out of KV:
+//   cols — a proper table with name/postcode/job columns
+//   rows — a table whose rows each hold one site as a JSON object (data/value col)
+//   blob — a key/value table where ONE value is a JSON ARRAY of site objects
+let PO_MAP;      // undefined = not probed yet, null = nothing usable found
+let PO_TABLES;   // [{ name, cols:[…] }] — kept for the /ts/po-status diagnostic
+let PO_BLOB;     // { at, list } — parsed blob cache (blob mode only)
+function poShape(o) {
+  if (!o || typeof o !== "object") return null;
+  const name = o.siteName ?? o.site_name ?? o.SiteName ?? o.name ?? o.site ?? o.store ?? o.branch ?? "";
+  const pc = o.postcode ?? o.postCode ?? o.post_code ?? o.Postcode ?? "";
+  const job = o.jobNumber ?? o.job_number ?? o.JobNumber ?? o.jobNo ?? o.job ?? o.siteNumber ?? o.site_number ?? null;
+  if (!name) return null;
+  return { name: String(name), pc: String(pc || ""), job: job != null && job !== "" ? String(job) : null };
+}
+function poSiteish(o) { const s = poShape(o); return !!(s && (s.pc || s.job)); }
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
   if (PO_MAP !== undefined) return PO_MAP;
+  PO_MAP = null; PO_TABLES = [];
   try {
     const { results } = await env.PO_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'").all();
     let best = null;
     for (const t of results || []) {
       const tbl = String(t.name);
+      const safe = tbl.replace(/"/g, "");
       let cols = [];
-      try { cols = (await env.PO_DB.prepare(`PRAGMA table_info("${tbl.replace(/"/g, "")}")`).all()).results || []; } catch { continue; }
+      try { cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || []; } catch { continue; }
       const names = cols.map(c => String(c.name));
+      PO_TABLES.push({ name: tbl, cols: names });
       const lower = names.map(n => n.toLowerCase());
       const pick = (...cands) => {
         for (const c of cands) { const i = lower.indexOf(c); if (i >= 0) return names[i]; }
         for (const c of cands) { const i = lower.findIndex(n => n.includes(c)); if (i >= 0) return names[i]; }
         return null;
       };
+      // Shape 1: real columns
       const nameCol = pick("site_name", "sitename", "site", "store", "branch", "name");
       const pcCol = pick("postcode", "post_code", "postal_code", "zip");
       const jobCol = pick("job_number", "jobnumber", "job_no", "jobno", "job");
-      if (!nameCol || (!pcCol && !jobCol)) continue;
-      const score = (pcCol ? 2 : 0) + (jobCol ? 1 : 0) + (/site|store|branch/i.test(tbl) ? 3 : 0);
-      if (!best || score > best.score) best = { table: tbl, nameCol, pcCol, jobCol, score };
+      if (nameCol && (pcCol || jobCol)) {
+        const score = 10 + (pcCol ? 2 : 0) + (jobCol ? 1 : 0) + (/site|store|branch/i.test(tbl) ? 3 : 0);
+        if (!best || score > best.score) best = { mode: "cols", table: tbl, nameCol, pcCol, jobCol, score };
+        continue;
+      }
+      // Shapes 2/3: JSON stored in a text column — sample some rows and look inside
+      const jsonCol = pick("value", "data", "json", "body", "payload", "v");
+      if (!jsonCol) continue;
+      const keyCol = pick("key", "k", "id", "name");
+      let rows = [];
+      try {
+        rows = (await env.PO_DB.prepare(
+          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 60`).all()).results || [];
+      } catch { continue; }
+      let rowish = 0;
+      for (const r of rows) {
+        let v = null; try { v = JSON.parse(r.v); } catch { continue; }
+        if (Array.isArray(v) && v.length && v.slice(0, 5).every(poSiteish)) {
+          const bk = r.k != null ? String(r.k) : "";
+          const score = 8 + (/site|store|branch/i.test(bk) ? 3 : 0) + Math.min(3, Math.floor(v.length / 50));
+          if (!best || score > best.score) best = { mode: "blob", table: tbl, jsonCol, keyCol, blobKey: bk, score };
+        } else if (poSiteish(v)) rowish++;
+      }
+      if (rowish >= Math.max(2, Math.floor(rows.length * 0.3))) {
+        const score = 7 + (/site|store|branch/i.test(tbl) ? 3 : 0);
+        if (!best || score > best.score) best = { mode: "rows", table: tbl, jsonCol, score };
+      }
     }
     PO_MAP = best;
   } catch { PO_MAP = null; }
   return PO_MAP;
 }
-async function poSiteRows(env, like, limit) {
+async function poBlobList(env, m) {
+  if (PO_BLOB && Date.now() - PO_BLOB.at < 5 * 60 * 1000) return PO_BLOB.list;
+  let list = [];
+  try {
+    const safe = m.table.replace(/"/g, "");
+    const row = m.keyCol
+      ? await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.keyCol}"=?`).bind(m.blobKey).first()
+      : await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" LIMIT 1`).first();
+    const v = row ? JSON.parse(row.v) : null;
+    if (Array.isArray(v)) list = v.map(poShape).filter(Boolean);
+  } catch {}
+  PO_BLOB = { at: Date.now(), list };
+  return list;
+}
+// term is the RAW search text ("" = everything); returns [{ name, pc, job }].
+async function poSiteRows(env, term, limit) {
   const m = await poDiscover(env);
   if (!m) return [];
+  const cap = Math.max(1, Math.min(30, limit));
+  const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
+  const T = String(term || "").toLowerCase();
+  const matches = s => !T || s.name.toLowerCase().includes(T) || s.pc.toLowerCase().includes(T) || (s.job || "").toLowerCase().includes(T);
   try {
-    const cols = [`"${m.nameCol}" AS name`];
-    if (m.pcCol) cols.push(`"${m.pcCol}" AS pc`);
-    if (m.jobCol) cols.push(`"${m.jobCol}" AS job`);
-    const where = [`"${m.nameCol}" LIKE ?1`];
-    if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
-    if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
-    const { results } = await env.PO_DB.prepare(
-      `SELECT ${cols.join(", ")} FROM "${m.table}" WHERE ${where.join(" OR ")} LIMIT ${Math.max(1, Math.min(30, limit))}`
-    ).bind(like).all();
-    return results || [];
-  } catch { return []; }
+    const safe = m.table.replace(/"/g, "");
+    if (m.mode === "cols") {
+      const cols = [`"${m.nameCol}" AS name`];
+      if (m.pcCol) cols.push(`"${m.pcCol}" AS pc`);
+      if (m.jobCol) cols.push(`CAST("${m.jobCol}" AS TEXT) AS job`);
+      const where = [`"${m.nameCol}" LIKE ?1`];
+      if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
+      if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
+      const { results } = await env.PO_DB.prepare(
+        `SELECT ${cols.join(", ")} FROM "${safe}" WHERE ${where.join(" OR ")} LIMIT ${cap}`).bind(like).all();
+      return (results || []).map(r => ({ name: String(r.name || ""), pc: String(r.pc || ""), job: r.job != null ? String(r.job) : null }))
+        .filter(s => s.name);
+    }
+    if (m.mode === "rows") {
+      // The LIKE runs over the raw JSON — cheap pre-filter, exact match in JS.
+      const { results } = await env.PO_DB.prepare(
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.jsonCol}" LIKE ?1 LIMIT 200`).bind(like).all();
+      const out = [];
+      for (const r of results || []) {
+        let v = null; try { v = JSON.parse(r.v); } catch { continue; }
+        const s = poShape(v);
+        if (s && matches(s)) { out.push(s); if (out.length >= cap) break; }
+      }
+      return out;
+    }
+    if (m.mode === "blob") {
+      const list = await poBlobList(env, m);
+      return list.filter(matches).slice(0, cap);
+    }
+  } catch {}
+  return [];
 }
 
 // ── Mileage estimate (postcodes.io + haversine × road factor) ────────────────
@@ -415,7 +497,7 @@ export async function handle(request, env, ctx, url, sess) {
     const sites = (results || []).map(s => ({
       name: s.site_name || ("Site " + s.site_number), code: s.site_number, postcode: (s.postcode || "").replace(/\*+$/, "") }));
     const seen = new Set(sites.map(s => s.name.trim().toLowerCase()));
-    for (const r of await poSiteRows(env, like, 15)) {
+    for (const r of await poSiteRows(env, term, 15)) {
       const name = String(r.name || "").trim();
       if (!name || seen.has(name.toLowerCase())) continue;
       seen.add(name.toLowerCase());
@@ -426,10 +508,19 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ── GET /ts/po-status — is the PO_DB binding live, what did we find? ──────
+  // Full diagnostic for the admin Settings modal: binding present, which
+  // table/shape was recognised, a few sample sites — and when nothing was
+  // recognised, the PO database's tables + columns so the problem is visible.
   if (sub === "/po-status" && method === "GET") {
     if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    return json({ ok: true, bound: !!env.PO_DB, discovered: m ? { table: m.table, nameCol: m.nameCol, pcCol: m.pcCol, jobCol: m.jobCol } : null }, {}, env, request);
+    const out = { ok: true, bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    if (m) {
+      out.discovered = { mode: m.mode, table: m.table, nameCol: m.nameCol || null, pcCol: m.pcCol || null,
+        jobCol: m.jobCol || null, jsonCol: m.jsonCol || null, blobKey: m.blobKey || null };
+      out.samples = (await poSiteRows(env, "", 5)).map(s => s.name + (s.pc ? " (" + s.pc + ")" : ""));
+    }
+    return json(out, {}, env, request);
   }
 
   // ── GET /ts/jobs — suggestions for the "job(s)" box ───────────────────────
@@ -455,7 +546,7 @@ export async function handle(request, env, ctx, url, sess) {
     // PO-system sites carrying their own job numbers (PO_DB binding, if set).
     try {
       const seen = new Set(jobs.map(j => String(j.ref).toLowerCase()));
-      for (const r of await poSiteRows(env, like, 8)) {
+      for (const r of await poSiteRows(env, term, 8)) {
         if (r.job == null || r.job === "") continue;
         const ref = String(r.job);
         if (seen.has(ref.toLowerCase())) continue;
