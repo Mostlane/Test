@@ -76,7 +76,8 @@
   </div>
 
   <div class="card inv" id="invCard" style="display:none"></div>
-  <p class="muted" style="font-size:12.5px;margin:6px 2px 20px" id="footNote"></p>
+  <p class="muted" style="font-size:12.5px;margin:6px 2px 4px" id="footNote"></p>
+  <p class="muted" style="font-size:11.5px;margin:0 2px 20px" id="srcNote"></p>
 </div>
 <datalist id="siteList"></datalist>
 <div class="savebar"><span class="st" id="saveState"></span><button class="btn primary" id="saveBtn">💾 Save week</button></div>
@@ -306,21 +307,27 @@ function cShape(r){
   if(!name&&!pc)return null;
   return {name:String(name||("Store "+code)).trim(),postcode:String(pc||"").toUpperCase(),code:String(code||"")};
 }
+function csNote(msg){const el=g("srcNote");if(el)el.textContent=msg;}
 async function loadCSites(){
-  if(CSITES)return CSITES;
+  if(CSITES){csNote("Site suggestions include "+CSITES.length+" stores from the store lists. (v8)");return CSITES;}
   try{const c=JSON.parse(sessionStorage.getItem("mlCSites")||"null");
-    if(c&&Date.now()-c.at<15*60*1000){CSITES=c.list;return CSITES;}}catch(e){}
+    if(c&&Date.now()-c.at<15*60*1000){CSITES=c.list;csNote("Site suggestions include "+CSITES.length+" stores from the store lists. (v8)");return CSITES;}}catch(e){}
   try{
-    const resp=await Promise.race([fetch(CWORKER),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),9000))]);
+    const resp=await Promise.race([fetch(CWORKER),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),12000))]);
+    if(!resp.ok)throw new Error("HTTP "+resp.status);
     const j=await resp.json();
     const list=[];
+    let raw=0;
     for(const cat of Object.keys(j||{})){
       const rows=Array.isArray(j[cat])?j[cat]:[];
+      raw+=rows.length;
       for(const rec of rows){const s=cShape(rec);if(s&&s.name)list.push(s);}
     }
     CSITES=list;
     try{sessionStorage.setItem("mlCSites",JSON.stringify({at:Date.now(),list}));}catch(e){}
-  }catch(e){CSITES=[];}
+    csNote(list.length?("Site suggestions include "+list.length+" stores from the store lists. (v8)")
+      :("⚠️ Store lists reached but no usable records ("+raw+" rows seen) — show the office this line. (v8)"));
+  }catch(e){CSITES=[];csNote("⚠️ Store lists couldn't be loaded ("+(e&&e.message||"error")+") — suggestions are portal/PO only. (v8)");}
   return CSITES;
 }
 let siteTimer=null;
