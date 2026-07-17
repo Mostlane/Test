@@ -537,21 +537,30 @@ export async function handle(request, env, ctx, url, sess) {
       ).bind(tid, like, like).all();
       for (const r of results || []) jobs.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " — " + String(r.description || "").slice(0, 48), kind: "sla" });
     } catch {}
+    // Engineers are "on" a PLACE as often as a numbered job, so site-name
+    // matches suggest too: the ref inserted is the job number when the site
+    // has one, otherwise the site name itself (commas softened so the
+    // comma-separated jobs box doesn't split it).
+    const nameRef = s => String(s || "").replace(/\s*,\s*/g, " – ").trim();
     try {
       const { results } = await env.DB.prepare(
-        "SELECT job_number, site_name, client FROM sites WHERE tenant_id=? AND active=1 AND job_number IS NOT NULL AND job_number!='' AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+        "SELECT job_number, site_name, client FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
       ).bind(tid, like, like).all();
-      for (const r of results || []) jobs.push({ ref: String(r.job_number), label: r.job_number + " — " + (r.site_name || r.client || "site"), kind: "project" });
+      for (const r of results || []) {
+        const hasJob = r.job_number != null && r.job_number !== "";
+        const name = r.site_name || r.client || "site";
+        jobs.push({ ref: hasJob ? String(r.job_number) : nameRef(name),
+          label: (hasJob ? r.job_number + " — " : "") + name, kind: "project" });
+      }
     } catch {}
-    // PO-system sites carrying their own job numbers (PO_DB binding, if set).
+    // PO-system sites (PO_DB binding, if set) — with or without job numbers.
     try {
       const seen = new Set(jobs.map(j => String(j.ref).toLowerCase()));
       for (const r of await poSiteRows(env, term, 8)) {
-        if (r.job == null || r.job === "") continue;
-        const ref = String(r.job);
-        if (seen.has(ref.toLowerCase())) continue;
+        const ref = (r.job != null && r.job !== "") ? String(r.job) : nameRef(r.name);
+        if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
-        jobs.push({ ref, label: ref + " — " + String(r.name || "PO site").slice(0, 48), kind: "po" });
+        jobs.push({ ref, label: ((r.job != null && r.job !== "") ? r.job + " — " : "") + String(r.name || "PO site").slice(0, 48), kind: "po" });
       }
     } catch {}
     // Exact/prefix matches float to the top; cap the list for the dropdown.
