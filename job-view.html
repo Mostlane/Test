@@ -1191,7 +1191,12 @@ let CUSTOM_CATS = [];                 // [{name, colour, done}]
 function catColour(name){ const c = CUSTOM_CATS.find(x => x.name === name); return c ? c.colour : null; }
 async function loadCats(){
   try{
-    const r = await fetch(`${SLA_API}/categories?t=${Date.now()}`, { cache:"no-store" });
+    // Timeout guard: a hung category fetch on weak signal must never stall the
+    // job from loading (this sits on loadJob's critical path).
+    const r = await Promise.race([
+      fetch(`${SLA_API}/categories?t=${Date.now()}`, { cache:"no-store" }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 7000))
+    ]);
     const d = await r.json();
     CUSTOM_CATS = Array.isArray(d.categories) ? d.categories : [];
   }catch(e){ CUSTOM_CATS = []; }

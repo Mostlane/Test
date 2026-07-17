@@ -458,6 +458,15 @@ function authFetch(path, opts = {}){
   opts.headers = Object.assign({}, opts.headers, t ? { "Authorization": "Bearer " + t } : {});
   return fetch(API + path, opts);
 }
+// authFetch that rejects after `ms` — a hung request on weak signal must never
+// leave the page stuck on a blank screen (API calls bypass the service worker,
+// so they have no timeout of their own).
+function authFetchTO(path, ms = 9000, opts = {}){
+  return Promise.race([
+    authFetch(path, opts),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))
+  ]);
+}
 function getCurrentUser(){
   return sessionStorage.getItem("mostlaneUser") ||
          sessionStorage.getItem("mostlaneUsername") ||
@@ -488,7 +497,7 @@ function rebuildStatuses(){
 }
 async function loadCategories(){
   try{
-    const res = await authFetch("/sla/categories?t=" + Date.now());
+    const res = await authFetchTO("/sla/categories?t=" + Date.now());
     const d = await res.json();
     CUSTOM_CATS = Array.isArray(d.categories) ? d.categories : [];
   }catch(e){ CUSTOM_CATS = []; }
@@ -545,7 +554,7 @@ function slaBadge(job){
 async function gate(){
   try{
     const u = getCurrentUser();
-    const res = await authFetch("/user?u=" + encodeURIComponent(u));
+    const res = await authFetchTO("/user?u=" + encodeURIComponent(u));
     const data = await res.json();
     if(!data.found){ $("forbidden").style.display = "block"; return false; }
     const user = data.user;
@@ -1326,9 +1335,11 @@ function init(){
 window.addEventListener("DOMContentLoaded", async () => {
   init();
   if(await gate()){
-    await loadCategories();
-    populateBulkDropdown();
+    // Jobs load independently of categories — a slow/failed category fetch must
+    // never hold up (or blank) the board. Categories merge into the chips/
+    // dropdown as soon as they arrive.
     ensureUsers().then(() => loadJobs());
+    loadCategories().then(() => { populateBulkDropdown(); render(); });
   }
 });
 </script>
