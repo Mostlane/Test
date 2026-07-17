@@ -392,6 +392,8 @@ function statusClass(status, slaStatus){
 // ("25886/1 Gatwick Road" → "Gatwick Road - 25886/1"). Store lives in siteName
 // or (email-intake jobs) the address-like description; the reference is the fault.
 function mlJobName(job){
+  const ref = String((job && job.helpdeskRef) || "").trim();
+  if(ref && ref.length <= 70 && /^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return ref;   // clean "Ticket - Site"
   const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
   let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
   if(!s) return "";

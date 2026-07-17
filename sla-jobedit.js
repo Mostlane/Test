@@ -25,6 +25,12 @@
   // (short + has a number, not a long fault sentence) and reorder it so the
   // street reads first: "25886/1 Gatwick Road" → "Gatwick Road - 25886/1".
   function mlJobName(job) {
+    // New intake jobs carry a clean "Ticket - Site" reference
+    // (e.g. "19667 - Freshwater, Avenue Road") — use it verbatim as the name.
+    const ref = String((job && job.helpdeskRef) || "").trim();
+    if (ref && ref.length <= 70 && /^[0-9][0-9./-]*\s+-\s+\S/.test(ref)) return ref;
+    // Legacy jobs: the store sits in siteName or the description; reorder to
+    // "Street - Number".
     const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
     let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
     if (!s) return "";
