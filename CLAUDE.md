@@ -313,7 +313,14 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   sample sites — and when nothing was recognised, every PO table + its
   columns. The admin Settings modal renders this as a plain-English status
   line (old worker build / missing binding / unrecognised schema / OK) —
-  FIRST place to look when "PO sites don't suggest". **Mileage**: engineer picks
+  FIRST place to look when "PO sites don't suggest". **Compliance stores
+  (17 Jul)**: what Jamie ALSO calls "PO sites" are the store lists on the
+  `mostlane-pos` KV worker (Retail/ELS/ELS Private/Cobra/Wenzels,
+  spreadsheet-shaped records). engineer-timesheet.html fetches its PUBLIC
+  CORS'd GET /Compliance/combined BROWSER-SIDE (workers.dev is 1042-blocked
+  server-side), heuristic-maps name/postcode (postcode regex over values
+  covers address-embedded ones), caches 15 min in sessionStorage, and merges
+  into the site picker alongside portal + PO_DB sites. **Mileage**: engineer picks
   a site (GET /ts/sites suggests name+postcode from the sites table) or types a
   postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
   worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,
