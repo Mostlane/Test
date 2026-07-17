@@ -289,15 +289,62 @@ document.addEventListener("input",e=>{
 document.addEventListener("focusin",e=>{if(!e.target.classList||!e.target.classList.contains("jobs"))hideAllSug();});
 
 // ── Site suggestions + mileage estimate ──────────────────────────────────────
+// Three sources: portal sites + PO-system sites (both via /ts/sites) and the
+// compliance worker's store lists (Retail / ELS / ELS Private / Cobra /
+// Wenzels). The compliance worker lives on workers.dev, which Cloudflare
+// blocks for worker→worker fetches (error 1042) — so the browser fetches its
+// public /Compliance/combined endpoint directly and we merge here.
+const CWORKER="https://mostlane-pos.jamie-def.workers.dev/Compliance/combined";
+const PCRE=/\b[A-Z]{1,2}\d[A-Z0-9]?\s*\d[A-Z]{2}\b/i;
+let CSITES=null;
+function cShape(r){
+  if(!r||typeof r!=="object")return null;
+  const name=r["Store Name"]??r.storeName??r["Site Name"]??r.siteName??r["Branch Name"]??r.branchName??r.Branch??r.Store??r.Site??r.Name??r.name??r.site??"";
+  let pc=r.Postcode??r.postcode??r["Post Code"]??r.postCode??"";
+  if(!pc){for(const v of Object.values(r)){if(typeof v==="string"){const m=v.match(PCRE);if(m){pc=m[0];break;}}}}
+  const code=r.branchCode??r["Branch Code"]??"";
+  if(!name&&!pc)return null;
+  return {name:String(name||("Store "+code)).trim(),postcode:String(pc||"").toUpperCase(),code:String(code||"")};
+}
+async function loadCSites(){
+  if(CSITES)return CSITES;
+  try{const c=JSON.parse(sessionStorage.getItem("mlCSites")||"null");
+    if(c&&Date.now()-c.at<15*60*1000){CSITES=c.list;return CSITES;}}catch(e){}
+  try{
+    const resp=await Promise.race([fetch(CWORKER),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),9000))]);
+    const j=await resp.json();
+    const list=[];
+    for(const cat of Object.keys(j||{})){
+      const rows=Array.isArray(j[cat])?j[cat]:[];
+      for(const rec of rows){const s=cShape(rec);if(s&&s.name)list.push(s);}
+    }
+    CSITES=list;
+    try{sessionStorage.setItem("mlCSites",JSON.stringify({at:Date.now(),list}));}catch(e){}
+  }catch(e){CSITES=[];}
+  return CSITES;
+}
 let siteTimer=null;
 document.addEventListener("input",e=>{
   if(!e.target.classList||!e.target.classList.contains("site"))return;
   const v=e.target.value;
   clearTimeout(siteTimer);
   siteTimer=setTimeout(async()=>{
-    const r=await authFetchTO("/ts/sites?q="+encodeURIComponent(v)).then(r=>r.json()).catch(()=>null);
-    if(!r||!r.sites)return;
-    SITES=r.sites;
+    const [r,cs]=await Promise.all([
+      authFetchTO("/ts/sites?q="+encodeURIComponent(v)).then(r=>r.json()).catch(()=>null),
+      loadCSites().catch(()=>[])
+    ]);
+    const merged=[...((r&&r.sites)||[])];
+    const seen=new Set(merged.map(s=>String(s.name).toLowerCase()));
+    const T=v.toLowerCase();
+    for(const s of (cs||[])){
+      if(!s.name||seen.has(s.name.toLowerCase()))continue;
+      if(!(s.name.toLowerCase().includes(T)||s.postcode.toLowerCase().includes(T)||(s.code&&String(s.code).includes(v))))continue;
+      seen.add(s.name.toLowerCase());
+      merged.push(s);
+      if(merged.length>=20)break;
+    }
+    if(!merged.length)return;
+    SITES=merged;
     g("siteList").innerHTML=SITES.map(s=>`<option value="${esc(s.name)}">${esc(s.postcode)}</option>`).join("");
     const hit=SITES.find(s=>s.name===v);
     if(hit&&hit.postcode){const pc=e.target.closest(".mirow").querySelector(".pc");if(!pc.value)pc.value=hit.postcode;}
@@ -354,6 +401,7 @@ g("prevWk").onclick=()=>{WEEK=addDays(WEEK,-7);load();};
 g("nextWk").onclick=()=>{WEEK=addDays(WEEK,7);load();};
 g("saveBtn").onclick=saveWeek;
 load();
+loadCSites();   // prewarm the store lists so the first keystroke suggests instantly
 </script>
 </body>
 </html>
