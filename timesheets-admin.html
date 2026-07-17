@@ -238,9 +238,11 @@ async function poStatusCheck(){
     const t=(r.tables||[]).map(t=>`<b>${esc(t.name)}</b> (${esc((t.cols||[]).join(", "))})`).join(" · ")||"none visible";
     return bad("⚠️ <b>PO sites:</b> connected to the PO database, but no site list was recognised in it. Show Claude this line — tables found: "+t);
   }
+  const vtag=" <span style='opacity:.65'>[page p6 · worker "+esc(r.build||"pre-w5 — paste the latest worker.js")+"]</span>";
   let msg="✅ <b>PO sites connected</b> — reading “"+esc(r.discovered.table)+"”"+(r.samples&&r.samples.length?". Examples: "+esc(r.samples.slice(0,3).join(" · ")):"")+".";
   if(r.orderSites&&r.orderSites.count)msg+=" Plus "+r.orderSites.count+" site names from the POs themselves (“"+esc(r.orderSites.table)+"”), e.g. "+esc((r.orderSites.samples||[]).join(" · "))+".";
-  good(msg);
+  else if(r.build)msg+=" ⚠️ No site names could be read off the PO records though — show Claude this: tables "+esc(JSON.stringify((r.tables||[]).map(t=>t.name)));
+  good(msg+vtag);
 }
 g("cfgSave").onclick=async()=>{
   const byUser={};

@@ -7625,7 +7625,7 @@ async function handle20(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w5", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = {
         mode: m.mode,
