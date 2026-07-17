@@ -361,9 +361,9 @@ function cShape(r){
 }
 function csNote(msg){const el=g("srcNote");if(el)el.textContent=msg;}
 async function loadCSites(){
-  if(CSITES){csNote("Site suggestions include "+CSITES.length+" stores from the store lists. (v8)");return CSITES;}
+  if(CSITES){csNote("Site suggestions include "+CSITES.length+" sites from the store lists. (v8)");return CSITES;}
   try{const c=JSON.parse(sessionStorage.getItem("mlCSites")||"null");
-    if(c&&Date.now()-c.at<15*60*1000){CSITES=c.list;csNote("Site suggestions include "+CSITES.length+" stores from the store lists. (v8)");return CSITES;}}catch(e){}
+    if(c&&Date.now()-c.at<15*60*1000){CSITES=c.list;csNote("Site suggestions include "+CSITES.length+" sites from the store lists. (v8)");return CSITES;}}catch(e){}
   try{
     const resp=await Promise.race([fetch(CWORKER),new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),12000))]);
     if(!resp.ok)throw new Error("HTTP "+resp.status);
@@ -377,7 +377,7 @@ async function loadCSites(){
     }
     CSITES=list;
     try{sessionStorage.setItem("mlCSites",JSON.stringify({at:Date.now(),list}));}catch(e){}
-    csNote(list.length?("Site suggestions include "+list.length+" stores from the store lists. (v8)")
+    csNote(list.length?("Site suggestions include "+list.length+" sites from the store lists. (v8)")
       :("⚠️ Store lists reached but no usable records ("+raw+" rows seen) — show the office this line. (v8)"));
   }catch(e){CSITES=[];csNote("⚠️ Store lists couldn't be loaded ("+(e&&e.message||"error")+") — suggestions are portal/PO only. (v8)");}
   return CSITES;
