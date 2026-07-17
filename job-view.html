@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=6"></script>
+  <script src="sla-jobedit.js?v=7"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -175,6 +175,8 @@
     .chip-slate{border-color:#cbd5e1}   .chip-slate[aria-pressed="true"]{background:#475569}
     .chip-orange{border-color:#fdd0ab}  .chip-orange[aria-pressed="true"]{background:#ea580c}
     .chip-purple{border-color:#ddd0fb}  .chip-purple[aria-pressed="true"]{background:#7c3aed}
+    /* Custom categories carry their own colour via --cc (border + filled state). */
+    .chip-custom[aria-pressed="true"]{background:var(--cc,#64748b)}
     .status-hint{font-weight:400;color:var(--muted);font-size:11px}
     #statusBar.saving{color:#2563eb;font-weight:600}
     #statusBar.saved{color:#166534;font-weight:600}
@@ -940,6 +942,9 @@ async function loadJob(){
   }
   $("statusBar").textContent = "Loading job…";
   try{
+    // Categories first, so a job saved under a custom status matches an existing
+    // option instead of tripping renderJob's "unknown status" fallback.
+    await loadCats();
     const res = await fetch(`${SLA_API}/jobs/${encodeURIComponent(jobId)}?t=${Date.now()}`, { cache:"no-store" });
     if(!res.ok) throw new Error(res.status + " " + res.statusText);
     job = await res.json();
@@ -1180,6 +1185,29 @@ const STATUS_META = {
   "Order":      { e:"📦", c:"orange" },
   "Quote":      { e:"📝", c:"purple" }
 };
+// Office-defined custom categories (extra statuses). Loaded from the worker and
+// merged into the status chips exactly like a built-in status.
+let CUSTOM_CATS = [];                 // [{name, colour, done}]
+function catColour(name){ const c = CUSTOM_CATS.find(x => x.name === name); return c ? c.colour : null; }
+async function loadCats(){
+  try{
+    const r = await fetch(`${SLA_API}/categories?t=${Date.now()}`, { cache:"no-store" });
+    const d = await r.json();
+    CUSTOM_CATS = Array.isArray(d.categories) ? d.categories : [];
+  }catch(e){ CUSTOM_CATS = []; }
+  // Add an <option> for every custom category not already present, so the chip
+  // grid and the status-match logic in renderJob both see them.
+  const sel = $("statusSelect");
+  if(sel){
+    const have = new Set(Array.from(sel.options).map(o => o.value.toLowerCase()));
+    CUSTOM_CATS.forEach(c => {
+      if(have.has(c.name.toLowerCase())) return;
+      const o = document.createElement("option"); o.value = c.name; o.textContent = c.name; sel.appendChild(o);
+    });
+  }
+  buildStatusChips();
+  if(job) highlightStatus($("statusSelect").value);
+}
 function isPackStatus(s){ return s === "Quote" || s === "On Hold" || s === "In Progress"; }
 // Statuses that must be confirmed rather than silently auto-saved, because they
 // need something first: a details pack (Quote/On Hold/In Progress) or the
@@ -1191,13 +1219,22 @@ function buildStatusChips(){
   if(!grid) return;
   grid.innerHTML = "";
   Array.from($("statusSelect").options).forEach(opt => {
-    const m = STATUS_META[opt.value] || { e:"•", c:"grey" };
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "status-chip chip-" + m.c;
     b.dataset.status = opt.value;
     b.setAttribute("aria-pressed", "false");
-    b.innerHTML = `<span class="chip-e">${m.e}</span><span>${opt.textContent}</span>`;
+    const cc = catColour(opt.value);
+    if(cc){
+      // Custom category — colour comes from the category itself.
+      b.className = "status-chip chip-custom";
+      b.style.setProperty("--cc", cc);
+      b.style.borderColor = cc;
+      b.innerHTML = `<span class="chip-e">🏷️</span><span>${opt.textContent}</span>`;
+    }else{
+      const m = STATUS_META[opt.value] || { e:"•", c:"grey" };
+      b.className = "status-chip chip-" + m.c;
+      b.innerHTML = `<span class="chip-e">${m.e}</span><span>${opt.textContent}</span>`;
+    }
     b.addEventListener("click", () => pickStatus(opt.value));
     grid.appendChild(b);
   });
