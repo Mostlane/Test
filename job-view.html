@@ -800,10 +800,14 @@ function renderJob(){
     return;
   }
   const ref = job.helpdeskRef || job.reference || job.id;
-  // A real reference is a short ticket/MOS number. Some jobs arrive (via the
-  // email intake) with the WHOLE fault report stuffed into the reference field
-  // — don't surface that as a reference; it belongs in the description/edit box.
-  const shortRef = (String(ref || "").trim().length <= 24) ? String(ref).trim() : "";
+  // Show the ticket number as the reference. New refs are "<ticket> - <site>"
+  // (or "<ticket>-<site>"), so pull the leading ticket ("25878-Portsmouth…" →
+  // "25878", "25886/1 - Gatwick Road" → "25886/1"). If there's no leading
+  // ticket, show a short ref as-is; a fault sentence stuffed into the reference
+  // (legacy jobs) has neither, so it stays hidden — the works is shown below.
+  const rt = String(ref || "").trim();
+  const ticket = (rt.match(/^(\d[\d\/]*)/) || [])[1] || "";
+  const shortRef = ticket || (rt.length <= 24 ? rt : "");
   const site = job.siteName || job.siteCode || job.address || job.location || "";
   // Title = the clean Job name ("Gatwick Road - 25886/1"); shared helper from
   // sla-jobedit.js (window.mlJobName), with a plain fallback if it's not loaded.
