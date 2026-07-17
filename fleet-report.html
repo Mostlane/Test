@@ -6,7 +6,7 @@
 <title>Fleet Report — Mostlane</title>
 <script src="/portal-config.js?v=2"></script>
 <script src="auth.js"></script>
-<style>
+<style id="fleetCss">
   :root{--indigo-dark:#1a237e;--indigo-mid:#283593;--indigo-light:#3949ab;--yellow:#ffd600;
         --green-bg:#d4edda;--green-text:#155724;--amber-bg:#fff3cd;--amber-text:#856404;
         --red-bg:#f8d7da;--red-text:#721c24;--weekend-bg:#fff8e1;--pool-bg:#fff9c4;--pool-border:#f9a825;}
@@ -320,7 +320,11 @@ async function deleteReport(key){
   try{ const r=await authFetch("/fleet/report-delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadPastReports(); }catch(e){}
 }
 function buildStandalone(){
-  const css=document.querySelector("style").textContent;
+  // Grab THIS report's stylesheet by id — not document.querySelector("style"),
+  // which returns portal-config.js's injected theme/emboss <style> (loaded
+  // first) and left the saved/exported report with no report styling at all.
+  const el=document.getElementById("fleetCss");
+  const css=el?el.textContent:(document.querySelector("style")?document.querySelector("style").textContent:"");
   const L=window.__lastReport||{inner:"",title:"Fleet report"};
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(L.title)}</title><style>${css}</style></head><body><div id="report">${L.inner}</div>`+
     `<`+`script>function tog(id){var el=document.getElementById(id);if(el)el.classList.toggle('open');}window.tog=tog;<`+`/script></body></html>`;
