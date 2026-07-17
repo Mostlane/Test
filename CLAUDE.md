@@ -304,11 +304,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   /ts/sites + /ts/jobs therefore ALSO read the PO system's own D1 via an
   OPTIONAL **PO_DB binding** (dashboard → mostlane-api → Bindings → D1 →
   variable `PO_DB` → database `mostlane-po`). The PO schema isn't in this
-  repo, so timesheets.js **discovers** the site table at runtime
-  (sqlite_master + PRAGMA; needs a name col + postcode/job col; site/store/
-  branch table names score higher; cached per isolate; fails soft to
-  portal-only when unbound). **GET /ts/po-status** (admin) shows bound +
-  what was discovered — check it if PO suggestions look wrong. **Mileage**: engineer picks
+  repo, so timesheets.js **discovers** the site storage at runtime
+  (sqlite_master + PRAGMA + row sampling; recognises THREE shapes: columnar
+  site tables, per-row JSON objects in a data/value column, and KV-style
+  blob = one JSON array of sites; field aliases siteName/postcode/jobNumber
+  etc.; cached per isolate; fails soft to portal-only when unbound).
+  **GET /ts/po-status** (admin) reports bound + discovered mode/table +
+  sample sites — and when nothing was recognised, every PO table + its
+  columns. The admin Settings modal renders this as a plain-English status
+  line (old worker build / missing binding / unrecognised schema / OK) —
+  FIRST place to look when "PO sites don't suggest". **Mileage**: engineer picks
   a site (GET /ts/sites suggests name+postcode from the sites table) or types a
   postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
   worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,
