@@ -587,10 +587,11 @@ function render(){
 
   for(const j of list){
     const rawRef = String(j.helpdeskRef || j.id || "").trim();
-    // A real reference is short. Jobs that arrived with the whole fault report
-    // in the reference field would otherwise show that text as a giant grey
-    // "reference" box — suppress it when it's clearly not a ticket number.
-    const ref = (rawRef.length <= 24) ? esc(rawRef) : "";
+    // Show the reference whenever it looks like a real one: it starts with a
+    // ticket number ("25878-Portsmouth…", "25886/1 - Gatwick Road") — however
+    // long — or it's a short ref. A long non-numeric string is a fault sentence
+    // stuffed into the reference (legacy jobs), so keep that hidden.
+    const ref = (/^\d/.test(rawRef) || rawRef.length <= 24) ? esc(rawRef) : "";
     const name = esc((window.mlJobName && window.mlJobName(j)) || j.siteName || j.siteCode || "");
     const colour = STATUS_COLOUR[j.status] || "#9ca3af";
     const sched = fmtSched(j);
