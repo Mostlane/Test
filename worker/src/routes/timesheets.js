@@ -357,6 +357,36 @@ export async function handle(request, env, ctx, url, sess) {
       name: s.site_name || ("Site " + s.site_number), code: s.site_number, postcode: (s.postcode || "").replace(/\*+$/, "") })) }, {}, env, request);
   }
 
+  // ── GET /ts/jobs — suggestions for the "job(s)" box ───────────────────────
+  // Two sources, both already in the portal D1: project job numbers on sites
+  // (the same list the PO system mirrors), and open live SLA jobs.
+  if (sub === "/jobs" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const jobs = [];
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT helpdesk_ref, description, status FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref IS NOT NULL AND helpdesk_ref!='' AND status NOT IN ('Complete','Closed') AND (helpdesk_ref LIKE ? OR description LIKE ?) ORDER BY raised_at DESC LIMIT 8"
+      ).bind(tid, like, like).all();
+      for (const r of results || []) jobs.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " — " + String(r.description || "").slice(0, 48), kind: "sla" });
+    } catch {}
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT job_number, site_name, client FROM sites WHERE tenant_id=? AND active=1 AND job_number IS NOT NULL AND job_number!='' AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+      ).bind(tid, like, like).all();
+      for (const r of results || []) jobs.push({ ref: String(r.job_number), label: r.job_number + " — " + (r.site_name || r.client || "site"), kind: "project" });
+    } catch {}
+    // Exact/prefix matches float to the top; cap the list for the dropdown.
+    const T = term.toLowerCase();
+    jobs.sort((a, b) => {
+      const pa = String(a.ref).toLowerCase().startsWith(T) ? 0 : 1;
+      const pb = String(b.ref).toLowerCase().startsWith(T) ? 0 : 1;
+      return pa - pb;
+    });
+    return json({ ok: true, jobs: jobs.slice(0, 10) }, {}, env, request);
+  }
+
   // ── GET /ts/mileage — estimated road miles between two postcodes ──────────
   if (sub === "/mileage" && method === "GET") {
     const from = q.get("from"), to = q.get("to");
