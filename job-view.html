@@ -6,7 +6,7 @@
   <title>Mostlane • Job Detail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=4"></script>
+  <script src="sla-jobedit.js?v=5"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -803,11 +803,13 @@ function renderJob(){
   // — don't surface that as a reference; it belongs in the description/edit box.
   const shortRef = (String(ref || "").trim().length <= 24) ? String(ref).trim() : "";
   const site = job.siteName || job.siteCode || job.address || job.location || "";
-  // Title = the store/site (e.g. "25826 Portsmouth, Copnor Road 331").
-  $("jobTitle").textContent = site || (shortRef ? `Job ${shortRef}` : "Job");
+  // Title = the clean Job name ("Gatwick Road - 25886/1"); shared helper from
+  // sla-jobedit.js (window.mlJobName), with a plain fallback if it's not loaded.
+  const name = (window.mlJobName && window.mlJobName(job)) || site;
+  $("jobTitle").textContent = name || (shortRef ? `Job ${shortRef}` : "Job");
   $("jobSub").textContent = shortRef;
   $("jobRef").textContent = shortRef || "—";
-  $("jobSite").textContent = site || "—";
+  $("jobSite").textContent = name || site || "—";
 
   const desc = job.description || job.rawPayload?.description || "—";
   $("jobDesc").textContent = desc;

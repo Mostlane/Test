@@ -388,6 +388,19 @@ function statusClass(status, slaStatus){
   }
   return "status-pill status-open";
 }
+// Clean "Job name" = the store/site as "Street - Number"
+// ("25886/1 Gatwick Road" → "Gatwick Road - 25886/1"). Store lives in siteName
+// or (email-intake jobs) the address-like description; the reference is the fault.
+function mlJobName(job){
+  const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
+  let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
+  if(!s) return "";
+  let m = s.match(/^([0-9][0-9\/\-]*)\s+(.+)$/);
+  if(m) return m[2].trim() + " - " + m[1].trim();
+  m = s.match(/^(.+?)[ ,]+([0-9][0-9\/\-]*)$/);
+  if(m) return m[1].trim().replace(/,+$/,"") + " - " + m[2].trim();
+  return s;
+}
 // Priority "Priority 2" / "P2" / 2 → p2 class + P2 label (defaults P4).
 function prioClass(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "p"+m[1] : "p4"; }
 function prioLabel(p){ const m = String(p == null ? "" : p).match(/([1-4])/); return m ? "P"+m[1] : "P4"; }
@@ -404,7 +417,7 @@ function stripClass(status, slaStatus){
 function jobCardInner(job, slaInfo, target){
   // The store/site line is the title (e.g. "25826 Portsmouth, Copnor Road 331").
   // The fault description is deliberately NOT shown on the dashboard.
-  const siteRaw = job.siteName || job.address || ("Job " + (job.helpdeskRef || job.id));
+  const siteRaw = mlJobName(job) || job.siteName || job.address || ("Job " + (job.helpdeskRef || job.id));
   const site = escH(siteRaw);
   const pc = String(job.postcode||"").replace(/\*+$/,"").trim();
   // Address/postcode line — skip anything already in the title so it doesn't repeat.

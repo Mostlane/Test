@@ -18,6 +18,24 @@
   "use strict";
   if (window.MLJobEdit) return;
 
+  // Clean "Job name" for titles everywhere: the store/site formatted
+  // "Street - Number". These jobs store the store either in siteName or (for
+  // email-intake jobs) in the description field ("25886/1 Gatwick Road"), while
+  // the reference holds the fault text — so pick whichever looks like a store
+  // (short + has a number, not a long fault sentence) and reorder it so the
+  // street reads first: "25886/1 Gatwick Road" → "Gatwick Road - 25886/1".
+  function mlJobName(job) {
+    const store = s => { s = String(s == null ? "" : s).trim(); return (s && s.length <= 50 && /\d/.test(s)) ? s : ""; };
+    let s = store(job && job.siteName) || store(job && job.description) || String((job && job.siteName) || "").trim();
+    if (!s) return "";
+    let m = s.match(/^([0-9][0-9\/\-]*)\s+(.+)$/);          // number-first: "25886/1 Gatwick Road"
+    if (m) return m[2].trim() + " - " + m[1].trim();
+    m = s.match(/^(.+?)[ ,]+([0-9][0-9\/\-]*)$/);           // number-last: "Portsmouth, Copnor Road 331"
+    if (m) return m[1].trim().replace(/,+$/, "") + " - " + m[2].trim();
+    return s;
+  }
+  window.mlJobName = mlJobName;
+
   const API = () => (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
   const $ = sel => document.getElementById(sel);
   function authFetch(path, opts = {}) {
@@ -332,7 +350,7 @@
     onSavedCb = (opts && opts.onSaved) || null;
     onDeletedCb = (opts && opts.onDeleted) || (opts && opts.onSaved) || null;
     pickedSite = null;
-    $("mljeTitle").textContent = `Edit job — ${job.helpdeskRef || job.id}`;
+    $("mljeTitle").textContent = "Edit job — " + (mlJobName(job) || job.helpdeskRef || job.id);
     $("mljeRef").value = job.helpdeskRef || "";
     $("mljeDesc").value = job.description || "";
     $("mljePriority").value = job.priority || "Priority 4";
