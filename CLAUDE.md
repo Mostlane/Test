@@ -24,8 +24,11 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
     (a) **`_headers` is a DEAD file** — GitHub Pages ignores it, so its no-cache
     rules were never applied (GitHub Pages sets its own ~10-min HTML cache).
     Client freshness relies on the **service worker cache version** (`sw.js` /
-    `service-worker.js` `CACHE_NAME`, currently `mostlane-v5`) + `?v=` query
-    bumps — bump those to force phones to refresh, NOT `_headers`.
+    `service-worker.js` `CACHE_NAME`, currently `mostlane-v7`) + `?v=` query
+    bumps — bump those to force phones to refresh, NOT `_headers`. (HTML pages
+    are navigation = network-first, so their inline-script edits ride the next
+    load without a CACHE_NAME bump; bump it to flush stale *cached* copies on
+    phones/PWAs when a page won't update.)
     (b) A **`.nojekyll`** file (repo root) disables the Jekyll build so the site
     is published as-is. **Keep it.** Without it, GitHub ran Jekyll, whose
     `github-metadata` plugin calls the GitHub API mid-build; a transient API
@@ -47,9 +50,12 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
   headlessly before publishing); (c) **straight from GitHub** — dist/worker.js
   is committed, so link the blob (has a copy-raw button):
   github.com/Mostlane/Test/blob/main/worker/dist/worker.js.
-  **Worker last sent ≈ the Web Push Phase-1 build (routes/push.js +
-  lib/webpush.js, ~6,174 lines) — needs VAPID_PUBLIC/VAPID_PRIVATE set in the
-  dashboard.** Confirm with Jamie what's actually pasted before assuming.
+  **Worker last sent ≈ the custom-job-categories build (commit d8f72ec, 7,013
+  lines, dist/worker.js — adds GET/POST /sla/categories + /sla/categories/delete
+  and category-aware normalizeStatus). Jamie confirmed deploying it.** Earlier
+  milestone was the Web Push Phase-1 build (routes/push.js + lib/webpush.js) —
+  still needs VAPID_PUBLIC/VAPID_PRIVATE set in the dashboard. Confirm with
+  Jamie what's actually pasted before assuming.
 - **Schema changes**: worker/schema.sql is the reference. Create tables LIVE
   via the D1 connector (done for all current tables), then update schema.sql.
 - **External workers (PO, SiteLog)**: never retype their code. Deliver changes
@@ -601,3 +607,12 @@ files to this public repo.
 - Site images: sites.data JSON carries imageURL/_svAt/_noImagery flags.
 - Worker delivery: always give commit + line count + expected tail so a
   truncated paste is detectable. Chat-pasting the worker truncates — never.
+- **API fetches bypass the service worker** (sw.js skips workers.dev /
+  cross-origin), so they have NO timeout of their own. A page that hides its
+  UI behind an `await`ed API call (e.g. a permission `gate()`) will FREEZE on a
+  blank screen on weak signal — the fetch just never resolves. Fix pattern:
+  race the fetch against a timeout so a hang falls into the catch and the page
+  still renders (sla-main.html `authFetchTO()`, used on the gate `/user` lookup;
+  job-view.html has a `Promise.race` timeout on its category fetch). Keep
+  secondary data (like categories) OFF the first-paint critical path — load it
+  after the board shows and merge it in when it arrives.
