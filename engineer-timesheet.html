@@ -272,11 +272,26 @@ document.addEventListener("input",e=>{
   clearTimeout(jobTimer);
   if(token.length<2){hideAllSug();return;}
   jobTimer=setTimeout(async()=>{
-    const r=await authFetchTO("/ts/jobs?q="+encodeURIComponent(token)).then(r=>r.json()).catch(()=>null);
+    const [r,cs]=await Promise.all([
+      authFetchTO("/ts/jobs?q="+encodeURIComponent(token)).then(r=>r.json()).catch(()=>null),
+      loadCSites().catch(()=>[])
+    ]);
     hideAllSug();
-    if(!r||!r.jobs||!r.jobs.length||document.activeElement!==inp)return;
+    const list=[...((r&&r.jobs)||[])];
+    // Store lists (compliance worker) suggest by name in the jobs box too.
+    const T=token.toLowerCase();
+    const seen=new Set(list.map(j=>String(j.ref).toLowerCase()));
+    for(const s of (cs||[])){
+      if(list.length>=8)break;
+      if(!s.name||!s.name.toLowerCase().includes(T))continue;
+      const ref=s.name.replace(/\s*,\s*/g," – ").trim();
+      if(seen.has(ref.toLowerCase()))continue;
+      seen.add(ref.toLowerCase());
+      list.push({ref,label:s.name+(s.postcode?" ("+s.postcode+")":"")});
+    }
+    if(!list.length||document.activeElement!==inp)return;
     const div=document.createElement("div");div.className="sugrow";
-    div.innerHTML=r.jobs.slice(0,6).map(j=>`<button type="button" class="sug" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
+    div.innerHTML=list.slice(0,6).map(j=>`<button type="button" class="sug" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
     inp.closest(".row").after(div);
     div.addEventListener("mousedown",ev=>{
       const b=ev.target.closest(".sug");if(!b)return;
