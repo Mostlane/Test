@@ -7165,7 +7165,8 @@ async function isTsAdmin(env, tid, sess) {
 }
 async function lookupPostcode(pc) {
   const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
-    headers: { "Accept": "application/json" }
+    headers: { "Accept": "application/json" },
+    cf: { cacheTtl: 30 * 86400, cacheEverything: true }
   });
   if (!r.ok) return null;
   const j = await r.json().catch(() => null);
