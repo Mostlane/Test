@@ -296,8 +296,11 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   week (saves 409 until admin deletes the invoice via /ts/invoice/delete).
   Retrieval: GET /ts/invoices (own; admin ?u=all), signed URLs → **GET
   /ts/invoice-file** (PUBLIC_ROUTES, sig-verified). **GET /ts/jobs?q=** feeds
-  the jobs-box suggestion chips: sites.job_number (the project job numbers the
-  PO system mirrors — no PO-worker call needed) + open sla_jobs refs. The admin
+  the jobs-box suggestion chips: open sla_jobs refs + portal/PO_DB sites BY
+  NAME with or without a job number (engineers are "on" places — a name-only
+  match inserts the site name, commas softened to " – " so the
+  comma-separated box doesn't split it); the page also merges
+  compliance-store names into the jobs chips client-side. The admin
   Settings column for the mileage switch is labelled **"Fuel (mileage)"** —
   that's Jamie's word for it. **PO sites (17 Jul)**: portal→PO site sync is
   add-only, so sites created inside the PO system never reach the portal —
