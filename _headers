@@ -91,3 +91,7 @@
   Cache-Control: no-cache
 /offline.html
   Cache-Control: no-cache
+/engineer-timesheet.html
+  Cache-Control: no-cache
+/timesheets-admin.html
+  Cache-Control: no-cache

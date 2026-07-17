@@ -88,6 +88,13 @@
 
     // Friendly names for the common endpoints; anything unmapped shows its raw path.
     const FRIENDLY = [
+      [/^POST \/ts\/my/,                  "⏱️ Saved their weekly timesheet"],
+      [/^POST \/ts\/me/,                  "⏱️ Updated their timesheet details"],
+      [/^POST \/ts\/invoice\/next/,       "🔢 Set their next invoice number"],
+      [/^POST \/ts\/invoice\/delete/,     "🗑️ Deleted an engineer invoice"],
+      [/^POST \/ts\/invoice/,             "🧾 Generated an invoice"],
+      [/^POST \/ts\/admin\/save/,         "✏️ Edited an engineer's timesheet"],
+      [/^POST \/ts\/admin\/config/,       "⚙️ Changed timesheet settings"],
       [/^POST \/holiday\/request/,        "🌴 Requested time off"],
       [/^POST \/holiday\/approve/,        "✅ Approved a holiday request"],
       [/^POST \/holiday\/reject/,         "❌ Rejected a holiday request"],

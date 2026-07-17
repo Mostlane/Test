@@ -523,3 +523,27 @@ CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(tenant_id, userna
 
 -- ── Compliance and Projects are intentionally NOT modelled here yet —
 --    they'll be added (or handled by separate systems) later.
+
+-- Engineer weekly timesheets (times + jobs per day; mileage claims in the JSON)
+CREATE TABLE IF NOT EXISTS eng_timesheets (
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  week      TEXT NOT NULL,               -- Monday (YYYY-MM-DD)
+  username  TEXT NOT NULL,
+  data      TEXT,                        -- { days: { date: {start,finish,jobs,note,mileage[]} } }
+  at        TEXT,
+  PRIMARY KEY (tenant_id, week, username)
+);
+
+-- Self-employed engineer invoices (sequential per user; PDF stored in R2 invoices/<tid>/<user>/)
+CREATE TABLE IF NOT EXISTS eng_invoices (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  username  TEXT NOT NULL,
+  number    INTEGER NOT NULL,
+  week      TEXT NOT NULL,
+  hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
+  r2_key    TEXT,
+  at        TEXT,
+  UNIQUE (tenant_id, username, number),
+  UNIQUE (tenant_id, username, week)
+);

@@ -230,6 +230,8 @@ a.button {
   <div class="menu-grid" id="menuGrid">
     
     <a class="button" href="index.html" id="CheckInOut"><span class="emoji">🕒</span> Check In / Out</a>
+    <a class="button" href="engineer-timesheet.html" id="EngTimesheet"><span class="emoji">⏱️</span> My Timesheet</a>
+    <a class="button" href="timesheets-admin.html" id="EngTsAdmin"><span class="emoji">🧾</span> Engineer Timesheets</a>
     <a class="button" href="vehicles.html" id="Vehicles"><span class="emoji">🚐</span> Vehicles</a>
     <a class="button" href="holiday.html" id="Holiday"><span class="emoji">📅</span> Holiday Requests</a>
     <a class="button" href="holiday-admin.html" id="HolidayAdmin"><span class="emoji">🗂️</span> Holiday Admin</a>
@@ -325,7 +327,11 @@ const MAP = {
   // Merged "Timesheet" tile — office + van timesheets. Visible to holders of
   // either OfficeTimesheet or Vehicles (van pay). applyGate points it at the
   // page the user can actually open; each page cross-links to the other.
-  OfficeTimesheet: ["OfficeTimesheet", "Vehicles"]
+  OfficeTimesheet: ["OfficeTimesheet", "Vehicles"],
+  // Engineer weekly timesheet (times + jobs; invoices/mileage if self-employed)
+  EngTimesheet: ["EngTimesheet"],
+  // Office view of the engineer timesheets + invoices + deduction settings
+  EngTsAdmin: ["TimesheetAdmin"]
   // Settings (was Personalise) is now ALWAYS visible (class "button visible")
   // so every user can set their landing page; the appearance options inside
   // stay permission-gated. It is deliberately NOT in this MAP.

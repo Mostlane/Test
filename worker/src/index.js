@@ -37,6 +37,7 @@ import * as hrdocs from "./routes/hrdocs.js";      // DONE  (staff personal + co
 import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + erasure)
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
+import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -61,6 +62,7 @@ const ROUTES = [
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/push",       push.handle],      // web push subscriptions + test send
+  ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
   ["*", "/update-site", sites.handle],
@@ -222,6 +224,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
   ["GET", "/sla/archive-file"],
+  // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
+  ["GET", "/ts/invoice-file"],
 ];
 
 function isPublic(method, pathname) {

@@ -246,6 +246,23 @@
           ["With <b>Office clock</b> enabled on your account and switched on for your office computer (Users → Devices tab), the clock in/out bar appears at the top of the main menu — tap it when you arrive and when you leave. Break for lunch and clock back in; the day adds the pieces up."],
           ["<b>My Hours</b> (sidebar or menu) shows your week: each day's clock times and total, plus the week total at the top. Use <b>← Prev / Next →</b> to look at other weeks.", "myhours.png"],
         ]},
+        { icon: "⏱️", title: "Fill in your weekly timesheet", perms: ["EngTimesheet"], steps: [
+          ["Open <b>My Timesheet</b> from the menu. Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
+          ["Any deductions the office has set for you (30&nbsp;minutes travel each way, or a lunch break on longer days) are shown greyed on each day and taken off automatically — the green figure is your <b>paid</b> time."],
+          ["If you claim <b>mileage</b>: tap <b>＋ Add mileage</b> on a day, start typing the site name and pick it from the list (its postcode fills in), then tap <b>🧮</b> to estimate the round trip from your home postcode. You can adjust the miles before saving."],
+          ["Tap <b>💾 Save week</b> when you're done — you can come back and change things any time until the week is invoiced."],
+        ]},
+        { icon: "🧾", title: "Invoice your week (self-employed)", perms: ["EngTimesheet"], steps: [
+          ["Self-employed engineers see an <b>Invoice this week</b> card under the timesheet. The first time, set <b>your starting invoice number</b> — every invoice after that counts up automatically."],
+          ["Check the totals, then tap <b>Generate invoice PDF</b>. Your rate (and mileage, if you claim it) are worked in, the PDF is numbered and saved in the portal, and the office can see it straight away."],
+          ["The week <b>locks</b> once invoiced. If something's wrong, ask the office to delete the invoice — that unlocks the week and the number is reused."],
+          ["All your past invoices are listed under the card — tap <b>Open</b> to view or re-download any of them."],
+        ]},
+        { icon: "🧾", title: "Engineer timesheets & invoices (admin)", perms: ["TimesheetAdmin"], steps: [
+          ["<b>Engineer Timesheets</b> shows everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
+          ["<b>⚙️ Settings</b> is where you set <b>who gets the 30-minute travel deduction</b> (each way), <b>who has lunch deducted</b>, who can claim <b>mileage</b>, their rate (per hour or per day), pence per mile, home postcode and next invoice number. It also holds the company details printed on invoices."],
+          ["<b>🧾 Invoices</b> lists every generated invoice — open the PDF or delete a wrong one (that unlocks the engineer's week and frees the number)."],
+        ]},
         { icon: "💼", title: "The office timesheet (admin)", perms: ["OfficeTimesheet"], steps: [
           ["<b>Office Timesheet</b> shows the whole team's week in one table — a row per person, a column per day, with totals.", "officesheet.png"],
           ["A <b>running</b> tag means they're still clocked in — that open session isn't counted until they clock out (or you close it)."],

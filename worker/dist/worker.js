@@ -753,6 +753,8 @@ var PERMISSION_KEYS = [
   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",
   // view the weekly master office timesheet (all staff)
+  "EngTimesheet",
+  // engineer weekly timesheet (times + jobs; invoices if self-employed)
   "AssetAdmin",
   // plant & equipment admin: sees ALL transfer documents + All Assets
   "ThemeColour",
@@ -6807,6 +6809,778 @@ async function seedAssignments(env, tid) {
   }
 }
 
+// src/lib/pdf.js
+var PAGE_W = 595;
+var PAGE_H = 842;
+var W = {
+  " ": 278,
+  "!": 278,
+  '"': 355,
+  "#": 556,
+  "$": 556,
+  "%": 889,
+  "&": 667,
+  "'": 191,
+  "(": 333,
+  ")": 333,
+  "*": 389,
+  "+": 584,
+  ",": 278,
+  "-": 333,
+  ".": 278,
+  "/": 278,
+  "0": 556,
+  "1": 556,
+  "2": 556,
+  "3": 556,
+  "4": 556,
+  "5": 556,
+  "6": 556,
+  "7": 556,
+  "8": 556,
+  "9": 556,
+  ":": 278,
+  ";": 278,
+  "=": 584,
+  "?": 556,
+  "@": 1015,
+  "A": 667,
+  "B": 667,
+  "C": 722,
+  "D": 722,
+  "E": 667,
+  "F": 611,
+  "G": 778,
+  "H": 722,
+  "I": 278,
+  "J": 500,
+  "K": 667,
+  "L": 556,
+  "M": 833,
+  "N": 722,
+  "O": 778,
+  "P": 667,
+  "Q": 778,
+  "R": 722,
+  "S": 667,
+  "T": 611,
+  "U": 722,
+  "V": 667,
+  "W": 944,
+  "X": 667,
+  "Y": 667,
+  "Z": 611,
+  "a": 556,
+  "b": 556,
+  "c": 500,
+  "d": 556,
+  "e": 556,
+  "f": 278,
+  "g": 556,
+  "h": 556,
+  "i": 222,
+  "j": 222,
+  "k": 500,
+  "l": 222,
+  "m": 833,
+  "n": 556,
+  "o": 556,
+  "p": 556,
+  "q": 556,
+  "r": 333,
+  "s": 500,
+  "t": 278,
+  "u": 556,
+  "v": 500,
+  "w": 722,
+  "x": 500,
+  "y": 500,
+  "z": 500,
+  "\xA3": 556,
+  "\xB7": 278,
+  "\u2013": 556,
+  "\u2014": 1e3
+};
+function textWidth(str, size = 10) {
+  let u = 0;
+  for (const ch of String(str)) u += W[ch] != null ? W[ch] : 556;
+  return u / 1e3 * size;
+}
+function pdfStr(s) {
+  let out = "";
+  for (const ch of String(s)) {
+    let c = ch.charCodeAt(0);
+    if (ch === "\u2013" || ch === "\u2014") c = 45;
+    if (ch === "\u2019" || ch === "\u2018") c = 39;
+    if (ch === "\u201C" || ch === "\u201D") c = 34;
+    if (c > 255) c = 63;
+    if (c === 92) out += "\\\\";
+    else if (c === 40) out += "\\(";
+    else if (c === 41) out += "\\)";
+    else if (c >= 32 && c <= 126) out += String.fromCharCode(c);
+    else out += "\\" + c.toString(8).padStart(3, "0");
+  }
+  return out;
+}
+var PdfDoc = class {
+  constructor() {
+    this.pages = [];
+    this.newPage();
+  }
+  newPage() {
+    this.pages.push([]);
+    return this;
+  }
+  get _ops() {
+    return this.pages[this.pages.length - 1];
+  }
+  // yTop is measured from the top of the page to the text BASELINE.
+  text(x, yTop, str, opt = {}) {
+    const size = opt.size || 10;
+    const font = opt.bold ? "/F2" : "/F1";
+    const grey = opt.grey ? "0.45 g " : "";
+    let tx = x;
+    if (opt.alignRight) tx = x - textWidth(str, size);
+    const y = PAGE_H - yTop;
+    this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+    return this;
+  }
+  hr(x1, yTop, x2, opt = {}) {
+    const y = PAGE_H - yTop;
+    const grey = opt.grey ? "0.75 G " : "0.2 G ";
+    this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+    return this;
+  }
+  bytes() {
+    const enc3 = new TextEncoder();
+    const objs = [];
+    objs.push("<< /Type /Catalog /Pages 2 0 R >>");
+    const pageIds = this.pages.map((_, i) => 5 + i * 2 + 1);
+    objs.push(`<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`);
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    objs.push("<< /Producer (Mostlane Portal) >>");
+    for (const ops of this.pages) {
+      const stream = ops.join("\n");
+      objs.push(`<< /Length ${enc3.encode(stream).length} >>
+stream
+${stream}
+endstream`);
+      const cid = objs.length;
+      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${cid} 0 R >>`);
+    }
+    let body = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    const offsets = [0];
+    for (let i = 0; i < objs.length; i++) {
+      offsets.push(enc3.encode(body).length);
+      body += `${i + 1} 0 obj
+${objs[i]}
+endobj
+`;
+    }
+    const xrefAt = enc3.encode(body).length;
+    body += `xref
+0 ${objs.length + 1}
+0000000000 65535 f 
+`;
+    for (let i = 1; i <= objs.length; i++) body += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+    body += `trailer
+<< /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>
+startxref
+${xrefAt}
+%%EOF
+`;
+    return enc3.encode(body);
+  }
+};
+
+// src/routes/timesheets.js
+var CFG_KEY = (tid) => `engts:cfg:${tid}`;
+var INV_PREFIX = (tid) => `invoices/${tid}/`;
+var isDateStr2 = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+function mondayOf3(dateStr) {
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function weekDays2(monday) {
+  const base = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const x = new Date(base);
+    x.setUTCDate(base.getUTCDate() + i);
+    out.push(x.toISOString().slice(0, 10));
+  }
+  return out;
+}
+var toMin = (t) => {
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(t || "").trim());
+  return m ? +m[1] * 60 + +m[2] : null;
+};
+var normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+var round1 = (n) => Math.round(n * 10) / 10;
+var money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
+async function ensureTables(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
+    tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
+    data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
+    hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
+    r2_key TEXT, at TEXT,
+    UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+}
+var DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45, company: "Mostlane" };
+async function getCfg(env, tid) {
+  let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      cfg.defaults = Object.assign(cfg.defaults, v.defaults || {});
+      cfg.byUser = v.byUser || {};
+    }
+  } catch {
+  }
+  return cfg;
+}
+async function saveCfg(env, tid, cfg) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, CFG_KEY(tid), JSON.stringify(cfg)).run();
+}
+async function userRow(env, tid, username) {
+  return env.DB.prepare("SELECT username, first_name, last_name, employment_type, status, profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+}
+function displayName(u) {
+  return u ? `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username : "";
+}
+function isSelfEmployed(u) {
+  return /self/i.test(String(u && u.employment_type || ""));
+}
+function effectiveCfg(cfg, u) {
+  const mine = cfg.byUser && cfg.byUser[u.username] || {};
+  let profile = {};
+  try {
+    profile = u.profile ? JSON.parse(u.profile) : {};
+  } catch {
+  }
+  const num2 = (v) => {
+    const n = parseFloat(v);
+    return isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    employment: u.employment_type || "Employed",
+    selfEmployed: isSelfEmployed(u),
+    commute: mine.commute === true,
+    // 30 mins each way deducted
+    lunch: mine.lunch === true,
+    // 30 mins lunch deducted
+    mileage: mine.mileage === true,
+    // may claim mileage
+    commuteMins: Number(mine.commuteMins ?? cfg.defaults.commuteMins) || 30,
+    lunchMins: Number(mine.lunchMins ?? cfg.defaults.lunchMins) || 30,
+    lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
+    pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
+    rateType: mine.rateType === "day" ? "day" : "hour",
+    rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
+    homePostcode: String(mine.homePostcode || "").toUpperCase(),
+    details: Array.isArray(mine.details) ? mine.details : [],
+    // extra lines under their name on the invoice
+    nextNumber: Number(mine.nextNumber) || null
+  };
+}
+function cleanDays(monday, days) {
+  const valid = new Set(weekDays2(monday));
+  const out = {};
+  for (const [date, d] of Object.entries(days || {})) {
+    if (!valid.has(date) || !d || typeof d !== "object") continue;
+    const start = toMin(d.start) != null ? String(d.start) : "";
+    const finish = toMin(d.finish) != null ? String(d.finish) : "";
+    const jobs = String(d.jobs || "").slice(0, 400);
+    const note = String(d.note || "").slice(0, 400);
+    const mileage = (Array.isArray(d.mileage) ? d.mileage : []).slice(0, 8).map((m) => ({
+      site: String(m && m.site || "").slice(0, 120),
+      postcode: String(m && m.postcode || "").toUpperCase().slice(0, 10),
+      miles: Math.max(0, Math.min(1e3, round1(parseFloat(m && m.miles) || 0)))
+    })).filter((m) => m.miles > 0 || m.site || m.postcode);
+    if (start || finish || jobs || note || mileage.length) out[date] = { start, finish, jobs, note, mileage };
+  }
+  return out;
+}
+function dayCalc(d, eff) {
+  const s = toMin(d.start), e0 = toMin(d.finish);
+  if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, miles: dayMiles(d) };
+  const e = e0 <= s ? e0 + 1440 : e0;
+  const span = e - s;
+  const commute = eff.commute ? eff.commuteMins * 2 : 0;
+  const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
+  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, miles: dayMiles(d) };
+}
+function dayMiles(d) {
+  return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
+}
+function weekTotals(days, eff) {
+  let paidMins = 0, miles = 0, daysWorked = 0;
+  for (const d of Object.values(days || {})) {
+    const c = dayCalc(d, eff);
+    paidMins += c.paid;
+    miles += c.miles;
+    if (c.worked) daysWorked++;
+  }
+  const hours = Math.round(paidMins / 60 * 100) / 100;
+  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
+  const mileagePay = Math.round(miles * eff.pencePerMile) / 100;
+  return {
+    paidMins,
+    hours,
+    miles: round1(miles),
+    daysWorked,
+    labour,
+    mileagePay,
+    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null
+  };
+}
+async function loadWeek(env, tid, username, monday) {
+  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
+  let days = {};
+  try {
+    days = row && row.data ? JSON.parse(row.data).days || {} : {};
+  } catch {
+  }
+  return { days, savedAt: row ? row.at : null };
+}
+async function invoiceFor(env, tid, username, monday) {
+  return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
+}
+async function nextInvoiceNumber(env, tid, username, eff) {
+  const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, username).first();
+  const max = row && row.m != null ? Number(row.m) : 0;
+  return Math.max(max + 1, eff.nextNumber || 1);
+}
+async function isTsAdmin(env, tid, sess) {
+  if (!sess) return false;
+  const p = await permissionsFor(env, tid, sess.user.username);
+  return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
+}
+async function lookupPostcode(pc) {
+  const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
+    headers: { "Accept": "application/json" }
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  const res = j && j.result;
+  return res && res.latitude != null ? { lat: res.latitude, lng: res.longitude, pc: res.postcode } : null;
+}
+function haversineMiles(a, b) {
+  const rad = (x) => x * Math.PI / 180, R = 3958.8;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+var ROAD_FACTOR = 1.25;
+function fmtDate(iso) {
+  return (/* @__PURE__ */ new Date(iso + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+function fmtHm(mins) {
+  return Math.floor(mins / 60) + "h " + String(Math.round(mins % 60)).padStart(2, "0") + "m";
+}
+function buildInvoicePdf({ number, name, details, company, monday, days, eff, totals }) {
+  const doc = new PdfDoc();
+  const L = 48, R = 547;
+  let y = 64;
+  doc.text(L, y, "INVOICE", { size: 22, bold: true });
+  doc.text(R, y - 8, "Invoice no. " + number, { size: 12, bold: true, alignRight: true });
+  doc.text(R, y + 8, "Date: " + fmtDate((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)), { size: 10, alignRight: true, grey: true });
+  y += 34;
+  doc.text(L, y, "From", { size: 9, grey: true });
+  doc.text(R, y, "To", { size: 9, grey: true, alignRight: true });
+  y += 14;
+  doc.text(L, y, name, { size: 11, bold: true });
+  const toLines = String(company || "Mostlane").split(/\n/).filter(Boolean);
+  let ty = y;
+  for (const ln of toLines) {
+    doc.text(R, ty, ln.trim(), { size: ty === y ? 11 : 10, bold: ty === y, alignRight: true });
+    ty += 14;
+  }
+  for (const ln of (details || []).slice(0, 5)) {
+    y += 14;
+    doc.text(L, y, String(ln).slice(0, 60), { size: 10 });
+  }
+  y = Math.max(y, ty - 14) + 24;
+  doc.text(L, y, "Week: " + fmtDate(monday) + " \u2013 " + fmtDate(weekDays2(monday)[6]), { size: 10, bold: true });
+  y += 16;
+  doc.hr(L, y, R);
+  y += 16;
+  const cDate = L, cDesc = L + 78, cHours = 425, cAmt = R;
+  doc.text(cDate, y, "Date", { size: 9, bold: true, grey: true });
+  doc.text(cDesc, y, "Details", { size: 9, bold: true, grey: true });
+  doc.text(cHours, y, "Hours", { size: 9, bold: true, grey: true, alignRight: true });
+  doc.text(cAmt, y, "Amount", { size: 9, bold: true, grey: true, alignRight: true });
+  y += 6;
+  doc.hr(L, y, R, { grey: true });
+  y += 15;
+  const fitDesc = (s, max) => {
+    let t = String(s || "");
+    while (t && textWidth(t, 10) > max) t = t.slice(0, -1);
+    return t;
+  };
+  const perHourAmount = (mins) => eff.rate && eff.rateType === "hour" ? money(mins / 60 * eff.rate) : "";
+  for (const date of weekDays2(monday)) {
+    const d = days[date];
+    if (!d) continue;
+    const c = dayCalc(d, eff);
+    if (!c.worked && !c.miles) continue;
+    if (c.worked) {
+      doc.text(cDate, y, (/* @__PURE__ */ new Date(date + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }), { size: 10 });
+      const dedNote = [c.commute ? "-" + c.commute + "m travel" : "", c.lunch ? "-" + c.lunch + "m lunch" : ""].filter(Boolean).join(", ");
+      doc.text(cDesc, y, fitDesc((d.jobs || "Site work") + (dedNote ? "  (" + dedNote + ")" : ""), cHours - cDesc - 40), { size: 10 });
+      doc.text(cHours, y, fmtHm(c.paid), { size: 10, alignRight: true });
+      doc.text(cAmt, y, perHourAmount(c.paid), { size: 10, alignRight: true });
+      y += 15;
+    }
+    for (const m of d.mileage || []) {
+      if (!(parseFloat(m.miles) > 0)) continue;
+      doc.text(cDesc, y, fitDesc("Mileage \u2014 " + (m.site || m.postcode || "site") + " (" + m.miles + " mi @ " + eff.pencePerMile + "p)", cHours - cDesc - 40), { size: 10, grey: true });
+      doc.text(cAmt, y, money(m.miles * eff.pencePerMile / 100), { size: 10, alignRight: true });
+      y += 15;
+    }
+    if (y > 720) {
+      doc.newPage();
+      y = 60;
+    }
+  }
+  y += 4;
+  doc.hr(L, y, R);
+  y += 18;
+  if (eff.rateType === "day" && eff.rate) {
+    doc.text(cHours, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
+    doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true });
+    y += 16;
+  } else {
+    doc.text(cHours, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
+    doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true });
+    y += 16;
+  }
+  if (totals.miles > 0) {
+    doc.text(cHours, y, "Mileage: " + totals.miles + " mi @ " + eff.pencePerMile + "p");
+    doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true });
+    y += 16;
+  }
+  y += 6;
+  doc.text(cHours, y, "TOTAL", { size: 12, bold: true });
+  doc.text(cAmt, y, money(totals.total || 0), { size: 12, bold: true, alignRight: true });
+  y += 30;
+  doc.text(L, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
+  return doc.bytes();
+}
+async function handle20(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/ts(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  const headers = corsHeaders(env, request);
+  if (sub === "/invoice-file" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
+    if (!sess && !await verifyFileSig(env, key, q)) return error("Link expired or invalid", 403, env, request);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": "application/pdf",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  await ensureTables(env);
+  const cfg = await getCfg(env, tid);
+  if (sub === "/me" && method === "GET") {
+    const u = await userRow(env, tid, me);
+    if (!u) return error("User not found", 404, env, request);
+    const eff = effectiveCfg(cfg, u);
+    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const admin = await isTsAdmin(env, tid, sess);
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    return json({
+      ok: true,
+      name: displayName(u),
+      ...eff,
+      rate: eff.rate,
+      nextInvoice: next,
+      canSetNumber: !invCount || Number(invCount.n) === 0,
+      admin
+    }, {}, env, request);
+  }
+  if (sub === "/me" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
+    if ("homePostcode" in b) mine.homePostcode = String(b.homePostcode || "").toUpperCase().slice(0, 10);
+    if ("details" in b) mine.details = (Array.isArray(b.details) ? b.details : String(b.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
+    if ("rate" in b) {
+      const n = parseFloat(b.rate);
+      if (isFinite(n) && n >= 0) mine.rate = n;
+    }
+    if ("rateType" in b && (b.rateType === "hour" || b.rateType === "day")) mine.rateType = b.rateType;
+    await saveCfg(env, tid, cfg);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/my" && method === "GET") {
+    const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
+    const { days, savedAt } = await loadWeek(env, tid, me, monday);
+    const inv = await invoiceFor(env, tid, me, monday);
+    return json({
+      ok: true,
+      week: monday,
+      days,
+      savedAt,
+      totals: weekTotals(days, eff),
+      invoice: inv ? {
+        number: inv.number,
+        total: inv.total,
+        at: inv.at,
+        url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
+      } : null
+    }, {}, env, request);
+  }
+  if (sub === "/my" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr2(b.week)) return error("week (Monday, YYYY-MM-DD) required", 400, env, request);
+    const monday = mondayOf3(b.week);
+    if (await invoiceFor(env, tid, me, monday))
+      return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
+    const days = cleanDays(monday, b.days);
+    await env.DB.prepare(
+      "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+    ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
+    const u = await userRow(env, tid, me);
+    return json({ ok: true, week: monday, totals: weekTotals(days, effectiveCfg(cfg, u)) }, {}, env, request);
+  }
+  if (sub === "/sites" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const { results } = await env.DB.prepare(
+      "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
+    ).bind(tid, like, like, like).all();
+    return json({ ok: true, sites: (results || []).map((s) => ({
+      name: s.site_name || "Site " + s.site_number,
+      code: s.site_number,
+      postcode: (s.postcode || "").replace(/\*+$/, "")
+    })) }, {}, env, request);
+  }
+  if (sub === "/mileage" && method === "GET") {
+    const from = q.get("from"), to = q.get("to");
+    if (!from || !to) return error("from and to postcodes required", 400, env, request);
+    const [a, b] = await Promise.all([lookupPostcode(from), lookupPostcode(to)]);
+    if (!a) return error("Couldn't find postcode " + String(from).toUpperCase(), 404, env, request);
+    if (!b) return error("Couldn't find postcode " + String(to).toUpperCase(), 404, env, request);
+    const oneWay = round1(haversineMiles(a, b) * ROAD_FACTOR);
+    return json({ ok: true, from: a.pc, to: b.pc, oneWay, roundTrip: round1(oneWay * 2) }, {}, env, request);
+  }
+  if (sub === "/invoice/next" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const next = parseInt(b.next, 10);
+    if (!next || next < 1 || next > 99999999) return error("Send a whole number, e.g. { next: 100 }", 400, env, request);
+    const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    if (row && row.m != null && next <= Number(row.m))
+      return error("Your invoices are already up to number " + row.m + " \u2014 the next number must be higher.", 400, env, request);
+    (cfg.byUser[me] || (cfg.byUser[me] = {})).nextNumber = next;
+    await saveCfg(env, tid, cfg);
+    return json({ ok: true, next }, {}, env, request);
+  }
+  if (sub === "/invoice" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr2(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf3(b.week);
+    const u = await userRow(env, tid, me);
+    if (!isSelfEmployed(u)) return error("Invoices are only for self-employed engineers.", 403, env, request);
+    const existing = await invoiceFor(env, tid, me, monday);
+    if (existing) return error("Invoice " + existing.number + " already exists for this week.", 409, env, request);
+    if (b.rate != null) {
+      const n = parseFloat(b.rate);
+      if (isFinite(n) && n > 0) {
+        const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
+        mine.rate = n;
+        if (b.rateType === "day" || b.rateType === "hour") mine.rateType = b.rateType;
+        await saveCfg(env, tid, cfg);
+      }
+    }
+    const eff = effectiveCfg(cfg, u);
+    if (!eff.rate) return error("No pay rate set \u2014 enter your rate first.", 400, env, request);
+    const { days } = await loadWeek(env, tid, me, monday);
+    const totals = weekTotals(days, eff);
+    if (!totals.daysWorked && !totals.miles) return error("Nothing on this week's timesheet yet \u2014 save your times first.", 400, env, request);
+    const number = await nextInvoiceNumber(env, tid, me, eff);
+    const pdf = buildInvoicePdf({
+      number,
+      name: displayName(u),
+      details: eff.details,
+      company: cfg.defaults.company,
+      monday,
+      days,
+      eff,
+      totals
+    });
+    const key = `${INV_PREFIX(tid)}${encodeURIComponent(me)}/INV-${number}-${monday}.pdf`;
+    await env.JOB_FILES.put(key, pdf, {
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: { by: me, number: String(number), week: monday, at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    await env.DB.prepare(
+      "INSERT INTO eng_invoices (tenant_id, username, number, week, hours, miles, labour, mileage, total, r2_key, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, me, number, monday, totals.hours, totals.miles, totals.labour, totals.mileagePay, totals.total, key, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({
+      ok: true,
+      number,
+      total: totals.total,
+      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", key)
+    }, {}, env, request);
+  }
+  if (sub === "/invoices" && method === "GET") {
+    const admin = await isTsAdmin(env, tid, sess);
+    const who = q.get("u");
+    let stmt;
+    if (who && admin && who !== "all") stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, who);
+    else if (who === "all" && admin) stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? ORDER BY at DESC LIMIT 400").bind(tid);
+    else stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, me);
+    const { results } = await stmt.all();
+    const invoices = [];
+    for (const r of results || []) invoices.push({
+      id: r.id,
+      username: r.username,
+      number: r.number,
+      week: r.week,
+      hours: r.hours,
+      miles: r.miles,
+      labour: r.labour,
+      mileage: r.mileage,
+      total: r.total,
+      at: r.at,
+      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", r.r2_key)
+    });
+    return json({ ok: true, invoices }, {}, env, request);
+  }
+  if (sub === "/invoice/delete" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
+    if (!row) return error("Invoice not found", 404, env, request);
+    await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
+    try {
+      await env.JOB_FILES.delete(row.r2_key);
+    } catch {
+    }
+    return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+  if (sub.startsWith("/admin/")) {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    if (sub === "/admin/overview" && method === "GET") {
+      const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+      const { results: users } = await env.DB.prepare(
+        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
+      ).bind(tid).all();
+      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const dataBy = {};
+      for (const r of rows || []) {
+        try {
+          dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at };
+        } catch {
+        }
+      }
+      const invBy = {};
+      for (const r of invs || []) invBy[r.username] = r;
+      const out = [];
+      for (const u of users || []) {
+        const eff = effectiveCfg(cfg, u);
+        const d = dataBy[u.username] || { days: {}, at: null };
+        const inv = invBy[u.username];
+        const perDay = {};
+        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
+        out.push({
+          username: u.username,
+          name: displayName(u),
+          employment: u.employment_type || "Employed",
+          selfEmployed: isSelfEmployed(u),
+          cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
+          days: d.days,
+          perDay,
+          savedAt: d.at,
+          totals: weekTotals(d.days, eff),
+          invoice: inv ? {
+            id: inv.id,
+            number: inv.number,
+            total: inv.total,
+            at: inv.at,
+            url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
+          } : null
+        });
+      }
+      return json({ ok: true, week: monday, days: weekDays2(monday), users: out }, {}, env, request);
+    }
+    if (sub === "/admin/save" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr2(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf3(b.week);
+      if (await invoiceFor(env, tid, b.username, monday))
+        return error("That week is invoiced \u2014 delete the invoice first if it needs correcting.", 409, env, request);
+      const days = cleanDays(monday, b.days);
+      await env.DB.prepare(
+        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+      ).bind(tid, monday, b.username, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
+      return json({ ok: true }, {}, env, request);
+    }
+    if (sub === "/admin/config" && method === "GET") {
+      const { results: users } = await env.DB.prepare(
+        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
+      ).bind(tid).all();
+      return json({
+        ok: true,
+        defaults: cfg.defaults,
+        byUser: cfg.byUser,
+        users: (users || []).map((u) => ({
+          username: u.username,
+          name: displayName(u),
+          employment: u.employment_type || "Employed",
+          selfEmployed: isSelfEmployed(u),
+          effective: effectiveCfg(cfg, u)
+        }))
+      }, {}, env, request);
+    }
+    if (sub === "/admin/config" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (b.defaults && typeof b.defaults === "object") cfg.defaults = Object.assign({ ...DEFAULTS }, cfg.defaults, b.defaults);
+      if (b.byUser && typeof b.byUser === "object") {
+        for (const [u, v] of Object.entries(b.byUser)) {
+          if (v === null) {
+            delete cfg.byUser[u];
+            continue;
+          }
+          const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
+          for (const k of ["commute", "lunch", "mileage"]) if (k in v) mine[k] = v[k] === true;
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber"]) {
+            if (k in v) {
+              const n = parseFloat(v[k]);
+              if (isFinite(n) && n >= 0) mine[k] = n;
+              else delete mine[k];
+            }
+          }
+          if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
+          if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
+          if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
+        }
+      }
+      await saveCfg(env, tid, cfg);
+      return json({ ok: true }, {}, env, request);
+    }
+  }
+  return error("Unknown timesheet route: " + sub, 404, env, request);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -6836,6 +7610,8 @@ var ROUTES = [
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
+  ["*", "/ts", handle20],
+  // engineer timesheets + invoices + mileage
   ["*", "/get-sites", handle8],
   ["*", "/add-site", handle8],
   ["*", "/update-site", handle8],
@@ -7001,7 +7777,9 @@ var PUBLIC_ROUTES = [
   ["GET", "/sla/inbound"],
   // connection self-check (fingerprint only, no secret)
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
-  ["GET", "/sla/archive-file"]
+  ["GET", "/sla/archive-file"],
+  // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
+  ["GET", "/ts/invoice-file"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;

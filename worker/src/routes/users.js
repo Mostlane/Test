@@ -315,6 +315,7 @@ const PERMISSION_KEYS = [
   "SiteLog",       // access to SiteLog (site check-in/attendance)
   "OfficeClock",   // opt-in: desktop clock in/out timer for office staff
   "OfficeTimesheet",// view the weekly master office timesheet (all staff)
+  "EngTimesheet",  // engineer weekly timesheet (times + jobs; invoices if self-employed)
   "AssetAdmin",    // plant & equipment admin: sees ALL transfer documents + All Assets
   "ThemeColour",     // personalisation: may pick a portal colour theme
   "ThemeBackground", // personalisation: may change the menu background
