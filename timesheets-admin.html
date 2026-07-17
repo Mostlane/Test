@@ -234,13 +234,16 @@ async function poStatusCheck(){
     return bad("⚠️ <b>PO sites:</b> the worker on Cloudflare is an older build that doesn't have the PO code — paste the latest worker.js into mostlane-api and Deploy.");
   if(!r.ok&&http===403) return bad("PO status needs Timesheet admin access.");
   if(!r.bound) return bad("⚠️ <b>PO sites:</b> no <code>PO_DB</code> binding on mostlane-api. Dashboard → mostlane-api → Settings → Bindings → Add → D1 database → variable name <b>PO_DB</b> → database <b>mostlane-po</b> → Save, then Deploy.");
-  if(!r.discovered){
+  const vtag=" <span style='opacity:.65'>[page p7 · worker "+esc(r.build||"pre-w5 — paste the latest worker.js")+"]</span>";
+  const hasOrder=!!(r.orderSites&&r.orderSites.count);
+  if(!r.discovered&&!hasOrder){
     const t=(r.tables||[]).map(t=>`<b>${esc(t.name)}</b> (${esc((t.cols||[]).join(", "))})`).join(" · ")||"none visible";
-    return bad("⚠️ <b>PO sites:</b> connected to the PO database, but no site list was recognised in it. Show Claude this line — tables found: "+t);
+    return bad("⚠️ <b>PO sites:</b> connected to the PO database, but nothing site-shaped was recognised in it. Show Claude this line — tables found: "+t+vtag);
   }
-  const vtag=" <span style='opacity:.65'>[page p6 · worker "+esc(r.build||"pre-w5 — paste the latest worker.js")+"]</span>";
-  let msg="✅ <b>PO sites connected</b> — reading “"+esc(r.discovered.table)+"”"+(r.samples&&r.samples.length?". Examples: "+esc(r.samples.slice(0,3).join(" · ")):"")+".";
-  if(r.orderSites&&r.orderSites.count)msg+=" Plus "+r.orderSites.count+" site names from the POs themselves (“"+esc(r.orderSites.table)+"”), e.g. "+esc((r.orderSites.samples||[]).join(" · "))+".";
+  let msg="✅ <b>PO sites connected</b>";
+  if(r.discovered)msg+=" — reading “"+esc(r.discovered.table)+"”"+(r.samples&&r.samples.length?". Examples: "+esc(r.samples.slice(0,3).join(" · ")):"")+".";
+  else msg+=" — this PO database keeps its site names on the PO records rather than a separate site list, which is fine.";
+  if(hasOrder)msg+=" Reading "+r.orderSites.count+" site names from the POs (“"+esc(r.orderSites.table)+"”), e.g. "+esc((r.orderSites.samples||[]).join(" · "))+".";
   else if(r.build)msg+=" ⚠️ No site names could be read off the PO records though — show Claude this: tables "+esc(JSON.stringify((r.tables||[]).map(t=>t.name)));
   good(msg+vtag);
 }

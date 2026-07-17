@@ -305,7 +305,14 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   the PO rows themselves (poOrderDiscover/poOrderSiteNames: po/purchase/order
   table, columnar `site` col or JSON rows, last 800 rows deduped, 5-min
   isolate cache) — plenty of PO sites exist ONLY as text on POs (e.g.
-  "Lakeside Surgery, Verwood"); /ts/po-status reports both discoveries. The admin
+  "Lakeside Surgery, Verwood"); /ts/po-status reports both discoveries.
+  RESOLVED 18 Jul: the original "PO sites don't suggest" saga was a WRONG
+  BINDING — Jamie had PO_DB pointed at the `mostlane` (portal) D1, so
+  discovery kept "working" against the portal (the tables[] list in the
+  status line is how it was caught — it showed eng_timesheets etc.). Correct
+  binding = database `mostlane-po`. That DB has NO recognisable sites table —
+  its site names live ONLY on the PO rows (orderSites discovery), which the
+  status line reports as healthy (green, "site names on the PO records"). The admin
   Settings column for the mileage switch is labelled **"Fuel (mileage)"** —
   that's Jamie's word for it. **PO sites (17 Jul)**: portal→PO site sync is
   add-only, so sites created inside the PO system never reach the portal —
