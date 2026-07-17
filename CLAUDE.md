@@ -299,7 +299,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   the jobs-box suggestion chips: sites.job_number (the project job numbers the
   PO system mirrors — no PO-worker call needed) + open sla_jobs refs. The admin
   Settings column for the mileage switch is labelled **"Fuel (mileage)"** —
-  that's Jamie's word for it. **Mileage**: engineer picks
+  that's Jamie's word for it. **PO sites (17 Jul)**: portal→PO site sync is
+  add-only, so sites created inside the PO system never reach the portal —
+  /ts/sites + /ts/jobs therefore ALSO read the PO system's own D1 via an
+  OPTIONAL **PO_DB binding** (dashboard → mostlane-api → Bindings → D1 →
+  variable `PO_DB` → database `mostlane-po`). The PO schema isn't in this
+  repo, so timesheets.js **discovers** the site table at runtime
+  (sqlite_master + PRAGMA; needs a name col + postcode/job col; site/store/
+  branch table names score higher; cached per isolate; fails soft to
+  portal-only when unbound). **GET /ts/po-status** (admin) shows bound +
+  what was discovered — check it if PO suggestions look wrong. **Mileage**: engineer picks
   a site (GET /ts/sites suggests name+postcode from the sites table) or types a
   postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
   worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,
@@ -502,7 +511,8 @@ SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN** (secrets); EMAIL
 **VAPID_PUBLIC**, optionally **PUSH_CONTACT** (mailto: for VAPID sub) /
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
-(mostlane). After changing dashboard secrets you must hit Deploy.
+(mostlane) + OPTIONAL PO_DB (mostlane-po — PO-site suggestions on the
+engineer timesheet). After changing dashboard secrets you must hit Deploy.
 
 ## Push notifications (Web Push — routes/push.js + lib/webpush.js + sw.js)
 Phase 1 (plumbing + test) + Phase 2 (real events + all-staff) DONE. Real OS

@@ -7163,6 +7163,67 @@ async function isTsAdmin(env, tid, sess) {
   const p = await permissionsFor(env, tid, sess.user.username);
   return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
 }
+var PO_MAP;
+async function poDiscover(env) {
+  if (!env.PO_DB) return null;
+  if (PO_MAP !== void 0) return PO_MAP;
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'"
+    ).all();
+    let best = null;
+    for (const t of results || []) {
+      const tbl = String(t.name);
+      let cols = [];
+      try {
+        cols = (await env.PO_DB.prepare(`PRAGMA table_info("${tbl.replace(/"/g, "")}")`).all()).results || [];
+      } catch {
+        continue;
+      }
+      const names = cols.map((c) => String(c.name));
+      const lower = names.map((n) => n.toLowerCase());
+      const pick = (...cands) => {
+        for (const c of cands) {
+          const i = lower.indexOf(c);
+          if (i >= 0) return names[i];
+        }
+        for (const c of cands) {
+          const i = lower.findIndex((n) => n.includes(c));
+          if (i >= 0) return names[i];
+        }
+        return null;
+      };
+      const nameCol = pick("site_name", "sitename", "site", "store", "branch", "name");
+      const pcCol = pick("postcode", "post_code", "postal_code", "zip");
+      const jobCol = pick("job_number", "jobnumber", "job_no", "jobno", "job");
+      if (!nameCol || !pcCol && !jobCol) continue;
+      const score = (pcCol ? 2 : 0) + (jobCol ? 1 : 0) + (/site|store|branch/i.test(tbl) ? 3 : 0);
+      if (!best || score > best.score) best = { table: tbl, nameCol, pcCol, jobCol, score };
+    }
+    PO_MAP = best;
+  } catch {
+    PO_MAP = null;
+  }
+  return PO_MAP;
+}
+async function poSiteRows(env, like, limit) {
+  const m = await poDiscover(env);
+  if (!m) return [];
+  try {
+    const cols = [`"${m.nameCol}" AS name`];
+    if (m.pcCol) cols.push(`"${m.pcCol}" AS pc`);
+    if (m.jobCol) cols.push(`"${m.jobCol}" AS job`);
+    const where = [`"${m.nameCol}" LIKE ?1`];
+    if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
+    if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
+    const { results } = await env.PO_DB.prepare(
+      `SELECT ${cols.join(", ")} FROM "${m.table}" WHERE ${where.join(" OR ")} LIMIT ${Math.max(1, Math.min(30, limit))}`
+    ).bind(like).all();
+    return results || [];
+  } catch {
+    return [];
+  }
+}
 async function lookupPostcode(pc) {
   const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
     headers: { "Accept": "application/json" },
@@ -7367,11 +7428,25 @@ async function handle20(request, env, ctx, url, sess) {
     const { results } = await env.DB.prepare(
       "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
     ).bind(tid, like, like, like).all();
-    return json({ ok: true, sites: (results || []).map((s) => ({
+    const sites = (results || []).map((s) => ({
       name: s.site_name || "Site " + s.site_number,
       code: s.site_number,
       postcode: (s.postcode || "").replace(/\*+$/, "")
-    })) }, {}, env, request);
+    }));
+    const seen = new Set(sites.map((s) => s.name.trim().toLowerCase()));
+    for (const r of await poSiteRows(env, like, 15)) {
+      const name = String(r.name || "").trim();
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      sites.push({ name, code: r.job != null ? String(r.job) : "", postcode: String(r.pc || "").toUpperCase(), source: "po" });
+      if (sites.length >= 25) break;
+    }
+    return json({ ok: true, sites }, {}, env, request);
+  }
+  if (sub === "/po-status" && method === "GET") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const m = await poDiscover(env);
+    return json({ ok: true, bound: !!env.PO_DB, discovered: m ? { table: m.table, nameCol: m.nameCol, pcCol: m.pcCol, jobCol: m.jobCol } : null }, {}, env, request);
   }
   if (sub === "/jobs" && method === "GET") {
     const term = String(q.get("q") || "").trim();
@@ -7390,6 +7465,17 @@ async function handle20(request, env, ctx, url, sess) {
         "SELECT job_number, site_name, client FROM sites WHERE tenant_id=? AND active=1 AND job_number IS NOT NULL AND job_number!='' AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
       ).bind(tid, like, like).all();
       for (const r of results || []) jobs.push({ ref: String(r.job_number), label: r.job_number + " \u2014 " + (r.site_name || r.client || "site"), kind: "project" });
+    } catch {
+    }
+    try {
+      const seen = new Set(jobs.map((j) => String(j.ref).toLowerCase()));
+      for (const r of await poSiteRows(env, like, 8)) {
+        if (r.job == null || r.job === "") continue;
+        const ref = String(r.job);
+        if (seen.has(ref.toLowerCase())) continue;
+        seen.add(ref.toLowerCase());
+        jobs.push({ ref, label: ref + " \u2014 " + String(r.name || "PO site").slice(0, 48), kind: "po" });
+      }
     } catch {
     }
     const T = term.toLowerCase();
