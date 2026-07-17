@@ -1038,7 +1038,7 @@ function onAction(e){
     if(job) window.MLJobEdit.open(job, { onSaved: () => loadJobs() });
   }
   else if(a === "sheet") openPdfModal(id);
-  else if(a === "view") location.href = "job-view.html?jobId=" + encodeURIComponent(id);
+  else if(a === "view") location.href = "job-view.html?jobId=" + encodeURIComponent(id) + "&back=sla-main.html";
 }
 
 function init(){

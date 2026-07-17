@@ -440,7 +440,7 @@
     .status-chip .chip-e{ font-size:20px; }
 
     /* the three big body actions → full-width bright buttons */
-    #saveBtn, #uploadBtn, #openSignatureBtn{
+    #saveBtn, #openSignatureBtn{
       width:100%; min-height:54px; border-radius:14px; font-size:16.5px; font-weight:750; gap:8px; margin-top:12px;
     }
 
@@ -619,9 +619,8 @@
     </p>
 
 <div class="photo-upload-mobile">
-  <label for="photoInput" class="photo-pick-btn">📷 Add photos</label>
+  <label for="photoInput" class="photo-pick-btn" id="photoPickBtn">📷 Add photos</label>
   <input type="file" id="photoInput" accept="image/*" multiple hidden>
-  <button class="btn primary" id="uploadBtn">Upload selected</button>
 </div>
     <div id="photoUploadStatus">No photos uploaded in this session yet.</div>
 
@@ -1541,9 +1540,19 @@ function init(){
   // in-app history to go back to (e.g. opened fresh from a push notification).
   const backBtn = $("backBtn");
   if(backBtn){
-    backBtn.addEventListener("click", e => {
-      if(history.length > 1){ e.preventDefault(); history.back(); }
-    });
+    // Where we came from: an explicit ?back= (set by the dashboard / My Jobs
+    // when they open a job) wins; else the referrer; else My Jobs. We do NOT
+    // use history.back() — the Site Documents round-trip leaves job⇄site-folder
+    // in history, and history.back() there ping-ponged (the "loop").
+    const bp = new URLSearchParams(location.search).get("back") || "";
+    const safe = d => /^(sla-main|engineer-jobs|my-day)\.html/.test(d || "");
+    let dest = safe(bp) ? bp : "";
+    if(!dest){
+      const r = document.referrer || "";
+      dest = /sla-main\.html/.test(r) ? "sla-main.html" : "engineer-jobs.html";
+    }
+    backBtn.setAttribute("href", dest);
+    backBtn.addEventListener("click", e => { e.preventDefault(); location.href = dest; });
   }
   buildStatusChips();
   $("noteInput").addEventListener("input", updateSaveButton);
@@ -1562,13 +1571,10 @@ $("clearSig").addEventListener("click", () => {
 });
 $("saveSig").addEventListener("click", saveSignature);
 
-  // Photo upload
-  $("uploadBtn").addEventListener("click", async () => {
+  // Photos upload the moment they're picked — no separate "Upload" button.
+  async function uploadPhotos(){
     const files = $("photoInput").files;
-    if(!files || !files.length){
-      $("photoUploadStatus").textContent = "❌ Please select at least one photo.";
-      return;
-    }
+    if(!files || !files.length) return;
 
     const jobId = job?.id;
     if(!jobId){
@@ -1576,35 +1582,24 @@ $("saveSig").addEventListener("click", saveSignature);
       return;
     }
 
-    $("uploadBtn").disabled = true;
-    $("uploadBtn").textContent = "Uploading…";
-    $("photoUploadStatus").textContent = "Uploading photos…";
+    const pick = $("photoPickBtn");
+    const pickText = pick ? pick.textContent : "";
+    if(pick){ pick.style.pointerEvents = "none"; pick.style.opacity = ".6"; pick.textContent = "⏳ Uploading…"; }
+    $("photoUploadStatus").textContent = `Uploading ${files.length} photo(s)…`;
 
-    let successCount = 0;
-    let failCount = 0;
-
+    let successCount = 0, failCount = 0;
     for(const file of files){
       try{
         const form = new FormData();
         form.append("file", file, file.name);
-
         const url = `${SLA_API}/jobs/${encodeURIComponent(jobId)}/files?filename=${encodeURIComponent(file.name)}`;
         const res = await fetch(url, { method:"POST", body:form });
-        if(!res.ok){
-          failCount++;
-          continue;
-        }
-
+        if(!res.ok){ failCount++; continue; }
         const data = await res.json();
         if(data && data.ok && data.publicURL){
-          photoGallery.push({
-            url: data.publicURL,
-            name: file.name
-          });
+          photoGallery.push({ url: data.publicURL, name: file.name });
           successCount++;
-        }else{
-          failCount++;
-        }
+        }else{ failCount++; }
       }catch(err){
         console.error("Photo upload error", err);
         failCount++;
@@ -1616,15 +1611,15 @@ $("saveSig").addEventListener("click", saveSignature);
     if(successCount && !failCount){
       $("photoUploadStatus").textContent = `✅ ${successCount} photo(s) uploaded.`;
     }else if(successCount && failCount){
-      $("photoUploadStatus").textContent = `⚠️ ${successCount} uploaded, ${failCount} failed.`;
+      $("photoUploadStatus").textContent = `⚠️ ${successCount} uploaded, ${failCount} failed — tap 📷 to retry the rest.`;
     }else{
-      $("photoUploadStatus").textContent = "❌ Upload failed.";
+      $("photoUploadStatus").textContent = "❌ Upload failed — check signal and tap 📷 to try again.";
     }
 
-    $("uploadBtn").disabled = false;
-    $("uploadBtn").textContent = "Upload Photos";
-    $("photoInput").value = "";
-  });
+    if(pick){ pick.style.pointerEvents = ""; pick.style.opacity = ""; pick.textContent = pickText || "📷 Add photos"; }
+    $("photoInput").value = "";   // let the same file be re-picked if needed
+  }
+  $("photoInput").addEventListener("change", uploadPhotos);
 
   // Photo modal events
   $("photoModalClose").addEventListener("click", closePhotoModal);
