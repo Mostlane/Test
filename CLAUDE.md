@@ -281,6 +281,9 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (page: **engineer-timesheet.html**, tile "⏱️ My Timesheet", NEW permission
   **EngTimesheet**); admin (**timesheets-admin.html**, tile "🧾 Engineer
   Timesheets", existing TimesheetAdmin|FullAccess perm) sees everyone's week.
+  EVERYTHING AUTOSAVES (Jamie's rule: no manual save buttons on any timesheet
+  page) — debounced ~1s, instant on taps, 8s retry loop, keepalive flush on
+  pagehide, flush before week-nav/modal close; status text shows Saved ✓.
   Per-user deduction switches (app_config `engts:cfg:<tid>` — no schema churn):
   **commute** (30 min each way, shown greyed/read-only on the engineer's page),
   **lunch** (30 min on days ≥ 6 h), **mileage** allowed, rate (£/hour or /day),
