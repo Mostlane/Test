@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=4"></script>
+  <script src="sla-jobedit.js?v=5"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -591,6 +591,7 @@ function render(){
     // in the reference field would otherwise show that text as a giant grey
     // "reference" box — suppress it when it's clearly not a ticket number.
     const ref = (rawRef.length <= 24) ? esc(rawRef) : "";
+    const name = esc((window.mlJobName && window.mlJobName(j)) || j.siteName || j.siteCode || "");
     const colour = STATUS_COLOUR[j.status] || "#9ca3af";
     const sched = fmtSched(j);
     const engs = (j.assignedEngineers||[]);
@@ -609,7 +610,7 @@ function render(){
       </td>
       <td class="nowrap">${prShort(j.priority)}</td>
       <td>
-        <div>${site}</div>
+        <div>${name || site}</div>
         <div class="small muted">${addr}</div>
       </td>
       <td class="nowrap small">
@@ -636,7 +637,7 @@ function render(){
         ${ref ? `<span class="ref">${ref}</span> ` : ""}<span class="cam" data-cam="${esc(j.id)}"></span>
         <span class="small nowrap">${prShort(j.priority)}</span>
       </div>
-      <div class="mjob-title" data-action="view">${site || "(no site)"}</div>
+      <div class="mjob-title" data-action="view">${name || site || "(no site)"}</div>
       ${addr ? `<div class="small muted">${addr}</div>` : ""}
       <div class="mjob-meta">
         <span class="dot" style="background:${colour}"></span>${esc(j.status)}
