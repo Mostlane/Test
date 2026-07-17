@@ -222,30 +222,43 @@ g("cfgBtn").onclick=async()=>{
   g("cfgOv").classList.add("show");
   poStatusCheck();
 };
-// Plain-English health check of the PO-site suggestions (worker build,
-// PO_DB binding, and whether a site table was recognised in the PO database).
+// Tick-list health check of the three suggestion sources: portal sites,
+// the PO system, and the compliance store lists. Detail only shows on a ❌.
 async function poStatusCheck(){
   const el=g("poStatus");
-  let r=null,http=0;
-  try{const resp=await authFetchTO("/ts/po-status");http=resp.status;r=await resp.json();}catch(e){}
-  const bad=(m)=>{el.style.background="#fef2f2";el.style.borderColor="#fecaca";el.innerHTML=m;};
-  const good=(m)=>{el.style.background="#ecfdf5";el.style.borderColor="#a7f3d0";el.innerHTML=m;};
-  if(!r||(http===404)||(r.error&&/unknown timesheet route/i.test(r.error||"")))
-    return bad("⚠️ <b>PO sites:</b> the worker on Cloudflare is an older build that doesn't have the PO code — paste the latest worker.js into mostlane-api and Deploy.");
-  if(!r.ok&&http===403) return bad("PO status needs Timesheet admin access.");
-  if(!r.bound) return bad("⚠️ <b>PO sites:</b> no <code>PO_DB</code> binding on mostlane-api. Dashboard → mostlane-api → Settings → Bindings → Add → D1 database → variable name <b>PO_DB</b> → database <b>mostlane-po</b> → Save, then Deploy.");
-  const vtag=" <span style='opacity:.65'>[page p7 · worker "+esc(r.build||"pre-w5 — paste the latest worker.js")+"]</span>";
-  const hasOrder=!!(r.orderSites&&r.orderSites.count);
-  if(!r.discovered&&!hasOrder){
-    const t=(r.tables||[]).map(t=>`<b>${esc(t.name)}</b> (${esc((t.cols||[]).join(", "))})`).join(" · ")||"none visible";
-    return bad("⚠️ <b>PO sites:</b> connected to the PO database, but nothing site-shaped was recognised in it. Show Claude this line — tables found: "+t+vtag);
+  const CW="https://mostlane-pos.jamie-def.workers.dev/Compliance/combined";
+  let r=null,http=0,portal=null,storesN=null;
+  const results=await Promise.allSettled([
+    authFetchTO("/ts/po-status").then(async resp=>{http=resp.status;r=await resp.json();}),
+    authFetchTO("/ts/sites?q=a").then(x=>x.json()).then(x=>{portal=(x&&x.sites||[]).filter(s=>!s.source).length;}),
+    Promise.race([fetch(CW),new Promise((_,rej)=>setTimeout(()=>rej(new Error("t")),9000))])
+      .then(x=>x.json()).then(j=>{storesN=0;for(const k of Object.keys(j||{}))if(Array.isArray(j[k]))storesN+=j[k].length;})
+  ]);
+  const row=(name,ok,note)=>`<div style="display:flex;gap:8px;align-items:baseline;margin:2px 0"><span style="min-width:110px"><b>${name}</b></span><span>${ok?"✅":"❌"}</span><span class="muted" style="font-size:12px">${note||""}</span></div>`;
+  // Portal sites
+  const pOk=portal!=null&&portal>0;
+  let rows=row("Portal sites",pOk,pOk?"":"couldn't load the portal site list — check your connection and try again");
+  // PO system
+  let poOk=false,poNote="";
+  if(!r||http===404||(r&&r.error&&/unknown timesheet route/i.test(r.error||""))){poNote="the worker on Cloudflare is an older build — paste the latest worker.js and Deploy";}
+  else if(!r.ok&&http===403){poNote="needs Timesheet admin access";}
+  else if(!r.bound){poNote="no <code>PO_DB</code> binding on mostlane-api (Settings → Bindings → D1 → variable <b>PO_DB</b> → database <b>mostlane-po</b>)";}
+  else{
+    const hasOrder=!!(r.orderSites&&r.orderSites.count);
+    if(r.discovered||hasOrder){
+      poOk=true;
+      poNote=hasOrder?(r.orderSites.count+" site names from your POs"+(r.discovered?" + a site list":"")):"site list";
+    } else poNote="connected but nothing site-shaped recognised — show Claude this: tables "+esc(JSON.stringify((r.tables||[]).map(t=>t.name)));
   }
-  let msg="✅ <b>PO sites connected</b>";
-  if(r.discovered)msg+=" — reading “"+esc(r.discovered.table)+"”"+(r.samples&&r.samples.length?". Examples: "+esc(r.samples.slice(0,3).join(" · ")):"")+".";
-  else msg+=" — this PO database keeps its site names on the PO records rather than a separate site list, which is fine.";
-  if(hasOrder)msg+=" Reading "+r.orderSites.count+" site names from the POs (“"+esc(r.orderSites.table)+"”), e.g. "+esc((r.orderSites.samples||[]).join(" · "))+".";
-  else if(r.build)msg+=" ⚠️ No site names could be read off the PO records though — show Claude this: tables "+esc(JSON.stringify((r.tables||[]).map(t=>t.name)));
-  good(msg+vtag);
+  rows+=row("PO system",poOk,poNote);
+  // Store lists (compliance worker)
+  const sOk=storesN!=null&&storesN>0;
+  rows+=row("Store lists",sOk,sOk?(storesN+" stores"):"couldn't reach the store lists (mostlane-pos worker)");
+  const allOk=pOk&&poOk&&sOk;
+  el.style.background=allOk?"#ecfdf5":"#fef2f2";
+  el.style.borderColor=allOk?"#a7f3d0":"#fecaca";
+  el.innerHTML=`<div style="margin-bottom:2px"><b>Site &amp; job suggestions</b></div>`+rows+
+    `<div style="opacity:.55;font-size:11px;margin-top:3px">[page p8 · worker ${esc((r&&r.build)||"pre-w5")}]</div>`;
 }
 g("cfgSave").onclick=async()=>{
   const byUser={};
