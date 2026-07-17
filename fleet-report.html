@@ -340,6 +340,24 @@ async function saveReport(){
 }
 window.saveReport=saveReport;
 
+// Download the report as a self-contained interactive .html file (same content
+// that gets saved to the portal — CSS inlined + the collapsible sections work
+// offline). No server round-trip; saves straight to the user's device.
+function downloadReport(){
+  if(!window.__lastReport){ return; }
+  try{
+    const blob=new Blob([buildStandalone()],{type:"text/html"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=String(window.__lastReport.title||"Fleet report").replace(/[–—]/g,"-").replace(/[\/\\:*?"<>|]+/g,"-").replace(/\s+/g," ").trim()+".html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    const msg=$("saveMsg"); if(msg)msg.textContent="✓ HTML file downloaded";
+  }catch(e){ const msg=$("saveMsg"); if(msg)msg.textContent="Download failed"; }
+}
+window.downloadReport=downloadReport;
+
 // Push the report's door-to-door hours into the Van Timesheet (per week).
 async function saveTimesheet(){
   const R=window.__reportData; if(!R){ return; }
@@ -541,6 +559,7 @@ function renderReport(R){
 
   const bar=`<div class="container"><div style="margin:6px 0 26px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
     <button class="btn" onclick="saveReport()">💾 Save to portal</button>
+    <button class="btn grey" onclick="downloadReport()">⬇️ Export HTML file</button>
     <button class="btn" onclick="saveTimesheet()">🕐 Save van timesheet</button>
     <a class="btn grey" href="/van-timesheet.html" target="_blank" rel="noopener" style="text-decoration:none">Open Van Timesheet</a>
     <button class="btn grey" onclick="location.reload()">↻ New report</button>
