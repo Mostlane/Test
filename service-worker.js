@@ -2,7 +2,7 @@
 // Single canonical SW (scope "/"). Registering this replaces any earlier SW at
 // the same scope (the old push-only service-worker.js), so there's just one.
 
-const CACHE_NAME = "mostlane-v6";
+const CACHE_NAME = "mostlane-v7";
 
 // Precache the shell so the app can at least boot on a dead/flaky connection.
 const CORE_ASSETS = [
