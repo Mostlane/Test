@@ -515,8 +515,10 @@
       </div>
     </div>
 
-    <!-- Description is kept in the Edit box (✏️ Edit details); not shown here. -->
-    <div class="field-value" id="jobDesc" hidden></div>
+    <div style="margin-top:12px;">
+      <div class="field-label">Description of works</div>
+      <div class="field-value" id="jobDesc" style="font-size:14.5px;line-height:1.55;white-space:pre-wrap;">—</div>
+    </div>
   </div>
 
   <!-- SITE DETAILS -->
@@ -811,8 +813,17 @@ function renderJob(){
   $("jobRef").textContent = shortRef || "—";
   $("jobSite").textContent = name || site || "—";
 
-  const desc = job.description || job.rawPayload?.description || "—";
-  $("jobDesc").textContent = desc;
+  // Show the actual works/fault text. On new & migrated jobs it lives in
+  // `description` (the reference is a clean "Number - Site"); on legacy jobs the
+  // fault is still in `helpdeskRef` and the description holds the store — so
+  // pick whichever field is the real fault text.
+  const worksText = () => {
+    const d = String(job.description || job.rawPayload?.description || "").trim();
+    const r = String(job.helpdeskRef || "").trim();
+    if (/^[0-9][0-9./-]*\s+-\s+\S/.test(r)) return d;   // clean ref → works is the description
+    return (r.length >= d.length) ? r : d;              // legacy → works is the longer field
+  };
+  $("jobDesc").textContent = worksText() || "—";
 
   const priorityRaw = (job.priority || "P4").toString().toUpperCase();
   $("jobPriority").textContent = priorityRaw;
