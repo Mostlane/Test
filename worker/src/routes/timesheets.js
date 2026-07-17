@@ -182,7 +182,8 @@ async function isTsAdmin(env, tid, sess) {
 // ── Mileage estimate (postcodes.io + haversine × road factor) ────────────────
 async function lookupPostcode(pc) {
   const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
-    headers: { "Accept": "application/json" } });
+    headers: { "Accept": "application/json" },
+    cf: { cacheTtl: 30 * 86400, cacheEverything: true } });   // postcodes don't move — cache at the edge
   if (!r.ok) return null;
   const j = await r.json().catch(() => null);
   const res = j && j.result;
