@@ -295,7 +295,11 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   the PDF, stores R2 `invoices/<tid>/<user>/INV-<n>-<week>.pdf`, and LOCKS the
   week (saves 409 until admin deletes the invoice via /ts/invoice/delete).
   Retrieval: GET /ts/invoices (own; admin ?u=all), signed URLs → **GET
-  /ts/invoice-file** (PUBLIC_ROUTES, sig-verified). **Mileage**: engineer picks
+  /ts/invoice-file** (PUBLIC_ROUTES, sig-verified). **GET /ts/jobs?q=** feeds
+  the jobs-box suggestion chips: sites.job_number (the project job numbers the
+  PO system mirrors — no PO-worker call needed) + open sla_jobs refs. The admin
+  Settings column for the mileage switch is labelled **"Fuel (mileage)"** —
+  that's Jamie's word for it. **Mileage**: engineer picks
   a site (GET /ts/sites suggests name+postcode from the sites table) or types a
   postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
   worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,

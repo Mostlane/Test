@@ -30,6 +30,8 @@
   .jobs{flex:1}
   .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f1f5f9;border:1px solid var(--line);border-radius:999px;padding:3px 9px}
   .ded.off{opacity:.45;text-decoration:line-through}
+  .sugrow{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 6px}
+  .sug{appearance:none;border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mi{border-top:1px dashed var(--line);margin-top:8px;padding-top:8px}
   .mirow{display:flex;gap:6px;align-items:center;margin:6px 0}
   .mirow input.site{flex:2.2;min-width:0}
@@ -256,6 +258,35 @@ async function saveWeek(){
   if(r&&r.ok){g("saveState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});}
   else{g("saveState").textContent="";alert((r&&r.error)||"Couldn't save — check your signal and try again.");}
 }
+
+// ── Job suggestions (project job numbers + live SLA jobs) ────────────────────
+// Suggests for the part being typed after the last comma, so several jobs can
+// be entered in one box; tapping a chip drops the job number in.
+let jobTimer=null;
+function hideAllSug(){document.querySelectorAll(".sugrow").forEach(el=>el.remove());}
+document.addEventListener("input",e=>{
+  if(!e.target.classList||!e.target.classList.contains("jobs"))return;
+  const inp=e.target;
+  const token=inp.value.split(",").pop().trim();
+  clearTimeout(jobTimer);
+  if(token.length<2){hideAllSug();return;}
+  jobTimer=setTimeout(async()=>{
+    const r=await authFetchTO("/ts/jobs?q="+encodeURIComponent(token)).then(r=>r.json()).catch(()=>null);
+    hideAllSug();
+    if(!r||!r.jobs||!r.jobs.length||document.activeElement!==inp)return;
+    const div=document.createElement("div");div.className="sugrow";
+    div.innerHTML=r.jobs.slice(0,6).map(j=>`<button type="button" class="sug" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
+    inp.closest(".row").after(div);
+    div.addEventListener("mousedown",ev=>{
+      const b=ev.target.closest(".sug");if(!b)return;
+      ev.preventDefault();
+      const parts=inp.value.split(",");parts[parts.length-1]=b.dataset.ref;
+      inp.value=parts.map(s=>s.trim()).filter(Boolean).join(", ");
+      hideAllSug();inp.focus();
+    });
+  },250);
+});
+document.addEventListener("focusin",e=>{if(!e.target.classList||!e.target.classList.contains("jobs"))hideAllSug();});
 
 // ── Site suggestions + mileage estimate ──────────────────────────────────────
 let siteTimer=null;

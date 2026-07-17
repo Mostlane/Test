@@ -87,7 +87,7 @@
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
   <h2>⚙️ Timesheet settings</h2>
-  <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). Tick <b>Mileage</b> for self-employed engineers who claim mileage. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
+  <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). <b>Fuel</b> is the per-person switch for whether they get paid mileage — tick it for the self-employed engineers who claim fuel, and set their pence per mile. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
   <div class="defs" id="defs"></div>
   <div style="max-height:52vh;overflow:auto"><table class="cfgTable" id="cfgTable"></table></div>
   <div class="foot"><button class="btn" onclick="document.getElementById('cfgOv').classList.remove('show')">Cancel</button>
@@ -203,7 +203,7 @@ g("cfgBtn").onclick=async()=>{
     <label>Default mileage (p/mile) <input type="number" id="d-ppm" value="${r.defaults.pencePerMile}" style="width:80px"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
-  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Mileage</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
     r.users.map(u=>{
       const o=(r.byUser&&r.byUser[u.username])||{};
       const e=u.effective;
