@@ -37,6 +37,48 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson(request)), headers);
   }
 
+  /* GET /sla/categories — custom job categories (any session, so every page can
+     merge them into its status list). POST — replace the whole list (SLA admin). */
+  if (subpath === "/categories") {
+    if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson(request);
+      const list = Array.isArray(body?.categories) ? body.categories : [];
+      return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
+    }
+  }
+
+  /* POST /sla/categories/delete — remove a category. Any jobs still in it are
+     first moved to `moveTo` (a built-in status or another category), so nothing
+     is orphaned. {name, moveTo}. */
+  if (subpath === "/categories/delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!(await isSlaAdmin(env, tenantId, sess))) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson(request);
+    const name = String(body?.name || "").trim();
+    const moveTo = String(body?.moveTo || "Pending").trim() || "Pending";
+    if (!name) return jsonResponse({ error: "name required" }, headers, 400);
+    const who = (sess.user && sess.user.username) || "system";
+    const now = new Date().toISOString();
+    const jobs = await listJobs(env, tenantId);
+    let moved = 0;
+    for (const job of jobs) {
+      if (String(job.status || "").toLowerCase() !== name.toLowerCase()) continue;
+      job.status = moveTo;
+      job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+      job.statusHistory.push({ status: moveTo, at: now, by: who });
+      if (moveTo === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      moved++;
+    }
+    const cats = (await getCategories(env, tenantId)).filter(c => c.name.toLowerCase() !== name.toLowerCase());
+    await setCategories(env, tenantId, cats);
+    return jsonResponse({ ok: true, moved, categories: cats }, headers);
+  }
+
   /* POST /sla/inbound — machine-to-machine job intake (the Zapier email
      parser). PUBLIC route (no portal session): guarded by the JOBS_INBOUND_TOKEN
      secret sent as "Authorization: Bearer <token>". Same create/update logic as
@@ -126,7 +168,8 @@ export async function handle(request, env, ctx, url, sess) {
     const overdueFilter = searchParams.get("overdue");
     const siteCodeFilter = searchParams.get("siteCode");
     if (statusFilter) {
-      const s = normalizeStatus(statusFilter).toLowerCase();
+      const catNames = (await getCategories(env, tenantId)).map(c => c.name);
+      const s = normalizeStatus(statusFilter, catNames).toLowerCase();
       jobs = jobs.filter(j => j.status.toLowerCase() === s);
     }
     if (priorityFilter) jobs = jobs.filter(j => j.priority === priorityFilter);
@@ -804,13 +847,19 @@ const CANONICAL_STATUSES = [
   "Complete","On Hold","Closed Jobs","Invoiced","Order","Quote"
 ];
 
-function normalizeStatus(status) {
+// `extra` = the tenant's custom category NAMES (strings). A job explicitly set
+// to one of them (from the UI) must keep that exact status instead of collapsing
+// to "Pending". Built-in aliases still map. Truly-unknown statuses (e.g. odd
+// inbound values) still default to "Pending" so garbage never leaks onto the
+// board.
+function normalizeStatus(status, extra) {
   if (!status) return "Pending";
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
   if (s === "closed" || s === "cancelled") return "Closed Jobs";
-  return CANONICAL_STATUSES.find(x => x.toLowerCase() === s) || "Pending";
+  const all = (Array.isArray(extra) && extra.length) ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
+  return all.find(x => x.toLowerCase() === s) || "Pending";
 }
 
 /* ================= ASSIGNMENT ================= */
@@ -917,7 +966,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const existing = await getJob(env, tenantId, id);
   const now = new Date().toISOString();
 
-  let status = normalizeStatus(body.status || existing?.status);
+  const catNames = (await getCategories(env, tenantId)).map(c => c.name);
+  let status = normalizeStatus(body.status || existing?.status, catNames);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
@@ -1041,7 +1091,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.travelStartMileage !== undefined) job.travelStartMileage = patch.travelStartMileage;  // per-job mileage
 
   if (patch.status) {
-    const s = normalizeStatus(patch.status);
+    const catNames = (await getCategories(env, tenantId)).map(c => c.name);
+    const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
       job.status = s;
       job.statusHistory.push({ status: s, at: now, by: patch.changedBy || "system" });
@@ -1343,6 +1394,51 @@ async function setConfig(env, tenantId, body) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(merged)).run();
   return merged;
+}
+
+/* Custom job categories (extra statuses defined by the office). Stored in
+   app_config key 'sla_categories' as [{name, colour}]. They behave exactly like
+   built-in statuses everywhere (chips, filters, mark-as, job-view). A custom
+   name may never shadow a built-in status, and duplicates collapse. */
+async function getCategories(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_categories'").bind(tenantId).first();
+  let cats;
+  try { cats = row ? JSON.parse(row.value) : []; } catch { cats = []; }
+  if (!Array.isArray(cats)) cats = [];
+  const seen = new Set();
+  const out = [];
+  for (const c of cats) {
+    const name = String((c && c.name) || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    if (CANONICAL_STATUSES.some(s => s.toLowerCase() === key)) continue;
+    seen.add(key);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String((c && c.colour) || "")) ? c.colour : "#64748b";
+    out.push({ name, colour, done: !!(c && c.done) });
+  }
+  return out;
+}
+
+async function setCategories(env, tenantId, list) {
+  const seen = new Set();
+  const clean = [];
+  for (const c of (Array.isArray(list) ? list : [])) {
+    const name = String((c && c.name) || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    if (CANONICAL_STATUSES.some(s => s.toLowerCase() === key)) continue;   // never shadow a built-in
+    seen.add(key);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String((c && c.colour) || "")) ? c.colour : "#64748b";
+    clean.push({ name, colour, done: !!(c && c.done) });
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_categories', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
 }
 
 /* ================= FILES (R2) + PDF ================= */

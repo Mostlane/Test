@@ -171,6 +171,22 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   (notification audit POST any session / GET FullAccess), **/audit/pageview**
   + **/audit/log** (activity log; GET FullAccess, filters user/days/type).
 - `sla.js` (jobs, multi-engineer, shifts, vehicle checks, packs, PDF).
+  **Custom job categories** (office-defined extra statuses, e.g. "FRA Works" /
+  "FRA Complete"): stored in app_config `sla_categories` = `[{name,colour,done}]`.
+  **GET /sla/categories** (any session), **POST /sla/categories** (SLA admin —
+  replaces the whole list; a name can never shadow a built-in status),
+  **POST /sla/categories/delete** `{name, moveTo}` (SLA admin — moves any jobs
+  still in the category to `moveTo`, then removes it). `normalizeStatus(status,
+  extraNames)` now PRESERVES a status matching a custom category (the write
+  paths — create/inbound + PATCH — pass the category names); truly-unknown
+  statuses still fall back to Pending. Categories with `done:true` count as
+  finished (dropped from the dashboard "Open" view like Complete/Closed).
+  Front-end: sla-main.html "🏷️ Categories" toolbar button → manage modal
+  (add name + `<input type=color>` + Finished tick, edit colour/done, delete
+  with a "where do the jobs go?" picker). Categories merge into the dashboard
+  chips/filters/bulk-mark, job-view.html status chips (custom chips carry their
+  own `--cc` colour), and the sla-jobedit.js status dropdown — all load them
+  from GET /sla/categories. job-view/sla-main/sla-scheduler use `sla-jobedit.js?v=7`.
   **POST /sla/inbound** (PUBLIC_ROUTES; `Authorization: Bearer
   JOBS_INBOUND_TOKEN`, timing-safe compare): machine-to-machine job intake —
   the Zapier email-parser zap POSTs jobs straight in. Upserts by reference

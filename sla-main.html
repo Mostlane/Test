@@ -6,7 +6,7 @@
   <title>Mostlane • SLA Jobs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="auth.js"></script>
-  <script src="sla-jobedit.js?v=6"></script>
+  <script src="sla-jobedit.js?v=7"></script>
   <style>
     :root{
       --ml-blue:#003b82;
@@ -244,6 +244,7 @@
         <option value="Closed Jobs">Closed Jobs</option>
       </select>
       <button class="btn small" id="bulkApply">Apply</button>
+      <button class="btn small" id="catManageBtn" title="Create / edit / delete job categories">🏷️ Categories</button>
       <select id="priorityFilter">
         <option value="all">All priorities</option>
         <option value="Priority 1">P1</option>
@@ -374,6 +375,63 @@
   </div>
 </div>
 
+<!-- CATEGORIES MODAL -->
+<div class="modal-backdrop" id="catBackdrop">
+  <div class="modal">
+    <header>
+      <h2>Job categories</h2>
+      <button type="button" id="catClose">&times;</button>
+    </header>
+    <div class="modal-body">
+      <p class="small muted" style="margin-bottom:10px;">
+        Categories are extra statuses you control. They show as chips on the
+        dashboard and as options everywhere a job's status is set. Tick
+        <b>Finished</b> for a "done" bucket (e.g. FRA Complete) so those jobs
+        drop out of the <b>Open</b> view like Completed/Closed do.
+      </p>
+      <div id="catList"></div>
+      <div class="field" style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;">
+        <label>Add a new category</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="catNewName" placeholder="e.g. FRA Works" style="flex:1;min-width:150px;">
+          <input type="color" id="catNewColour" value="#0ea5e9" title="Pick a colour" style="width:44px;height:38px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;">
+          <label class="small" style="display:flex;align-items:center;gap:4px;white-space:nowrap;">
+            <input type="checkbox" id="catNewDone"> Finished
+          </label>
+          <button type="button" class="btn small primary" id="catAddBtn">Add</button>
+        </div>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="catCancel">Close</button>
+      <button type="button" class="btn primary" id="catSave">Save changes</button>
+    </div>
+    <div id="catStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
+<!-- CATEGORY DELETE (move jobs) MODAL -->
+<div class="modal-backdrop" id="catDelBackdrop">
+  <div class="modal">
+    <header>
+      <h2>Delete category</h2>
+      <button type="button" id="catDelClose">&times;</button>
+    </header>
+    <div class="modal-body">
+      <p id="catDelMsg" class="small" style="margin-bottom:10px;"></p>
+      <div class="field" id="catDelMoveWrap" style="display:none;">
+        <label for="catDelMoveTo">Move those jobs to</label>
+        <select id="catDelMoveTo"></select>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="catDelCancel">Cancel</button>
+      <button type="button" class="btn primary" id="catDelConfirm">Delete category</button>
+    </div>
+    <div id="catDelStatusText" class="small muted" style="margin-top:4px;"></div>
+  </div>
+</div>
+
 <!-- JOB PDF TYPE MODAL -->
 <div class="modal-backdrop" id="pdfTypeBackdrop">
   <div class="modal">
@@ -406,8 +464,8 @@ function getCurrentUser(){
          localStorage.getItem("mostlaneUser") || "Portal User";
 }
 
-/* Statuses shown as chips, with their colours (dot + outline). */
-const STATUSES = [
+/* Built-in statuses shown as chips, with their colours (dot + outline). */
+const BASE_STATUSES = [
   ["Pending",     "#9f1239"],
   ["Scheduled",   "#f59e0b"],
   ["Travelling",  "#3b82f6"],
@@ -419,7 +477,26 @@ const STATUSES = [
   ["Invoiced",    "#22c55e"],
   ["Closed Jobs", "#701a75"]
 ];
-const STATUS_COLOUR = Object.fromEntries(STATUSES);
+/* Custom categories (office-defined) behave exactly like statuses. Loaded from
+   GET /sla/categories and appended after the built-ins. */
+let CUSTOM_CATS = [];                 // [{name, colour, done}]
+let STATUSES = BASE_STATUSES.slice(); // built-ins + customs (rebuilt on load)
+let STATUS_COLOUR = Object.fromEntries(STATUSES);
+function rebuildStatuses(){
+  STATUSES = BASE_STATUSES.concat(CUSTOM_CATS.map(c => [c.name, c.colour]));
+  STATUS_COLOUR = Object.fromEntries(STATUSES);
+}
+async function loadCategories(){
+  try{
+    const res = await authFetch("/sla/categories?t=" + Date.now());
+    const d = await res.json();
+    CUSTOM_CATS = Array.isArray(d.categories) ? d.categories : [];
+  }catch(e){ CUSTOM_CATS = []; }
+  rebuildStatuses();
+}
+/* Names of custom categories the office flagged as "finished" — hidden from the
+   default Open view, like Complete/Closed/Invoiced. */
+function doneCatNames(){ return CUSTOM_CATS.filter(c => c.done).map(c => c.name); }
 
 let allJobs = [];
 let archiveMatches = [];        // archived jobs matching the current search
@@ -448,7 +525,7 @@ function fmtSched(job){
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function prShort(p){ const m = /([1-4])/.exec(p||""); return m ? "P"+m[1] : "P4"; }
-function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status); }
+function isClosed(j){ return ["Complete","Closed Jobs","Invoiced"].includes(j.status) || doneCatNames().includes(j.status); }
 
 function slaBadge(job){
   if(isClosed(job)) return {text:"", cls:"sla-badge sla-none"};
@@ -998,6 +1075,159 @@ async function applyBulk(){
   await loadJobs();
 }
 
+/* ============ categories ============ */
+/* The "Mark selected as…" dropdown lists every status (built-in + custom). */
+function populateBulkDropdown(){
+  const sel = $("bulkAction");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">Mark selected as…</option>';
+  STATUSES.forEach(([s]) => {
+    const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o);
+  });
+  if([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+
+let catWork = [];          // working copy while the modal is open
+function jobsInCategory(name){ return allJobs.filter(j => (j.status||"") === name).length; }
+function isSavedCategory(name){ return CUSTOM_CATS.some(c => c.name === name); }
+
+function openCatModal(){
+  catWork = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour || "#64748b", done: !!c.done }));
+  $("catNewName").value = "";
+  $("catNewColour").value = "#0ea5e9";
+  $("catNewDone").checked = false;
+  $("catStatusText").textContent = "";
+  renderCatList();
+  $("catBackdrop").classList.add("show");
+}
+function closeCatModal(){ $("catBackdrop").classList.remove("show"); }
+
+function renderCatList(){
+  const host = $("catList");
+  if(!catWork.length){
+    host.innerHTML = '<div class="small muted">No categories yet. Add one below.</div>';
+    return;
+  }
+  host.innerHTML = "";
+  catWork.forEach((c, i) => {
+    const inUse = isSavedCategory(c.name) ? jobsInCategory(c.name) : 0;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid #f1f5f9;";
+    row.innerHTML = `
+      <input type="color" value="${esc(c.colour)}" data-ci="${i}" data-k="colour" title="Colour" style="width:40px;height:34px;padding:2px;border:1px solid #cbd5e1;border-radius:8px;">
+      <span style="flex:1;min-width:120px;font-weight:600;">${esc(c.name)}</span>
+      <label class="small" style="display:flex;align-items:center;gap:4px;white-space:nowrap;">
+        <input type="checkbox" data-ci="${i}" data-k="done" ${c.done ? "checked" : ""}> Finished
+      </label>
+      <span class="small muted" style="min-width:64px;text-align:right;">${inUse ? inUse + " job" + (inUse===1?"":"s") : ""}</span>
+      <button type="button" class="btn small" data-del="${i}" style="color:#b91c1c;">🗑</button>`;
+    host.appendChild(row);
+  });
+  host.querySelectorAll('input[data-k="colour"]').forEach(el =>
+    el.addEventListener("input", e => { catWork[+e.target.dataset.ci].colour = e.target.value; }));
+  host.querySelectorAll('input[data-k="done"]').forEach(el =>
+    el.addEventListener("change", e => { catWork[+e.target.dataset.ci].done = e.target.checked; }));
+  host.querySelectorAll('button[data-del]').forEach(el =>
+    el.addEventListener("click", e => onCatDelete(+e.currentTarget.dataset.del)));
+}
+
+function catAdd(){
+  const name = $("catNewName").value.trim();
+  if(!name){ $("catStatusText").textContent = "Enter a name first."; return; }
+  const lc = name.toLowerCase();
+  if(BASE_STATUSES.some(s => s[0].toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" is already a built-in status.`; return; }
+  if(catWork.some(c => c.name.toLowerCase() === lc)){ $("catStatusText").textContent = `"${name}" already exists.`; return; }
+  catWork.push({ name, colour: $("catNewColour").value || "#64748b", done: $("catNewDone").checked });
+  $("catNewName").value = "";
+  $("catNewColour").value = "#0ea5e9";
+  $("catNewDone").checked = false;
+  $("catStatusText").textContent = "";
+  renderCatList();
+}
+
+/* Delete a row. A brand-new (unsaved) category with no jobs just drops out of the
+   working list. An existing one goes through the "where do the jobs go?" modal. */
+function onCatDelete(i){
+  const c = catWork[i];
+  if(!c) return;
+  if(!isSavedCategory(c.name)){ catWork.splice(i, 1); renderCatList(); return; }
+  openCatDelete(c.name);
+}
+
+let catDelName = null;
+function openCatDelete(name){
+  catDelName = name;
+  const n = jobsInCategory(name);
+  const moveWrap = $("catDelMoveWrap");
+  if(n > 0){
+    $("catDelMsg").innerHTML = `<b>${esc(name)}</b> still has <b>${n}</b> job${n===1?"":"s"} in it. Choose where to move ${n===1?"it":"them"}, then delete the category.`;
+    const sel = $("catDelMoveTo");
+    sel.innerHTML = "";
+    // every status/category except the one being deleted
+    STATUSES.filter(([s]) => s !== name).forEach(([s]) => {
+      const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o);
+    });
+    moveWrap.style.display = "";
+  }else{
+    $("catDelMsg").innerHTML = `Delete category <b>${esc(name)}</b>? It has no jobs in it.`;
+    moveWrap.style.display = "none";
+  }
+  $("catDelStatusText").textContent = "";
+  $("catDelBackdrop").classList.add("show");
+}
+function closeCatDelete(){ $("catDelBackdrop").classList.remove("show"); catDelName = null; }
+
+async function catDeleteConfirm(){
+  if(!catDelName) return;
+  const name = catDelName;
+  const moveTo = ($("catDelMoveWrap").style.display !== "none") ? $("catDelMoveTo").value : "Pending";
+  $("catDelStatusText").textContent = "Working…";
+  try{
+    // 1) Persist any pending colour/done edits + additions, minus the category
+    //    being removed, so nothing the user changed is lost on reload.
+    const keep = catWork.filter(c => c.name !== name);
+    let res = await authFetch("/sla/categories", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ categories: keep })
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    // 2) Move any jobs out of the category (server-side) and drop it.
+    res = await authFetch("/sla/categories/delete", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ name, moveTo })
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+    closeCatDelete();
+    await loadCategories();
+    populateBulkDropdown();
+    catWork = CUSTOM_CATS.map(c => ({ name: c.name, colour: c.colour, done: !!c.done }));
+    renderCatList();
+    await loadJobs();
+    $("catStatusText").textContent = d.moved ? `Deleted "${name}" · moved ${d.moved} job${d.moved===1?"":"s"} to ${moveTo}.` : `Deleted "${name}".`;
+  }catch(err){
+    $("catDelStatusText").textContent = "❌ " + err.message;
+  }
+}
+
+async function catSaveChanges(){
+  $("catStatusText").textContent = "Saving…";
+  try{
+    const res = await authFetch("/sla/categories", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ categories: catWork })
+    });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    await loadCategories();
+    populateBulkDropdown();
+    await loadJobs();
+    $("catStatusText").textContent = "✅ Saved.";
+    setTimeout(closeCatModal, 500);
+  }catch(err){
+    $("catStatusText").textContent = "❌ " + err.message;
+  }
+}
+
 /* ============ search (live + archive together) ============ */
 let searchDeb = null;
 function onSearchInput(){
@@ -1060,6 +1290,18 @@ function init(){
     });
   });
   $("bulkApply").addEventListener("click", applyBulk);
+  $("catManageBtn").addEventListener("click", openCatModal);
+  $("catClose").addEventListener("click", closeCatModal);
+  $("catCancel").addEventListener("click", closeCatModal);
+  $("catAddBtn").addEventListener("click", catAdd);
+  $("catNewName").addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); catAdd(); } });
+  $("catSave").addEventListener("click", catSaveChanges);
+  $("catDelClose").addEventListener("click", closeCatDelete);
+  $("catDelCancel").addEventListener("click", closeCatDelete);
+  $("catDelConfirm").addEventListener("click", catDeleteConfirm);
+  ["catBackdrop","catDelBackdrop"].forEach(id => {
+    $(id).addEventListener("click", e => { if(e.target === $(id)) $(id).classList.remove("show"); });
+  });
   $("priorityFilter").addEventListener("change", () => { activePriority = $("priorityFilter").value; render(); });
   $("searchBox").addEventListener("input", onSearchInput);
   $("resetBtn").addEventListener("click", () => {
@@ -1084,6 +1326,8 @@ function init(){
 window.addEventListener("DOMContentLoaded", async () => {
   init();
   if(await gate()){
+    await loadCategories();
+    populateBulkDropdown();
     ensureUsers().then(() => loadJobs());
   }
 });

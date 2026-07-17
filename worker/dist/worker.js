@@ -2651,6 +2651,41 @@ async function handle7(request, env, ctx, url, sess) {
     if (method === "GET") return jsonResponse(await getConfig(env, tenantId), headers);
     if (method === "POST") return jsonResponse(await setConfig(env, tenantId, await readJson2(request)), headers);
   }
+  if (subpath === "/categories") {
+    if (method === "GET") return jsonResponse({ categories: await getCategories(env, tenantId) }, headers);
+    if (method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      const list = Array.isArray(body?.categories) ? body.categories : [];
+      return jsonResponse({ ok: true, categories: await setCategories(env, tenantId, list) }, headers);
+    }
+  }
+  if (subpath === "/categories/delete" && method === "POST") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const body = await readJson2(request);
+    const name = String(body?.name || "").trim();
+    const moveTo = String(body?.moveTo || "Pending").trim() || "Pending";
+    if (!name) return jsonResponse({ error: "name required" }, headers, 400);
+    const who = sess.user && sess.user.username || "system";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const jobs = await listJobs(env, tenantId);
+    let moved = 0;
+    for (const job of jobs) {
+      if (String(job.status || "").toLowerCase() !== name.toLowerCase()) continue;
+      job.status = moveTo;
+      job.statusHistory = Array.isArray(job.statusHistory) ? job.statusHistory : [];
+      job.statusHistory.push({ status: moveTo, at: now, by: who });
+      if (moveTo === "Closed Jobs" && !job.closedAt) job.closedAt = now;
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      moved++;
+    }
+    const cats = (await getCategories(env, tenantId)).filter((c) => c.name.toLowerCase() !== name.toLowerCase());
+    await setCategories(env, tenantId, cats);
+    return jsonResponse({ ok: true, moved, categories: cats }, headers);
+  }
   if (subpath === "/inbound" && method === "GET") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     let fp = null;
@@ -2720,7 +2755,8 @@ async function handle7(request, env, ctx, url, sess) {
     const overdueFilter = searchParams.get("overdue");
     const siteCodeFilter = searchParams.get("siteCode");
     if (statusFilter) {
-      const s = normalizeStatus(statusFilter).toLowerCase();
+      const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
+      const s = normalizeStatus(statusFilter, catNames).toLowerCase();
       jobs = jobs.filter((j) => j.status.toLowerCase() === s);
     }
     if (priorityFilter) jobs = jobs.filter((j) => j.priority === priorityFilter);
@@ -3330,13 +3366,14 @@ var CANONICAL_STATUSES = [
   "Order",
   "Quote"
 ];
-function normalizeStatus(status) {
+function normalizeStatus(status, extra) {
   if (!status) return "Pending";
   const s = status.toLowerCase().trim();
   if (s === "open" || s === "with contractor - r") return "Pending";
   if (s === "completed") return "Complete";
   if (s === "closed" || s === "cancelled") return "Closed Jobs";
-  return CANONICAL_STATUSES.find((x) => x.toLowerCase() === s) || "Pending";
+  const all = Array.isArray(extra) && extra.length ? CANONICAL_STATUSES.concat(extra) : CANONICAL_STATUSES;
+  return all.find((x) => x.toLowerCase() === s) || "Pending";
 }
 var normId = (s) => (s || "").toLowerCase().replace(/\s+/g, ".").trim();
 var PRIORITY_SET = /* @__PURE__ */ new Set(["Priority 1", "Priority 2", "Priority 3", "Priority 4"]);
@@ -3435,7 +3472,8 @@ async function createOrUpdateJobFromPayload(env, tenantId, body) {
   const id = body.id || body.reference || crypto.randomUUID();
   const existing = await getJob(env, tenantId, id);
   const now = (/* @__PURE__ */ new Date()).toISOString();
-  let status = normalizeStatus(body.status || existing?.status);
+  const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
+  let status = normalizeStatus(body.status || existing?.status, catNames);
   const raisedAt = body.raisedAt || existing?.raisedAt || now;
   const priority = body.priority || existing?.priority || "Priority 4";
   const targetAt = computeSlaTarget(raisedAt, priority, cfg);
@@ -3543,7 +3581,8 @@ async function patchJob(env, tenantId, id, patch) {
   if (patch.order !== void 0) job.order = patch.order;
   if (patch.travelStartMileage !== void 0) job.travelStartMileage = patch.travelStartMileage;
   if (patch.status) {
-    const s = normalizeStatus(patch.status);
+    const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
+    const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
       job.status = s;
       job.statusHistory.push({ status: s, at: now, by: patch.changedBy || "system" });
@@ -3847,6 +3886,49 @@ async function setConfig(env, tenantId, body) {
     "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_config', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
   ).bind(tenantId, JSON.stringify(merged)).run();
   return merged;
+}
+async function getCategories(env, tenantId) {
+  const db = tenantDB(env, tenantId);
+  const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = 'sla_categories'").bind(tenantId).first();
+  let cats;
+  try {
+    cats = row ? JSON.parse(row.value) : [];
+  } catch {
+    cats = [];
+  }
+  if (!Array.isArray(cats)) cats = [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const c of cats) {
+    const name = String(c && c.name || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    if (CANONICAL_STATUSES.some((s) => s.toLowerCase() === key)) continue;
+    seen.add(key);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(c && c.colour || "")) ? c.colour : "#64748b";
+    out.push({ name, colour, done: !!(c && c.done) });
+  }
+  return out;
+}
+async function setCategories(env, tenantId, list) {
+  const seen = /* @__PURE__ */ new Set();
+  const clean = [];
+  for (const c of Array.isArray(list) ? list : []) {
+    const name = String(c && c.name || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    if (CANONICAL_STATUSES.some((s) => s.toLowerCase() === key)) continue;
+    seen.add(key);
+    const colour = /^#[0-9a-fA-F]{6}$/.test(String(c && c.colour || "")) ? c.colour : "#64748b";
+    clean.push({ name, colour, done: !!(c && c.done) });
+  }
+  const db = tenantDB(env, tenantId);
+  await db.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?, 'sla_categories', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tenantId, JSON.stringify(clean)).run();
+  return clean;
 }
 function r2Url(env, key) {
   const base = (env.R2_PUBLIC_BASE || "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev").replace(/\/$/, "");
@@ -5885,7 +5967,7 @@ async function isFull(env, tenantId, sess) {
   const p = await permissionsFor(env, tenantId, sess.user.username);
   return p.FullAccess === "Yes";
 }
-async function getCategories(env, tenantId) {
+async function getCategories2(env, tenantId) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`staff_doc_categories:${tenantId}`).first();
     if (row && row.value) {
@@ -5897,7 +5979,7 @@ async function getCategories(env, tenantId) {
   return DEFAULT_CATEGORIES.slice();
 }
 async function addCategory(env, tenantId, name) {
-  const cats = await getCategories(env, tenantId);
+  const cats = await getCategories2(env, tenantId);
   const clean = cleanCat(name);
   if (clean && !cats.some((c) => c.toLowerCase() === clean.toLowerCase())) cats.push(clean);
   await env.DB.prepare(
@@ -5955,7 +6037,7 @@ async function handle17(request, env, ctx, url, sess) {
   if (sub === "/docs" && method === "GET") {
     const who = (q.get("user") || sess.user.username).trim();
     if (who !== sess.user.username && !full) return jr2({ error: "Forbidden" }, headers, 403);
-    const categories = await getCategories(env, tenantId);
+    const categories = await getCategories2(env, tenantId);
     const personal = await signGroups(env, url.origin, await listUnder(env, personalPrefix(tenantId, who)));
     const company = await signGroups(env, url.origin, await listUnder(env, companyPrefix(tenantId)));
     return jr2({ user: who, categories, personal, company, canManage: full }, headers);

@@ -63,7 +63,26 @@
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function slug(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
 
-  const STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs"];
+  const BASE_STATUSES = ["Pending", "Scheduled", "Travelling", "In Progress", "On Hold", "Quote", "Order", "Complete", "Invoiced", "Closed Jobs"];
+  let STATUSES = BASE_STATUSES.slice();   // built-ins + custom categories (loaded lazily)
+  let catsLoaded = false;
+  async function loadCats() {
+    try {
+      const r = await authFetch("/sla/categories?t=" + Date.now());
+      const d = await r.json();
+      const names = (Array.isArray(d.categories) ? d.categories : []).map(c => c && c.name).filter(Boolean);
+      STATUSES = BASE_STATUSES.concat(names.filter(n => !BASE_STATUSES.some(b => b.toLowerCase() === n.toLowerCase())));
+    } catch (e) { /* keep built-ins on failure */ }
+    catsLoaded = true;
+  }
+  // Rebuild the status dropdown; always include the job's own status so an
+  // orphaned/custom value still shows selected instead of silently blank.
+  function buildStatusOptions(current) {
+    const list = STATUSES.slice();
+    if (current && !list.some(s => s.toLowerCase() === String(current).toLowerCase())) list.push(current);
+    const sel = $("mljeStatus");
+    if (sel) sel.innerHTML = list.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  }
   const PRIORITIES = [["Priority 1", "P1 – Emergency"], ["Priority 2", "P2 – Urgent"], ["Priority 3", "P3 – Routine"], ["Priority 4", "P4 – Low"]];
 
   /* ---- injected styles + DOM ---- */
@@ -191,7 +210,7 @@
 
     // build static option lists
     $("mljePriority").innerHTML = PRIORITIES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
-    $("mljeStatus").innerHTML = STATUSES.map(s => `<option value="${s}">${s}</option>`).join("");
+    buildStatusOptions();
 
     $("mljeCancel").addEventListener("click", close);
     back.addEventListener("click", e => { if (e.target === back) close(); });
@@ -360,7 +379,11 @@
     $("mljeRef").value = job.helpdeskRef || "";
     $("mljeDesc").value = job.description || "";
     $("mljePriority").value = job.priority || "Priority 4";
+    // Status list = built-ins + custom categories. Show the job's own value even
+    // before the category fetch returns; refresh the list once it does.
+    buildStatusOptions(job.status);
     $("mljeStatus").value = job.status || "Pending";
+    loadCats().then(() => { buildStatusOptions(currentJob && currentJob.status); if (currentJob) $("mljeStatus").value = currentJob.status || "Pending"; });
     $("mljeRaised").value = toLocalInput(job.raisedAt);
     // Schedule (date · start · finish) — empty boxes mean "not scheduled".
     const sAt = job.scheduledAt ? new Date(job.scheduledAt) : null;
