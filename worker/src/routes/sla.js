@@ -144,8 +144,8 @@ export async function handle(request, env, ctx, url, sess) {
       changedBy: "zapier"
     };
     const beforeId = payload.reference;
-    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
-    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
+    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
   }
@@ -154,8 +154,8 @@ export async function handle(request, env, ctx, url, sess) {
   if (subpath === "/jobs" && method === "POST") {
     const payload = await readJson(request);
     const beforeId = payload.id || payload.reference;
-    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
-    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
+    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
@@ -935,6 +935,26 @@ async function listJobs(env, tenantId) {
 }
 
 // Upsert a full job object: indexed columns for filtering + full JSON in `data`.
+// D1 occasionally throws transient faults under load ("D1 DB storage
+// operation exceeded timeout which caused object to be reset", lost network,
+// internal errors). The job upsert is idempotent, so briefly retrying is
+// always safe — this keeps one D1 hiccup from bouncing a Zapier job.
+function isTransientD1(e) {
+  return /exceeded timeout|object to be reset|Network connection lost|D1_ERROR.*(timeout|reset|storage|internal)/i
+    .test(String((e && e.message) || e));
+}
+async function d1Retry(fn, tries = 3) {
+  let err;
+  for (let i = 0; i < tries; i++) {
+    try { return await fn(); } catch (e) {
+      err = e;
+      if (!isTransientD1(e)) throw e;
+      await new Promise(r => setTimeout(r, 200 * (i + 1) * (i + 1)));   // 200ms, 800ms
+    }
+  }
+  throw err;
+}
+
 async function saveJob(env, tenantId, job) {
   const db = tenantDB(env, tenantId);
   await db.prepare(`
