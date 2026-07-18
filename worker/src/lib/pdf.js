@@ -80,7 +80,11 @@ export class PdfDoc {
     const enc = new TextEncoder();
     const objs = [];                    // 1-indexed object bodies (strings)
     objs.push("<< /Type /Catalog /Pages 2 0 R >>");                       // 1
-    const pageIds = this.pages.map((_, i) => 5 + i * 2 + 1);
+    // Objects land as: 1 catalog, 2 pages, 3-4 fonts, 5 info, then per page
+    // a CONTENT stream (6, 8, …) followed by its PAGE object (7, 9, …).
+    // Kids must reference the PAGE objects — pointing at the streams renders
+    // a blank document in strict viewers (iOS).
+    const pageIds = this.pages.map((_, i) => 7 + i * 2);
     objs.push(`<< /Type /Pages /Kids [${pageIds.map(id => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`); // 2
     objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");        // 3
     objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");   // 4

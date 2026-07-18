@@ -6971,7 +6971,7 @@ var PdfDoc = class {
     const enc3 = new TextEncoder();
     const objs = [];
     objs.push("<< /Type /Catalog /Pages 2 0 R >>");
-    const pageIds = this.pages.map((_, i) => 5 + i * 2 + 1);
+    const pageIds = this.pages.map((_, i) => 7 + i * 2);
     objs.push(`<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`);
     objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
     objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
