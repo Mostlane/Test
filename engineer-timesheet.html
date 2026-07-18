@@ -122,9 +122,9 @@ function collect(){
     const d={ start:card.querySelector(".t-start").value, finish:card.querySelector(".t-finish").value,
       jobs:card.querySelector(".jobs").value.trim(), mileage:[] };
     card.querySelectorAll(".mirow").forEach(r=>{
-      const site=r.querySelector(".site").value.trim(), pc=r.querySelector(".pc").value.trim().toUpperCase(),
-        miles=parseFloat(r.querySelector(".miles").value)||0;
-      if(site||pc||miles) d.mileage.push({site,postcode:pc,miles});
+      const site=(r.dataset.site||"").trim(), pc=(r.dataset.pc||"").toUpperCase(),
+        miles=parseFloat(r.dataset.miles)||0;
+      if(site) d.mileage.push({site,postcode:pc,miles});
     });
     if(d.start||d.finish||d.jobs||d.mileage.length) days[date]=d;
   });
@@ -158,13 +158,16 @@ function refreshTotals(){
   });
 }
 
+// Mileage rows are READ-ONLY: the site comes from the job box pick and the
+// miles come from the office's preset register — engineers can't type miles
+// (the server enforces the presets on save too). ✕ just withdraws the claim.
 function mileRow(m){
   const div=document.createElement("div");div.className="mirow";
-  div.innerHTML=`<input type="text" class="site" list="siteList" placeholder="Site" value="${esc(m.site||"")}">
-    <input type="text" class="pc" placeholder="Postcode" value="${esc(m.postcode||"")}">
-    <input type="number" class="miles" min="0" step="0.1" placeholder="mi" value="${m.miles||""}">
-    <button class="btn calc" title="Estimate round-trip miles from your home postcode">🧮</button>
-    <button class="btn del" title="Remove">✕</button>`;
+  div.dataset.site=m.site||"";div.dataset.pc=(m.postcode||"").toUpperCase();div.dataset.miles=m.miles!=null&&m.miles!==""?m.miles:"0";
+  const mi=parseFloat(div.dataset.miles)||0;
+  div.innerHTML=`<span style="flex:2.2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📍 ${esc(m.site||"site")}</span>
+    <span style="flex:none;font-weight:600">${mi>0?mi+" mi":'<span class="muted" title="The office hasn\'t set mileage for this site yet">no preset</span>'}</span>
+    <button class="btn del" title="Remove this claim">✕</button>`;
   return div;
 }
 
@@ -184,12 +187,11 @@ function render(){
       <div class="row"><label>Start <input type="time" class="t-start" value="${esc(d.start||"")}"></label>
         <label>Finish <input type="time" class="t-finish" value="${esc(d.finish||"")}"></label>${deds.join(" ")}</div>
       <div class="row"><input type="text" class="jobs" placeholder="Job number(s) / what you were on" value="${esc(d.jobs||"")}"></div>
-      ${ME&&ME.mileage?`<div class="mi"><div class="muted" style="font-size:12.5px;margin-bottom:2px">Mileage claims${ME.radius?` · <span title="Set by the office">first/last ${ME.radiusMiles} mi of the day unpaid</span>`:""}</div>
-        <div class="milist"></div><button class="btn addmi" style="font-size:13px">＋ Add mileage</button></div>`:""}`;
+      ${ME&&ME.mileage?`<div class="mi"><div class="muted" style="font-size:12.5px;margin-bottom:2px">Mileage — added automatically when you pick a site in the job box (miles set by the office)${ME.radius?` · first/last ${ME.radiusMiles} mi of the day unpaid`:""}</div>
+        <div class="milist"></div></div>`:""}`;
     if(ME&&ME.mileage){
       const list=card.querySelector(".milist");
       (d.mileage||[]).forEach(m=>list.appendChild(mileRow(m)));
-      card.querySelector(".addmi").onclick=()=>{list.appendChild(mileRow({}));};
     }
     host.appendChild(card);
   }
@@ -201,7 +203,7 @@ function render(){
   const fn=[];
   if(ME&&ME.commute) fn.push("Travel deduction: "+ME.commuteMins+" minutes each way is unpaid (set by the office).");
   if(ME&&ME.lunch) fn.push("Lunch: "+ME.lunchMins+" minutes is deducted on days of "+ME.lunchThresholdH+"h or more.");
-  if(ME&&ME.mileage) fn.push("Mileage fills in automatically for known sites (round trip from base) — you can adjust the figure before it saves.");
+  if(ME&&ME.mileage) fn.push("Mileage is automatic: pick the site in the job box and the office's preset round-trip figure is claimed — miles can't be typed in. If a site shows “no preset”, ask the office to set its mileage.");
   if(ME&&ME.mileage&&ME.radius) fn.push("The first and last "+ME.radiusMiles+" miles of each day aren't paid — the deduction is applied automatically.");
   g("footNote").textContent=fn.join(" ");
 }
@@ -375,14 +377,14 @@ async function autoMileage(card,j){
   if(!ME||!ME.mileage||!card||INVOICE)return;
   const list=card.querySelector(".milist");if(!list)return;
   const name=String(j.site||"").trim();if(!name)return;
-  const already=[...card.querySelectorAll(".mirow .site")].some(x=>x.value.trim().toLowerCase()===name.toLowerCase());
+  const already=[...card.querySelectorAll(".mirow")].some(x=>(x.dataset.site||"").trim().toLowerCase()===name.toLowerCase());
   if(already)return;
   let miles=j.miles!=null?j.miles:null;
   if(miles==null){
     const r=await authFetchTO("/ts/miles?name="+encodeURIComponent(name)).then(x=>x.json()).catch(()=>null);
     if(r&&r.miles!=null)miles=r.miles;
   }
-  list.appendChild(mileRow({site:name,postcode:(j.postcode||"").toUpperCase(),miles:miles!=null?miles:""}));
+  list.appendChild(mileRow({site:name,postcode:(j.postcode||"").toUpperCase(),miles:miles!=null?miles:0}));
   refreshTotals();
   queueSave();
 }
@@ -428,74 +430,14 @@ async function loadCSites(){
   }catch(e){CSITES=[];csNote("⚠️ Store lists couldn't be loaded ("+(e&&e.message||"error")+") — suggestions are portal/PO only. (v8)");}
   return CSITES;
 }
-let siteTimer=null;
-document.addEventListener("input",e=>{
-  if(!e.target.classList||!e.target.classList.contains("site"))return;
-  const v=e.target.value;
-  clearTimeout(siteTimer);
-  siteTimer=setTimeout(async()=>{
-    const [r,cs]=await Promise.all([
-      authFetchTO("/ts/sites?q="+encodeURIComponent(v)).then(r=>r.json()).catch(()=>null),
-      loadCSites().catch(()=>[])
-    ]);
-    const merged=[...((r&&r.sites)||[])];
-    const seen=new Set(merged.map(s=>String(s.name).toLowerCase()));
-    const T=v.toLowerCase();
-    for(const s of (cs||[])){
-      if(!s.name||seen.has(s.name.toLowerCase()))continue;
-      if(!(s.name.toLowerCase().includes(T)||s.postcode.toLowerCase().includes(T)||(s.code&&String(s.code).includes(v))))continue;
-      seen.add(s.name.toLowerCase());
-      merged.push(s);
-      if(merged.length>=20)break;
-    }
-    if(!merged.length)return;
-    SITES=merged;
-    g("siteList").innerHTML=SITES.map(s=>`<option value="${esc(s.name)}">${esc(s.postcode)}</option>`).join("");
-    const hit=SITES.find(s=>s.name===v);
-    if(hit&&hit.postcode){const pc=e.target.closest(".mirow").querySelector(".pc");if(!pc.value)pc.value=hit.postcode;}
-  },250);
-});
-document.addEventListener("change",async e=>{
-  if(e.target.classList&&e.target.classList.contains("site")){
-    const row=e.target.closest(".mirow");
-    const hit=SITES.find(s=>s.name===e.target.value);
-    if(hit&&hit.postcode)row.querySelector(".pc").value=hit.postcode;
-    // Known site mileage fills in automatically (office-maintained register).
-    const milesIn=row.querySelector(".miles");
-    if(!milesIn.value){
-      if(hit&&hit.miles!=null)milesIn.value=hit.miles;
-      else if(e.target.value.trim()){
-        const r=await authFetchTO("/ts/miles?name="+encodeURIComponent(e.target.value.trim())).then(x=>x.json()).catch(()=>null);
-        if(r&&r.miles!=null&&!milesIn.value){milesIn.value=r.miles;refreshTotals();queueSave();}
-      }
-    }
-  }
+// Mileage rows carry no inputs — the only action is withdrawing a claim.
+document.addEventListener("change",e=>{
   refreshTotals();
   if(e.target.closest&&e.target.closest(".card[data-date]"))queueSave();
 });
-document.addEventListener("click",async e=>{
+document.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
-  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();queueSave();return;}
-  if(!b.classList.contains("calc"))return;
-  e.preventDefault();
-  const row=b.closest(".mirow");
-  b.textContent="…";
-  // 1st choice: the office's saved mileage for this site.
-  const siteName=row.querySelector(".site").value.trim();
-  if(siteName){
-    const r0=await authFetchTO("/ts/miles?name="+encodeURIComponent(siteName)).then(x=>x.json()).catch(()=>null);
-    if(r0&&r0.miles!=null){row.querySelector(".miles").value=r0.miles;b.textContent="🧮";refreshTotals();queueSave();return;}
-  }
-  // Otherwise estimate the round trip from the company base postcode.
-  const from=(ME&&ME.basePostcode)||"PO15 5RQ";
-  const to=row.querySelector(".pc").value.trim();
-  if(!to){b.textContent="🧮";return alert("Enter the site postcode first (or pick a site from the list).");}
-  const r=await authFetchTO("/ts/mileage?from="+encodeURIComponent(from)+"&to="+encodeURIComponent(to)).then(r=>r.json()).catch(()=>null);
-  b.textContent="🧮";
-  if(!r||!r.ok)return alert((r&&r.error)||"Couldn't estimate that journey — enter the miles by hand.");
-  row.querySelector(".miles").value=r.roundTrip;
-  refreshTotals();
-  queueSave();
+  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();queueSave();}
 });
 document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();queueSave();}});
 
