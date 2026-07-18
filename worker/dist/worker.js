@@ -2737,16 +2737,16 @@ async function handle7(request, env, ctx, url, sess) {
       changedBy: "zapier"
     };
     const beforeId = payload.reference;
-    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
-    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
+    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse({ ok: true, created: !before, id: job.id, reference: job.helpdeskRef, status: job.status, priority: job.priority, targetAt: job.targetAt }, headers, before ? 200 : 201);
   }
   if (subpath === "/jobs" && method === "POST") {
     const payload = await readJson2(request);
     const beforeId = payload.id || payload.reference;
-    const before = beforeId ? await getJob(env, tenantId, beforeId) : null;
-    const job = await createOrUpdateJobFromPayload(env, tenantId, payload);
+    const before = beforeId ? await d1Retry(() => getJob(env, tenantId, beforeId)) : null;
+    const job = await d1Retry(() => createOrUpdateJobFromPayload(env, tenantId, payload));
     ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, job));
     return jsonResponse(decorateJobWithLiveSla(job), headers, 201);
   }
@@ -3437,6 +3437,22 @@ async function listJobs(env, tenantId) {
   const db = tenantDB(env, tenantId);
   const { results } = await db.prepare("SELECT data FROM sla_jobs WHERE tenant_id = ?").bind(tenantId).all();
   return (results || []).map((r) => JSON.parse(r.data));
+}
+function isTransientD1(e) {
+  return /exceeded timeout|object to be reset|Network connection lost|D1_ERROR.*(timeout|reset|storage|internal)/i.test(String(e && e.message || e));
+}
+async function d1Retry(fn, tries = 3) {
+  let err;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      err = e;
+      if (!isTransientD1(e)) throw e;
+      await new Promise((r) => setTimeout(r, 200 * (i + 1) * (i + 1)));
+    }
+  }
+  throw err;
 }
 async function saveJob(env, tenantId, job) {
   const db = tenantDB(env, tenantId);
