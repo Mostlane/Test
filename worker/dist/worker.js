@@ -7031,8 +7031,21 @@ async function ensureTables(env) {
     hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
     r2_key TEXT, at TEXT,
     UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
+    tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
+    name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
+    PRIMARY KEY (tenant_id, key))`).run();
 }
-var DEFAULTS = { commuteMins: 30, lunchMins: 30, lunchThresholdH: 6, pencePerMile: 45, company: "Mostlane" };
+var normKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+var DEFAULTS = {
+  commuteMins: 30,
+  lunchMins: 30,
+  lunchThresholdH: 6,
+  pencePerMile: 45,
+  radiusMiles: 10,
+  basePostcode: "PO15 5RQ",
+  company: "Mostlane"
+};
 async function getCfg(env, tid) {
   let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
   try {
@@ -7077,7 +7090,10 @@ function effectiveCfg(cfg, u) {
     lunch: mine.lunch === true,
     // 30 mins lunch deducted
     mileage: mine.mileage === true,
-    // may claim mileage
+    // may claim mileage (fuel)
+    radius: mine.radius === true,
+    // first/last N miles of a day unpaid
+    radiusMiles: Number(mine.radiusMiles ?? cfg.defaults.radiusMiles) || 10,
     commuteMins: Number(mine.commuteMins ?? cfg.defaults.commuteMins) || 30,
     lunchMins: Number(mine.lunchMins ?? cfg.defaults.lunchMins) || 30,
     lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
@@ -7108,33 +7124,42 @@ function cleanDays(monday, days) {
   }
   return out;
 }
+function claimedMiles(miles, eff) {
+  if (!eff.radius || !(miles > 0)) return miles;
+  return Math.max(0, round1(miles - 2 * eff.radiusMiles));
+}
 function dayCalc(d, eff) {
+  const miles = dayMiles(d);
+  const base = { miles, milesClaimed: claimedMiles(miles, eff) };
   const s = toMin(d.start), e0 = toMin(d.finish);
-  if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, miles: dayMiles(d) };
+  if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, ...base };
   const e = e0 <= s ? e0 + 1440 : e0;
   const span = e - s;
   const commute = eff.commute ? eff.commuteMins * 2 : 0;
   const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
-  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, miles: dayMiles(d) };
+  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
 }
 function dayMiles(d) {
   return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
 }
 function weekTotals(days, eff) {
-  let paidMins = 0, miles = 0, daysWorked = 0;
+  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
   for (const d of Object.values(days || {})) {
     const c = dayCalc(d, eff);
     paidMins += c.paid;
     miles += c.miles;
+    milesClaimed += c.milesClaimed;
     if (c.worked) daysWorked++;
   }
   const hours = Math.round(paidMins / 60 * 100) / 100;
   const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
-  const mileagePay = Math.round(miles * eff.pencePerMile) / 100;
+  const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
   return {
     paidMins,
     hours,
     miles: round1(miles),
+    milesClaimed: round1(milesClaimed),
+    milesDeducted: round1(miles - milesClaimed),
     daysWorked,
     labour,
     mileagePay,
@@ -7471,8 +7496,7 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
     }
     for (const m of d.mileage || []) {
       if (!(parseFloat(m.miles) > 0)) continue;
-      doc.text(cDesc, y, fitDesc("Mileage \u2014 " + (m.site || m.postcode || "site") + " (" + m.miles + " mi @ " + eff.pencePerMile + "p)", cHours - cDesc - 40), { size: 10, grey: true });
-      doc.text(cAmt, y, money(m.miles * eff.pencePerMile / 100), { size: 10, alignRight: true });
+      doc.text(cDesc, y, fitDesc("Mileage \u2014 " + (m.site || m.postcode || "site") + " (" + m.miles + " mi)", cHours - cDesc - 40), { size: 10, grey: true });
       y += 15;
     }
     if (y > 720) {
@@ -7483,22 +7507,24 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   y += 4;
   doc.hr(L, y, R);
   y += 18;
+  const cTot = 280;
   if (eff.rateType === "day" && eff.rate) {
-    doc.text(cHours, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
+    doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
     doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true });
     y += 16;
   } else {
-    doc.text(cHours, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
+    doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
     doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true });
     y += 16;
   }
   if (totals.miles > 0) {
-    doc.text(cHours, y, "Mileage: " + totals.miles + " mi @ " + eff.pencePerMile + "p");
+    const ded = totals.milesDeducted > 0;
+    doc.text(cTot, y, "Mileage: " + (ded ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p" : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
     doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true });
     y += 16;
   }
   y += 6;
-  doc.text(cHours, y, "TOTAL", { size: 12, bold: true });
+  doc.text(cTot, y, "TOTAL", { size: 12, bold: true });
   doc.text(cAmt, y, money(totals.total || 0), { size: 12, bold: true, alignRight: true });
   y += 30;
   doc.text(L, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
@@ -7540,6 +7566,7 @@ async function handle20(request, env, ctx, url, sess) {
       ...eff,
       rate: eff.rate,
       nextInvoice: next,
+      basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
       canSetNumber: !invCount || Number(invCount.n) === 0,
       admin
     }, {}, env, request);
@@ -7617,6 +7644,22 @@ async function handle20(request, env, ctx, url, sess) {
         if (seen.has(n.trim().toLowerCase())) continue;
         seen.add(n.trim().toLowerCase());
         sites.push({ name: n, code: "", postcode: "", source: "po-order" });
+      }
+    } catch {
+    }
+    try {
+      const keys = [...new Set(sites.map((s) => normKey(s.name)).filter(Boolean))];
+      if (keys.length) {
+        const ph = keys.map(() => "?").join(",");
+        const { results: mrows } = await env.DB.prepare(
+          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+        ).bind(tid, ...keys).all();
+        const mmap = {};
+        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
+        for (const s of sites) {
+          const m = mmap[normKey(s.name)];
+          if (m != null) s.miles = m;
+        }
       }
     } catch {
     }
@@ -7699,6 +7742,81 @@ async function handle20(request, env, ctx, url, sess) {
       return pa - pb;
     });
     return json({ ok: true, jobs: jobs.slice(0, 10) }, {}, env, request);
+  }
+  if (sub === "/miles" && method === "GET") {
+    const name = q.get("name");
+    if (name != null) {
+      const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(name)).first();
+      return json({ ok: true, miles: row && row.miles != null ? row.miles : null }, {}, env, request);
+    }
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const { results: saved } = await env.DB.prepare("SELECT key, name, postcode, miles FROM site_miles WHERE tenant_id=?").bind(tid).all();
+    const byKey = {};
+    for (const r of saved || []) byKey[r.key] = { name: r.name || r.key, postcode: r.postcode || "", miles: r.miles, saved: true };
+    const { results: portal } = await env.DB.prepare(
+      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!=''"
+    ).bind(tid).all();
+    for (const r of portal || []) {
+      const k = normKey(r.site_name);
+      if (!byKey[k]) byKey[k] = { name: r.site_name, postcode: (r.postcode || "").replace(/\*+$/, ""), miles: null, saved: false };
+      else if (!byKey[k].postcode) byKey[k].postcode = (r.postcode || "").replace(/\*+$/, "");
+    }
+    let list = Object.values(byKey).sort((a, b) => a.name.localeCompare(b.name));
+    const term = String(q.get("q") || "").trim().toLowerCase();
+    if (term) list = list.filter((s) => s.name.toLowerCase().includes(term) || (s.postcode || "").toLowerCase().includes(term));
+    return json({ ok: true, sites: list, missing: list.filter((s) => s.miles == null && s.postcode).length }, {}, env, request);
+  }
+  if (sub === "/miles" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let saved = 0;
+    for (const e of (Array.isArray(b.entries) ? b.entries : []).slice(0, 200)) {
+      const key = normKey(e && e.name);
+      if (!key) continue;
+      const miles = parseFloat(e.miles);
+      if (!isFinite(miles) || miles < 0 || miles > 2e3) {
+        await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).run();
+        continue;
+      }
+      await env.DB.prepare(
+        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET name=excluded.name, postcode=excluded.postcode, miles=excluded.miles, updated_at=excluded.updated_at"
+      ).bind(tid, key, String(e.name).trim().slice(0, 120), String(e.postcode || "").toUpperCase().slice(0, 10), round1(miles), now).run();
+      saved++;
+    }
+    for (const n of (Array.isArray(b.delete) ? b.delete : []).slice(0, 200)) {
+      await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(n)).run();
+    }
+    return json({ ok: true, saved }, {}, env, request);
+  }
+  if (sub === "/miles/autofill" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const base = await lookupPostcode(cfg.defaults.basePostcode || "PO15 5RQ");
+    if (!base) return error("Base postcode " + (cfg.defaults.basePostcode || "PO15 5RQ") + " couldn't be found.", 400, env, request);
+    const { results: portal } = await env.DB.prepare(
+      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!='' AND postcode IS NOT NULL AND postcode!=''"
+    ).bind(tid).all();
+    const { results: saved } = await env.DB.prepare("SELECT key FROM site_miles WHERE tenant_id=?").bind(tid).all();
+    const have = new Set((saved || []).map((r) => r.key));
+    const todo = (portal || []).filter((r) => !have.has(normKey(r.site_name)));
+    const batch = todo.slice(0, 25);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let done = 0, failed = 0;
+    for (const r of batch) {
+      const pc = String(r.postcode).replace(/\*+$/, "");
+      const to = await lookupPostcode(pc).catch(() => null);
+      if (!to) {
+        failed++;
+        have.add(normKey(r.site_name));
+        continue;
+      }
+      const roundTrip = round1(haversineMiles(base, to) * ROAD_FACTOR * 2);
+      await env.DB.prepare(
+        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET miles=excluded.miles, updated_at=excluded.updated_at"
+      ).bind(tid, normKey(r.site_name), r.site_name, pc.toUpperCase(), roundTrip, now).run();
+      done++;
+    }
+    return json({ ok: true, done, failed, remaining: Math.max(0, todo.length - batch.length) }, {}, env, request);
   }
   if (sub === "/mileage" && method === "GET") {
     const from = q.get("from"), to = q.get("to");
@@ -7889,8 +8007,8 @@ async function handle20(request, env, ctx, url, sess) {
             continue;
           }
           const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
-          for (const k of ["commute", "lunch", "mileage"]) if (k in v) mine[k] = v[k] === true;
-          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber"]) {
+          for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
             if (k in v) {
               const n = parseFloat(v[k]);
               if (isFinite(n) && n >= 0) mine[k] = n;

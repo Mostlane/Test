@@ -99,15 +99,20 @@ const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Su
 
 let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, SITES=[];
 
+function claimedMiles(miles){
+  if(!(ME&&ME.radius)||!(miles>0))return miles;
+  return Math.max(0,Math.round((miles-2*ME.radiusMiles)*10)/10);
+}
 function dayCalc(d){
   const s=toMin(d.start), e0=toMin(d.finish);
   const miles=(d.mileage||[]).reduce((a,m)=>a+(parseFloat(m.miles)||0),0);
-  if(s==null||e0==null) return {span:0,paid:0,commute:0,lunch:0,worked:false,miles};
+  const mc=claimedMiles(miles);
+  if(s==null||e0==null) return {span:0,paid:0,commute:0,lunch:0,worked:false,miles,milesClaimed:mc};
   const e=e0<=s?e0+1440:e0;
   const span=e-s;
   const commute=ME&&ME.commute?ME.commuteMins*2:0;
   const lunch=(ME&&ME.lunch&&span>=ME.lunchThresholdH*60)?ME.lunchMins:0;
-  return {span,paid:Math.max(0,span-commute-lunch),commute,lunch,worked:true,miles};
+  return {span,paid:Math.max(0,span-commute-lunch),commute,lunch,worked:true,miles,milesClaimed:mc};
 }
 
 function collect(){
@@ -128,14 +133,17 @@ function collect(){
 
 function refreshTotals(){
   const days=collect();
-  let paid=0,miles=0,worked=0;
-  for(const d of Object.values(days)){const c=dayCalc(d);paid+=c.paid;miles+=c.miles;if(c.worked)worked++;}
+  let paid=0,miles=0,milesClaimed=0,worked=0;
+  for(const d of Object.values(days)){const c=dayCalc(d);paid+=c.paid;miles+=c.miles;milesClaimed+=c.milesClaimed;if(c.worked)worked++;}
   const hours=Math.round(paid/60*100)/100;
+  miles=Math.round(miles*10)/10;milesClaimed=Math.round(milesClaimed*10)/10;
   let h=`<span>Paid time<br><b>${hmS(paid)}</b></span><span>Days<br><b>${worked}</b></span>`;
-  if(ME&&ME.mileage) h+=`<span>Mileage<br><b>${Math.round(miles*10)/10} mi</b></span>`;
+  if(ME&&ME.mileage){
+    h+=`<span>Mileage<br><b>${milesClaimed} mi</b>${milesClaimed!==miles?`<br><span class="muted" style="font-size:11px">${miles} − ${Math.round((miles-milesClaimed)*10)/10} radius</span>`:""}</span>`;
+  }
   if(ME&&ME.selfEmployed&&ME.rate){
     const labour=ME.rateType==="day"?worked*ME.rate:hours*ME.rate;
-    const mp=miles*ME.pencePerMile/100;
+    const mp=milesClaimed*ME.pencePerMile/100;
     h+=`<span>Labour<br><b>${money(labour)}</b></span>`;
     if(ME.mileage) h+=`<span>Mileage pay<br><b>${money(mp)}</b></span>`;
     h+=`<span>Total<br><b>${money(labour+mp)}</b></span>`;
@@ -176,7 +184,7 @@ function render(){
       <div class="row"><label>Start <input type="time" class="t-start" value="${esc(d.start||"")}"></label>
         <label>Finish <input type="time" class="t-finish" value="${esc(d.finish||"")}"></label>${deds.join(" ")}</div>
       <div class="row"><input type="text" class="jobs" placeholder="Job number(s) / what you were on" value="${esc(d.jobs||"")}"></div>
-      ${ME&&ME.mileage?`<div class="mi"><div class="muted" style="font-size:12.5px;margin-bottom:2px">Mileage claims</div>
+      ${ME&&ME.mileage?`<div class="mi"><div class="muted" style="font-size:12.5px;margin-bottom:2px">Mileage claims${ME.radius?` · <span title="Set by the office">first/last ${ME.radiusMiles} mi of the day unpaid</span>`:""}</div>
         <div class="milist"></div><button class="btn addmi" style="font-size:13px">＋ Add mileage</button></div>`:""}`;
     if(ME&&ME.mileage){
       const list=card.querySelector(".milist");
@@ -193,7 +201,8 @@ function render(){
   const fn=[];
   if(ME&&ME.commute) fn.push("Travel deduction: "+ME.commuteMins+" minutes each way is unpaid (set by the office).");
   if(ME&&ME.lunch) fn.push("Lunch: "+ME.lunchMins+" minutes is deducted on days of "+ME.lunchThresholdH+"h or more.");
-  if(ME&&ME.mileage) fn.push("Mileage is estimated door-to-door (round trip) from your home postcode — you can adjust the figure before saving.");
+  if(ME&&ME.mileage) fn.push("Mileage fills in automatically for known sites (round trip from base) — you can adjust the figure before it saves.");
+  if(ME&&ME.mileage&&ME.radius) fn.push("The first and last "+ME.radiusMiles+" miles of each day aren't paid — the deduction is applied automatically.");
   g("footNote").textContent=fn.join(" ");
 }
 
@@ -409,10 +418,20 @@ document.addEventListener("input",e=>{
     if(hit&&hit.postcode){const pc=e.target.closest(".mirow").querySelector(".pc");if(!pc.value)pc.value=hit.postcode;}
   },250);
 });
-document.addEventListener("change",e=>{
+document.addEventListener("change",async e=>{
   if(e.target.classList&&e.target.classList.contains("site")){
+    const row=e.target.closest(".mirow");
     const hit=SITES.find(s=>s.name===e.target.value);
-    if(hit&&hit.postcode)e.target.closest(".mirow").querySelector(".pc").value=hit.postcode;
+    if(hit&&hit.postcode)row.querySelector(".pc").value=hit.postcode;
+    // Known site mileage fills in automatically (office-maintained register).
+    const milesIn=row.querySelector(".miles");
+    if(!milesIn.value){
+      if(hit&&hit.miles!=null)milesIn.value=hit.miles;
+      else if(e.target.value.trim()){
+        const r=await authFetchTO("/ts/miles?name="+encodeURIComponent(e.target.value.trim())).then(x=>x.json()).catch(()=>null);
+        if(r&&r.miles!=null&&!milesIn.value){milesIn.value=r.miles;refreshTotals();queueSave();}
+      }
+    }
   }
   refreshTotals();
   if(e.target.closest&&e.target.closest(".card[data-date]"))queueSave();
@@ -423,17 +442,18 @@ document.addEventListener("click",async e=>{
   if(!b.classList.contains("calc"))return;
   e.preventDefault();
   const row=b.closest(".mirow");
-  let home=(ME&&ME.homePostcode)||"";
-  if(!home){
-    home=(prompt("What's your home postcode? (used to estimate mileage — saved for next time)")||"").trim().toUpperCase();
-    if(!home)return;
-    await authFetchTO("/ts/me",{method:"POST",body:JSON.stringify({homePostcode:home})}).catch(()=>null);
-    ME.homePostcode=home;
-  }
-  const to=row.querySelector(".pc").value.trim();
-  if(!to)return alert("Enter the site postcode first (or pick a site from the list).");
   b.textContent="…";
-  const r=await authFetchTO("/ts/mileage?from="+encodeURIComponent(home)+"&to="+encodeURIComponent(to)).then(r=>r.json()).catch(()=>null);
+  // 1st choice: the office's saved mileage for this site.
+  const siteName=row.querySelector(".site").value.trim();
+  if(siteName){
+    const r0=await authFetchTO("/ts/miles?name="+encodeURIComponent(siteName)).then(x=>x.json()).catch(()=>null);
+    if(r0&&r0.miles!=null){row.querySelector(".miles").value=r0.miles;b.textContent="🧮";refreshTotals();queueSave();return;}
+  }
+  // Otherwise estimate the round trip from the company base postcode.
+  const from=(ME&&ME.basePostcode)||"PO15 5RQ";
+  const to=row.querySelector(".pc").value.trim();
+  if(!to){b.textContent="🧮";return alert("Enter the site postcode first (or pick a site from the list).");}
+  const r=await authFetchTO("/ts/mileage?from="+encodeURIComponent(from)+"&to="+encodeURIComponent(to)).then(r=>r.json()).catch(()=>null);
   b.textContent="🧮";
   if(!r||!r.ok)return alert((r&&r.error)||"Couldn't estimate that journey — enter the miles by hand.");
   row.querySelector(".miles").value=r.roundTrip;

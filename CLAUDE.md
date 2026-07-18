@@ -338,12 +338,20 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   CORS'd GET /Compliance/combined BROWSER-SIDE (workers.dev is 1042-blocked
   server-side), heuristic-maps name/postcode (postcode regex over values
   covers address-embedded ones), caches 15 min in sessionStorage, and merges
-  into the site picker alongside portal + PO_DB sites. **Mileage**: engineer picks
-  a site (GET /ts/sites suggests name+postcode from the sites table) or types a
-  postcode; **GET /ts/mileage** = postcodes.io (keyless; custom domain so
-  worker-fetchable) haversine × 1.25 road factor, round trip — an ESTIMATE,
-  always editable before saving. Home postcode self-set on first calc (POST
-  /ts/me) or by admin. No new worker secrets needed (filesign reuses
+  into the site picker alongside portal + PO_DB sites. **Mileage (reworked
+  18 Jul)**: per-site ROUND-TRIP miles live in the **site_miles** table
+  (self-migrating; key = normalised site name) — the register the admin edits
+  via "🗺️ Site mileage" on timesheets-admin (autosaving rows, ➕ add one-offs,
+  "⚡ Work out missing" loops POST /ts/miles/autofill 25-at-a-time estimating
+  from defaults.basePostcode, default **PO15 5RQ**, via postcodes.io
+  haversine × 1.25 × 2 — an ESTIMATE, always editable). /ts/sites suggestions
+  carry `miles`; picking a site auto-fills the engineer's miles box (GET
+  /ts/miles?name= is the single lookup; 🧮 falls back to a base→postcode
+  estimate — home postcode no longer used). **10-mile radius rule**: per-user
+  `radius` tick (+ defaults radiusMiles 10) — first/last N mi of each day
+  unpaid: claimed = max(0, dayMiles − 2N) per day, shown on the engineer page
+  and itemised on the invoice PDF ("66 mi − 28 mi (first/last 10 mi/day) =
+  38 mi @ 45p"). No new worker secrets needed (filesign reuses
   PORTAL_BRIDGE_SECRET). Activity-log FRIENDLY entries added.
 - `vancheck.js` — weekly van checks (replaces the old Jotform walkaround):
   driver form (mileage + photo slots → R2 vancheck/…), /vancheck/week admin
