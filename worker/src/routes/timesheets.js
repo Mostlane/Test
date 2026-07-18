@@ -228,12 +228,18 @@ function poShape(o) {
   return { name: String(name), pc: String(pc || ""), job: job != null && job !== "" ? String(job) : null };
 }
 function poSiteish(o) { const s = poShape(o); return !!(s && (s.pc || s.job)); }
+let PO_PROBE = null;   // in-flight probe — concurrent requests share one sweep
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
   if (PO_MAP !== undefined && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1000)) return PO_MAP;
+  if (!PO_PROBE) PO_PROBE = probePoDb(env).finally(() => { PO_PROBE = null; });
+  await PO_PROBE;
+  return PO_MAP;
+}
+async function probePoDb(env) {
   PO_MAP_AT = Date.now();
-  PO_MAP = null; PO_TABLES = [];
-  PO_ORD = undefined;   // re-probe the orders table alongside
+  const tables = [];
+  let map = null;
   try {
     const { results } = await env.PO_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'").all();
@@ -252,7 +258,7 @@ async function poDiscover(env) {
       budget--;
       try { cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || []; } catch { continue; }
       const names = cols.map(c => String(c.name));
-      PO_TABLES.push({ name: tbl, cols: names });
+      tables.push({ name: tbl, cols: names });
       const lower = names.map(n => n.toLowerCase());
       const pick = (...cands) => {
         for (const c of cands) { const i = lower.indexOf(c); if (i >= 0) return names[i]; }
@@ -293,9 +299,12 @@ async function poDiscover(env) {
         if (!best || score > best.score) best = { mode: "rows", table: tbl, jsonCol, score };
       }
     }
-    PO_MAP = best;
-  } catch { PO_MAP = null; }
-  return PO_MAP;
+    map = best;
+  } catch { map = null; }
+  // Commit everything in one go so no request ever sees a half-filled state.
+  PO_TABLES = tables;
+  PO_MAP = map;
+  PO_ORD = deriveOrderMap();
 }
 async function poBlobList(env, m) {
   if (PO_BLOB && Date.now() - PO_BLOB.at < 5 * 60 * 1000) return PO_BLOB.list;
@@ -359,37 +368,38 @@ async function poSiteRows(env, term, limit) {
 // also discover the PO/orders table (name matching po/purchase/order, or any
 // remaining table with a site-ish column; columnar or JSON rows) and harvest
 // DISTINCT site names from the most recent rows, cached 5 min per isolate.
-let PO_ORD;        // undefined = not probed, null = nothing usable
+let PO_ORD;        // set atomically by the same probe as PO_MAP
 let PO_ORD_CACHE;  // { at, list } — harvested site names
-async function poOrderDiscover(env) {
-  if (!env.PO_DB) return null;
-  if (PO_ORD !== undefined) return PO_ORD;
-  PO_ORD = null;
-  try {
-    const sitesTable = (await poDiscover(env)) ? PO_MAP.table : null;   // populates PO_TABLES too
-    let best = null;
-    for (const t of PO_TABLES || []) {
-      if (t.name === sitesTable) continue;
-      const lower = (t.cols || []).map(n => n.toLowerCase());
-      const pick = (...cands) => {
-        for (const c of cands) { const i = lower.indexOf(c); if (i >= 0) return t.cols[i]; }
-        for (const c of cands) { const i = lower.findIndex(n => n.includes(c)); if (i >= 0) return t.cols[i]; }
-        return null;
-      };
-      const isPo = /po|purchase|order/i.test(t.name);
-      const siteCol = pick("site_name", "sitename", "site", "location");
-      const jsonCol = pick("data", "value", "json", "body", "payload");
-      if (siteCol) {
-        const score = 5 + (isPo ? 5 : 0);
-        if (!best || score > best.score) best = { mode: "col", table: t.name, siteCol, score };
-      } else if (jsonCol && isPo) {
-        const score = 6;
-        if (!best || score > best.score) best = { mode: "json", table: t.name, jsonCol, score };
-      }
+// Derived from the table list with NO extra queries — runs inside the probe
+// so both discoveries land together (a race here once poisoned an isolate:
+// one request read the half-filled table list and cached "nothing" forever).
+function deriveOrderMap() {
+  const sitesTable = PO_MAP ? PO_MAP.table : null;
+  let best = null;
+  for (const t of PO_TABLES || []) {
+    if (t.name === sitesTable) continue;
+    const lower = (t.cols || []).map(n => n.toLowerCase());
+    const pick = (...cands) => {
+      for (const c of cands) { const i = lower.indexOf(c); if (i >= 0) return t.cols[i]; }
+      for (const c of cands) { const i = lower.findIndex(n => n.includes(c)); if (i >= 0) return t.cols[i]; }
+      return null;
+    };
+    const isPo = /po|purchase|order/i.test(t.name);
+    const siteCol = pick("site_name", "sitename", "site", "location");
+    const jsonCol = pick("data", "value", "json", "body", "payload");
+    if (siteCol) {
+      const score = 5 + (isPo ? 5 : 0);
+      if (!best || score > best.score) best = { mode: "col", table: t.name, siteCol, score };
+    } else if (jsonCol && isPo) {
+      const score = 6;
+      if (!best || score > best.score) best = { mode: "json", table: t.name, jsonCol, score };
     }
-    PO_ORD = best;
-  } catch { PO_ORD = null; }
-  return PO_ORD;
+  }
+  return best;
+}
+async function poOrderDiscover(env) {
+  await poDiscover(env);   // single-flight; fills PO_ORD too
+  return PO_ORD || null;
 }
 async function poOrderSiteNames(env) {
   const m = await poOrderDiscover(env);
@@ -638,7 +648,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, build: "w7", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w8", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = { mode: m.mode, table: m.table, nameCol: m.nameCol || null, pcCol: m.pcCol || null,
         jobCol: m.jobCol || null, jsonCol: m.jsonCol || null, blobKey: m.blobKey || null };
