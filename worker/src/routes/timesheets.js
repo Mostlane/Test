@@ -586,18 +586,41 @@ export async function handle(request, env, ctx, url, sess) {
   }
 
   // ── POST /ts/my — save own week ───────────────────────────────────────────
+  // Mileage is PRESET-ONLY for engineers: whatever miles the client sends are
+  // replaced with the office's site-mileage register figure (0 when the site
+  // has none), and non-fuel users get their mileage stripped entirely — so
+  // nobody can hand themselves miles, whatever their phone submits.
   if (sub === "/my" && method === "POST") {
     const b = await request.json().catch(() => ({}));
     if (!isDateStr(b.week)) return error("week (Monday, YYYY-MM-DD) required", 400, env, request);
     const monday = mondayOf(b.week);
     if (await invoiceFor(env, tid, me, monday))
       return error("This week has already been invoiced — ask the office to remove the invoice first.", 409, env, request);
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
     const days = cleanDays(monday, b.days);
+    if (!eff.mileage) {
+      for (const d of Object.values(days)) d.mileage = [];
+    } else {
+      const names = [...new Set(Object.values(days).flatMap(d => (d.mileage || []).map(m => normKey(m.site))).filter(Boolean))];
+      const preset = {};
+      if (names.length) {
+        try {
+          const ph = names.map(() => "?").join(",");
+          const { results } = await env.DB.prepare(
+            `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`).bind(tid, ...names).all();
+          for (const r of results || []) if (r.miles != null) preset[r.key] = r.miles;
+        } catch {}
+      }
+      for (const d of Object.values(days)) {
+        d.mileage = (d.mileage || []).filter(m => m.site)
+          .map(m => ({ site: m.site, postcode: m.postcode, miles: preset[normKey(m.site)] != null ? preset[normKey(m.site)] : 0 }));
+      }
+    }
     await env.DB.prepare(
       "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
     ).bind(tid, monday, me, JSON.stringify({ days }), new Date().toISOString()).run();
-    const u = await userRow(env, tid, me);
-    return json({ ok: true, week: monday, totals: weekTotals(days, effectiveCfg(cfg, u)) }, {}, env, request);
+    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
   }
 
   // ── GET /ts/sites — suggestion list for the mileage site picker ───────────

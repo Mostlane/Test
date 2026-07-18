@@ -7644,12 +7644,32 @@ async function handle20(request, env, ctx, url, sess) {
     const monday = mondayOf3(b.week);
     if (await invoiceFor(env, tid, me, monday))
       return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
     const days = cleanDays(monday, b.days);
+    if (!eff.mileage) {
+      for (const d of Object.values(days)) d.mileage = [];
+    } else {
+      const names = [...new Set(Object.values(days).flatMap((d) => (d.mileage || []).map((m) => normKey(m.site))).filter(Boolean))];
+      const preset = {};
+      if (names.length) {
+        try {
+          const ph = names.map(() => "?").join(",");
+          const { results } = await env.DB.prepare(
+            `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+          ).bind(tid, ...names).all();
+          for (const r of results || []) if (r.miles != null) preset[r.key] = r.miles;
+        } catch {
+        }
+      }
+      for (const d of Object.values(days)) {
+        d.mileage = (d.mileage || []).filter((m) => m.site).map((m) => ({ site: m.site, postcode: m.postcode, miles: preset[normKey(m.site)] != null ? preset[normKey(m.site)] : 0 }));
+      }
+    }
     await env.DB.prepare(
       "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
     ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
-    const u = await userRow(env, tid, me);
-    return json({ ok: true, week: monday, totals: weekTotals(days, effectiveCfg(cfg, u)) }, {}, env, request);
+    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
   }
   if (sub === "/sites" && method === "GET") {
     const term = String(q.get("q") || "").trim();
