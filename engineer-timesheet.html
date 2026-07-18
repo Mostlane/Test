@@ -219,6 +219,10 @@ function renderInvoiceCard(){
     card.innerHTML=`<h3>🧾 Invoice</h3><div class="invrow">Invoice <b>${INVOICE.number}</b> · ${money(INVOICE.total||0)} · <a href="${esc(INVOICE.url)}" target="_blank">Open PDF</a></div><div class="invlist" id="invList"></div>`;
   } else {
     card.innerHTML=`<h3>🧾 Invoice this week</h3>
+      <div class="invrow" style="flex-direction:column;align-items:stretch">
+        <label class="muted" style="font-size:12.5px">Your name &amp; address on the invoice (the “From” box — saves as you type)</label>
+        <textarea id="fromDetails" rows="3" style="font:inherit;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px" placeholder="${esc(ME.name||"")}\n1 Your Street\nTown, Postcode">${esc((ME.details&&ME.details.length?ME.details:[ME.name||""]).join("\n"))}</textarea>
+      </div>
       ${ME.rate?`<div class="invrow muted">Your rate: <b>${money(ME.rate)}${ME.rateType==="day"?"/day":"/hour"}</b>${ME.mileage?` · mileage ${ME.pencePerMile}p/mi`:""}</div>`
         :`<div class="invrow"><label>Your rate £ <input type="number" id="rateIn" min="0" step="0.5" style="width:90px"></label>
            <select id="rateType"><option value="hour">per hour</option><option value="day">per day</option></select></div>`}
@@ -237,6 +241,12 @@ function renderInvoiceCard(){
       },900);};
     }
     g("genBtn").onclick=generateInvoice;
+    let fdTimer=null;
+    g("fromDetails").oninput=()=>{clearTimeout(fdTimer);fdTimer=setTimeout(async()=>{
+      const details=g("fromDetails").value.split("\n").map(s=>s.trim()).filter(Boolean);
+      const r=await authFetchTO("/ts/me",{method:"POST",body:JSON.stringify({details})}).then(x=>x.json()).catch(()=>null);
+      if(r&&r.ok)ME.details=details;
+    },900);};
   }
   loadInvoiceList();
 }
