@@ -284,7 +284,7 @@ async function poStatusCheck(){
   const CW="https://mostlane-pos.jamie-def.workers.dev/Compliance/combined";
   let r=null,http=0,portal=null,storesN=null;
   const results=await Promise.allSettled([
-    authFetchTO("/ts/po-status").then(async resp=>{http=resp.status;r=await resp.json();}),
+    authFetchTO("/ts/po-status",{},20000).then(async resp=>{http=resp.status;r=await resp.json();}),
     authFetchTO("/ts/sites?q=a").then(x=>x.json()).then(x=>{portal=(x&&x.sites||[]).filter(s=>!s.source).length;}),
     Promise.race([fetch(CW),new Promise((_,rej)=>setTimeout(()=>rej(new Error("t")),9000))])
       .then(x=>x.json()).then(j=>{storesN=0;for(const k of Object.keys(j||{}))if(Array.isArray(j[k]))storesN+=j[k].length;})
@@ -295,7 +295,9 @@ async function poStatusCheck(){
   let rows=row("Portal sites",pOk,pOk?"":"couldn't load the portal site list — check your connection and try again");
   // PO system
   let poOk=false,poNote="";
-  if(!r||http===404||(r&&r.error&&/unknown timesheet route/i.test(r.error||""))){poNote="the worker on Cloudflare is an older build — paste the latest worker.js and Deploy";}
+  if(!r&&http===0){poNote="couldn't reach the worker just then (slow signal or a busy moment) — close and reopen Settings to re-check";}
+  else if(http===404||(r&&r.error&&/unknown timesheet route/i.test(r.error||""))){poNote="the worker on Cloudflare is an older build — paste the latest worker.js and Deploy";}
+  else if(!r){poNote="unexpected reply from the worker — reopen Settings to re-check";}
   else if(!r.ok&&http===403){poNote="needs Timesheet admin access";}
   else if(!r.bound){poNote="no <code>PO_DB</code> binding on mostlane-api (Settings → Bindings → D1 → variable <b>PO_DB</b> → database <b>mostlane-po</b>)";}
   else{
@@ -313,7 +315,7 @@ async function poStatusCheck(){
   el.style.background=allOk?"#ecfdf5":"#fef2f2";
   el.style.borderColor=allOk?"#a7f3d0":"#fecaca";
   el.innerHTML=`<div style="margin-bottom:2px"><b>Site &amp; job suggestions</b></div>`+rows+
-    `<div style="opacity:.55;font-size:11px;margin-top:3px">[page p8 · worker ${esc((r&&r.build)||"pre-w5")}]</div>`;
+    `<div style="opacity:.55;font-size:11px;margin-top:3px">[page p9 · worker ${esc((r&&r.build)||"pre-w5")}]</div>`;
 }
 // Autosave the settings modal: debounced on any tick/typing, retry on failure.
 let cfgTimer=null,cfgRetry=null,cfgBusy=false,cfgDirty=false;
