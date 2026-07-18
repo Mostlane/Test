@@ -7719,7 +7719,7 @@ async function handle20(request, env, ctx, url, sess) {
     const nameRef = (s) => String(s || "").replace(/\s*,\s*/g, " \u2013 ").trim();
     try {
       const { results } = await env.DB.prepare(
-        "SELECT job_number, site_name, client FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+        "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
       ).bind(tid, like, like).all();
       for (const r of results || []) {
         const hasJob = r.job_number != null && r.job_number !== "";
@@ -7727,7 +7727,9 @@ async function handle20(request, env, ctx, url, sess) {
         jobs.push({
           ref: hasJob ? String(r.job_number) : nameRef(name),
           label: (hasJob ? r.job_number + " \u2014 " : "") + name,
-          kind: "project"
+          kind: "project",
+          site: name,
+          postcode: (r.postcode || "").replace(/\*+$/, "")
         });
       }
     } catch {
@@ -7738,7 +7740,13 @@ async function handle20(request, env, ctx, url, sess) {
         const ref = r.job != null && r.job !== "" ? String(r.job) : nameRef(r.name);
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
-        jobs.push({ ref, label: (r.job != null && r.job !== "" ? r.job + " \u2014 " : "") + String(r.name || "PO site").slice(0, 48), kind: "po" });
+        jobs.push({
+          ref,
+          label: (r.job != null && r.job !== "" ? r.job + " \u2014 " : "") + String(r.name || "PO site").slice(0, 48),
+          kind: "po",
+          site: String(r.name || ""),
+          postcode: String(r.pc || "").toUpperCase()
+        });
       }
       const T2 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
@@ -7747,7 +7755,7 @@ async function handle20(request, env, ctx, url, sess) {
         const ref = nameRef(n);
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
-        jobs.push({ ref, label: n.slice(0, 60), kind: "po-order" });
+        jobs.push({ ref, label: n.slice(0, 60), kind: "po-order", site: n });
       }
     } catch {
     }
@@ -7757,7 +7765,24 @@ async function handle20(request, env, ctx, url, sess) {
       const pb = String(b.ref).toLowerCase().startsWith(T) ? 0 : 1;
       return pa - pb;
     });
-    return json({ ok: true, jobs: jobs.slice(0, 10) }, {}, env, request);
+    const out = jobs.slice(0, 10);
+    try {
+      const keys = [...new Set(out.map((j) => normKey(j.site)).filter(Boolean))];
+      if (keys.length) {
+        const ph = keys.map(() => "?").join(",");
+        const { results: mrows } = await env.DB.prepare(
+          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+        ).bind(tid, ...keys).all();
+        const mmap = {};
+        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
+        for (const j of out) {
+          const m = mmap[normKey(j.site)];
+          if (m != null) j.miles = m;
+        }
+      }
+    } catch {
+    }
+    return json({ ok: true, jobs: out }, {}, env, request);
   }
   if (sub === "/miles" && method === "GET") {
     const name = q.get("name");

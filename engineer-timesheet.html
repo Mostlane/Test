@@ -333,22 +333,44 @@ document.addEventListener("input",e=>{
       const ref=s.name.replace(/\s*,\s*/g," – ").trim();
       if(seen.has(ref.toLowerCase()))continue;
       seen.add(ref.toLowerCase());
-      list.push({ref,label:s.name+(s.postcode?" ("+s.postcode+")":"")});
+      list.push({ref,label:s.name+(s.postcode?" ("+s.postcode+")":""),site:s.name,postcode:s.postcode||""});
     }
     if(!list.length||document.activeElement!==inp)return;
     const div=document.createElement("div");div.className="sugrow";
-    div.innerHTML=list.slice(0,6).map(j=>`<button type="button" class="sug" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
+    div.innerHTML=list.slice(0,6).map((j,ix)=>`<button type="button" class="sug" data-ix="${ix}" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
     inp.closest(".row").after(div);
     div.addEventListener("mousedown",ev=>{
       const b=ev.target.closest(".sug");if(!b)return;
       ev.preventDefault();
       const parts=inp.value.split(",");parts[parts.length-1]=b.dataset.ref;
       inp.value=parts.map(s=>s.trim()).filter(Boolean).join(", ");
+      const j=list[+b.dataset.ix];
       hideAllSug();inp.focus();queueSave();
+      // Fuel users: picking a site drops its mileage claim in automatically.
+      if(j&&j.site)autoMileage(inp.closest(".card[data-date]"),j);
     });
   },250);
 });
 document.addEventListener("focusin",e=>{if(!e.target.classList||!e.target.classList.contains("jobs"))hideAllSug();});
+
+// Auto-add a mileage claim when a fuel-allowance user picks a site chip:
+// fills the site, postcode and the office's saved round-trip miles. Never
+// duplicates a site already claimed on that day.
+async function autoMileage(card,j){
+  if(!ME||!ME.mileage||!card||INVOICE)return;
+  const list=card.querySelector(".milist");if(!list)return;
+  const name=String(j.site||"").trim();if(!name)return;
+  const already=[...card.querySelectorAll(".mirow .site")].some(x=>x.value.trim().toLowerCase()===name.toLowerCase());
+  if(already)return;
+  let miles=j.miles!=null?j.miles:null;
+  if(miles==null){
+    const r=await authFetchTO("/ts/miles?name="+encodeURIComponent(name)).then(x=>x.json()).catch(()=>null);
+    if(r&&r.miles!=null)miles=r.miles;
+  }
+  list.appendChild(mileRow({site:name,postcode:(j.postcode||"").toUpperCase(),miles:miles!=null?miles:""}));
+  refreshTotals();
+  queueSave();
+}
 
 // ── Site suggestions + mileage estimate ──────────────────────────────────────
 // Three sources: portal sites + PO-system sites (both via /ts/sites) and the
