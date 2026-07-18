@@ -61,7 +61,10 @@ const normPc = pc => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const round1 = n => Math.round(n * 10) / 10;
 const money = n => "£" + (Math.round(n * 100) / 100).toFixed(2);
 
+let TABLES_ENSURED = false;   // once per isolate — the tables persist in D1
 async function ensureTables(env) {
+  if (TABLES_ENSURED) return;
+  TABLES_ENSURED = true;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
@@ -213,6 +216,7 @@ async function isTsAdmin(env, tid, sess) {
 //   rows — a table whose rows each hold one site as a JSON object (data/value col)
 //   blob — a key/value table where ONE value is a JSON ARRAY of site objects
 let PO_MAP;      // undefined = not probed yet, null = nothing usable found
+let PO_MAP_AT = 0;   // a FAILED probe is retried after 2 min, success is kept
 let PO_TABLES;   // [{ name, cols:[…] }] — kept for the /ts/po-status diagnostic
 let PO_BLOB;     // { at, list } — parsed blob cache (blob mode only)
 function poShape(o) {
@@ -226,16 +230,26 @@ function poShape(o) {
 function poSiteish(o) { const s = poShape(o); return !!(s && (s.pc || s.job)); }
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
-  if (PO_MAP !== undefined) return PO_MAP;
+  if (PO_MAP !== undefined && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1000)) return PO_MAP;
+  PO_MAP_AT = Date.now();
   PO_MAP = null; PO_TABLES = [];
+  PO_ORD = undefined;   // re-probe the orders table alongside
   try {
     const { results } = await env.PO_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'").all();
     let best = null;
-    for (const t of results || []) {
-      const tbl = String(t.name);
+    // Workers cap the number of queries per request, and probing EVERY table
+    // (PRAGMA + row sample each) blew that cap on the real PO database — the
+    // sweep died half-way and cached the failure. So: probe likely-named
+    // tables first, under a hard query budget.
+    const prio = n => /site|store|branch/i.test(n) ? 3 : /po|purchase|order|job/i.test(n) ? 2 : /kv|data|config|record/i.test(n) ? 1 : 0;
+    const ordered = (results || []).map(t => String(t.name)).sort((a, b) => prio(b) - prio(a));
+    let budget = 18;
+    for (const tbl of ordered) {
+      if (budget <= 0) break;
       const safe = tbl.replace(/"/g, "");
       let cols = [];
+      budget--;
       try { cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || []; } catch { continue; }
       const names = cols.map(c => String(c.name));
       PO_TABLES.push({ name: tbl, cols: names });
@@ -258,10 +272,12 @@ async function poDiscover(env) {
       const jsonCol = pick("value", "data", "json", "body", "payload", "v");
       if (!jsonCol) continue;
       const keyCol = pick("key", "k", "id", "name");
+      if (budget <= 0) break;
+      budget--;
       let rows = [];
       try {
         rows = (await env.PO_DB.prepare(
-          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 60`).all()).results || [];
+          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 40`).all()).results || [];
       } catch { continue; }
       let rowish = 0;
       for (const r of rows) {
@@ -385,11 +401,11 @@ async function poOrderSiteNames(env) {
     const add = v => { const s = String(v || "").trim(); if (s.length > 2 && !names.has(s.toLowerCase())) names.set(s.toLowerCase(), s); };
     if (m.mode === "col") {
       const { results } = await env.PO_DB.prepare(
-        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 800`).all();
+        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 500`).all();
       for (const r of results || []) add(r.s);
     } else {
       const { results } = await env.PO_DB.prepare(
-        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 800`).all();
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 500`).all();
       for (const r of results || []) {
         let o = null; try { o = JSON.parse(r.v); } catch { continue; }
         if (o && typeof o === "object") add(o.site ?? o.siteName ?? o.site_name ?? o.Site ?? o.location ?? "");
@@ -622,7 +638,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, build: "w6", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w7", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = { mode: m.mode, table: m.table, nameCol: m.nameCol || null, pcCol: m.pcCol || null,
         jobCol: m.jobCol || null, jsonCol: m.jsonCol || null, blobKey: m.blobKey || null };
