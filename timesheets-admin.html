@@ -447,14 +447,21 @@ g("miFill").onclick=async()=>{
 g("invBtn").onclick=async()=>{
   const r=await authFetchTO("/ts/invoices?u=all").then(x=>x.json()).catch(()=>null);
   if(!r||!r.ok)return alert("Couldn't load invoices.");
-  g("invTable").innerHTML="<tr><th style='text-align:left'>Engineer</th><th>No.</th><th>Week</th><th>Hours</th><th>Miles</th><th>Total</th><th>Created</th><th></th><th></th></tr>"+
-    (r.invoices.length?r.invoices.map(i=>`<tr><td style="text-align:left;font-weight:600">${esc(i.username)}</td><td><b>#${i.number}</b></td>
-      <td>${new Date(i.week+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</td>
+  const row=i=>`<tr><td style="text-align:left;font-weight:600">${esc(i.username)}</td><td><b>#${i.number}</b></td>
       <td>${i.hours||0}</td><td>${i.miles||0}</td><td>${money(i.total||0)}</td>
       <td>${new Date(i.at).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})}</td>
       <td><a href="${esc(i.url)}" target="_blank">Open</a></td>
-      <td><button class="btn" onclick="delInv(${i.id},'${esc(i.username).replace(/'/g,"\\'")}',${i.number})">🗑</button></td></tr>`).join("")
-    :'<tr><td colspan="9" class="empty">No invoices yet.</td></tr>');
+      <td><button class="btn" onclick="delInv(${i.id},'${esc(i.username).replace(/'/g,"\\'")}',${i.number})">🗑</button></td></tr>`;
+  // Grouped by week (newest first) so a whole pay week reads as one block.
+  const byWeek={};
+  for(const i of r.invoices)(byWeek[i.week]=byWeek[i.week]||[]).push(i);
+  const weeks=Object.keys(byWeek).sort().reverse();
+  g("invTable").innerHTML="<tr><th style='text-align:left'>Engineer</th><th>No.</th><th>Hours</th><th>Miles</th><th>Total</th><th>Created</th><th></th><th></th></tr>"+
+    (weeks.length?weeks.map(w=>{
+      const tot=byWeek[w].reduce((a,i)=>a+(i.total||0),0);
+      return `<tr><td colspan="8" style="text-align:left;background:#eef2ff;font-weight:700;padding:8px">Week of ${new Date(w+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} <span class="muted" style="font-weight:400">· ${byWeek[w].length} invoice(s) · ${money(tot)}</span></td></tr>`+byWeek[w].map(row).join("");
+    }).join("")
+    :'<tr><td colspan="8" class="empty">No invoices yet.</td></tr>');
   g("invOv").classList.add("show");
 };
 async function delInv(id,user,number){
