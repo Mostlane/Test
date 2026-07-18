@@ -7037,7 +7037,10 @@ var toMin = (t) => {
 var normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 var round1 = (n) => Math.round(n * 10) / 10;
 var money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
+var TABLES_ENSURED = false;
 async function ensureTables(env) {
+  if (TABLES_ENSURED) return;
+  TABLES_ENSURED = true;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
     tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
     data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
@@ -7205,6 +7208,7 @@ async function isTsAdmin(env, tid, sess) {
   return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
 }
 var PO_MAP;
+var PO_MAP_AT = 0;
 var PO_TABLES;
 var PO_BLOB;
 function poShape(o) {
@@ -7221,18 +7225,24 @@ function poSiteish(o) {
 }
 async function poDiscover(env) {
   if (!env.PO_DB) return null;
-  if (PO_MAP !== void 0) return PO_MAP;
+  if (PO_MAP !== void 0 && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1e3)) return PO_MAP;
+  PO_MAP_AT = Date.now();
   PO_MAP = null;
   PO_TABLES = [];
+  PO_ORD = void 0;
   try {
     const { results } = await env.PO_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'"
     ).all();
     let best = null;
-    for (const t of results || []) {
-      const tbl = String(t.name);
+    const prio = (n) => /site|store|branch/i.test(n) ? 3 : /po|purchase|order|job/i.test(n) ? 2 : /kv|data|config|record/i.test(n) ? 1 : 0;
+    const ordered = (results || []).map((t) => String(t.name)).sort((a, b) => prio(b) - prio(a));
+    let budget = 18;
+    for (const tbl of ordered) {
+      if (budget <= 0) break;
       const safe = tbl.replace(/"/g, "");
       let cols = [];
+      budget--;
       try {
         cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || [];
       } catch {
@@ -7263,10 +7273,12 @@ async function poDiscover(env) {
       const jsonCol = pick("value", "data", "json", "body", "payload", "v");
       if (!jsonCol) continue;
       const keyCol = pick("key", "k", "id", "name");
+      if (budget <= 0) break;
+      budget--;
       let rows = [];
       try {
         rows = (await env.PO_DB.prepare(
-          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 60`
+          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 40`
         ).all()).results || [];
       } catch {
         continue;
@@ -7411,12 +7423,12 @@ async function poOrderSiteNames(env) {
     };
     if (m.mode === "col") {
       const { results } = await env.PO_DB.prepare(
-        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 800`
+        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
       ).all();
       for (const r of results || []) add(r.s);
     } else {
       const { results } = await env.PO_DB.prepare(
-        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 800`
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
       ).all();
       for (const r of results || []) {
         let o = null;
@@ -7684,7 +7696,7 @@ async function handle20(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, build: "w6", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w7", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = {
         mode: m.mode,
