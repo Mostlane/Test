@@ -457,11 +457,14 @@ function buildInvoicePdf({ number, name, details, company, monday, days, eff, to
   y += 34;
   doc.text(L, y, "From", { size: 9, grey: true }); doc.text(R, y, "To", { size: 9, grey: true, alignRight: true });
   y += 14;
-  doc.text(L, y, name, { size: 11, bold: true });
+  // The engineer's own "From" block replaces the portal display name entirely
+  // when set (first line bold — their full/trading name, then address lines).
+  const fromLines = (details && details.length ? details : [name]).slice(0, 6);
+  doc.text(L, y, String(fromLines[0]).slice(0, 60), { size: 11, bold: true });
   const toLines = String(company || "Mostlane").split(/\n/).filter(Boolean);
   let ty = y;
   for (const ln of toLines) { doc.text(R, ty, ln.trim(), { size: ty === y ? 11 : 10, bold: ty === y, alignRight: true }); ty += 14; }
-  for (const ln of (details || []).slice(0, 5)) { y += 14; doc.text(L, y, String(ln).slice(0, 60), { size: 10 }); }
+  for (const ln of fromLines.slice(1)) { y += 14; doc.text(L, y, String(ln).slice(0, 60), { size: 10 }); }
   y = Math.max(y, ty - 14) + 24;
   doc.text(L, y, "Week: " + fmtDate(monday) + " – " + fmtDate(weekDays(monday)[6]), { size: 10, bold: true });
   y += 16; doc.hr(L, y, R); y += 16;
@@ -563,7 +566,7 @@ export async function handle(request, env, ctx, url, sess) {
     const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
     if ("homePostcode" in b) mine.homePostcode = String(b.homePostcode || "").toUpperCase().slice(0, 10);
     if ("details" in b) mine.details = (Array.isArray(b.details) ? b.details : String(b.details || "").split(/\n/))
-      .map(s => String(s).trim()).filter(Boolean).slice(0, 5);
+      .map(s => String(s).trim()).filter(Boolean).slice(0, 6);
     if ("rate" in b) { const n = parseFloat(b.rate); if (isFinite(n) && n >= 0) mine.rate = n; }
     if ("rateType" in b && (b.rateType === "hour" || b.rateType === "day")) mine.rateType = b.rateType;
     await saveCfg(env, tid, cfg);
