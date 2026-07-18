@@ -249,7 +249,7 @@
         { icon: "⏱️", title: "Fill in your weekly timesheet", perms: ["EngTimesheet"], steps: [
           ["Open <b>My Timesheet</b> from the menu. Each day has a <b>Start</b> and <b>Finish</b> time and a box for the <b>job number(s)</b> you were on."],
           ["Any deductions the office has set for you (30&nbsp;minutes travel each way, or a lunch break on longer days) are shown greyed on each day and taken off automatically — the green figure is your <b>paid</b> time."],
-          ["If you claim <b>mileage</b>: tap <b>＋ Add mileage</b> on a day, start typing the site name and pick it from the list (its postcode fills in), then tap <b>🧮</b> to estimate the round trip from your home postcode. You can adjust the miles before saving."],
+          ["If you claim <b>mileage</b>: tap <b>＋ Add mileage</b> on a day and start typing the site name — pick it from the list and the postcode <b>and miles fill in automatically</b> for known sites (the office keeps the mileage list). For anywhere unknown, tap <b>🧮</b> for an estimate, or type the miles. If your account has the 10-mile radius rule, the first and last 10 miles of each day are deducted automatically."],
           ["Everything <b>saves automatically as you type</b> — the bar at the bottom shows “Saved ✓”. Come back and change things any time until the week is invoiced."],
         ]},
         { icon: "🧾", title: "Invoice your week (self-employed)", perms: ["EngTimesheet"], steps: [
@@ -261,6 +261,7 @@
         { icon: "🧾", title: "Engineer timesheets & invoices (admin)", perms: ["TimesheetAdmin"], steps: [
           ["<b>Engineer Timesheets</b> shows everyone's week — paid hours per day (after their deductions), miles, and each self-employed engineer's invoice for the week. <b>✎</b> edits a person's days."],
           ["<b>⚙️ Settings</b> is where you set <b>who gets the 30-minute travel deduction</b> (each way), <b>who has lunch deducted</b>, who gets <b>fuel</b> (the mileage switch), their rate (per hour or per day), pence per mile, home postcode and next invoice number. It also holds the company details printed on invoices."],
+          ["<b>🗺️ Site mileage</b> holds the round-trip miles paid for each site (from base). <b>⚡ Work out missing</b> estimates every portal site's figure in one go; type over any value to correct it, and add one-off sites at the top. Engineers' mileage boxes fill from this list automatically."],
           ["<b>🧾 Invoices</b> lists every generated invoice — open the PDF or delete a wrong one (that unlocks the engineer's week and frees the number)."],
         ]},
         { icon: "💼", title: "The office timesheet (admin)", perms: ["OfficeTimesheet"], steps: [

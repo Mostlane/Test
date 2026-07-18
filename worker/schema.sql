@@ -547,3 +547,15 @@ CREATE TABLE IF NOT EXISTS eng_invoices (
   UNIQUE (tenant_id, username, number),
   UNIQUE (tenant_id, username, week)
 );
+
+-- Known round-trip mileage per site from the base postcode (engineer mileage
+-- rows auto-fill from this; admin edits it on timesheets-admin.html)
+CREATE TABLE IF NOT EXISTS site_miles (
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  key       TEXT NOT NULL,               -- normalised site name
+  name      TEXT,
+  postcode  TEXT,
+  miles     REAL,                        -- round trip
+  updated_at TEXT,
+  PRIMARY KEY (tenant_id, key)
+);

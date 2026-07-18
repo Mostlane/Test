@@ -67,6 +67,7 @@
     <button class="btn" id="nextWk">Next ›</button>
     <label style="margin-left:8px;font-size:13px"><input type="checkbox" id="showAll"> Show everyone</label>
     <span style="flex:1"></span>
+    <button class="btn" id="milesBtn">🗺️ Site mileage</button>
     <button class="btn" id="invBtn">🧾 Invoices</button>
     <button class="btn" id="cfgBtn">⚙️ Settings</button>
   </div>
@@ -87,12 +88,30 @@
 
 <div class="ov" id="cfgOv"><div class="panel" style="max-width:1050px">
   <h2>⚙️ Timesheet settings</h2>
-  <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). <b>Fuel</b> is the per-person switch for whether they get paid mileage — tick it for the self-employed engineers who claim fuel, and set their pence per mile. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
+  <p class="note">Tick <b>Travel</b> for anyone who has 30 minutes each way deducted, and <b>Lunch</b> for anyone who has the lunch break deducted (on days over the threshold). <b>Fuel</b> is the per-person switch for whether they get paid mileage — tick it for the self-employed engineers who claim fuel, and set their pence per mile. <b>10-mi radius</b> means the first and last 10 miles of each day get no fuel allowance. Rates are used on self-employed invoices. Blank number boxes fall back to the defaults / the person's profile.</p>
   <div id="poStatus" style="border-radius:9px;padding:9px 12px;margin-bottom:10px;font-size:13px;background:#f1f5f9;border:1px solid var(--line)">Checking the PO system link…</div>
   <div class="defs" id="defs"></div>
   <div style="max-height:52vh;overflow:auto"><table class="cfgTable" id="cfgTable"></table></div>
   <div class="foot"><span class="muted" id="cfgState" style="margin-right:auto;align-self:center">Changes save automatically</span>
   <button class="btn primary" onclick="closeCfg()">Close</button></div>
+</div></div>
+
+<div class="ov" id="milesOv"><div class="panel" style="max-width:760px">
+  <h2>🗺️ Site mileage</h2>
+  <p class="note">The <b>round-trip miles</b> paid for a visit to each site, measured from base. When an engineer picks a site on their timesheet the saved figure fills in automatically. Type to change a value (blank = no saved figure); <b>⚡ Work out missing</b> estimates any site that has a postcode but no figure yet — always check and adjust the ones that matter.</p>
+  <div class="bar" style="margin-bottom:8px">
+    <input type="text" id="miSearch" placeholder="Search sites…" style="flex:1;font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px">
+    <button class="btn" id="miFill">⚡ Work out missing</button>
+  </div>
+  <div class="bar" style="margin-bottom:8px;gap:6px">
+    <input type="text" id="miNewName" placeholder="Add a site (name)" style="flex:2;font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px">
+    <input type="text" id="miNewPc" placeholder="Postcode" style="width:110px;font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px;text-transform:uppercase">
+    <input type="number" id="miNewMiles" placeholder="mi" step="0.1" min="0" style="width:84px;font:inherit;padding:8px;border:1px solid #cbd5e1;border-radius:8px">
+    <button class="btn" id="miAdd">➕ Add</button>
+  </div>
+  <div style="max-height:48vh;overflow:auto"><table class="cfgTable" id="miTable"></table></div>
+  <div class="foot"><span class="muted" id="miState" style="margin-right:auto;align-self:center">Changes save automatically</span>
+  <button class="btn primary" onclick="document.getElementById('milesOv').classList.remove('show')">Close</button></div>
 </div></div>
 
 <div class="ov" id="invOv"><div class="panel">
@@ -233,9 +252,11 @@ g("cfgBtn").onclick=async()=>{
     <label>Lunch deduction (mins) <input type="number" id="d-lunch" value="${r.defaults.lunchMins}" style="width:80px"></label>
     <label>Lunch applies from (hours) <input type="number" id="d-thresh" value="${r.defaults.lunchThresholdH}" style="width:80px"></label>
     <label>Default mileage (p/mile) <input type="number" id="d-ppm" value="${r.defaults.pencePerMile}" style="width:80px"></label>
+    <label>Radius (miles, first/last) <input type="number" id="d-radius" value="${r.defaults.radiusMiles!=null?r.defaults.radiusMiles:10}" style="width:80px"></label>
+    <label>Base postcode <input type="text" id="d-base" value="${esc(r.defaults.basePostcode||"PO15 5RQ")}" style="width:110px;text-transform:uppercase"></label>
     <label style="flex:1;min-width:220px">Company details on invoices (the “To” address)
       <textarea id="d-company" rows="2">${esc(r.defaults.company||"Mostlane")}</textarea></label>`;
-  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
+  g("cfgTable").innerHTML=`<tr><th style="text-align:left">Engineer</th><th>Employment</th><th>Travel −30×2</th><th>Lunch −30</th><th>Fuel (mileage)</th><th>10-mi radius</th><th>Rate £</th><th>Per</th><th>p/mile</th><th>Home postcode</th><th>Next inv #</th></tr>`+
     r.users.map(u=>{
       const o=(r.byUser&&r.byUser[u.username])||{};
       const e=u.effective;
@@ -244,6 +265,7 @@ g("cfgBtn").onclick=async()=>{
         <td><input type="checkbox" class="c-commute" ${e.commute?"checked":""}></td>
         <td><input type="checkbox" class="c-lunch" ${e.lunch?"checked":""}></td>
         <td><input type="checkbox" class="c-mileage" ${e.mileage?"checked":""}></td>
+        <td><input type="checkbox" class="c-radius" ${e.radius?"checked":""}></td>
         <td><input type="number" class="c-rate" step="0.5" min="0" value="${o.rate!=null?o.rate:(e.rate!=null?e.rate:"")}"></td>
         <td><select class="c-ratetype"><option value="hour" ${e.rateType!=="day"?"selected":""}>hour</option><option value="day" ${e.rateType==="day"?"selected":""}>day</option></select></td>
         <td><input type="number" class="c-ppm" value="${o.pencePerMile!=null?o.pencePerMile:""}" placeholder="${e.pencePerMile}"></td>
@@ -302,6 +324,7 @@ function collectCfg(){
       commute:tr.querySelector(".c-commute").checked,
       lunch:tr.querySelector(".c-lunch").checked,
       mileage:tr.querySelector(".c-mileage").checked,
+      radius:tr.querySelector(".c-radius").checked,
       rate:tr.querySelector(".c-rate").value,
       rateType:tr.querySelector(".c-ratetype").value,
       pencePerMile:tr.querySelector(".c-ppm").value,
@@ -310,7 +333,9 @@ function collectCfg(){
     };
   });
   const defaults={commuteMins:+g("d-commute").value||30,lunchMins:+g("d-lunch").value||30,
-    lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,company:g("d-company").value};
+    lunchThresholdH:+g("d-thresh").value||6,pencePerMile:+g("d-ppm").value||45,
+    radiusMiles:+g("d-radius").value||10,basePostcode:g("d-base").value.trim().toUpperCase()||"PO15 5RQ",
+    company:g("d-company").value};
   return {defaults,byUser};
 }
 function queueCfgSave(){
@@ -341,6 +366,80 @@ async function closeCfg(){
 }
 document.addEventListener("input",e=>{if(e.target.closest&&(e.target.closest("#cfgTable")||e.target.closest("#defs")))queueCfgSave();});
 document.addEventListener("change",e=>{if(e.target.closest&&(e.target.closest("#cfgTable")||e.target.closest("#defs")))queueCfgSave();});
+
+// ── Site mileage register (autosaving) ───────────────────────────────────────
+let MI_LIST=[],miTimer=null,miDirty={},miBusy=false;
+function miRow(s){
+  return `<tr data-name="${esc(s.name)}"><td style="text-align:left">${esc(s.name)}</td>
+    <td class="muted">${esc(s.postcode||"")}</td>
+    <td><input type="number" class="mi-miles" step="0.1" min="0" value="${s.miles!=null?s.miles:""}" placeholder="—" data-pc="${esc(s.postcode||"")}"></td></tr>`;
+}
+function miRender(){
+  const t=(g("miSearch").value||"").trim().toLowerCase();
+  const list=t?MI_LIST.filter(s=>s.name.toLowerCase().includes(t)||(s.postcode||"").toLowerCase().includes(t)):MI_LIST;
+  g("miTable").innerHTML=`<tr><th style="text-align:left">Site</th><th>Postcode</th><th>Round-trip mi</th></tr>`+
+    list.slice(0,500).map(miRow).join("");
+}
+async function miLoad(){
+  const r=await authFetchTO("/ts/miles?all=1",{},15000).then(x=>x.json()).catch(()=>null);
+  if(!r||!r.ok){g("miState").textContent="Couldn't load — is the latest worker pasted?";return;}
+  MI_LIST=r.sites||[];
+  miRender();
+  g("miState").textContent=(r.missing?r.missing+" site(s) have no figure yet — ⚡ works them out. ":"")+"Changes save automatically";
+}
+g("milesBtn").onclick=()=>{g("milesOv").classList.add("show");g("miSearch").value="";g("miState").textContent="Loading…";miLoad();};
+g("miSearch") && (document.getElementById("miSearch").oninput=()=>miRender());
+function queueMiSave(name,pc,val){
+  miDirty[name]={name,postcode:pc,miles:val};
+  clearTimeout(miTimer);
+  miTimer=setTimeout(()=>doMiSave(),900);
+}
+async function doMiSave(){
+  clearTimeout(miTimer);
+  if(miBusy){miTimer=setTimeout(()=>doMiSave(),1200);return;}
+  const entries=Object.values(miDirty);
+  if(!entries.length)return;
+  miDirty={};miBusy=true;
+  g("miState").textContent="Saving…";
+  const r=await authFetchTO("/ts/miles",{method:"POST",body:JSON.stringify({entries})}).then(x=>x.json()).catch(()=>null);
+  miBusy=false;
+  if(r&&r.ok){
+    for(const e of entries){const s=MI_LIST.find(x=>x.name===e.name);if(s){s.miles=parseFloat(e.miles);if(!isFinite(s.miles))s.miles=null;else s.saved=true;}}
+    g("miState").textContent="Saved ✓ "+new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+    if(Object.keys(miDirty).length)doMiSave();
+  }else{
+    for(const e of entries)miDirty[e.name]=e;   // keep and retry
+    g("miState").textContent="⚠️ Couldn't save — retrying…";
+    miTimer=setTimeout(()=>doMiSave(),8000);
+  }
+}
+document.addEventListener("input",e=>{
+  if(!e.target.classList||!e.target.classList.contains("mi-miles"))return;
+  const tr=e.target.closest("tr");
+  queueMiSave(tr.dataset.name,e.target.dataset.pc,e.target.value);
+});
+g("miAdd").onclick=async()=>{
+  const name=g("miNewName").value.trim(),pc=g("miNewPc").value.trim().toUpperCase(),mi=g("miNewMiles").value;
+  if(!name)return alert("Enter the site name.");
+  queueMiSave(name,pc,mi);
+  await doMiSave();
+  g("miNewName").value="";g("miNewPc").value="";g("miNewMiles").value="";
+  miLoad();
+};
+g("miFill").onclick=async()=>{
+  g("miFill").disabled=true;
+  let total=0,failed=0;
+  try{
+    for(let i=0;i<40;i++){
+      g("miState").textContent="Working out mileage… "+(total?total+" done":"");
+      const r=await authFetchTO("/ts/miles/autofill",{method:"POST",body:"{}"},30000).then(x=>x.json()).catch(()=>null);
+      if(!r||!r.ok){g("miState").textContent=(r&&r.error)||"⚠️ Couldn't calculate — is the latest worker pasted?";break;}
+      total+=r.done;failed+=r.failed;
+      if(!r.remaining){g("miState").textContent="Done — "+total+" worked out"+(failed?" ("+failed+" postcode(s) not found — set those by hand)":"")+".";break;}
+    }
+  }finally{g("miFill").disabled=false;}
+  miLoad();
+};
 
 // ── Invoices list ────────────────────────────────────────────────────────────
 g("invBtn").onclick=async()=>{
