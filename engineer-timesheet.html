@@ -208,7 +208,12 @@ function render(){
 
 function renderInvoiceCard(){
   const card=g("invCard");
-  if(!ME||!ME.selfEmployed){card.style.display="none";return;}
+  if(!ME||!ME.selfEmployed){
+    // Nothing for employed staff — but explain it to an admin who's testing.
+    if(ME&&ME.admin){card.style.display="";card.innerHTML='<h3>🧾 Invoice</h3><p class="muted" style="font-size:13px">Invoices only appear for <b>self-employed</b> engineers — this account\'s Employment type is "'+esc(ME.employment||"Employed")+'" (set in Users Admin). Their rate and fuel switches live in Engineer Timesheets → ⚙️ Settings.</p>';}
+    else card.style.display="none";
+    return;
+  }
   card.style.display="";
   if(INVOICE){
     card.innerHTML=`<h3>🧾 Invoice</h3><div class="invrow">Invoice <b>${INVOICE.number}</b> · ${money(INVOICE.total||0)} · <a href="${esc(INVOICE.url)}" target="_blank">Open PDF</a></div><div class="invlist" id="invList"></div>`;
