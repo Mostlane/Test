@@ -7684,7 +7684,7 @@ async function handle20(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, build: "w5", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w6", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = {
         mode: m.mode,
@@ -7708,15 +7708,16 @@ async function handle20(request, env, ctx, url, sess) {
     const term = String(q.get("q") || "").trim();
     if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
     const like = "%" + term.replace(/[%_]/g, "") + "%";
-    const jobs = [];
+    const sla = [], project = [], po = [], errs = {};
+    const nameRef = (s) => String(s || "").replace(/\s*,\s*/g, " \u2013 ").trim();
     try {
       const { results } = await env.DB.prepare(
         "SELECT helpdesk_ref, description, status FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref IS NOT NULL AND helpdesk_ref!='' AND status NOT IN ('Complete','Closed') AND (helpdesk_ref LIKE ? OR description LIKE ?) ORDER BY raised_at DESC LIMIT 8"
       ).bind(tid, like, like).all();
-      for (const r of results || []) jobs.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " \u2014 " + String(r.description || "").slice(0, 48), kind: "sla" });
-    } catch {
+      for (const r of results || []) sla.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " \u2014 " + String(r.description || "").slice(0, 48), kind: "sla" });
+    } catch (e) {
+      errs.sla = String(e && e.message || e);
     }
-    const nameRef = (s) => String(s || "").replace(/\s*,\s*/g, " \u2013 ").trim();
     try {
       const { results } = await env.DB.prepare(
         "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
@@ -7724,7 +7725,7 @@ async function handle20(request, env, ctx, url, sess) {
       for (const r of results || []) {
         const hasJob = r.job_number != null && r.job_number !== "";
         const name = r.site_name || r.client || "site";
-        jobs.push({
+        project.push({
           ref: hasJob ? String(r.job_number) : nameRef(name),
           label: (hasJob ? r.job_number + " \u2014 " : "") + name,
           kind: "project",
@@ -7732,15 +7733,16 @@ async function handle20(request, env, ctx, url, sess) {
           postcode: (r.postcode || "").replace(/\*+$/, "")
         });
       }
-    } catch {
+    } catch (e) {
+      errs.project = String(e && e.message || e);
     }
+    const seen = new Set([...sla, ...project].map((j) => String(j.ref).toLowerCase()));
     try {
-      const seen = new Set(jobs.map((j) => String(j.ref).toLowerCase()));
       for (const r of await poSiteRows(env, term, 8)) {
         const ref = r.job != null && r.job !== "" ? String(r.job) : nameRef(r.name);
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
-        jobs.push({
+        po.push({
           ref,
           label: (r.job != null && r.job !== "" ? r.job + " \u2014 " : "") + String(r.name || "PO site").slice(0, 48),
           kind: "po",
@@ -7748,16 +7750,27 @@ async function handle20(request, env, ctx, url, sess) {
           postcode: String(r.pc || "").toUpperCase()
         });
       }
+    } catch (e) {
+      errs.poSites = String(e && e.message || e);
+    }
+    try {
       const T2 = term.toLowerCase();
       for (const n of await poOrderSiteNames(env)) {
-        if (jobs.length >= 12) break;
+        if (po.length >= 8) break;
         if (!n.toLowerCase().includes(T2)) continue;
         const ref = nameRef(n);
         if (!ref || seen.has(ref.toLowerCase())) continue;
         seen.add(ref.toLowerCase());
-        jobs.push({ ref, label: n.slice(0, 60), kind: "po-order", site: n });
+        po.push({ ref, label: n.slice(0, 60), kind: "po-order", site: n });
       }
-    } catch {
+    } catch (e) {
+      errs.poOrders = String(e && e.message || e);
+    }
+    const jobs = [...po.slice(0, 4), ...sla.slice(0, 3), ...project.slice(0, 3)];
+    const spare = [...po.slice(4), ...sla.slice(3), ...project.slice(3)];
+    for (const j of spare) {
+      if (jobs.length >= 10) break;
+      jobs.push(j);
     }
     const T = term.toLowerCase();
     jobs.sort((a, b) => {
@@ -7766,6 +7779,15 @@ async function handle20(request, env, ctx, url, sess) {
       return pa - pb;
     });
     const out = jobs.slice(0, 10);
+    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess)) {
+      return json({
+        ok: true,
+        build: "w6",
+        counts: { sla: sla.length, project: project.length, po: po.length },
+        errors: errs,
+        jobs: out
+      }, {}, env, request);
+    }
     try {
       const keys = [...new Set(out.map((j) => normKey(j.site)).filter(Boolean))];
       if (keys.length) {
