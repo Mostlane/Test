@@ -68,6 +68,7 @@
   .sugrow{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0 2px}
   .sug{appearance:none;border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:999px;padding:7px 12px;font-size:13px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* mileage */
+  .autoline{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#0e7a3c;background:#ecfdf5;border:1px solid #bbe7cd;border-radius:10px;padding:6px 10px;margin-top:12px;font-weight:600}
   .mi{margin-top:12px}
   .mirow{display:flex;gap:8px;align-items:center;margin:7px 0;background:#f6f9fc;border:1px solid #e8eef6;border-radius:12px;padding:9px 8px 9px 12px;font-size:14.5px}
   .mirow .btn{padding:7px 11px;flex:none;border-radius:10px}
@@ -133,7 +134,7 @@ const hmS=m=>(!m||m<=0)?"0h 00m":Math.floor(m/60)+"h "+String(Math.round(m%60)).
 const money=n=>"£"+(Math.round(n*100)/100).toFixed(2);
 const DOWFULL=["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
-let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, SITES=[];
+let ME=null, WEEK=mondayOf(new Date()), DAYS={}, INVOICE=null, ASSIGNED={}, AUTO={}, SITES=[];
 
 function claimedMiles(miles){
   if(!(ME&&ME.radius)||!(miles>0))return miles;
@@ -235,8 +236,20 @@ function render(){
   const host=g("dayCards");host.innerHTML="";
   const locked=!!INVOICE;
   const today=new Date().toISOString().slice(0,10);
+  let autoChanged=false;
   for(let i=0;i<7;i++){
-    const date=addDays(WEEK,i), d=DAYS[date]||{};
+    const date=addDays(WEEK,i); let d=DAYS[date]||{};
+    // Time captured from job statuses fills anything the engineer hasn't
+    // typed themselves (never overwrites, never on an invoiced week).
+    const a=(!locked&&AUTO[date])||null;
+    if(a){
+      if(!d.start&&a.start){d.start=a.start;autoChanged=true;}
+      if(!d.finish&&a.finish){d.finish=a.finish;autoChanged=true;}
+      const have=(d.jobs||"").toLowerCase();
+      const addRefs=(a.jobs||[]).filter(j=>!have.includes(String(j.ref).toLowerCase()));
+      if(addRefs.length){d.jobs=[d.jobs,addRefs.map(j=>j.ref).join(", ")].filter(Boolean).join(", ");autoChanged=true;}
+      DAYS[date]=d;
+    }
     const card=document.createElement("div");
     const isToday=date===today;
     card.className="card"+(i>=5?" wknd":"")+(isToday&&!locked?" open":"");
@@ -260,6 +273,7 @@ function render(){
         <div class="flab">Jobs — tap above or type to add (as many as needed)</div>
         <div class="row joblist"></div>
         ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
+        ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
     if(ME&&ME.mileage){
@@ -287,6 +301,11 @@ function render(){
       if(refs.includes(String(b.ref).toLowerCase()))card.querySelectorAll(".bk")[ix].classList.add("used");
     });
     host.appendChild(card);
+  }
+  if(autoChanged){setTimeout(()=>{refreshTotals();queueSave();},0);}
+  if(!locked)for(const [date,a] of Object.entries(AUTO)){
+    const cardEl=document.querySelector(`.card[data-date="${date}"]`);
+    if(cardEl)(a.jobs||[]).forEach(j=>{if(j.site)autoMileage(cardEl,j);});
   }
   g("invBanner").innerHTML=locked?`<div class="banner">✅ Invoice <b>${INVOICE.number}</b> has been generated for this week (${money(INVOICE.total||0)}) — <a href="${esc(INVOICE.url)}" target="_blank">open the PDF</a>. The week is locked; ask the office if something needs correcting.</div>`:"";
   document.querySelectorAll(".card[data-date] input,.card[data-date] .btn,.card[data-date] .bk").forEach(el=>{if(locked)el.disabled=true;});
@@ -558,6 +577,7 @@ async function load(){
     DAYS=(wkR&&wkR.days)||{};
     INVOICE=(wkR&&wkR.invoice)||null;
     ASSIGNED=(asR&&asR.byDay)||{};
+    AUTO=(wkR&&wkR.auto)||{};
   }catch(e){
     g("dayCards").innerHTML='<div class="card">Couldn\'t load your timesheet — <button class="btn" onclick="load()">try again</button></div>';
     return;

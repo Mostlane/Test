@@ -80,6 +80,109 @@ async function ensureTables(env) {
     tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
     name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
     PRIMARY KEY (tenant_id, key))`).run();
+  // Job-status time capture: Travelling/In Progress opens a segment for the
+  // acting engineer, any other status closes it — the timesheet auto-fills
+  // from these (see trackJobTime / jobTimeAuto).
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+    started_at TEXT NOT NULL, ended_at TEXT)`).run();
+}
+
+// ── Job-status time capture (called from sla.js on every status change) ─────
+// "Travelling"/"In Progress" start the clock on that job for the ACTING
+// engineer (closing their clock on any other job); every other status stops
+// it. Only counts when the actor is actually assigned to the job, so office
+// edits never start anyone's clock. Best-effort: never breaks the job save.
+const TS_ACTIVE = new Set(["travelling", "in progress"]);
+export async function trackJobTime(env, tid, actor, before, after) {
+  try {
+    if (!actor || !after) return;
+    const bs = String((before && before.status) || "").toLowerCase().trim();
+    const as = String((after && after.status) || "").toLowerCase().trim();
+    if (bs === as) return;
+    const engs = (Array.isArray(after.assignedEngineers) && after.assignedEngineers.length)
+      ? after.assignedEngineers : (after.assignedTo ? [after.assignedTo] : []);
+    const normId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let mine = engs.some(e => normId(e) === normId(actor));
+    if (!mine) {
+      try {
+        const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+        const map = {};
+        for (const u of results || []) {
+          map[normId(u.username)] = u.username;
+          const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+          if (full) map[normId(full)] = u.username;
+        }
+        mine = engs.some(e => map[normId(e)] === actor);
+      } catch {}
+    }
+    if (!mine) return;
+    await ensureTables(env);
+    const now = new Date().toISOString();
+    if (TS_ACTIVE.has(as)) {
+      // one clock at a time: starting this job ends any other open segment
+      await env.DB.prepare(
+        "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
+      ).bind(now, tid, actor, String(after.id)).run();
+      const open = await env.DB.prepare(
+        "SELECT id FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+      ).bind(tid, actor, String(after.id)).first();
+      if (!open) await env.DB.prepare(
+        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at) VALUES (?,?,?,?,?,?,?)"
+      ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
+        after.siteName || "", String(after.postcode || "").toUpperCase(), now).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+      ).bind(now, tid, actor, String(after.id)).run();
+    }
+  } catch { /* time capture must never break a job update */ }
+}
+
+// The captured week for one user, folded to per-London-day windows:
+// { "YYYY-MM-DD": { start, finish|null, open, jobs:[{ref,site,postcode}] } }.
+// A segment left open on an earlier day is lazily closed at 19:00 that day
+// (or an hour after it started, if it started later than that).
+async function jobTimeAuto(env, tid, username, monday) {
+  const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const lDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
+  const lTime = iso => { try { return new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
+    ).bind(tid, username, monday, end).all();
+    const today = lDate(new Date().toISOString());
+    for (const seg of results || []) {
+      const date = lDate(seg.started_at);
+      let endedAt = seg.ended_at, open = false;
+      if (!endedAt) {
+        if (date < today) {
+          // forgot to complete — close at 19:00 that day (or start+1h)
+          const cut = new Date(seg.started_at); cut.setHours(cut.getHours() + 1);
+          const sevenPm = new Date(date + "T18:00:00Z");   // ≈19:00 London in summer, 18:00 in winter — close enough for a fallback
+          endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
+          try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
+        } else { open = true; }
+      }
+      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
+      o.s = Math.min(o.s, Date.parse(seg.started_at));
+      if (open) { o.open = true; }
+      else o.e = Math.max(o.e, Date.parse(endedAt));
+      const ref = seg.job_ref || seg.job_id;
+      if (!o.jobs.some(j => j.ref.toLowerCase() === String(ref).toLowerCase()))
+        o.jobs.push({ ref, site: seg.site || "", postcode: seg.postcode || "" });
+    }
+  } catch {}
+  const shaped = {};
+  for (const [date, o] of Object.entries(out)) {
+    shaped[date] = { start: lTime(new Date(o.s).toISOString()),
+      finish: o.open || !o.e ? null : lTime(new Date(o.e).toISOString()),
+      open: o.open, jobs: o.jobs };
+  }
+  return shaped;
 }
 const normKey = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -580,7 +683,8 @@ export async function handle(request, env, ctx, url, sess) {
     const eff = effectiveCfg(cfg, u);
     const { days, savedAt } = await loadWeek(env, tid, me, monday);
     const inv = await invoiceFor(env, tid, me, monday);
-    return json({ ok: true, week: monday, days, savedAt, totals: weekTotals(days, eff),
+    const auto = await jobTimeAuto(env, tid, me, monday);
+    return json({ ok: true, week: monday, days, savedAt, auto, totals: weekTotals(days, eff),
       invoice: inv ? { number: inv.number, total: inv.total, at: inv.at,
         url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key) } : null }, {}, env, request);
   }
@@ -1012,6 +1116,20 @@ export async function handle(request, env, ctx, url, sess) {
       for (const u of users || []) {
         const eff = effectiveCfg(cfg, u);
         const d = dataBy[u.username] || { days: {}, at: null };
+        // Job-status time capture fills gaps the engineer hasn't typed over,
+        // so the admin sees captured days even before the engineer opens
+        // their timesheet.
+        try {
+          const auto = await jobTimeAuto(env, tid, u.username, monday);
+          for (const [date, a] of Object.entries(auto)) {
+            const day = d.days[date] = d.days[date] || {};
+            if (!day.start && a.start) day.start = a.start;
+            if (!day.finish && a.finish) day.finish = a.finish;
+            const have = String(day.jobs || "").toLowerCase();
+            const extra = a.jobs.map(j => j.ref).filter(rf => !have.includes(String(rf).toLowerCase()));
+            if (extra.length) day.jobs = [day.jobs, extra.join(", ")].filter(Boolean).join(", ");
+          }
+        } catch {}
         const inv = invBy[u.username];
         const perDay = {};
         for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };

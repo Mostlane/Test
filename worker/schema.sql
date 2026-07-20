@@ -559,3 +559,15 @@ CREATE TABLE IF NOT EXISTS site_miles (
   updated_at TEXT,
   PRIMARY KEY (tenant_id, key)
 );
+
+-- Job-status time capture: Travelling/In Progress opens a segment for the
+-- acting engineer, any other status closes it; timesheets auto-fill from it
+CREATE TABLE IF NOT EXISTS job_time_segments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  username  TEXT NOT NULL,
+  job_id    TEXT NOT NULL,
+  job_ref   TEXT, site TEXT, postcode TEXT,
+  started_at TEXT NOT NULL,
+  ended_at   TEXT                          -- NULL = clock running
+);
