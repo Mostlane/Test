@@ -17,6 +17,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { trackJobTime } from "./timesheets.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser } from "./push.js";
 
@@ -563,6 +564,7 @@ export async function handle(request, env, ctx, url, sess) {
     const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch);
     if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+    if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     return updated
       ? jsonResponse(decorateJobWithLiveSla(updated), headers)
       : jsonResponse({ error: "Not found" }, headers, 404);
@@ -674,6 +676,7 @@ export async function handle(request, env, ctx, url, sess) {
       const before = await getJob(env, tenantId, id);
       const updated = await patchJob(env, tenantId, id, await readJson(request));
       if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+      if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers)
                      : jsonResponse({ error: "Not found" }, headers, 404);
     }

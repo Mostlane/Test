@@ -2641,8 +2641,1522 @@ async function verifyFileSig(env, key, params) {
   return diff === 0;
 }
 
-// src/routes/sla.js
+// src/lib/pdf.js
+var PAGE_W = 595;
+var PAGE_H = 842;
+var W = {
+  " ": 278,
+  "!": 278,
+  '"': 355,
+  "#": 556,
+  "$": 556,
+  "%": 889,
+  "&": 667,
+  "'": 191,
+  "(": 333,
+  ")": 333,
+  "*": 389,
+  "+": 584,
+  ",": 278,
+  "-": 333,
+  ".": 278,
+  "/": 278,
+  "0": 556,
+  "1": 556,
+  "2": 556,
+  "3": 556,
+  "4": 556,
+  "5": 556,
+  "6": 556,
+  "7": 556,
+  "8": 556,
+  "9": 556,
+  ":": 278,
+  ";": 278,
+  "=": 584,
+  "?": 556,
+  "@": 1015,
+  "A": 667,
+  "B": 667,
+  "C": 722,
+  "D": 722,
+  "E": 667,
+  "F": 611,
+  "G": 778,
+  "H": 722,
+  "I": 278,
+  "J": 500,
+  "K": 667,
+  "L": 556,
+  "M": 833,
+  "N": 722,
+  "O": 778,
+  "P": 667,
+  "Q": 778,
+  "R": 722,
+  "S": 667,
+  "T": 611,
+  "U": 722,
+  "V": 667,
+  "W": 944,
+  "X": 667,
+  "Y": 667,
+  "Z": 611,
+  "a": 556,
+  "b": 556,
+  "c": 500,
+  "d": 556,
+  "e": 556,
+  "f": 278,
+  "g": 556,
+  "h": 556,
+  "i": 222,
+  "j": 222,
+  "k": 500,
+  "l": 222,
+  "m": 833,
+  "n": 556,
+  "o": 556,
+  "p": 556,
+  "q": 556,
+  "r": 333,
+  "s": 500,
+  "t": 278,
+  "u": 556,
+  "v": 500,
+  "w": 722,
+  "x": 500,
+  "y": 500,
+  "z": 500,
+  "\xA3": 556,
+  "\xB7": 278,
+  "\u2013": 556,
+  "\u2014": 1e3
+};
+function textWidth(str, size = 10) {
+  let u = 0;
+  for (const ch of String(str)) u += W[ch] != null ? W[ch] : 556;
+  return u / 1e3 * size;
+}
+function pdfStr(s) {
+  let out = "";
+  for (const ch of String(s)) {
+    let c = ch.charCodeAt(0);
+    if (ch === "\u2013" || ch === "\u2014") c = 45;
+    if (ch === "\u2019" || ch === "\u2018") c = 39;
+    if (ch === "\u201C" || ch === "\u201D") c = 34;
+    if (c > 255) c = 63;
+    if (c === 92) out += "\\\\";
+    else if (c === 40) out += "\\(";
+    else if (c === 41) out += "\\)";
+    else if (c >= 32 && c <= 126) out += String.fromCharCode(c);
+    else out += "\\" + c.toString(8).padStart(3, "0");
+  }
+  return out;
+}
+var PdfDoc = class {
+  constructor() {
+    this.pages = [];
+    this.newPage();
+  }
+  newPage() {
+    this.pages.push([]);
+    return this;
+  }
+  get _ops() {
+    return this.pages[this.pages.length - 1];
+  }
+  // yTop is measured from the top of the page to the text BASELINE.
+  text(x, yTop, str, opt = {}) {
+    const size = opt.size || 10;
+    const font = opt.bold ? "/F2" : "/F1";
+    const grey = opt.grey ? "0.45 g " : "";
+    let tx = x;
+    if (opt.alignRight) tx = x - textWidth(str, size);
+    const y = PAGE_H - yTop;
+    this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
+    return this;
+  }
+  hr(x1, yTop, x2, opt = {}) {
+    const y = PAGE_H - yTop;
+    const grey = opt.grey ? "0.75 G " : "0.2 G ";
+    this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
+    return this;
+  }
+  bytes() {
+    const enc3 = new TextEncoder();
+    const objs = [];
+    objs.push("<< /Type /Catalog /Pages 2 0 R >>");
+    const pageIds = this.pages.map((_, i) => 7 + i * 2);
+    objs.push(`<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`);
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    objs.push("<< /Producer (Mostlane Portal) >>");
+    for (const ops of this.pages) {
+      const stream = ops.join("\n");
+      objs.push(`<< /Length ${enc3.encode(stream).length} >>
+stream
+${stream}
+endstream`);
+      const cid = objs.length;
+      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${cid} 0 R >>`);
+    }
+    let body = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    const offsets = [0];
+    for (let i = 0; i < objs.length; i++) {
+      offsets.push(enc3.encode(body).length);
+      body += `${i + 1} 0 obj
+${objs[i]}
+endobj
+`;
+    }
+    const xrefAt = enc3.encode(body).length;
+    body += `xref
+0 ${objs.length + 1}
+0000000000 65535 f 
+`;
+    for (let i = 1; i <= objs.length; i++) body += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+    body += `trailer
+<< /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>
+startxref
+${xrefAt}
+%%EOF
+`;
+    return enc3.encode(body);
+  }
+};
+
+// src/routes/timesheets.js
+var CFG_KEY = (tid) => `engts:cfg:${tid}`;
+var INV_PREFIX = (tid) => `invoices/${tid}/`;
+var isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+function mondayOf(dateStr) {
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function weekDays(monday) {
+  const base = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const x = new Date(base);
+    x.setUTCDate(base.getUTCDate() + i);
+    out.push(x.toISOString().slice(0, 10));
+  }
+  return out;
+}
+var toMin = (t) => {
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(t || "").trim());
+  return m ? +m[1] * 60 + +m[2] : null;
+};
+var normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+var round1 = (n) => Math.round(n * 10) / 10;
+var money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
+var TABLES_ENSURED = false;
+async function ensureTables(env) {
+  if (TABLES_ENSURED) return;
+  TABLES_ENSURED = true;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
+    tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
+    data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
+    hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
+    r2_key TEXT, at TEXT,
+    UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
+    tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
+    name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
+    PRIMARY KEY (tenant_id, key))`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+    started_at TEXT NOT NULL, ended_at TEXT)`).run();
+}
+var TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
+async function trackJobTime(env, tid, actor, before, after) {
+  try {
+    if (!actor || !after) return;
+    const bs = String(before && before.status || "").toLowerCase().trim();
+    const as = String(after && after.status || "").toLowerCase().trim();
+    if (bs === as) return;
+    const engs = Array.isArray(after.assignedEngineers) && after.assignedEngineers.length ? after.assignedEngineers : after.assignedTo ? [after.assignedTo] : [];
+    const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+    let mine = engs.some((e) => normId2(e) === normId2(actor));
+    if (!mine) {
+      try {
+        const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+        const map = {};
+        for (const u of results || []) {
+          map[normId2(u.username)] = u.username;
+          const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+          if (full) map[normId2(full)] = u.username;
+        }
+        mine = engs.some((e) => map[normId2(e)] === actor);
+      } catch {
+      }
+    }
+    if (!mine) return;
+    await ensureTables(env);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (TS_ACTIVE.has(as)) {
+      await env.DB.prepare(
+        "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
+      ).bind(now, tid, actor, String(after.id)).run();
+      const open = await env.DB.prepare(
+        "SELECT id FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+      ).bind(tid, actor, String(after.id)).first();
+      if (!open) await env.DB.prepare(
+        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at) VALUES (?,?,?,?,?,?,?)"
+      ).bind(
+        tid,
+        actor,
+        String(after.id),
+        after.helpdeskRef || String(after.id),
+        after.siteName || "",
+        String(after.postcode || "").toUpperCase(),
+        now
+      ).run();
+    } else {
+      await env.DB.prepare(
+        "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+      ).bind(now, tid, actor, String(after.id)).run();
+    }
+  } catch {
+  }
+}
+async function jobTimeAuto(env, tid, username, monday) {
+  const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+  endD.setUTCDate(endD.getUTCDate() + 7);
+  const end = endD.toISOString().slice(0, 10);
+  const lDate = (iso) => {
+    try {
+      return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+    } catch {
+      return String(iso).slice(0, 10);
+    }
+  };
+  const lTime = (iso) => {
+    try {
+      return new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  };
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
+    ).bind(tid, username, monday, end).all();
+    const today = lDate((/* @__PURE__ */ new Date()).toISOString());
+    for (const seg of results || []) {
+      const date = lDate(seg.started_at);
+      let endedAt = seg.ended_at, open = false;
+      if (!endedAt) {
+        if (date < today) {
+          const cut = new Date(seg.started_at);
+          cut.setHours(cut.getHours() + 1);
+          const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
+          endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
+          try {
+            await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
+          } catch {
+          }
+        } else {
+          open = true;
+        }
+      }
+      const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
+      o.s = Math.min(o.s, Date.parse(seg.started_at));
+      if (open) {
+        o.open = true;
+      } else o.e = Math.max(o.e, Date.parse(endedAt));
+      const ref = seg.job_ref || seg.job_id;
+      if (!o.jobs.some((j) => j.ref.toLowerCase() === String(ref).toLowerCase()))
+        o.jobs.push({ ref, site: seg.site || "", postcode: seg.postcode || "" });
+    }
+  } catch {
+  }
+  const shaped = {};
+  for (const [date, o] of Object.entries(out)) {
+    shaped[date] = {
+      start: lTime(new Date(o.s).toISOString()),
+      finish: o.open || !o.e ? null : lTime(new Date(o.e).toISOString()),
+      open: o.open,
+      jobs: o.jobs
+    };
+  }
+  return shaped;
+}
+var normKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+var DEFAULTS = {
+  commuteMins: 30,
+  lunchMins: 30,
+  lunchThresholdH: 6,
+  pencePerMile: 45,
+  radiusMiles: 10,
+  basePostcode: "PO15 5RQ",
+  company: "Mostlane"
+};
+async function getCfg(env, tid) {
+  let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
+    if (row && row.value) {
+      const v = JSON.parse(row.value);
+      cfg.defaults = Object.assign(cfg.defaults, v.defaults || {});
+      cfg.byUser = v.byUser || {};
+    }
+  } catch {
+  }
+  return cfg;
+}
+async function saveCfg(env, tid, cfg) {
+  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, CFG_KEY(tid), JSON.stringify(cfg)).run();
+}
+async function userRow(env, tid, username) {
+  return env.DB.prepare("SELECT username, first_name, last_name, employment_type, status, profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
+}
+function displayName(u) {
+  return u ? `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username : "";
+}
+function isSelfEmployed(u) {
+  return /self/i.test(String(u && u.employment_type || ""));
+}
+function effectiveCfg(cfg, u) {
+  const mine = cfg.byUser && cfg.byUser[u.username] || {};
+  let profile = {};
+  try {
+    profile = u.profile ? JSON.parse(u.profile) : {};
+  } catch {
+  }
+  const num2 = (v) => {
+    const n = parseFloat(v);
+    return isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    employment: u.employment_type || "Employed",
+    selfEmployed: isSelfEmployed(u),
+    commute: mine.commute === true,
+    // 30 mins each way deducted
+    lunch: mine.lunch === true,
+    // 30 mins lunch deducted
+    mileage: mine.mileage === true,
+    // may claim mileage (fuel)
+    radius: mine.radius === true,
+    // first/last N miles of a day unpaid
+    radiusMiles: Number(mine.radiusMiles ?? cfg.defaults.radiusMiles) || 10,
+    commuteMins: Number(mine.commuteMins ?? cfg.defaults.commuteMins) || 30,
+    lunchMins: Number(mine.lunchMins ?? cfg.defaults.lunchMins) || 30,
+    lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
+    pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
+    rateType: mine.rateType === "day" ? "day" : "hour",
+    rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
+    homePostcode: String(mine.homePostcode || "").toUpperCase(),
+    details: Array.isArray(mine.details) ? mine.details : [],
+    // extra lines under their name on the invoice
+    nextNumber: Number(mine.nextNumber) || null
+  };
+}
+function cleanDays(monday, days) {
+  const valid = new Set(weekDays(monday));
+  const out = {};
+  for (const [date, d] of Object.entries(days || {})) {
+    if (!valid.has(date) || !d || typeof d !== "object") continue;
+    const start = toMin(d.start) != null ? String(d.start) : "";
+    const finish = toMin(d.finish) != null ? String(d.finish) : "";
+    const jobs = String(d.jobs || "").slice(0, 400);
+    const note = String(d.note || "").slice(0, 400);
+    const mileage = (Array.isArray(d.mileage) ? d.mileage : []).slice(0, 8).map((m) => ({
+      site: String(m && m.site || "").slice(0, 120),
+      postcode: String(m && m.postcode || "").toUpperCase().slice(0, 10),
+      miles: Math.max(0, Math.min(1e3, round1(parseFloat(m && m.miles) || 0)))
+    })).filter((m) => m.miles > 0 || m.site || m.postcode);
+    if (start || finish || jobs || note || mileage.length) out[date] = { start, finish, jobs, note, mileage };
+  }
+  return out;
+}
+function claimedMiles(miles, eff) {
+  if (!eff.radius || !(miles > 0)) return miles;
+  return Math.max(0, round1(miles - 2 * eff.radiusMiles));
+}
+function dayCalc(d, eff) {
+  const miles = dayMiles(d);
+  const base = { miles, milesClaimed: claimedMiles(miles, eff) };
+  const s = toMin(d.start), e0 = toMin(d.finish);
+  if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, ...base };
+  const e = e0 <= s ? e0 + 1440 : e0;
+  const span = e - s;
+  const commute = eff.commute ? eff.commuteMins * 2 : 0;
+  const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
+  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
+}
+function dayMiles(d) {
+  return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
+}
+function weekTotals(days, eff) {
+  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
+  for (const d of Object.values(days || {})) {
+    const c = dayCalc(d, eff);
+    paidMins += c.paid;
+    miles += c.miles;
+    milesClaimed += c.milesClaimed;
+    if (c.worked) daysWorked++;
+  }
+  const hours = Math.round(paidMins / 60 * 100) / 100;
+  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
+  const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
+  return {
+    paidMins,
+    hours,
+    miles: round1(miles),
+    milesClaimed: round1(milesClaimed),
+    milesDeducted: round1(miles - milesClaimed),
+    daysWorked,
+    labour,
+    mileagePay,
+    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null
+  };
+}
+async function loadWeek(env, tid, username, monday) {
+  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
+  let days = {};
+  try {
+    days = row && row.data ? JSON.parse(row.data).days || {} : {};
+  } catch {
+  }
+  return { days, savedAt: row ? row.at : null };
+}
+async function invoiceFor(env, tid, username, monday) {
+  return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
+}
+async function nextInvoiceNumber(env, tid, username, eff) {
+  const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, username).first();
+  const max = row && row.m != null ? Number(row.m) : 0;
+  return Math.max(max + 1, eff.nextNumber || 1);
+}
+async function isTsAdmin(env, tid, sess) {
+  if (!sess) return false;
+  const p = await permissionsFor(env, tid, sess.user.username);
+  return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
+}
+var PO_MAP;
+var PO_MAP_AT = 0;
+var PO_TABLES;
+var PO_BLOB;
+function poShape(o) {
+  if (!o || typeof o !== "object") return null;
+  const name = o.siteName ?? o.site_name ?? o.SiteName ?? o.name ?? o.site ?? o.store ?? o.branch ?? "";
+  const pc = o.postcode ?? o.postCode ?? o.post_code ?? o.Postcode ?? "";
+  const job = o.jobNumber ?? o.job_number ?? o.JobNumber ?? o.jobNo ?? o.job ?? o.siteNumber ?? o.site_number ?? null;
+  if (!name) return null;
+  return { name: String(name), pc: String(pc || ""), job: job != null && job !== "" ? String(job) : null };
+}
+function poSiteish(o) {
+  const s = poShape(o);
+  return !!(s && (s.pc || s.job));
+}
+var PO_PROBE = null;
+async function poDiscover(env) {
+  if (!env.PO_DB) return null;
+  if (PO_MAP !== void 0 && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1e3)) return PO_MAP;
+  if (!PO_PROBE) PO_PROBE = probePoDb(env).finally(() => {
+    PO_PROBE = null;
+  });
+  await PO_PROBE;
+  return PO_MAP;
+}
+async function probePoDb(env) {
+  PO_MAP_AT = Date.now();
+  const tables = [];
+  let map = null;
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'"
+    ).all();
+    let best = null;
+    const prio = (n) => /site|store|branch/i.test(n) ? 3 : /po|purchase|order|job/i.test(n) ? 2 : /kv|data|config|record/i.test(n) ? 1 : 0;
+    const ordered = (results || []).map((t) => String(t.name)).sort((a, b) => prio(b) - prio(a));
+    let budget = 18;
+    for (const tbl of ordered) {
+      if (budget <= 0) break;
+      const safe = tbl.replace(/"/g, "");
+      let cols = [];
+      budget--;
+      try {
+        cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || [];
+      } catch {
+        continue;
+      }
+      const names = cols.map((c) => String(c.name));
+      tables.push({ name: tbl, cols: names });
+      const lower = names.map((n) => n.toLowerCase());
+      const pick = (...cands) => {
+        for (const c of cands) {
+          const i = lower.indexOf(c);
+          if (i >= 0) return names[i];
+        }
+        for (const c of cands) {
+          const i = lower.findIndex((n) => n.includes(c));
+          if (i >= 0) return names[i];
+        }
+        return null;
+      };
+      const nameCol = pick("site_name", "sitename", "site", "store", "branch", "name");
+      const pcCol = pick("postcode", "post_code", "postal_code", "zip");
+      const jobCol = pick("job_number", "jobnumber", "job_no", "jobno", "job");
+      if (nameCol && (pcCol || jobCol)) {
+        const score = 10 + (pcCol ? 2 : 0) + (jobCol ? 1 : 0) + (/site|store|branch/i.test(tbl) ? 3 : 0);
+        if (!best || score > best.score) best = { mode: "cols", table: tbl, nameCol, pcCol, jobCol, score };
+        continue;
+      }
+      const jsonCol = pick("value", "data", "json", "body", "payload", "v");
+      if (!jsonCol) continue;
+      const keyCol = pick("key", "k", "id", "name");
+      if (budget <= 0) break;
+      budget--;
+      let rows = [];
+      try {
+        rows = (await env.PO_DB.prepare(
+          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 40`
+        ).all()).results || [];
+      } catch {
+        continue;
+      }
+      let rowish = 0;
+      for (const r of rows) {
+        let v = null;
+        try {
+          v = JSON.parse(r.v);
+        } catch {
+          continue;
+        }
+        if (Array.isArray(v) && v.length && v.slice(0, 5).every(poSiteish)) {
+          const bk = r.k != null ? String(r.k) : "";
+          const score = 8 + (/site|store|branch/i.test(bk) ? 3 : 0) + Math.min(3, Math.floor(v.length / 50));
+          if (!best || score > best.score) best = { mode: "blob", table: tbl, jsonCol, keyCol, blobKey: bk, score };
+        } else if (poSiteish(v)) rowish++;
+      }
+      if (rowish >= Math.max(2, Math.floor(rows.length * 0.3))) {
+        const score = 7 + (/site|store|branch/i.test(tbl) ? 3 : 0);
+        if (!best || score > best.score) best = { mode: "rows", table: tbl, jsonCol, score };
+      }
+    }
+    map = best;
+  } catch {
+    map = null;
+  }
+  PO_TABLES = tables;
+  PO_MAP = map;
+  PO_ORD = deriveOrderMap();
+}
+async function poBlobList(env, m) {
+  if (PO_BLOB && Date.now() - PO_BLOB.at < 5 * 60 * 1e3) return PO_BLOB.list;
+  let list = [];
+  try {
+    const safe = m.table.replace(/"/g, "");
+    const row = m.keyCol ? await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.keyCol}"=?`).bind(m.blobKey).first() : await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" LIMIT 1`).first();
+    const v = row ? JSON.parse(row.v) : null;
+    if (Array.isArray(v)) list = v.map(poShape).filter(Boolean);
+  } catch {
+  }
+  PO_BLOB = { at: Date.now(), list };
+  return list;
+}
+async function poSiteRows(env, term, limit) {
+  const m = await poDiscover(env);
+  if (!m) return [];
+  const cap = Math.max(1, Math.min(30, limit));
+  const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
+  const T = String(term || "").toLowerCase();
+  const matches = (s) => !T || s.name.toLowerCase().includes(T) || s.pc.toLowerCase().includes(T) || (s.job || "").toLowerCase().includes(T);
+  try {
+    const safe = m.table.replace(/"/g, "");
+    if (m.mode === "cols") {
+      const cols = [`"${m.nameCol}" AS name`];
+      if (m.pcCol) cols.push(`"${m.pcCol}" AS pc`);
+      if (m.jobCol) cols.push(`CAST("${m.jobCol}" AS TEXT) AS job`);
+      const where = [`"${m.nameCol}" LIKE ?1`];
+      if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
+      if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
+      const { results } = await env.PO_DB.prepare(
+        `SELECT ${cols.join(", ")} FROM "${safe}" WHERE ${where.join(" OR ")} LIMIT ${cap}`
+      ).bind(like).all();
+      return (results || []).map((r) => ({ name: String(r.name || ""), pc: String(r.pc || ""), job: r.job != null ? String(r.job) : null })).filter((s) => s.name);
+    }
+    if (m.mode === "rows") {
+      const { results } = await env.PO_DB.prepare(
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.jsonCol}" LIKE ?1 LIMIT 200`
+      ).bind(like).all();
+      const out = [];
+      for (const r of results || []) {
+        let v = null;
+        try {
+          v = JSON.parse(r.v);
+        } catch {
+          continue;
+        }
+        const s = poShape(v);
+        if (s && matches(s)) {
+          out.push(s);
+          if (out.length >= cap) break;
+        }
+      }
+      return out;
+    }
+    if (m.mode === "blob") {
+      const list = await poBlobList(env, m);
+      return list.filter(matches).slice(0, cap);
+    }
+  } catch {
+  }
+  return [];
+}
+var PO_ORD;
+var PO_ORD_CACHE;
+function deriveOrderMap() {
+  const sitesTable = PO_MAP ? PO_MAP.table : null;
+  let best = null;
+  for (const t of PO_TABLES || []) {
+    if (t.name === sitesTable) continue;
+    const lower = (t.cols || []).map((n) => n.toLowerCase());
+    const pick = (...cands) => {
+      for (const c of cands) {
+        const i = lower.indexOf(c);
+        if (i >= 0) return t.cols[i];
+      }
+      for (const c of cands) {
+        const i = lower.findIndex((n) => n.includes(c));
+        if (i >= 0) return t.cols[i];
+      }
+      return null;
+    };
+    const isPo = /po|purchase|order/i.test(t.name);
+    const siteCol = pick("site_name", "sitename", "site", "location");
+    const jsonCol = pick("data", "value", "json", "body", "payload");
+    if (siteCol) {
+      const score = 5 + (isPo ? 5 : 0);
+      if (!best || score > best.score) best = { mode: "col", table: t.name, siteCol, score };
+    } else if (jsonCol && isPo) {
+      const score = 6;
+      if (!best || score > best.score) best = { mode: "json", table: t.name, jsonCol, score };
+    }
+  }
+  return best;
+}
+async function poOrderDiscover(env) {
+  await poDiscover(env);
+  return PO_ORD || null;
+}
+async function poOrderSiteNames(env) {
+  const m = await poOrderDiscover(env);
+  if (!m) return [];
+  if (PO_ORD_CACHE && Date.now() - PO_ORD_CACHE.at < 5 * 60 * 1e3) return PO_ORD_CACHE.list;
+  const names = /* @__PURE__ */ new Map();
+  try {
+    const safe = m.table.replace(/"/g, "");
+    const add = (v) => {
+      const s = String(v || "").trim();
+      if (s.length > 2 && !names.has(s.toLowerCase())) names.set(s.toLowerCase(), s);
+    };
+    if (m.mode === "col") {
+      const { results } = await env.PO_DB.prepare(
+        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
+      ).all();
+      for (const r of results || []) add(r.s);
+    } else {
+      const { results } = await env.PO_DB.prepare(
+        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
+      ).all();
+      for (const r of results || []) {
+        let o = null;
+        try {
+          o = JSON.parse(r.v);
+        } catch {
+          continue;
+        }
+        if (o && typeof o === "object") add(o.site ?? o.siteName ?? o.site_name ?? o.Site ?? o.location ?? "");
+      }
+    }
+  } catch {
+  }
+  PO_ORD_CACHE = { at: Date.now(), list: [...names.values()] };
+  return PO_ORD_CACHE.list;
+}
+async function lookupPostcode(pc) {
+  const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
+    headers: { "Accept": "application/json" },
+    cf: { cacheTtl: 30 * 86400, cacheEverything: true }
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  const res = j && j.result;
+  return res && res.latitude != null ? { lat: res.latitude, lng: res.longitude, pc: res.postcode } : null;
+}
+function haversineMiles(a, b) {
+  const rad = (x) => x * Math.PI / 180, R = 3958.8;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+var ROAD_FACTOR = 1.25;
+function fmtDate(iso) {
+  return (/* @__PURE__ */ new Date(iso + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+function fmtHm(mins) {
+  return Math.floor(mins / 60) + "h " + String(Math.round(mins % 60)).padStart(2, "0") + "m";
+}
+function buildInvoicePdf({ number, name, details, company, monday, days, eff, totals }) {
+  const doc = new PdfDoc();
+  const L = 48, R = 547;
+  let y = 64;
+  doc.text(L, y, "INVOICE", { size: 22, bold: true });
+  doc.text(R, y - 8, "Invoice no. " + number, { size: 12, bold: true, alignRight: true });
+  doc.text(R, y + 8, "Date: " + fmtDate((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)), { size: 10, alignRight: true, grey: true });
+  y += 34;
+  doc.text(L, y, "From", { size: 9, grey: true });
+  doc.text(R, y, "To", { size: 9, grey: true, alignRight: true });
+  y += 14;
+  const fromLines = (details && details.length ? details : [name]).slice(0, 6);
+  doc.text(L, y, String(fromLines[0]).slice(0, 60), { size: 11, bold: true });
+  const toLines = String(company || "Mostlane").split(/\n/).filter(Boolean);
+  let ty = y;
+  for (const ln of toLines) {
+    doc.text(R, ty, ln.trim(), { size: ty === y ? 11 : 10, bold: ty === y, alignRight: true });
+    ty += 14;
+  }
+  for (const ln of fromLines.slice(1)) {
+    y += 14;
+    doc.text(L, y, String(ln).slice(0, 60), { size: 10 });
+  }
+  y = Math.max(y, ty - 14) + 24;
+  doc.text(L, y, "Week: " + fmtDate(monday) + " \u2013 " + fmtDate(weekDays(monday)[6]), { size: 10, bold: true });
+  y += 16;
+  doc.hr(L, y, R);
+  y += 16;
+  const cDate = L, cDesc = L + 78, cHours = 425, cAmt = R;
+  doc.text(cDate, y, "Date", { size: 9, bold: true, grey: true });
+  doc.text(cDesc, y, "Details", { size: 9, bold: true, grey: true });
+  doc.text(cHours, y, "Hours", { size: 9, bold: true, grey: true, alignRight: true });
+  doc.text(cAmt, y, "Amount", { size: 9, bold: true, grey: true, alignRight: true });
+  y += 6;
+  doc.hr(L, y, R, { grey: true });
+  y += 15;
+  const fitDesc = (s, max) => {
+    let t = String(s || "");
+    while (t && textWidth(t, 10) > max) t = t.slice(0, -1);
+    return t;
+  };
+  const perHourAmount = (mins) => eff.rate && eff.rateType === "hour" ? money(mins / 60 * eff.rate) : "";
+  for (const date of weekDays(monday)) {
+    const d = days[date];
+    if (!d) continue;
+    const c = dayCalc(d, eff);
+    if (!c.worked && !c.miles) continue;
+    if (c.worked) {
+      doc.text(cDate, y, (/* @__PURE__ */ new Date(date + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }), { size: 10 });
+      const dedNote = [c.commute ? "-" + c.commute + "m travel" : "", c.lunch ? "-" + c.lunch + "m lunch" : ""].filter(Boolean).join(", ");
+      doc.text(cDesc, y, fitDesc((d.jobs || "Site work") + (dedNote ? "  (" + dedNote + ")" : ""), cHours - cDesc - 40), { size: 10 });
+      doc.text(cHours, y, fmtHm(c.paid), { size: 10, alignRight: true });
+      doc.text(cAmt, y, perHourAmount(c.paid), { size: 10, alignRight: true });
+      y += 15;
+    }
+    for (const m of d.mileage || []) {
+      if (!(parseFloat(m.miles) > 0)) continue;
+      doc.text(cDesc, y, fitDesc("Mileage \u2014 " + (m.site || m.postcode || "site") + " (" + m.miles + " mi)", cHours - cDesc - 40), { size: 10, grey: true });
+      y += 15;
+    }
+    if (y > 720) {
+      doc.newPage();
+      y = 60;
+    }
+  }
+  y += 4;
+  doc.hr(L, y, R);
+  y += 18;
+  const cTot = 280;
+  if (eff.rateType === "day" && eff.rate) {
+    doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
+    doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true });
+    y += 16;
+  } else {
+    doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
+    doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true });
+    y += 16;
+  }
+  if (totals.miles > 0) {
+    const ded = totals.milesDeducted > 0;
+    doc.text(cTot, y, "Mileage: " + (ded ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p" : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
+    doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true });
+    y += 16;
+  }
+  y += 6;
+  doc.text(cTot, y, "TOTAL", { size: 12, bold: true });
+  doc.text(cAmt, y, money(totals.total || 0), { size: 12, bold: true, alignRight: true });
+  y += 30;
+  doc.text(L, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
+  return doc.bytes();
+}
 async function handle7(request, env, ctx, url, sess) {
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/ts(?=\/|$)/, "") || "/";
+  const q = url.searchParams;
+  const headers = corsHeaders(env, request);
+  if (sub === "/invoice-file" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
+    if (!sess && !await verifyFileSig(env, key, q)) return error("Link expired or invalid", 403, env, request);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": "application/pdf",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  await ensureTables(env);
+  const cfg = await getCfg(env, tid);
+  if (sub === "/me" && method === "GET") {
+    const u = await userRow(env, tid, me);
+    if (!u) return error("User not found", 404, env, request);
+    const eff = effectiveCfg(cfg, u);
+    const next = await nextInvoiceNumber(env, tid, me, eff);
+    const admin = await isTsAdmin(env, tid, sess);
+    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    return json({
+      ok: true,
+      name: displayName(u),
+      ...eff,
+      rate: eff.rate,
+      nextInvoice: next,
+      basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
+      canSetNumber: !invCount || Number(invCount.n) === 0,
+      admin
+    }, {}, env, request);
+  }
+  if (sub === "/me" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
+    if ("homePostcode" in b) mine.homePostcode = String(b.homePostcode || "").toUpperCase().slice(0, 10);
+    if ("details" in b) mine.details = (Array.isArray(b.details) ? b.details : String(b.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 6);
+    if ("rate" in b) {
+      const n = parseFloat(b.rate);
+      if (isFinite(n) && n >= 0) mine.rate = n;
+    }
+    if ("rateType" in b && (b.rateType === "hour" || b.rateType === "day")) mine.rateType = b.rateType;
+    await saveCfg(env, tid, cfg);
+    return json({ ok: true }, {}, env, request);
+  }
+  if (sub === "/my" && method === "GET") {
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
+    const { days, savedAt } = await loadWeek(env, tid, me, monday);
+    const inv = await invoiceFor(env, tid, me, monday);
+    const auto = await jobTimeAuto(env, tid, me, monday);
+    return json({
+      ok: true,
+      week: monday,
+      days,
+      savedAt,
+      auto,
+      totals: weekTotals(days, eff),
+      invoice: inv ? {
+        number: inv.number,
+        total: inv.total,
+        at: inv.at,
+        url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
+      } : null
+    }, {}, env, request);
+  }
+  if (sub === "/my" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week (Monday, YYYY-MM-DD) required", 400, env, request);
+    const monday = mondayOf(b.week);
+    if (await invoiceFor(env, tid, me, monday))
+      return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
+    const u = await userRow(env, tid, me);
+    const eff = effectiveCfg(cfg, u);
+    const days = cleanDays(monday, b.days);
+    if (!eff.mileage) {
+      for (const d of Object.values(days)) d.mileage = [];
+    } else {
+      const names = [...new Set(Object.values(days).flatMap((d) => (d.mileage || []).map((m) => normKey(m.site))).filter(Boolean))];
+      const preset = {};
+      if (names.length) {
+        try {
+          const ph = names.map(() => "?").join(",");
+          const { results } = await env.DB.prepare(
+            `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+          ).bind(tid, ...names).all();
+          for (const r of results || []) if (r.miles != null) preset[r.key] = r.miles;
+        } catch {
+        }
+      }
+      for (const d of Object.values(days)) {
+        d.mileage = (d.mileage || []).filter((m) => m.site).map((m) => ({ site: m.site, postcode: m.postcode, miles: preset[normKey(m.site)] != null ? preset[normKey(m.site)] : 0 }));
+      }
+    }
+    await env.DB.prepare(
+      "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+    ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
+  }
+  if (sub === "/assigned" && method === "GET") {
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+    endD.setUTCDate(endD.getUTCDate() + 7);
+    const end = endD.toISOString().slice(0, 10);
+    const byDay = {};
+    const debug = { me, matchedAs: [], candidates: [] };
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+      ).bind(tid, monday, end).all();
+      const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
+      const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+      const map = {};
+      try {
+        const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+        for (const u of users || []) {
+          map[normId2(u.username)] = u.username;
+          const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+          if (full) map[normId2(full)] = u.username;
+        }
+      } catch {
+      }
+      const meN = norm(me);
+      const isMe = (e) => {
+        const resolved = map[normId2(e)];
+        if (resolved != null) return resolved === me;
+        const n = norm(e);
+        return !!n && (n === meN || n.includes(meN) || meN.includes(n));
+      };
+      const londonDate3 = (iso) => {
+        try {
+          return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+        } catch {
+          return String(iso).slice(0, 10);
+        }
+      };
+      const londonTime = (iso) => {
+        try {
+          return new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
+        } catch {
+          return "";
+        }
+      };
+      for (const r of results || []) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+        const mine = engs.some(isMe);
+        debug.candidates.push({
+          ref: r.helpdesk_ref || r.id,
+          scheduledAt: r.scheduled_at,
+          engineers: engs,
+          resolved: engs.map((e) => map[normId2(e)] || "(no user match: " + e + ")"),
+          mine
+        });
+        if (!mine) continue;
+        const date = londonDate3(r.scheduled_at);
+        (byDay[date] = byDay[date] || []).push({
+          ref: r.helpdesk_ref || r.id,
+          label: (r.helpdesk_ref || r.id) + (d.description ? " \u2014 " + String(d.description).slice(0, 44) : ""),
+          site: d.siteName || "",
+          postcode: String(d.postcode || "").toUpperCase(),
+          time: londonTime(r.scheduled_at)
+        });
+      }
+      for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    } catch (e) {
+      debug.error = String(e && e.message || e);
+    }
+    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess))
+      return json({ ok: true, build: "w9", week: monday, byDay, debug }, {}, env, request);
+    return json({ ok: true, week: monday, byDay }, {}, env, request);
+  }
+  if (sub === "/sites" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const { results } = await env.DB.prepare(
+      "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
+    ).bind(tid, like, like, like).all();
+    const sites = (results || []).map((s) => ({
+      name: s.site_name || "Site " + s.site_number,
+      code: s.site_number,
+      postcode: (s.postcode || "").replace(/\*+$/, "")
+    }));
+    const seen = new Set(sites.map((s) => s.name.trim().toLowerCase()));
+    for (const r of await poSiteRows(env, term, 15)) {
+      const name = String(r.name || "").trim();
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      sites.push({ name, code: r.job != null ? String(r.job) : "", postcode: String(r.pc || "").toUpperCase(), source: "po" });
+      if (sites.length >= 25) break;
+    }
+    try {
+      const T = term.toLowerCase();
+      for (const n of await poOrderSiteNames(env)) {
+        if (sites.length >= 25) break;
+        if (T && !n.toLowerCase().includes(T)) continue;
+        if (seen.has(n.trim().toLowerCase())) continue;
+        seen.add(n.trim().toLowerCase());
+        sites.push({ name: n, code: "", postcode: "", source: "po-order" });
+      }
+    } catch {
+    }
+    try {
+      const keys = [...new Set(sites.map((s) => normKey(s.name)).filter(Boolean))];
+      if (keys.length) {
+        const ph = keys.map(() => "?").join(",");
+        const { results: mrows } = await env.DB.prepare(
+          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+        ).bind(tid, ...keys).all();
+        const mmap = {};
+        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
+        for (const s of sites) {
+          const m = mmap[normKey(s.name)];
+          if (m != null) s.miles = m;
+        }
+      }
+    } catch {
+    }
+    return json({ ok: true, sites }, {}, env, request);
+  }
+  if (sub === "/po-status" && method === "GET") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const m = await poDiscover(env);
+    const out = { ok: true, build: "w9", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    if (m) {
+      out.discovered = {
+        mode: m.mode,
+        table: m.table,
+        nameCol: m.nameCol || null,
+        pcCol: m.pcCol || null,
+        jobCol: m.jobCol || null,
+        jsonCol: m.jsonCol || null,
+        blobKey: m.blobKey || null
+      };
+      out.samples = (await poSiteRows(env, "", 5)).map((s) => s.name + (s.pc ? " (" + s.pc + ")" : ""));
+    }
+    const om = await poOrderDiscover(env);
+    if (om) {
+      const names = await poOrderSiteNames(env);
+      out.orderSites = { table: om.table, mode: om.mode, count: names.length, samples: names.slice(0, 3) };
+    }
+    return json(out, {}, env, request);
+  }
+  if (sub === "/jobs" && method === "GET") {
+    const term = String(q.get("q") || "").trim();
+    if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
+    const like = "%" + term.replace(/[%_]/g, "") + "%";
+    const sla = [], project = [], po = [], errs = {};
+    const nameRef = (s) => String(s || "").replace(/\s*,\s*/g, " \u2013 ").trim();
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT helpdesk_ref, description, status FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref IS NOT NULL AND helpdesk_ref!='' AND status NOT IN ('Complete','Closed') AND (helpdesk_ref LIKE ? OR description LIKE ?) ORDER BY raised_at DESC LIMIT 8"
+      ).bind(tid, like, like).all();
+      for (const r of results || []) sla.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " \u2014 " + String(r.description || "").slice(0, 48), kind: "sla" });
+    } catch (e) {
+      errs.sla = String(e && e.message || e);
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+      ).bind(tid, like, like).all();
+      for (const r of results || []) {
+        const hasJob = r.job_number != null && r.job_number !== "";
+        const name = r.site_name || r.client || "site";
+        project.push({
+          ref: hasJob ? String(r.job_number) : nameRef(name),
+          label: (hasJob ? r.job_number + " \u2014 " : "") + name,
+          kind: "project",
+          site: name,
+          postcode: (r.postcode || "").replace(/\*+$/, "")
+        });
+      }
+    } catch (e) {
+      errs.project = String(e && e.message || e);
+    }
+    const seen = new Set([...sla, ...project].map((j) => String(j.ref).toLowerCase()));
+    try {
+      for (const r of await poSiteRows(env, term, 8)) {
+        const ref = r.job != null && r.job !== "" ? String(r.job) : nameRef(r.name);
+        if (!ref || seen.has(ref.toLowerCase())) continue;
+        seen.add(ref.toLowerCase());
+        po.push({
+          ref,
+          label: (r.job != null && r.job !== "" ? r.job + " \u2014 " : "") + String(r.name || "PO site").slice(0, 48),
+          kind: "po",
+          site: String(r.name || ""),
+          postcode: String(r.pc || "").toUpperCase()
+        });
+      }
+    } catch (e) {
+      errs.poSites = String(e && e.message || e);
+    }
+    try {
+      const T2 = term.toLowerCase();
+      for (const n of await poOrderSiteNames(env)) {
+        if (po.length >= 8) break;
+        if (!n.toLowerCase().includes(T2)) continue;
+        const ref = nameRef(n);
+        if (!ref || seen.has(ref.toLowerCase())) continue;
+        seen.add(ref.toLowerCase());
+        po.push({ ref, label: n.slice(0, 60), kind: "po-order", site: n });
+      }
+    } catch (e) {
+      errs.poOrders = String(e && e.message || e);
+    }
+    const jobs = [...po.slice(0, 4), ...sla.slice(0, 3), ...project.slice(0, 3)];
+    const spare = [...po.slice(4), ...sla.slice(3), ...project.slice(3)];
+    for (const j of spare) {
+      if (jobs.length >= 10) break;
+      jobs.push(j);
+    }
+    const T = term.toLowerCase();
+    jobs.sort((a, b) => {
+      const pa = String(a.ref).toLowerCase().startsWith(T) ? 0 : 1;
+      const pb = String(b.ref).toLowerCase().startsWith(T) ? 0 : 1;
+      return pa - pb;
+    });
+    const out = jobs.slice(0, 10);
+    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess)) {
+      return json({
+        ok: true,
+        build: "w6",
+        counts: { sla: sla.length, project: project.length, po: po.length },
+        errors: errs,
+        jobs: out
+      }, {}, env, request);
+    }
+    try {
+      const keys = [...new Set(out.map((j) => normKey(j.site)).filter(Boolean))];
+      if (keys.length) {
+        const ph = keys.map(() => "?").join(",");
+        const { results: mrows } = await env.DB.prepare(
+          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
+        ).bind(tid, ...keys).all();
+        const mmap = {};
+        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
+        for (const j of out) {
+          const m = mmap[normKey(j.site)];
+          if (m != null) j.miles = m;
+        }
+      }
+    } catch {
+    }
+    return json({ ok: true, jobs: out }, {}, env, request);
+  }
+  if (sub === "/miles" && method === "GET") {
+    const name = q.get("name");
+    if (name != null) {
+      const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(name)).first();
+      return json({ ok: true, miles: row && row.miles != null ? row.miles : null }, {}, env, request);
+    }
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const { results: saved } = await env.DB.prepare("SELECT key, name, postcode, miles FROM site_miles WHERE tenant_id=?").bind(tid).all();
+    const byKey = {};
+    for (const r of saved || []) byKey[r.key] = { name: r.name || r.key, postcode: r.postcode || "", miles: r.miles, saved: true };
+    const { results: portal } = await env.DB.prepare(
+      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!=''"
+    ).bind(tid).all();
+    for (const r of portal || []) {
+      const k = normKey(r.site_name);
+      if (!byKey[k]) byKey[k] = { name: r.site_name, postcode: (r.postcode || "").replace(/\*+$/, ""), miles: null, saved: false };
+      else if (!byKey[k].postcode) byKey[k].postcode = (r.postcode || "").replace(/\*+$/, "");
+    }
+    let list = Object.values(byKey).sort((a, b) => a.name.localeCompare(b.name));
+    const term = String(q.get("q") || "").trim().toLowerCase();
+    if (term) list = list.filter((s) => s.name.toLowerCase().includes(term) || (s.postcode || "").toLowerCase().includes(term));
+    return json({ ok: true, sites: list, missing: list.filter((s) => s.miles == null && s.postcode).length }, {}, env, request);
+  }
+  if (sub === "/miles" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let saved = 0;
+    for (const e of (Array.isArray(b.entries) ? b.entries : []).slice(0, 200)) {
+      const key = normKey(e && e.name);
+      if (!key) continue;
+      const miles = parseFloat(e.miles);
+      if (!isFinite(miles) || miles < 0 || miles > 2e3) {
+        await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).run();
+        continue;
+      }
+      await env.DB.prepare(
+        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET name=excluded.name, postcode=excluded.postcode, miles=excluded.miles, updated_at=excluded.updated_at"
+      ).bind(tid, key, String(e.name).trim().slice(0, 120), String(e.postcode || "").toUpperCase().slice(0, 10), round1(miles), now).run();
+      saved++;
+    }
+    for (const n of (Array.isArray(b.delete) ? b.delete : []).slice(0, 200)) {
+      await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(n)).run();
+    }
+    return json({ ok: true, saved }, {}, env, request);
+  }
+  if (sub === "/miles/autofill" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const base = await lookupPostcode(cfg.defaults.basePostcode || "PO15 5RQ");
+    if (!base) return error("Base postcode " + (cfg.defaults.basePostcode || "PO15 5RQ") + " couldn't be found.", 400, env, request);
+    const { results: portal } = await env.DB.prepare(
+      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!='' AND postcode IS NOT NULL AND postcode!=''"
+    ).bind(tid).all();
+    const { results: saved } = await env.DB.prepare("SELECT key FROM site_miles WHERE tenant_id=?").bind(tid).all();
+    const have = new Set((saved || []).map((r) => r.key));
+    const todo = (portal || []).filter((r) => !have.has(normKey(r.site_name)));
+    const batch = todo.slice(0, 25);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    let done = 0, failed = 0;
+    for (const r of batch) {
+      const pc = String(r.postcode).replace(/\*+$/, "");
+      const to = await lookupPostcode(pc).catch(() => null);
+      if (!to) {
+        failed++;
+        have.add(normKey(r.site_name));
+        continue;
+      }
+      const roundTrip = round1(haversineMiles(base, to) * ROAD_FACTOR * 2);
+      await env.DB.prepare(
+        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET miles=excluded.miles, updated_at=excluded.updated_at"
+      ).bind(tid, normKey(r.site_name), r.site_name, pc.toUpperCase(), roundTrip, now).run();
+      done++;
+    }
+    return json({ ok: true, done, failed, remaining: Math.max(0, todo.length - batch.length) }, {}, env, request);
+  }
+  if (sub === "/mileage" && method === "GET") {
+    const from = q.get("from"), to = q.get("to");
+    if (!from || !to) return error("from and to postcodes required", 400, env, request);
+    const [a, b] = await Promise.all([lookupPostcode(from), lookupPostcode(to)]);
+    if (!a) return error("Couldn't find postcode " + String(from).toUpperCase(), 404, env, request);
+    if (!b) return error("Couldn't find postcode " + String(to).toUpperCase(), 404, env, request);
+    const oneWay = round1(haversineMiles(a, b) * ROAD_FACTOR);
+    return json({ ok: true, from: a.pc, to: b.pc, oneWay, roundTrip: round1(oneWay * 2) }, {}, env, request);
+  }
+  if (sub === "/invoice/next" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    const next = parseInt(b.next, 10);
+    if (!next || next < 1 || next > 99999999) return error("Send a whole number, e.g. { next: 100 }", 400, env, request);
+    const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
+    if (row && row.m != null && next <= Number(row.m))
+      return error("Your invoices are already up to number " + row.m + " \u2014 the next number must be higher.", 400, env, request);
+    (cfg.byUser[me] || (cfg.byUser[me] = {})).nextNumber = next;
+    await saveCfg(env, tid, cfg);
+    return json({ ok: true, next }, {}, env, request);
+  }
+  if (sub === "/invoice" && method === "POST") {
+    const b = await request.json().catch(() => ({}));
+    if (!isDateStr(b.week)) return error("week required", 400, env, request);
+    const monday = mondayOf(b.week);
+    const u = await userRow(env, tid, me);
+    if (!isSelfEmployed(u)) return error("Invoices are only for self-employed engineers.", 403, env, request);
+    const existing = await invoiceFor(env, tid, me, monday);
+    if (existing) return error("Invoice " + existing.number + " already exists for this week.", 409, env, request);
+    if (b.rate != null) {
+      const n = parseFloat(b.rate);
+      if (isFinite(n) && n > 0) {
+        const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
+        mine.rate = n;
+        if (b.rateType === "day" || b.rateType === "hour") mine.rateType = b.rateType;
+        await saveCfg(env, tid, cfg);
+      }
+    }
+    const eff = effectiveCfg(cfg, u);
+    if (!eff.rate) return error("No pay rate set \u2014 enter your rate first.", 400, env, request);
+    const { days } = await loadWeek(env, tid, me, monday);
+    const totals = weekTotals(days, eff);
+    if (!totals.daysWorked && !totals.miles) return error("Nothing on this week's timesheet yet \u2014 save your times first.", 400, env, request);
+    const number = await nextInvoiceNumber(env, tid, me, eff);
+    const pdf = buildInvoicePdf({
+      number,
+      name: displayName(u),
+      details: eff.details,
+      company: cfg.defaults.company,
+      monday,
+      days,
+      eff,
+      totals
+    });
+    const key = `${INV_PREFIX(tid)}${encodeURIComponent(me)}/INV-${number}-${monday}.pdf`;
+    await env.JOB_FILES.put(key, pdf, {
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: { by: me, number: String(number), week: monday, at: (/* @__PURE__ */ new Date()).toISOString() }
+    });
+    await env.DB.prepare(
+      "INSERT INTO eng_invoices (tenant_id, username, number, week, hours, miles, labour, mileage, total, r2_key, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, me, number, monday, totals.hours, totals.miles, totals.labour, totals.mileagePay, totals.total, key, (/* @__PURE__ */ new Date()).toISOString()).run();
+    return json({
+      ok: true,
+      number,
+      total: totals.total,
+      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", key)
+    }, {}, env, request);
+  }
+  if (sub === "/invoices" && method === "GET") {
+    const admin = await isTsAdmin(env, tid, sess);
+    const who = q.get("u");
+    let stmt;
+    if (who && admin && who !== "all") stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, who);
+    else if (who === "all" && admin) stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? ORDER BY at DESC LIMIT 400").bind(tid);
+    else stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, me);
+    const { results } = await stmt.all();
+    const invoices = [];
+    for (const r of results || []) invoices.push({
+      id: r.id,
+      username: r.username,
+      number: r.number,
+      week: r.week,
+      hours: r.hours,
+      miles: r.miles,
+      labour: r.labour,
+      mileage: r.mileage,
+      total: r.total,
+      at: r.at,
+      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", r.r2_key)
+    });
+    return json({ ok: true, invoices }, {}, env, request);
+  }
+  if (sub === "/invoice/delete" && method === "POST") {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
+    if (!row) return error("Invoice not found", 404, env, request);
+    await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
+    try {
+      await env.JOB_FILES.delete(row.r2_key);
+    } catch {
+    }
+    return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
+  }
+  if (sub.startsWith("/admin/")) {
+    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
+    if (sub === "/admin/overview" && method === "GET") {
+      const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+      const { results: users } = await env.DB.prepare(
+        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
+      ).bind(tid).all();
+      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
+      const dataBy = {};
+      for (const r of rows || []) {
+        try {
+          dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at };
+        } catch {
+        }
+      }
+      const invBy = {};
+      for (const r of invs || []) invBy[r.username] = r;
+      const out = [];
+      for (const u of users || []) {
+        const eff = effectiveCfg(cfg, u);
+        const d = dataBy[u.username] || { days: {}, at: null };
+        try {
+          const auto = await jobTimeAuto(env, tid, u.username, monday);
+          for (const [date, a] of Object.entries(auto)) {
+            const day = d.days[date] = d.days[date] || {};
+            if (!day.start && a.start) day.start = a.start;
+            if (!day.finish && a.finish) day.finish = a.finish;
+            const have = String(day.jobs || "").toLowerCase();
+            const extra = a.jobs.map((j) => j.ref).filter((rf) => !have.includes(String(rf).toLowerCase()));
+            if (extra.length) day.jobs = [day.jobs, extra.join(", ")].filter(Boolean).join(", ");
+          }
+        } catch {
+        }
+        const inv = invBy[u.username];
+        const perDay = {};
+        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
+        out.push({
+          username: u.username,
+          name: displayName(u),
+          employment: u.employment_type || "Employed",
+          selfEmployed: isSelfEmployed(u),
+          cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
+          days: d.days,
+          perDay,
+          savedAt: d.at,
+          totals: weekTotals(d.days, eff),
+          invoice: inv ? {
+            id: inv.id,
+            number: inv.number,
+            total: inv.total,
+            at: inv.at,
+            url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
+          } : null
+        });
+      }
+      return json({ ok: true, week: monday, days: weekDays(monday), users: out }, {}, env, request);
+    }
+    if (sub === "/admin/save" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (!b.username || !isDateStr(b.week)) return error("username and week required", 400, env, request);
+      const monday = mondayOf(b.week);
+      if (await invoiceFor(env, tid, b.username, monday))
+        return error("That week is invoiced \u2014 delete the invoice first if it needs correcting.", 409, env, request);
+      const days = cleanDays(monday, b.days);
+      await env.DB.prepare(
+        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
+      ).bind(tid, monday, b.username, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
+      return json({ ok: true }, {}, env, request);
+    }
+    if (sub === "/admin/config" && method === "GET") {
+      const { results: users } = await env.DB.prepare(
+        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
+      ).bind(tid).all();
+      return json({
+        ok: true,
+        defaults: cfg.defaults,
+        byUser: cfg.byUser,
+        users: (users || []).map((u) => ({
+          username: u.username,
+          name: displayName(u),
+          employment: u.employment_type || "Employed",
+          selfEmployed: isSelfEmployed(u),
+          effective: effectiveCfg(cfg, u)
+        }))
+      }, {}, env, request);
+    }
+    if (sub === "/admin/config" && method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      if (b.defaults && typeof b.defaults === "object") cfg.defaults = Object.assign({ ...DEFAULTS }, cfg.defaults, b.defaults);
+      if (b.byUser && typeof b.byUser === "object") {
+        for (const [u, v] of Object.entries(b.byUser)) {
+          if (v === null) {
+            delete cfg.byUser[u];
+            continue;
+          }
+          const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
+          for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
+          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
+            if (k in v) {
+              const n = parseFloat(v[k]);
+              if (isFinite(n) && n >= 0) mine[k] = n;
+              else delete mine[k];
+            }
+          }
+          if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
+          if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
+          if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
+        }
+      }
+      await saveCfg(env, tid, cfg);
+      return json({ ok: true }, {}, env, request);
+    }
+  }
+  return error("Unknown timesheet route: " + sub, 404, env, request);
+}
+
+// src/routes/sla.js
+async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -3106,6 +4620,7 @@ async function handle7(request, env, ctx, url, sess) {
     const before = await getJob(env, tenantId, id);
     const updated = await patchJob(env, tenantId, id, patch);
     if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+    if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
     return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
   }
   if (subpath.startsWith("/jobs/")) {
@@ -3197,6 +4712,7 @@ async function handle7(request, env, ctx, url, sess) {
       const before = await getJob(env, tenantId, id);
       const updated = await patchJob(env, tenantId, id, await readJson2(request));
       if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
+      if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
   }
@@ -4091,7 +5607,7 @@ function buildJobExportHtml(job, files, logoDataUrl) {
 
 // src/routes/sites.js
 var OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
-async function handle8(request, env, ctx, url, sess) {
+async function handle9(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const q = url.searchParams;
@@ -4384,7 +5900,7 @@ async function requireFullAccess(env, request) {
   if (perms.FullAccess !== "Yes") return { err: error("Forbidden", 403, env, request) };
   return { sess };
 }
-async function handle9(request, env, ctx, url, sess) {
+async function handle10(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -4694,7 +6210,7 @@ function num(v) {
 // src/routes/sitelog.js
 var SITELOG_API = "https://api.site-log.co.uk";
 var SCAN_URL = "https://site-log.co.uk/scan.html";
-async function handle10(request, env, ctx, url, sess) {
+async function handle11(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (path === "/sitelog-launch" && request.method === "GET") {
     if (!sess) sess = await requireSession(env, request);
@@ -4769,7 +6285,7 @@ function londonDate(d = /* @__PURE__ */ new Date()) {
 function secondsBetween(a, b) {
   return Math.max(0, Math.floor((Date.parse(b) - Date.parse(a)) / 1e3));
 }
-var isDateStr = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+var isDateStr2 = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
 function toIso(v) {
   if (!v) return null;
   const t = Date.parse(v);
@@ -4871,13 +6387,13 @@ async function openSegmentRow(env, tenantId, username) {
     "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND clock_out IS NULL AND edited_out IS NULL AND (voided IS NULL OR voided=0) ORDER BY clock_in DESC LIMIT 1"
   ).bind(tenantId, username).first();
 }
-function mondayOf(dateStr) {
+function mondayOf2(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   const dow = (d.getUTCDay() + 6) % 7;
   d.setUTCDate(d.getUTCDate() - dow);
   return d.toISOString().slice(0, 10);
 }
-function weekDays(monday) {
+function weekDays2(monday) {
   const base = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   const out = [];
   for (let i = 0; i < 7; i++) {
@@ -4889,8 +6405,8 @@ function weekDays(monday) {
 }
 async function weekDetail(env, tenantId, username, week) {
   const db = tenantDB(env, tenantId);
-  const monday = mondayOf(isDateStr(week) ? week : londonDate());
-  const days = weekDays(monday);
+  const monday = mondayOf2(isDateStr2(week) ? week : londonDate());
+  const days = weekDays2(monday);
   const sunday = days[6];
   const { results } = await db.prepare(
     "SELECT * FROM office_shifts WHERE tenant_id=? AND username=? AND date>=? AND date<=? ORDER BY clock_in"
@@ -4908,7 +6424,7 @@ async function weekDetail(env, tenantId, username, week) {
   }
   return { monday, sunday, days, byDay, weekTotal };
 }
-async function handle11(request, env, ctx, url, sess) {
+async function handle12(request, env, ctx, url, sess) {
   const path = url.pathname;
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -5036,8 +6552,8 @@ async function handle11(request, env, ctx, url, sess) {
   if (path === "/office/timesheet" && request.method === "GET") {
     if (!await isTimesheetAdmin(env, tenantId, me)) return error("Forbidden", 403, env, request);
     await autoCloseOverdue(env, tenantId, null);
-    const monday = mondayOf(isDateStr(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
-    const days = weekDays(monday);
+    const monday = mondayOf2(isDateStr2(url.searchParams.get("week") || "") ? url.searchParams.get("week") : londonDate());
+    const days = weekDays2(monday);
     const sunday = days[6];
     const { results } = await db.prepare(
       "SELECT * FROM office_shifts WHERE tenant_id=? AND date >= ? AND date <= ? ORDER BY username, clock_in"
@@ -5098,7 +6614,7 @@ function logMove(env, tenantId, keyID, action, holder, byUser, note) {
     "INSERT INTO key_log (key_id, tenant_id, action, holder, by_user, note, at) VALUES (?,?,?,?,?,?,?)"
   ).bind(keyID, db.tenantId, action, holder || "", byUser || "", note || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
-async function handle12(request, env, ctx, url, sess) {
+async function handle13(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname, searchParams } = url;
   const method = request.method.toUpperCase();
@@ -5216,7 +6732,7 @@ function filterTheme(theme, can) {
   if (can.background && theme.bg && typeof theme.bg === "object") t.bg = theme.bg;
   return t;
 }
-async function handle13(request, env, ctx, url, sess) {
+async function handle14(request, env, ctx, url, sess) {
   const cors = corsHeaders(env, request);
   const { pathname } = url;
   const method = request.method.toUpperCase();
@@ -5284,7 +6800,7 @@ async function handle13(request, env, ctx, url, sess) {
 
 // src/routes/hs.js
 var PREFIX = { induction: "IND", hotworks: "HWP", rams: "RAMS", incident: "INC" };
-async function handle14(request, env, ctx, url, sess) {
+async function handle15(request, env, ctx, url, sess) {
   if (!sess) sess = await requireSession(env, request);
   if (!sess) return error("Not authenticated", 401, env, request);
   const perms = await permissionsFor(env, sess.tenantId, sess.user.username);
@@ -5443,7 +6959,7 @@ function londonToISO2(dateStr, hm) {
   }
   return (/* @__PURE__ */ new Date(`${dateStr}T${hm}:00Z`)).toISOString();
 }
-function mondayOf2(dateStr) {
+function mondayOf3(dateStr) {
   const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7);
   return d.toISOString().slice(0, 10);
@@ -5497,7 +7013,7 @@ function shapeCheck(r) {
     skippedBy: items.skippedBy || ""
   };
 }
-async function handle15(request, env, ctx, url, sess) {
+async function handle16(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId;
   const db = tenantDB(env, tenantId);
@@ -5534,7 +7050,7 @@ async function handle15(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/config" && method === "GET") {
     const s = await getSettings(db);
-    const week = mondayOf2(londonDate2());
+    const week = mondayOf3(londonDate2());
     const mine = await db.prepare("SELECT * FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, me, week).first();
     const dueAt = deadlineFor(week, s);
     return json({
@@ -5549,7 +7065,7 @@ async function handle15(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/submit" && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const week = mondayOf2(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
+    const week = mondayOf3(b.week && /^\d{4}-\d{2}-\d{2}$/.test(b.week) ? b.week : londonDate2());
     const vehicle = String(b.vehicle || sess.user.vehicle_assigned || "").trim();
     if (!vehicle) return error("No vehicle \u2014 enter the reg or ask the office to allocate one to you.", 400, env, request);
     const answers = b.answers && typeof b.answers === "object" ? b.answers : {};
@@ -5603,7 +7119,7 @@ async function handle15(request, env, ctx, url, sess) {
   if (path === "/vancheck/week" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
     const wk = url.searchParams.get("week");
-    const week = mondayOf2(wk && /^\d{4}-\d{2}-\d{2}$/.test(wk) ? wk : londonDate2());
+    const week = mondayOf3(wk && /^\d{4}-\d{2}-\d{2}$/.test(wk) ? wk : londonDate2());
     const s = await getSettings(db);
     const { results: drivers } = await db.prepare(
       "SELECT username, first_name, last_name, vehicle_assigned FROM users WHERE tenant_id=? AND status='Active' AND vehicle_assigned IS NOT NULL AND vehicle_assigned != ''"
@@ -5628,7 +7144,7 @@ async function handle15(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/remind-now" && method === "POST") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
-    const week = mondayOf2(londonDate2());
+    const week = mondayOf3(londonDate2());
     const r = await remindDrivers(env, tenantId, week, {
       title: "Weekly van check due",
       body: "Please complete your weekly van check \u2014 tap to start.",
@@ -5642,7 +7158,7 @@ async function handle15(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
-    const wk = mondayOf2(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
     if (existing) {
       let it = {};
@@ -5667,7 +7183,7 @@ async function handle15(request, env, ctx, url, sess) {
     const b = await request.json().catch(() => ({}));
     const who = String(b.username || "").trim();
     if (!who) return error("username required", 400, env, request);
-    const wk = mondayOf2(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
+    const wk = mondayOf3(/^\d{4}-\d{2}-\d{2}$/.test(b.week || "") ? b.week : londonDate2());
     const existing = await db.prepare("SELECT items FROM vehicle_checks WHERE tenant_id=? AND username=? AND week=?").bind(db.tenantId, who, wk).first();
     if (!existing) return json({ ok: true, notSkipped: true }, {}, env, request);
     let it = {};
@@ -5681,7 +7197,7 @@ async function handle15(request, env, ctx, url, sess) {
   }
   if (path === "/vancheck/attention" && method === "GET") {
     const s = await getSettings(db);
-    const week = mondayOf2(londonDate2());
+    const week = mondayOf3(londonDate2());
     const dueAt = deadlineFor(week, s);
     const overdue = Date.now() > Date.parse(dueAt);
     const myVehicle = sess.user.vehicle_assigned || "";
@@ -5743,7 +7259,7 @@ async function sendWeeklyReminders(env, now = /* @__PURE__ */ new Date()) {
   const lonDate = londonDate2(d);
   const lonHour = Number(d.toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).replace(/\D/g, "")) || 0;
   const lonDow = d.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "short" });
-  const week = mondayOf2(lonDate);
+  const week = mondayOf3(lonDate);
   const isMonday7 = lonDow === "Mon" && lonHour === 7;
   let tenants = [];
   try {
@@ -5791,7 +7307,7 @@ function json2(data, status, env, request) {
     headers: { "Content-Type": "application/json", ...corsHeaders(env, request) }
   });
 }
-async function handle16(request, env, ctx, url, sess) {
+async function handle17(request, env, ctx, url, sess) {
   if (url.pathname !== "/stats") return json2({ error: "Not found" }, 404, env, request);
   if (!sess) return json2({ error: "Not authenticated" }, 401, env, request);
   const tenantId = sess.tenantId;
@@ -6031,7 +7547,7 @@ async function signGroups(env, origin, groups) {
   }
   return groups;
 }
-async function handle17(request, env, ctx, url, sess) {
+async function handle18(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -6144,7 +7660,7 @@ function redact(rows) {
     return o;
   });
 }
-async function handle18(request, env, ctx, url, sess) {
+async function handle19(request, env, ctx, url, sess) {
   if (!sess) return error("Not authenticated", 401, env, request);
   const tenantId = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
   const perms = await permissionsFor(env, tenantId, sess.user.username);
@@ -6253,7 +7769,7 @@ async function photoIndex(env, tid) {
   }
   return out;
 }
-async function handle19(request, env, ctx, url, sess) {
+async function handle20(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
   const method = request.method.toUpperCase();
   const tid = sess ? sess.tenantId : await resolveTenantId(env, request);
@@ -6825,1387 +8341,6 @@ async function seedAssignments(env, tid) {
   }
 }
 
-// src/lib/pdf.js
-var PAGE_W = 595;
-var PAGE_H = 842;
-var W = {
-  " ": 278,
-  "!": 278,
-  '"': 355,
-  "#": 556,
-  "$": 556,
-  "%": 889,
-  "&": 667,
-  "'": 191,
-  "(": 333,
-  ")": 333,
-  "*": 389,
-  "+": 584,
-  ",": 278,
-  "-": 333,
-  ".": 278,
-  "/": 278,
-  "0": 556,
-  "1": 556,
-  "2": 556,
-  "3": 556,
-  "4": 556,
-  "5": 556,
-  "6": 556,
-  "7": 556,
-  "8": 556,
-  "9": 556,
-  ":": 278,
-  ";": 278,
-  "=": 584,
-  "?": 556,
-  "@": 1015,
-  "A": 667,
-  "B": 667,
-  "C": 722,
-  "D": 722,
-  "E": 667,
-  "F": 611,
-  "G": 778,
-  "H": 722,
-  "I": 278,
-  "J": 500,
-  "K": 667,
-  "L": 556,
-  "M": 833,
-  "N": 722,
-  "O": 778,
-  "P": 667,
-  "Q": 778,
-  "R": 722,
-  "S": 667,
-  "T": 611,
-  "U": 722,
-  "V": 667,
-  "W": 944,
-  "X": 667,
-  "Y": 667,
-  "Z": 611,
-  "a": 556,
-  "b": 556,
-  "c": 500,
-  "d": 556,
-  "e": 556,
-  "f": 278,
-  "g": 556,
-  "h": 556,
-  "i": 222,
-  "j": 222,
-  "k": 500,
-  "l": 222,
-  "m": 833,
-  "n": 556,
-  "o": 556,
-  "p": 556,
-  "q": 556,
-  "r": 333,
-  "s": 500,
-  "t": 278,
-  "u": 556,
-  "v": 500,
-  "w": 722,
-  "x": 500,
-  "y": 500,
-  "z": 500,
-  "\xA3": 556,
-  "\xB7": 278,
-  "\u2013": 556,
-  "\u2014": 1e3
-};
-function textWidth(str, size = 10) {
-  let u = 0;
-  for (const ch of String(str)) u += W[ch] != null ? W[ch] : 556;
-  return u / 1e3 * size;
-}
-function pdfStr(s) {
-  let out = "";
-  for (const ch of String(s)) {
-    let c = ch.charCodeAt(0);
-    if (ch === "\u2013" || ch === "\u2014") c = 45;
-    if (ch === "\u2019" || ch === "\u2018") c = 39;
-    if (ch === "\u201C" || ch === "\u201D") c = 34;
-    if (c > 255) c = 63;
-    if (c === 92) out += "\\\\";
-    else if (c === 40) out += "\\(";
-    else if (c === 41) out += "\\)";
-    else if (c >= 32 && c <= 126) out += String.fromCharCode(c);
-    else out += "\\" + c.toString(8).padStart(3, "0");
-  }
-  return out;
-}
-var PdfDoc = class {
-  constructor() {
-    this.pages = [];
-    this.newPage();
-  }
-  newPage() {
-    this.pages.push([]);
-    return this;
-  }
-  get _ops() {
-    return this.pages[this.pages.length - 1];
-  }
-  // yTop is measured from the top of the page to the text BASELINE.
-  text(x, yTop, str, opt = {}) {
-    const size = opt.size || 10;
-    const font = opt.bold ? "/F2" : "/F1";
-    const grey = opt.grey ? "0.45 g " : "";
-    let tx = x;
-    if (opt.alignRight) tx = x - textWidth(str, size);
-    const y = PAGE_H - yTop;
-    this._ops.push(`${grey}BT ${font} ${size} Tf 1 0 0 1 ${tx.toFixed(2)} ${y.toFixed(2)} Tm (${pdfStr(str)}) Tj ET${opt.grey ? " 0 g" : ""}`);
-    return this;
-  }
-  hr(x1, yTop, x2, opt = {}) {
-    const y = PAGE_H - yTop;
-    const grey = opt.grey ? "0.75 G " : "0.2 G ";
-    this._ops.push(`${grey}${opt.w || 0.75} w ${x1} ${y.toFixed(2)} m ${x2} ${y.toFixed(2)} l S 0 G`);
-    return this;
-  }
-  bytes() {
-    const enc3 = new TextEncoder();
-    const objs = [];
-    objs.push("<< /Type /Catalog /Pages 2 0 R >>");
-    const pageIds = this.pages.map((_, i) => 7 + i * 2);
-    objs.push(`<< /Type /Pages /Kids [${pageIds.map((id) => id + " 0 R").join(" ")}] /Count ${this.pages.length} >>`);
-    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-    objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-    objs.push("<< /Producer (Mostlane Portal) >>");
-    for (const ops of this.pages) {
-      const stream = ops.join("\n");
-      objs.push(`<< /Length ${enc3.encode(stream).length} >>
-stream
-${stream}
-endstream`);
-      const cid = objs.length;
-      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${cid} 0 R >>`);
-    }
-    let body = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
-    const offsets = [0];
-    for (let i = 0; i < objs.length; i++) {
-      offsets.push(enc3.encode(body).length);
-      body += `${i + 1} 0 obj
-${objs[i]}
-endobj
-`;
-    }
-    const xrefAt = enc3.encode(body).length;
-    body += `xref
-0 ${objs.length + 1}
-0000000000 65535 f 
-`;
-    for (let i = 1; i <= objs.length; i++) body += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
-    body += `trailer
-<< /Size ${objs.length + 1} /Root 1 0 R /Info 5 0 R >>
-startxref
-${xrefAt}
-%%EOF
-`;
-    return enc3.encode(body);
-  }
-};
-
-// src/routes/timesheets.js
-var CFG_KEY = (tid) => `engts:cfg:${tid}`;
-var INV_PREFIX = (tid) => `invoices/${tid}/`;
-var isDateStr2 = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
-function mondayOf3(dateStr) {
-  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
-  const dow = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - dow);
-  return d.toISOString().slice(0, 10);
-}
-function weekDays2(monday) {
-  const base = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
-  const out = [];
-  for (let i = 0; i < 7; i++) {
-    const x = new Date(base);
-    x.setUTCDate(base.getUTCDate() + i);
-    out.push(x.toISOString().slice(0, 10));
-  }
-  return out;
-}
-var toMin = (t) => {
-  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(t || "").trim());
-  return m ? +m[1] * 60 + +m[2] : null;
-};
-var normPc = (pc) => String(pc || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-var round1 = (n) => Math.round(n * 10) / 10;
-var money = (n) => "\xA3" + (Math.round(n * 100) / 100).toFixed(2);
-var TABLES_ENSURED = false;
-async function ensureTables(env) {
-  if (TABLES_ENSURED) return;
-  TABLES_ENSURED = true;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_timesheets (
-    tenant_id INTEGER NOT NULL DEFAULT 1, week TEXT NOT NULL, username TEXT NOT NULL,
-    data TEXT, at TEXT, PRIMARY KEY (tenant_id, week, username))`).run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS eng_invoices (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
-    username TEXT NOT NULL, number INTEGER NOT NULL, week TEXT NOT NULL,
-    hours REAL, miles REAL, labour REAL, mileage REAL, total REAL,
-    r2_key TEXT, at TEXT,
-    UNIQUE (tenant_id, username, number), UNIQUE (tenant_id, username, week))`).run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS site_miles (
-    tenant_id INTEGER NOT NULL DEFAULT 1, key TEXT NOT NULL,
-    name TEXT, postcode TEXT, miles REAL, updated_at TEXT,
-    PRIMARY KEY (tenant_id, key))`).run();
-}
-var normKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
-var DEFAULTS = {
-  commuteMins: 30,
-  lunchMins: 30,
-  lunchThresholdH: 6,
-  pencePerMile: 45,
-  radiusMiles: 10,
-  basePostcode: "PO15 5RQ",
-  company: "Mostlane"
-};
-async function getCfg(env, tid) {
-  let cfg = { defaults: { ...DEFAULTS }, byUser: {} };
-  try {
-    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CFG_KEY(tid)).first();
-    if (row && row.value) {
-      const v = JSON.parse(row.value);
-      cfg.defaults = Object.assign(cfg.defaults, v.defaults || {});
-      cfg.byUser = v.byUser || {};
-    }
-  } catch {
-  }
-  return cfg;
-}
-async function saveCfg(env, tid, cfg) {
-  await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, CFG_KEY(tid), JSON.stringify(cfg)).run();
-}
-async function userRow(env, tid, username) {
-  return env.DB.prepare("SELECT username, first_name, last_name, employment_type, status, profile FROM users WHERE tenant_id=? AND username=?").bind(tid, username).first();
-}
-function displayName(u) {
-  return u ? `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username : "";
-}
-function isSelfEmployed(u) {
-  return /self/i.test(String(u && u.employment_type || ""));
-}
-function effectiveCfg(cfg, u) {
-  const mine = cfg.byUser && cfg.byUser[u.username] || {};
-  let profile = {};
-  try {
-    profile = u.profile ? JSON.parse(u.profile) : {};
-  } catch {
-  }
-  const num2 = (v) => {
-    const n = parseFloat(v);
-    return isFinite(n) && n > 0 ? n : null;
-  };
-  return {
-    employment: u.employment_type || "Employed",
-    selfEmployed: isSelfEmployed(u),
-    commute: mine.commute === true,
-    // 30 mins each way deducted
-    lunch: mine.lunch === true,
-    // 30 mins lunch deducted
-    mileage: mine.mileage === true,
-    // may claim mileage (fuel)
-    radius: mine.radius === true,
-    // first/last N miles of a day unpaid
-    radiusMiles: Number(mine.radiusMiles ?? cfg.defaults.radiusMiles) || 10,
-    commuteMins: Number(mine.commuteMins ?? cfg.defaults.commuteMins) || 30,
-    lunchMins: Number(mine.lunchMins ?? cfg.defaults.lunchMins) || 30,
-    lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
-    pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
-    rateType: mine.rateType === "day" ? "day" : "hour",
-    rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
-    homePostcode: String(mine.homePostcode || "").toUpperCase(),
-    details: Array.isArray(mine.details) ? mine.details : [],
-    // extra lines under their name on the invoice
-    nextNumber: Number(mine.nextNumber) || null
-  };
-}
-function cleanDays(monday, days) {
-  const valid = new Set(weekDays2(monday));
-  const out = {};
-  for (const [date, d] of Object.entries(days || {})) {
-    if (!valid.has(date) || !d || typeof d !== "object") continue;
-    const start = toMin(d.start) != null ? String(d.start) : "";
-    const finish = toMin(d.finish) != null ? String(d.finish) : "";
-    const jobs = String(d.jobs || "").slice(0, 400);
-    const note = String(d.note || "").slice(0, 400);
-    const mileage = (Array.isArray(d.mileage) ? d.mileage : []).slice(0, 8).map((m) => ({
-      site: String(m && m.site || "").slice(0, 120),
-      postcode: String(m && m.postcode || "").toUpperCase().slice(0, 10),
-      miles: Math.max(0, Math.min(1e3, round1(parseFloat(m && m.miles) || 0)))
-    })).filter((m) => m.miles > 0 || m.site || m.postcode);
-    if (start || finish || jobs || note || mileage.length) out[date] = { start, finish, jobs, note, mileage };
-  }
-  return out;
-}
-function claimedMiles(miles, eff) {
-  if (!eff.radius || !(miles > 0)) return miles;
-  return Math.max(0, round1(miles - 2 * eff.radiusMiles));
-}
-function dayCalc(d, eff) {
-  const miles = dayMiles(d);
-  const base = { miles, milesClaimed: claimedMiles(miles, eff) };
-  const s = toMin(d.start), e0 = toMin(d.finish);
-  if (s == null || e0 == null) return { span: 0, paid: 0, commute: 0, lunch: 0, worked: false, ...base };
-  const e = e0 <= s ? e0 + 1440 : e0;
-  const span = e - s;
-  const commute = eff.commute ? eff.commuteMins * 2 : 0;
-  const lunch = eff.lunch && span >= eff.lunchThresholdH * 60 ? eff.lunchMins : 0;
-  return { span, paid: Math.max(0, span - commute - lunch), commute, lunch, worked: true, ...base };
-}
-function dayMiles(d) {
-  return round1((Array.isArray(d.mileage) ? d.mileage : []).reduce((a, m) => a + (parseFloat(m.miles) || 0), 0));
-}
-function weekTotals(days, eff) {
-  let paidMins = 0, miles = 0, milesClaimed = 0, daysWorked = 0;
-  for (const d of Object.values(days || {})) {
-    const c = dayCalc(d, eff);
-    paidMins += c.paid;
-    miles += c.miles;
-    milesClaimed += c.milesClaimed;
-    if (c.worked) daysWorked++;
-  }
-  const hours = Math.round(paidMins / 60 * 100) / 100;
-  const labour = eff.rate ? Math.round((eff.rateType === "day" ? daysWorked * eff.rate : hours * eff.rate) * 100) / 100 : null;
-  const mileagePay = Math.round(milesClaimed * eff.pencePerMile) / 100;
-  return {
-    paidMins,
-    hours,
-    miles: round1(miles),
-    milesClaimed: round1(milesClaimed),
-    milesDeducted: round1(miles - milesClaimed),
-    daysWorked,
-    labour,
-    mileagePay,
-    total: labour != null ? Math.round((labour + mileagePay) * 100) / 100 : null
-  };
-}
-async function loadWeek(env, tid, username, monday) {
-  const row = await env.DB.prepare("SELECT data, at FROM eng_timesheets WHERE tenant_id=? AND week=? AND username=?").bind(tid, monday, username).first();
-  let days = {};
-  try {
-    days = row && row.data ? JSON.parse(row.data).days || {} : {};
-  } catch {
-  }
-  return { days, savedAt: row ? row.at : null };
-}
-async function invoiceFor(env, tid, username, monday) {
-  return env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? AND week=?").bind(tid, username, monday).first();
-}
-async function nextInvoiceNumber(env, tid, username, eff) {
-  const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, username).first();
-  const max = row && row.m != null ? Number(row.m) : 0;
-  return Math.max(max + 1, eff.nextNumber || 1);
-}
-async function isTsAdmin(env, tid, sess) {
-  if (!sess) return false;
-  const p = await permissionsFor(env, tid, sess.user.username);
-  return p.FullAccess === "Yes" || p.TimesheetAdmin === "Yes";
-}
-var PO_MAP;
-var PO_MAP_AT = 0;
-var PO_TABLES;
-var PO_BLOB;
-function poShape(o) {
-  if (!o || typeof o !== "object") return null;
-  const name = o.siteName ?? o.site_name ?? o.SiteName ?? o.name ?? o.site ?? o.store ?? o.branch ?? "";
-  const pc = o.postcode ?? o.postCode ?? o.post_code ?? o.Postcode ?? "";
-  const job = o.jobNumber ?? o.job_number ?? o.JobNumber ?? o.jobNo ?? o.job ?? o.siteNumber ?? o.site_number ?? null;
-  if (!name) return null;
-  return { name: String(name), pc: String(pc || ""), job: job != null && job !== "" ? String(job) : null };
-}
-function poSiteish(o) {
-  const s = poShape(o);
-  return !!(s && (s.pc || s.job));
-}
-var PO_PROBE = null;
-async function poDiscover(env) {
-  if (!env.PO_DB) return null;
-  if (PO_MAP !== void 0 && (PO_MAP !== null || Date.now() - PO_MAP_AT < 2 * 60 * 1e3)) return PO_MAP;
-  if (!PO_PROBE) PO_PROBE = probePoDb(env).finally(() => {
-    PO_PROBE = null;
-  });
-  await PO_PROBE;
-  return PO_MAP;
-}
-async function probePoDb(env) {
-  PO_MAP_AT = Date.now();
-  const tables = [];
-  let map = null;
-  try {
-    const { results } = await env.PO_DB.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf%' ESCAPE '\\'"
-    ).all();
-    let best = null;
-    const prio = (n) => /site|store|branch/i.test(n) ? 3 : /po|purchase|order|job/i.test(n) ? 2 : /kv|data|config|record/i.test(n) ? 1 : 0;
-    const ordered = (results || []).map((t) => String(t.name)).sort((a, b) => prio(b) - prio(a));
-    let budget = 18;
-    for (const tbl of ordered) {
-      if (budget <= 0) break;
-      const safe = tbl.replace(/"/g, "");
-      let cols = [];
-      budget--;
-      try {
-        cols = (await env.PO_DB.prepare(`PRAGMA table_info("${safe}")`).all()).results || [];
-      } catch {
-        continue;
-      }
-      const names = cols.map((c) => String(c.name));
-      tables.push({ name: tbl, cols: names });
-      const lower = names.map((n) => n.toLowerCase());
-      const pick = (...cands) => {
-        for (const c of cands) {
-          const i = lower.indexOf(c);
-          if (i >= 0) return names[i];
-        }
-        for (const c of cands) {
-          const i = lower.findIndex((n) => n.includes(c));
-          if (i >= 0) return names[i];
-        }
-        return null;
-      };
-      const nameCol = pick("site_name", "sitename", "site", "store", "branch", "name");
-      const pcCol = pick("postcode", "post_code", "postal_code", "zip");
-      const jobCol = pick("job_number", "jobnumber", "job_no", "jobno", "job");
-      if (nameCol && (pcCol || jobCol)) {
-        const score = 10 + (pcCol ? 2 : 0) + (jobCol ? 1 : 0) + (/site|store|branch/i.test(tbl) ? 3 : 0);
-        if (!best || score > best.score) best = { mode: "cols", table: tbl, nameCol, pcCol, jobCol, score };
-        continue;
-      }
-      const jsonCol = pick("value", "data", "json", "body", "payload", "v");
-      if (!jsonCol) continue;
-      const keyCol = pick("key", "k", "id", "name");
-      if (budget <= 0) break;
-      budget--;
-      let rows = [];
-      try {
-        rows = (await env.PO_DB.prepare(
-          `SELECT ${keyCol ? `"${keyCol}" AS k, ` : ""}"${jsonCol}" AS v FROM "${safe}" LIMIT 40`
-        ).all()).results || [];
-      } catch {
-        continue;
-      }
-      let rowish = 0;
-      for (const r of rows) {
-        let v = null;
-        try {
-          v = JSON.parse(r.v);
-        } catch {
-          continue;
-        }
-        if (Array.isArray(v) && v.length && v.slice(0, 5).every(poSiteish)) {
-          const bk = r.k != null ? String(r.k) : "";
-          const score = 8 + (/site|store|branch/i.test(bk) ? 3 : 0) + Math.min(3, Math.floor(v.length / 50));
-          if (!best || score > best.score) best = { mode: "blob", table: tbl, jsonCol, keyCol, blobKey: bk, score };
-        } else if (poSiteish(v)) rowish++;
-      }
-      if (rowish >= Math.max(2, Math.floor(rows.length * 0.3))) {
-        const score = 7 + (/site|store|branch/i.test(tbl) ? 3 : 0);
-        if (!best || score > best.score) best = { mode: "rows", table: tbl, jsonCol, score };
-      }
-    }
-    map = best;
-  } catch {
-    map = null;
-  }
-  PO_TABLES = tables;
-  PO_MAP = map;
-  PO_ORD = deriveOrderMap();
-}
-async function poBlobList(env, m) {
-  if (PO_BLOB && Date.now() - PO_BLOB.at < 5 * 60 * 1e3) return PO_BLOB.list;
-  let list = [];
-  try {
-    const safe = m.table.replace(/"/g, "");
-    const row = m.keyCol ? await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.keyCol}"=?`).bind(m.blobKey).first() : await env.PO_DB.prepare(`SELECT "${m.jsonCol}" AS v FROM "${safe}" LIMIT 1`).first();
-    const v = row ? JSON.parse(row.v) : null;
-    if (Array.isArray(v)) list = v.map(poShape).filter(Boolean);
-  } catch {
-  }
-  PO_BLOB = { at: Date.now(), list };
-  return list;
-}
-async function poSiteRows(env, term, limit) {
-  const m = await poDiscover(env);
-  if (!m) return [];
-  const cap = Math.max(1, Math.min(30, limit));
-  const like = "%" + String(term || "").replace(/[%_]/g, "") + "%";
-  const T = String(term || "").toLowerCase();
-  const matches = (s) => !T || s.name.toLowerCase().includes(T) || s.pc.toLowerCase().includes(T) || (s.job || "").toLowerCase().includes(T);
-  try {
-    const safe = m.table.replace(/"/g, "");
-    if (m.mode === "cols") {
-      const cols = [`"${m.nameCol}" AS name`];
-      if (m.pcCol) cols.push(`"${m.pcCol}" AS pc`);
-      if (m.jobCol) cols.push(`CAST("${m.jobCol}" AS TEXT) AS job`);
-      const where = [`"${m.nameCol}" LIKE ?1`];
-      if (m.pcCol) where.push(`"${m.pcCol}" LIKE ?1`);
-      if (m.jobCol) where.push(`CAST("${m.jobCol}" AS TEXT) LIKE ?1`);
-      const { results } = await env.PO_DB.prepare(
-        `SELECT ${cols.join(", ")} FROM "${safe}" WHERE ${where.join(" OR ")} LIMIT ${cap}`
-      ).bind(like).all();
-      return (results || []).map((r) => ({ name: String(r.name || ""), pc: String(r.pc || ""), job: r.job != null ? String(r.job) : null })).filter((s) => s.name);
-    }
-    if (m.mode === "rows") {
-      const { results } = await env.PO_DB.prepare(
-        `SELECT "${m.jsonCol}" AS v FROM "${safe}" WHERE "${m.jsonCol}" LIKE ?1 LIMIT 200`
-      ).bind(like).all();
-      const out = [];
-      for (const r of results || []) {
-        let v = null;
-        try {
-          v = JSON.parse(r.v);
-        } catch {
-          continue;
-        }
-        const s = poShape(v);
-        if (s && matches(s)) {
-          out.push(s);
-          if (out.length >= cap) break;
-        }
-      }
-      return out;
-    }
-    if (m.mode === "blob") {
-      const list = await poBlobList(env, m);
-      return list.filter(matches).slice(0, cap);
-    }
-  } catch {
-  }
-  return [];
-}
-var PO_ORD;
-var PO_ORD_CACHE;
-function deriveOrderMap() {
-  const sitesTable = PO_MAP ? PO_MAP.table : null;
-  let best = null;
-  for (const t of PO_TABLES || []) {
-    if (t.name === sitesTable) continue;
-    const lower = (t.cols || []).map((n) => n.toLowerCase());
-    const pick = (...cands) => {
-      for (const c of cands) {
-        const i = lower.indexOf(c);
-        if (i >= 0) return t.cols[i];
-      }
-      for (const c of cands) {
-        const i = lower.findIndex((n) => n.includes(c));
-        if (i >= 0) return t.cols[i];
-      }
-      return null;
-    };
-    const isPo = /po|purchase|order/i.test(t.name);
-    const siteCol = pick("site_name", "sitename", "site", "location");
-    const jsonCol = pick("data", "value", "json", "body", "payload");
-    if (siteCol) {
-      const score = 5 + (isPo ? 5 : 0);
-      if (!best || score > best.score) best = { mode: "col", table: t.name, siteCol, score };
-    } else if (jsonCol && isPo) {
-      const score = 6;
-      if (!best || score > best.score) best = { mode: "json", table: t.name, jsonCol, score };
-    }
-  }
-  return best;
-}
-async function poOrderDiscover(env) {
-  await poDiscover(env);
-  return PO_ORD || null;
-}
-async function poOrderSiteNames(env) {
-  const m = await poOrderDiscover(env);
-  if (!m) return [];
-  if (PO_ORD_CACHE && Date.now() - PO_ORD_CACHE.at < 5 * 60 * 1e3) return PO_ORD_CACHE.list;
-  const names = /* @__PURE__ */ new Map();
-  try {
-    const safe = m.table.replace(/"/g, "");
-    const add = (v) => {
-      const s = String(v || "").trim();
-      if (s.length > 2 && !names.has(s.toLowerCase())) names.set(s.toLowerCase(), s);
-    };
-    if (m.mode === "col") {
-      const { results } = await env.PO_DB.prepare(
-        `SELECT DISTINCT "${m.siteCol}" AS s FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
-      ).all();
-      for (const r of results || []) add(r.s);
-    } else {
-      const { results } = await env.PO_DB.prepare(
-        `SELECT "${m.jsonCol}" AS v FROM "${safe}" ORDER BY rowid DESC LIMIT 500`
-      ).all();
-      for (const r of results || []) {
-        let o = null;
-        try {
-          o = JSON.parse(r.v);
-        } catch {
-          continue;
-        }
-        if (o && typeof o === "object") add(o.site ?? o.siteName ?? o.site_name ?? o.Site ?? o.location ?? "");
-      }
-    }
-  } catch {
-  }
-  PO_ORD_CACHE = { at: Date.now(), list: [...names.values()] };
-  return PO_ORD_CACHE.list;
-}
-async function lookupPostcode(pc) {
-  const r = await fetch("https://api.postcodes.io/postcodes/" + encodeURIComponent(normPc(pc)), {
-    headers: { "Accept": "application/json" },
-    cf: { cacheTtl: 30 * 86400, cacheEverything: true }
-  });
-  if (!r.ok) return null;
-  const j = await r.json().catch(() => null);
-  const res = j && j.result;
-  return res && res.latitude != null ? { lat: res.latitude, lng: res.longitude, pc: res.postcode } : null;
-}
-function haversineMiles(a, b) {
-  const rad = (x) => x * Math.PI / 180, R = 3958.8;
-  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-var ROAD_FACTOR = 1.25;
-function fmtDate(iso) {
-  return (/* @__PURE__ */ new Date(iso + "T12:00:00Z")).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-function fmtHm(mins) {
-  return Math.floor(mins / 60) + "h " + String(Math.round(mins % 60)).padStart(2, "0") + "m";
-}
-function buildInvoicePdf({ number, name, details, company, monday, days, eff, totals }) {
-  const doc = new PdfDoc();
-  const L = 48, R = 547;
-  let y = 64;
-  doc.text(L, y, "INVOICE", { size: 22, bold: true });
-  doc.text(R, y - 8, "Invoice no. " + number, { size: 12, bold: true, alignRight: true });
-  doc.text(R, y + 8, "Date: " + fmtDate((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)), { size: 10, alignRight: true, grey: true });
-  y += 34;
-  doc.text(L, y, "From", { size: 9, grey: true });
-  doc.text(R, y, "To", { size: 9, grey: true, alignRight: true });
-  y += 14;
-  const fromLines = (details && details.length ? details : [name]).slice(0, 6);
-  doc.text(L, y, String(fromLines[0]).slice(0, 60), { size: 11, bold: true });
-  const toLines = String(company || "Mostlane").split(/\n/).filter(Boolean);
-  let ty = y;
-  for (const ln of toLines) {
-    doc.text(R, ty, ln.trim(), { size: ty === y ? 11 : 10, bold: ty === y, alignRight: true });
-    ty += 14;
-  }
-  for (const ln of fromLines.slice(1)) {
-    y += 14;
-    doc.text(L, y, String(ln).slice(0, 60), { size: 10 });
-  }
-  y = Math.max(y, ty - 14) + 24;
-  doc.text(L, y, "Week: " + fmtDate(monday) + " \u2013 " + fmtDate(weekDays2(monday)[6]), { size: 10, bold: true });
-  y += 16;
-  doc.hr(L, y, R);
-  y += 16;
-  const cDate = L, cDesc = L + 78, cHours = 425, cAmt = R;
-  doc.text(cDate, y, "Date", { size: 9, bold: true, grey: true });
-  doc.text(cDesc, y, "Details", { size: 9, bold: true, grey: true });
-  doc.text(cHours, y, "Hours", { size: 9, bold: true, grey: true, alignRight: true });
-  doc.text(cAmt, y, "Amount", { size: 9, bold: true, grey: true, alignRight: true });
-  y += 6;
-  doc.hr(L, y, R, { grey: true });
-  y += 15;
-  const fitDesc = (s, max) => {
-    let t = String(s || "");
-    while (t && textWidth(t, 10) > max) t = t.slice(0, -1);
-    return t;
-  };
-  const perHourAmount = (mins) => eff.rate && eff.rateType === "hour" ? money(mins / 60 * eff.rate) : "";
-  for (const date of weekDays2(monday)) {
-    const d = days[date];
-    if (!d) continue;
-    const c = dayCalc(d, eff);
-    if (!c.worked && !c.miles) continue;
-    if (c.worked) {
-      doc.text(cDate, y, (/* @__PURE__ */ new Date(date + "T12:00:00Z")).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }), { size: 10 });
-      const dedNote = [c.commute ? "-" + c.commute + "m travel" : "", c.lunch ? "-" + c.lunch + "m lunch" : ""].filter(Boolean).join(", ");
-      doc.text(cDesc, y, fitDesc((d.jobs || "Site work") + (dedNote ? "  (" + dedNote + ")" : ""), cHours - cDesc - 40), { size: 10 });
-      doc.text(cHours, y, fmtHm(c.paid), { size: 10, alignRight: true });
-      doc.text(cAmt, y, perHourAmount(c.paid), { size: 10, alignRight: true });
-      y += 15;
-    }
-    for (const m of d.mileage || []) {
-      if (!(parseFloat(m.miles) > 0)) continue;
-      doc.text(cDesc, y, fitDesc("Mileage \u2014 " + (m.site || m.postcode || "site") + " (" + m.miles + " mi)", cHours - cDesc - 40), { size: 10, grey: true });
-      y += 15;
-    }
-    if (y > 720) {
-      doc.newPage();
-      y = 60;
-    }
-  }
-  y += 4;
-  doc.hr(L, y, R);
-  y += 18;
-  const cTot = 280;
-  if (eff.rateType === "day" && eff.rate) {
-    doc.text(cTot, y, "Labour: " + totals.daysWorked + " day(s) @ " + money(eff.rate), { size: 10 });
-    doc.text(cAmt, y, money(totals.labour || 0), { size: 10, alignRight: true });
-    y += 16;
-  } else {
-    doc.text(cTot, y, "Labour: " + totals.hours + " h" + (eff.rate ? " @ " + money(eff.rate) + "/h" : ""), { size: 10 });
-    doc.text(cAmt, y, totals.labour != null ? money(totals.labour) : "", { size: 10, alignRight: true });
-    y += 16;
-  }
-  if (totals.miles > 0) {
-    const ded = totals.milesDeducted > 0;
-    doc.text(cTot, y, "Mileage: " + (ded ? totals.miles + " mi - " + totals.milesDeducted + " mi (first/last " + eff.radiusMiles + " mi/day) = " + totals.milesClaimed + " mi @ " + eff.pencePerMile + "p" : totals.milesClaimed + " mi @ " + eff.pencePerMile + "p"), { size: ded ? 9 : 10 });
-    doc.text(cAmt, y, money(totals.mileagePay), { size: 10, alignRight: true });
-    y += 16;
-  }
-  y += 6;
-  doc.text(cTot, y, "TOTAL", { size: 12, bold: true });
-  doc.text(cAmt, y, money(totals.total || 0), { size: 12, bold: true, alignRight: true });
-  y += 30;
-  doc.text(L, y, "Generated via the Mostlane Portal on " + (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) + ".", { size: 8, grey: true });
-  return doc.bytes();
-}
-async function handle20(request, env, ctx, url, sess) {
-  const method = request.method.toUpperCase();
-  const sub = url.pathname.replace(/^\/ts(?=\/|$)/, "") || "/";
-  const q = url.searchParams;
-  const headers = corsHeaders(env, request);
-  if (sub === "/invoice-file" && method === "GET") {
-    const key = q.get("key");
-    if (!key || !String(key).startsWith("invoices/")) return error("Bad key", 400, env, request);
-    if (!sess && !await verifyFileSig(env, key, q)) return error("Link expired or invalid", 403, env, request);
-    const obj = await env.JOB_FILES.get(key);
-    if (!obj) return new Response("Not found", { status: 404, headers });
-    return new Response(obj.body, { status: 200, headers: {
-      ...headers,
-      "Content-Type": "application/pdf",
-      "Content-Disposition": "inline",
-      "Cache-Control": "private, max-age=3600"
-    } });
-  }
-  if (!sess) return error("Not authenticated", 401, env, request);
-  const tid = sess.tenantId;
-  const me = sess.user.username;
-  await ensureTables(env);
-  const cfg = await getCfg(env, tid);
-  if (sub === "/me" && method === "GET") {
-    const u = await userRow(env, tid, me);
-    if (!u) return error("User not found", 404, env, request);
-    const eff = effectiveCfg(cfg, u);
-    const next = await nextInvoiceNumber(env, tid, me, eff);
-    const admin = await isTsAdmin(env, tid, sess);
-    const invCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
-    return json({
-      ok: true,
-      name: displayName(u),
-      ...eff,
-      rate: eff.rate,
-      nextInvoice: next,
-      basePostcode: String(cfg.defaults.basePostcode || "PO15 5RQ").toUpperCase(),
-      canSetNumber: !invCount || Number(invCount.n) === 0,
-      admin
-    }, {}, env, request);
-  }
-  if (sub === "/me" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
-    if ("homePostcode" in b) mine.homePostcode = String(b.homePostcode || "").toUpperCase().slice(0, 10);
-    if ("details" in b) mine.details = (Array.isArray(b.details) ? b.details : String(b.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 6);
-    if ("rate" in b) {
-      const n = parseFloat(b.rate);
-      if (isFinite(n) && n >= 0) mine.rate = n;
-    }
-    if ("rateType" in b && (b.rateType === "hour" || b.rateType === "day")) mine.rateType = b.rateType;
-    await saveCfg(env, tid, cfg);
-    return json({ ok: true }, {}, env, request);
-  }
-  if (sub === "/my" && method === "GET") {
-    const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const u = await userRow(env, tid, me);
-    const eff = effectiveCfg(cfg, u);
-    const { days, savedAt } = await loadWeek(env, tid, me, monday);
-    const inv = await invoiceFor(env, tid, me, monday);
-    return json({
-      ok: true,
-      week: monday,
-      days,
-      savedAt,
-      totals: weekTotals(days, eff),
-      invoice: inv ? {
-        number: inv.number,
-        total: inv.total,
-        at: inv.at,
-        url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
-      } : null
-    }, {}, env, request);
-  }
-  if (sub === "/my" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    if (!isDateStr2(b.week)) return error("week (Monday, YYYY-MM-DD) required", 400, env, request);
-    const monday = mondayOf3(b.week);
-    if (await invoiceFor(env, tid, me, monday))
-      return error("This week has already been invoiced \u2014 ask the office to remove the invoice first.", 409, env, request);
-    const u = await userRow(env, tid, me);
-    const eff = effectiveCfg(cfg, u);
-    const days = cleanDays(monday, b.days);
-    if (!eff.mileage) {
-      for (const d of Object.values(days)) d.mileage = [];
-    } else {
-      const names = [...new Set(Object.values(days).flatMap((d) => (d.mileage || []).map((m) => normKey(m.site))).filter(Boolean))];
-      const preset = {};
-      if (names.length) {
-        try {
-          const ph = names.map(() => "?").join(",");
-          const { results } = await env.DB.prepare(
-            `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
-          ).bind(tid, ...names).all();
-          for (const r of results || []) if (r.miles != null) preset[r.key] = r.miles;
-        } catch {
-        }
-      }
-      for (const d of Object.values(days)) {
-        d.mileage = (d.mileage || []).filter((m) => m.site).map((m) => ({ site: m.site, postcode: m.postcode, miles: preset[normKey(m.site)] != null ? preset[normKey(m.site)] : 0 }));
-      }
-    }
-    await env.DB.prepare(
-      "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
-    ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
-  }
-  if (sub === "/assigned" && method === "GET") {
-    const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
-    endD.setUTCDate(endD.getUTCDate() + 7);
-    const end = endD.toISOString().slice(0, 10);
-    const byDay = {};
-    const debug = { me, matchedAs: [], candidates: [] };
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
-      ).bind(tid, monday, end).all();
-      const normId2 = (s) => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
-      const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
-      const map = {};
-      try {
-        const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
-        for (const u of users || []) {
-          map[normId2(u.username)] = u.username;
-          const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
-          if (full) map[normId2(full)] = u.username;
-        }
-      } catch {
-      }
-      const meN = norm(me);
-      const isMe = (e) => {
-        const resolved = map[normId2(e)];
-        if (resolved != null) return resolved === me;
-        const n = norm(e);
-        return !!n && (n === meN || n.includes(meN) || meN.includes(n));
-      };
-      const londonDate3 = (iso) => {
-        try {
-          return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-        } catch {
-          return String(iso).slice(0, 10);
-        }
-      };
-      const londonTime = (iso) => {
-        try {
-          return new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" });
-        } catch {
-          return "";
-        }
-      };
-      for (const r of results || []) {
-        let d = {};
-        try {
-          d = JSON.parse(r.data);
-        } catch {
-          continue;
-        }
-        const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
-        const mine = engs.some(isMe);
-        debug.candidates.push({
-          ref: r.helpdesk_ref || r.id,
-          scheduledAt: r.scheduled_at,
-          engineers: engs,
-          resolved: engs.map((e) => map[normId2(e)] || "(no user match: " + e + ")"),
-          mine
-        });
-        if (!mine) continue;
-        const date = londonDate3(r.scheduled_at);
-        (byDay[date] = byDay[date] || []).push({
-          ref: r.helpdesk_ref || r.id,
-          label: (r.helpdesk_ref || r.id) + (d.description ? " \u2014 " + String(d.description).slice(0, 44) : ""),
-          site: d.siteName || "",
-          postcode: String(d.postcode || "").toUpperCase(),
-          time: londonTime(r.scheduled_at)
-        });
-      }
-      for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-    } catch (e) {
-      debug.error = String(e && e.message || e);
-    }
-    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess))
-      return json({ ok: true, build: "w9", week: monday, byDay, debug }, {}, env, request);
-    return json({ ok: true, week: monday, byDay }, {}, env, request);
-  }
-  if (sub === "/sites" && method === "GET") {
-    const term = String(q.get("q") || "").trim();
-    const like = "%" + term.replace(/[%_]/g, "") + "%";
-    const { results } = await env.DB.prepare(
-      "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
-    ).bind(tid, like, like, like).all();
-    const sites = (results || []).map((s) => ({
-      name: s.site_name || "Site " + s.site_number,
-      code: s.site_number,
-      postcode: (s.postcode || "").replace(/\*+$/, "")
-    }));
-    const seen = new Set(sites.map((s) => s.name.trim().toLowerCase()));
-    for (const r of await poSiteRows(env, term, 15)) {
-      const name = String(r.name || "").trim();
-      if (!name || seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      sites.push({ name, code: r.job != null ? String(r.job) : "", postcode: String(r.pc || "").toUpperCase(), source: "po" });
-      if (sites.length >= 25) break;
-    }
-    try {
-      const T = term.toLowerCase();
-      for (const n of await poOrderSiteNames(env)) {
-        if (sites.length >= 25) break;
-        if (T && !n.toLowerCase().includes(T)) continue;
-        if (seen.has(n.trim().toLowerCase())) continue;
-        seen.add(n.trim().toLowerCase());
-        sites.push({ name: n, code: "", postcode: "", source: "po-order" });
-      }
-    } catch {
-    }
-    try {
-      const keys = [...new Set(sites.map((s) => normKey(s.name)).filter(Boolean))];
-      if (keys.length) {
-        const ph = keys.map(() => "?").join(",");
-        const { results: mrows } = await env.DB.prepare(
-          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
-        ).bind(tid, ...keys).all();
-        const mmap = {};
-        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
-        for (const s of sites) {
-          const m = mmap[normKey(s.name)];
-          if (m != null) s.miles = m;
-        }
-      }
-    } catch {
-    }
-    return json({ ok: true, sites }, {}, env, request);
-  }
-  if (sub === "/po-status" && method === "GET") {
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const m = await poDiscover(env);
-    const out = { ok: true, build: "w9", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
-    if (m) {
-      out.discovered = {
-        mode: m.mode,
-        table: m.table,
-        nameCol: m.nameCol || null,
-        pcCol: m.pcCol || null,
-        jobCol: m.jobCol || null,
-        jsonCol: m.jsonCol || null,
-        blobKey: m.blobKey || null
-      };
-      out.samples = (await poSiteRows(env, "", 5)).map((s) => s.name + (s.pc ? " (" + s.pc + ")" : ""));
-    }
-    const om = await poOrderDiscover(env);
-    if (om) {
-      const names = await poOrderSiteNames(env);
-      out.orderSites = { table: om.table, mode: om.mode, count: names.length, samples: names.slice(0, 3) };
-    }
-    return json(out, {}, env, request);
-  }
-  if (sub === "/jobs" && method === "GET") {
-    const term = String(q.get("q") || "").trim();
-    if (term.length < 2) return json({ ok: true, jobs: [] }, {}, env, request);
-    const like = "%" + term.replace(/[%_]/g, "") + "%";
-    const sla = [], project = [], po = [], errs = {};
-    const nameRef = (s) => String(s || "").replace(/\s*,\s*/g, " \u2013 ").trim();
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT helpdesk_ref, description, status FROM sla_jobs WHERE tenant_id=? AND helpdesk_ref IS NOT NULL AND helpdesk_ref!='' AND status NOT IN ('Complete','Closed') AND (helpdesk_ref LIKE ? OR description LIKE ?) ORDER BY raised_at DESC LIMIT 8"
-      ).bind(tid, like, like).all();
-      for (const r of results || []) sla.push({ ref: r.helpdesk_ref, label: r.helpdesk_ref + " \u2014 " + String(r.description || "").slice(0, 48), kind: "sla" });
-    } catch (e) {
-      errs.sla = String(e && e.message || e);
-    }
-    try {
-      const { results } = await env.DB.prepare(
-        "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
-      ).bind(tid, like, like).all();
-      for (const r of results || []) {
-        const hasJob = r.job_number != null && r.job_number !== "";
-        const name = r.site_name || r.client || "site";
-        project.push({
-          ref: hasJob ? String(r.job_number) : nameRef(name),
-          label: (hasJob ? r.job_number + " \u2014 " : "") + name,
-          kind: "project",
-          site: name,
-          postcode: (r.postcode || "").replace(/\*+$/, "")
-        });
-      }
-    } catch (e) {
-      errs.project = String(e && e.message || e);
-    }
-    const seen = new Set([...sla, ...project].map((j) => String(j.ref).toLowerCase()));
-    try {
-      for (const r of await poSiteRows(env, term, 8)) {
-        const ref = r.job != null && r.job !== "" ? String(r.job) : nameRef(r.name);
-        if (!ref || seen.has(ref.toLowerCase())) continue;
-        seen.add(ref.toLowerCase());
-        po.push({
-          ref,
-          label: (r.job != null && r.job !== "" ? r.job + " \u2014 " : "") + String(r.name || "PO site").slice(0, 48),
-          kind: "po",
-          site: String(r.name || ""),
-          postcode: String(r.pc || "").toUpperCase()
-        });
-      }
-    } catch (e) {
-      errs.poSites = String(e && e.message || e);
-    }
-    try {
-      const T2 = term.toLowerCase();
-      for (const n of await poOrderSiteNames(env)) {
-        if (po.length >= 8) break;
-        if (!n.toLowerCase().includes(T2)) continue;
-        const ref = nameRef(n);
-        if (!ref || seen.has(ref.toLowerCase())) continue;
-        seen.add(ref.toLowerCase());
-        po.push({ ref, label: n.slice(0, 60), kind: "po-order", site: n });
-      }
-    } catch (e) {
-      errs.poOrders = String(e && e.message || e);
-    }
-    const jobs = [...po.slice(0, 4), ...sla.slice(0, 3), ...project.slice(0, 3)];
-    const spare = [...po.slice(4), ...sla.slice(3), ...project.slice(3)];
-    for (const j of spare) {
-      if (jobs.length >= 10) break;
-      jobs.push(j);
-    }
-    const T = term.toLowerCase();
-    jobs.sort((a, b) => {
-      const pa = String(a.ref).toLowerCase().startsWith(T) ? 0 : 1;
-      const pb = String(b.ref).toLowerCase().startsWith(T) ? 0 : 1;
-      return pa - pb;
-    });
-    const out = jobs.slice(0, 10);
-    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess)) {
-      return json({
-        ok: true,
-        build: "w6",
-        counts: { sla: sla.length, project: project.length, po: po.length },
-        errors: errs,
-        jobs: out
-      }, {}, env, request);
-    }
-    try {
-      const keys = [...new Set(out.map((j) => normKey(j.site)).filter(Boolean))];
-      if (keys.length) {
-        const ph = keys.map(() => "?").join(",");
-        const { results: mrows } = await env.DB.prepare(
-          `SELECT key, miles FROM site_miles WHERE tenant_id=? AND key IN (${ph})`
-        ).bind(tid, ...keys).all();
-        const mmap = {};
-        for (const r of mrows || []) if (r.miles != null) mmap[r.key] = r.miles;
-        for (const j of out) {
-          const m = mmap[normKey(j.site)];
-          if (m != null) j.miles = m;
-        }
-      }
-    } catch {
-    }
-    return json({ ok: true, jobs: out }, {}, env, request);
-  }
-  if (sub === "/miles" && method === "GET") {
-    const name = q.get("name");
-    if (name != null) {
-      const row = await env.DB.prepare("SELECT miles FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(name)).first();
-      return json({ ok: true, miles: row && row.miles != null ? row.miles : null }, {}, env, request);
-    }
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const { results: saved } = await env.DB.prepare("SELECT key, name, postcode, miles FROM site_miles WHERE tenant_id=?").bind(tid).all();
-    const byKey = {};
-    for (const r of saved || []) byKey[r.key] = { name: r.name || r.key, postcode: r.postcode || "", miles: r.miles, saved: true };
-    const { results: portal } = await env.DB.prepare(
-      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!=''"
-    ).bind(tid).all();
-    for (const r of portal || []) {
-      const k = normKey(r.site_name);
-      if (!byKey[k]) byKey[k] = { name: r.site_name, postcode: (r.postcode || "").replace(/\*+$/, ""), miles: null, saved: false };
-      else if (!byKey[k].postcode) byKey[k].postcode = (r.postcode || "").replace(/\*+$/, "");
-    }
-    let list = Object.values(byKey).sort((a, b) => a.name.localeCompare(b.name));
-    const term = String(q.get("q") || "").trim().toLowerCase();
-    if (term) list = list.filter((s) => s.name.toLowerCase().includes(term) || (s.postcode || "").toLowerCase().includes(term));
-    return json({ ok: true, sites: list, missing: list.filter((s) => s.miles == null && s.postcode).length }, {}, env, request);
-  }
-  if (sub === "/miles" && method === "POST") {
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    let saved = 0;
-    for (const e of (Array.isArray(b.entries) ? b.entries : []).slice(0, 200)) {
-      const key = normKey(e && e.name);
-      if (!key) continue;
-      const miles = parseFloat(e.miles);
-      if (!isFinite(miles) || miles < 0 || miles > 2e3) {
-        await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, key).run();
-        continue;
-      }
-      await env.DB.prepare(
-        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET name=excluded.name, postcode=excluded.postcode, miles=excluded.miles, updated_at=excluded.updated_at"
-      ).bind(tid, key, String(e.name).trim().slice(0, 120), String(e.postcode || "").toUpperCase().slice(0, 10), round1(miles), now).run();
-      saved++;
-    }
-    for (const n of (Array.isArray(b.delete) ? b.delete : []).slice(0, 200)) {
-      await env.DB.prepare("DELETE FROM site_miles WHERE tenant_id=? AND key=?").bind(tid, normKey(n)).run();
-    }
-    return json({ ok: true, saved }, {}, env, request);
-  }
-  if (sub === "/miles/autofill" && method === "POST") {
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const base = await lookupPostcode(cfg.defaults.basePostcode || "PO15 5RQ");
-    if (!base) return error("Base postcode " + (cfg.defaults.basePostcode || "PO15 5RQ") + " couldn't be found.", 400, env, request);
-    const { results: portal } = await env.DB.prepare(
-      "SELECT site_name, postcode FROM sites WHERE tenant_id=? AND active=1 AND site_name IS NOT NULL AND site_name!='' AND postcode IS NOT NULL AND postcode!=''"
-    ).bind(tid).all();
-    const { results: saved } = await env.DB.prepare("SELECT key FROM site_miles WHERE tenant_id=?").bind(tid).all();
-    const have = new Set((saved || []).map((r) => r.key));
-    const todo = (portal || []).filter((r) => !have.has(normKey(r.site_name)));
-    const batch = todo.slice(0, 25);
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    let done = 0, failed = 0;
-    for (const r of batch) {
-      const pc = String(r.postcode).replace(/\*+$/, "");
-      const to = await lookupPostcode(pc).catch(() => null);
-      if (!to) {
-        failed++;
-        have.add(normKey(r.site_name));
-        continue;
-      }
-      const roundTrip = round1(haversineMiles(base, to) * ROAD_FACTOR * 2);
-      await env.DB.prepare(
-        "INSERT INTO site_miles (tenant_id, key, name, postcode, miles, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id, key) DO UPDATE SET miles=excluded.miles, updated_at=excluded.updated_at"
-      ).bind(tid, normKey(r.site_name), r.site_name, pc.toUpperCase(), roundTrip, now).run();
-      done++;
-    }
-    return json({ ok: true, done, failed, remaining: Math.max(0, todo.length - batch.length) }, {}, env, request);
-  }
-  if (sub === "/mileage" && method === "GET") {
-    const from = q.get("from"), to = q.get("to");
-    if (!from || !to) return error("from and to postcodes required", 400, env, request);
-    const [a, b] = await Promise.all([lookupPostcode(from), lookupPostcode(to)]);
-    if (!a) return error("Couldn't find postcode " + String(from).toUpperCase(), 404, env, request);
-    if (!b) return error("Couldn't find postcode " + String(to).toUpperCase(), 404, env, request);
-    const oneWay = round1(haversineMiles(a, b) * ROAD_FACTOR);
-    return json({ ok: true, from: a.pc, to: b.pc, oneWay, roundTrip: round1(oneWay * 2) }, {}, env, request);
-  }
-  if (sub === "/invoice/next" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const next = parseInt(b.next, 10);
-    if (!next || next < 1 || next > 99999999) return error("Send a whole number, e.g. { next: 100 }", 400, env, request);
-    const row = await env.DB.prepare("SELECT MAX(number) AS m FROM eng_invoices WHERE tenant_id=? AND username=?").bind(tid, me).first();
-    if (row && row.m != null && next <= Number(row.m))
-      return error("Your invoices are already up to number " + row.m + " \u2014 the next number must be higher.", 400, env, request);
-    (cfg.byUser[me] || (cfg.byUser[me] = {})).nextNumber = next;
-    await saveCfg(env, tid, cfg);
-    return json({ ok: true, next }, {}, env, request);
-  }
-  if (sub === "/invoice" && method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    if (!isDateStr2(b.week)) return error("week required", 400, env, request);
-    const monday = mondayOf3(b.week);
-    const u = await userRow(env, tid, me);
-    if (!isSelfEmployed(u)) return error("Invoices are only for self-employed engineers.", 403, env, request);
-    const existing = await invoiceFor(env, tid, me, monday);
-    if (existing) return error("Invoice " + existing.number + " already exists for this week.", 409, env, request);
-    if (b.rate != null) {
-      const n = parseFloat(b.rate);
-      if (isFinite(n) && n > 0) {
-        const mine = cfg.byUser[me] || (cfg.byUser[me] = {});
-        mine.rate = n;
-        if (b.rateType === "day" || b.rateType === "hour") mine.rateType = b.rateType;
-        await saveCfg(env, tid, cfg);
-      }
-    }
-    const eff = effectiveCfg(cfg, u);
-    if (!eff.rate) return error("No pay rate set \u2014 enter your rate first.", 400, env, request);
-    const { days } = await loadWeek(env, tid, me, monday);
-    const totals = weekTotals(days, eff);
-    if (!totals.daysWorked && !totals.miles) return error("Nothing on this week's timesheet yet \u2014 save your times first.", 400, env, request);
-    const number = await nextInvoiceNumber(env, tid, me, eff);
-    const pdf = buildInvoicePdf({
-      number,
-      name: displayName(u),
-      details: eff.details,
-      company: cfg.defaults.company,
-      monday,
-      days,
-      eff,
-      totals
-    });
-    const key = `${INV_PREFIX(tid)}${encodeURIComponent(me)}/INV-${number}-${monday}.pdf`;
-    await env.JOB_FILES.put(key, pdf, {
-      httpMetadata: { contentType: "application/pdf" },
-      customMetadata: { by: me, number: String(number), week: monday, at: (/* @__PURE__ */ new Date()).toISOString() }
-    });
-    await env.DB.prepare(
-      "INSERT INTO eng_invoices (tenant_id, username, number, week, hours, miles, labour, mileage, total, r2_key, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
-    ).bind(tid, me, number, monday, totals.hours, totals.miles, totals.labour, totals.mileagePay, totals.total, key, (/* @__PURE__ */ new Date()).toISOString()).run();
-    return json({
-      ok: true,
-      number,
-      total: totals.total,
-      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", key)
-    }, {}, env, request);
-  }
-  if (sub === "/invoices" && method === "GET") {
-    const admin = await isTsAdmin(env, tid, sess);
-    const who = q.get("u");
-    let stmt;
-    if (who && admin && who !== "all") stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, who);
-    else if (who === "all" && admin) stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? ORDER BY at DESC LIMIT 400").bind(tid);
-    else stmt = env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND username=? ORDER BY at DESC LIMIT 200").bind(tid, me);
-    const { results } = await stmt.all();
-    const invoices = [];
-    for (const r of results || []) invoices.push({
-      id: r.id,
-      username: r.username,
-      number: r.number,
-      week: r.week,
-      hours: r.hours,
-      miles: r.miles,
-      labour: r.labour,
-      mileage: r.mileage,
-      total: r.total,
-      at: r.at,
-      url: await signedFileUrl(env, url.origin, "/ts/invoice-file", r.r2_key)
-    });
-    return json({ ok: true, invoices }, {}, env, request);
-  }
-  if (sub === "/invoice/delete" && method === "POST") {
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    const b = await request.json().catch(() => ({}));
-    const row = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, Number(b.id)).first();
-    if (!row) return error("Invoice not found", 404, env, request);
-    await env.DB.prepare("DELETE FROM eng_invoices WHERE tenant_id=? AND id=?").bind(tid, row.id).run();
-    try {
-      await env.JOB_FILES.delete(row.r2_key);
-    } catch {
-    }
-    return json({ ok: true, deleted: row.number, username: row.username }, {}, env, request);
-  }
-  if (sub.startsWith("/admin/")) {
-    if (!await isTsAdmin(env, tid, sess)) return error("Forbidden", 403, env, request);
-    if (sub === "/admin/overview" && method === "GET") {
-      const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-      const { results: users } = await env.DB.prepare(
-        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
-      ).bind(tid).all();
-      const { results: rows } = await env.DB.prepare("SELECT username, data, at FROM eng_timesheets WHERE tenant_id=? AND week=?").bind(tid, monday).all();
-      const { results: invs } = await env.DB.prepare("SELECT * FROM eng_invoices WHERE tenant_id=? AND week=?").bind(tid, monday).all();
-      const dataBy = {};
-      for (const r of rows || []) {
-        try {
-          dataBy[r.username] = { days: JSON.parse(r.data).days || {}, at: r.at };
-        } catch {
-        }
-      }
-      const invBy = {};
-      for (const r of invs || []) invBy[r.username] = r;
-      const out = [];
-      for (const u of users || []) {
-        const eff = effectiveCfg(cfg, u);
-        const d = dataBy[u.username] || { days: {}, at: null };
-        const inv = invBy[u.username];
-        const perDay = {};
-        for (const [date, day] of Object.entries(d.days)) perDay[date] = { ...dayCalc(day, eff), start: day.start, finish: day.finish, jobs: day.jobs, note: day.note, mileage: day.mileage || [] };
-        out.push({
-          username: u.username,
-          name: displayName(u),
-          employment: u.employment_type || "Employed",
-          selfEmployed: isSelfEmployed(u),
-          cfg: { commute: eff.commute, lunch: eff.lunch, mileage: eff.mileage, rate: eff.rate, rateType: eff.rateType, pencePerMile: eff.pencePerMile },
-          days: d.days,
-          perDay,
-          savedAt: d.at,
-          totals: weekTotals(d.days, eff),
-          invoice: inv ? {
-            id: inv.id,
-            number: inv.number,
-            total: inv.total,
-            at: inv.at,
-            url: await signedFileUrl(env, url.origin, "/ts/invoice-file", inv.r2_key)
-          } : null
-        });
-      }
-      return json({ ok: true, week: monday, days: weekDays2(monday), users: out }, {}, env, request);
-    }
-    if (sub === "/admin/save" && method === "POST") {
-      const b = await request.json().catch(() => ({}));
-      if (!b.username || !isDateStr2(b.week)) return error("username and week required", 400, env, request);
-      const monday = mondayOf3(b.week);
-      if (await invoiceFor(env, tid, b.username, monday))
-        return error("That week is invoiced \u2014 delete the invoice first if it needs correcting.", 409, env, request);
-      const days = cleanDays(monday, b.days);
-      await env.DB.prepare(
-        "INSERT INTO eng_timesheets (tenant_id, week, username, data, at) VALUES (?,?,?,?,?) ON CONFLICT(tenant_id, week, username) DO UPDATE SET data=excluded.data, at=excluded.at"
-      ).bind(tid, monday, b.username, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
-      return json({ ok: true }, {}, env, request);
-    }
-    if (sub === "/admin/config" && method === "GET") {
-      const { results: users } = await env.DB.prepare(
-        "SELECT username, first_name, last_name, employment_type, profile FROM users WHERE tenant_id=? AND status='Active' ORDER BY username"
-      ).bind(tid).all();
-      return json({
-        ok: true,
-        defaults: cfg.defaults,
-        byUser: cfg.byUser,
-        users: (users || []).map((u) => ({
-          username: u.username,
-          name: displayName(u),
-          employment: u.employment_type || "Employed",
-          selfEmployed: isSelfEmployed(u),
-          effective: effectiveCfg(cfg, u)
-        }))
-      }, {}, env, request);
-    }
-    if (sub === "/admin/config" && method === "POST") {
-      const b = await request.json().catch(() => ({}));
-      if (b.defaults && typeof b.defaults === "object") cfg.defaults = Object.assign({ ...DEFAULTS }, cfg.defaults, b.defaults);
-      if (b.byUser && typeof b.byUser === "object") {
-        for (const [u, v] of Object.entries(b.byUser)) {
-          if (v === null) {
-            delete cfg.byUser[u];
-            continue;
-          }
-          const mine = cfg.byUser[u] || (cfg.byUser[u] = {});
-          for (const k of ["commute", "lunch", "mileage", "radius"]) if (k in v) mine[k] = v[k] === true;
-          for (const k of ["commuteMins", "lunchMins", "lunchThresholdH", "pencePerMile", "rate", "nextNumber", "radiusMiles"]) {
-            if (k in v) {
-              const n = parseFloat(v[k]);
-              if (isFinite(n) && n >= 0) mine[k] = n;
-              else delete mine[k];
-            }
-          }
-          if ("rateType" in v && (v.rateType === "hour" || v.rateType === "day")) mine.rateType = v.rateType;
-          if ("homePostcode" in v) mine.homePostcode = String(v.homePostcode || "").toUpperCase().slice(0, 10);
-          if ("details" in v) mine.details = (Array.isArray(v.details) ? v.details : String(v.details || "").split(/\n/)).map((s) => String(s).trim()).filter(Boolean).slice(0, 5);
-        }
-      }
-      await saveCfg(env, tid, cfg);
-      return json({ ok: true }, {}, env, request);
-    }
-  }
-  return error("Unknown timesheet route: " + sub, 404, env, request);
-}
-
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -8225,49 +8360,49 @@ var ROUTES = [
   ["*", "/upload-asset-image", handle6],
   ["*", "/upload-asset-thumb", handle6],
   ["*", "/delete-asset-image", handle6],
-  ["*", "/sla", handle7],
-  ["*", "/stats", handle16],
-  ["*", "/staff", handle17],
+  ["*", "/sla", handle8],
+  ["*", "/stats", handle17],
+  ["*", "/staff", handle18],
   // staff personal + company documents
-  ["*", "/privacy", handle18],
+  ["*", "/privacy", handle19],
   // GDPR data export + erasure
-  ["*", "/fleet", handle19],
+  ["*", "/fleet", handle20],
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
-  ["*", "/ts", handle20],
+  ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
-  ["*", "/get-sites", handle8],
-  ["*", "/add-site", handle8],
-  ["*", "/update-site", handle8],
-  ["*", "/next-project-job-number", handle8],
-  ["*", "/upload-image", handle8],
-  ["*", "/customers", handle8],
-  ["*", "/import-sites", handle8],
-  ["*", "/sites", handle8],
+  ["*", "/get-sites", handle9],
+  ["*", "/add-site", handle9],
+  ["*", "/update-site", handle9],
+  ["*", "/next-project-job-number", handle9],
+  ["*", "/upload-image", handle9],
+  ["*", "/customers", handle9],
+  ["*", "/import-sites", handle9],
+  ["*", "/sites", handle9],
   // /sites/street-images (bulk imagery)
-  ["*", "/settings", handle9],
-  ["*", "/oncall", handle9],
-  ["*", "/daily-logs", handle9],
-  ["*", "/notify", handle9],
+  ["*", "/settings", handle10],
+  ["*", "/oncall", handle10],
+  ["*", "/daily-logs", handle10],
+  ["*", "/notify", handle10],
   // notification audit log
-  ["*", "/prefs", handle9],
+  ["*", "/prefs", handle10],
   // per-user cross-device markers
-  ["*", "/menu-config", handle9],
+  ["*", "/menu-config", handle10],
   // Full-access menu visibility (shared)
-  ["*", "/audit", handle9],
+  ["*", "/audit", handle10],
   // activity log (page views + viewer)
-  ["*", "/sitelog", handle10],
-  ["*", "/sitelog-launch", handle10],
-  ["*", "/office", handle11],
+  ["*", "/sitelog", handle11],
+  ["*", "/sitelog-launch", handle11],
+  ["*", "/office", handle12],
   // office clock in/out + weekly timesheet
-  ["*", "/key", handle12],
+  ["*", "/key", handle13],
   // /keys, /key/* (key register)
-  ["*", "/theme", handle13],
+  ["*", "/theme", handle14],
   // per-user colour theme + background
-  ["*", "/hs/", handle14],
+  ["*", "/hs/", handle15],
   // H&S documents hub (inductions, permits, RAMS, incidents)
-  ["*", "/vancheck", handle15]
+  ["*", "/vancheck", handle16]
   // weekly van checks (form, grid, deadline badges)
   // Excluded for now (separate / later systems): Purchase Orders,
   // Hours/Timesheets, Labour Planning, Check-in/out, Vehicles,

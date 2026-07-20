@@ -309,6 +309,16 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   table, columnar `site` col or JSON rows, last 800 rows deduped, 5-min
   isolate cache) — plenty of PO sites exist ONLY as text on POs (e.g.
   "Lakeside Surgery, Verwood"); /ts/po-status reports both discoveries.
+  **Job-status time capture (20 Jul)**: sla.js status changes call
+  timesheets.js trackJobTime (both PATCH paths, ctx.waitUntil): Travelling/
+  In Progress by an ASSIGNED engineer opens a row in **job_time_segments**
+  (closing their open segment on any other job); every other status closes
+  it; office edits never track. GET /ts/my returns `auto` (per-London-day
+  window + jobs incl. site/postcode); engineer page fills ONLY empty fields
+  from it (green "⏱ From your jobs" line, job pills + preset mileage added,
+  persisted via autosave); /ts/admin/overview overlays the same so admin
+  sees captured days even if the engineer never opens the page. Segments
+  left open on a previous day are lazily closed (~19:00 UK or start+1h).
   RESOLVED 18 Jul: the original "PO sites don't suggest" saga was a WRONG
   BINDING — Jamie had PO_DB pointed at the `mostlane` (portal) D1, so
   discovery kept "working" against the portal (the tables[] list in the
