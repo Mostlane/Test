@@ -623,6 +623,39 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
   }
 
+  // ── GET /ts/assigned?week= — the caller's scheduled SLA jobs, per day ─────
+  // Feeds the "you're booked on" chips on each timesheet day. Engineer names
+  // on jobs arrive in several spellings (dotted ids, case differences), so
+  // matching is normalised the same way login is forgiving.
+  if (sub === "/assigned" && method === "GET") {
+    const monday = mondayOf(isDateStr(q.get("week")) ? q.get("week") : new Date().toISOString().slice(0, 10));
+    const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
+    const end = endD.toISOString().slice(0, 10);
+    const byDay = {};
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+      ).bind(tid, monday, end).all();
+      const norm = s => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+      const meN = norm(me);
+      for (const r of results || []) {
+        let d = {}; try { d = JSON.parse(r.data); } catch { continue; }
+        const engs = (Array.isArray(d.assignedEngineers) && d.assignedEngineers.length)
+          ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
+        if (!engs.some(e => { const n = norm(e); return n && (n === meN || n.includes(meN) || meN.includes(n)); })) continue;
+        const date = String(r.scheduled_at).slice(0, 10);
+        (byDay[date] = byDay[date] || []).push({
+          ref: r.helpdesk_ref || r.id,
+          label: (r.helpdesk_ref || r.id) + (d.description ? " — " + String(d.description).slice(0, 44) : ""),
+          site: d.siteName || "", postcode: String(d.postcode || "").toUpperCase(),
+          time: String(r.scheduled_at).slice(11, 16) || ""
+        });
+      }
+      for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    } catch {}
+    return json({ ok: true, week: monday, byDay }, {}, env, request);
+  }
+
   // ── GET /ts/sites — suggestion list for the mileage site picker ───────────
   // Portal sites first, then the PO system's own sites (PO_DB binding),
   // deduped by name so shared sites don't appear twice.

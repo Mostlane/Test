@@ -7671,6 +7671,44 @@ async function handle20(request, env, ctx, url, sess) {
     ).bind(tid, monday, me, JSON.stringify({ days }), (/* @__PURE__ */ new Date()).toISOString()).run();
     return json({ ok: true, week: monday, days, totals: weekTotals(days, eff) }, {}, env, request);
   }
+  if (sub === "/assigned" && method === "GET") {
+    const monday = mondayOf3(isDateStr2(q.get("week")) ? q.get("week") : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
+    endD.setUTCDate(endD.getUTCDate() + 7);
+    const end = endD.toISOString().slice(0, 10);
+    const byDay = {};
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
+      ).bind(tid, monday, end).all();
+      const norm = (s) => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+      const meN = norm(me);
+      for (const r of results || []) {
+        let d = {};
+        try {
+          d = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        const engs = Array.isArray(d.assignedEngineers) && d.assignedEngineers.length ? d.assignedEngineers : d.assignedTo ? [d.assignedTo] : [];
+        if (!engs.some((e) => {
+          const n = norm(e);
+          return n && (n === meN || n.includes(meN) || meN.includes(n));
+        })) continue;
+        const date = String(r.scheduled_at).slice(0, 10);
+        (byDay[date] = byDay[date] || []).push({
+          ref: r.helpdesk_ref || r.id,
+          label: (r.helpdesk_ref || r.id) + (d.description ? " \u2014 " + String(d.description).slice(0, 44) : ""),
+          site: d.siteName || "",
+          postcode: String(d.postcode || "").toUpperCase(),
+          time: String(r.scheduled_at).slice(11, 16) || ""
+        });
+      }
+      for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    } catch {
+    }
+    return json({ ok: true, week: monday, byDay }, {}, env, request);
+  }
   if (sub === "/sites" && method === "GET") {
     const term = String(q.get("q") || "").trim();
     const like = "%" + term.replace(/[%_]/g, "") + "%";
