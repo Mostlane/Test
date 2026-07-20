@@ -48,7 +48,12 @@
   input[type=time]{font:inherit;font-size:18px;font-weight:600;width:100%;height:50px;text-align:center;border:1.5px solid #d5dde9;border-radius:13px;background:#f8fafd;color:var(--ink)}
   input[type=time]:focus,input[type=text]:focus,input[type=number]:focus,textarea:focus{outline:none;border-color:var(--brand);background:#fff;box-shadow:0 0 0 3px rgba(26,79,143,.12)}
   input[type=text],input[type=number],textarea{font:inherit;padding:12px;border:1.5px solid #d5dde9;border-radius:13px;width:100%;background:#f8fafd}
-  .jobs{height:50px}
+  .jobs{height:48px}
+  .joblist{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+  .jpill{background:#eef4fb;border:1.5px solid #cfdff4;color:#0e3a6d;border-radius:12px;padding:9px 6px 9px 12px;font-size:14px;font-weight:600;display:inline-flex;gap:4px;align-items:center;max-width:100%}
+  .jpill i{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .jpill button{border:none;background:none;color:#8aa2c0;font-size:16px;padding:0 7px;cursor:pointer;line-height:1}
+  .joblist input.jobs{flex:1;min-width:150px;width:auto}
   .flab{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:12px 0 5px 3px}
   .row{margin:0}
   /* deduction + assigned chips */
@@ -150,8 +155,11 @@ function collect(){
   const days={};
   document.querySelectorAll(".card[data-date]").forEach(card=>{
     const date=card.dataset.date;
+    const refs=[...card.querySelectorAll(".joblist .jpill")].map(p=>(p.dataset.ref||"").trim()).filter(Boolean);
+    const jin=card.querySelector(".joblist input.jobs");
+    if(jin&&jin.value.trim())refs.push(jin.value.trim());
     const d={ start:card.querySelector(".t-start").value, finish:card.querySelector(".t-finish").value,
-      jobs:card.querySelector(".jobs").value.trim(), mileage:[] };
+      jobs:refs.join(", "), mileage:[] };
     card.querySelectorAll(".mirow").forEach(r=>{
       const site=(r.dataset.site||"").trim(), pc=(r.dataset.pc||"").toUpperCase(),
         miles=parseFloat(r.dataset.miles)||0;
@@ -207,6 +215,20 @@ function mileRow(m){
   return div;
 }
 
+function jobPill(ref){
+  const span=document.createElement("span");span.className="jpill";span.dataset.ref=ref;
+  span.innerHTML=`<i>${esc(ref)}</i><button type="button" class="jdel" title="Remove this job">✕</button>`;
+  return span;
+}
+function addJobPill(card,ref){
+  ref=String(ref||"").trim();
+  if(!ref)return false;
+  const list=card.querySelector(".joblist");
+  if(!list)return false;
+  if([...list.querySelectorAll(".jpill")].some(p=>(p.dataset.ref||"").toLowerCase()===ref.toLowerCase()))return false;
+  list.insertBefore(jobPill(ref),list.querySelector("input.jobs"));
+  return true;
+}
 function render(){
   const sun=new Date(addDays(WEEK,6)+"T12:00:00Z"),mon=new Date(WEEK+"T12:00:00Z");
   g("wkLabel").innerHTML=`<b>${mon.toLocaleDateString("en-GB",{day:"numeric",month:"short"})} – ${sun.toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</b><span>${WEEK===mondayOf(new Date())?"This week":sun.getFullYear()}</span>`;
@@ -235,8 +257,8 @@ function render(){
           <div class="tfield"><label>Start</label><input type="time" class="t-start" value="${esc(d.start||"")}"></div>
           <div class="tfield"><label>Finish</label><input type="time" class="t-finish" value="${esc(d.finish||"")}"></div>
         </div>
-        <div class="flab">Job number(s) / what you were on</div>
-        <div class="row"><input type="text" class="jobs" placeholder="Type or tap a job above…" value="${esc(d.jobs||"")}"></div>
+        <div class="flab">Jobs — tap above or type to add (as many as needed)</div>
+        <div class="row joblist"></div>
         ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
       </div>`;
@@ -244,15 +266,16 @@ function render(){
       const list=card.querySelector(".milist");
       (d.mileage||[]).forEach(m=>list.appendChild(mileRow(m)));
     }
+    const jl=card.querySelector(".joblist");
+    (d.jobs||"").split(",").map(s=>s.trim()).filter(Boolean).forEach(rf=>jl.appendChild(jobPill(rf)));
+    const jin=document.createElement("input");
+    jin.type="text";jin.className="jobs";jin.placeholder="Type to add a job or site…";jin.autocomplete="off";
+    jl.appendChild(jin);
     card.querySelector(".dhead").addEventListener("click",()=>{card.classList.toggle("open");});
     booked.forEach((b,ix)=>{
       card.querySelectorAll(".bk")[ix].addEventListener("click",ev=>{
         ev.preventDefault();
-        const inp=card.querySelector(".jobs");
-        const refs=inp.value.split(",").map(s=>s.trim()).filter(Boolean);
-        if(!refs.some(x=>x.toLowerCase()===String(b.ref).toLowerCase())){
-          refs.push(b.ref);
-          inp.value=refs.join(", ");
+        if(addJobPill(card,b.ref)){
           if(b.site)autoMileage(card,{site:b.site,postcode:b.postcode});
           refreshTotals();
           clearTimeout(saveTimer);doSave();
@@ -401,7 +424,7 @@ function hideAllSug(){document.querySelectorAll(".sugrow").forEach(el=>el.remove
 document.addEventListener("input",e=>{
   if(!e.target.classList||!e.target.classList.contains("jobs"))return;
   const inp=e.target;
-  const token=inp.value.split(",").pop().trim();
+  const token=inp.value.trim();
   clearTimeout(jobTimer);
   if(token.length<2){hideAllSug();return;}
   jobTimer=setTimeout(async()=>{
@@ -429,12 +452,16 @@ document.addEventListener("input",e=>{
     div.addEventListener("mousedown",ev=>{
       const b=ev.target.closest(".sug");if(!b)return;
       ev.preventDefault();
-      const parts=inp.value.split(",");parts[parts.length-1]=b.dataset.ref;
-      inp.value=parts.map(s=>s.trim()).filter(Boolean).join(", ");
+      const card=inp.closest(".card[data-date]");
       const j=list[+b.dataset.ix];
-      hideAllSug();inp.focus();queueSave();
-      // Fuel users: picking a site drops its mileage claim in automatically.
-      if(j&&j.site)autoMileage(inp.closest(".card[data-date]"),j);
+      inp.value="";
+      hideAllSug();inp.focus();
+      if(addJobPill(card,b.dataset.ref)){
+        // Fuel users: picking a site drops its mileage claim in automatically.
+        if(j&&j.site)autoMileage(card,j);
+        refreshTotals();
+        clearTimeout(saveTimer);doSave();
+      }
     });
   },250);
 });
@@ -508,7 +535,14 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("click",e=>{
   const b=e.target.closest("button");if(!b)return;
-  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();queueSave();}
+  if(b.classList.contains("del")){b.closest(".mirow").remove();refreshTotals();clearTimeout(saveTimer);doSave();}
+  else if(b.classList.contains("jdel")){b.closest(".jpill").remove();refreshTotals();clearTimeout(saveTimer);doSave();}
+});
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter"||!e.target.classList||!e.target.classList.contains("jobs"))return;
+  e.preventDefault();
+  const card=e.target.closest(".card[data-date]");
+  if(addJobPill(card,e.target.value)){e.target.value="";hideAllSug();refreshTotals();clearTimeout(saveTimer);doSave();}
 });
 document.addEventListener("input",e=>{if(e.target.closest&&e.target.closest(".card[data-date]")){refreshTotals();queueSave();}});
 
