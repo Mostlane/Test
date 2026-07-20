@@ -632,27 +632,56 @@ export async function handle(request, env, ctx, url, sess) {
     const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
     const end = endD.toISOString().slice(0, 10);
     const byDay = {};
+    const debug = { me, matchedAs: [], candidates: [] };
     try {
       const { results } = await env.DB.prepare(
         "SELECT id, helpdesk_ref, scheduled_at, data FROM sla_jobs WHERE tenant_id=? AND scheduled_at IS NOT NULL AND scheduled_at>=? AND scheduled_at<? LIMIT 500"
       ).bind(tid, monday, end).all();
+      // Resolve exactly like the (working) assignment pushes do: build a map
+      // of normalised username AND "First Last" → canonical username from the
+      // users table, then compare canonically. Fuzzy contains() as fallback.
+      const normId = s => String(s || "").toLowerCase().replace(/\s+/g, ".").trim();
       const norm = s => String(s || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+      const map = {};
+      try {
+        const { results: users } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+        for (const u of users || []) {
+          map[normId(u.username)] = u.username;
+          const full = ((u.first_name || "") + " " + (u.last_name || "")).trim();
+          if (full) map[normId(full)] = u.username;
+        }
+      } catch {}
       const meN = norm(me);
+      const isMe = e => {
+        const resolved = map[normId(e)];
+        if (resolved != null) return resolved === me;
+        const n = norm(e);
+        return !!n && (n === meN || n.includes(meN) || meN.includes(n));
+      };
+      // Bucket by the LONDON date of the booking (UTC slicing puts a 00:30 BST
+      // job on the wrong day).
+      const londonDate = iso => { try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); } catch { return String(iso).slice(0, 10); } };
+      const londonTime = iso => { try { return new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
       for (const r of results || []) {
         let d = {}; try { d = JSON.parse(r.data); } catch { continue; }
         const engs = (Array.isArray(d.assignedEngineers) && d.assignedEngineers.length)
           ? d.assignedEngineers : (d.assignedTo ? [d.assignedTo] : []);
-        if (!engs.some(e => { const n = norm(e); return n && (n === meN || n.includes(meN) || meN.includes(n)); })) continue;
-        const date = String(r.scheduled_at).slice(0, 10);
+        const mine = engs.some(isMe);
+        debug.candidates.push({ ref: r.helpdesk_ref || r.id, scheduledAt: r.scheduled_at, engineers: engs,
+          resolved: engs.map(e => map[normId(e)] || "(no user match: " + e + ")"), mine });
+        if (!mine) continue;
+        const date = londonDate(r.scheduled_at);
         (byDay[date] = byDay[date] || []).push({
           ref: r.helpdesk_ref || r.id,
           label: (r.helpdesk_ref || r.id) + (d.description ? " — " + String(d.description).slice(0, 44) : ""),
           site: d.siteName || "", postcode: String(d.postcode || "").toUpperCase(),
-          time: String(r.scheduled_at).slice(11, 16) || ""
+          time: londonTime(r.scheduled_at)
         });
       }
       for (const k of Object.keys(byDay)) byDay[k].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-    } catch {}
+    } catch (e) { debug.error = String(e && e.message || e); }
+    if (q.get("debug") === "1" && await isTsAdmin(env, tid, sess))
+      return json({ ok: true, build: "w9", week: monday, byDay, debug }, {}, env, request);
     return json({ ok: true, week: monday, byDay }, {}, env, request);
   }
 
@@ -707,7 +736,7 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/po-status" && method === "GET") {
     if (!(await isTsAdmin(env, tid, sess))) return error("Forbidden", 403, env, request);
     const m = await poDiscover(env);
-    const out = { ok: true, build: "w8", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
+    const out = { ok: true, build: "w9", bound: !!env.PO_DB, discovered: null, samples: [], tables: PO_TABLES || [] };
     if (m) {
       out.discovered = { mode: m.mode, table: m.table, nameCol: m.nameCol || null, pcCol: m.pcCol || null,
         jobCol: m.jobCol || null, jsonCol: m.jsonCol || null, blobKey: m.blobKey || null };

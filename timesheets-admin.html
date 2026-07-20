@@ -311,6 +311,19 @@ async function poStatusCheck(){
   // Store lists (compliance worker)
   const sOk=storesN!=null&&storesN>0;
   rows+=row("Store lists",sOk,sOk?(storesN+" sites"):"couldn't reach the store lists (mostlane-pos worker)");
+  // Booked-job chips (this week's scheduled jobs, matched to you)
+  let bOk=false,bNote="";
+  try{
+    const b=await authFetchTO("/ts/assigned?debug=1",{},15000).then(x=>x.json());
+    if(b&&b.ok&&b.debug){
+      const tot=(b.debug.candidates||[]).length, mine=(b.debug.candidates||[]).filter(c=>c.mine).length;
+      bOk=true;
+      bNote=tot+" job(s) scheduled this week, "+mine+" matched to you";
+      const unres=(b.debug.candidates||[]).flatMap(c=>c.resolved||[]).filter(x=>String(x).startsWith("(no user match"));
+      if(unres.length)bNote+=" · ⚠️ engineer names not matching any user: "+esc([...new Set(unres)].slice(0,3).join(", "));
+    } else bNote="needs the latest worker (w9) pasted";
+  }catch(e){bNote="couldn't check just now";}
+  rows+=row("Booked jobs",bOk,bNote);
   const allOk=pOk&&poOk&&sOk;
   el.style.background=allOk?"#ecfdf5":"#fef2f2";
   el.style.borderColor=allOk?"#a7f3d0":"#fecaca";
