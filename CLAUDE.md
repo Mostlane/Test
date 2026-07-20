@@ -628,7 +628,18 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
    released via /po-config; portal 🧾 button). Patched previously: 🏠 back
    button; portal sync (PORTAL_DB binding mirrors portal sites+users,
    add-only, 5-min throttle). That PORTAL_DB binding can also WRITE
-   audit_log — see future plans.
+   audit_log — see future plans. **Job→PO prefill (20 Jul)**: job-view.html's
+   "Raise PO for this job" button appends `#mlpo=<base64(JSON)>` (jobRef,
+   jobId, site, address, description, by — encoded
+   btoa(unescape(encodeURIComponent(...)))) to the engineer's personal PO URL;
+   the PO worker's engineerPage() `prefillFromJob()` decodes it and fills Site
+   + Incident/job number ONLY when those fields are empty (supplier +
+   description stay the engineer's to type; green "✓ Pre-filled from job …"
+   note; office-hours gate still hides the form so no prefill then; bad
+   payloads fail silent to a blank form). Full patched worker was delivered
+   20 Jul (2,311 lines, tail `function escapeHtmlServer(s) …`) — Jamie pastes
+   it into the PO worker in the Cloudflare dashboard. my-day.html's generic
+   "Raise a PO" link carries no payload (by design).
 2. **SiteLog** — repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk),
    worker api.site-log.co.uk (secret ADMIN_SECRET = admin PIN; custom domain
    IS fetchable server-side; *.workers.dev hosts are NOT — error 1042).
