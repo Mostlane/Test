@@ -163,7 +163,17 @@
     // sort: not-done first, by scheduled time
     jobs.sort(function(a,b){ var da=isDone(a)?1:0, db=isDone(b)?1:0; if(da!==db) return da-db; return String(a.scheduledAt||"").localeCompare(String(b.scheduledAt||"")); });
     try{ var sr=await jfetch("/shift/today?engineer="+encodeURIComponent(eng)+"&date="+todayLocal()+"&t="+Date.now()); var sd=await sr.json(); shift=sd.shift||null; }catch(e){ shift=null; }
-    try{ var vr=await jfetch("/vehicle-check?engineer="+encodeURIComponent(eng)+"&week="+mondayOfWeek()+"&t="+Date.now()); var vd=await vr.json(); vcState=(vd.check&&vd.check.checked_at)?"done":"prompt"; }catch(e){ vcState="prompt"; }
+    // Van check state from the real deadline you set (vancheck settings). We only
+    // FORCE it when the deadline has passed; before that it's just a reminder and
+    // the pop-up notifications do the nudging.
+    try{
+      var t=localStorage.getItem("mostlaneToken");
+      var vr=await fetch(MOSTLANE_API+"/vancheck/config?t="+Date.now(),{headers:t?{"Authorization":"Bearer "+t}:{},cache:"no-store"});
+      var vd=await vr.json();
+      var vcDone=!!(vd&&vd.myCheck);
+      var vcOverdue=!!(vd&&vd.deadline&&vd.deadline.overdue);
+      vcState = vcDone ? "done" : (vcOverdue ? "overdue" : "due");
+    }catch(e){ vcState="due"; }   // unknown → don't hard-block, just remind
     loadInboxBadge();
   }
   async function loadInboxBadge(){
@@ -188,7 +198,7 @@
     var n=jobs.length;
     s.innerHTML=''
       +'<div class="row-top"><div><div class="hello">'+greeting()+'</div><h1 class="big">Ready to start?</h1></div>'+av+'</div>'
-      +(vcState!=="done"?'<div class="due">🚐 Your <b>weekly van check</b> is due before you clock on.</div>':'')
+      +(vcState==="overdue"?'<div class="due">🚐 Your <b>weekly van check</b> is past its deadline — please do it before you start.</div>':(vcState==="due"?'<div class="due">🚐 Reminder: your <b>weekly van check</b> is still to do this week.</div>':''))
       +'<div class="card"><div class="eyebrow" style="margin-top:0">Start of day</div>'
       +'<div class="miniline">'+(n?(n===1?'On site · <b>'+esc(jobName(jobs[0]))+'</b>':'<b>'+n+' jobs</b> booked today'):'No jobs booked yet today')+'</div>'
       +(vcState==="done"?'<div class="miniline">✅ Van check done this week</div>':'')
@@ -263,7 +273,10 @@
 
   function clockStrip(){
     var s=shift; var mi=(s&&s.start_mileage!=null)?(" · start "+s.start_mileage.toLocaleString()+" mi"):"";
-    return '<div class="card" style="padding:12px 14px"><div class="miniline">✅ Van check done'+(vcState==="done"?" this week":"")+'</div>'
+    var vc = vcState==="done" ? '✅ Van check done this week'
+           : vcState==="overdue" ? '<a href="van-check.html" style="color:var(--urgent);text-decoration:none">⚠️ Van check overdue — do it ›</a>'
+           : '<a href="van-check.html" style="color:var(--muted);text-decoration:none">🚐 Van check still to do ›</a>';
+    return '<div class="card" style="padding:12px 14px"><div class="miniline">'+vc+'</div>'
       +'<div class="miniline">⏱ Clocked on '+fmtTime(s&&s.clock_on_at)+mi+' <span class="k act" id="endBtn">End my day</span></div></div>';
   }
   function wireClock(){ var b=$("endBtn"); if(b) b.onclick=function(){ endDay(); }; }
@@ -319,7 +332,7 @@
     await doClockOn(m); toast("Van check done — you're clocked on");
   };
   async function startDay(){
-    if(vcState!=="done"){ openVc(); return; }   // van check enforced before clock-on
+    if(vcState==="overdue"){ openVc(); return; }   // only force the van check once its deadline has passed
     var m=prompt("Start mileage on the van? (optional)"); await doClockOn((m&&!isNaN(+m))?Math.round(+m):null); toast("Clocked on — have a good day");
   }
   async function doClockOn(startMileage){
