@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=2"></script>
+  <script src="/ml-perms.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mostlane Portal Login</title>
@@ -96,7 +97,9 @@
     // password change always wins.
     function goNext() {
       if (window.__mostlaneMustChange) { window.location.href = "change-password.html?forced=1"; return; }
-      var fallback = window.__mostlaneStory ? "route.html" : "main.html";
+      // Field users (SLA/jobs, not admin) land in the engineer app; office &
+      // admins get the main menu. Reads the permissions just cached at login.
+      var fallback = (window.mlIsFieldUser && window.mlIsFieldUser()) ? "route.html" : "main.html";
       var token = localStorage.getItem("mostlaneToken");
       if (!token) { window.location.href = fallback; return; }
       fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })
@@ -143,8 +146,7 @@
         var d = await r.json().catch(function () { return {}; });
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
-          var story = (d.user && d.user.StoryMode === "Yes");
-          var fb = story ? "route.html" : "main.html";
+          var fb = (window.mlIsFieldUser && window.mlIsFieldUser(d.user)) ? "route.html" : "main.html";
           var lp = null;
           try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}
           location.replace(lp || fb);
@@ -240,8 +242,8 @@ const user = result.user;
        const PERM_KEYS = ["FullAccess","Users","DeviceAdmin","CheckInOut","Vehicles",
          "Holiday","HolidayAdmin","EngineersHoursMenu","HoursDashboard","PurchaseOrders",
          "Sites","AddSite","Assets","MyDocuments","Weekly","Forms","Compliance","Projects",
-         "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","StoryMode","HSPlan",
-         "SiteLog","OfficeClock","OfficeTimesheet"];
+         "ProjectsAdmin","TimesheetAdmin","LabourPlanning","SLA","SLAAdmin","StoryMode","HSPlan",
+         "SiteLog","OfficeClock","OfficeTimesheet","EngTimesheet","ThemeColour","ThemeBackground"];
        const perms = {};
        PERM_KEYS.forEach(function (k) { perms[k] = user[k]; });
 

@@ -50,34 +50,14 @@
   <div class="prof"><div class="av" id="avatar">··</div><div><h2 id="name">…</h2><div class="role" id="role">Engineer</div></div></div>
 
   <div class="stat2">
-    <div class="stat" data-perm="Holiday"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
-    <div class="stat" data-perm="EngTimesheet"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
+    <div class="stat" id="statHol"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
+    <div class="stat" id="statHrs"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
   </div>
 
-  <div class="grouplbl" data-group>My kit &amp; access</div>
-  <div class="card list" data-group>
-    <a href="my-assets.html" data-perm="Assets"><span class="ic">🧰</span>Plant &amp; equipment held<span class="ch">›</span></a>
-    <a href="keys.html"><span class="ic">🔑</span>Keys signed to me<span class="ch">›</span></a>
-    <a href="van-check.html" id="vanLink"><span class="ic">🚐</span>Van check<span class="ch">›</span></a>
-    <a href="oncall_current.html"><span class="ic">📞</span>Availability &amp; on-call<span class="ch">›</span></a>
-  </div>
+  <!-- Permission-driven launcher: filled from the shared ML_MENU (see ml-perms.js). -->
+  <div id="launcher"></div>
 
-  <div class="grouplbl" data-group>My records</div>
-  <div class="card list" data-group>
-    <a href="my-documents.html" data-perm="MyDocuments"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
-    <a href="holiday.html" data-perm="Holiday"><span class="ic">🌴</span>Holiday<span class="ch">›</span></a>
-    <a href="engineer-timesheet.html" data-perm="EngTimesheet"><span class="ic">⏱️</span>My timesheet<span class="ch">›</span></a>
-  </div>
-
-  <div class="grouplbl" data-group>Settings</div>
-  <div class="card list" data-group>
-    <a href="notifications.html"><span class="ic">🔔</span>Notifications<span class="ch">›</span></a>
-    <a href="personalise.html" data-perm="Personalise"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
-    <a href="change-password.html"><span class="ic">🔒</span>Password &amp; device<span class="ch">›</span></a>
-    <a href="help.html"><span class="ic">❓</span>Help &amp; support<span class="ch">›</span></a>
-  </div>
-
-  <div class="card list" id="menuCard"><a href="main.html"><span class="ic">▦</span>Full menu<span class="ch">›</span></a></div>
+  <div class="card list" id="menuCard" style="display:none"><a href="main.html"><span class="ic">▦</span>Full office menu<span class="ch">›</span></a></div>
   <div class="signout" id="signout">Sign out</div>
 
   <nav class="tabbar">
@@ -104,32 +84,47 @@
   $("avatar").textContent=initials(name);
   try{ var veh=localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""; if(veh) $("role").textContent="Engineer · Van "+veh; }catch(e){}
 
-  // Permission gating — shared with main.html via /ml-perms.js (single source).
-  // Hide any link/stat the user's permissions don't unlock, then collapse a
-  // group whose links are all hidden. FullAccess (you, Jamie) sees everything.
-  var can = window.mlCan || function(){ return true; };   // fail-open if the shared file didn't load
-  [].forEach.call(document.querySelectorAll("[data-perm]"), function(el){
-    if(!can(el.getAttribute("data-perm"))) el.style.display="none";
-  });
-  [].forEach.call(document.querySelectorAll(".card.list[data-group]"), function(card){
-    var anyVisible = [].some.call(card.querySelectorAll("a"), function(a){ return a.style.display!=="none"; });
-    if(!anyVisible){ card.style.display="none"; if(card.previousElementSibling && card.previousElementSibling.hasAttribute("data-group")) card.previousElementSibling.style.display="none"; }
-  });
+  // Everything below is driven by the user's real permissions, from the shared
+  // /ml-perms.js (the SAME source as the office menu). Grant a permission and its
+  // entry shows up here automatically. FullAccess (you, Jamie) sees everything.
+  var can = window.mlCan || function(){ return true; };
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 
-  // Holiday days left — only fetch/show if they can request holiday.
+  // ---- permission-driven launcher (every portal area they can open) ----
+  var GROUP_LABEL = { Work:"My work", Records:"My records", Portal:"Portal", Settings:"Settings" };
+  var GROUP_ORDER = ["Work","Records","Portal","Settings"];
+  (function buildLauncher(){
+    var items = (window.mlMenuFor ? window.mlMenuFor() : []);
+    var byGroup = {};
+    items.forEach(function(m){ (byGroup[m.group]=byGroup[m.group]||[]).push(m); });
+    var html = "";
+    GROUP_ORDER.forEach(function(g){
+      var list = byGroup[g]; if(!list || !list.length) return;
+      html += '<div class="grouplbl">'+esc(GROUP_LABEL[g]||g)+'</div><div class="card list">';
+      html += list.map(function(m){ return '<a href="'+esc(m.href)+'"><span class="ic">'+m.icon+'</span>'+esc(m.label)+'<span class="ch">›</span></a>'; }).join("");
+      html += '</div>';
+    });
+    $("launcher").innerHTML = html || '<div class="grouplbl">Settings</div>';
+  })();
+
+  // Full office menu link — only for admins who actually use it.
+  if(can("__never") || (window.mlPerms && String((window.mlPerms().FullAccess||"")).toLowerCase()==="yes")) $("menuCard").style.display="";
+
+  // ---- quick-stat cards, gated + fetched only when relevant ----
   if(can("Holiday")){
     afetch("/holiday/summary").then(function(r){return r.json();}).then(function(j){
       if(j && (j.remaining!=null)){ $("holN").textContent=Math.round(j.remaining*10)/10; }
     }).catch(function(){});
-  }
-  // Hours this week — only if they have an engineer timesheet.
+  } else { $("statHol").style.display="none"; }
   if(can("EngTimesheet")){
     afetch("/ts/my").then(function(r){return r.json();}).then(function(j){
       var t=j&&j.totals; if(!t) return;
       var h=t.hours!=null?t.hours:(t.paidHours!=null?t.paidHours:(t.totalHours!=null?t.totalHours:null));
       if(h!=null) $("hrsN").textContent=Math.round(h*10)/10;
     }).catch(function(){});
-  }
+  } else { $("statHrs").style.display="none"; }
+  // If both stats are hidden, drop the empty row.
+  if($("statHol").style.display==="none" && $("statHrs").style.display==="none"){ var s2=document.querySelector(".stat2"); if(s2) s2.style.display="none"; }
 
   $("signout").onclick=function(){
     try{
