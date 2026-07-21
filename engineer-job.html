@@ -129,6 +129,14 @@
     <div class="hint" style="text-align:center">Can't tick one? Don't start — report it and the office is alerted.</div>
   </div></div>
 
+  <div class="modal" id="blockModal"><div class="sheet">
+    <h3>⚠️ Finish your current job first</h3>
+    <p id="blockMsg" style="color:var(--muted);font-size:14.5px;line-height:1.5;margin:8px 0 16px"></p>
+    <button class="btn primary wide" id="blockGo"><span id="blockGoRef">Go to that job →</span></button>
+    <button class="btn line wide" id="blockStay" style="margin-top:8px">Stay here</button>
+    <div class="hint" style="text-align:center">You can only work one job at a time — wrap up the open one to move on.</div>
+  </div></div>
+
   <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button></div>
   <div class="toast" id="toast"></div>
 
@@ -252,6 +260,12 @@
     if(s.pack==="hold"){ [].forEach.call(document.querySelectorAll("#holdReason,#holdNeeds"),function(el){el.addEventListener("input",refresh);}); }
     if(s.pack==="quote"){ wireQuote(); }
     $("slide").classList.remove("go"); refresh();
+    // Tapping Travelling saves it — and trips the cross-job guard (can't set out
+    // for a new job while another is unfinished), surfacing the warning modal.
+    if(n==="Travelling" && job && job.status!=="Travelling"){
+      patchJob({status:"Travelling"}).then(function(){ if(job) job.status="Travelling"; var cs=$("curstatus"); if(cs) cs.textContent="Travelling"; toast("On your way — drive safe"); })
+        .catch(function(err){ if(!err.blocked) toast("⚠ "+err.message); });
+    }
   }
   function wireQuote(){
     $("qEng").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;var v=Math.max(1,(+$("qEngN").textContent)+(+b.dataset.d));$("qEngN").textContent=v;refresh();});
@@ -339,8 +353,20 @@
     body.opId=opId(); body.changedBy=getUser()||body.changedBy;
     var r=await jfetch("/jobs/"+encodeURIComponent(jobId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     var j=await r.json().catch(function(){return{};});
-    if(!r.ok) throw new Error(j.error||("Update failed ("+r.status+")"));
+    if(!r.ok){
+      // Cross-job guard: another of the engineer's jobs isn't finished. Show a
+      // full warning modal that jumps straight to that job (not a small toast).
+      if(r.status===409 && j.blockingJob){ showBlockModal(j.blockingJob, j.error); var be=new Error(j.error||"Finish your other job first"); be.blocked=true; throw be; }
+      throw new Error(j.error||("Update failed ("+r.status+")"));
+    }
     return j;
+  }
+  var blockedBy=null;
+  function showBlockModal(bj, msg){
+    blockedBy=bj||null;
+    $("blockMsg").textContent = msg || ("Finish "+((bj&&bj.ref)||"your other job")+" first — "+((bj&&bj.why)||"it's still open")+".");
+    $("blockGoRef").textContent = (bj&&bj.ref) ? ("Go to "+bj.ref+" →") : "Go to that job →";
+    $("blockModal").classList.add("show");
   }
   async function uploadPhotos(e){
     var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }
@@ -368,7 +394,7 @@
       else if(chosen==="On Hold"){ $("slidetxt").textContent="Sending…"; await patchJob({status:"On Hold",hold:{reason:ntrim("holdReason"),needs:ntrim("holdNeeds")}}); $("slidetxt").textContent="Sent for approval ✓"; toast("Sent to the office for approval"); }
       else if(chosen==="Quote"){ $("slidetxt").textContent="Submitting…"; await patchJob({status:"Quote",note:$("note").value.trim(),quote:collectQuote()}); $("slidetxt").textContent="Quote submitted ✓"; toast("Quote submitted"); }
       setTimeout(function(){ location.href=backTo; },1200);
-    }catch(err){ finishing=false; slide.classList.remove("go","locked"); $("slidetxt").textContent=ENDLABEL[chosen]||"Slide to finish"; toast("⚠ "+err.message); }
+    }catch(err){ finishing=false; slide.classList.remove("go","locked"); $("slidetxt").textContent=ENDLABEL[chosen]||"Slide to finish"; if(!err.blocked) toast("⚠ "+err.message); }
   }
   function collectQuote(){
     var bar=document.querySelector("#qBar button.on"), disr=document.querySelector("#qDisr button.on");
@@ -436,7 +462,7 @@
       if(job){ job.riskAssessment=ra; job.status="In Progress"; }
       $("raModal").classList.remove("show"); $("curstatus").textContent="In Progress";
       drawStatus(); applyLock(); drawTimeline(); toast("RA signed — work started");
-    }catch(err){ toast("⚠ "+err.message); }
+    }catch(err){ if(err.blocked){ $("raModal").classList.remove("show"); } else { toast("⚠ "+err.message); } }
   };
   $("raReport").onclick=async function(){
     var reason=$("raNotes").value.trim(); if(!reason){ $("raNotes").classList.add("err"); toast("Tell the office what's stopping you"); return; }
@@ -454,6 +480,9 @@
   $("lxClose").onclick=function(){ $("lightbox").classList.remove("show"); };
   $("lxPrev").onclick=function(){ lxi=(lxi-1+photos.length)%photos.length; showLx(); };
   $("lxNext").onclick=function(){ lxi=(lxi+1)%photos.length; showLx(); };
+
+  $("blockStay").onclick=function(){ $("blockModal").classList.remove("show"); };
+  $("blockGo").onclick=function(){ if(blockedBy&&blockedBy.id){ location.href="engineer-job.html?jobId="+encodeURIComponent(blockedBy.id)+"&back="+encodeURIComponent(backTo); } else { $("blockModal").classList.remove("show"); } };
 
   (async function boot(){
     if(!jobId){ $("loading").textContent="No job specified."; return; }
