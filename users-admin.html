@@ -420,20 +420,31 @@
 
     async function guardAndLoad() {
       try {
-        const me = await (await api("/auth/me")).json();
-        if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Users === "Yes")) {
+        const meRes = await api("/auth/me");
+        if (!meRes.ok) throw new Error("/auth/me returned HTTP " + meRes.status);
+        const me = await meRes.json();
+        if (!me.ok || !me.user || !(me.user.FullAccess === "Yes" || me.user.Users === "Yes")) {
           alert("Access denied"); location.href = "main.html"; return;
         }
         if (me.user.FullAccess === "Yes") initMenuVis();   // curation is Full-access only
         await loadUsers();
       } catch (e) {
         g("listMsg").style.display = "block";
-        g("listMsg").textContent = "Could not reach the portal API.";
+        // Report the precise failure (which call, what status) instead of a
+        // blanket "could not reach" — a 500 here means the worker threw, and
+        // that message tells us exactly which endpoint and why.
+        g("listMsg").textContent = "Users didn't load — " + (e && e.message ? e.message : String(e));
       }
     }
 
     async function loadUsers() {
-      const data = await (await api("/users")).json();
+      const res = await api("/users");
+      if (!res.ok) {
+        let detail = "";
+        try { detail = " — " + (await res.text()).slice(0, 200); } catch (e) {}
+        throw new Error("/users returned HTTP " + res.status + detail);
+      }
+      const data = await res.json();
       allUsers = data.Users || [];
       render();
     }
