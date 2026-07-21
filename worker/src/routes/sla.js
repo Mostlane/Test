@@ -840,6 +840,7 @@ export async function handle(request, env, ctx, url, sess) {
       // ── End-point enforcement (server is the authority) ─────────────────
       // Engineers can't fake a completion by patching the DB directly, and an
       // offline replay is re-validated here. Admins (office) can override.
+      let autoStart = null;   // set below → clock the engineer on after a status change
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
@@ -864,6 +865,14 @@ export async function handle(request, env, ctx, url, sess) {
             return jsonResponse({ error: `Finish ${blocker.ref} first — ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
 
+        // Auto-start the day: the engineer's first status change of the day
+        // clocks them on (if they never pressed "Start my day"), recording the
+        // GPS that rides the status change. Idempotent — never overwrites an
+        // existing clock-on. Only for engineers acting on their own jobs.
+        if (!isAdmin && body.status && target !== before.status) {
+          autoStart = { user: sess.user.username, gps: body.gps || null, date: body.localDate || null };
+        }
+
         // On Hold needs approval. An engineer's hold is "pending"; an admin who
         // sets it themselves is self-approved.
         if (body.status && target === "On Hold" && before.status !== "On Hold") {
@@ -877,6 +886,7 @@ export async function handle(request, env, ctx, url, sess) {
       const updated = await patchJob(env, tenantId, id, body);
       if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       // Tell every office/admin when a job has just been parked pending approval.
       if (updated && updated.hold?.approval?.state === "pending"
           && before?.hold?.approval?.state !== "pending") {
@@ -1101,6 +1111,23 @@ function raMissing(patch, job) {
 
 // The engineer's OTHER jobs that aren't yet at a valid end point — used to block
 // them from starting the next one. Returns the first blocker, or null.
+// Clock an engineer on for the day if they aren't already (their first job
+// status change "starts their day"). COALESCE keeps any existing clock-on, so
+// this never overwrites a real Start-my-day and is safe to replay.
+async function ensureClockOn(env, tenantId, username, gps, localDate) {
+  try {
+    if (!username) return;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(localDate || "") ? localDate : new Date().toISOString().slice(0, 10);
+    await env.DB.prepare(`
+      INSERT INTO shifts (tenant_id, username, date, clock_on_at, clock_on_gps)
+      VALUES (?,?,?,?,?)
+      ON CONFLICT(username, date) DO UPDATE SET
+        clock_on_at  = COALESCE(shifts.clock_on_at, excluded.clock_on_at),
+        clock_on_gps = COALESCE(shifts.clock_on_gps, excluded.clock_on_gps)
+    `).bind(tenantId, username, date, new Date().toISOString(), gps || null).run();
+  } catch (e) { /* non-fatal */ }
+}
+
 async function findBlockingJob(env, tenantId, username, exceptId) {
   const uNorm = normId(username);
   const jobs = await listJobs(env, tenantId);
