@@ -176,8 +176,14 @@
       errorBox.textContent = "";
 
       try {
+// Post straight to the live API. Login must not depend on portal-config's
+// legacy-host bridge rewriting login.jamie-def.workers.dev — if that bridge
+// isn't installed (or the old host is gone), the request fails with a bare
+// "Load failed". Hitting MOSTLANE_API directly is the same host the rest of
+// the portal (and the PWA) already reach.
+const LOGIN_API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev").replace(/\/$/, "");
 const res = await fetch(
-  "https://login.jamie-def.workers.dev/auth/login",
+  LOGIN_API + "/auth/login",
   {
     method: "POST",
     headers: { "Content-Type": "application/json" },
