@@ -2,13 +2,15 @@
 // Single canonical SW (scope "/"). Registering this replaces any earlier SW at
 // the same scope (the old push-only service-worker.js), so there's just one.
 
-const CACHE_NAME = "mostlane-v10";
+const CACHE_NAME = "mostlane-v11";
 
 // Precache the shell so the app can at least boot on a dead/flaky connection.
 const CORE_ASSETS = [
   "/",
   "/main.html",
   "/login.html",
+  "/you.html",
+  "/route.html",
   "/offline.html",
   "/Mostlane_Embossed.png",
   "/icons/icon-192.png",
@@ -16,8 +18,13 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener("install", (e) => {
+  // Cache each asset INDEPENDENTLY (not addAll): addAll rejects the whole batch
+  // if any one URL 404s, which would leave the cache EMPTY and the app with no
+  // offline shell. Per-asset means one bad URL can't wipe the rest.
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => {})
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(CORE_ASSETS.map((u) => cache.add(u)))
+    ).catch(() => {})
   );
   self.skipWaiting();
 });
@@ -57,15 +64,41 @@ self.addEventListener("fetch", (e) => {
 
   // Page navigations: network-first with a short timeout, then cached copy,
   // then the offline page. Prevents the blank white screen on poor signal.
+  //
+  // CRITICAL for installed PWAs: a navigation must NEVER be answered with a
+  // failed response (Response.error()) OR a redirected response — iOS reacts by
+  // ejecting the standalone app into a blank Safari tab ("Search or enter
+  // website name"). So we (a) rebuild any redirected network response into a
+  // plain one, and (b) guarantee the fallback chain always returns real HTML.
   if (req.mode === "navigate" || (req.headers.get("accept") || "").includes("text/html")) {
     e.respondWith((async () => {
       try {
-        const res = await fetchWithTimeout(req, 3500);
+        const res = await fetchWithTimeout(req, 4000);
+        // A redirected response can't be returned to a navigation — it fails
+        // the load. Reconstruct it as a clean, non-redirected response.
+        if (res && res.redirected) {
+          const buf = await res.clone().arrayBuffer();
+          const clean = new Response(buf, { status: res.status, statusText: res.statusText, headers: res.headers });
+          cachePut(req, clean.clone());
+          return clean;
+        }
         cachePut(req, res);
         return res;
       } catch {
-        const cached = await caches.match(req, { ignoreSearch: true });
-        return cached || (await caches.match("/offline.html")) || Response.error();
+        return (await caches.match(req, { ignoreSearch: true }))
+          || (await caches.match("/main.html"))
+          || (await caches.match("/login.html"))
+          || (await caches.match("/offline.html"))
+          // Last resort: a tiny self-reloading page — anything but a blank tab.
+          || new Response(
+               "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>" +
+               "<title>Reconnecting…</title><body style='margin:0;font:16px system-ui;display:flex;height:100vh;" +
+               "align-items:center;justify-content:center;background:#e6e8eb;color:#123'>" +
+               "<div style='text-align:center'><p>Reconnecting…</p>" +
+               "<p><a href='/login.html' style='color:#0066cc'>Open Mostlane</a></p></div>" +
+               "<script>setTimeout(function(){location.replace('/login.html')},1500)</script>",
+               { headers: { "Content-Type": "text/html; charset=utf-8" } }
+             );
       }
     })());
     return;
