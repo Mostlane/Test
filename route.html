@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Route — Mostlane</title>
+  <script src="auth.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root{
+      --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+      --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+      --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+      --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    }
+    @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px 92px;min-height:100vh}
+    a{color:var(--accent)}
+    .row-top{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
+    .hello{font-size:13px;color:var(--muted)} h1.big{font-size:25px;margin:2px 0 0;letter-spacing:-.02em}
+    .avatar{width:44px;height:44px;border-radius:50%;background:var(--panel);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px;text-decoration:none;flex:0 0 auto}
+    .eyebrow{font-size:12px;color:var(--muted);font-weight:700;margin:18px 2px 2px;text-transform:uppercase;letter-spacing:.05em}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin:12px 0;box-shadow:0 1px 0 rgba(16,32,58,.03)}
+    .hero{background:var(--panel);color:var(--panel-ink);border:0;border-radius:20px;padding:18px}
+    .hero .lbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--panel-sub);font-weight:700}
+    .hero h2{margin:8px 0 4px;font-size:21px}.hero .sub{color:var(--panel-sub);font-size:13px}
+    .hero .btns{display:flex;gap:10px;margin-top:16px}
+    .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:15px;border-radius:12px;padding:13px 16px;text-align:center;transition:filter .15s,transform .06s;color:var(--ink);text-decoration:none;display:inline-block}
+    .btn:active{transform:translateY(1px)}.btn.primary{background:var(--accent);color:#fff}
+    .btn.ghost{background:color-mix(in srgb,#fff 12%,transparent);color:#fff}
+    .btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}.btn.wide{width:100%}
+    .hero .btns .btn{flex:1}
+    .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:5px 9px;border-radius:999px}
+    .pill.urgent{background:var(--urgent);color:#fff}.pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+    .pill.grey{background:var(--chip);color:var(--muted)}.pill.proj{background:color-mix(in srgb,var(--purple) 16%,transparent);color:var(--purple)}
+    .miniline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin:5px 0}
+    .miniline .k{margin-left:auto} .miniline .k.act{color:var(--accent);font-weight:700;cursor:pointer}
+    .stat3{display:flex;gap:10px;margin-top:10px}
+    .stat3 .s{flex:1;background:var(--chip);border-radius:12px;padding:10px;text-align:center}
+    .stat3 .n{font-size:19px;font-weight:800}.stat3 .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+    .prog{height:8px;border-radius:999px;background:var(--chip);overflow:hidden;margin:10px 0 4px}
+    .prog i{display:block;height:100%;background:var(--purple)}
+    .tools{display:flex;gap:8px;margin-top:12px}
+    .tool{flex:1;border:1px solid rgba(255,255,255,.18);background:color-mix(in srgb,#fff 10%,transparent);color:#fff;border-radius:11px;padding:11px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;text-decoration:none}
+    .task{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+    .task:last-child{border:0}
+    .box{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:0 0 auto;display:grid;place-items:center;color:#fff;font-size:13px}
+    .task.on .box{background:var(--ok);border-color:var(--ok)}.task.on{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 50%,transparent)}
+    .tl{position:relative;margin:6px 0 0 6px;padding-left:20px}
+    .tl:before{content:"";position:absolute;left:5px;top:8px;bottom:16px;width:2px;background:var(--line)}
+    .stop{position:relative;margin:10px 0;cursor:pointer}
+    .stop .dot{position:absolute;left:-19px;top:16px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--muted)}
+    .stop.done .dot{background:var(--ok);border-color:var(--ok)} .stop.now .dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+    .stopcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 14px}
+    .stop.now .stopcard{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+    .stop .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.stop .t b{font-size:15px}
+    .stop .m{color:var(--muted);font-size:12.5px;margin-top:3px}
+    .stop.done .stopcard{opacity:.72}.stop.done b{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
+    #map{height:180px;border-radius:14px;border:1px solid var(--line);overflow:hidden;background:var(--chip)}
+    .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)}
+    .legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:9px;height:9px;border-radius:50%}
+    .due{background:color-mix(in srgb,var(--amber) 13%,var(--card));border:1px solid color-mix(in srgb,var(--amber) 40%,var(--line));border-radius:12px;padding:11px 13px;font-size:13px;margin:10px 0}
+    .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:40}.modal.show{display:flex}
+    .sheet{background:var(--card);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:92%;overflow:auto}
+    .sheet h3{margin:0 0 4px}
+    .vc{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+    .vc.on .box{background:var(--ok);border-color:var(--ok)}
+    input.txt,textarea.txt{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px;font:inherit;font-size:15px;background:var(--card);color:var(--ink);margin-top:8px;resize:vertical}
+    .flbl{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px}
+    .safe{display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--line);border-radius:12px;margin-top:12px;cursor:pointer;font-weight:650}
+    .safe.on{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card))}
+    .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    #loading{padding:60px 0;text-align:center;color:var(--muted)}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+    .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
+    .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
+    .tabbar a .badge{display:inline-block;min-width:16px;background:var(--urgent);color:#fff;border-radius:999px;font-size:10px;padding:0 4px;margin-left:2px}
+  </style>
+</head>
+<body>
+  <div id="loading">Loading your day…</div>
+  <div id="screen" style="display:none"></div>
+
+  <div class="modal" id="vcModal"><div class="sheet">
+    <h3>Weekly van check</h3>
+    <div class="miniline" style="margin:2px 0 8px">Walk all four sides. Due by the weekly deadline.</div>
+    <div id="vcList"></div>
+    <label class="flbl">Odometer — start mileage</label>
+    <input class="txt" id="vcMiles" type="number" inputmode="numeric" placeholder="e.g. 41880">
+    <div class="safe" id="vcSafe"><span class="box">✓</span>Van is safe &amp; roadworthy to drive</div>
+    <textarea class="txt" id="vcDefects" rows="2" placeholder="Any defects? (optional)"></textarea>
+    <div id="vcMsg" style="color:var(--urgent);font-size:13px;margin-top:6px"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn line" style="flex:1" id="vcCancel">Cancel</button>
+      <button class="btn primary" style="flex:2" id="vcSubmit">Submit &amp; start day</button>
+    </div>
+  </div></div>
+
+  <nav class="tabbar">
+    <a href="route.html" class="on"><span class="ic">🧭</span>Route</a>
+    <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
+    <a href="inbox.html" id="tabInbox"><span class="ic">📨</span>Inbox</a>
+    <a href="you.html"><span class="ic">👤</span>You</a>
+  </nav>
+  <div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+  "use strict";
+  var SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+  var MOSTLANE_API = window.MOSTLANE_API || "";
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function getEngineer(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }
+  function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  function fmtTime(iso){ try{ return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+  function mondayOfWeek(){ var x=new Date(); var day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
+  function getGps(){ return new Promise(function(res){ if(!navigator.geolocation) return res(""); navigator.geolocation.getCurrentPosition(function(p){res(p.coords.latitude.toFixed(5)+","+p.coords.longitude.toFixed(5));},function(){res("");},{timeout:8000}); }); }
+
+  var DONE_STATUS=["Complete","Closed Jobs","Invoiced"];
+  var VC_ITEMS=["Lights & indicators","Tyres & wheels","Windscreen, wipers & washers","Mirrors & glass","Bodywork (walk 4 sides)","Fluid levels (oil/coolant/washer)","Brakes & handbrake","Horn","Seatbelts","Load area secure / racking","Number plates","Dashboard warning lights","No leaks underneath","First aid & extinguisher"];
+  var STATUS_COL={Pending:"#9f1239",Scheduled:"var(--accent)",Travelling:"var(--accent)","In Progress":"var(--purple)","On Hold":"var(--amber)",Quote:"var(--purple)",Order:"var(--teal)"};
+
+  var jobs=[], shift=null, vcState="prompt", eng="";
+
+  // ---- postcode geocoding (shared cache with engineer-jobs.html) ----
+  var GEO_KEY="mlPostcodeGeo_v1", geoCache={};
+  try{ geoCache=JSON.parse(localStorage.getItem(GEO_KEY))||{}; }catch(e){ geoCache={}; }
+  var PC_RE=/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+  function jobPostcode(j){ var pc=String(j.postcode||"").replace(/\*+$/,"").trim(); if(!pc){ var m=PC_RE.exec(j.address||""); if(m) pc=m[0]; } return pc.toUpperCase().replace(/\s+/g," "); }
+  async function geocode(pcs){ var todo=[]; pcs.forEach(function(pc){ if(pc&&geoCache[pc]===undefined&&todo.indexOf(pc)<0) todo.push(pc); });
+    for(var i=0;i<todo.length;i+=100){ var batch=todo.slice(i,i+100);
+      try{ var res=await fetch("https://api.postcodes.io/postcodes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({postcodes:batch})});
+        var data=await res.json(); (data.result||[]).forEach(function(r){ geoCache[(r.query||"").toUpperCase()]=(r.result&&isFinite(r.result.latitude))?[r.result.latitude,r.result.longitude]:null; });
+      }catch(e){} }
+    try{ localStorage.setItem(GEO_KEY,JSON.stringify(geoCache)); }catch(e){}
+  }
+  function jobCoords(j){ var pc=jobPostcode(j); if(pc&&Array.isArray(geoCache[pc])) return geoCache[pc]; var la=Number(j.lat),lo=Number(j.lon); if(isFinite(la)&&isFinite(lo)&&(la||lo)) return [la,lo]; return null; }
+
+  function jfetch(path,opts){ return fetch(SLA_API+path,opts||{cache:"no-store"}); }
+  function jobName(j){ try{ return (window.mlJobName?window.mlJobName(j):"")||j.siteName||j.helpdeskRef||j.id; }catch(e){ return j.siteName||j.helpdeskRef||j.id; } }
+  function isDone(j){ return DONE_STATUS.indexOf(j.status||"")>=0; }
+  function isUrgent(j){ return /priority\s*1|p1/i.test(j.priority||""); }
+  function dirUrl(j){ var pc=String(j.postcode||"").replace(/\*+$/,"").trim(); var dest=[j.address,pc].filter(Boolean).join(", ")||((j.lat!=null&&j.lon!=null&&(j.lat||j.lon))?j.lat+","+j.lon:""); return dest?"https://www.google.com/maps/dir/?api=1&destination="+encodeURIComponent(dest)+"&travelmode=driving":""; }
+  function jobHref(j){ return "engineer-job.html?jobId="+encodeURIComponent(j.id)+"&back=route.html"; }
+
+  async function loadAll(){
+    eng=getEngineer();
+    var jr=await jfetch("/jobs/for-engineer?engineer="+encodeURIComponent(eng)+"&date="+todayLocal()+"&t="+Date.now());
+    var list=await jr.json(); jobs=Array.isArray(list)?list:[];
+    // sort: not-done first, by scheduled time
+    jobs.sort(function(a,b){ var da=isDone(a)?1:0, db=isDone(b)?1:0; if(da!==db) return da-db; return String(a.scheduledAt||"").localeCompare(String(b.scheduledAt||"")); });
+    try{ var sr=await jfetch("/shift/today?engineer="+encodeURIComponent(eng)+"&date="+todayLocal()+"&t="+Date.now()); var sd=await sr.json(); shift=sd.shift||null; }catch(e){ shift=null; }
+    try{ var vr=await jfetch("/vehicle-check?engineer="+encodeURIComponent(eng)+"&week="+mondayOfWeek()+"&t="+Date.now()); var vd=await vr.json(); vcState=(vd.check&&vd.check.checked_at)?"done":"prompt"; }catch(e){ vcState="prompt"; }
+    loadInboxBadge();
+  }
+  async function loadInboxBadge(){
+    try{ var t=localStorage.getItem("mostlaneToken"); var r=await fetch(MOSTLANE_API+"/messages/unread",{headers:t?{"Authorization":"Bearer "+t}:{}}); var j=await r.json();
+      if(j&&j.unread>0){ $("tabInbox").innerHTML='<span class="ic">📨</span>Inbox <span class="badge">'+j.unread+'</span>'; } }catch(e){}
+  }
+
+  function greeting(){ var h=new Date().getHours(); return h<12?"Good morning,":h<17?"Good afternoon,":"Good evening,"; }
+  function onShift(){ return !!(shift&&shift.clock_on_at&&!shift.clock_off_at); }
+  function dayEnded(){ return !!(shift&&shift.clock_off_at); }
+
+  function render(){
+    var s=$("screen"); s.style.display="block"; $("loading").style.display="none";
+    var av='<a class="avatar" href="you.html">'+esc(initials(eng))+'</a>';
+    if(dayEnded()){ return renderEnd(s,av); }
+    if(!onShift()){ return renderStart(s,av); }
+    if(jobs.length===1){ return renderProject(s,av,jobs[0]); }
+    return renderReactive(s,av);
+  }
+
+  function renderStart(s,av){
+    var n=jobs.length;
+    s.innerHTML=''
+      +'<div class="row-top"><div><div class="hello">'+greeting()+'</div><h1 class="big">Ready to start?</h1></div>'+av+'</div>'
+      +(vcState!=="done"?'<div class="due">🚐 Your <b>weekly van check</b> is due before you clock on.</div>':'')
+      +'<div class="card"><div class="eyebrow" style="margin-top:0">Start of day</div>'
+      +'<div class="miniline">'+(n?(n===1?'On site · <b>'+esc(jobName(jobs[0]))+'</b>':'<b>'+n+' jobs</b> booked today'):'No jobs booked yet today')+'</div>'
+      +(vcState==="done"?'<div class="miniline">✅ Van check done this week</div>':'')
+      +'<button class="btn primary wide" style="margin-top:12px" id="startBtn">▶ Start my day</button>'
+      +'<div class="miniline" style="justify-content:center;margin-top:8px">Captures your GPS + van check + start mileage.</div></div>'
+      +'<div class="eyebrow">Today\'s map</div><div id="map"></div>'+legend()
+      +historyCard();
+    $("startBtn").onclick=function(){ startDay(); };
+    drawMap();
+  }
+  function renderReactive(s,av){
+    var next=jobs.find(function(j){return !isDone(j);});
+    var head='<div class="row-top"><div><div class="hello">'+greeting()+'</div><h1 class="big">Today\'s route</h1></div>'+av+'</div>';
+    var hero='';
+    if(next){
+      hero='<div class="card hero"><div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">Up next</span>'+(isUrgent(next)?'<span class="pill urgent">URGENT</span>':'')+'</div>'
+        +'<h2>'+esc(jobName(next))+'</h2><div class="sub">'+esc([next.address,String(next.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(" · ")||next.siteName||"")+'</div>'
+        +'<div class="btns">'+(dirUrl(next)?'<a class="btn ghost" target="_blank" rel="noopener" href="'+dirUrl(next)+'">Navigate</a>':'')+'<a class="btn primary" href="'+jobHref(next)+'">On my way ›</a></div></div>';
+    } else {
+      hero='<div class="card hero"><span class="lbl">All done</span><h2>Every job wrapped up 🎉</h2><div class="sub">Nothing left on today\'s route.</div></div>';
+    }
+    s.innerHTML=head+hero+clockStrip()
+      +'<div class="eyebrow">Then</div>'+timeline()
+      +'<div class="eyebrow">Today\'s map</div><div id="map"></div>'+legend()
+      +historyCard();
+    wireClock(); drawMap();
+  }
+  function renderProject(s,av,job){
+    var proj=job.project||null;
+    var head='<div class="row-top"><div><div class="hello">'+greeting()+'</div><h1 class="big">On site today</h1></div>'+av+'</div>';
+    var heroInner;
+    if(proj&&proj.totalDays){
+      var pct=Math.max(6,Math.round((proj.day||1)/proj.totalDays*100));
+      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+(proj.day||1)+' of ~'+proj.totalDays+'</span><span class="pill proj">PROJECT '+esc(proj.ref||"")+'</span></div>'
+        +'<h2>'+esc(proj.name||jobName(job))+'</h2><div class="sub">'+esc(job.siteName||job.address||"")+'</div>'
+        +'<div class="prog"><i style="width:'+pct+'%"></i></div>';
+    } else {
+      heroInner='<div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on</span>'+(isUrgent(job)?'<span class="pill urgent">URGENT</span>':'<span class="pill" style="background:color-mix(in srgb,#fff 14%,transparent);color:#fff">'+esc(job.status||"")+'</span>')+'</div>'
+        +'<h2>'+esc(jobName(job))+'</h2><div class="sub">'+esc([job.address,String(job.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(" · ")||job.siteName||"")+'</div>';
+    }
+    var tools='<div class="tools">'+(dirUrl(job)?'<a class="tool" target="_blank" rel="noopener" href="'+dirUrl(job)+'">🗺️ Directions</a>':'')
+      +'<a class="tool" href="site-folder.html?site='+encodeURIComponent(job.siteCode||"")+'&name='+encodeURIComponent(job.siteName||"")+'&back=route.html">📁 Documents</a></div>';
+    var tasksCard='';
+    if(proj&&proj.tasks&&proj.tasks.length){
+      tasksCard='<div class="eyebrow">Today\'s tasks</div><div class="card" id="taskCard">'+proj.tasks.map(function(t,i){return '<div class="task'+(t.done?' on':'')+'" data-i="'+i+'"><span class="box">✓</span>'+esc(t.t||t.text||"")+'</div>';}).join("")+'</div>';
+    }
+    s.innerHTML=head+'<div class="card hero">'+heroInner+tools+'</div>'+clockStrip()
+      +tasksCard
+      +'<a class="btn primary wide" href="'+jobHref(job)+'">▶ Log today\'s work</a>'
+      +'<div class="eyebrow">Site map</div><div id="map"></div>'
+      +historyCard();
+    wireClock();
+    var tc=$("taskCard"); if(tc){ tc.addEventListener("click",function(e){ var row=e.target.closest(".task"); if(row) row.classList.toggle("on"); }); }
+    drawMap();
+  }
+  function renderEnd(s,av){
+    var mi=(shift.start_mileage!=null&&shift.end_mileage!=null)?(shift.end_mileage-shift.start_mileage):null;
+    var doneCount=jobs.filter(isDone).length;
+    var isProj=jobs.length===1;
+    s.innerHTML=''
+      +'<div class="row-top"><div><div class="hello">Good evening,</div><h1 class="big">That\'s a wrap</h1></div>'+av+'</div>'
+      +'<div class="card"><div class="eyebrow" style="margin-top:0">Day summary</div>'
+      +'<div class="stat3"><div class="s"><div class="n">'+hoursOnShift()+'</div><div class="l">On shift</div></div>'
+      +'<div class="s"><div class="n">'+(isProj?"1":doneCount)+'</div><div class="l">'+(isProj?"Project day":"Jobs done")+'</div></div>'
+      +'<div class="s"><div class="n">'+(mi!=null?mi:"—")+'</div><div class="l">Miles</div></div></div>'
+      +(shift.start_mileage!=null?'<div class="miniline" style="margin-top:12px">Start '+shift.start_mileage.toLocaleString()+(shift.end_mileage!=null?' → end '+shift.end_mileage.toLocaleString():'')+' mi</div>':'')
+      +(shift.fuel?'<div class="miniline">Fuel: '+esc(shift.fuel)+'</div>':'')
+      +'<div class="miniline">On '+fmtTime(shift.clock_on_at)+' → Off '+fmtTime(shift.clock_off_at)+'</div></div>'
+      +historyCard();
+  }
+  function hoursOnShift(){ if(!shift||!shift.clock_on_at||!shift.clock_off_at) return "—"; var h=(new Date(shift.clock_off_at)-new Date(shift.clock_on_at))/3600000; return (Math.round(h*10)/10)+"h"; }
+
+  function clockStrip(){
+    var s=shift; var mi=(s&&s.start_mileage!=null)?(" · start "+s.start_mileage.toLocaleString()+" mi"):"";
+    return '<div class="card" style="padding:12px 14px"><div class="miniline">✅ Van check done'+(vcState==="done"?" this week":"")+'</div>'
+      +'<div class="miniline">⏱ Clocked on '+fmtTime(s&&s.clock_on_at)+mi+' <span class="k act" id="endBtn">End my day</span></div></div>';
+  }
+  function wireClock(){ var b=$("endBtn"); if(b) b.onclick=function(){ endDay(); }; }
+
+  function timeline(){
+    var nextJob=jobs.find(function(x){return !isDone(x);});
+    return '<div class="tl">'+jobs.map(function(j){
+      var done=isDone(j); var cls=done?"done":(j===nextJob?"now":"");
+      var right=done?'<span class="pill ok">DONE</span>':'<span class="pill grey">'+esc(j.scheduledAt?fmtTime(j.scheduledAt):(j.status||""))+'</span>';
+      return '<a class="stop '+cls+'" style="display:block;text-decoration:none;color:inherit" href="'+jobHref(j)+'"><div class="dot"></div><div class="stopcard"><div class="t"><b>'+esc(jobName(j))+'</b>'+right+'</div><div class="m">'+esc(String(j.address||j.siteName||"").slice(0,60))+'</div></div></a>';
+    }).join("")+'</div>';
+  }
+  function legend(){ return '<div class="legend"><span><i style="background:var(--urgent)"></i>Urgent</span><span><i style="background:var(--accent)"></i>Scheduled</span><span><i style="background:var(--amber)"></i>On hold</span><span><i style="background:var(--ok)"></i>Done</span></div>'; }
+
+  var map=null,layer=null;
+  async function drawMap(){
+    var host=$("map"); if(!host) return;
+    if(typeof L==="undefined"){ host.innerHTML='<div class="miniline" style="justify-content:center;height:100%;margin:0">Map offline</div>'; return; }
+    await geocode(jobs.map(jobPostcode));
+    if(!map){ map=L.map(host,{zoomControl:false,attributionControl:false}); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map); layer=L.layerGroup().addTo(map); }
+    setTimeout(function(){
+      map.invalidateSize(); layer.clearLayers(); var pts=[];
+      jobs.forEach(function(j){ var pt=jobCoords(j); if(!pt) return; var col=isDone(j)?"#17b26a":(isUrgent(j)?"#e0344b":(STATUS_COL[j.status]||"#2f6fed"));
+        var m=L.circleMarker(pt,{radius:9,color:"#fff",weight:2,fillColor:col.indexOf("var(")<0?col:"#2f6fed",fillOpacity:.95});
+        m.bindPopup('<b>'+esc(jobName(j))+'</b><br><a href="'+jobHref(j)+'">Open job →</a>'); m.addTo(layer); pts.push(pt);
+      });
+      if(pts.length){ map.fitBounds(pts,{padding:[30,30],maxZoom:13}); } else { map.setView([51.27,-0.75],9); }
+    },80);
+  }
+
+  function historyCard(){ return '<div class="card" style="padding:12px 14px;margin-top:12px"><div class="miniline">📅 My work history <a class="k act" href="engineer-jobs.html" style="text-decoration:none">This week ›</a></div></div>'; }
+
+  // ---- van check + clock on ----
+  function openVc(){
+    $("vcList").innerHTML=VC_ITEMS.map(function(v){return '<div class="vc"><span class="box">✓</span>'+esc(v)+'</div>';}).join("");
+    [].forEach.call($("vcList").children,function(el){ el.onclick=function(){ el.classList.toggle("on"); }; });
+    $("vcMiles").value=""; $("vcSafe").classList.remove("on"); $("vcDefects").value=""; $("vcMsg").textContent="";
+    $("vcModal").classList.add("show");
+  }
+  $("vcSafe").onclick=function(){ this.classList.toggle("on"); };
+  $("vcCancel").onclick=function(){ $("vcModal").classList.remove("show"); };
+  $("vcSubmit").onclick=async function(){
+    if($("vcList").querySelectorAll(".vc.on").length<VC_ITEMS.length){ $("vcMsg").textContent="Tick every item."; return; }
+    if(!$("vcSafe").classList.contains("on")){ $("vcMsg").textContent="Confirm the van is safe to drive."; return; }
+    var m=parseInt($("vcMiles").value,10); if(!(m>0)){ $("vcMsg").textContent="Enter the start mileage."; return; }
+    var items={}; VC_ITEMS.forEach(function(v,i){ items[v]=$("vcList").children[i].classList.contains("on"); });
+    try{ await jfetch("/vehicle-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,week:mondayOfWeek(),safeToDrive:true,items:items,note:$("vcDefects").value.trim(),startMileage:m})}); }catch(e){}
+    vcState="done"; $("vcModal").classList.remove("show");
+    await doClockOn(m); toast("Van check done — you're clocked on");
+  };
+  async function startDay(){
+    if(vcState!=="done"){ openVc(); return; }   // van check enforced before clock-on
+    var m=prompt("Start mileage on the van? (optional)"); await doClockOn((m&&!isNaN(+m))?Math.round(+m):null); toast("Clocked on — have a good day");
+  }
+  async function doClockOn(startMileage){
+    var gps=await getGps();
+    try{ await jfetch("/shift/clock-on",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,startMileage:startMileage,date:todayLocal()})}); }catch(e){}
+    await loadAll(); render();
+  }
+  async function endDay(){
+    var m=prompt("End mileage on the van? (optional)"); if(m===null&&!confirm("End your day now?")) return;
+    var endMileage=(m&&!isNaN(+m))?Math.round(+m):null;
+    var fuel=prompt("Fuel added today? (£ or litres — optional)")||"";
+    var gps=await getGps();
+    try{ await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal()})}); }catch(e){}
+    await loadAll(); render(); toast("Clocked off — have a good evening");
+  }
+
+  (async function boot(){
+    try{ await loadAll(); render(); }
+    catch(err){ $("loading").innerHTML="Couldn't load your day.<br><small>"+esc(err.message)+"</small>"; }
+  })();
+})();
+</script>
+</body>
+</html>
