@@ -61,11 +61,14 @@
     .stop .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.stop .t b{font-size:15px}
     .stop .m{color:var(--muted);font-size:12.5px;margin-top:3px}
     .stop.done .stopcard{opacity:.72}.stop.done b{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
-    #map{height:180px;border-radius:14px;border:1px solid var(--line);overflow:hidden;background:var(--chip)}
+    /* isolate the Leaflet map so its internal pane z-indexes (200-700) can't
+       paint over modals/toasts that sit above it in the page */
+    #map{height:180px;border-radius:14px;border:1px solid var(--line);overflow:hidden;background:var(--chip);position:relative;z-index:0;isolation:isolate}
+    .leaflet-pane,.leaflet-top,.leaflet-bottom{z-index:1}
     .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)}
     .legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:9px;height:9px;border-radius:50%}
     .due{background:color-mix(in srgb,var(--amber) 13%,var(--card));border:1px solid color-mix(in srgb,var(--amber) 40%,var(--line));border-radius:12px;padding:11px 13px;font-size:13px;margin:10px 0}
-    .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:40}.modal.show{display:flex}
+    .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:3000}.modal.show{display:flex}
     .sheet{background:var(--card);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:92%;overflow:auto}
     .sheet h3{margin:0 0 4px}
     .vc{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px;cursor:pointer;border-bottom:1px solid var(--line)}
@@ -74,7 +77,7 @@
     .flbl{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px}
     .safe{display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--line);border-radius:12px;margin-top:12px;cursor:pointer;font-weight:650}
     .safe.on{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card))}
-    .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:4000;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
     #loading{padding:60px 0;text-align:center;color:var(--muted)}
     .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
     .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
