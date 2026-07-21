@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="/portal-config.js?v=2"></script>
+  <script src="/ml-perms.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>You — Mostlane</title>
@@ -49,29 +50,29 @@
   <div class="prof"><div class="av" id="avatar">··</div><div><h2 id="name">…</h2><div class="role" id="role">Engineer</div></div></div>
 
   <div class="stat2">
-    <div class="stat"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
-    <div class="stat"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
+    <div class="stat" data-perm="Holiday"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
+    <div class="stat" data-perm="EngTimesheet"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
   </div>
 
-  <div class="grouplbl">My kit &amp; access</div>
-  <div class="card list">
-    <a href="my-assets.html"><span class="ic">🧰</span>Plant &amp; equipment held<span class="ch">›</span></a>
+  <div class="grouplbl" data-group>My kit &amp; access</div>
+  <div class="card list" data-group>
+    <a href="my-assets.html" data-perm="Assets"><span class="ic">🧰</span>Plant &amp; equipment held<span class="ch">›</span></a>
     <a href="keys.html"><span class="ic">🔑</span>Keys signed to me<span class="ch">›</span></a>
     <a href="van-check.html" id="vanLink"><span class="ic">🚐</span>Van check<span class="ch">›</span></a>
     <a href="oncall_current.html"><span class="ic">📞</span>Availability &amp; on-call<span class="ch">›</span></a>
   </div>
 
-  <div class="grouplbl">My records</div>
-  <div class="card list">
-    <a href="my-documents.html"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
-    <a href="holiday.html"><span class="ic">🌴</span>Holiday<span class="ch">›</span></a>
-    <a href="engineer-timesheet.html"><span class="ic">⏱️</span>My timesheet<span class="ch">›</span></a>
+  <div class="grouplbl" data-group>My records</div>
+  <div class="card list" data-group>
+    <a href="my-documents.html" data-perm="MyDocuments"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
+    <a href="holiday.html" data-perm="Holiday"><span class="ic">🌴</span>Holiday<span class="ch">›</span></a>
+    <a href="engineer-timesheet.html" data-perm="EngTimesheet"><span class="ic">⏱️</span>My timesheet<span class="ch">›</span></a>
   </div>
 
-  <div class="grouplbl">Settings</div>
-  <div class="card list">
+  <div class="grouplbl" data-group>Settings</div>
+  <div class="card list" data-group>
     <a href="notifications.html"><span class="ic">🔔</span>Notifications<span class="ch">›</span></a>
-    <a href="personalise.html"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
+    <a href="personalise.html" data-perm="Personalise"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
     <a href="change-password.html"><span class="ic">🔒</span>Password &amp; device<span class="ch">›</span></a>
     <a href="help.html"><span class="ic">❓</span>Help &amp; support<span class="ch">›</span></a>
   </div>
@@ -103,17 +104,32 @@
   $("avatar").textContent=initials(name);
   try{ var veh=localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""; if(veh) $("role").textContent="Engineer · Van "+veh; }catch(e){}
 
-  // Holiday days left (best-effort).
-  afetch("/holiday/summary").then(function(r){return r.json();}).then(function(j){
-    if(j && (j.remaining!=null)){ $("holN").textContent=Math.round(j.remaining*10)/10; }
-  }).catch(function(){});
+  // Permission gating — shared with main.html via /ml-perms.js (single source).
+  // Hide any link/stat the user's permissions don't unlock, then collapse a
+  // group whose links are all hidden. FullAccess (you, Jamie) sees everything.
+  var can = window.mlCan || function(){ return true; };   // fail-open if the shared file didn't load
+  [].forEach.call(document.querySelectorAll("[data-perm]"), function(el){
+    if(!can(el.getAttribute("data-perm"))) el.style.display="none";
+  });
+  [].forEach.call(document.querySelectorAll(".card.list[data-group]"), function(card){
+    var anyVisible = [].some.call(card.querySelectorAll("a"), function(a){ return a.style.display!=="none"; });
+    if(!anyVisible){ card.style.display="none"; if(card.previousElementSibling && card.previousElementSibling.hasAttribute("data-group")) card.previousElementSibling.style.display="none"; }
+  });
 
-  // Hours this week (best-effort — reads whichever total key the worker returns).
-  afetch("/ts/my").then(function(r){return r.json();}).then(function(j){
-    var t=j&&j.totals; if(!t) return;
-    var h=t.hours!=null?t.hours:(t.paidHours!=null?t.paidHours:(t.totalHours!=null?t.totalHours:null));
-    if(h!=null) $("hrsN").textContent=Math.round(h*10)/10;
-  }).catch(function(){});
+  // Holiday days left — only fetch/show if they can request holiday.
+  if(can("Holiday")){
+    afetch("/holiday/summary").then(function(r){return r.json();}).then(function(j){
+      if(j && (j.remaining!=null)){ $("holN").textContent=Math.round(j.remaining*10)/10; }
+    }).catch(function(){});
+  }
+  // Hours this week — only if they have an engineer timesheet.
+  if(can("EngTimesheet")){
+    afetch("/ts/my").then(function(r){return r.json();}).then(function(j){
+      var t=j&&j.totals; if(!t) return;
+      var h=t.hours!=null?t.hours:(t.paidHours!=null?t.paidHours:(t.totalHours!=null?t.totalHours:null));
+      if(h!=null) $("hrsN").textContent=Math.round(h*10)/10;
+    }).catch(function(){});
+  }
 
   $("signout").onclick=function(){
     try{
