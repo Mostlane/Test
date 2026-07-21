@@ -4155,6 +4155,31 @@ async function handle7(request, env, ctx, url, sess) {
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
 
+// src/lib/idempotency.js
+var READY = false;
+async function ensure(env) {
+  if (READY) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS idempotency (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    op_id TEXT PRIMARY KEY,
+    scope TEXT,
+    at TEXT
+  )`).run();
+  READY = true;
+}
+async function firstTime(env, tenantId, opId, scope) {
+  if (!opId) return true;
+  await ensure(env);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO idempotency (tenant_id, op_id, scope, at) VALUES (?,?,?,?)"
+    ).bind(tenantId, String(opId).slice(0, 120), String(scope || "").slice(0, 60), (/* @__PURE__ */ new Date()).toISOString()).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // src/routes/sla.js
 async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -4201,6 +4226,36 @@ async function handle8(request, env, ctx, url, sess) {
     const cats = (await getCategories(env, tenantId)).filter((c) => c.name.toLowerCase() !== name.toLowerCase());
     await setCategories(env, tenantId, cats);
     return jsonResponse({ ok: true, moved, categories: cats }, headers);
+  }
+  if (subpath === "/holds/pending" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const jobs = await listJobs(env, tenantId);
+    const holds = jobs.filter((j) => j.hold && j.hold.approval && j.hold.approval.state === "pending").map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      site: j.siteName || j.siteCode || "",
+      reason: j.hold && j.hold.reason || "",
+      needs: j.hold && j.hold.needs || "",
+      requestedBy: j.hold.approval.requestedBy || "",
+      requestedAt: j.hold.approval.requestedAt || ""
+    })).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
+    return jsonResponse({ ok: true, holds }, headers);
+  }
+  if (subpath === "/safety/open" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const jobs = await listJobs(env, tenantId);
+    const flags = jobs.filter((j) => j.raBlock && j.raBlock.state === "open").map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      site: j.siteName || j.siteCode || "",
+      reason: j.raBlock.reason || "",
+      items: j.raBlock.items || [],
+      by: j.raBlock.by || "",
+      at: j.raBlock.at || ""
+    })).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    return jsonResponse({ ok: true, flags }, headers);
   }
   if (subpath === "/inbound" && method === "GET") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
@@ -4663,20 +4718,30 @@ async function handle8(request, env, ctx, url, sess) {
       const form = await request.formData();
       const file = form.get("file");
       if (!filename || !file) return jsonResponse({ error: "Missing file" }, headers, 400);
+      const stageIn = searchParams.get("stage");
+      const stage = PHOTO_STAGES.includes(stageIn) ? stageIn : "";
       const key = `jobs/${id}/photos/${filename}`;
-      await env.JOB_FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type } });
-      return jsonResponse({ ok: true, publicURL: r2Url(env, key) }, headers, 201);
+      await env.JOB_FILES.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type },
+        customMetadata: stage ? { stage } : void 0
+      });
+      return jsonResponse({ ok: true, publicURL: r2Url(env, key), stage }, headers, 201);
     }
     if (parts[2] === "files" && method === "GET") {
-      const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
+      const listed = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/`, include: ["customMetadata"] });
       return jsonResponse({ files: listed.objects.map((o) => ({
         name: o.key.split("/").pop(),
-        publicURL: r2Url(env, o.key)
+        publicURL: r2Url(env, o.key),
+        stage: o.customMetadata && o.customMetadata.stage || ""
       })) }, headers);
     }
     if (parts[2] === "signature" && method === "POST") {
-      const { signedBy, signedAt, signatureBase64 } = await readJson2(request);
+      const { signedBy, signedAt, signatureBase64, opId } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
+      if (opId && !await firstTime(env, tenantId, opId, "sig:" + id)) {
+        const cur = await getJob(env, tenantId, id);
+        return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
+      }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
@@ -4688,6 +4753,105 @@ async function handle8(request, env, ctx, url, sess) {
         await saveJob(env, tenantId, job);
       }
       return jsonResponse({ ok: true, key, publicURL: r2Url(env, key) }, headers, 201);
+    }
+    if (parts[2] === "hold-approve" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
+      job.hold = job.hold || {};
+      job.hold.approval = { state: "approved", requestedBy, by: sess.user.username, at: now };
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "On Hold \u2014 approved", at: now, by: sess.user.username });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      const eng = requestedBy || assignedList(job)[0];
+      if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
+        title: "On-hold approved",
+        body: `${job.helpdeskRef || id} was approved to stay on hold \u2014 you're clear to move on.`,
+        url: "/engineer-jobs.html",
+        tag: "hold-decided:" + id
+      }));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+    if (parts[2] === "hold-reject" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const body = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const requestedBy = job.hold && job.hold.approval && job.hold.approval.requestedBy || "";
+      job.hold = job.hold || {};
+      job.hold.approval = { state: "rejected", requestedBy, by: sess.user.username, at: now, reason: String(body.reason || "").slice(0, 300) };
+      job.status = "In Progress";
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "In Progress", at: now, by: sess.user.username });
+      job.events ||= [];
+      job.events.push({ at: now, by: sess.user.username, type: "note", note: "On-hold rejected" + (body.reason ? ": " + body.reason : "") });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      const eng = requestedBy || assignedList(job)[0];
+      if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
+        title: "On-hold not approved",
+        body: `${job.helpdeskRef || id}: ${body.reason || "the office needs this finished"} \u2014 tap to continue.`,
+        url: "/job-view.html?jobId=" + encodeURIComponent(id),
+        tag: "hold-decided:" + id
+      }));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+    if (parts[2] === "ra-block" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson2(request);
+      const reason = String(b.reason || "").trim();
+      if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      job.raBlock = {
+        state: "open",
+        reason: reason.slice(0, 500),
+        items: Array.isArray(b.items) ? b.items.slice(0, 10).map((x) => String(x).slice(0, 120)) : [],
+        by: sess.user.username,
+        at: now
+      };
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Awaiting office (safety)", at: now, by: sess.user.username });
+      job.events ||= [];
+      job.events.push({ at: now, by: sess.user.username, type: "note", note: "Can't proceed safely: " + reason });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+        title: "\u26A0 Safety flag \u2014 can't proceed",
+        body: `${sess.user.username} can't proceed at ${job.helpdeskRef || id}: ${reason.slice(0, 80)}`,
+        url: "/inbox.html",
+        tag: "ra-block:" + id
+      }, sess.user.username));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+    if (parts[2] === "ra-resolve" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
+      const note = String(b.note || "").slice(0, 300);
+      job.raBlock = Object.assign({}, job.raBlock, { state: "resolved", resolvedBy: sess.user.username, resolvedAt: now, resolveNote: note });
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Safety flag resolved", at: now, by: sess.user.username });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
+        title: "Safety flag resolved",
+        body: `${job.helpdeskRef || id}: ${note || "the office has actioned it"} \u2014 tap to continue.`,
+        url: "/job-view.html?jobId=" + encodeURIComponent(id),
+        tag: "ra-block:" + id
+      }));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
@@ -4710,9 +4874,45 @@ async function handle8(request, env, ctx, url, sess) {
     }
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
-      const updated = await patchJob(env, tenantId, id, await readJson2(request));
+      const body = await readJson2(request);
+      if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
+        return before ? jsonResponse(decorateJobWithLiveSla(before), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+      }
+      if (before && sess) {
+        const perms = await permissionsFor(env, tenantId, sess.user.username);
+        const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
+        const catNames = (await getCategories(env, tenantId)).map((c) => c.name);
+        const target = body.status ? normalizeStatus(body.status, catNames) : before.status;
+        if (!isAdmin && body.status && target !== before.status) {
+          let missing = [];
+          if (target === "Complete") missing = completionMissing(before, body, await jobPhotoCount(env, id));
+          else if (target === "Quote") missing = quoteMissing(before, body, await jobPhotoCount(env, id));
+          else if (target === "In Progress") missing = raMissing(body, before);
+          else if (target === "On Hold") missing = holdMissing(body, before);
+          if (missing.length)
+            return jsonResponse({ error: `Can't set ${target} yet \u2014 still needs ${humanList(missing)}.`, missing, needs: target }, headers, 422);
+        }
+        if (!isAdmin && body.status && (target === "Travelling" || target === "In Progress")) {
+          const blocker = await findBlockingJob(env, tenantId, sess.user.username, id);
+          if (blocker)
+            return jsonResponse({ error: `Finish ${blocker.ref} first \u2014 ${blocker.why}.`, blockingJob: blocker }, headers, 409);
+        }
+        if (body.status && target === "On Hold" && before.status !== "On Hold") {
+          body.hold = Object.assign({}, before.hold, body.hold);
+          body.hold.approval = isAdmin ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString(), auto: true } : { state: "pending", requestedBy: sess.user.username, requestedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        }
+      }
+      const updated = await patchJob(env, tenantId, id, body);
       if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      if (updated && updated.hold?.approval?.state === "pending" && before?.hold?.approval?.state !== "pending") {
+        ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+          title: "On-hold approval needed",
+          body: `${updated.hold.approval.requestedBy} wants to hold ${updated.helpdeskRef || id}: ${String(updated.hold.reason || "").slice(0, 60)}`,
+          url: "/inbox.html",
+          tag: "hold-approve:" + id
+        }, updated.hold.approval.requestedBy));
+      }
       return updated ? jsonResponse(decorateJobWithLiveSla(updated), headers) : jsonResponse({ error: "Not found" }, headers, 404);
     }
   }
@@ -4861,6 +5061,67 @@ async function handle8(request, env, ctx, url, sess) {
     } });
   }
   return jsonResponse({ error: "Not found" }, headers, 404);
+}
+var PHOTO_STAGES = ["Before", "During", "After"];
+var MIN_COMPLETE_NOTE = 15;
+async function jobPhotoCount(env, id) {
+  try {
+    const l = await env.JOB_FILES.list({ prefix: `jobs/${id}/photos/` });
+    return (l.objects || []).length;
+  } catch {
+    return 0;
+  }
+}
+function humanList(items) {
+  const a = items.filter(Boolean);
+  if (a.length <= 1) return a.join("");
+  return a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
+}
+function completionMissing(job, patch, photoCount) {
+  const miss = [];
+  if (String(patch.note || "").trim().length < MIN_COMPLETE_NOTE) miss.push("a completion note");
+  if (photoCount < 1) miss.push("at least one photo");
+  if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
+  return miss;
+}
+function quoteMissing(job, patch, photoCount) {
+  const q = patch.quote && typeof patch.quote === "object" ? patch.quote : job.quote || {};
+  const miss = [];
+  if (!String(q.description || "").trim()) miss.push("the works description");
+  if (!String(q.reason || "").trim()) miss.push("why it needs quoting");
+  if (!String(q.materials || "").trim()) miss.push("the materials");
+  if (photoCount < 1) miss.push("at least one photo");
+  if (!job.signature || !job.signature.fileKey) miss.push("the customer signature");
+  return miss;
+}
+function holdMissing(patch, job) {
+  const h = patch.hold && typeof patch.hold === "object" ? patch.hold : job.hold || {};
+  const miss = [];
+  if (!String(h.reason || "").trim()) miss.push("the reason");
+  if (!String(h.needs || "").trim()) miss.push("what's needed to resume");
+  return miss;
+}
+function raMissing(patch, job) {
+  const ra = patch.riskAssessment && typeof patch.riskAssessment === "object" ? patch.riskAssessment : job.riskAssessment || {};
+  return ra.safe === true ? [] : ["the risk assessment (safe to proceed)"];
+}
+async function findBlockingJob(env, tenantId, username, exceptId) {
+  const uNorm = normId(username);
+  const jobs = await listJobs(env, tenantId);
+  for (const j of jobs) {
+    if (String(j.id) === String(exceptId)) continue;
+    if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
+    if (j.raBlock && j.raBlock.state === "open")
+      return { id: j.id, ref: j.helpdeskRef || j.id, why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
+    if (j.status === "In Progress" || j.status === "Travelling")
+      return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${j.status}` };
+    if (j.status === "On Hold") {
+      const ap = j.hold && j.hold.approval;
+      if (!ap || ap.state !== "approved")
+        return { id: j.id, ref: j.helpdeskRef || j.id, why: "its on-hold is waiting for an admin to approve" };
+    }
+  }
+  return null;
 }
 async function readJson2(r) {
   const t = await r.text();
@@ -6565,10 +6826,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure(u.username);
+    const ensure3 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure3(u.username);
     for (const r of results || []) {
-      const e = ensure(r.username);
+      const e = ensure3(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -8341,6 +8602,103 @@ async function seedAssignments(env, tid) {
   }
 }
 
+// src/routes/messages.js
+var READY2 = false;
+async function ensure2(env) {
+  if (READY2) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    from_user TEXT NOT NULL,
+    to_user TEXT NOT NULL,
+    body TEXT NOT NULL,
+    at TEXT NOT NULL,
+    seen INTEGER NOT NULL DEFAULT 0
+  )`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen)").run();
+  } catch {
+  }
+  READY2 = true;
+}
+function jr4(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson5(r) {
+  try {
+    return await r.json();
+  } catch {
+    return {};
+  }
+}
+var lc = (s) => String(s || "").toLowerCase();
+async function handle21(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/messages(?=\/|$)/, "") || "/";
+  await ensure2(env);
+  if (sub === "/unread" && method === "GET") {
+    const r = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
+    ).bind(tid, me).first();
+    return jr4({ ok: true, unread: r && r.n || 0 }, headers);
+  }
+  if ((sub === "/" || sub === "/threads") && method === "GET") {
+    const { results } = await env.DB.prepare(
+      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) ORDER BY id DESC LIMIT 500"
+    ).bind(tid, me, me).all();
+    const byOther = {};
+    for (const m of results || []) {
+      const other = lc(m.from_user) === lc(me) ? m.to_user : m.from_user;
+      const key = lc(other);
+      if (!byOther[key]) byOther[key] = { with: other, last: m.body, at: m.at, unread: 0 };
+      if (lc(m.to_user) === lc(me) && !m.seen) byOther[key].unread++;
+    }
+    const threads = Object.values(byOther).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    return jr4({ ok: true, threads }, headers);
+  }
+  if (sub === "/thread" && method === "GET") {
+    const other = (url.searchParams.get("with") || "").trim();
+    if (!other) return jr4({ error: "with required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?))) ORDER BY id ASC LIMIT 500"
+    ).bind(tid, me, other, other, me).all();
+    ctx?.waitUntil(env.DB.prepare(
+      "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
+    ).bind(tid, me, other).run());
+    const messages = (results || []).map((m) => ({ id: m.id, mine: lc(m.from_user) === lc(me), from: m.from_user, body: m.body, at: m.at }));
+    return jr4({ ok: true, with: other, messages }, headers);
+  }
+  if (sub === "/send" && method === "POST") {
+    const b = await readJson5(request);
+    const to = String(b.to || "").trim();
+    const body = String(b.body || "").trim().slice(0, 2e3);
+    if (!to || !body) return jr4({ error: "to and body required" }, headers, 400);
+    if (!await firstTime(env, tid, b.opId, "msg")) return jr4({ ok: true, duplicate: true }, headers);
+    const row = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, to).first();
+    const toUser = row ? row.username : to;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const res = await env.DB.prepare(
+      "INSERT INTO messages (tenant_id, from_user, to_user, body, at, seen) VALUES (?,?,?,?,?,0)"
+    ).bind(tid, me, toUser, body, at).run();
+    ctx?.waitUntil(sendToUser(env, tid, toUser, { title: "Message from " + me, body: body.slice(0, 120), url: "/inbox.html", tag: "msg:" + lc(me) }));
+    return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null, at, to: toUser }, headers, 201);
+  }
+  if (sub === "/read" && method === "POST") {
+    const b = await readJson5(request);
+    const other = String(b.with || "").trim();
+    if (!other) return jr4({ error: "with required" }, headers, 400);
+    await env.DB.prepare(
+      "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
+    ).bind(tid, me, other).run();
+    return jr4({ ok: true }, headers);
+  }
+  return jr4({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -8370,6 +8728,8 @@ var ROUTES = [
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
+  ["*", "/messages", handle21],
+  // office ↔ engineer messages (Inbox)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
   ["*", "/get-sites", handle9],

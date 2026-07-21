@@ -426,21 +426,21 @@ function jobCardInner(job, slaInfo, target){
   const addr = escH([...new Set([job.address, pc].map(x => String(x||"").trim()).filter(Boolean))]
     .filter(a => !String(siteRaw).includes(a)).join(" · "));
   const dir = dirUrl(job);
+  // Engineer view — deliberately NO SLA information (no countdown, target or
+  // P-number). Just the site, address and the plain job status.
   return `
       <div class="job-top">
         <span class="ref">${escH(job.helpdeskRef || job.id)}</span>
         <span class="grow"></span>
-        <span class="priority-badge ${prioClass(job.priority)}">${prioLabel(job.priority)}</span>
       </div>
       <div class="job-site">${site}</div>
       ${addr ? `<div class="job-addr">${addr}</div>` : ""}
       <div class="job-meta">
-        <span class="${slaInfo.cls}" data-sla-target="${target || ""}">${slaInfo.text}</span>
         <span class="${statusClass(job.status, slaInfo.status)}">${escH(job.status || "Open")}</span>
       </div>
       <div class="job-actions">
         ${dir ? `<a class="act dir" href="${dir}" target="_blank" rel="noopener" aria-label="Directions">🧭</a>` : ""}
-        <a class="act open" href="job-view.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">Open job →</a>
+        <a class="act open" href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html">Open job →</a>
       </div>`;
 }
 
@@ -859,7 +859,7 @@ async function openDayMap(){
           ${escH(job.description||"")}<br>
           <span style="color:#6b7280;">${escH(job.siteName||job.address||"")}</span><br>
           ${job.scheduledAt ? "🗓 " + new Date(job.scheduledAt).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) + "<br>" : ""}
-          <a href="job-view.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html" style="color:#1d4ed8;font-weight:600;">Open job →</a>
+          <a href="engineer-job.html?jobId=${encodeURIComponent(job.id)}&back=engineer-jobs.html" style="color:#1d4ed8;font-weight:600;">Open job →</a>
           ${dirUrl(job) ? ` · <a href="${dirUrl(job)}" target="_blank" rel="noopener" style="color:#1d4ed8;">Directions</a>` : ""}
         </div>`);
       m.addTo(dayMapLayer);
@@ -917,7 +917,7 @@ async function checkBlocked(){
       const ref = escH(blocking.helpdeskRef || blocking.id);
       banner.innerHTML = `⚠️ <b>Job ${ref}</b> is <b>${escH(blocking.status)}</b> but is missing the required details. ` +
         `You can't start another job until it's completed. ` +
-        `<a href="job-view.html?jobId=${encodeURIComponent(blocking.id)}&back=engineer-jobs.html" style="color:#b91c1c;font-weight:700;">Complete it now →</a>`;
+        `<a href="engineer-job.html?jobId=${encodeURIComponent(blocking.id)}&back=engineer-jobs.html" style="color:#b91c1c;font-weight:700;">Complete it now →</a>`;
       banner.style.display = "block";
     }else{
       banner.style.display = "none";

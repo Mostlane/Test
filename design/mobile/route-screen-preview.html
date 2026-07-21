@@ -1,0 +1,235 @@
+<title>Mostlane — Route screen (working preview)</title>
+<style>
+  :root{
+    --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+    --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+    --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+    --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+  :root[data-theme="dark"]{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}
+  :root[data-theme="light"]{--bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;--panel:#0f1f38;--chip:#eef2f8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 14px 40px}
+  .pitch{max-width:390px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}.pitch b{color:var(--ink)}
+  .phone{width:390px;max-width:100%;background:var(--card);border-radius:34px;box-shadow:var(--shadow),0 0 0 10px color-mix(in srgb,var(--panel) 92%,#000);overflow:hidden;height:820px;display:flex;flex-direction:column;position:relative}
+  .statusbar{height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;font-weight:600;color:var(--muted)}
+  .demobar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 14px;background:color-mix(in srgb,var(--amber) 10%,var(--card));border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .demobar b{color:var(--ink)}
+  .seg{display:flex;margin-left:auto;background:var(--chip);border-radius:9px;padding:3px;gap:3px}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px;cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(16,32,58,.14)}
+  .screen{flex:1;overflow-y:auto;padding:6px 16px 30px}.screen::-webkit-scrollbar{width:0}
+
+  .row-top{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+  .hello{font-size:13px;color:var(--muted)} h1.big{font-size:25px;margin:2px 0 0;letter-spacing:-.02em}
+  .avatar{width:44px;height:44px;border-radius:50%;background:var(--panel);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+  .eyebrow{font-size:12px;color:var(--muted);font-weight:700;margin:16px 2px 2px;text-transform:uppercase;letter-spacing:.05em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin:12px 0;box-shadow:0 1px 0 rgba(16,32,58,.03)}
+  .hero{background:var(--panel);color:var(--panel-ink);border:0;border-radius:20px;padding:18px}
+  .hero .lbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--panel-sub);font-weight:700}
+  .hero h2{margin:8px 0 4px;font-size:21px}.hero .sub{color:var(--panel-sub);font-size:13px}
+  .hero .btns{display:flex;gap:10px;margin-top:16px}
+  .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:15px;border-radius:12px;padding:13px 16px;flex:1;text-align:center;transition:filter .15s,transform .06s}
+  .btn:active{transform:translateY(1px)}.btn.primary{background:var(--accent);color:#fff}
+  .btn.ghost{background:color-mix(in srgb,#fff 12%,transparent);color:#fff}
+  .btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}.btn.wide{width:100%;flex:none}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:5px 9px;border-radius:999px}
+  .pill.urgent{background:var(--urgent);color:#fff}.pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+  .pill.amber{background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--amber)}.pill.grey{background:var(--chip);color:var(--muted)}
+  .pill.proj{background:color-mix(in srgb,var(--purple) 16%,transparent);color:var(--purple)}
+
+  .miniline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin:5px 0}
+  .miniline .k{margin-left:auto} .miniline .k.act{color:var(--accent);font-weight:700;cursor:pointer}
+  .stat3{display:flex;gap:10px;margin-top:10px}
+  .stat3 .s{flex:1;background:var(--chip);border-radius:12px;padding:10px;text-align:center}
+  .stat3 .n{font-size:19px;font-weight:800}.stat3 .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+
+  /* project focus */
+  .prog{height:8px;border-radius:999px;background:var(--chip);overflow:hidden;margin:10px 0 4px}
+  .prog i{display:block;height:100%;background:var(--purple)}
+  .tools{display:flex;gap:8px;margin-top:12px}
+  .tool{flex:1;border:1px solid rgba(255,255,255,.18);background:color-mix(in srgb,#fff 10%,transparent);color:#fff;border-radius:11px;padding:11px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer}
+  .task{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+  .task:last-child{border:0}
+  .box{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:0 0 auto;display:grid;place-items:center;color:#fff;font-size:13px}
+  .task.on .box{background:var(--ok);border-color:var(--ok)}.task.on{color:var(--muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 50%,transparent)}
+
+  .tl{position:relative;margin:6px 0 0 6px;padding-left:20px}
+  .tl:before{content:"";position:absolute;left:5px;top:8px;bottom:16px;width:2px;background:var(--line)}
+  .stop{position:relative;margin:10px 0;cursor:pointer}
+  .stop .dot{position:absolute;left:-19px;top:16px;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--muted)}
+  .stop.done .dot{background:var(--ok);border-color:var(--ok)} .stop.now .dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .stopcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 14px}
+  .stop.now .stopcard{border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+  .stop .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.stop .t b{font-size:15px}
+  .stop .m{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .stop.done .stopcard{opacity:.72}.stop.done b{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
+
+  .map{height:160px;border-radius:14px;border:1px solid var(--line);position:relative;overflow:hidden;
+    background:linear-gradient(0deg,rgba(0,0,0,.03),rgba(0,0,0,.03)),repeating-linear-gradient(0deg,transparent 0 22px,color-mix(in srgb,var(--muted) 10%,transparent) 22px 23px),repeating-linear-gradient(90deg,transparent 0 22px,color-mix(in srgb,var(--muted) 10%,transparent) 22px 23px),color-mix(in srgb,var(--accent) 6%,var(--card))}
+  .map .pin{position:absolute;width:16px;height:16px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 4px color-mix(in srgb,#000 4%,transparent),0 0 16px 4px currentColor}
+  .map .cap{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--muted);background:color-mix(in srgb,var(--card) 82%,transparent);padding:3px 8px;border-radius:8px}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}.legend i{width:9px;height:9px;border-radius:50%}
+
+  .modal{position:absolute;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:20}.modal.show{display:flex}
+  .sheet{background:var(--card);width:100%;border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:90%;overflow:auto}
+  .sheet h3{margin:0 0 4px}
+  .vc{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+  .vc.on .box{background:var(--ok);border-color:var(--ok)}
+  input.txt{width:100%;border:1px solid var(--line);border-radius:11px;padding:12px;font:inherit;font-size:15px;background:var(--card);color:var(--ink);margin-top:8px}
+  .flbl{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px}
+  .safe{display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--line);border-radius:12px;margin-top:12px;cursor:pointer;font-weight:650}
+  .safe.on{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card))}
+  .toast{position:absolute;left:16px;right:16px;bottom:16px;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:30;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+  .due{background:color-mix(in srgb,var(--amber) 13%,var(--card));border:1px solid color-mix(in srgb,var(--amber) 40%,var(--line));border-radius:12px;padding:11px 13px;font-size:13px;margin:10px 0}
+</style>
+
+<div class="stage">
+  <p class="pitch"><b>Route — working preview.</b> Route picks the view automatically from how many jobs you have today: <b>one job → a single-site focus</b> (a project, or one big call-out); <b>several jobs → the call-out list</b>. Use the <b>demo toggle</b> (top of the phone) to see both. Start-of-day (van check + clock-on) is the same either way. Nothing here is live.</p>
+
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>▪ ▪▪▪ ▪</span></div>
+    <div class="demobar">DEMO · jobs today: <span class="seg" id="modeSeg"><button data-m="reactive" class="on">Several</button><button data-m="project">One</button></span></div>
+    <div class="screen" id="screen"></div>
+
+    <div class="modal" id="vcModal">
+      <div class="sheet">
+        <h3>Weekly van check</h3>
+        <div class="pitch" style="text-align:left;margin:2px 0 8px">Walk all four sides. Due by Wednesday 12:00.</div>
+        <div id="vcList"></div>
+        <label class="flbl">Odometer (start mileage)</label>
+        <input class="txt" id="vcMiles" type="number" inputmode="numeric" placeholder="e.g. 41880">
+        <div class="safe" id="vcSafe" onclick="this.classList.toggle('on')"><span class="box">✓</span>Van is safe &amp; roadworthy</div>
+        <textarea class="txt" id="vcDefects" rows="2" placeholder="Any defects? (optional)"></textarea>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn line" style="flex:1" onclick="closeVc()">Cancel</button>
+          <button class="btn primary" style="flex:2" id="vcSubmit">Submit &amp; start day</button>
+        </div>
+      </div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <p class="pitch">In the real app there's no toggle — Route just counts today's jobs. <b>One job</b> = the single-site focus (day counter for a multi-day project, directions, documents, today's tasks, "log today's work"). <b>Several</b> = the up-next + list + map. If a call-out lands on a one-job day, that's now two jobs, so it flips to the list. Both do van check, clock on/off + mileage, and open the Job screen you approved.</p>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2200);}
+
+  var mode="reactive", phase="start", startMiles=41880, endMiles=42020, fuel="";
+  var jobs=[
+    {ref:"ML-48291",title:"Burst pipe — Unit 4 kitchen",site:"Greggs · Market St, Leeds",time:"Up next",dist:"4.2 mi",status:"urgent",state:"next"},
+    {ref:"ML-48277",title:"Door closer replacement",site:"Costa · Wakefield WF1",time:"13:30",status:"scheduled",state:"then",note:"parts on van ✓"},
+    {ref:"ML-48280",title:"Quarterly HVAC service",site:"B&M · Ring Rd Retail Pk",time:"15:15",status:"scheduled",state:"then",note:"PPM checklist"},
+    {ref:"ML-48120",title:"Emergency light test",site:"Iceland · Hunslet",time:"Done 11:02",status:"done",state:"done",note:"2 photos · signed"}
+  ];
+  var project={name:"Aldi Pudsey — full refit",site:"Aldi · Robin Ln, Pudsey LS28",ref:"P0421",day:3,total:10,
+    tasks:[{t:"Second-fix lighting — aisle 4-6",done:true},{t:"Test & label distribution board B",done:false},{t:"Emergency light install — stockroom",done:false},{t:"Snag list from Tuesday",done:false}]};
+  var VC=["Lights & indicators","Tyres & wheels","Windscreen, wipers & washers","Mirrors & glass","Bodywork (walk 4 sides)","Engine oil","Coolant","Brakes & handbrake","Horn","Seatbelts","Load area secure & racking","Number plates","No leaks underneath","First aid & extinguisher"];
+  var PINCOL={urgent:"var(--urgent)",scheduled:"var(--accent)",done:"var(--ok)",project:"var(--purple)"};
+
+  $("modeSeg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;mode=b.dataset.m;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b)});render();});
+
+  function vcRows(){ $("vcList").innerHTML=VC.map(function(v){return '<div class="vc" onclick="this.classList.toggle(\'on\')"><span class="box">✓</span>'+v+'</div>';}).join(""); }
+  window.closeVc=function(){ $("vcModal").classList.remove("show"); };
+  function openVc(){ vcRows(); $("vcMiles").value=""; $("vcSafe").classList.remove("on"); $("vcModal").classList.add("show"); }
+  $("vcSubmit").onclick=function(){
+    if(document.querySelectorAll("#vcList .vc.on").length<VC.length){ toast("Tick every item"); return; }
+    if(!$("vcSafe").classList.contains("on")){ toast("Confirm the van is safe to drive"); return; }
+    var m=parseInt($("vcMiles").value,10); if(!(m>0)){ $("vcMiles").focus(); toast("Enter the start mileage"); return; }
+    startMiles=m; phase="day"; closeVc(); render(); toast("Van check done — you're clocked on");
+  };
+  window.openJob=function(ref){ toast("Opens the Job screen for "+ref); };
+  window.logDay=function(){ toast("Opens today's project log — RA on arrival, then hours + photos + notes"); };
+
+  function mapReactive(){
+    var pts=[{x:30,y:38,c:"urgent"},{x:58,y:30,c:"scheduled"},{x:46,y:62,c:"scheduled"},{x:70,y:66,c:"done"}];
+    return '<div class="map">'+pts.map(function(p){return '<div class="pin" style="left:'+p.x+'%;top:'+p.y+'%;background:'+PINCOL[p.c]+';color:'+PINCOL[p.c]+'"></div>';}).join('')
+      +'<div class="cap">4 jobs today · pins by status</div></div>'
+      +'<div class="legend"><span><i style="background:var(--urgent)"></i>Urgent</span><span><i style="background:var(--accent)"></i>Scheduled</span><span><i style="background:var(--amber)"></i>On hold</span><span><i style="background:var(--ok)"></i>Done</span></div>';
+  }
+  function mapProject(){
+    return '<div class="map"><div class="pin" style="left:50%;top:48%;background:var(--purple);color:var(--purple)"></div><div class="cap">On site · '+project.site+'</div></div>';
+  }
+  function timeline(){
+    return '<div class="tl">'+jobs.map(function(j){
+      var cls=j.state==="next"?"now":(j.state==="done"?"done":"");
+      var right=j.state==="done"?'<span class="pill ok">DONE</span>':'<span class="pill grey">'+j.time+'</span>';
+      return '<div class="stop '+cls+'" onclick="openJob(\''+j.ref+'\')"><div class="dot"></div><div class="stopcard"><div class="t"><b>'+j.title+'</b>'+right+'</div><div class="m">'+j.site+(j.note?' · '+j.note:'')+'</div></div></div>';
+    }).join("")+'</div>';
+  }
+
+  function clockStrip(){
+    return '<div class="card" style="padding:12px 14px"><div class="miniline">✅ Van check done <span class="k">start '+startMiles.toLocaleString()+' mi</span></div>'
+      +'<div class="miniline">⏱ Clocked on 08:02 <span class="k act" id="endBtn">End my day</span></div></div>';
+  }
+
+  function render(){
+    var s=$("screen");
+    if(phase==="start"){
+      s.innerHTML=''
+        +'<div class="row-top"><div><div class="hello">Good morning,</div><h1 class="big">Ready to start?</h1></div><div class="avatar">DW</div></div>'
+        +'<div class="due">🚐 Your <b>weekly van check</b> is due before you clock on (by Wednesday 12:00).</div>'
+        +'<div class="card"><div class="eyebrow" style="margin-top:0">Start of day</div>'
+        +'<div class="miniline">Vehicle · <b>NX68 KLM</b></div>'
+        +'<div class="miniline">'+(mode==="project"?('On project · <b>'+project.name+'</b>'):'4 jobs booked today')+'</div>'
+        +'<button class="btn primary wide" style="margin-top:12px" id="startBtn">▶ Start my day</button>'
+        +'<div class="pitch" style="text-align:center;margin-top:8px">Captures your GPS + van check + start mileage.</div></div>'
+        +'<div class="eyebrow">Today\'s map</div>'+(mode==="project"?mapProject():mapReactive());
+      $("startBtn").onclick=openVc;
+      return;
+    }
+    if(phase==="end"){
+      s.innerHTML=''
+        +'<div class="row-top"><div><div class="hello">Good evening,</div><h1 class="big">That\'s a wrap</h1></div><div class="avatar">DW</div></div>'
+        +'<div class="card"><div class="eyebrow" style="margin-top:0">Day summary</div>'
+        +'<div class="stat3"><div class="s"><div class="n">9.5h</div><div class="l">On shift</div></div><div class="s"><div class="n">'+(mode==="project"?"1":"3")+'</div><div class="l">'+(mode==="project"?"Project day":"Jobs done")+'</div></div><div class="s"><div class="n">'+(endMiles-startMiles)+'</div><div class="l">Miles</div></div></div>'
+        +'<div class="miniline" style="margin-top:12px">Start '+startMiles.toLocaleString()+' → end '+endMiles.toLocaleString()+' mi</div>'
+        +'<div class="miniline">Fuel: '+(fuel||"—")+'</div></div>'
+        +'<button class="btn line wide" onclick="location.reload()">↺ Replay preview</button>';
+      return;
+    }
+    // phase day
+    var head='<div class="row-top"><div><div class="hello">Good afternoon,</div><h1 class="big">'+(mode==="project"?"On site today":"Today\'s route")+'</h1></div><div class="avatar">DW</div></div>';
+    if(mode==="project"){
+      var pct=Math.round(project.day/project.total*100);
+      s.innerHTML=head
+        +'<div class="card hero" style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">You\'re on · Day '+project.day+' of ~'+project.total+'</span><span class="pill proj">PROJECT '+project.ref+'</span></div>'
+        +'<h2>'+project.name+'</h2><div class="sub">'+project.site+'</div>'
+        +'<div class="prog"><i style="width:'+pct+'%"></i></div>'
+        +'<div class="tools"><div class="tool" onclick="toast(\'Opens Google Maps\')">🗺️ Directions</div><div class="tool" onclick="toast(\'Opens Site Documents\')">📁 Documents</div></div></div>'
+        +clockStrip()
+        +'<div class="eyebrow">Today\'s tasks</div><div class="card">'+project.tasks.map(function(t){return '<div class="task'+(t.done?' on':'')+'" onclick="this.classList.toggle(\'on\')"><span class="box">✓</span>'+t.t+'</div>';}).join("")+'</div>'
+        +'<button class="btn primary wide" onclick="logDay()">▶ Log today\'s work</button>'
+        +'<div class="eyebrow">Site map</div>'+mapProject()
+        +'<div class="card" style="padding:12px 14px;margin-top:12px"><div class="miniline">📅 My work history <span class="k act" onclick="toast(\'Opens past weeks\')">View ›</span></div></div>';
+      $("endBtn").onclick=endDay;
+    } else {
+      var next=jobs.find(function(j){return j.state==="next"});
+      s.innerHTML=head
+        +'<div class="card hero" style="margin-top:14px"><div style="display:flex;justify-content:space-between;align-items:center"><span class="lbl">Up next</span><span class="pill urgent">URGENT</span></div>'
+        +'<h2>'+next.title+'</h2><div class="sub">'+next.site+' · '+next.dist+'</div>'
+        +'<div class="btns"><button class="btn ghost" onclick="toast(\'Opens Google Maps\')">Navigate</button><button class="btn primary" onclick="openJob(\''+next.ref+'\')">On my way ›</button></div></div>'
+        +clockStrip()
+        +'<div class="eyebrow">Then</div>'+timeline()
+        +'<div class="eyebrow">Today\'s map</div>'+mapReactive()
+        +'<div class="card" style="padding:12px 14px;margin-top:12px"><div class="miniline">📅 Job history <span class="k act" onclick="toast(\'Opens past weeks\')">This week ›</span></div></div>';
+      $("endBtn").onclick=endDay;
+    }
+  }
+  function endDay(){
+    var m=prompt("End mileage?", String(startMiles+140)); if(m===null) return;
+    endMiles=parseInt(m,10)||startMiles+140;
+    fuel=prompt("Fuel added? (£ or litres — optional)","")||"";
+    phase="end"; render(); toast("Clocked off — have a good evening");
+  }
+  render();
+})();
+</script>

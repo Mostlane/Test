@@ -964,7 +964,7 @@ async function init(){
     const p = (who && who.user) || {};
     const isAdmin = (p.FullAccess === "Yes") || (p.SLAAdmin === "Yes");
     if(!isAdmin){
-      if(p.SLA === "Yes"){ location.replace("engineer-jobs.html"); return; }
+      if(p.SLA === "Yes"){ location.replace("route.html"); return; }
       document.querySelector(".card").innerHTML = "<p style='padding:16px;color:#b91c1c;'>🚫 You don't have SLA Admin access.</p>";
       return;
     }

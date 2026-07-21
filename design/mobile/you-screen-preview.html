@@ -1,0 +1,91 @@
+<title>Mostlane — You (working preview)</title>
+<style>
+  :root{
+    --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+    --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+    --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;
+    --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+  :root[data-theme="dark"]{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}
+  :root[data-theme="light"]{--bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;--panel:#0f1f38;--chip:#eef2f8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 14px 40px}
+  .pitch{max-width:390px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}.pitch b{color:var(--ink)}
+  .phone{width:390px;max-width:100%;background:var(--card);border-radius:34px;box-shadow:var(--shadow),0 0 0 10px color-mix(in srgb,var(--panel) 92%,#000);overflow:hidden;height:820px;display:flex;flex-direction:column;position:relative}
+  .statusbar{height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;font-weight:600;color:var(--muted)}
+  .screen{flex:1;overflow-y:auto;padding:10px 16px 30px}.screen::-webkit-scrollbar{width:0}
+
+  h1.big{font-size:25px;margin:6px 0 12px;letter-spacing:-.02em}
+  .prof{background:var(--panel);color:var(--panel-ink);border-radius:20px;padding:18px;display:flex;gap:14px;align-items:center}
+  .prof .av{width:56px;height:56px;border-radius:16px;background:color-mix(in srgb,#fff 14%,transparent);display:grid;place-items:center;font-weight:800;font-size:18px}
+  .prof h2{margin:0;font-size:19px}.prof .role{color:var(--panel-sub);font-size:13px;margin-top:3px}
+  .stat2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .stat .n{font-size:26px;font-weight:800;letter-spacing:-.02em}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:2px}
+  .stat a{color:var(--accent);font-size:13px;font-weight:600;text-decoration:none;display:inline-block;margin-top:8px;cursor:pointer}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin:12px 0;overflow:hidden}
+  .list a{display:flex;align-items:center;gap:12px;padding:15px 16px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;font-weight:600;font-size:15px;cursor:pointer}
+  .list a:last-child{border:0}
+  .list a:active{background:color-mix(in srgb,var(--muted) 6%,var(--card))}
+  .list a .ic{width:28px;text-align:center;font-size:17px}
+  .list a .ch{margin-left:auto;color:var(--muted)}
+  .list a .badge{margin-left:auto;font-size:11px;font-weight:700;color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent);padding:3px 9px;border-radius:999px}
+  .list a .badge.red{color:var(--urgent);background:color-mix(in srgb,var(--urgent) 14%,transparent)}
+  .grouplbl{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:16px 4px 2px}
+  .signout{color:var(--urgent);text-align:center;font-weight:700;padding:18px;cursor:pointer}
+  .toast{position:absolute;left:16px;right:16px;bottom:16px;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:30;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+</style>
+
+<div class="stage">
+  <p class="pitch"><b>You — working preview.</b> The engineer's own hub, pulling together everything that's scattered across tiles today: holiday, hours, documents, equipment, keys, on-call, settings. No certifications (as you asked). Tap anything — it'd open that page. Nothing here is live.</p>
+
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>▪ ▪▪▪ ▪</span></div>
+    <div class="screen">
+      <h1 class="big">You</h1>
+      <div class="prof"><div class="av">DW</div><div><h2>Dan Walker</h2><div class="role">Multi-skilled Engineer · Van NX68 KLM</div></div></div>
+
+      <div class="stat2">
+        <div class="stat"><div class="n">18</div><div class="l">Holiday days left</div><a onclick="toast('Opens Holiday — unchanged')">Book time off ›</a></div>
+        <div class="stat"><div class="n">38.5</div><div class="l">Hrs this week</div><a onclick="toast('Opens My Timesheet')">Timesheet ›</a></div>
+      </div>
+
+      <div class="grouplbl">My kit &amp; access</div>
+      <div class="card list">
+        <a onclick="toast('Opens Plant &amp; Equipment held')"><span class="ic">🧰</span>Plant &amp; equipment held<span class="badge">6</span></a>
+        <a onclick="toast('Opens Keys signed to me')"><span class="ic">🔑</span>Keys signed to me<span class="badge">2</span></a>
+        <a onclick="toast('Opens Van check')"><span class="ic">🚐</span>Van check<span class="badge red">Due</span></a>
+        <a onclick="toast('Opens Availability &amp; on-call rota')"><span class="ic">📞</span>Availability &amp; on-call<span class="badge">On call</span></a>
+      </div>
+
+      <div class="grouplbl">My records</div>
+      <div class="card list">
+        <a onclick="toast('Opens My Documents')"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
+        <a onclick="toast('Opens Holiday')"><span class="ic">🌴</span>Holiday<span class="ch">›</span></a>
+        <a onclick="toast('Opens My Timesheet')"><span class="ic">⏱️</span>My timesheet<span class="ch">›</span></a>
+      </div>
+
+      <div class="grouplbl">Settings</div>
+      <div class="card list">
+        <a onclick="toast('Opens Notification settings')"><span class="ic">🔔</span>Notifications<span class="ch">›</span></a>
+        <a onclick="toast('Opens Personalise — theme &amp; background')"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
+        <a onclick="toast('Opens Password &amp; device')"><span class="ic">🔒</span>Password &amp; device<span class="ch">›</span></a>
+        <a onclick="toast('Opens Help &amp; support')"><span class="ic">❓</span>Help &amp; support<span class="ch">›</span></a>
+      </div>
+
+      <div class="signout" onclick="toast('Signs out')">Sign out</div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <p class="pitch">Everything carried over: holiday days + book time off (holiday screen untouched), hours + timesheet, My Documents (GDPR), plant &amp; equipment held, keys signed to me, van check, on-call rota, notifications, personalise/theme, password &amp; device, help, sign out.</p>
+</div>
+
+<script>
+  function toast(m){var t=document.getElementById("toast");t.innerHTML=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2000);}
+  window.toast=toast;
+</script>

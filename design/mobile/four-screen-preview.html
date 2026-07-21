@@ -1,0 +1,408 @@
+<title>Mostlane — engineer app (design preview)</title>
+<style>
+  :root{
+    --bg:#e9eef4; --card:#ffffff; --ink:#12233a; --muted:#5c6b82; --line:#e2e8f1;
+    --panel:#0f1f38; --panel-ink:#eaf1fb; --panel-sub:#9fb2cd;
+    --accent:#2f6fed; --accent-ink:#ffffff;
+    --urgent:#e0344b; --ok:#17b26a; --amber:#f79009; --purple:#7a5af8; --teal:#0fb6b0;
+    --chip:#eef2f8; --radius:16px;
+    --shadow:0 10px 30px rgba(16,32,58,.10);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#070d17; --card:#111f34; --ink:#e9f0fb; --muted:#93a6c1; --line:#20314b;
+      --panel:#0b1729; --panel-ink:#eaf1fb; --panel-sub:#9fb2cd; --chip:#17263e; }
+  }
+  :root[data-theme="dark"]{ --bg:#070d17; --card:#111f34; --ink:#e9f0fb; --muted:#93a6c1; --line:#20314b;
+    --panel:#0b1729; --panel-ink:#eaf1fb; --panel-sub:#9fb2cd; --chip:#17263e; }
+  :root[data-theme="light"]{ --bg:#e9eef4; --card:#ffffff; --ink:#12233a; --muted:#5c6b82; --line:#e2e8f1;
+    --panel:#0f1f38; --panel-ink:#eaf1fb; --panel-sub:#9fb2cd; --chip:#eef2f8; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:
+     radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb,var(--accent) 10%, transparent), transparent 60%),
+     var(--bg);
+    color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;}
+  .stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;
+    padding:22px 14px 40px;}
+  .pitch{max-width:390px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}
+  .pitch b{color:var(--ink)}
+
+  /* phone frame */
+  .phone{width:390px;max-width:100%;background:var(--card);border-radius:34px;
+    box-shadow:var(--shadow), 0 0 0 10px color-mix(in srgb,var(--panel) 92%, #000);
+    overflow:hidden;position:relative;height:800px;display:flex;flex-direction:column;}
+  .status{height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+    padding:0 20px;font-size:12px;font-weight:600;color:var(--muted);background:var(--card)}
+  .screen{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:6px 16px 96px;scroll-behavior:smooth}
+  .screen::-webkit-scrollbar{width:0}
+  .screen[hidden]{display:none}
+
+  h1.big{font-size:26px;margin:2px 0 14px;letter-spacing:-.02em;text-wrap:balance}
+  .eyebrow{font-size:12px;color:var(--muted);font-weight:600;margin:14px 2px 2px}
+  .row-top{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+  .avatar{width:44px;height:44px;border-radius:50%;background:var(--panel);color:#fff;
+    display:grid;place-items:center;font-weight:700;font-size:14px;letter-spacing:.02em;flex:0 0 auto}
+  .hello{font-size:13px;color:var(--muted)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;margin:12px 0;box-shadow:0 1px 0 rgba(16,32,58,.03)}
+  .card.tap{cursor:pointer;transition:transform .08s ease}
+  .card.tap:active{transform:scale(.99)}
+
+  .hero{background:var(--panel);color:var(--panel-ink);border:0;border-radius:20px;padding:18px}
+  .hero .lbl{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--panel-sub);font-weight:700}
+  .hero h2{margin:8px 0 4px;font-size:21px;letter-spacing:-.01em}
+  .hero .sub{color:var(--panel-sub);font-size:13px}
+  .hero .btns{display:flex;gap:10px;margin-top:16px}
+  .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:15px;
+    border-radius:12px;padding:13px 16px;flex:1;text-align:center;transition:filter .15s, transform .06s}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.ghost{background:color-mix(in srgb,#fff 12%, transparent);color:#fff}
+  .btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+  .btn.wide{width:100%;flex:none}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;
+    padding:5px 9px;border-radius:999px;letter-spacing:.02em}
+  .pill.urgent{background:var(--urgent);color:#fff}
+  .pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+  .pill.amber{background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--amber)}
+  .pill.blue{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+  .pill.grey{background:var(--chip);color:var(--muted)}
+
+  /* route timeline */
+  .tl{position:relative;margin:6px 0 0 6px;padding-left:20px}
+  .tl:before{content:"";position:absolute;left:5px;top:8px;bottom:16px;width:2px;background:var(--line)}
+  .stop{position:relative;margin:10px 0}
+  .stop .dot{position:absolute;left:-19px;top:16px;width:12px;height:12px;border-radius:50%;
+    background:var(--card);border:2px solid var(--muted)}
+  .stop.done .dot{background:var(--ok);border-color:var(--ok)}
+  .stop.now .dot{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .stopcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px 14px}
+  .stop .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .stop .t b{font-size:15px}
+  .stop .m{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .stop.done .stopcard{opacity:.72}
+  .stop.done b{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--muted) 60%,transparent)}
+
+  .miniline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px;margin:2px 0}
+  .miniline .k{margin-left:auto;color:var(--ink);font-weight:600}
+
+  /* map preview */
+  .map{height:150px;border-radius:14px;border:1px solid var(--line);position:relative;overflow:hidden;
+    background:
+      linear-gradient(0deg,rgba(0,0,0,.03),rgba(0,0,0,.03)),
+      repeating-linear-gradient(0deg,transparent 0 22px,color-mix(in srgb,var(--muted) 10%,transparent) 22px 23px),
+      repeating-linear-gradient(90deg,transparent 0 22px,color-mix(in srgb,var(--muted) 10%,transparent) 22px 23px),
+      color-mix(in srgb,var(--accent) 6%,var(--card))}
+  .map .pin{position:absolute;width:16px;height:16px;border-radius:50%;transform:translate(-50%,-50%);
+    box-shadow:0 0 0 4px color-mix(in srgb,#000 4%,transparent),0 0 14px 3px currentColor}
+  .map .cap{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--muted);
+    background:color-mix(in srgb,var(--card) 82%,transparent);padding:3px 8px;border-radius:8px}
+
+  /* job screen */
+  .backline{font-size:13px;color:var(--muted);margin-top:6px}
+  .sec-h{display:flex;align-items:center;justify-content:space-between;margin:4px 0 8px}
+  .sec-h .t{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .sec-h .r{font-size:12px;color:var(--urgent);font-weight:700}
+  .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ph{aspect-ratio:1.35;border-radius:12px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--muted) 8%,var(--card)) 0 10px,color-mix(in srgb,var(--muted) 13%,var(--card)) 10px 20px);
+    position:relative;display:flex;align-items:flex-end;padding:9px;color:var(--muted);font-size:12px}
+  .ph .tag{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.06em;
+    background:var(--panel);color:#fff;padding:4px 8px;border-radius:7px}
+  .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));
+    align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer}
+  /* stage slider */
+  .stage-pick{margin-top:12px}
+  .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:650;
+    font-size:13px;padding:8px 0;border-radius:8px;cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(16,32,58,.12)}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px}
+
+  .check{display:flex;align-items:center;gap:11px;padding:9px 2px;font-size:14.5px}
+  .box{width:22px;height:22px;border-radius:7px;border:2px solid var(--line);flex:0 0 auto;display:grid;place-items:center;color:#fff;font-size:13px}
+  .check.on .box{background:var(--ok);border-color:var(--ok)}
+
+  .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+  .sc{border:1px solid var(--line);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:8px;
+    font-weight:650;font-size:14px;cursor:pointer;background:var(--card);transition:transform .06s}
+  .sc:active{transform:scale(.98)}
+  .sc .d{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  .sc.on{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .jobtools{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+  .tool{flex:1 1 auto;min-width:46%;border:1px solid var(--line);background:var(--card);border-radius:12px;
+    padding:11px;font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:8px;justify-content:center;cursor:pointer}
+
+  /* slide to complete */
+  .slide{margin-top:4px;height:58px;border-radius:14px;background:var(--panel);position:relative;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;color:var(--panel-sub);font-weight:700;user-select:none}
+  .slide .knob{position:absolute;left:5px;top:5px;height:48px;width:48px;border-radius:11px;background:var(--accent);
+    color:#fff;display:grid;place-items:center;font-size:20px;transition:left .25s cubic-bezier(.2,.7,.3,1)}
+  .slide.go .knob{left:calc(100% - 53px);background:var(--ok)}
+  .slide.go .txt{color:#fff}
+  .offline{display:flex;align-items:center;gap:7px;justify-content:center;color:var(--muted);font-size:12px;margin-top:10px}
+
+  /* inbox */
+  .filters{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px}
+  .filters .f{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 14px;
+    font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
+  .filters .f.on{background:var(--panel);color:#fff;border-color:var(--panel)}
+  .filters .f .n{display:inline-block;margin-left:6px;background:var(--accent);color:#fff;border-radius:999px;font-size:11px;padding:1px 7px}
+  .note{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+  .note .ic{width:38px;height:38px;border-radius:11px;flex:0 0 auto;display:grid;place-items:center;font-size:17px}
+  .note .bd{flex:1;min-width:0}
+  .note .hd{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .note .who{font-weight:700;font-size:14.5px}
+  .note .tm{color:var(--muted);font-size:12px;flex:0 0 auto}
+  .note .tx{color:var(--muted);font-size:13.5px;margin-top:3px;line-height:1.45}
+  .note .act{display:flex;gap:8px;margin-top:10px}
+  .note .act .btn{flex:0 0 auto;padding:9px 16px;font-size:14px}
+  .qr{display:flex;gap:8px;margin-top:9px}
+  .qr button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
+
+  /* you */
+  .prof{background:var(--panel);color:var(--panel-ink);border-radius:20px;padding:18px;display:flex;gap:14px;align-items:center}
+  .prof .av{width:56px;height:56px;border-radius:16px;background:color-mix(in srgb,#fff 14%,transparent);
+    display:grid;place-items:center;font-weight:800;font-size:18px}
+  .prof h2{margin:0;font-size:19px}
+  .prof .role{color:var(--panel-sub);font-size:13px;margin-top:3px}
+  .stat2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+  .stat .n{font-size:26px;font-weight:800;letter-spacing:-.02em}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:2px}
+  .stat a{color:var(--accent);font-size:13px;font-weight:600;text-decoration:none;display:inline-block;margin-top:8px}
+  .list a{display:flex;align-items:center;gap:12px;padding:15px 4px;border-bottom:1px solid var(--line);
+    color:var(--ink);text-decoration:none;font-weight:600;font-size:15px}
+  .list a .ic{width:30px;text-align:center}
+  .list a .ch{margin-left:auto;color:var(--muted)}
+  .list a .badge{margin-left:auto;font-size:11px;font-weight:700;color:var(--ok);
+    background:color-mix(in srgb,var(--ok) 15%,transparent);padding:3px 9px;border-radius:999px}
+  .signout{color:var(--urgent);text-align:center;font-weight:700;padding:18px;cursor:pointer}
+
+  /* tab bar */
+  .tabs{position:absolute;left:12px;right:12px;bottom:12px;height:64px;background:color-mix(in srgb,var(--card) 88%,transparent);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line);border-radius:20px;
+    display:flex;box-shadow:var(--shadow)}
+  .tabs button{flex:1;border:0;background:transparent;cursor:pointer;font:inherit;color:var(--muted);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600}
+  .tabs button .g{font-size:19px;line-height:1}
+  .tabs button.on{color:var(--accent)}
+  .tabs button.on .g{transform:translateY(-1px)}
+</style>
+
+<div class="stage">
+  <p class="pitch"><b>Design preview — tap the bottom tabs.</b> Real features from your portal, in the new look. Nothing here is live; it's for signing off the feel before I wire it in. Try the <b>photo stage buttons</b> and <b>slide to complete</b> on the Job tab.</p>
+
+  <div class="phone">
+    <div class="status"><span>9:41</span><span>Mostlane ▪ ▪▪▪ ▪</span></div>
+
+    <!-- ROUTE -->
+    <div class="screen" id="s-route">
+      <div class="row-top">
+        <div><div class="hello">Good afternoon,</div><h1 class="big" style="margin:2px 0 0">Today's route</h1></div>
+        <div class="avatar">DW</div>
+      </div>
+
+      <div class="card hero" style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="lbl">Up next · SLA 17:00</span><span class="pill urgent">URGENT</span>
+        </div>
+        <h2>Burst pipe — Unit 4 kitchen</h2>
+        <div class="sub">Greggs · 12 Market St, Leeds · 4.2 mi</div>
+        <div class="btns">
+          <button class="btn ghost">Navigate</button>
+          <button class="btn primary">On my way ›</button>
+        </div>
+      </div>
+
+      <div class="card" style="padding:12px 14px">
+        <div class="miniline">🚐 Weekly van check <span class="pill amber" style="margin-left:auto">Due Wed</span></div>
+        <div class="miniline">⏱ Clocked on 08:02 · start mileage 41,880 <span class="k">Clock off</span></div>
+      </div>
+
+      <div class="eyebrow">Then</div>
+      <div class="tl">
+        <div class="stop now"><div class="dot"></div><div class="stopcard">
+          <div class="t"><b>Door closer replacement</b><span class="pill grey">13:30</span></div>
+          <div class="m">Costa · Wakefield WF1 · parts on van ✓</div></div></div>
+        <div class="stop"><div class="dot"></div><div class="stopcard">
+          <div class="t"><b>Quarterly HVAC service</b><span class="pill grey">15:15</span></div>
+          <div class="m">B&M · Ring Rd Retail Pk · PPM checklist</div></div></div>
+        <div class="stop done"><div class="dot"></div><div class="stopcard">
+          <div class="t"><b>Emergency light test</b><span class="pill ok">DONE</span></div>
+          <div class="m">Signed off 11:02 · 2 photos</div></div></div>
+      </div>
+
+      <div class="eyebrow">Today's map</div>
+      <div class="map">
+        <div class="pin" style="left:30%;top:38%;background:var(--urgent);color:var(--urgent)"></div>
+        <div class="pin" style="left:58%;top:30%;background:var(--accent);color:var(--accent)"></div>
+        <div class="pin" style="left:46%;top:62%;background:var(--amber);color:var(--amber)"></div>
+        <div class="pin" style="left:70%;top:66%;background:var(--ok);color:var(--ok)"></div>
+        <div class="cap">4 jobs · pins coloured by status</div>
+      </div>
+      <div class="miniline" style="margin-top:14px">📅 Job history <span class="k">This week ›</span></div>
+    </div>
+
+    <!-- JOB -->
+    <div class="screen" id="s-job" hidden>
+      <div class="backline">← Burst pipe · #ML-48291</div>
+      <h1 class="big" style="margin:6px 0 10px">Complete this job</h1>
+
+      <div class="card">
+        <div class="sec-h"><span class="t">Photo evidence</span><span class="r">signature still needed</span></div>
+        <div class="photos">
+          <div class="ph"><span class="tag">BEFORE</span>before — leak</div>
+          <div class="ph"><span class="tag">DURING</span>pipe section</div>
+          <div class="ph"><span class="tag">DURING</span>joint done</div>
+          <div class="ph add" onclick="document.getElementById('stagepick').scrollIntoView({block:'center'})">📷<span>Add photo</span></div>
+        </div>
+        <div class="stage-pick" id="stagepick">
+          <div class="hint" style="margin:2px 0 6px">When was the new photo taken?</div>
+          <div class="seg" id="seg">
+            <button data-s="Before">Before</button>
+            <button class="on" data-s="During">During</button>
+            <button data-s="After">After</button>
+          </div>
+          <div class="hint" id="segout">Tagged <b>During</b> — then it uploads (queues if you're offline).</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="sec-h"><span class="t">Checklist</span><span class="t" style="color:var(--muted)">optional · office-added</span></div>
+        <div class="check on" onclick="this.classList.toggle('on')"><span class="box">✓</span>Water supply isolated & restored</div>
+        <div class="check on" onclick="this.classList.toggle('on')"><span class="box">✓</span>Pressure test passed</div>
+        <div class="check" onclick="this.classList.toggle('on')"><span class="box">✓</span>Site left clean & manager informed</div>
+      </div>
+
+      <div class="card">
+        <div class="sec-h"><span class="t">Set status</span></div>
+        <div class="status-grid">
+          <div class="sc on"><span class="d" style="background:var(--teal)"></span>Complete</div>
+          <div class="sc"><span class="d" style="background:var(--purple)"></span>Quote</div>
+          <div class="sc"><span class="d" style="background:var(--amber)"></span>On Hold</div>
+          <div class="sc"><span class="d" style="background:var(--ok)"></span>In Progress</div>
+          <div class="sc"><span class="d" style="background:var(--accent)"></span>Order parts</div>
+          <div class="sc"><span class="d" style="background:#64748b"></span>Travelling</div>
+        </div>
+        <div class="hint">Complete needs <b>notes + a photo + customer signature</b>. On Hold needs an admin's approval before you can move on.</div>
+      </div>
+
+      <div class="card" style="padding:12px 14px">
+        <div class="jobtools">
+          <div class="tool">📁 Site documents</div>
+          <div class="tool">🗺️ Directions</div>
+          <div class="tool">☎️ Call site</div>
+          <div class="tool">🧾 Raise PO</div>
+        </div>
+      </div>
+
+      <div class="slide" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to complete job</span></div>
+      <div class="offline">📶 Works offline — syncs when you're back in signal</div>
+    </div>
+
+    <!-- INBOX -->
+    <div class="screen" id="s-inbox" hidden>
+      <div class="row-top"><h1 class="big" style="margin:6px 0 0">Inbox</h1><a href="#" style="color:var(--accent);font-weight:600;text-decoration:none;font-size:14px">Mark all read</a></div>
+      <div class="filters">
+        <div class="f on">All</div><div class="f">Jobs<span class="n">2</span></div>
+        <div class="f">Messages<span class="n">1</span></div><div class="f">Admin</div>
+      </div>
+
+      <div class="card" style="border-color:color-mix(in srgb,var(--urgent) 35%,var(--line))">
+        <div class="note" style="border:0;padding:2px 0">
+          <div class="ic" style="background:color-mix(in srgb,var(--urgent) 15%,transparent)">🔴</div>
+          <div class="bd">
+            <div class="hd"><span class="who">Urgent job · 14:38</span><span class="tm">Dispatch</span></div>
+            <div class="tx"><b style="color:var(--ink)">Burst pipe assigned — 4hr SLA.</b> Greggs, Market St. Accept within 15 min or it reroutes.</div>
+            <div class="act"><button class="btn primary">Accept</button><button class="btn line">Can't take it</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:4px 14px">
+        <div class="note">
+          <div class="ic" style="background:color-mix(in srgb,var(--accent) 14%,transparent)">💬</div>
+          <div class="bd"><div class="hd"><span class="who">Sarah · Ops</span><span class="tm">09:47</span></div>
+            <div class="tx">Can you grab photos of the fascia at Costa while you're there? Client is asking.</div>
+            <div class="qr"><button>👍 Will do</button><button>Reply…</button></div></div>
+        </div>
+        <div class="note">
+          <div class="ic" style="background:color-mix(in srgb,var(--amber) 16%,transparent)">⏸️</div>
+          <div class="bd"><div class="hd"><span class="who">On-hold approval needed</span><span class="tm">11:20</span></div>
+            <div class="tx"><b style="color:var(--ink)">#ML-48260</b> — Tony wants to hold "no isolation valve". Approve so he can move on.</div>
+            <div class="act"><button class="btn primary" style="padding:9px 16px;font-size:14px">Approve</button><button class="btn line" style="padding:9px 16px;font-size:14px">Reject</button></div></div>
+        </div>
+        <div class="note">
+          <div class="ic" style="background:color-mix(in srgb,var(--ok) 15%,transparent)">✓</div>
+          <div class="bd"><div class="hd"><span class="who">Sign-off approved</span><span class="tm">11:02</span></div>
+            <div class="tx">#ML-48120 emergency lighting — Jamie Line approved your completion.</div></div>
+        </div>
+        <div class="note" style="border:0">
+          <div class="ic" style="background:color-mix(in srgb,var(--amber) 12%,transparent)">🚐</div>
+          <div class="bd"><div class="hd"><span class="who">Weekly van check due</span><span class="tm">08:00</span></div>
+            <div class="tx">Due by Wednesday 12:00 — tap to complete the walkaround.</div></div>
+        </div>
+      </div>
+      <p class="hint" style="text-align:center">Also here: equipment transfers, "still hold this?" checks, holiday decisions.</p>
+    </div>
+
+    <!-- YOU -->
+    <div class="screen" id="s-you" hidden>
+      <h1 class="big" style="margin:6px 0 12px">You</h1>
+      <div class="prof">
+        <div class="av">DW</div>
+        <div><h2>Dan Walker</h2><div class="role">Multi-skilled Engineer · Van NX68 KLM</div></div>
+      </div>
+      <div class="stat2">
+        <div class="stat"><div class="n">18</div><div class="l">Holiday days left</div><a href="#">Book time off ›</a></div>
+        <div class="stat"><div class="n">38.5</div><div class="l">Hrs this week</div><a href="#">Timesheet ›</a></div>
+      </div>
+      <div class="card list" style="padding:2px 14px">
+        <a href="#"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
+        <a href="#"><span class="ic">🧰</span>Plant & equipment held<span class="ch">›</span></a>
+        <a href="#"><span class="ic">🔑</span>Keys signed to me<span class="badge">2</span></a>
+        <a href="#"><span class="ic">📞</span>Availability & on-call<span class="badge">On call</span></a>
+        <a href="#"><span class="ic">🔔</span>Notification settings<span class="ch">›</span></a>
+        <a href="#"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
+        <a href="#"><span class="ic">🔒</span>Password & device<span class="ch">›</span></a>
+        <a href="#" style="border:0"><span class="ic">❓</span>Help & support<span class="ch">›</span></a>
+      </div>
+      <div class="signout">Sign out</div>
+    </div>
+
+    <!-- TABS -->
+    <nav class="tabs" id="tabs">
+      <button class="on" data-t="route"><span class="g">🗺️</span>Route</button>
+      <button data-t="job"><span class="g">🧰</span>Job</button>
+      <button data-t="inbox"><span class="g">📥</span>Inbox</button>
+      <button data-t="you"><span class="g">👤</span>You</button>
+    </nav>
+  </div>
+
+  <p class="pitch">Once you're happy with this feel, I wire it into the live pages + worker — carrying over every feature in the inventory, adding the On-Hold approval flow, messaging, and offline.</p>
+</div>
+
+<script>
+  var screens = {route:"s-route",job:"s-job",inbox:"s-inbox",you:"s-you"};
+  document.getElementById("tabs").addEventListener("click",function(e){
+    var b=e.target.closest("button"); if(!b) return;
+    [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b)});
+    for(var k in screens){document.getElementById(screens[k]).hidden = (k!==b.dataset.t);}
+    document.querySelector(".screen:not([hidden])").scrollTop=0;
+  });
+  document.getElementById("seg").addEventListener("click",function(e){
+    var b=e.target.closest("button"); if(!b) return;
+    [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b)});
+    document.getElementById("segout").innerHTML='Tagged <b>'+b.dataset.s+'</b> — then it uploads (queues if you’re offline).';
+  });
+  var slide=document.getElementById("slide"), knob=slide.querySelector(".knob"), sx=0, dragging=false;
+  function setGo(on){ slide.classList.toggle("go",on); document.getElementById("slidetxt").textContent = on? "Completing… ✓ synced" : "Slide to complete job"; }
+  knob.addEventListener("pointerdown",function(e){dragging=true;sx=e.clientX;knob.setPointerCapture(e.pointerId);});
+  knob.addEventListener("pointermove",function(e){ if(!dragging) return; if(e.clientX-sx>120){setGo(true);dragging=false;} });
+  knob.addEventListener("pointerup",function(){ dragging=false; setTimeout(function(){ if(slide.classList.contains("go")) setGo(false); },1600); });
+  slide.addEventListener("click",function(){ if(!slide.classList.contains("go")){ setGo(true); setTimeout(function(){setGo(false)},1600);} });
+</script>

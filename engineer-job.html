@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="ml-offline.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Job — Mostlane</title>
+  <script src="auth.js"></script>
+  <script src="sla-jobedit.js?v=7"></script>
+  <style>
+    :root{
+      --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+      --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+      --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+      --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    }
+    @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px 60px}
+    a{color:var(--accent)}
+    .backline{font-size:13px;color:var(--muted);margin-top:4px;cursor:pointer;background:0;border:0;padding:0;font:inherit}
+    h1.big{font-size:23px;margin:6px 0 4px;letter-spacing:-.02em}
+    .sub{color:var(--muted);font-size:13px;margin-bottom:6px}
+    .metarow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:5px 9px;border-radius:999px}
+    .pill.urgent{background:var(--urgent);color:#fff}.pill.grey{background:var(--chip);color:var(--muted)}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:15px;margin:12px 0}
+    .sec-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}
+    .sec-h .t{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+    .site .ln{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px}.site .ln .ic{width:22px;text-align:center}
+    .site .tools{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    .tool{flex:1 1 auto;min-width:30%;border:1px solid var(--line);background:var(--card);border-radius:11px;padding:10px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;color:var(--ink);text-decoration:none}
+    .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .ph{aspect-ratio:1.35;border-radius:12px;position:relative;display:flex;align-items:flex-end;padding:9px;color:#fff;font-size:12px;overflow:hidden;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.5);background-size:cover;background-position:center;background-color:#334155}
+    .ph .tag{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.05em;background:rgba(9,20,38,.82);color:#fff;padding:4px 8px;border-radius:7px}
+    .ph.add{background:color-mix(in srgb,var(--accent) 7%,var(--card));border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));align-items:center;justify-content:center;color:var(--accent);font-weight:700;flex-direction:column;gap:4px;cursor:pointer;text-shadow:none}
+    .seg{display:flex;background:var(--chip);border-radius:11px;padding:4px;gap:4px;margin-top:12px}
+    .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:650;font-size:13px;padding:8px 0;border-radius:8px;cursor:pointer}
+    .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(16,32,58,.12)}
+    .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.45}
+    .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .sc{border:1px solid var(--line);border-radius:12px;padding:11px 12px;display:flex;align-items:center;gap:8px;font-weight:650;font-size:14px;cursor:pointer;background:var(--card)}
+    .sc .d{width:10px;height:10px;border-radius:50%;flex:0 0 auto}.sc.on{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 6%,var(--card))}
+    textarea,input.txt{width:100%;border:1px solid var(--line);border-radius:11px;padding:11px;font:inherit;font-size:14px;background:var(--card);color:var(--ink);margin-top:8px;resize:vertical}
+    input.txt.err,textarea.err{border-color:var(--urgent)}
+    .panel{margin-top:10px;padding:12px;border:1px dashed var(--line);border-radius:12px;background:color-mix(in srgb,var(--muted) 4%,var(--card))}
+    .panel h4{margin:0 0 4px;font-size:13px}
+    .flbl{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px}.flbl .req{color:var(--urgent)}
+    .stepper{display:inline-flex;align-items:center;gap:16px;border:1px solid var(--line);border-radius:11px;padding:5px 12px}
+    .stepper button{width:30px;height:30px;border:0;border-radius:8px;background:var(--chip);color:var(--ink);font-size:19px;font-weight:700;cursor:pointer;line-height:1}
+    .stepper span{min-width:18px;text-align:center;font-weight:700;font-size:16px}
+    .chips{display:flex;flex-wrap:wrap;gap:7px}
+    .chip{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:8px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+    .qrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:14px}.qrow .req{color:var(--urgent)}
+    .yn{display:flex;gap:6px;flex:0 0 auto}.yn button{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:9px;padding:8px 14px;font:inherit;font-weight:650;cursor:pointer}
+    .yn button.on[data-v="yes"]{background:var(--ok);border-color:var(--ok);color:#fff}.yn button.on[data-v="no"]{background:var(--muted);border-color:var(--muted);color:#fff}
+    .chips.err,.yn.err{outline:2px solid var(--urgent);outline-offset:3px;border-radius:12px}
+    .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:15px;border-radius:12px;padding:12px 16px;transition:filter .15s,transform .06s}
+    .btn:active{transform:translateY(1px)}.btn.primary{background:var(--accent);color:#fff}.btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}.btn.wide{width:100%}
+    .btn.danger{background:color-mix(in srgb,var(--urgent) 12%,var(--card));color:var(--urgent);border:1px solid color-mix(in srgb,var(--urgent) 40%,var(--line))}
+    .slide{margin-top:6px;height:58px;border-radius:14px;background:var(--panel);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;color:var(--panel-sub);font-weight:700;user-select:none;touch-action:none}
+    .slide.locked{opacity:.55}.slide .knob{position:absolute;left:5px;top:5px;height:48px;width:48px;border-radius:11px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:20px;transition:left .2s cubic-bezier(.2,.7,.3,1)}
+    .slide.go .knob{left:calc(100% - 53px);background:var(--ok)}.slide.go .txt{color:#fff}
+    .offline{display:flex;align-items:center;gap:7px;justify-content:center;color:var(--muted);font-size:12px;margin:10px 0 4px}
+    .tl{position:relative;margin:4px 0 0 4px;padding-left:16px}.tl:before{content:"";position:absolute;left:3px;top:6px;bottom:6px;width:2px;background:var(--line)}
+    .ev{position:relative;margin:9px 0;font-size:13px}.ev .dot{position:absolute;left:-16px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--muted)}.ev b{font-weight:650}.ev .m{color:var(--muted);font-size:12px}
+    .banner{border-radius:14px;padding:12px 14px;margin:10px 0;font-size:13.5px;display:none}.banner.show{display:block}
+    .banner.lock{background:color-mix(in srgb,var(--amber) 13%,var(--card));border:1px solid color-mix(in srgb,var(--amber) 45%,var(--line))}.banner.lock b{color:#b45309}
+    .banner.lock.reported{background:color-mix(in srgb,var(--urgent) 12%,var(--card));border-color:color-mix(in srgb,var(--urgent) 40%,var(--line))}.banner.lock.reported b{color:var(--urgent)}
+    .banner .go{margin-top:8px;color:var(--accent);font-weight:700;cursor:pointer}
+    .ralock #photosCard,.ralock #statusCard .status-grid,.ralock #note,.ralock #sigBtn{opacity:.5}
+    .check{display:flex;align-items:center;gap:10px;padding:7px 2px;font-size:14px;cursor:pointer}
+    .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--line);flex:0 0 auto;display:grid;place-items:center;color:#fff;font-size:12px}.check.on .box{background:var(--ok);border-color:var(--ok)}
+    .rapic{display:flex;align-items:center;gap:8px;border:2px dashed color-mix(in srgb,var(--accent) 45%,var(--line));background:color-mix(in srgb,var(--accent) 6%,var(--card));color:var(--accent);border-radius:12px;padding:14px;font-weight:650;cursor:pointer;font-size:14px}
+    .rapic.done{border-style:solid;border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card));color:var(--ok)}.rapic.err{border-color:var(--urgent);color:var(--urgent)}
+    .hz{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.hz .hzl{flex:1;font-size:14px}.hz.err .hzl{color:var(--urgent)}
+    .hzopt{display:flex;gap:6px;flex:0 0 auto}.hb{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:9px;padding:7px 11px;font:inherit;font-size:12.5px;font-weight:650;cursor:pointer}
+    .hb.on[data-v="ok"]{background:var(--ok);border-color:var(--ok);color:#fff}.hb.on[data-v="na"]{background:var(--muted);border-color:var(--muted);color:#fff}
+    .raSafe{margin-top:12px;padding:12px 14px;border:2px solid var(--line);border-radius:12px;font-size:15px}.raSafe.on{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--card))}
+    .fieldlbl{display:block;font-size:12px;font-weight:700;letter-spacing:.02em;color:var(--muted);text-transform:uppercase;margin:0 0 4px}.fieldlbl .req{color:var(--urgent);text-transform:none;letter-spacing:0}
+    input.txt.big{font-size:17px;font-weight:600;padding:14px;border-width:2px}
+    .shake{animation:sh .32s}@keyframes sh{0%,100%{transform:none}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+    .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:40}.modal.show{display:flex}
+    .sheet{background:var(--card);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px 18px 24px;max-height:92%;overflow:auto}
+    .sheet h3{margin:0 0 4px}canvas{width:100%;height:180px;border:1px solid var(--line);border-radius:12px;touch-action:none;background:var(--card);margin-top:2px}canvas.err{border-color:var(--urgent)}
+    .toast{position:fixed;left:16px;right:16px;bottom:16px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    #loading{padding:60px 0;text-align:center;color:var(--muted)}
+    .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:50}.lightbox.show{display:flex}
+    .lightbox img{max-width:94%;max-height:80%;border-radius:8px}
+    .lightbox .lx-close{position:absolute;top:16px;right:20px;color:#fff;font-size:30px;cursor:pointer;background:0;border:0}
+    .lightbox .lx-nav{position:absolute;top:50%;transform:translateY(-50%);color:#fff;font-size:38px;cursor:pointer;background:0;border:0;padding:12px}
+  </style>
+</head>
+<body>
+  <div id="loading">Loading job…</div>
+  <div id="app" style="display:none"></div>
+
+  <div class="modal" id="sigModal"><div class="sheet">
+    <h3>Customer sign-off</h3>
+    <label class="fieldlbl" for="sigName">Customer's full name <span class="req">required</span></label>
+    <input class="txt big" id="sigName" placeholder="e.g. Dave Robson — Store Manager" autocomplete="name">
+    <label class="fieldlbl" style="margin-top:14px">Signature <span class="req">required</span></label>
+    <canvas id="sigCanvas"></canvas>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn line" style="flex:1" id="sigClear">Clear</button><button class="btn primary" style="flex:2" id="sigSave">Save sign-off</button></div>
+    <div class="hint" style="text-align:center">Both a name and a signature are needed.</div>
+  </div></div>
+
+  <div class="modal" id="raModal"><div class="sheet">
+    <h3>Risk assessment</h3>
+    <div class="hint" style="margin:0 0 8px">Complete this before you start work — you sign it yourself.</div>
+    <div class="rapic" id="raPic"><span class="ric">📷</span><span id="raPicTxt">Photo of the work area</span> <span class="req">required</span></div>
+    <div class="hint" style="margin-top:6px">This also becomes the job's <b>Before</b> photo.</div>
+    <div class="fieldlbl" style="margin-top:14px">Hazard controls <span class="req">answer each</span></div>
+    <div id="raChecks"></div>
+    <textarea id="raNotes" rows="2" placeholder="Site conditions / notes"></textarea>
+    <div class="fieldlbl" style="margin-top:14px">Declarations <span class="req">all required</span></div>
+    <div class="check raSafe decl" data-d="competent"><span class="box">✓</span><b>I am suitably trained &amp; competent to carry out this task</b></div>
+    <div class="check raSafe decl" data-d="public"><span class="box">✓</span><b>Third parties &amp; the public are safeguarded</b> — barriers, segregation etc. in place</div>
+    <div class="check raSafe decl" data-d="safe"><span class="box">✓</span><b>Safe to proceed</b></div>
+    <label class="fieldlbl" style="margin-top:14px" for="raName">Your name <span class="req">required</span></label>
+    <input class="txt big" id="raName" placeholder="Your full name" autocomplete="name">
+    <label class="fieldlbl" style="margin-top:14px">Your signature <span class="req">required</span></label>
+    <canvas id="raCanvas"></canvas>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn line" style="flex:1" id="raCancel">Cancel</button><button class="btn primary" style="flex:2" id="raStart">Sign &amp; start work</button></div>
+    <button class="btn danger wide" style="margin-top:10px" id="raReport">⚠ I can't proceed safely — tell the office</button>
+    <div class="hint" style="text-align:center">Can't tick one? Don't start — report it and the office is alerted.</div>
+  </div></div>
+
+  <div class="lightbox" id="lightbox"><button class="lx-close" id="lxClose">✕</button><button class="lx-nav" id="lxPrev" style="left:6px">‹</button><img id="lxImg" alt=""><button class="lx-nav" id="lxNext" style="right:6px">›</button></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+  var MOSTLANE_API = window.MOSTLANE_API || "";
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.innerHTML=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
+  function getUser(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function qp(k){ return new URLSearchParams(location.search).get(k); }
+  var jobId = qp("jobId")||qp("id")||"";
+  var backTo = qp("back")||"engineer-jobs.html";
+
+  var STATUSES=[
+    {n:"Travelling",c:"#64748b"},
+    {n:"In Progress",c:"var(--ok)",ra:true},
+    {n:"Complete",c:"var(--teal)"},
+    {n:"On Hold",c:"var(--amber)",pack:"hold"},
+    {n:"Quote",c:"var(--purple)",pack:"quote"}
+  ];
+  var ENDLABEL={Complete:"Slide to complete job","On Hold":"Slide to send for approval",Quote:"Slide to submit quote"};
+  var HAZ=["Safe access & egress","Correct PPE worn","Isolation / lock-off where needed","Work at height controlled","Hazardous materials (asbestos / COSHH)"];
+
+  var job=null, photos=[], cats=[], chosen="Travelling", stage="During";
+  var raDone=false, reported=false, signed=false, sigName="", raPicPending=false;
+
+  function jfetch(path, opts){ return fetch(SLA_API+path, opts||{}); }
+  async function loadAll(){
+    var jr = await jfetch("/jobs/"+encodeURIComponent(jobId)+"?t="+Date.now(), {cache:"no-store"});
+    if(!jr.ok) throw new Error("Job load failed ("+jr.status+")");
+    job = await jr.json();
+    try{ var cr=await jfetch("/categories?t="+Date.now(),{cache:"no-store"}); var cj=await cr.json(); cats=(cj&&cj.categories)||[]; }catch(e){ cats=[]; }
+    await loadPhotos();
+    raDone = !!(job.riskAssessment && job.riskAssessment.safe) || ["In Progress","Complete","On Hold","Quote","Order","Closed Jobs","Invoiced"].indexOf(job.status)>=0;
+    reported = !!(job.raBlock && job.raBlock.state==="open");
+    if(reported) raDone=false;
+    signed = !!(job.signature && job.signature.fileKey);
+    sigName = signed ? (job.signature.signedBy||"") : "";
+    chosen = raDone ? "In Progress" : "Travelling";
+  }
+  async function loadPhotos(){
+    try{ var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?t="+Date.now(),{cache:"no-store"}); var j=await r.json(); photos=(j&&j.files)||[]; }catch(e){ photos=[]; }
+  }
+
+  function jobName(){ try{ return (window.mlJobName? window.mlJobName(job): (job.siteName||job.helpdeskRef||job.id)); }catch(e){ return job.siteName||job.helpdeskRef||job.id; } }
+
+  function render(){
+    var address=[job.address,(job.postcode||"").replace(/\*+$/,"")].filter(Boolean).join(", ");
+    var phone=job.telephone||"";
+    var dirDest = (job.lat!=null&&job.lon!=null)? (job.lat+","+job.lon) : (address||job.siteName||"");
+    var urgent = /priority\s*1/i.test(job.priority||"");
+    var h='';
+    h+='<button class="backline" id="backBtn">← '+esc(job.helpdeskRef||job.id)+'</button>';
+    h+='<h1 class="big">'+esc(jobName())+'</h1>';
+    if(job.description) h+='<div class="sub">'+esc(job.description)+'</div>';
+    h+='<div class="metarow">'+(urgent?'<span class="pill urgent">Urgent</span>':'')+'<span class="pill grey" id="curstatus">'+esc(job.status||"")+'</span></div>';
+    h+='<div class="banner lock" id="lockBanner"><b>🔒 Risk assessment on arrival.</b> <span id="lockMsg"></span><div class="go" id="lockGo"></div></div>';
+    if(address||phone||job.siteName){
+      h+='<div class="card site"><div class="sec-h"><span class="t">Site</span></div>';
+      if(address) h+='<div class="ln"><span class="ic">📍</span>'+esc(address)+'</div>';
+      if(phone) h+='<div class="ln"><span class="ic">☎️</span><a href="tel:'+esc(phone.replace(/[^0-9+]/g,""))+'">'+esc(phone)+'</a></div>';
+      h+='<div class="tools"><button class="tool" id="docsBtn">📁 Documents</button>';
+      if(dirDest) h+='<a class="tool" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(dirDest)+'">🗺️ Directions</a>';
+      h+='<button class="tool" id="poBtn" style="display:none">🧾 Raise PO</button></div></div>';
+    }
+    h+='<div class="card" id="photosCard"><div class="sec-h"><span class="t">Photo evidence</span><span class="t" id="phcount"></span></div><div class="photos" id="photos"></div>';
+    h+='<div class="seg" id="seg"><button data-s="Before">Before</button><button class="on" data-s="During">During</button><button data-s="After">After</button></div>';
+    h+='<div class="hint">Pick when the photo was taken, then add it.</div><input type="file" id="fileInput" accept="image/*" capture="environment" multiple style="display:none"></div>';
+    h+='<div class="card" id="statusCard"><div class="sec-h"><span class="t">Set status</span></div><div class="status-grid" id="statusGrid"></div><div id="panelHost"></div></div>';
+    h+='<div class="card"><div class="sec-h"><span class="t">Notes</span></div><textarea id="note" rows="3" placeholder="What did you do? (needed to complete)"></textarea></div>';
+    h+='<div class="card"><div class="sec-h"><span class="t">Customer signature</span><span class="t" id="sigstate">'+(signed?("Signed by "+esc(sigName)):"Not signed")+'</span></div><button class="btn line wide" id="sigBtn">✍️ Capture signature</button></div>';
+    h+='<div id="completeWrap" style="display:none"><div class="hint" id="missing" style="text-align:center;margin-bottom:2px"></div><div class="slide locked" id="slide"><div class="knob">››</div><span class="txt" id="slidetxt">Slide to finish</span></div><div class="offline">📶 Works offline — syncs when you\'re back in signal</div></div>';
+    h+='<div class="card"><div class="sec-h"><span class="t">Activity</span></div><div class="tl" id="timeline"></div></div>';
+    h+='<div id="editWrap" style="display:none;text-align:center;margin-top:6px"><button class="btn line" id="editBtn">✏️ Edit details (office)</button></div>';
+    $("app").innerHTML=h;
+    wire();
+  }
+
+  function drawPhotos(){
+    var host=$("photos"),html="";
+    photos.forEach(function(p,i){
+      var bg=p.publicURL?'background-image:url('+esc(p.publicURL)+')':'';
+      var tag=p.stage?'<span class="tag">'+esc(p.stage.toUpperCase())+'</span>':'';
+      html+='<div class="ph" data-i="'+i+'" style="'+bg+'">'+tag+'</div>';
+    });
+    html+='<div class="ph add" id="addPhoto">'+(raDone?'📷<span>Add '+stage+' photo</span>':'🔒<span>RA required</span>')+'</div>';
+    host.innerHTML=html;
+    $("phcount").textContent=photos.length+(photos.length===1?" photo":" photos");
+    $("addPhoto").onclick=function(){ if(!raDone){ openRA(); return; } raPicPending=false; $("fileInput").click(); };
+    [].forEach.call(host.querySelectorAll(".ph[data-i]"),function(el){ el.onclick=function(){ openLightbox(+el.dataset.i); }; });
+  }
+  function drawStatus(){
+    $("statusGrid").innerHTML=STATUSES.map(function(s){ return '<div class="sc'+(s.n===chosen?' on':'')+'" data-n="'+s.n+'"><span class="d" style="background:'+s.c+'"></span>'+s.n+'</div>'; }).join("");
+    [].forEach.call($("statusGrid").querySelectorAll(".sc"),function(el){ el.onclick=function(){ pick(el.dataset.n); }; });
+  }
+  function panelFor(kind){
+    if(kind==="hold") return '<div class="panel"><h4>Put on hold — needs approval</h4><textarea rows="2" id="holdReason" placeholder="Why on hold?*"></textarea><textarea rows="2" id="holdNeeds" placeholder="What\'s needed to resume?*"></textarea><div class="hint">Fill both, then slide below. You can\'t start another job until an admin approves.</div></div>';
+    if(kind==="quote"){
+      var access=["None needed","Small Step Ladder","Large Step Ladder","Ladder","Tower 5m Working Height","Scissor Lift"];
+      return '<div class="panel"><h4>Quote details</h4>'
+        +'<label class="flbl">Engineers required <span class="req">*</span></label><div class="stepper" id="qEng"><button data-d="-1">−</button><span id="qEngN">1</span><button data-d="1">+</button></div>'
+        +'<label class="flbl">Estimated duration — hours <span class="req">*</span></label><input class="txt" id="qDur" type="number" min="0.5" step="0.5" value="1">'
+        +'<label class="flbl">Full list of materials required <span class="req">*</span></label><textarea id="qMat" rows="2"></textarea>'
+        +'<label class="flbl">Time restrictions on when works can be done <span class="req">*</span></label><textarea id="qTime" rows="2" placeholder="put ‘none’ if no restriction"></textarea>'
+        +'<label class="flbl">Access equipment required <span class="req">*</span></label><div class="chips" id="qAccess">'+access.map(function(a){return '<button class="chip" data-a="'+a+'">'+a+'</button>';}).join('')+'</div>'
+        +'<div class="qrow"><span>Barriers required? <span class="req">*</span></span><span class="yn" id="qBar"><button data-v="yes">Yes</button><button data-v="no">No</button></span></div>'
+        +'<div class="qrow"><span>Disruption client should know first? <span class="req">*</span></span><span class="yn" id="qDisr"><button data-v="yes">Yes</button><button data-v="no">No</button></span></div>'
+        +'<textarea id="qDisrNote" rows="2" placeholder="What disruption? (required)" style="display:none"></textarea>'
+        +'<div class="hint">Fill every field, then slide below — a quote also needs a photo + the customer’s signature.</div></div>';
+    }
+    return "";
+  }
+  function pick(n){
+    if(!raDone && n!=="Travelling"){ openRA(); return; }
+    var s=STATUSES.find(function(x){return x.n===n}); chosen=n; drawStatus();
+    $("panelHost").innerHTML = s.pack? panelFor(s.pack):"";
+    if(s.pack==="hold"){ [].forEach.call(document.querySelectorAll("#holdReason,#holdNeeds"),function(el){el.addEventListener("input",refresh);}); }
+    if(s.pack==="quote"){ wireQuote(); }
+    $("slide").classList.remove("go"); refresh();
+  }
+  function wireQuote(){
+    $("qEng").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;var v=Math.max(1,(+$("qEngN").textContent)+(+b.dataset.d));$("qEngN").textContent=v;refresh();});
+    $("qAccess").addEventListener("click",function(e){var b=e.target.closest(".chip");if(!b)return;this.classList.remove("err");var none=b.dataset.a==="None needed";if(none){[].forEach.call(this.children,function(c){c.classList.toggle("on",c===b);});}else{b.classList.toggle("on");var nn=this.querySelector('[data-a="None needed"]');if(nn)nn.classList.remove("on");}refresh();});
+    function yn(id){$(id).addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;this.classList.remove("err");[].forEach.call(this.children,function(c){c.classList.toggle("on",c===b);});if(id==="qDisr"){$("qDisrNote").style.display=b.dataset.v==="yes"?"block":"none";}refresh();});}
+    yn("qBar");yn("qDisr");
+    [].forEach.call(document.querySelectorAll("#qMat,#qTime,#qDur,#qDisrNote"),function(el){el.addEventListener("input",function(){this.classList.remove("err");refresh();});});
+  }
+  function ntrim(id){var el=$(id);return el?String(el.value||"").trim():"";}
+  function outcomeMissing(){
+    if(chosen==="Complete"){var m=[];if(($("note").value||"").trim().length<15)m.push("a completion note");if(photos.length<1)m.push("a photo");if(!signed)m.push("the customer's signature");return m;}
+    if(chosen==="On Hold"){var m=[];if(!ntrim("holdReason"))m.push("the reason");if(!ntrim("holdNeeds"))m.push("what's needed to resume");return m;}
+    if(chosen==="Quote"){var m=[];if(!ntrim("qMat"))m.push("materials");if(!ntrim("qTime"))m.push("time restrictions");if(!(parseFloat(($("qDur")||{}).value)>0))m.push("duration");if(!document.querySelector("#qAccess .chip.on"))m.push("access equipment");if(!document.querySelector("#qBar button.on"))m.push("barriers Yes/No");var d=document.querySelector("#qDisr button.on");if(!d)m.push("disruption Yes/No");else if(d.dataset.v==="yes"&&!ntrim("qDisrNote"))m.push("the disruption note");if(photos.length<1)m.push("a photo");if(!signed)m.push("the customer's signature");return m;}
+    return null;
+  }
+  function refresh(){
+    var wrap=$("completeWrap"),slide=$("slide");
+    var miss = raDone? outcomeMissing():null;
+    if(miss===null){ wrap.style.display="none"; return; }
+    wrap.style.display="block";
+    if(!slide.classList.contains("go")) $("slidetxt").textContent=ENDLABEL[chosen]||"Slide to finish";
+    if(miss.length){ slide.classList.add("locked"); $("missing").innerHTML="Still needs "+miss.join(", ")+"."; $("missing").style.color="var(--urgent)"; }
+    else{ slide.classList.remove("locked"); $("missing").innerHTML="All set — slide to finish this job."; $("missing").style.color="var(--ok)"; }
+  }
+  function drawTimeline(){
+    var evs=[];
+    (job.statusHistory||[]).forEach(function(hh){ evs.push({at:hh.at,b:hh.status,m:(hh.by||"")}); });
+    (job.events||[]).forEach(function(e){ if(e.note) evs.push({at:e.at,b:"Note",m:(e.by||"")+" — "+e.note}); });
+    if(job.signature) evs.push({at:job.signature.signedAt,b:"Customer sign-off",m:"Signed by "+(job.signature.signedBy||"")});
+    evs.sort(function(a,b){return String(b.at).localeCompare(String(a.at));});
+    $("timeline").innerHTML=evs.map(function(e){return '<div class="ev"><span class="dot"></span><b>'+esc(e.b)+'</b><div class="m">'+esc(e.m)+" · "+esc(fmtTime(e.at))+'</div></div>';}).join("")||'<div class="hint">No activity yet.</div>';
+  }
+  function fmtTime(iso){ try{ var d=new Date(iso); return isNaN(d)?"":d.toLocaleString("en-GB",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+  function applyLock(){
+    var locked=!raDone;
+    document.body.classList.toggle("ralock",locked);
+    $("note").readOnly=locked; drawPhotos();
+    var lb=$("lockBanner");
+    if(locked){ lb.classList.add("show");
+      if(reported){ $("lockMsg").innerHTML="Reported to the office — they've been alerted and will call you. You're held on this job until they respond. Retry the risk assessment once it's sorted."; $("lockGo").textContent="Retry risk assessment →"; lb.classList.add("reported"); }
+      else{ $("lockMsg").innerHTML="You can set <b>Travelling</b> on your way. Once on site, complete &amp; sign the risk assessment to start work."; $("lockGo").textContent="Open risk assessment →"; lb.classList.remove("reported"); }
+    } else lb.classList.remove("show");
+    refresh();
+  }
+
+  function wire(){
+    $("backBtn").onclick=function(){ location.href=backTo; };
+    var docsBtn=$("docsBtn"); if(docsBtn) docsBtn.onclick=function(){ location.href="site-folder.html?site="+encodeURIComponent(job.siteCode||"")+"&name="+encodeURIComponent(job.siteName||"")+"&back="+encodeURIComponent("engineer-job.html?jobId="+jobId); };
+    $("seg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;stage=b.dataset.s;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});drawPhotos();});
+    $("fileInput").addEventListener("change",uploadPhotos);
+    $("note").addEventListener("input",refresh);
+    $("note").addEventListener("pointerdown",function(e){ if(!raDone){ e.preventDefault(); openRA(); } });
+    $("sigBtn").onclick=function(){ if(!raDone){ openRA(); return; } openSig(); };
+    $("lockGo").onclick=openRA;
+    var slide=$("slide"),knob=slide.querySelector(".knob"),sx=0,dg=false;
+    knob.addEventListener("pointerdown",function(e){if(slide.classList.contains("locked"))return;dg=true;sx=e.clientX;try{knob.setPointerCapture(e.pointerId);}catch(_){}});
+    knob.addEventListener("pointermove",function(e){if(!dg)return;if(e.clientX-sx>120){dg=false;doFinish();}});
+    knob.addEventListener("pointerup",function(){dg=false;});
+    slide.addEventListener("click",function(){if(!slide.classList.contains("locked"))doFinish();});
+    fillPoButton(); setupOfficeEdit();
+    drawStatus(); drawTimeline(); applyLock();
+  }
+  async function fillPoButton(){
+    var btn=$("poBtn"); if(!btn) return;
+    try{
+      var t=localStorage.getItem("mostlaneToken");
+      var r=await fetch(MOSTLANE_API+"/po-config",{headers:t?{"Authorization":"Bearer "+t}:{}});
+      var c=await r.json().catch(function(){return{};});
+      if(r.ok&&c.ok&&c.url){
+        var href=c.url;
+        try{ var payload={jobRef:job.helpdeskRef||job.id,jobId:job.id,site:job.siteName||job.siteCode||"",address:[job.address,job.postcode].filter(Boolean).join(", "),description:job.description||"",by:getUser()};
+          href += (href.indexOf("#")>=0?"&":"#")+"mlpo="+btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }catch(e){}
+        btn.style.display=""; btn.onclick=function(){ location.href=href; };
+      }
+    }catch(e){}
+  }
+  function setupOfficeEdit(){
+    if(window.MLJobEdit && window.MLJobEdit.open){
+      $("editWrap").style.display="block";
+      $("editBtn").onclick=function(){ window.MLJobEdit.open(job, function(){ location.reload(); }); };
+    }
+  }
+
+  async function patchJob(body){
+    body.opId=opId(); body.changedBy=getUser()||body.changedBy;
+    var r=await jfetch("/jobs/"+encodeURIComponent(jobId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok) throw new Error(j.error||("Update failed ("+r.status+")"));
+    return j;
+  }
+  async function uploadPhotos(e){
+    var files=e.target.files; if(!files||!files.length){ raPicPending=false; return; }
+    var wasRA = raPicPending;
+    var useStage = raPicPending ? "Before" : stage;
+    for(var i=0;i<files.length;i++){
+      var f=files[i]; var fn=Date.now()+"-"+i+"-"+(f.name||"photo.jpg").replace(/[^\w.\-]+/g,"_");
+      var form=new FormData(); form.append("file",f);
+      try{ await jfetch("/jobs/"+encodeURIComponent(jobId)+"/files?filename="+encodeURIComponent(fn)+"&stage="+encodeURIComponent(useStage),{method:"POST",body:form}); }
+      catch(err){ toast("Photo upload failed — will retry when online"); }
+    }
+    raPicPending=false; e.target.value="";
+    await loadPhotos(); drawPhotos(); refresh();
+    if(wasRA){ window.dispatchEvent(new Event("ml-rapic")); toast("Work-area photo added"); }
+    else toast("Photo added — tagged "+useStage);
+  }
+  var finishing=false;
+  async function doFinish(){
+    if(finishing) return;
+    if((outcomeMissing()||[]).length) return;
+    finishing=true;
+    var slide=$("slide"); slide.classList.add("go");
+    try{
+      if(chosen==="Complete"){ $("slidetxt").textContent="Completing…"; await patchJob({status:"Complete",note:$("note").value.trim()}); $("slidetxt").textContent="Completed ✓"; toast("Job completed"); }
+      else if(chosen==="On Hold"){ $("slidetxt").textContent="Sending…"; await patchJob({status:"On Hold",hold:{reason:ntrim("holdReason"),needs:ntrim("holdNeeds")}}); $("slidetxt").textContent="Sent for approval ✓"; toast("Sent to the office for approval"); }
+      else if(chosen==="Quote"){ $("slidetxt").textContent="Submitting…"; await patchJob({status:"Quote",note:$("note").value.trim(),quote:collectQuote()}); $("slidetxt").textContent="Quote submitted ✓"; toast("Quote submitted"); }
+      setTimeout(function(){ location.href=backTo; },1200);
+    }catch(err){ finishing=false; slide.classList.remove("go","locked"); $("slidetxt").textContent=ENDLABEL[chosen]||"Slide to finish"; toast("⚠ "+err.message); }
+  }
+  function collectQuote(){
+    var bar=document.querySelector("#qBar button.on"), disr=document.querySelector("#qDisr button.on");
+    return { engineersRequired:+$("qEngN").textContent, estDurationHours:parseFloat($("qDur").value)||1, materials:ntrim("qMat"),
+      timeRestrictions:ntrim("qTime"), accessEquipment:[].map.call(document.querySelectorAll("#qAccess .chip.on"),function(c){return c.dataset.a;}),
+      barriersRequired: bar? bar.dataset.v==="yes":false, disruptionToClient: disr? disr.dataset.v==="yes":false, disruptionNote:ntrim("qDisrNote") };
+  }
+
+  function makeSigPad(canvas){ var cx,drawing=false,stroke=false;
+    function size(){canvas.width=canvas.offsetWidth*2;canvas.height=canvas.offsetHeight*2;cx=canvas.getContext("2d");cx.scale(2,2);cx.lineWidth=2.2;cx.lineCap="round";cx.strokeStyle=getComputedStyle(document.body).color;}
+    function pos(e){var r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+    canvas.addEventListener("pointerdown",function(e){drawing=true;stroke=true;canvas.classList.remove("err");var p=pos(e);cx.beginPath();cx.moveTo(p.x,p.y);});
+    canvas.addEventListener("pointermove",function(e){if(!drawing)return;var p=pos(e);cx.lineTo(p.x,p.y);cx.stroke();});
+    window.addEventListener("pointerup",function(){drawing=false;});
+    return{size:size,el:canvas,has:function(){return stroke;},dataURL:function(){return canvas.toDataURL("image/png");},clear:function(){if(cx)cx.clearRect(0,0,canvas.width,canvas.height);stroke=false;canvas.classList.remove("err");}};
+  }
+  var custPad=makeSigPad($("sigCanvas")), raPad=makeSigPad($("raCanvas"));
+  function openSig(){ $("sigModal").classList.add("show"); setTimeout(custPad.size,50); }
+  $("sigClear").onclick=function(){ custPad.clear(); };
+  $("sigSave").onclick=async function(){
+    var name=$("sigName").value.trim();
+    if(!name){ $("sigName").classList.add("err"); toast("Enter the customer's name first"); return; }
+    if(!custPad.has()){ custPad.el.classList.add("err"); toast("Ask the customer to sign in the box"); return; }
+    try{
+      var r=await jfetch("/jobs/"+encodeURIComponent(jobId)+"/signature",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signedBy:name,signedAt:new Date().toISOString(),signatureBase64:custPad.dataURL(),opId:opId()})});
+      if(!r.ok) throw new Error("Signature save failed");
+      signed=true; sigName=name; job.signature={signedBy:name,signedAt:new Date().toISOString(),fileKey:"saved"};
+      $("sigstate").textContent="Signed by "+name; $("sigModal").classList.remove("show"); drawTimeline(); refresh(); toast("Sign-off saved");
+    }catch(err){ toast("⚠ "+err.message); }
+  };
+  $("sigName").addEventListener("input",function(){this.classList.remove("err");});
+
+  var raPicTaken=false;
+  $("raChecks").innerHTML=HAZ.map(function(v){return '<div class="hz" data-hz><span class="hzl">'+v+'</span><span class="hzopt"><button class="hb" data-v="ok">In place</button><button class="hb" data-v="na">N/A</button></span></div>';}).join("");
+  $("raPic").onclick=function(){ raPicPending=true; $("fileInput").click(); };
+  $("raChecks").addEventListener("click",function(e){var b=e.target.closest(".hb");if(!b)return;var row=b.closest(".hz");row.classList.remove("err");[].forEach.call(row.querySelectorAll(".hb"),function(x){x.classList.toggle("on",x===b);});row.dataset.ans=b.dataset.v;});
+  var decls=function(){return [].slice.call(document.querySelectorAll("#raModal .decl"));};
+  var hazRows=function(){return [].slice.call(document.querySelectorAll("#raChecks .hz"));};
+  document.querySelectorAll("#raModal .decl").forEach(function(d){ d.addEventListener("click",function(){ this.classList.toggle("on"); this.classList.remove("shake"); }); });
+  // reflect that the RA work-area photo was captured (fires after its upload completes)
+  window.addEventListener("ml-rapic", function(){ raPicTaken=true; $("raPic").classList.add("done"); $("raPic").classList.remove("err"); $("raPicTxt").textContent="Work-area photo added"; });
+  function openRA(){
+    raPicTaken=(photos.some(function(p){return p.stage==="Before";}));
+    if(raPicTaken){ $("raPic").classList.add("done"); $("raPicTxt").textContent="Work-area photo added"; } else { $("raPic").classList.remove("done","err"); $("raPicTxt").textContent="Photo of the work area"; }
+    hazRows().forEach(function(r){r.classList.remove("err");delete r.dataset.ans;[].forEach.call(r.querySelectorAll(".hb"),function(b){b.classList.remove("on");});});
+    decls().forEach(function(d){d.classList.remove("on","shake");});
+    $("raNotes").value="";$("raNotes").classList.remove("err");$("raName").value=getUser()||"";$("raName").classList.remove("err");raPad.clear();
+    $("raModal").classList.add("show");setTimeout(raPad.size,50);
+  }
+  $("raCancel").onclick=function(){ $("raModal").classList.remove("show"); };
+  $("raName").addEventListener("input",function(){this.classList.remove("err");});
+  $("raNotes").addEventListener("input",function(){this.classList.remove("err");});
+  $("raStart").onclick=async function(){
+    if(!raPicTaken){ $("raPic").classList.add("err"); toast("Take a photo of the work area"); return; }
+    var un=hazRows().filter(function(r){return !r.dataset.ans;}); if(un.length){ un.forEach(function(r){r.classList.add("err");}); toast("Answer each hazard control"); return; }
+    var op=decls().filter(function(d){return !d.classList.contains("on");}); if(op.length){ op.forEach(function(d){d.classList.add("shake");}); toast("Confirm all declarations — or report to the office"); return; }
+    var name=$("raName").value.trim(); if(!name){ $("raName").classList.add("err"); toast("Enter your name"); return; }
+    if(!raPad.has()){ raPad.el.classList.add("err"); toast("Sign the risk assessment"); return; }
+    var ra={ safe:true, name:name, at:new Date().toISOString(),
+      hazards:hazRows().map(function(r){return{item:r.querySelector(".hzl").textContent,answer:r.dataset.ans};}),
+      declarations:{competent:true,publicSafeguarded:true,safeToProceed:true}, notes:ntrim("raNotes"), signature:raPad.dataURL() };
+    try{
+      await patchJob({status:"In Progress",riskAssessment:ra});
+      raDone=true; reported=false; chosen="In Progress";
+      if(job){ job.riskAssessment=ra; job.status="In Progress"; }
+      $("raModal").classList.remove("show"); $("curstatus").textContent="In Progress";
+      drawStatus(); applyLock(); drawTimeline(); toast("RA signed — work started");
+    }catch(err){ toast("⚠ "+err.message); }
+  };
+  $("raReport").onclick=async function(){
+    var reason=$("raNotes").value.trim(); if(!reason){ $("raNotes").classList.add("err"); toast("Tell the office what's stopping you"); return; }
+    var failed=decls().filter(function(d){return !d.classList.contains("on");}).map(function(d){return d.querySelector("b").textContent;});
+    try{
+      await jfetch("/jobs/"+encodeURIComponent(jobId)+"/ra-block",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({reason:reason,items:failed})});
+      reported=true; raDone=false; if(job){ job.raBlock={state:"open",reason:reason}; }
+      $("raModal").classList.remove("show"); $("curstatus").textContent="⚠ Awaiting office"; applyLock(); toast("Office alerted — someone will call you");
+    }catch(err){ toast("⚠ "+err.message); }
+  };
+
+  var lxi=0;
+  function openLightbox(i){ lxi=i; showLx(); $("lightbox").classList.add("show"); }
+  function showLx(){ if(!photos[lxi]) return; $("lxImg").src=photos[lxi].publicURL||""; }
+  $("lxClose").onclick=function(){ $("lightbox").classList.remove("show"); };
+  $("lxPrev").onclick=function(){ lxi=(lxi-1+photos.length)%photos.length; showLx(); };
+  $("lxNext").onclick=function(){ lxi=(lxi+1)%photos.length; showLx(); };
+
+  (async function boot(){
+    if(!jobId){ $("loading").textContent="No job specified."; return; }
+    try{
+      await loadAll();
+      $("loading").style.display="none"; $("app").style.display="block"; render();
+    }catch(err){ $("loading").innerHTML="Couldn't load this job.<br><small>"+esc(err.message)+"</small>"; }
+  })();
+})();
+</script>
+</body>
+</html>

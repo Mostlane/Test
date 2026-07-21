@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="ml-offline.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Inbox — Mostlane</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+      --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+      --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+      --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    }
+    @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px 92px;min-height:100vh}
+    a{color:var(--accent)}
+    .row-top{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
+    h1.big{font-size:25px;margin:2px 0 0;letter-spacing:-.02em}
+    .markall{font-size:13px;color:var(--accent);font-weight:650;background:0;border:0;cursor:pointer}
+    .filters{display:flex;gap:8px;margin:14px 0 6px;overflow-x:auto;-webkit-overflow-scrolling:touch}.filters::-webkit-scrollbar{height:0}
+    .fchip{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:999px;padding:8px 14px;font:inherit;font-size:13px;font-weight:650;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px}
+    .fchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+    .fchip .c{background:color-mix(in srgb,var(--urgent) 90%,#000);color:#fff;border-radius:999px;font-size:10px;font-weight:800;padding:1px 6px}.fchip.on .c{background:rgba(255,255,255,.28)}
+    .eyebrow{font-size:12px;color:var(--muted);font-weight:700;margin:18px 2px 4px;text-transform:uppercase;letter-spacing:.05em}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin:10px 0;overflow:hidden}
+    .item{display:flex;align-items:flex-start;gap:12px;padding:14px 15px;border-bottom:1px solid var(--line);text-decoration:none;color:var(--ink)}
+    .item:last-child{border:0}
+    .item .ic{width:38px;height:38px;border-radius:11px;flex:0 0 auto;display:grid;place-items:center;font-size:18px;background:var(--chip)}
+    .item .ic.urgent{background:color-mix(in srgb,var(--urgent) 15%,transparent)}.item .ic.job{background:color-mix(in srgb,var(--accent) 13%,transparent)}.item .ic.msg{background:color-mix(in srgb,var(--purple) 14%,transparent)}
+    .item .bd{flex:1;min-width:0}
+    .item .ti{font-weight:650;font-size:14.5px;display:flex;align-items:center;gap:7px}
+    .item .ti .dot{width:8px;height:8px;border-radius:50%;background:var(--urgent);flex:0 0 auto}
+    .item .mt{font-size:13px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .item .when{font-size:11px;color:var(--muted);margin-top:3px}
+    .acts{display:flex;gap:8px;margin-top:10px}
+    .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:14px;border-radius:10px;padding:9px 13px;transition:filter .15s,transform .06s;color:var(--ink);text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+    .btn:active{transform:translateY(1px)}.btn.primary{background:var(--accent);color:#fff}.btn.ok{background:var(--ok);color:#fff}
+    .btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}.btn.danger{background:color-mix(in srgb,var(--urgent) 12%,var(--card));color:var(--urgent);border:1px solid color-mix(in srgb,var(--urgent) 40%,var(--line))}
+    .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:40px 10px}
+    .compose{width:100%;margin-top:6px}
+    #loading{padding:60px 0;text-align:center;color:var(--muted)}
+    /* thread sheet */
+    .modal{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:40}.modal.show{display:flex}
+    .sheet{background:var(--bg);width:100%;max-width:520px;margin:0 auto;border-radius:20px 20px 0 0;max-height:88%;display:flex;flex-direction:column}
+    .sheet .sh-h{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card);border-radius:20px 20px 0 0}
+    .sheet .sh-h b{font-size:16px}.sheet .sh-h .x{margin-left:auto;background:0;border:0;font-size:22px;color:var(--muted);cursor:pointer}
+    .thread{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+    .bub{max-width:78%;padding:9px 13px;border-radius:16px;font-size:14.5px;line-height:1.35;word-wrap:break-word}
+    .bub.them{background:var(--card);border:1px solid var(--line);align-self:flex-start;border-bottom-left-radius:5px}
+    .bub.me{background:var(--accent);color:#fff;align-self:flex-end;border-bottom-right-radius:5px}
+    .bub .tm{display:block;font-size:10px;opacity:.65;margin-top:3px}
+    .reply{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--card)}
+    .reply input{flex:1;border:1px solid var(--line);border-radius:999px;padding:11px 15px;font:inherit;font-size:15px;background:var(--bg);color:var(--ink)}
+    .reply button{border:0;background:var(--accent);color:#fff;border-radius:50%;width:44px;height:44px;font-size:18px;cursor:pointer;flex:0 0 auto}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+    .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
+    .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
+    .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+  </style>
+</head>
+<body>
+  <div class="row-top"><h1 class="big">Inbox</h1><button class="markall" id="markAll">Mark all read</button></div>
+  <div class="filters" id="filters"></div>
+  <div id="loading">Loading…</div>
+  <div id="list"></div>
+
+  <div class="modal" id="threadModal"><div class="sheet">
+    <div class="sh-h"><b id="thName">Thread</b><button class="x" id="thClose">✕</button></div>
+    <div class="thread" id="thBody"></div>
+    <form class="reply" id="thReply"><input id="thInput" placeholder="Type a message…" autocomplete="off"><button type="submit">➤</button></form>
+  </div></div>
+
+  <nav class="tabbar">
+    <a href="route.html"><span class="ic">🧭</span>Route</a>
+    <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
+    <a href="inbox.html" class="on"><span class="ic">📨</span>Inbox</a>
+    <a href="you.html"><span class="ic">👤</span>You</a>
+  </nav>
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var API = window.MOSTLANE_API || "";
+  var SLA_API = "https://mostlane-sla.jamie-def.workers.dev";
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
+  function me(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function token(){ try{return localStorage.getItem("mostlaneToken")||"";}catch(e){return "";} }
+  function isAdmin(){ try{ var p=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); return p.FullAccess==="Yes"||p.SLAAdmin==="Yes"; }catch(e){ return false; } }
+  function authHeaders(extra){ var h=extra||{}; var t=token(); if(t) h["Authorization"]="Bearer "+t; return h; }
+  function afetch(url,opts){ opts=opts||{}; opts.headers=authHeaders(opts.headers||{}); return fetch(url,opts); }
+  function jfetch(path,opts){ return fetch(SLA_API+path,opts||{cache:"no-store"}); }
+  function fmtWhen(iso){ try{ var d=new Date(iso),now=new Date(); var same=d.toDateString()===now.toDateString(); return same?d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}); }catch(e){ return ""; } }
+
+  var OWNER = window.MOSTLANE_OWNER || "Jamie Line";
+  var admin=false, filter="all";
+  var threads=[], jobs=[], holds=[], flags=[];
+
+  async function loadAll(){
+    admin=isAdmin();
+    var calls=[
+      afetch(API+"/messages/threads").then(function(r){return r.json();}).then(function(j){ threads=(j&&j.threads)||[]; }).catch(function(){ threads=[]; }),
+      jfetch("/jobs/for-engineer?engineer="+encodeURIComponent(me())+"&t="+Date.now()).then(function(r){return r.json();}).then(function(l){ jobs=Array.isArray(l)?l:[]; }).catch(function(){ jobs=[]; })
+    ];
+    if(admin){
+      calls.push(jfetch("/holds/pending?t="+Date.now(),{headers:authHeaders(),cache:"no-store"}).then(function(r){return r.json();}).then(function(j){ holds=(j&&j.holds)||[]; }).catch(function(){ holds=[]; }));
+      calls.push(jfetch("/safety/open?t="+Date.now(),{headers:authHeaders(),cache:"no-store"}).then(function(r){return r.json();}).then(function(j){ flags=(j&&j.flags)||[]; }).catch(function(){ flags=[]; }));
+    }
+    await Promise.all(calls);
+  }
+
+  function unread(){
+    var msg=threads.reduce(function(a,t){return a+(t.unread||0);},0);
+    var jobN=openJobs().length;
+    var adm=holds.length+flags.length;
+    return {messages:msg, jobs:jobN, admin:adm, all:msg+jobN+adm};
+  }
+  function openJobs(){ return jobs.filter(function(j){ return ["Complete","Closed Jobs","Invoiced"].indexOf(j.status||"")<0; }); }
+  function jobName(j){ try{ return (window.mlJobName?window.mlJobName(j):"")||j.siteName||j.helpdeskRef||j.id; }catch(e){ return j.siteName||j.helpdeskRef||j.id; } }
+
+  function renderFilters(){
+    var u=unread();
+    var defs=[["all","All",u.all],["jobs","Jobs",u.jobs],["messages","Messages",u.messages]];
+    if(admin) defs.push(["admin","Admin",u.admin]);
+    $("filters").innerHTML=defs.map(function(d){ return '<button class="fchip'+(filter===d[0]?" on":"")+'" data-f="'+d[0]+'">'+d[1]+(d[2]?'<span class="c">'+d[2]+'</span>':'')+'</button>'; }).join("");
+    [].forEach.call($("filters").children,function(el){ el.onclick=function(){ filter=el.dataset.f; renderFilters(); renderList(); }; });
+  }
+
+  function renderList(){
+    var host=$("list"); var html=""; var show=function(f){ return filter==="all"||filter===f; };
+    if(admin && show("admin") && (holds.length||flags.length)){
+      html+='<div class="eyebrow">Needs a decision</div><div class="card" id="adminCard">';
+      flags.forEach(function(f){
+        html+='<div class="item"><div class="ic urgent">⚠️</div><div class="bd"><div class="ti"><span class="dot"></span>Safety flag — '+esc(f.ref)+'</div><div class="mt">'+esc(f.by||"Engineer")+' can\'t proceed: '+esc(f.reason)+'</div>'
+          +'<div class="acts"><button class="btn ok" data-resolve="'+esc(f.id)+'">Cleared — resolve</button><a class="btn line" href="engineer-job.html?jobId='+encodeURIComponent(f.id)+'&back=inbox.html">Open job</a></div></div></div>';
+      });
+      holds.forEach(function(h){
+        html+='<div class="item"><div class="ic">⏸️</div><div class="bd"><div class="ti"><span class="dot"></span>On-hold approval — '+esc(h.ref)+'</div><div class="mt">'+esc(h.requestedBy||"Engineer")+': '+esc(h.reason||"")+(h.needs?' — needs '+esc(h.needs):'')+'</div>'
+          +'<div class="acts"><button class="btn ok" data-approve="'+esc(h.id)+'">Approve</button><button class="btn danger" data-reject="'+esc(h.id)+'">Reject</button></div></div></div>';
+      });
+      html+='</div>';
+    }
+    if(show("jobs")){
+      var oj=openJobs();
+      if(oj.length){
+        html+='<div class="eyebrow">Your jobs</div><div class="card">';
+        oj.slice(0,20).forEach(function(j){
+          html+='<a class="item" href="engineer-job.html?jobId='+encodeURIComponent(j.id)+'&back=inbox.html"><div class="ic job">🧰</div><div class="bd"><div class="ti">'+esc(jobName(j))+'</div><div class="mt">New job — added to your route · '+esc(j.status||"")+'</div></div></a>';
+        });
+        html+='</div>';
+      } else if(filter==="jobs"){ html+='<div class="empty">No open jobs right now.</div>'; }
+    }
+    if(show("messages")){
+      html+='<div class="eyebrow">Messages</div><div class="card">';
+      if(threads.length){
+        threads.forEach(function(t){
+          html+='<a class="item" data-thread="'+esc(t.with)+'"><div class="ic msg">💬</div><div class="bd"><div class="ti">'+(t.unread?'<span class="dot"></span>':'')+esc(t.with)+'</div><div class="mt">'+esc(t.last||"")+'</div><div class="when">'+esc(fmtWhen(t.at))+'</div></div></a>';
+        });
+      }
+      html+='<div style="padding:12px 15px"><button class="btn line compose" id="composeBtn">✉️ Message the office</button></div></div>';
+    }
+    if(filter==="all" && !unread().all && !threads.length && !openJobs().length){ html='<div class="empty">📭 You\'re all caught up.</div>'; }
+    host.innerHTML=html;
+    wireList();
+  }
+
+  function wireList(){
+    [].forEach.call(document.querySelectorAll("[data-thread]"),function(el){ el.onclick=function(){ openThread(el.dataset.thread); }; });
+    var cb=$("composeBtn"); if(cb) cb.onclick=function(){ openThread(OWNER); };
+    [].forEach.call(document.querySelectorAll("[data-approve]"),function(el){ el.onclick=function(){ decideHold(el.dataset.approve,"approve"); }; });
+    [].forEach.call(document.querySelectorAll("[data-reject]"),function(el){ el.onclick=function(){ decideHold(el.dataset.reject,"reject"); }; });
+    [].forEach.call(document.querySelectorAll("[data-resolve]"),function(el){ el.onclick=function(){ resolveFlag(el.dataset.resolve); }; });
+  }
+
+  async function decideHold(id,which){
+    if(which==="reject" && !confirm("Reject this hold? The job goes back to the engineer to finish.")) return;
+    var reason = which==="reject" ? (prompt("Reason (optional):")||"") : "";
+    try{
+      var r=await jfetch("/jobs/"+encodeURIComponent(id)+"/hold-"+which,{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({reason:reason})});
+      if(!r.ok) throw new Error("Failed ("+r.status+")");
+      holds=holds.filter(function(h){return String(h.id)!==String(id);});
+      renderFilters(); renderList(); toast(which==="approve"?"Approved":"Rejected — back to engineer");
+    }catch(err){ toast("⚠ "+err.message); }
+  }
+  async function resolveFlag(id){
+    var note=prompt("Note for the engineer (e.g. barriers delivered, retry RA):")||"";
+    try{
+      var r=await jfetch("/jobs/"+encodeURIComponent(id)+"/ra-resolve",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({note:note})});
+      if(!r.ok) throw new Error("Failed ("+r.status+")");
+      flags=flags.filter(function(f){return String(f.id)!==String(id);});
+      renderFilters(); renderList(); toast("Safety flag cleared");
+    }catch(err){ toast("⚠ "+err.message); }
+  }
+
+  // ---- message thread ----
+  var curThread=null;
+  async function openThread(withUser){
+    curThread=withUser; $("thName").textContent=withUser; $("thBody").innerHTML='<div class="empty">Loading…</div>'; $("threadModal").classList.add("show");
+    try{
+      var r=await afetch(API+"/messages/thread?with="+encodeURIComponent(withUser)); var j=await r.json();
+      var msgs=(j&&j.messages)||[];
+      $("thBody").innerHTML=msgs.length?msgs.map(function(m){ return '<div class="bub '+(m.mine?"me":"them")+'">'+esc(m.body)+'<span class="tm">'+esc(fmtWhen(m.at))+'</span></div>'; }).join(""):'<div class="empty">No messages yet — say hello.</div>';
+      $("thBody").scrollTop=$("thBody").scrollHeight;
+      // mark thread read locally
+      threads.forEach(function(t){ if(String(t.with).toLowerCase()===String(withUser).toLowerCase()) t.unread=0; });
+      renderFilters();
+    }catch(err){ $("thBody").innerHTML='<div class="empty">Couldn\'t load this thread.</div>'; }
+  }
+  $("thClose").onclick=function(){ $("threadModal").classList.remove("show"); renderList(); };
+  $("thReply").onsubmit=async function(e){
+    e.preventDefault(); var body=$("thInput").value.trim(); if(!body||!curThread) return;
+    $("thInput").value="";
+    var b='<div class="bub me">'+esc(body)+'<span class="tm">now</span></div>';
+    $("thBody").insertAdjacentHTML("beforeend",b); $("thBody").scrollTop=$("thBody").scrollHeight;
+    try{
+      var r=await afetch(API+"/messages/send",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({to:curThread,body:body,opId:opId()})});
+      if(!r.ok) throw new Error("send failed");
+    }catch(err){ toast("Message will send when you're back online"); }
+  };
+
+  $("markAll").onclick=async function(){
+    var toMark=threads.filter(function(t){return t.unread;});
+    for(var i=0;i<toMark.length;i++){ try{ await afetch(API+"/messages/read",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({with:toMark[i].with})}); }catch(e){} }
+    threads.forEach(function(t){ t.unread=0; });
+    renderFilters(); renderList(); toast("Marked read");
+  };
+
+  (async function boot(){
+    try{ await loadAll(); $("loading").style.display="none"; renderFilters(); renderList(); }
+    catch(err){ $("loading").innerHTML="Couldn't load your inbox.<br><small>"+esc(err.message)+"</small>"; }
+  })();
+})();
+</script>
+</body>
+</html>

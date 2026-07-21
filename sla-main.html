@@ -566,7 +566,7 @@ async function gate(){
       $("mainCard").style.display = "block";
       return true;
     }
-    if(sla){ location.replace("engineer-jobs.html"); return false; }  // engineer → My Jobs
+    if(sla){ location.replace("route.html"); return false; }  // engineer → Route (mobile app)
     $("forbidden").style.display = "block";
     return false;
   }catch(e){
