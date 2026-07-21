@@ -217,8 +217,7 @@ if (!result.ok) {
 // blank out the login.
 const user = result.user || result;
 if (!user || !user.Username) {
-  errorBox.textContent = "Login ok but no account details came back (keys: " +
-    Object.keys(result || {}).join(", ") + ").";
+  errorBox.textContent = "Signed in, but your account details didn't come back. Please try again or contact the office.";
   return;
 }
 
@@ -285,10 +284,13 @@ localStorage.setItem(
 
       } catch (err) {
         console.error(err);
-        // Surface the real reason so a login failure is diagnosable in the
-        // field (phones have no dev console). Reads plainly for a real user too.
-        errorBox.textContent = "Could not load user data — " +
-          (err && err.message ? err.message : String(err));
+        // "Load failed" / "Failed to fetch" mean the request never reached the
+        // server (offline / weak signal); anything else is unexpected. Keep the
+        // detail in the console for support, show a plain line to the user.
+        var msg = (err && err.message) || String(err);
+        errorBox.textContent = /load failed|failed to fetch|networkerror/i.test(msg)
+          ? "Couldn't reach the server. Check your connection and try again."
+          : "Something went wrong signing in. Please try again.";
       }
     });
   </script>
