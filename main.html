@@ -3,11 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <script src="/portal-config.js?v=2"></script>
-  <script src="/ml-perms.js"></script>
-  <!-- Field users never see the office menu: if one lands here (e.g. a sub-page's
-       Back button points at main.html), bounce straight to their You launcher.
-       Runs before paint so there's no flash. Admins/office are unaffected. -->
-  <script>try{ if(window.mlIsFieldUser && window.mlIsFieldUser()){ location.replace("you.html"); } }catch(e){}</script>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
