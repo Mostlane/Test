@@ -39,6 +39,12 @@
     .list a .badge.red{color:var(--urgent);background:color-mix(in srgb,var(--urgent) 14%,transparent)}
     .grouplbl{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:16px 4px 2px}
     .signout{color:var(--urgent);text-align:center;font-weight:700;padding:18px;cursor:pointer}
+    .daytimer{padding:16px;margin-top:12px}
+    .daytimer .dl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+    .daytimer .drow{display:flex;align-items:baseline;gap:10px;margin-top:6px}
+    .daytimer .dtime{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+    .daytimer .dsub{font-size:13px}
+    .daytimer.live .dtime{color:var(--ok)}
     .loc{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-top:12px}
     .loc .lic{width:40px;height:40px;flex:0 0 auto;border-radius:12px;background:color-mix(in srgb,var(--accent) 12%,transparent);display:grid;place-items:center;font-size:19px}
     .loc.on .lic{background:color-mix(in srgb,var(--ok) 15%,transparent)}.loc.off .lic{background:color-mix(in srgb,var(--urgent) 13%,transparent)}
@@ -54,6 +60,12 @@
 <body>
   <h1 class="big">You</h1>
   <div class="prof"><div class="av" id="avatar">··</div><div><h2 id="name">…</h2><div class="role" id="role">Engineer</div></div></div>
+
+  <!-- Day timer: how long they've been on shift today (live). -->
+  <div class="card daytimer" id="dayCard" style="display:none">
+    <div class="dl" id="dayLabel">On shift today</div>
+    <div class="drow"><div class="dtime" id="dayTime">0h 0m</div><div class="dsub muted" id="daySub"></div></div>
+  </div>
 
   <!-- Location permission control: lets the engineer grant location up-front and
        see its status (the app also asks when they clock on / update a job). -->
@@ -97,6 +109,32 @@
   $("name").textContent=name||"Engineer";
   $("avatar").textContent=initials(name);
   try{ var veh=localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""; if(veh) $("role").textContent="Engineer · Van "+veh; }catch(e){}
+
+  // ---- Day timer: how long they've been on shift today (live) ----
+  var SLA_API="https://mostlane-sla.jamie-def.workers.dev";   // portal-config bridge attaches the token
+  function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+  function fmtDur(ms){ if(ms<0)ms=0; var m=Math.floor(ms/60000); return Math.floor(m/60)+"h "+(m%60)+"m"; }
+  function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+  (function dayTimer(){
+    fetch(SLA_API+"/shift/today?engineer="+encodeURIComponent(name)+"&date="+todayLocal()+"&t="+Date.now(),{cache:"no-store"})
+      .then(function(r){return r.json();}).then(function(sd){
+        var s=sd&&sd.shift; if(!s||!s.clock_on_at) return;   // not started -> card stays hidden
+        $("dayCard").style.display="block";
+        var onAt=new Date(s.clock_on_at).getTime();
+        if(s.clock_off_at){
+          var offAt=new Date(s.clock_off_at).getTime();
+          $("dayLabel").textContent="Worked today";
+          $("dayTime").textContent=fmtDur(offAt-onAt);
+          $("daySub").textContent=fmtClock(s.clock_on_at)+" → "+fmtClock(s.clock_off_at);
+        } else {
+          $("dayCard").classList.add("live");
+          $("dayLabel").textContent="On shift today";
+          $("daySub").textContent="since "+fmtClock(s.clock_on_at);
+          var tick=function(){ $("dayTime").textContent=fmtDur(Date.now()-onAt); };
+          tick(); setInterval(tick,30000);
+        }
+      }).catch(function(){});
+  })();
 
   // Everything below is driven by the user's real permissions, from the shared
   // /ml-perms.js (the SAME source as the office menu). Grant a permission and its
