@@ -4217,6 +4217,21 @@ async function handle8(request, env, ctx, url, sess) {
     })).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
     return jsonResponse({ ok: true, holds }, headers);
   }
+  if (subpath === "/safety/open" && method === "GET") {
+    if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+    if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+    const jobs = await listJobs(env, tenantId);
+    const flags = jobs.filter((j) => j.raBlock && j.raBlock.state === "open").map((j) => ({
+      id: j.id,
+      ref: j.helpdeskRef || j.id,
+      site: j.siteName || j.siteCode || "",
+      reason: j.raBlock.reason || "",
+      items: j.raBlock.items || [],
+      by: j.raBlock.by || "",
+      at: j.raBlock.at || ""
+    })).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    return jsonResponse({ ok: true, flags }, headers);
+  }
   if (subpath === "/inbound" && method === "GET") {
     const secret = (env.JOBS_INBOUND_TOKEN || "").trim().replace(/^Bearer\s+/i, "").trim();
     let fp = null;
@@ -4758,6 +4773,57 @@ async function handle8(request, env, ctx, url, sess) {
       }));
       return jsonResponse(decorateJobWithLiveSla(job), headers);
     }
+    if (parts[2] === "ra-block" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      const b = await readJson2(request);
+      const reason = String(b.reason || "").trim();
+      if (!reason) return jsonResponse({ error: "reason required" }, headers, 400);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      job.raBlock = {
+        state: "open",
+        reason: reason.slice(0, 500),
+        items: Array.isArray(b.items) ? b.items.slice(0, 10).map((x) => String(x).slice(0, 120)) : [],
+        by: sess.user.username,
+        at: now
+      };
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Awaiting office (safety)", at: now, by: sess.user.username });
+      job.events ||= [];
+      job.events.push({ at: now, by: sess.user.username, type: "note", note: "Can't proceed safely: " + reason });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
+        title: "\u26A0 Safety flag \u2014 can't proceed",
+        body: `${sess.user.username} can't proceed at ${job.helpdeskRef || id}: ${reason.slice(0, 80)}`,
+        url: "/inbox.html",
+        tag: "ra-block:" + id
+      }, sess.user.username));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
+    if (parts[2] === "ra-resolve" && method === "POST") {
+      if (!sess) return jsonResponse({ error: "Not authenticated" }, headers, 401);
+      if (!await isSlaAdmin(env, tenantId, sess)) return jsonResponse({ error: "Forbidden" }, headers, 403);
+      const b = await readJson2(request);
+      const job = await getJob(env, tenantId, id);
+      if (!job) return jsonResponse({ error: "Not found" }, headers, 404);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const eng = job.raBlock && job.raBlock.by || assignedList(job)[0];
+      const note = String(b.note || "").slice(0, 300);
+      job.raBlock = Object.assign({}, job.raBlock, { state: "resolved", resolvedBy: sess.user.username, resolvedAt: now, resolveNote: note });
+      job.statusHistory ||= [];
+      job.statusHistory.push({ status: "Safety flag resolved", at: now, by: sess.user.username });
+      job.updatedAt = now;
+      await saveJob(env, tenantId, job);
+      if (eng) ctx?.waitUntil(sendToUser(env, tenantId, eng, {
+        title: "Safety flag resolved",
+        body: `${job.helpdeskRef || id}: ${note || "the office has actioned it"} \u2014 tap to continue.`,
+        url: "/job-view.html?jobId=" + encodeURIComponent(id),
+        tag: "ra-block:" + id
+      }));
+      return jsonResponse(decorateJobWithLiveSla(job), headers);
+    }
     if (method === "GET") {
       const job = await getJob(env, tenantId, id);
       return job ? jsonResponse(decorateJobWithLiveSla(job), headers) : jsonResponse({ error: "Not found" }, headers, 404);
@@ -5013,6 +5079,8 @@ async function findBlockingJob(env, tenantId, username, exceptId) {
   for (const j of jobs) {
     if (String(j.id) === String(exceptId)) continue;
     if (!assignedList(j).some((a) => normId(a) === uNorm)) continue;
+    if (j.raBlock && j.raBlock.state === "open")
+      return { id: j.id, ref: j.helpdeskRef || j.id, why: "it's flagged 'can't proceed safely' \u2014 waiting for the office" };
     if (j.status === "In Progress" || j.status === "Travelling")
       return { id: j.id, ref: j.helpdeskRef || j.id, why: `it's still ${j.status}` };
     if (j.status === "On Hold") {
