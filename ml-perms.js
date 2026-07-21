@@ -84,11 +84,9 @@
   // and its entry appears on the user's You screen automatically. `always:true`
   // items are personal pages open to any logged-in user (no permission needed).
   var MENU = [
-    // Work
+    // Work  (keys live inside Plant & Equipment; no separate keys/on-call tiles)
     { key: "Assets", href: "my-assets.html", label: "Plant & equipment", icon: "🧰", group: "Work" },
-    { always: true, href: "keys.html", label: "Keys signed to me", icon: "🔑", group: "Work" },
     { always: true, href: "van-check.html", label: "Van check", icon: "🚐", group: "Work" },
-    { always: true, href: "oncall_current.html", label: "Availability & on-call", icon: "📞", group: "Work" },
     { key: "Vehicles", href: "vehicles.html", label: "Vehicles / fleet", icon: "🛻", group: "Work" },
     { key: "CheckInOut", href: "index.html", label: "Check in / out", icon: "🕒", group: "Work" },
     // Records

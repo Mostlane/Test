@@ -8,177 +8,75 @@
   <script src="auth.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
-  <style>
+    <style>
     :root{
-      --brand:#003b82;
-      --accent:#1766ff;
-      --accent-press:#0f52d6;
-      --ml-bg:#eff3f8;
-      --panel:#ffffff;
-      --text:#0e1728;
-      --muted:#8a94a6;
-      --muted-2:#4a5568;
-      --border:#e2e7ef;
-      --chip:#eef2f8;
-      --chip-ink:#41506a;
-      --ok:#15803d;   --ok-bg:#e7f7ec;
-      --warn:#b45309;  --warn-bg:#fdf1e0;
-      --bad:#d11f2d;   --bad-bg:#fdebed;
-      --radius:16px;
-      --tap:54px;
-      --shadow:0 6px 18px rgba(14,23,40,.07), 0 1px 3px rgba(14,23,40,.05);
+      --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+      --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+      --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+      --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     }
-    html{background:var(--ml-bg);}
-    *{box-sizing:border-box;}
-    html,body{
-      margin:0;padding:0;
-      font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
-      color:var(--text);
-      background:transparent;
-      -webkit-font-smoothing:antialiased;
-    }
-    .shell{ max-width:560px; margin:0 auto; padding:0 14px 40px; }
-    .card{ background:transparent; }
-
-    header.main-header{
-      position:sticky; top:0; z-index:20;
-      display:flex; justify-content:space-between; align-items:center; gap:12px;
-      padding:14px 16px; margin:0 -14px 14px;
-      background:var(--panel); border-bottom:1px solid var(--border);
-    }
-    header h1{ margin:0; font-size:22px; letter-spacing:-.02em; color:var(--brand); }
-    header .sub{ font-size:12.5px; color:var(--muted); margin-top:1px; }
-
-    .btn{
-      border-radius:12px; padding:0 14px; min-height:44px; font-size:14px;
-      border:1px solid var(--border); background:#fff; cursor:pointer;
-      display:inline-flex; align-items:center; justify-content:center; gap:6px;
-      text-decoration:none; color:var(--muted-2); font-weight:650; white-space:nowrap;
-      user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; touch-action:manipulation;
-    }
-    .btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 4px 12px rgba(23,102,255,.30); }
-    .btn.primary:active{ background:var(--accent-press); transform:translateY(1px); }
-    .icon-btn{
-      width:46px; height:46px; padding:0; border-radius:13px; border:1px solid var(--border);
-      background:#fff; color:var(--muted-2); font-size:20px; cursor:pointer;
-      display:flex; align-items:center; justify-content:center; touch-action:manipulation;
-    }
-    .content{ padding:0; }
-
-    /* === Controls === */
-    .nav-row{ display:flex; gap:10px; margin-bottom:8px; }
-    .nav-row .btn{ flex:1; min-height:48px; font-size:14.5px; }
-    .older-btn{
-      width:100%; min-height:46px; margin-bottom:14px;
-      border-radius:13px; border:1px dashed #cdd6e3; background:transparent;
-      color:var(--muted); font-size:14px; font-weight:650; cursor:pointer; touch-action:manipulation;
-    }
-    .hint{ text-align:center; font-size:11px; color:var(--muted); margin:4px 0 12px; }
-
-    /* === Day groups === */
-    .day-group{ margin-top:6px; }
-    .day-banner{
-      position:sticky; top:72px; z-index:10;
-      display:flex; align-items:baseline; gap:8px;
-      background:var(--ml-bg); padding:9px 4px; margin:14px 0 10px;
-      font-size:16px; font-weight:800; letter-spacing:-.01em; color:var(--text);
-    }
-    .day-banner .d-count{ font-size:13px; font-weight:650; color:var(--muted); }
-    .day-banner.today::after{
-      content:"TODAY"; font-size:10.5px; font-weight:800; letter-spacing:.08em;
-      color:#fff; background:var(--accent); padding:2px 8px; border-radius:999px; align-self:center;
-    }
-
-    /* === Job card === */
-    .job-card{
-      position:relative; background:var(--panel); border:1px solid var(--border);
-      border-radius:var(--radius); box-shadow:var(--shadow);
-      padding:15px 16px 15px 19px; margin-bottom:12px; overflow:hidden;
-    }
-    .job-card::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:7px; background:var(--strip,var(--border)); }
-    .job-card.strip-ok{--strip:var(--ok);}
-    .job-card.strip-warn{--strip:var(--warn);}
-    .job-card.strip-bad{--strip:var(--bad);}
-    .job-card.strip-done{--strip:#b9c2d0;}
-    .job-card.strip-none{--strip:#cbd5e5;}
-
-    .job-card.job-flash{ animation:mlJobFlash 1s ease-in-out 0s 4; scroll-margin-top:150px; }
-    @keyframes mlJobFlash{
-      0%,100%{ box-shadow:var(--shadow); }
-      50%    { box-shadow:0 0 0 4px rgba(23,102,255,.55), 0 8px 22px rgba(23,102,255,.35); }
-    }
-    @media (prefers-reduced-motion:reduce){
-      .job-card.job-flash{ animation:none; box-shadow:0 0 0 4px rgba(23,102,255,.55); }
-    }
-
-    .job-top{ display:flex; align-items:center; gap:8px; margin-bottom:9px; }
-    .job-top .grow{ flex:1; }
-    .ref{
-      font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12px; font-weight:600;
-      color:var(--muted); background:var(--chip); padding:3px 9px; border-radius:8px; display:inline-block;
-    }
-    .priority-badge{ font-size:11.5px; font-weight:800; letter-spacing:.03em; padding:4px 10px; border-radius:999px; display:inline-flex; align-items:center; }
-    .p1{background:var(--bad-bg);color:var(--bad);}
-    .p2{background:var(--warn-bg);color:var(--warn);}
-    .p3{background:var(--ok-bg);color:var(--ok);}
-    .p4{background:var(--chip);color:var(--muted-2);}
-
-    .job-site{ font-size:20px; font-weight:750; letter-spacing:-.02em; line-height:1.22; color:var(--text); }
-    .job-addr{ font-size:13.5px; color:var(--muted); margin-top:3px; }
-    .job-desc{ font-size:14.5px; color:var(--muted-2); margin-top:9px; }
-
-    .job-meta{ display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; align-items:center; }
-    .sla-badge{
-      border-radius:999px; padding:6px 11px; font-size:12.5px; font-weight:650;
-      display:inline-flex; align-items:center; gap:5px;
-      font-variant-numeric:tabular-nums; white-space:nowrap;
-    }
-    .sla-green{background:var(--ok-bg);color:var(--ok);}
-    .sla-amber{background:var(--warn-bg);color:var(--warn);}
-    .sla-red{background:var(--bad-bg);color:var(--bad);}
-    .sla-none{background:var(--chip);color:var(--chip-ink);}
-
-    .status-pill{
-      border-radius:999px; padding:6px 11px; font-size:12.5px; font-weight:650;
-      display:inline-flex; align-items:center; gap:5px; background:var(--chip); color:var(--chip-ink);
-    }
-    .status-open{background:#e7f2ff;color:#1256b8;}
-    .status-overdue{background:var(--bad-bg);color:var(--bad);}
-    .status-complete{background:var(--chip);color:var(--muted-2);}
-
-    /* actions */
-    .job-actions{ display:flex; gap:10px; margin-top:14px; }
-    .act{
-      min-height:var(--tap); border-radius:14px; font-size:16px; font-weight:750;
-      display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
-      border:1px solid var(--border); background:#fff; color:var(--text); text-decoration:none;
-      touch-action:manipulation;
-    }
-    .act.dir{ flex:0 0 auto; padding:0 18px; font-size:22px; color:var(--muted-2); }
-    .act.open{
-      flex:1; background:var(--accent); border-color:var(--accent); color:#fff; letter-spacing:-.01em;
-      box-shadow:0 4px 12px rgba(23,102,255,.30);
-    }
-    .act.open:active{ background:var(--accent-press); transform:translateY(1px); }
-    .act:focus-visible{ outline:3px solid rgba(23,102,255,.45); outline-offset:2px; }
-
-    .small{font-size:11px;}
-    .muted{color:var(--muted);}
-
-    /* === Modal === */
-    .modal-backdrop{
-      position:fixed; inset:0; background:rgba(14,23,40,.5);
-      display:none; align-items:center; justify-content:center; padding:16px; z-index:9999;
-    }
-    .modal-card{
-      width:min(520px,100%); background:#fff; border:1px solid var(--border);
-      border-radius:var(--radius); box-shadow:0 18px 44px rgba(0,0,0,.22); padding:16px;
-    }
-    .modal-title{ margin:0 0 6px; font-size:17px; color:var(--brand); }
-    .modal-sub{ margin:0 0 12px; font-size:12.5px; color:var(--muted); }
-    .modal-actions{ display:flex; gap:8px; flex-wrap:wrap; }
-    .modal-actions .btn{ flex:1 1 140px; }
-    .btn.danger{ background:#fff; border-color:#ef4444; color:#b91c1c; }
+    @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    html{background:var(--bg);}
+    body{background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:0 16px 92px;min-height:100vh}
+    a{color:var(--accent)}
+    .shell{padding:0}
+    header.main-header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 2px 4px;background:transparent;border:0;position:static}
+    header h1{margin:0;font-size:25px;letter-spacing:-.02em;color:var(--ink)}
+    header .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+    .btn{border-radius:12px;padding:0 14px;min-height:42px;font-size:14px;border:1px solid var(--line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;color:var(--ink);font-weight:650;white-space:nowrap;font-family:inherit;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .btn.primary:active{transform:translateY(1px)}
+    .btn.danger{background:color-mix(in srgb,var(--urgent) 12%,var(--card));border-color:color-mix(in srgb,var(--urgent) 40%,var(--line));color:var(--urgent)}
+    .icon-btn{width:44px;height:44px;padding:0;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+    .ml-back{display:none !important}
+    .content{padding:0}
+    .nav-row{display:flex;gap:10px;margin:12px 0 8px}
+    .nav-row .btn{flex:1;min-height:44px}
+    .older-btn{width:100%;min-height:44px;margin-bottom:14px;border-radius:12px;border:1px dashed color-mix(in srgb,var(--muted) 40%,var(--line));background:transparent;color:var(--muted);font-size:14px;font-weight:650;cursor:pointer;font-family:inherit;touch-action:manipulation}
+    .hint{text-align:center;font-size:11px;color:var(--muted);margin:4px 0 12px}
+    .day-group{margin-top:4px}
+    .day-banner{display:flex;align-items:baseline;gap:8px;padding:8px 2px;margin:16px 0 8px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+    .day-banner .d-count{font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--muted)}
+    .day-banner.today{color:var(--accent)}
+    .day-banner.today::after{content:"TODAY";font-size:10px;font-weight:800;letter-spacing:.06em;color:#fff;background:var(--accent);padding:2px 8px;border-radius:999px;align-self:center}
+    .job-card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 0 rgba(16,32,58,.03);padding:15px 16px;margin-bottom:12px;overflow:hidden}
+    .job-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--strip,var(--line))}
+    .job-card.strip-ok{--strip:var(--ok)}.job-card.strip-warn{--strip:var(--amber)}.job-card.strip-bad{--strip:var(--urgent)}.job-card.strip-done{--strip:#b9c2d0}.job-card.strip-none{--strip:var(--line)}
+    .job-card.job-flash{animation:mlJobFlash 1s ease-in-out 0s 4;scroll-margin-top:80px}
+    @keyframes mlJobFlash{0%,100%{box-shadow:0 1px 0 rgba(16,32,58,.03)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
+    @media (prefers-reduced-motion:reduce){.job-card.job-flash{animation:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 55%,transparent)}}
+    .job-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .job-top .grow{flex:1}
+    .ref{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px;font-weight:600;color:var(--muted);background:var(--chip);padding:3px 9px;border-radius:8px;display:inline-block}
+    .priority-badge{display:none}
+    .job-site{font-size:18px;font-weight:750;letter-spacing:-.02em;line-height:1.22;color:var(--ink)}
+    .job-addr{font-size:13px;color:var(--muted);margin-top:3px}
+    .job-desc{font-size:14px;color:var(--muted);margin-top:9px}
+    .job-meta{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px;align-items:center}
+    .status-pill{border-radius:999px;padding:5px 11px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;background:var(--chip);color:var(--muted)}
+    .status-open{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent)}
+    .status-overdue{background:color-mix(in srgb,var(--urgent) 13%,transparent);color:var(--urgent)}
+    .status-complete{background:var(--chip);color:var(--muted)}
+    .sla-badge{display:none !important}
+    .job-actions{display:flex;gap:10px;margin-top:13px}
+    .act{min-height:50px;border-radius:13px;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);text-decoration:none;touch-action:manipulation}
+    .act.dir{flex:0 0 auto;padding:0 16px;font-size:20px;color:var(--muted)}
+    .act.open{flex:1;background:var(--accent);border-color:var(--accent);color:#fff}
+    .act.open:active{transform:translateY(1px)}
+    .small{font-size:11px}.muted{color:var(--muted)}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(6,12,22,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:9999}
+    .modal-card{width:min(520px,100%);background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 18px 44px rgba(0,0,0,.28);padding:18px}
+    .modal-title{margin:0 0 6px;font-size:17px;color:var(--ink)}
+    .modal-sub{margin:0 0 12px;font-size:12.5px;color:var(--muted)}
+    .modal-actions{display:flex;gap:8px;flex-wrap:wrap}
+    .modal-actions .btn{flex:1 1 140px}
+    #blockedBanner{border-radius:14px}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+    .tabbar a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
+    .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
   </style>
 </head>
 
@@ -187,14 +85,13 @@
   <div class="card">
     <header class="main-header">
       <div>
-        <h1>My Jobs</h1>
+        <h1>My jobs</h1>
         <div class="sub" id="userLabel">Engineer</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <a class="btn" id="adminDashBtn" href="sla-main.html" style="display:none;">📋 Dashboard</a>
         <a class="btn" id="adminSchedBtn" href="sla-scheduler.html" style="display:none;">🗓️ Scheduler</a>
         <button type="button" class="icon-btn" id="dayMapBtn" title="Today's map" aria-label="Today's map">🗺️</button>
-        <a class="ml-back" data-role="home" href="main.html">← Menu</a>
       </div>
     </header>
 
@@ -1029,5 +926,11 @@ function init(){
 
 window.addEventListener("DOMContentLoaded", init);
 </script>
+<nav class="tabbar">
+  <a href="route.html"><span class="ic">🧭</span>Route</a>
+  <a href="engineer-jobs.html" class="on"><span class="ic">📋</span>Jobs</a>
+  <a href="inbox.html"><span class="ic">📨</span>Inbox</a>
+  <a href="you.html"><span class="ic">👤</span>You</a>
+</nav>
 </body>
 </html>

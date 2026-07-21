@@ -276,6 +276,39 @@
     }
   } catch (e) {}
 
+  // ── Field users: every "back / home" button returns to the You launcher ──────
+  // Field staff (Staff Type = field, non-admin) live entirely in the engineer
+  // app. A page's hard-coded back button must never drop them on the office menu
+  // — or a page they lack permission for (e.g. van-check's back → vehicles.html).
+  // So on every portal page, repoint the standard back button (data-role="home")
+  // to you.html. Uses the shared mlIsFieldUser when present, else an inline copy
+  // (ml-perms.js isn't loaded on every page; portal-config.js is).
+  function mlFieldUserLocal() {
+    try {
+      if (typeof window.mlIsFieldUser === "function") return window.mlIsFieldUser();
+      var p = JSON.parse(sessionStorage.getItem("mostlanePermissions") || localStorage.getItem("mostlanePermissions") || "{}") || {};
+      var yes = function (v) { return String(v || "").toLowerCase() === "yes"; };
+      if (yes(p.FullAccess) || yes(p.SLAAdmin)) return false;
+      var st = String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase();
+      if (st === "office") return false;
+      if (st === "field") return true;
+      return yes(p.SLA) || yes(p.StoryMode);
+    } catch (e) { return false; }
+  }
+  try {
+    var fuPage = (location.pathname.split("/").pop() || "").toLowerCase();
+    var FU_SKIP = ["login.html", "onboard.html", "forgot-password.html", "reset-password.html",
+                   "change-password.html", "you.html", "route.html", "inbox.html", "engineer-jobs.html"];
+    if (FU_SKIP.indexOf(fuPage) === -1 && mlFieldUserLocal()) {
+      var fixBacks = function () {
+        var links = document.querySelectorAll('[data-role="home"]');
+        for (var i = 0; i < links.length; i++) { links[i].setAttribute("href", "/you.html"); }
+      };
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fixBacks);
+      else fixBacks();
+    }
+  } catch (e) {}
+
   // ── View As (owner only) ────────────────────────────────────────────────────
   // Jamie can open a real session as any user to see exactly what they see.
   // The server locks /auth/impersonate to the owner account and audits each use.
