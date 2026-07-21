@@ -4155,6 +4155,31 @@ async function handle7(request, env, ctx, url, sess) {
   return error("Unknown timesheet route: " + sub, 404, env, request);
 }
 
+// src/lib/idempotency.js
+var READY = false;
+async function ensure(env) {
+  if (READY) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS idempotency (
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    op_id TEXT PRIMARY KEY,
+    scope TEXT,
+    at TEXT
+  )`).run();
+  READY = true;
+}
+async function firstTime(env, tenantId, opId, scope) {
+  if (!opId) return true;
+  await ensure(env);
+  try {
+    await env.DB.prepare(
+      "INSERT INTO idempotency (tenant_id, op_id, scope, at) VALUES (?,?,?,?)"
+    ).bind(tenantId, String(opId).slice(0, 120), String(scope || "").slice(0, 60), (/* @__PURE__ */ new Date()).toISOString()).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // src/routes/sla.js
 async function handle8(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -4711,8 +4736,12 @@ async function handle8(request, env, ctx, url, sess) {
       })) }, headers);
     }
     if (parts[2] === "signature" && method === "POST") {
-      const { signedBy, signedAt, signatureBase64 } = await readJson2(request);
+      const { signedBy, signedAt, signatureBase64, opId } = await readJson2(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
+      if (opId && !await firstTime(env, tenantId, opId, "sig:" + id)) {
+        const cur = await getJob(env, tenantId, id);
+        return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
+      }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
@@ -4846,6 +4875,9 @@ async function handle8(request, env, ctx, url, sess) {
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
       const body = await readJson2(request);
+      if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
+        return before ? jsonResponse(decorateJobWithLiveSla(before), headers) : jsonResponse({ error: "Not found" }, headers, 404);
+      }
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
@@ -6794,10 +6826,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure2 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure2(u.username);
+    const ensure3 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure3(u.username);
     for (const r of results || []) {
-      const e = ensure2(r.username);
+      const e = ensure3(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -8571,9 +8603,9 @@ async function seedAssignments(env, tid) {
 }
 
 // src/routes/messages.js
-var READY = false;
-async function ensure(env) {
-  if (READY) return;
+var READY2 = false;
+async function ensure2(env) {
+  if (READY2) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id INTEGER NOT NULL DEFAULT 1,
@@ -8587,7 +8619,7 @@ async function ensure(env) {
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen)").run();
   } catch {
   }
-  READY = true;
+  READY2 = true;
 }
 function jr4(o, h, s = 200) {
   return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
@@ -8607,7 +8639,7 @@ async function handle21(request, env, ctx, url, sess) {
   const me = sess.user.username;
   const method = request.method.toUpperCase();
   const sub = url.pathname.replace(/^\/messages(?=\/|$)/, "") || "/";
-  await ensure(env);
+  await ensure2(env);
   if (sub === "/unread" && method === "GET") {
     const r = await env.DB.prepare(
       "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
@@ -8645,6 +8677,7 @@ async function handle21(request, env, ctx, url, sess) {
     const to = String(b.to || "").trim();
     const body = String(b.body || "").trim().slice(0, 2e3);
     if (!to || !body) return jr4({ error: "to and body required" }, headers, 400);
+    if (!await firstTime(env, tid, b.opId, "msg")) return jr4({ ok: true, duplicate: true }, headers);
     const row = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, to).first();
     const toUser = row ? row.username : to;
     const at = (/* @__PURE__ */ new Date()).toISOString();

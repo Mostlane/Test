@@ -9,6 +9,7 @@
 import { corsHeaders } from "../lib/http.js";
 import { resolveTenantId } from "../lib/tenantdb.js";
 import { sendToUser } from "./push.js";
+import { firstTime } from "../lib/idempotency.js";
 
 let READY = false;
 async function ensure(env) {
@@ -83,6 +84,8 @@ export async function handle(request, env, ctx, url, sess) {
     const to = String(b.to || "").trim();
     const body = String(b.body || "").trim().slice(0, 2000);
     if (!to || !body) return jr({ error: "to and body required" }, headers, 400);
+    // Offline replay guard: a repeated op-id is a no-op, not a duplicate message.
+    if (!(await firstTime(env, tid, b.opId, "msg"))) return jr({ ok: true, duplicate: true }, headers);
     // Resolve to the canonical username so threads don't split on casing.
     const row = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, to).first();
     const toUser = row ? row.username : to;

@@ -20,6 +20,7 @@ import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
 import { trackJobTime } from "./timesheets.js";
 import { permissionsFor } from "../lib/auth.js";
 import { sendToUser, sendToPermission } from "./push.js";
+import { firstTime } from "../lib/idempotency.js";
 
 export async function handle(request, env, ctx, url, sess) {
   const headers = corsHeaders(env, request);
@@ -672,8 +673,13 @@ export async function handle(request, env, ctx, url, sess) {
 
     // POST /sla/jobs/{id}/signature  -> save signature PNG to R2 + attach to job
     if (parts[2] === "signature" && method === "POST") {
-      const { signedBy, signedAt, signatureBase64 } = await readJson(request);
+      const { signedBy, signedAt, signatureBase64, opId } = await readJson(request);
       if (!signedBy || !signatureBase64) return jsonResponse({ error: "Missing signature data" }, headers, 400);
+      // Offline replay guard: don't store a second signature for the same op.
+      if (opId && !(await firstTime(env, tenantId, opId, "sig:" + id))) {
+        const cur = await getJob(env, tenantId, id);
+        return jsonResponse({ ok: true, duplicate: true, key: cur && cur.signature ? cur.signature.fileKey : null }, headers);
+      }
       const base64 = signatureBase64.split(",")[1];
       const binary = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
       const key = `jobs/${id}/signature/${Date.now()}.png`;
@@ -823,6 +829,13 @@ export async function handle(request, env, ctx, url, sess) {
     if (method === "PATCH") {
       const before = await getJob(env, tenantId, id);
       const body = await readJson(request);
+
+      // Offline replay guard: if this exact op already landed, return the job
+      // as-is instead of re-applying (no duplicate history/notifications).
+      if (body.opId && !(await firstTime(env, tenantId, body.opId, "patch:" + id))) {
+        return before ? jsonResponse(decorateJobWithLiveSla(before), headers)
+                      : jsonResponse({ error: "Not found" }, headers, 404);
+      }
 
       // ── End-point enforcement (server is the authority) ─────────────────
       // Engineers can't fake a completion by patching the DB directly, and an
