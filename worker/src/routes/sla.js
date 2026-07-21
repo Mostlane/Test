@@ -1403,7 +1403,12 @@ async function patchJob(env, tenantId, id, patch) {
     const s = normalizeStatus(patch.status, catNames);
     if (s !== job.status) {
       job.status = s;
-      job.statusHistory.push({ status: s, at: now, by: patch.changedBy || "system" });
+      // Snapshot the engineer's location at the moment of every status change
+      // (captured on-device, so it's present even when the change was made
+      // offline and replayed later). `gps` = "lat,lon".
+      const entry = { status: s, at: now, by: patch.changedBy || "system" };
+      if (patch.gps) entry.gps = String(patch.gps).slice(0, 40);
+      job.statusHistory.push(entry);
       if (s === "Closed Jobs" && !job.closedAt) job.closedAt = now;
     }
   } else if (!hadEngineers && assignedList(job).length && job.status === "Pending") {
