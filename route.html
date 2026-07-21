@@ -283,6 +283,10 @@
     var host=$("map"); if(!host) return;
     if(typeof L==="undefined"){ host.innerHTML='<div class="miniline" style="justify-content:center;height:100%;margin:0">Map offline</div>'; return; }
     await geocode(jobs.map(jobPostcode));
+    // render() rebuilds the screen each phase, so the old #map node is gone.
+    // If our cached map is bound to a stale container, tear it down and rebuild
+    // on the new node — otherwise it renders blank after clock-on re-renders.
+    if(map){ try{ if(map.getContainer()!==host){ map.remove(); map=null; layer=null; } }catch(e){ map=null; layer=null; } }
     if(!map){ map=L.map(host,{zoomControl:false,attributionControl:false}); L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map); layer=L.layerGroup().addTo(map); }
     setTimeout(function(){
       map.invalidateSize(); layer.clearLayers(); var pts=[];
