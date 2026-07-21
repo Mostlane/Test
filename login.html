@@ -205,11 +205,20 @@ if (!result.ok) {
   errorBox.textContent = result.error || "Invalid login credentials.";
   return;
 }
-const user = result.user;
+// Be tolerant of both response shapes: the consolidated worker nests the
+// account under `result.user`; older/rolled-back workers returned the fields
+// flat on the response itself. Fall back to `result` so a shape change can't
+// blank out the login.
+const user = result.user || result;
+if (!user || !user.Username) {
+  errorBox.textContent = "Login ok but no account details came back (keys: " +
+    Object.keys(result || {}).join(", ") + ").";
+  return;
+}
 
         // ✅ Store the server session token (consolidated worker). Old login
         // worker doesn't return one, so this is a no-op until cutover.
-        if (result.token) localStorage.setItem('mostlaneToken', result.token);
+        if (result.token) { try { localStorage.setItem('mostlaneToken', result.token); } catch (e) {} }
 
         // Flag whether the user must change their password (admin reset / new user).
         window.__mostlaneMustChange = !!(result.mustChangePassword || user.MustChangePassword);
@@ -270,7 +279,10 @@ localStorage.setItem(
 
       } catch (err) {
         console.error(err);
-        errorBox.textContent = "Could not load user data.";
+        // Surface the real reason so a login failure is diagnosable in the
+        // field (phones have no dev console). Reads plainly for a real user too.
+        errorBox.textContent = "Could not load user data — " +
+          (err && err.message ? err.message : String(err));
       }
     });
   </script>
