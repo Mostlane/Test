@@ -39,6 +39,12 @@
     .list a .badge.red{color:var(--urgent);background:color-mix(in srgb,var(--urgent) 14%,transparent)}
     .grouplbl{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:16px 4px 2px}
     .signout{color:var(--urgent);text-align:center;font-weight:700;padding:18px;cursor:pointer}
+    .loc{display:flex;align-items:center;gap:12px;padding:14px 16px;margin-top:12px}
+    .loc .lic{width:40px;height:40px;flex:0 0 auto;border-radius:12px;background:color-mix(in srgb,var(--accent) 12%,transparent);display:grid;place-items:center;font-size:19px}
+    .loc.on .lic{background:color-mix(in srgb,var(--ok) 15%,transparent)}.loc.off .lic{background:color-mix(in srgb,var(--urgent) 13%,transparent)}
+    .loc .lbd{flex:1;min-width:0}.loc .lti{font-weight:650;font-size:14.5px}.loc .lsub{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.4}
+    .locbtn{flex:0 0 auto;border:0;border-radius:10px;background:var(--accent);color:#fff;font:inherit;font-weight:650;font-size:13.5px;padding:10px 14px;cursor:pointer}
+    .locbtn:disabled{background:var(--ok);opacity:1}
     .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
     .tabbar a{flex:1;text-align:center;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
     .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
@@ -48,6 +54,14 @@
 <body>
   <h1 class="big">You</h1>
   <div class="prof"><div class="av" id="avatar">··</div><div><h2 id="name">…</h2><div class="role" id="role">Engineer</div></div></div>
+
+  <!-- Location permission control: lets the engineer grant location up-front and
+       see its status (the app also asks when they clock on / update a job). -->
+  <div class="card loc" id="locCard">
+    <div class="lic" id="licon">📍</div>
+    <div class="lbd"><div class="lti">Location access</div><div class="lsub" id="locState">Used to log where you start, finish &amp; update jobs.</div></div>
+    <button class="locbtn" id="locBtn">Turn on</button>
+  </div>
 
   <div class="stat2">
     <div class="stat" id="statHol"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
@@ -133,6 +147,32 @@
     }catch(e){}
     location.href="login.html";
   };
+
+  // ---- Location access control ----
+  (function locationCard(){
+    var card=$("locCard"), st=$("locState"), btn=$("locBtn");
+    if(!card) return;
+    if(!navigator.geolocation){ st.textContent="This device can't share its location."; btn.style.display="none"; return; }
+    function paint(state){
+      card.classList.remove("on","off");
+      if(state==="granted"){ card.classList.add("on"); $("licon").textContent="✅"; st.textContent="On — your job locations are being recorded."; btn.textContent="On"; btn.disabled=true; }
+      else if(state==="denied"){ card.classList.add("off"); $("licon").textContent="🚫"; st.innerHTML="Blocked on this device. Turn it on in <b>phone Settings → this app (or Safari) → Location → While Using</b>, then reload."; btn.textContent="Reload"; btn.disabled=false; btn.onclick=function(){ location.reload(); }; }
+      else { $("licon").textContent="📍"; st.textContent="Tap to allow location so your day &amp; jobs are logged."; btn.textContent="Turn on"; btn.disabled=false; btn.onclick=request; }
+    }
+    function request(){
+      st.textContent="Requesting…";
+      navigator.geolocation.getCurrentPosition(
+        function(){ paint("granted"); toast("Location on — thanks"); },
+        function(err){ if(err&&err.code===1){ paint("denied"); } else { paint("prompt"); toast("Couldn't get a fix — try again outdoors"); } },
+        { timeout:8000, enableHighAccuracy:true }
+      );
+    }
+    try{
+      if(navigator.permissions&&navigator.permissions.query){
+        navigator.permissions.query({name:"geolocation"}).then(function(p){ paint(p.state); p.onchange=function(){ paint(p.state); }; }).catch(function(){ paint("prompt"); });
+      } else { paint("prompt"); }
+    }catch(e){ paint("prompt"); }
+  })();
 })();
 </script>
 </body>
