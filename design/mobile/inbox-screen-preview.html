@@ -1,0 +1,172 @@
+<title>Mostlane — Inbox (working preview)</title>
+<style>
+  :root{
+    --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+    --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+    --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;--purple:#7a5af8;--teal:#0fb6b0;
+    --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+  :root[data-theme="dark"]{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}
+  :root[data-theme="light"]{--bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;--panel:#0f1f38;--chip:#eef2f8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+  .stage{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:14px;padding:22px 14px 40px}
+  .pitch{max-width:390px;text-align:center;color:var(--muted);font-size:13px;line-height:1.5}.pitch b{color:var(--ink)}
+  .phone{width:390px;max-width:100%;background:var(--card);border-radius:34px;box-shadow:var(--shadow),0 0 0 10px color-mix(in srgb,var(--panel) 92%,#000);overflow:hidden;height:820px;display:flex;flex-direction:column;position:relative}
+  .statusbar{height:34px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;font-weight:600;color:var(--muted)}
+  .demobar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 14px;background:color-mix(in srgb,var(--amber) 10%,var(--card));border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .seg{display:flex;margin-left:auto;background:var(--chip);border-radius:9px;padding:3px;gap:3px}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:700;padding:5px 10px;border-radius:7px;cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(16,32,58,.14)}
+  .screen{flex:1;overflow-y:auto;padding:10px 16px 30px}.screen::-webkit-scrollbar{width:0}
+
+  .row-top{display:flex;align-items:center;justify-content:space-between}
+  h1.big{font-size:25px;margin:2px 0;letter-spacing:-.02em}
+  .markread{color:var(--accent);font-weight:600;font-size:14px;cursor:pointer;background:0;border:0}
+  .filters{display:flex;gap:8px;overflow-x:auto;padding:10px 0 6px}.filters::-webkit-scrollbar{height:0}
+  .f{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
+  .f.on{background:var(--panel);color:#fff;border-color:var(--panel)}
+  .f .n{display:inline-block;margin-left:6px;background:var(--accent);color:#fff;border-radius:999px;font-size:11px;padding:1px 7px}
+  .f.on .n{background:color-mix(in srgb,#fff 22%,transparent)}
+
+  .note{display:flex;gap:12px;padding:14px 4px;border-bottom:1px solid var(--line);position:relative}
+  .note.unread{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 5%,transparent),transparent 60%)}
+  .note.urgent{border-left:3px solid var(--urgent);padding-left:12px;border-radius:2px}
+  .note .ic{width:40px;height:40px;border-radius:12px;flex:0 0 auto;display:grid;place-items:center;font-size:18px}
+  .note .bd{flex:1;min-width:0}
+  .note .hd{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .note .who{font-weight:700;font-size:14.5px}
+  .note .tm{color:var(--muted);font-size:12px;flex:0 0 auto}
+  .note .tx{color:var(--muted);font-size:13.5px;margin-top:3px;line-height:1.45}
+  .note .tx b{color:var(--ink)}
+  .note .dotU{position:absolute;left:-2px;top:18px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .act{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn{appearance:none;border:0;cursor:pointer;font:inherit;font-weight:650;font-size:14px;border-radius:10px;padding:9px 16px;transition:filter .15s,transform .06s}
+  .btn:active{transform:translateY(1px)}.btn.primary{background:var(--accent);color:#fff}
+  .btn.ok{background:var(--ok);color:#fff}.btn.line{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+  .btn.danger{background:color-mix(in srgb,var(--urgent) 12%,var(--card));color:var(--urgent);border:1px solid color-mix(in srgb,var(--urgent) 40%,var(--line))}
+  .qr{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+  .qr button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
+  .resolved{margin-top:8px;font-size:13px;font-weight:700}
+  .empty{text-align:center;color:var(--muted);font-size:14px;padding:40px 10px}
+
+  /* thread sheet */
+  .modal{position:absolute;inset:0;background:rgba(6,12,22,.55);display:none;align-items:flex-end;z-index:20}.modal.show{display:flex}
+  .sheet{background:var(--card);width:100%;border-radius:20px 20px 0 0;padding:16px 16px 18px;max-height:82%;display:flex;flex-direction:column}
+  .sheet h3{margin:0 0 10px}
+  .thread{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:4px 0}
+  .msg{max-width:78%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.4}
+  .msg.them{align-self:flex-start;background:var(--chip);color:var(--ink);border-bottom-left-radius:4px}
+  .msg.me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+  .msg .mt{display:block;font-size:10px;opacity:.7;margin-top:3px}
+  .compose{display:flex;gap:8px;margin-top:10px}
+  .compose input{flex:1;border:1px solid var(--line);border-radius:999px;padding:11px 14px;font:inherit;font-size:14px;background:var(--card);color:var(--ink)}
+  .compose .btn{border-radius:999px}
+  .toast{position:absolute;left:16px;right:16px;bottom:16px;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:30;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+</style>
+
+<div class="stage">
+  <p class="pitch"><b>Inbox — working preview.</b> One place for everything that used to be scattered (blocking pop-ups + tile badges): job assignments, office messages, approvals, van checks, transfers. <b>Filter</b> with the chips, tap a new job to view it (jobs are just assigned — no accepting), <b>Approve</b> a hold, <b>Reply</b> to a message (opens a thread). Use the demo toggle to see the office/admin extras. Nothing here is live.</p>
+
+  <div class="phone">
+    <div class="statusbar"><span>9:41</span><span>▪ ▪▪▪ ▪</span></div>
+    <div class="demobar">DEMO · viewing as: <span class="seg" id="roleSeg"><button data-r="eng" class="on">Engineer</button><button data-r="office">Office</button></span></div>
+    <div class="screen" id="screen"></div>
+
+    <div class="modal" id="threadModal">
+      <div class="sheet">
+        <h3 id="threadWho">Message</h3>
+        <div class="thread" id="thread"></div>
+        <div class="compose"><input id="msgInput" placeholder="Type a reply…"><button class="btn primary" id="sendBtn">Send</button></div>
+        <button class="btn line" style="margin-top:8px" onclick="closeThread()">Close</button>
+      </div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <p class="pitch">Engineers see: job assignments, messages, sign-offs, van-check &amp; transfer reminders. Office/admins also see: on-hold approvals and safety flags to action. "Mark all read" clears the dots; snooze/seen state syncs across devices (as it does today).</p>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2200);}
+
+  var role="eng", filter="all";
+  // cats: job | message | admin. office=true means office/admin only.
+  var items=[
+    {id:"j1",cat:"job",unread:true,urgent:true,ic:"🔴",icb:"var(--urgent)",who:"New urgent job · 14:38",tm:"Dispatch",tx:"<b>Burst pipe — Greggs, Market St.</b> Added to your route — tap to view.",actions:"openjob"},
+    {id:"m1",cat:"message",unread:true,ic:"💬",icb:"var(--accent)",who:"Sarah · Ops",tm:"09:47",tx:"Can you grab photos of the fascia at Costa while you're there? Client is asking.",thread:[["them","Can you grab photos of the fascia at Costa while you're there? Client is asking.","09:47"]],quick:["👍 Will do","Reply…"]},
+    {id:"a1",cat:"admin",office:true,unread:true,ic:"⏸️",icb:"var(--amber)",who:"On-hold approval needed",tm:"11:20",tx:"<b>#ML-48260</b> — Tony wants to hold “no isolation valve on site”. Approve so he can move on.",actions:"approve"},
+    {id:"a2",cat:"admin",office:true,unread:true,urgent:true,ic:"⚠️",icb:"var(--urgent)",who:"Safety flag — can't proceed",tm:"11:05",tx:"<b>#ML-48312</b> — Dan reported: public walking through work area, no barriers. Held awaiting you.",actions:"safety"},
+    {id:"j2",cat:"job",unread:false,ic:"✓",icb:"var(--ok)",who:"Sign-off approved",tm:"11:02",tx:"#ML-48120 emergency lighting — Jamie Line approved your completion."},
+    {id:"r1",cat:"admin",unread:false,ic:"🚐",icb:"var(--amber)",who:"Weekly van check due",tm:"08:00",tx:"Due by Wednesday 12:00 — tap to complete the walkaround.",actions:"open"},
+    {id:"t1",cat:"job",unread:true,ic:"📦",icb:"var(--purple)",who:"Equipment sent to you",tm:"Yesterday",tx:"Kabir sent you a Hilti SDS drill — accept &amp; sign to take responsibility.",actions:"transfer"},
+    {id:"m2",cat:"message",unread:false,ic:"💬",icb:"var(--accent)",who:"Jamie Line",tm:"Yesterday",tx:"Good work clearing the backlog this week 👍",thread:[["them","Good work clearing the backlog this week 👍","Yesterday"]],quick:["🙏 Thanks","Reply…"]}
+  ];
+
+  var FILTERS=[["all","All"],["job","Jobs"],["message","Messages"],["admin","Admin"]];
+
+  $("roleSeg").addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;role=b.dataset.r;[].forEach.call(this.children,function(x){x.classList.toggle("on",x===b)});render();});
+
+  function visible(){ return items.filter(function(i){ if(i.office && role!=="office") return false; return filter==="all"||i.cat===filter; }); }
+  function count(cat){ return items.filter(function(i){ if(i.office && role!=="office") return false; return (cat==="all"||i.cat===cat) && i.unread; }).length; }
+
+  function actionsHtml(i){
+    if(i.resolvedTxt) return '<div class="resolved" style="color:'+(i.resolvedCol||'var(--ok)')+'">'+i.resolvedTxt+'</div>';
+    if(i.actions==="openjob") return '<div class="act"><button class="btn primary" data-do="viewjob" data-id="'+i.id+'">View job ›</button></div>';
+    if(i.actions==="approve") return '<div class="act"><button class="btn ok" data-do="ok" data-id="'+i.id+'">Approve</button><button class="btn danger" data-do="reject" data-id="'+i.id+'">Reject</button></div>';
+    if(i.actions==="safety") return '<div class="act"><button class="btn primary" data-do="call" data-id="'+i.id+'">Call engineer</button><button class="btn line" data-do="reassign" data-id="'+i.id+'">Reassign / reschedule</button></div>';
+    if(i.actions==="transfer") return '<div class="act"><button class="btn primary" data-do="sign" data-id="'+i.id+'">Accept &amp; sign</button><button class="btn line" data-do="reject" data-id="'+i.id+'">Reject</button></div>';
+    if(i.actions==="open") return '<div class="act"><button class="btn primary" data-do="open" data-id="'+i.id+'">Start van check</button></div>';
+    if(i.quick) return '<div class="qr">'+i.quick.map(function(q){return '<button data-do="reply" data-id="'+i.id+'">'+q+'</button>';}).join('')+'</div>';
+    return "";
+  }
+
+  function render(){
+    var s=$("screen");
+    var head='<div class="row-top"><h1 class="big">Inbox</h1><button class="markread" id="markread">Mark all read</button></div>';
+    var filt='<div class="filters">'+FILTERS.map(function(f){ var n=count(f[0]); return '<div class="f'+(filter===f[0]?" on":"")+'" data-f="'+f[0]+'">'+f[1]+(n?'<span class="n">'+n+'</span>':'')+'</div>'; }).join('')+'</div>';
+    var list=visible();
+    var body = list.length ? list.map(function(i){
+      return '<div class="note'+(i.unread?" unread":"")+(i.urgent?" urgent":"")+'" data-open="'+(i.thread?i.id:"")+'">'
+        +(i.unread?'<span class="dotU"></span>':'')
+        +'<div class="ic" style="background:color-mix(in srgb,'+i.icb+' 15%,transparent)">'+i.ic+'</div>'
+        +'<div class="bd"><div class="hd"><span class="who">'+i.who+'</span><span class="tm">'+i.tm+'</span></div><div class="tx">'+i.tx+'</div>'+actionsHtml(i)+'</div></div>';
+    }).join('') : '<div class="empty">Nothing here 🎉</div>';
+    s.innerHTML=head+filt+'<div id="list">'+body+'</div>';
+
+    $("markread").onclick=function(){ items.forEach(function(i){i.unread=false;}); render(); toast("All marked read"); };
+    [].forEach.call(document.querySelectorAll(".f"),function(el){ el.onclick=function(){ filter=el.dataset.f; render(); }; });
+    // row actions
+    [].forEach.call(document.querySelectorAll("[data-do]"),function(el){ el.onclick=function(ev){ ev.stopPropagation(); doAction(el.dataset.do, el.dataset.id); }; });
+    // open thread by tapping a message row
+    [].forEach.call(document.querySelectorAll(".note[data-open]"),function(el){ if(!el.dataset.open) return; el.onclick=function(){ openThread(el.dataset.open); }; });
+  }
+
+  function find(id){ return items.find(function(i){return i.id===id;}); }
+  function doAction(act,id){
+    var i=find(id); if(!i) return; i.unread=false;
+    if(act==="viewjob"){ toast("Opens the job — it's already on your route"); }
+    else if(act==="ok"){ i.resolvedTxt="✓ Approved — engineer notified"; toast("Hold approved"); }
+    else if(act==="reject"){ i.resolvedTxt="Rejected — engineer told to continue"; i.resolvedCol="var(--urgent)"; toast("Rejected"); }
+    else if(act==="call"){ toast("Calling the engineer…"); return; }
+    else if(act==="reassign"){ i.resolvedTxt="Reassigned — engineer released"; toast("Reassigned"); }
+    else if(act==="sign"){ i.resolvedTxt="✓ Accepted &amp; signed"; toast("Item accepted"); }
+    else if(act==="open"){ toast("Opens the van check"); return; }
+    else if(act==="reply"){ openThread(id); return; }
+    render();
+  }
+
+  var activeThread=null;
+  function openThread(id){ var i=find(id); if(!i||!i.thread) return; i.unread=false; activeThread=i; $("threadWho").textContent=i.who; drawThread(); $("threadModal").classList.add("show"); render(); }
+  window.closeThread=function(){ $("threadModal").classList.remove("show"); activeThread=null; };
+  function drawThread(){ $("thread").innerHTML=activeThread.thread.map(function(m){return '<div class="msg '+m[0]+'">'+m[1]+'<span class="mt">'+m[2]+'</span></div>';}).join(''); var t=$("thread"); t.scrollTop=t.scrollHeight; }
+  $("sendBtn").onclick=function(){ var v=$("msgInput").value.trim(); if(!v||!activeThread) return; activeThread.thread.push(["me",v,"now"]); $("msgInput").value=""; drawThread(); toast("Sent"); };
+  $("msgInput").addEventListener("keydown",function(e){ if(e.key==="Enter") $("sendBtn").click(); });
+
+  render();
+})();
+</script>
