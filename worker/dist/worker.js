@@ -6726,10 +6726,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure(u.username);
+    const ensure2 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure2(u.username);
     for (const r of results || []) {
-      const e = ensure(r.username);
+      const e = ensure2(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -8502,6 +8502,102 @@ async function seedAssignments(env, tid) {
   }
 }
 
+// src/routes/messages.js
+var READY = false;
+async function ensure(env) {
+  if (READY) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL DEFAULT 1,
+    from_user TEXT NOT NULL,
+    to_user TEXT NOT NULL,
+    body TEXT NOT NULL,
+    at TEXT NOT NULL,
+    seen INTEGER NOT NULL DEFAULT 0
+  )`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(tenant_id, to_user, seen)").run();
+  } catch {
+  }
+  READY = true;
+}
+function jr4(o, h, s = 200) {
+  return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } });
+}
+async function readJson5(r) {
+  try {
+    return await r.json();
+  } catch {
+    return {};
+  }
+}
+var lc = (s) => String(s || "").toLowerCase();
+async function handle21(request, env, ctx, url, sess) {
+  const headers = corsHeaders(env, request);
+  if (!sess) return jr4({ error: "Not authenticated" }, headers, 401);
+  const tid = sess.tenantId != null ? sess.tenantId : await resolveTenantId(env, request);
+  const me = sess.user.username;
+  const method = request.method.toUpperCase();
+  const sub = url.pathname.replace(/^\/messages(?=\/|$)/, "") || "/";
+  await ensure(env);
+  if (sub === "/unread" && method === "GET") {
+    const r = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM messages WHERE tenant_id=? AND lower(to_user)=lower(?) AND seen=0"
+    ).bind(tid, me).first();
+    return jr4({ ok: true, unread: r && r.n || 0 }, headers);
+  }
+  if ((sub === "/" || sub === "/threads") && method === "GET") {
+    const { results } = await env.DB.prepare(
+      "SELECT from_user, to_user, body, at, seen FROM messages WHERE tenant_id=? AND (lower(from_user)=lower(?) OR lower(to_user)=lower(?)) ORDER BY id DESC LIMIT 500"
+    ).bind(tid, me, me).all();
+    const byOther = {};
+    for (const m of results || []) {
+      const other = lc(m.from_user) === lc(me) ? m.to_user : m.from_user;
+      const key = lc(other);
+      if (!byOther[key]) byOther[key] = { with: other, last: m.body, at: m.at, unread: 0 };
+      if (lc(m.to_user) === lc(me) && !m.seen) byOther[key].unread++;
+    }
+    const threads = Object.values(byOther).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    return jr4({ ok: true, threads }, headers);
+  }
+  if (sub === "/thread" && method === "GET") {
+    const other = (url.searchParams.get("with") || "").trim();
+    if (!other) return jr4({ error: "with required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT id, from_user, to_user, body, at FROM messages WHERE tenant_id=? AND ((lower(from_user)=lower(?) AND lower(to_user)=lower(?)) OR (lower(from_user)=lower(?) AND lower(to_user)=lower(?))) ORDER BY id ASC LIMIT 500"
+    ).bind(tid, me, other, other, me).all();
+    ctx?.waitUntil(env.DB.prepare(
+      "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
+    ).bind(tid, me, other).run());
+    const messages = (results || []).map((m) => ({ id: m.id, mine: lc(m.from_user) === lc(me), from: m.from_user, body: m.body, at: m.at }));
+    return jr4({ ok: true, with: other, messages }, headers);
+  }
+  if (sub === "/send" && method === "POST") {
+    const b = await readJson5(request);
+    const to = String(b.to || "").trim();
+    const body = String(b.body || "").trim().slice(0, 2e3);
+    if (!to || !body) return jr4({ error: "to and body required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT username FROM users WHERE tenant_id=? AND lower(username)=lower(?)").bind(tid, to).first();
+    const toUser = row ? row.username : to;
+    const at = (/* @__PURE__ */ new Date()).toISOString();
+    const res = await env.DB.prepare(
+      "INSERT INTO messages (tenant_id, from_user, to_user, body, at, seen) VALUES (?,?,?,?,?,0)"
+    ).bind(tid, me, toUser, body, at).run();
+    ctx?.waitUntil(sendToUser(env, tid, toUser, { title: "Message from " + me, body: body.slice(0, 120), url: "/inbox.html", tag: "msg:" + lc(me) }));
+    return jr4({ ok: true, id: res.meta ? res.meta.last_row_id : null, at, to: toUser }, headers, 201);
+  }
+  if (sub === "/read" && method === "POST") {
+    const b = await readJson5(request);
+    const other = String(b.with || "").trim();
+    if (!other) return jr4({ error: "with required" }, headers, 400);
+    await env.DB.prepare(
+      "UPDATE messages SET seen=1 WHERE tenant_id=? AND lower(to_user)=lower(?) AND lower(from_user)=lower(?) AND seen=0"
+    ).bind(tid, me, other).run();
+    return jr4({ ok: true }, headers);
+  }
+  return jr4({ error: "Not found: " + sub }, headers, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -8531,6 +8627,8 @@ var ROUTES = [
   // fleet reports + driver mapping
   ["*", "/push", handle4],
   // web push subscriptions + test send
+  ["*", "/messages", handle21],
+  // office ↔ engineer messages (Inbox)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
   ["*", "/get-sites", handle9],

@@ -38,6 +38,7 @@ import * as privacy from "./routes/privacy.js";    // DONE  (UK GDPR export + er
 import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save/list/open + driver map)
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
 import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
+import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -62,6 +63,7 @@ const ROUTES = [
   ["*", "/privacy",    privacy.handle],  // GDPR data export + erasure
   ["*", "/fleet",      fleet.handle],     // fleet reports + driver mapping
   ["*", "/push",       push.handle],      // web push subscriptions + test send
+  ["*", "/messages",   messages.handle],  // office ↔ engineer messages (Inbox)
   ["*", "/ts",         timesheets.handle], // engineer timesheets + invoices + mileage
   ["*", "/get-sites",  sites.handle],
   ["*", "/add-site",   sites.handle],
