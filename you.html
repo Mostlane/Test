@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="/portal-config.js?v=2"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>You — Mostlane</title>
+  <script src="auth.js"></script>
+  <style>
+    :root{
+      --bg:#e9eef4;--card:#fff;--ink:#12233a;--muted:#5c6b82;--line:#e2e8f1;
+      --panel:#0f1f38;--panel-ink:#eaf1fb;--panel-sub:#9fb2cd;
+      --accent:#2f6fed;--urgent:#e0344b;--ok:#17b26a;--amber:#f79009;
+      --chip:#eef2f8;--radius:16px;--shadow:0 10px 30px rgba(16,32,58,.10);
+      --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    }
+    @media (prefers-color-scheme:dark){:root{--bg:#070d17;--card:#111f34;--ink:#e9f0fb;--muted:#93a6c1;--line:#20314b;--panel:#0b1729;--chip:#17263e;}}
+    *{box-sizing:border-box}
+    html,body{margin:0}
+    body{background:radial-gradient(1200px 600px at 50% -10%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 60%),var(--bg);color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased;max-width:520px;margin:0 auto;padding:14px 16px 92px;min-height:100vh}
+    a{color:var(--accent);text-decoration:none}
+    h1.big{font-size:25px;margin:6px 0 12px;letter-spacing:-.02em}
+    .prof{background:var(--panel);color:var(--panel-ink);border-radius:20px;padding:18px;display:flex;gap:14px;align-items:center}
+    .prof .av{width:56px;height:56px;border-radius:16px;background:color-mix(in srgb,#fff 14%,transparent);display:grid;place-items:center;font-weight:800;font-size:18px}
+    .prof h2{margin:0;font-size:19px}.prof .role{color:var(--panel-sub);font-size:13px;margin-top:3px}
+    .stat2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+    .stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+    .stat .n{font-size:26px;font-weight:800;letter-spacing:-.02em}
+    .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:2px}
+    .stat a{color:var(--accent);font-size:13px;font-weight:600;display:inline-block;margin-top:8px;cursor:pointer}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin:12px 0;overflow:hidden}
+    .list a{display:flex;align-items:center;gap:12px;padding:15px 16px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px}
+    .list a:last-child{border:0}
+    .list a:active{background:color-mix(in srgb,var(--muted) 6%,var(--card))}
+    .list a .ic{width:28px;text-align:center;font-size:17px}
+    .list a .ch{margin-left:auto;color:var(--muted)}
+    .list a .badge{margin-left:auto;font-size:11px;font-weight:700;color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent);padding:3px 9px;border-radius:999px}
+    .list a .badge.red{color:var(--urgent);background:color-mix(in srgb,var(--urgent) 14%,transparent)}
+    .grouplbl{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin:16px 4px 2px}
+    .signout{color:var(--urgent);text-align:center;font-weight:700;padding:18px;cursor:pointer}
+    .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:saturate(180%) blur(12px);border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+    .tabbar a{flex:1;text-align:center;color:var(--muted);font-size:11px;font-weight:650;padding:6px 0}
+    .tabbar a .ic{display:block;font-size:20px;line-height:1.1}.tabbar a.on{color:var(--accent)}
+    .toast{position:fixed;left:16px;right:16px;bottom:82px;max-width:490px;margin:0 auto;background:var(--panel);color:#fff;padding:12px 14px;border-radius:12px;font-size:13.5px;text-align:center;z-index:60;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+  </style>
+</head>
+<body>
+  <h1 class="big">You</h1>
+  <div class="prof"><div class="av" id="avatar">··</div><div><h2 id="name">…</h2><div class="role" id="role">Engineer</div></div></div>
+
+  <div class="stat2">
+    <div class="stat"><div class="n" id="holN">—</div><div class="l">Holiday days left</div><a href="holiday.html">Book time off ›</a></div>
+    <div class="stat"><div class="n" id="hrsN">—</div><div class="l">Hrs this week</div><a href="engineer-timesheet.html">Timesheet ›</a></div>
+  </div>
+
+  <div class="grouplbl">My kit &amp; access</div>
+  <div class="card list">
+    <a href="my-assets.html"><span class="ic">🧰</span>Plant &amp; equipment held<span class="ch">›</span></a>
+    <a href="keys.html"><span class="ic">🔑</span>Keys signed to me<span class="ch">›</span></a>
+    <a href="van-check.html" id="vanLink"><span class="ic">🚐</span>Van check<span class="ch">›</span></a>
+    <a href="oncall_current.html"><span class="ic">📞</span>Availability &amp; on-call<span class="ch">›</span></a>
+  </div>
+
+  <div class="grouplbl">My records</div>
+  <div class="card list">
+    <a href="my-documents.html"><span class="ic">📄</span>My documents<span class="ch">›</span></a>
+    <a href="holiday.html"><span class="ic">🌴</span>Holiday<span class="ch">›</span></a>
+    <a href="engineer-timesheet.html"><span class="ic">⏱️</span>My timesheet<span class="ch">›</span></a>
+  </div>
+
+  <div class="grouplbl">Settings</div>
+  <div class="card list">
+    <a href="notifications.html"><span class="ic">🔔</span>Notifications<span class="ch">›</span></a>
+    <a href="personalise.html"><span class="ic">🎨</span>Personalise<span class="ch">›</span></a>
+    <a href="change-password.html"><span class="ic">🔒</span>Password &amp; device<span class="ch">›</span></a>
+    <a href="help.html"><span class="ic">❓</span>Help &amp; support<span class="ch">›</span></a>
+  </div>
+
+  <div class="card list" id="menuCard"><a href="main.html"><span class="ic">▦</span>Full menu<span class="ch">›</span></a></div>
+  <div class="signout" id="signout">Sign out</div>
+
+  <nav class="tabbar">
+    <a href="route.html"><span class="ic">🧭</span>Route</a>
+    <a href="engineer-jobs.html"><span class="ic">📋</span>Jobs</a>
+    <a href="inbox.html"><span class="ic">📨</span>Inbox</a>
+    <a href="you.html" class="on"><span class="ic">👤</span>You</a>
+  </nav>
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var API = window.MOSTLANE_API || "";
+  var $=function(id){return document.getElementById(id)};
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2200);}
+  function me(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }
+  function token(){ try{return localStorage.getItem("mostlaneToken")||"";}catch(e){return "";} }
+  function afetch(path){ var t=token(); return fetch(API+path,{headers:t?{"Authorization":"Bearer "+t}:{},cache:"no-store"}); }
+
+  var name=me();
+  $("name").textContent=name||"Engineer";
+  $("avatar").textContent=initials(name);
+  try{ var veh=localStorage.getItem("mostlaneVehicle")||sessionStorage.getItem("mostlaneVehicle")||""; if(veh) $("role").textContent="Engineer · Van "+veh; }catch(e){}
+
+  // Holiday days left (best-effort).
+  afetch("/holiday/summary").then(function(r){return r.json();}).then(function(j){
+    if(j && (j.remaining!=null)){ $("holN").textContent=Math.round(j.remaining*10)/10; }
+  }).catch(function(){});
+
+  // Hours this week (best-effort — reads whichever total key the worker returns).
+  afetch("/ts/my").then(function(r){return r.json();}).then(function(j){
+    var t=j&&j.totals; if(!t) return;
+    var h=t.hours!=null?t.hours:(t.paidHours!=null?t.paidHours:(t.totalHours!=null?t.totalHours:null));
+    if(h!=null) $("hrsN").textContent=Math.round(h*10)/10;
+  }).catch(function(){});
+
+  $("signout").onclick=function(){
+    try{
+      ["mostlaneToken","mostlaneLoggedIn","mostlaneExpiry","mostlaneBypassUntil","mostlaneUser","mostlaneUsername","mostlanePermissions","mostlaneMasterLogin"].forEach(function(k){ localStorage.removeItem(k); });
+      sessionStorage.clear();
+    }catch(e){}
+    location.href="login.html";
+  };
+})();
+</script>
+</body>
+</html>
