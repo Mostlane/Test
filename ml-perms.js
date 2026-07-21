@@ -58,13 +58,25 @@
     return names.some(function (n) { return yes(p[n]); });
   }
 
-  // A "field user" is a jobs/SLA person who isn't an office admin. They land in
-  // the engineer app (route.html) at login and navigate the portal from the You
-  // screen; office/admins keep main.html. StoryMode counts too (guided engineer).
+  // Staff Type ("office" | "field", default field) decides the home surface:
+  // field users live in the engineer app (route.html + You), office users get
+  // main.html. Read it off a passed user object, else the value cached at login.
+  function staffType(p) {
+    if (p && (p.StaffType || p.staffType)) return String(p.StaffType || p.staffType).toLowerCase();
+    try { return String(localStorage.getItem("mostlaneStaffType") || sessionStorage.getItem("mostlaneStaffType") || "").toLowerCase(); }
+    catch (e) { return ""; }
+  }
+  // A "field user" navigates entirely via the app and never sees main.html.
+  // Admins (FullAccess/SLAAdmin) always use the office menu regardless of type.
+  // If Staff Type isn't known yet (worker not re-pasted), fall back to the old
+  // SLA/StoryMode heuristic so rollout is seamless.
   function isField(p) {
-    p = perms(p);
-    if (yes(p.FullAccess) || yes(p.SLAAdmin)) return false;
-    return yes(p.SLA) || yes(p.StoryMode);
+    var pp = perms(p);
+    if (yes(pp.FullAccess) || yes(pp.SLAAdmin)) return false;
+    var st = staffType(p);
+    if (st === "office") return false;
+    if (st === "field") return true;
+    return yes(pp.SLA) || yes(pp.StoryMode);
   }
 
   // Canonical portal launcher: every area the You screen can surface, gated by
@@ -85,15 +97,25 @@
     { key: "EngTimesheet", href: "engineer-timesheet.html", label: "My timesheet", icon: "⏱️", group: "Records" },
     { key: "OfficeTimesheet", href: "office-timesheet.html", label: "Office timesheet", icon: "💼", group: "Records" },
     { key: "EngineersHoursMenu", href: "engineers-hours-menu.html", label: "Engineers hours", icon: "🛠️", group: "Records" },
+    { key: "HoursDashboard", href: "hours-dashboard-simple-v2.html", label: "Hours dashboard", icon: "⏳", group: "Records" },
     { key: "Weekly", href: "weekly.html", label: "Weekly summary", icon: "📊", group: "Records" },
     // Portal
     { key: "Forms", href: "forms.html", label: "Forms", icon: "📝", group: "Portal" },
     { key: "Compliance", href: "compliance.html", label: "Compliance", icon: "✔️", group: "Portal" },
     { key: "PurchaseOrders", href: "po.html", label: "PO system", icon: "🧾", group: "Portal" },
     { key: "Sites", href: "sites.html", label: "Manage sites", icon: "📍", group: "Portal" },
+    { key: "Customers", href: "customers.html", label: "Customers", icon: "🏢", group: "Portal" },
     { key: "Projects", href: "projects.html", label: "Projects", icon: "📋", group: "Portal" },
     { key: "HSPlan", href: "hs-docs.html", label: "H&S", icon: "🦺", group: "Portal" },
     { key: "SiteLog", href: "sitelog.html", label: "SiteLog", icon: "🗺️", group: "Portal" },
+    // Admin (only holders of these permissions ever see them)
+    { key: "SLAAdmin", href: "sla-main.html", label: "SLA dashboard", icon: "🚨", group: "Admin" },
+    { key: "Users", href: "users-admin.html", label: "Users", icon: "👥", group: "Admin" },
+    { key: "EngTsAdmin", href: "timesheets-admin.html", label: "Engineer timesheets", icon: "🧾", group: "Admin" },
+    { key: "HolidayAdmin", href: "holiday-admin.html", label: "Holiday admin", icon: "🗂️", group: "Admin" },
+    { key: "LabourPlanning", href: "labour-planning.html", label: "Labour planning", icon: "📅", group: "Admin" },
+    { key: "Stats", href: "stats.html", label: "Stats", icon: "📈", group: "Admin" },
+    { key: "Notifications", href: "notification-centre.html", label: "Notification centre", icon: "🛎️", group: "Admin" },
     // Settings (personal — always available)
     { always: true, href: "notifications.html", label: "Notifications", icon: "🔔", group: "Settings" },
     { always: true, href: "personalise.html", label: "Personalise & settings", icon: "🎨", group: "Settings" },
