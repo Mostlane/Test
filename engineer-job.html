@@ -150,6 +150,7 @@
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function getUser(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
   // Device GPS snapshot for status changes. Works offline (no network needed);
   // a recent fix is reused so taps stay snappy, and it never blocks longer than
   // the timeout. The reading is stamped into the PATCH body, so when a change is
@@ -368,6 +369,7 @@
   async function patchJob(body){
     body.opId=opId(); body.changedBy=getUser()||body.changedBy;
     if(body.status && body.gps===undefined) body.gps=await getGps();   // snapshot location on every status change
+    if(body.status && body.localDate===undefined) body.localDate=todayLocal();   // lets the server auto-start the day on the first change
     var r=await jfetch("/jobs/"+encodeURIComponent(jobId),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     var j=await r.json().catch(function(){return{};});
     if(!r.ok){

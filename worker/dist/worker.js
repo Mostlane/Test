@@ -4889,6 +4889,7 @@ async function handle8(request, env, ctx, url, sess) {
       if (body.opId && !await firstTime(env, tenantId, body.opId, "patch:" + id)) {
         return before ? jsonResponse(decorateJobWithLiveSla(before), headers) : jsonResponse({ error: "Not found" }, headers, 404);
       }
+      let autoStart = null;
       if (before && sess) {
         const perms = await permissionsFor(env, tenantId, sess.user.username);
         const isAdmin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes";
@@ -4908,6 +4909,9 @@ async function handle8(request, env, ctx, url, sess) {
           if (blocker)
             return jsonResponse({ error: `Finish ${blocker.ref} first \u2014 ${blocker.why}.`, blockingJob: blocker }, headers, 409);
         }
+        if (!isAdmin && body.status && target !== before.status) {
+          autoStart = { user: sess.user.username, gps: body.gps || null, date: body.localDate || null };
+        }
         if (body.status && target === "On Hold" && before.status !== "On Hold") {
           body.hold = Object.assign({}, before.hold, body.hold);
           body.hold.approval = isAdmin ? { state: "approved", requestedBy: sess.user.username, by: sess.user.username, at: (/* @__PURE__ */ new Date()).toISOString(), auto: true } : { state: "pending", requestedBy: sess.user.username, requestedAt: (/* @__PURE__ */ new Date()).toISOString() };
@@ -4916,6 +4920,7 @@ async function handle8(request, env, ctx, url, sess) {
       const updated = await patchJob(env, tenantId, id, body);
       if (updated) ctx?.waitUntil(notifyNewlyAssigned(env, tenantId, before, updated));
       if (updated) ctx?.waitUntil(trackJobTime(env, tenantId, sess?.user?.username, before, updated));
+      if (updated && autoStart) ctx?.waitUntil(ensureClockOn(env, tenantId, autoStart.user, autoStart.gps, autoStart.date));
       if (updated && updated.hold?.approval?.state === "pending" && before?.hold?.approval?.state !== "pending") {
         ctx?.waitUntil(sendToPermission(env, tenantId, ["FullAccess", "SLAAdmin"], {
           title: "On-hold approval needed",
@@ -5115,6 +5120,20 @@ function holdMissing(patch, job) {
 function raMissing(patch, job) {
   const ra = patch.riskAssessment && typeof patch.riskAssessment === "object" ? patch.riskAssessment : job.riskAssessment || {};
   return ra.safe === true ? [] : ["the risk assessment (safe to proceed)"];
+}
+async function ensureClockOn(env, tenantId, username, gps, localDate) {
+  try {
+    if (!username) return;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(localDate || "") ? localDate : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    await env.DB.prepare(`
+      INSERT INTO shifts (tenant_id, username, date, clock_on_at, clock_on_gps)
+      VALUES (?,?,?,?,?)
+      ON CONFLICT(username, date) DO UPDATE SET
+        clock_on_at  = COALESCE(shifts.clock_on_at, excluded.clock_on_at),
+        clock_on_gps = COALESCE(shifts.clock_on_gps, excluded.clock_on_gps)
+    `).bind(tenantId, username, date, (/* @__PURE__ */ new Date()).toISOString(), gps || null).run();
+  } catch (e) {
+  }
 }
 async function findBlockingJob(env, tenantId, username, exceptId) {
   const uNorm = normId(username);
