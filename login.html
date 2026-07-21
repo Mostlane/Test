@@ -96,7 +96,7 @@
     // password change always wins.
     function goNext() {
       if (window.__mostlaneMustChange) { window.location.href = "change-password.html?forced=1"; return; }
-      var fallback = window.__mostlaneStory ? "my-day.html" : "main.html";
+      var fallback = window.__mostlaneStory ? "route.html" : "main.html";
       var token = localStorage.getItem("mostlaneToken");
       if (!token) { window.location.href = fallback; return; }
       fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })
@@ -144,7 +144,7 @@
         if (r.ok && d.ok) {
           try { sessionStorage.setItem("mlAutoSkipAt", String(Date.now())); } catch (e2) {}
           var story = (d.user && d.user.StoryMode === "Yes");
-          var fb = story ? "my-day.html" : "main.html";
+          var fb = story ? "route.html" : "main.html";
           var lp = null;
           try { var pr = await (await fetch(window.MOSTLANE_API + "/prefs", { headers: { "Authorization": "Bearer " + token } })).json(); lp = pr && pr.ok && pr.prefs && safeLanding(pr.prefs.landingPage); } catch (e3) {}
           location.replace(lp || fb);
