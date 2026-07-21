@@ -92,6 +92,7 @@
   <div class="modal" id="vcModal"><div class="sheet">
     <h3>Weekly van check</h3>
     <div class="miniline" style="margin:2px 0 8px">Walk all four sides. Due by the weekly deadline.</div>
+    <div id="vcVehLine" class="miniline" style="margin:0 0 6px;color:var(--ink);font-weight:650"></div>
     <div id="vcList"></div>
     <label class="flbl">Odometer — start mileage</label>
     <input class="txt" id="vcMiles" type="number" inputmode="numeric" placeholder="e.g. 41880">
@@ -133,7 +134,7 @@
   var VC_ITEMS=["Lights & indicators","Tyres & wheels","Windscreen, wipers & washers","Mirrors & glass","Bodywork (walk 4 sides)","Fluid levels (oil/coolant/washer)","Brakes & handbrake","Horn","Seatbelts","Load area secure / racking","Number plates","Dashboard warning lights","No leaks underneath","First aid & extinguisher"];
   var STATUS_COL={Pending:"#9f1239",Scheduled:"var(--accent)",Travelling:"var(--accent)","In Progress":"var(--purple)","On Hold":"var(--amber)",Quote:"var(--purple)",Order:"var(--teal)"};
 
-  var jobs=[], shift=null, vcState="prompt", eng="";
+  var jobs=[], shift=null, vcState="prompt", eng="", vcVehicle="";
 
   // ---- postcode geocoding (shared cache with engineer-jobs.html) ----
   var GEO_KEY="mlPostcodeGeo_v1", geoCache={};
@@ -172,8 +173,9 @@
       var vd=await vr.json();
       var vcDone=!!(vd&&vd.myCheck);
       var vcOverdue=!!(vd&&vd.deadline&&vd.deadline.overdue);
+      vcVehicle = (vd&&vd.vehicle) || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || "";
       vcState = vcDone ? "done" : (vcOverdue ? "overdue" : "due");
-    }catch(e){ vcState="due"; }   // unknown → don't hard-block, just remind
+    }catch(e){ vcState="due"; vcVehicle=localStorage.getItem("mostlaneVehicle")||""; }   // unknown → don't hard-block, just remind
     loadInboxBadge();
   }
   async function loadInboxBadge(){
@@ -315,6 +317,8 @@
 
   // ---- van check + clock on ----
   function openVc(){
+    $("vcVehLine").innerHTML = vcVehicle ? ('🚐 Vehicle · <b>'+esc(vcVehicle)+'</b>') : '';
+    $("vcVehLine").style.display = vcVehicle ? 'flex' : 'none';
     $("vcList").innerHTML=VC_ITEMS.map(function(v){return '<div class="vc"><span class="box">✓</span>'+esc(v)+'</div>';}).join("");
     [].forEach.call($("vcList").children,function(el){ el.onclick=function(){ el.classList.toggle("on"); }; });
     $("vcMiles").value=""; $("vcSafe").classList.remove("on"); $("vcDefects").value=""; $("vcMsg").textContent="";
@@ -327,7 +331,7 @@
     if(!$("vcSafe").classList.contains("on")){ $("vcMsg").textContent="Confirm the van is safe to drive."; return; }
     var m=parseInt($("vcMiles").value,10); if(!(m>0)){ $("vcMsg").textContent="Enter the start mileage."; return; }
     var items={}; VC_ITEMS.forEach(function(v,i){ items[v]=$("vcList").children[i].classList.contains("on"); });
-    try{ await jfetch("/vehicle-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,week:mondayOfWeek(),safeToDrive:true,items:items,note:$("vcDefects").value.trim(),startMileage:m,opId:opId()})}); }catch(e){}
+    try{ await jfetch("/vehicle-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,week:mondayOfWeek(),vehicle:vcVehicle,safeToDrive:true,items:items,note:$("vcDefects").value.trim(),startMileage:m,opId:opId()})}); }catch(e){}
     vcState="done"; $("vcModal").classList.remove("show");
     await doClockOn(m); toast("Van check done — you're clocked on");
   };

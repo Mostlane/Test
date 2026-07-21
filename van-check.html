@@ -140,6 +140,9 @@
     catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
     if (!d.ok) { location.href = "/main.html"; return; }
     CFG = d;
+    // Auto-fill the engineer's assigned registration: prefer the server's
+    // vehicle_assigned, fall back to the reg cached at login (VehicleAssigned).
+    try { CFG.vehicle = CFG.vehicle || localStorage.getItem("mostlaneVehicle") || sessionStorage.getItem("mostlaneVehicle") || ""; } catch (e) {}
     const dueBox = g("dueBox");
     const dueTxt = new Date(d.deadline.dueAt).toLocaleString("en-GB", { weekday:"long", hour:"2-digit", minute:"2-digit" });
     dueBox.style.display = "block";
