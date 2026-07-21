@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <script src="/portal-config.js?v=2"></script>
+  <script src="/ml-perms.js"></script>
   <title>Main Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -291,7 +292,10 @@ a.button {
 
       // Permission mapping
 
-const MAP = {
+// Permission map lives in the shared /ml-perms.js (single source, also used by
+// the field-user app). The inline copy below is only a fallback if that file
+// ever fails to load, so office gating never breaks.
+const MAP = window.ML_PERM_MAP || {
   CheckInOut: ["CheckInOut", "CheckIn/Out", "checkinBtn", "checkinhtml"],
   Vehicles: ["Vehicles", "vehiclesBtn"],
   Holiday: ["HolidayRequests", "Holiday", "holidayBtn"],
