@@ -91,8 +91,8 @@
   function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 
   // ---- permission-driven launcher (every portal area they can open) ----
-  var GROUP_LABEL = { Work:"My work", Records:"My records", Portal:"Portal", Settings:"Settings" };
-  var GROUP_ORDER = ["Work","Records","Portal","Settings"];
+  var GROUP_LABEL = { Work:"My work", Records:"My records", Portal:"Portal", Admin:"Admin", Settings:"Settings" };
+  var GROUP_ORDER = ["Work","Records","Portal","Admin","Settings"];
   (function buildLauncher(){
     var items = (window.mlMenuFor ? window.mlMenuFor() : []);
     var byGroup = {};

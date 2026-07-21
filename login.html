@@ -235,6 +235,7 @@ const user = result.user;
         set('mostlaneFolder', user.SharePointPath || '');
         set('mostlaneVehicle', user.VehicleAssigned || '');
         set('mostlaneEmployment', user.EmploymentType || '');
+        set('mostlaneStaffType', (user.StaffType || 'field'));
         localStorage.setItem('mostlaneExpiry', EXPIRY);
 
        // Cache the COMPLETE set of permission flags so the sidebar and menu

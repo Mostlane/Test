@@ -455,8 +455,19 @@ function shapeUser(u, perms) {
     Status: u.status,
     SharePointPath: u.sharepoint_path,
     MustChangePassword: !!u.must_change_password,
+    // "office" | "field" (default field) — drives whether the user lands in the
+    // office menu (main.html) or the engineer app (route.html / You).
+    StaffType: staffTypeOf(u),
     ...perms
   };
+}
+function staffTypeOf(u) {
+  try {
+    const p = typeof u.profile === "string" ? JSON.parse(u.profile) : u.profile || {};
+    return p && p.staffType === "office" ? "office" : "field";
+  } catch {
+    return "field";
+  }
 }
 var LOGIN_FAIL_LIMIT = 20;
 async function tooManyRecentFails(env, ip) {
