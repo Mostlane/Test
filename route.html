@@ -122,6 +122,7 @@
   function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show")},2400);}
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function getEngineer(){ try{return sessionStorage.getItem("mostlaneUser")||sessionStorage.getItem("mostlaneUsername")||localStorage.getItem("mostlaneUser")||"";}catch(e){return "";} }
+  function opId(){ try{return crypto.randomUUID();}catch(e){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2);} }
   function initials(n){ return String(n||"").split(/\s+/).map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase()||"ML"; }
   function todayLocal(){ var d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
   function fmtTime(iso){ try{ return new Date(iso).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
@@ -309,7 +310,7 @@
     if(!$("vcSafe").classList.contains("on")){ $("vcMsg").textContent="Confirm the van is safe to drive."; return; }
     var m=parseInt($("vcMiles").value,10); if(!(m>0)){ $("vcMsg").textContent="Enter the start mileage."; return; }
     var items={}; VC_ITEMS.forEach(function(v,i){ items[v]=$("vcList").children[i].classList.contains("on"); });
-    try{ await jfetch("/vehicle-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,week:mondayOfWeek(),safeToDrive:true,items:items,note:$("vcDefects").value.trim(),startMileage:m})}); }catch(e){}
+    try{ await jfetch("/vehicle-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,week:mondayOfWeek(),safeToDrive:true,items:items,note:$("vcDefects").value.trim(),startMileage:m,opId:opId()})}); }catch(e){}
     vcState="done"; $("vcModal").classList.remove("show");
     await doClockOn(m); toast("Van check done — you're clocked on");
   };
@@ -319,7 +320,7 @@
   }
   async function doClockOn(startMileage){
     var gps=await getGps();
-    try{ await jfetch("/shift/clock-on",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,startMileage:startMileage,date:todayLocal()})}); }catch(e){}
+    try{ await jfetch("/shift/clock-on",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,startMileage:startMileage,date:todayLocal(),opId:opId()})}); }catch(e){}
     await loadAll(); render();
   }
   async function endDay(){
@@ -327,7 +328,7 @@
     var endMileage=(m&&!isNaN(+m))?Math.round(+m):null;
     var fuel=prompt("Fuel added today? (£ or litres — optional)")||"";
     var gps=await getGps();
-    try{ await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal()})}); }catch(e){}
+    try{ await jfetch("/shift/clock-off",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({engineer:eng,gps:gps,endMileage:endMileage,fuel:fuel,date:todayLocal(),opId:opId()})}); }catch(e){}
     await loadAll(); render(); toast("Clocked off — have a good evening");
   }
 
