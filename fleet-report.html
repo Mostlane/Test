@@ -229,6 +229,33 @@ function anomaliesForDay(reg,d,day,isPool){
   return out;
 }
 
+/* ═══ Clock-in vs van movement ═══
+   Flag when the engineer's Start my day / End my day (portal clock-on/off)
+   doesn't match when their assigned van actually first/last moved that day. */
+let SHIFTS = {};              // normUsername -> { date -> {onMin, offMin} }
+const CLOCK_TOL = 5;          // minutes tolerance
+function localMin(iso){ if(!iso) return null; const dt=new Date(iso); return isNaN(dt)?null:dt.getHours()*60+dt.getMinutes(); }
+async function fetchShifts(fromD,toD){
+  const out={};
+  try{
+    const d=await authFetch("/sla/shifts?from="+encodeURIComponent(fromD)+"&to="+encodeURIComponent(toD)).then(r=>r.json());
+    (d.shifts||[]).forEach(s=>{ const u=norm(s.username); (out[u]=out[u]||{})[s.date]={onMin:localMin(s.clock_on_at),offMin:localMin(s.clock_off_at)}; });
+  }catch(e){}
+  return out;
+}
+function clockFlags(driverUser,date,day){
+  const out=[];
+  if(!driverUser || !day || !day.trips || !day.trips.length || day.startMin==null) return out;  // van didn't move -> nothing to compare
+  const sh=(SHIFTS[norm(driverUser)]||{})[date];
+  if(!sh || sh.onMin==null){ out.push(["High","No Start my day (van moved "+hm(day.startMin)+")"]); }
+  else if(Math.abs(sh.onMin-day.startMin)>CLOCK_TOL){ out.push(["Medium","Start my day "+hm(sh.onMin)+" ≠ van "+hm(day.startMin)]); }
+  if(day.endMin!=null && sh){
+    if(sh.offMin==null){ out.push(["Medium","No End my day (van last moved "+hm(day.endMin)+")"]); }
+    else if(Math.abs(sh.offMin-day.endMin)>CLOCK_TOL){ out.push(["Medium","End my day "+hm(sh.offMin)+" ≠ van "+hm(day.endMin)]); }
+  }
+  return out;
+}
+
 /* ═══ Van-check compliance from the portal ═══ */
 function mondayOf(iso){ const d=new Date(iso+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7)); return d.toISOString().slice(0,10); }
 function weeksBetween(minISO,maxISO){ const out=[]; let w=mondayOf(minISO); const end=mondayOf(maxISO); let guard=0; while(w<=end && guard++<12){ out.push(w); const d=new Date(w+"T12:00:00Z"); d.setUTCDate(d.getUTCDate()+7); w=d.toISOString().slice(0,10);} return out; }
@@ -435,7 +462,8 @@ async function generate(){
       dayList.forEach(d=>{ if(!minD||d.date<minD)minD=d.date; if(!maxD||d.date>maxD)maxD=d.date; });
       const pool=dmap[v.reg]===POOL_VAL||POOL.has(v.reg);
       const driver=pool?"🚚 Fleet (pool)":(dmap[v.reg]?driverName(dmap[v.reg]):v.driver);
-      vehicles.push({...v, driver, isPool:pool, days:dayList});
+      const driverUser=pool?"":(dmap[v.reg]||"");   // the username, for clock-on/off lookup
+      vehicles.push({...v, driver, driverUser, isPool:pool, days:dayList});
     }
     if(!minD){ $("status").textContent="No trip data found in that file."; $("genBtn").disabled=false; return; }
     $("status").textContent="Reading driver scores…";
@@ -443,6 +471,8 @@ async function generate(){
     $("status").textContent="Fetching van-check compliance…";
     const weeks=weeksBetween(minD,maxD);
     const vanByWeek=await fetchVanChecks(weeks);
+    $("status").textContent="Fetching Start/End-of-day times…";
+    SHIFTS=await fetchShifts(minD,maxD);
     $("status").textContent="Building report…";
     renderReport({vehicles,scores,weeks,vanByWeek,minD,maxD,dmap});
     $("genPane").style.display="none";
@@ -546,7 +576,7 @@ function renderReport(R){
       const d=byDow[dw]; const wknd=dw===0||dw===6;
       if(!d||!d.trips.length){ h+=`<div class="day"><div class="day-h ${wknd?'wk':''}"><span class="day-nm">${DOW[dw]}</span><span class="muted">No activity</span></div></div>`; return; }
       const dk=key+"_"+d.date;
-      const anoms=anomaliesForDay(v.reg,d.date,d,v.isPool).map(a=>`<span class="flag ${a[0]==='High'?'f-red':a[0]==='Medium'?'f-warn':'f-ok'}">${esc(a[1])}</span>`).join(" ");
+      const anoms=anomaliesForDay(v.reg,d.date,d,v.isPool).concat(clockFlags(v.driverUser,d.date,d)).map(a=>`<span class="flag ${a[0]==='High'?'f-red':a[0]==='Medium'?'f-warn':'f-ok'}">${esc(a[1])}</span>`).join(" ");
       h+=`<div class="day"><div class="day-h ${wknd?'wk':''}" onclick="tog('d_${dk}')"><span class="day-nm">${DOW[dw]}</span>
           <span class="pill p-blue">🕐 ${hmSpan(d.span)}</span><span class="pill p-green">🚗 ${hmSpan(d.travel)}</span><span class="pill p-amber">${d.miles.toFixed(1)} mi</span> ${anoms}</div>
           <div class="day-b" id="d_${dk}"><table class="rt" style="box-shadow:none;margin:0"><tr><th>#</th><th>From</th><th>To</th><th>Start</th><th>End</th><th>Dur</th><th>Miles</th><th>Type</th></tr>
@@ -558,7 +588,7 @@ function renderReport(R){
 
   // 8. Anomalies table
   const allAnoms=[];
-  active.forEach(v=>v.days.filter(d=>d.trips.length).forEach(d=>anomaliesForDay(v.reg,d.date,d,v.isPool).forEach(a=>allAnoms.push([v.driver||v.reg,d.date,a[1],a[0]]))));
+  active.forEach(v=>v.days.filter(d=>d.trips.length).forEach(d=>anomaliesForDay(v.reg,d.date,d,v.isPool).concat(clockFlags(v.driverUser,d.date,d)).forEach(a=>allAnoms.push([v.driver||v.reg,d.date,a[1],a[0]]))));
   allAnoms.sort((a,b)=>({High:0,Medium:1,Note:2}[a[3]]-{High:0,Medium:1,Note:2}[b[3]]));
   h+=`<div class="section-title">Anomalies</div><table class="rt anom"><tr><th>Driver</th><th>Date</th><th>Anomaly</th><th>Severity</th></tr>`;
   if(!allAnoms.length) h+=`<tr><td colspan="4" class="muted">None flagged.</td></tr>`;
