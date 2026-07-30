@@ -571,3 +571,33 @@ CREATE TABLE IF NOT EXISTS job_time_segments (
   started_at TEXT NOT NULL,
   ended_at   TEXT                          -- NULL = clock running
 );
+
+-- ── Household wealth tracker (owner-only, private) ──────────────────────────
+-- Driven by wealth.html + routes/finance.js. Every route is gated to the OWNER
+-- account, so staff can never reach it. Tables are self-migrating in
+-- finance.js (CREATE IF NOT EXISTS on first request) — these are for reference.
+CREATE TABLE IF NOT EXISTS fin_bills (          -- recurring monthly bills (JSON blob)
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  id   TEXT PRIMARY KEY,
+  data TEXT NOT NULL                            -- {id,name,amount,dayOfMonth,category,notes,active}
+);
+CREATE TABLE IF NOT EXISTS fin_income (         -- income sources (JSON blob)
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  id   TEXT PRIMARY KEY,
+  data TEXT NOT NULL                            -- {id,name,amount,frequency,anchorDate,dayOfMonth,notes,active}
+);
+CREATE TABLE IF NOT EXISTS fin_transactions (   -- imported bank transactions
+  tenant_id   INTEGER NOT NULL DEFAULT 1,
+  id          TEXT PRIMARY KEY,
+  dt          TEXT NOT NULL,                    -- ISO date YYYY-MM-DD
+  description TEXT NOT NULL,
+  amount      REAL NOT NULL,                    -- signed: +in / -out
+  category    TEXT,
+  account     TEXT,
+  hash        TEXT NOT NULL,                    -- dedupe key (date|pence|desc|account)
+  data        TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS fin_tx_hash ON fin_transactions (tenant_id, hash);
+CREATE INDEX IF NOT EXISTS fin_tx_dt ON fin_transactions (tenant_id, dt);
+-- Opening balance / categories / auto-categorise rules live in app_config
+-- under key `fin:config`.

@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Household Wealth — Mostlane</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<script src="/xlsx-lite.js"></script>
+<script src="/statement-parse.js"></script>
+<style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b;
+         --brand:#2563eb; --good:#16a34a; --bad:#dc2626; --warn:#b45309; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
+  a.ml-back{color:#fff;text-decoration:none;font-size:15px;}
+  .wrap{max-width:820px;margin:0 auto;padding:14px;}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 14px 0;max-width:820px;margin:0 auto;-webkit-overflow-scrolling:touch;}
+  .tabs button{appearance:none;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;
+    padding:8px 14px;font-size:14px;font-weight:600;white-space:nowrap;cursor:pointer;font-family:inherit;}
+  .tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  .card h2{margin:0 0 4px;font-size:16px;}
+  .card h3{margin:14px 0 6px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5;}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
+    padding:10px 15px;font-size:15px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.small{padding:6px 10px;font-size:13px;border-radius:8px;}
+  .btn.danger{color:var(--bad);border-color:#fecaca;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  label{font-size:13px;font-weight:600;color:var(--muted);display:block;margin:10px 0 4px;}
+  input,select{font-family:inherit;font-size:15px;padding:10px;border:1px solid var(--line);border-radius:9px;width:100%;background:#fff;color:var(--ink);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .kpi{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:14px;}
+  .kpi .v{font-size:24px;font-weight:800;letter-spacing:-.01em;}
+  .kpi .l{font-size:12px;color:var(--muted);margin-top:2px;}
+  .kpi.big{grid-column:1/-1;background:#0f172a;color:#fff;border-color:#0f172a;}
+  .kpi.big .l{color:#cbd5e1;}
+  .pos{color:var(--good);} .neg{color:var(--bad);}
+  .list{list-style:none;margin:0;padding:0;}
+  .list li{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line);}
+  .list li:last-child{border-bottom:0;}
+  .list .grow{flex:1;min-width:0;}
+  .list .nm{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .list .meta{font-size:12px;color:var(--muted);}
+  .amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;}
+  .bar-row .lab{width:130px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .bar-track{flex:1;background:#eef2f7;border-radius:6px;overflow:hidden;height:16px;}
+  .bar-fill{height:100%;background:var(--brand);border-radius:6px;}
+  .bar-val{width:76px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  td.r,th.r{text-align:right;}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:#eef2f7;color:#334155;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;display:none;z-index:60;max-width:90%;}
+  .hidden{display:none!important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-end;justify-content:center;z-index:50;}
+  .modal-bg.on{display:flex;}
+  .modal{background:#fff;border-radius:16px 16px 0 0;padding:18px;width:100%;max-width:520px;max-height:88vh;overflow:auto;}
+  .modal h2{margin:0 0 12px;font-size:17px;}
+  .muted{color:var(--muted);} .small{font-size:12px;}
+  .warnbox{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:10px;}
+  .empty{color:var(--muted);text-align:center;padding:22px 8px;font-size:14px;}
+  @media(min-width:560px){ .modal{border-radius:16px;align-self:center;} .modal-bg{align-items:center;} }
+  @media(min-width:560px){ .kpis{grid-template-columns:repeat(3,1fr);} .kpi.big{grid-column:1/-1;} }
+  svg .grid{stroke:#e2e8f0;stroke-width:1;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html">‹ Back</a>
+  <h1>💰 Household Wealth</h1>
+</header>
+
+<div class="tabs" id="tabs">
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="setup">Money in &amp; out</button>
+  <button data-tab="spending">Spending</button>
+  <button data-tab="statements">Statements</button>
+  <button data-tab="settings">Settings</button>
+</div>
+
+<div class="wrap">
+  <div id="loading" class="empty">Loading…</div>
+  <div id="denied" class="card hidden"><h2>Private</h2><p class="sub">This household wealth tracker is only available to the account owner.</p></div>
+
+  <!-- ── OVERVIEW ─────────────────────────────────────────────────────────── -->
+  <section id="tab-overview" class="tabpane hidden">
+    <div class="card">
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="card">
+      <h2>Next 12 weeks</h2>
+      <p class="sub">Projected balance at the end of each week, once your pay and bills land. Red weeks dip below zero.</p>
+      <div id="forecast"></div>
+    </div>
+    <div class="card">
+      <h2>Coming up</h2>
+      <ul class="list" id="upcoming"></ul>
+    </div>
+    <div class="card" id="monthCard">
+      <h2>This month's spending</h2>
+      <p class="sub" id="monthSub">Upload a statement to see where the money actually went.</p>
+      <div id="monthSpend"></div>
+    </div>
+  </section>
+
+  <!-- ── SETUP: income + bills ────────────────────────────────────────────── -->
+  <section id="tab-setup" class="tabpane hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Income</h2>
+        <button class="btn primary small" onclick="editIncome()">+ Add income</button>
+      </div>
+      <p class="sub">Your wages and anything else that comes in regularly. Weekly pay is anchored to a real pay date so the forecast lands on the right days.</p>
+      <ul class="list" id="incomeList"></ul>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Monthly bills</h2>
+        <button class="btn primary small" onclick="editBill()">+ Add bill</button>
+      </div>
+      <p class="sub">Each recurring bill and the day of the month it leaves your account.</p>
+      <ul class="list" id="billList"></ul>
+    </div>
+  </section>
+
+  <!-- ── SPENDING ─────────────────────────────────────────────────────────── -->
+  <section id="tab-spending" class="tabpane hidden">
+    <div class="card">
+      <div class="grid2">
+        <div><label>From</label><input type="date" id="spFrom"></div>
+        <div><label>To</label><input type="date" id="spTo"></div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn small" onclick="spRange(1)">This month</button>
+        <button class="btn small" onclick="spRange(3)">3 months</button>
+        <button class="btn small" onclick="spRange(12)">12 months</button>
+        <button class="btn primary small" onclick="loadSpending()">Show</button>
+      </div>
+    </div>
+    <div class="card" id="spSummary"></div>
+    <div class="card"><h2>Where it went</h2><div id="spByCat"><p class="empty">No data yet.</p></div></div>
+    <div class="card"><h2>Top places</h2><div id="spMerchants"></div></div>
+    <div class="card"><h2>In vs out by month</h2><div id="spMonthly"></div></div>
+  </section>
+
+  <!-- ── STATEMENTS ───────────────────────────────────────────────────────── -->
+  <section id="tab-statements" class="tabpane hidden">
+    <div class="card">
+      <h2>Upload a statement</h2>
+      <p class="sub">Export your transactions from your bank (CSV or Excel work best; PDF is read as best-effort). The file is read <b>here in your browser</b> — the raw file is never uploaded anywhere. Check the list, then save.</p>
+      <label>Account name (optional)</label>
+      <input id="acctName" placeholder="e.g. Barclays current account">
+      <div style="margin-top:12px;">
+        <input type="file" id="fileIn" accept=".csv,.tsv,.txt,.xlsx,.pdf" class="hidden">
+        <button class="btn primary" onclick="document.getElementById('fileIn').click()">Choose file…</button>
+        <span id="fileName" class="muted small"></span>
+      </div>
+      <div id="parseMsg" class="sub" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card hidden" id="reviewCard">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Review <span id="revCount" class="pill"></span></h2>
+        <div class="row">
+          <button class="btn small" onclick="flipAll(-1)">All spend</button>
+          <button class="btn small" onclick="flipAll(1)">All in</button>
+        </div>
+      </div>
+      <div id="revWarn"></div>
+      <p class="sub">Tap the arrow to flip money in/out, change a category, or delete a row. Duplicates already saved are skipped automatically.</p>
+      <div style="overflow-x:auto;">
+        <table id="revTable"></table>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn primary" id="importBtn" onclick="doImport()">Save these transactions</button>
+        <button class="btn" onclick="cancelReview()">Cancel</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Saved transactions</h2>
+      <p class="sub"><span id="txCount">0</span> transactions stored. These power the Spending charts.</p>
+      <div class="row">
+        <button class="btn danger small" onclick="clearAll()">Delete all transactions</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SETTINGS ─────────────────────────────────────────────────────────── -->
+  <section id="tab-settings" class="tabpane hidden">
+    <div class="card">
+      <h2>Balance</h2>
+      <p class="sub">Your balance right now — the forecast starts from here.</p>
+      <div class="grid2">
+        <div><label>Current balance (£)</label><input type="number" step="0.01" id="cfgBal"></div>
+        <div><label>As of date</label><input type="date" id="cfgDate"></div>
+      </div>
+      <button class="btn primary small" style="margin-top:12px;" onclick="saveBalance()">Save balance</button>
+    </div>
+    <div class="card">
+      <h2>Auto-categorise rules</h2>
+      <p class="sub">When a transaction description contains the text on the left, it's filed under the category on the right. First match wins.</p>
+      <div id="rulesList"></div>
+      <div class="row" style="margin-top:10px;">
+        <input id="ruleMatch" placeholder="text in description (e.g. tesco)" style="flex:1;min-width:120px;">
+        <select id="ruleCat" style="flex:1;min-width:120px;"></select>
+        <button class="btn small" onclick="addRule()">Add</button>
+      </div>
+      <button class="btn primary small" style="margin-top:12px;" onclick="saveRules()">Save rules</button>
+      <p class="small muted" style="margin-top:8px;">Changing rules affects new imports. Existing transactions keep their category (edit them on the Statements review or Spending list).</p>
+    </div>
+  </section>
+</div>
+
+<!-- Bill / income modal -->
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts={}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? {"Authorization":"Bearer "+t} : {});
+  return fetch(API + path, opts);
+}
+async function apiGet(path){ const r = await authFetch(path); if(r.status===403) throw {denied:true}; if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }
+async function apiPost(path, body){ const r = await authFetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})}); if(r.status===403) throw {denied:true}; return r.json(); }
+function esc(s){ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
+
+let CFG = {currency:"£",categories:[],rules:[],openingBalance:0,openingDate:""};
+let BILLS = [], INCOME = [];
+function cur(n){ const s=(Math.abs(n)).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2}); return (n<0?"-":"")+(CFG.currency||"£")+s; }
+function cur0(n){ return (n<0?"-":"")+(CFG.currency||"£")+Math.round(Math.abs(n)).toLocaleString("en-GB"); }
+
+// ── Tabs ────────────────────────────────────────────────────────────────────
+$("tabs").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.add("hidden"));
+  $("tab-"+b.dataset.tab).classList.remove("hidden");
+  if(b.dataset.tab==="spending" && !$("spByCat").dataset.loaded) loadSpending();
+});
+
+// ── Load everything ─────────────────────────────────────────────────────────
+async function boot(){
+  try{
+    const d = await apiGet("/finance/data");
+    CFG = d.config; BILLS = d.bills; INCOME = d.income;
+    $("loading").classList.add("hidden");
+    $("tab-overview").classList.remove("hidden");
+    $("txCount").textContent = d.txCount;
+    renderAll();
+    loadMonthSpend();
+  }catch(e){
+    $("loading").classList.add("hidden");
+    if(e && e.denied){ $("denied").classList.remove("hidden"); document.querySelector(".tabs").classList.add("hidden"); }
+    else { $("loading").classList.remove("hidden"); $("loading").textContent = "Couldn't load (" + (e.message||"error") + "). Pull to refresh."; }
+  }
+}
+function renderAll(){ renderOverview(); renderSetup(); renderSettings(); }
+
+// ── Forecast maths ───────────────────────────────────────────────────────────
+function ymd(d){ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); }
+function daysIn(y,m){ return new Date(y,m+1,0).getDate(); }
+function monthlyIncomeTotal(){
+  return INCOME.filter(i=>i.active!==false).reduce((s,i)=>{
+    const a=+i.amount||0;
+    if(i.frequency==="weekly") return s+a*52/12;
+    if(i.frequency==="fortnightly") return s+a*26/12;
+    if(i.frequency==="fourweekly") return s+a*13/12;
+    return s+a; // monthly
+  },0);
+}
+function monthlyBillsTotal(){ return BILLS.filter(b=>b.active!==false).reduce((s,b)=>s+(+b.amount||0),0); }
+
+// Build dated events (income +, bills -) between start..end inclusive.
+function buildEvents(start, end){
+  const ev=[];
+  const s=new Date(start), e=new Date(end);
+  for(const i of INCOME.filter(x=>x.active!==false)){
+    const a=+i.amount||0; if(!a) continue;
+    if(i.frequency==="monthly"){
+      let y=s.getFullYear(), m=s.getMonth();
+      const cur=new Date(y,m,1);
+      while(cur<=e){
+        const dd=Math.min(i.dayOfMonth||1, daysIn(cur.getFullYear(),cur.getMonth()));
+        const dt=new Date(cur.getFullYear(),cur.getMonth(),dd);
+        if(dt>=s && dt<=e) ev.push({date:dt, amount:a, label:i.name, type:"in"});
+        cur.setMonth(cur.getMonth()+1);
+      }
+    } else {
+      const step = i.frequency==="fortnightly"?14 : i.frequency==="fourweekly"?28 : 7;
+      let anchor = new Date(i.anchorDate||start);
+      // wind anchor to first occurrence >= start
+      const diff = Math.floor((s - anchor)/(86400000*step));
+      let cur = new Date(anchor.getTime() + Math.max(0,diff)*step*86400000);
+      while(cur < s) cur = new Date(cur.getTime()+step*86400000);
+      while(cur<=e){ ev.push({date:new Date(cur), amount:a, label:i.name, type:"in"}); cur=new Date(cur.getTime()+step*86400000); }
+    }
+  }
+  for(const b of BILLS.filter(x=>x.active!==false)){
+    const a=+b.amount||0; if(!a) continue;
+    let cur=new Date(s.getFullYear(), s.getMonth(), 1);
+    while(cur<=e){
+      const dd=Math.min(b.dayOfMonth||1, daysIn(cur.getFullYear(),cur.getMonth()));
+      const dt=new Date(cur.getFullYear(),cur.getMonth(),dd);
+      if(dt>=s && dt<=e) ev.push({date:dt, amount:-a, label:b.name, type:"out"});
+      cur.setMonth(cur.getMonth()+1);
+    }
+  }
+  ev.sort((x,y)=>x.date-y.date);
+  return ev;
+}
+
+function renderOverview(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const openDate = CFG.openingDate ? new Date(CFG.openingDate) : today;
+  const start = openDate>today?today:openDate;
+  const horizon = new Date(today.getTime()+84*86400000);
+  const ev = buildEvents(start, horizon);
+
+  // running balance to today
+  let bal = +CFG.openingBalance||0;
+  for(const e of ev){ if(e.date<=today && e.date>=start) bal+=e.amount; }
+  const balToday = bal;
+
+  // next payday
+  const futureIn = ev.filter(e=>e.type==="in" && e.date>today).sort((a,b)=>a.date-b.date);
+  const nextPay = futureIn[0];
+
+  // bills before next payday
+  const cutoff = nextPay?nextPay.date:horizon;
+  const billsBefore = ev.filter(e=>e.type==="out" && e.date>today && e.date<=cutoff).reduce((s,e)=>s+(-e.amount),0);
+  const safe = balToday - billsBefore;
+
+  // forecast running from today
+  let run = balToday; let minBal=balToday, minDate=today;
+  for(const e of ev.filter(e=>e.date>today)){ run+=e.amount; if(run<minBal){minBal=run; minDate=e.date;} }
+
+  const mIn=monthlyIncomeTotal(), mBills=monthlyBillsTotal(), mLeft=mIn-mBills;
+
+  const k=[];
+  k.push(`<div class="kpi big"><div class="v ${balToday<0?'neg':''}">${cur(balToday)}</div><div class="l">Balance ${CFG.openingDate&&openDate>today?('projected'):'now'}</div></div>`);
+  k.push(`<div class="kpi"><div class="v ${safe<0?'neg':'pos'}">${cur(safe)}</div><div class="l">Safe to spend ${nextPay?('until '+nextPay.date.toLocaleDateString("en-GB",{day:'numeric',month:'short'})):'this month'}</div></div>`);
+  k.push(`<div class="kpi"><div class="v">${nextPay?cur0(nextPay.amount):'—'}</div><div class="l">Next pay ${nextPay?nextPay.date.toLocaleDateString("en-GB",{weekday:'short',day:'numeric',month:'short'}):''}</div></div>`);
+  k.push(`<div class="kpi"><div class="v ${mLeft<0?'neg':'pos'}">${cur0(mLeft)}</div><div class="l">Left over / month</div></div>`);
+  k.push(`<div class="kpi"><div class="v ${mLeft<0?'neg':'pos'}">${cur0(mLeft*12/52)}</div><div class="l">Left over / week</div></div>`);
+  k.push(`<div class="kpi"><div class="v ${minBal<0?'neg':''}">${cur0(minBal)}</div><div class="l">Lowest dip ${minBal<balToday?('~'+minDate.toLocaleDateString("en-GB",{day:'numeric',month:'short'})):''}</div></div>`);
+  $("kpis").innerHTML = k.join("");
+
+  // weekly forecast bars (12 weeks)
+  const weeks=[]; let wb=balToday;
+  for(let w=0; w<12; w++){
+    const wStart=new Date(today.getTime()+w*7*86400000);
+    const wEnd=new Date(today.getTime()+(w+1)*7*86400000);
+    for(const e of ev){ if(e.date>wStart && e.date<=wEnd) wb+=e.amount; }
+    weeks.push({end:wEnd, bal:wb});
+  }
+  $("forecast").innerHTML = svgForecast(weeks, balToday);
+
+  // upcoming events (next 30 days)
+  const up = ev.filter(e=>e.date>today && e.date<=new Date(today.getTime()+30*86400000)).slice(0,12);
+  $("upcoming").innerHTML = up.length ? up.map(e=>`
+    <li><div class="grow"><div class="nm">${e.type==="in"?"⬆️ ":"⬇️ "}${esc(e.label)}</div>
+      <div class="meta">${e.date.toLocaleDateString("en-GB",{weekday:'short',day:'numeric',month:'short'})}</div></div>
+      <div class="amt ${e.amount<0?'neg':'pos'}">${e.amount<0?'':'+'}${cur(e.amount)}</div></li>`).join("")
+    : `<li class="empty" style="border:0;">Nothing due in the next 30 days — add your bills and income under “Money in &amp; out”.</li>`;
+}
+
+function svgForecast(weeks, startBal){
+  if(!weeks.length) return "";
+  const W=Math.max(320, weeks.length*46), H=170, pad=26, base=H-24;
+  const vals=weeks.map(w=>w.bal).concat([startBal,0]);
+  const max=Math.max(...vals,1), min=Math.min(...vals,0);
+  const span=(max-min)||1;
+  const y=v=> pad + (base-pad) - ( (v-min)/span )*(base-pad-6) + 6;
+  const bw=Math.min(30,(W-20)/weeks.length-8);
+  let bars="", labs="";
+  const zeroY=y(0);
+  weeks.forEach((w,i)=>{
+    const x=14+i*((W-20)/weeks.length);
+    const yy=y(w.bal);
+    const top=Math.min(yy,zeroY), h=Math.abs(zeroY-yy);
+    const col=w.bal<0?"#dc2626":"#16a34a";
+    bars+=`<rect x="${x}" y="${top}" width="${bw}" height="${Math.max(2,h)}" rx="3" fill="${col}" opacity=".9"><title>${w.end.toLocaleDateString("en-GB")}: ${cur(w.bal)}</title></rect>`;
+    if(i%2===0) labs+=`<text x="${x+bw/2}" y="${H-6}" font-size="10" fill="#64748b" text-anchor="middle">${w.end.toLocaleDateString("en-GB",{day:'numeric',month:'short'})}</text>`;
+  });
+  return `<div style="overflow-x:auto;"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    <line class="grid" x1="8" y1="${zeroY}" x2="${W-6}" y2="${zeroY}"></line>
+    <text x="10" y="${zeroY-3}" font-size="9" fill="#94a3b8">£0</text>
+    ${bars}${labs}</svg></div>`;
+}
+
+// ── Setup lists ──────────────────────────────────────────────────────────────
+const FREQ_LABEL={weekly:"Weekly",fortnightly:"Every 2 weeks",fourweekly:"Every 4 weeks",monthly:"Monthly"};
+function renderSetup(){
+  $("incomeList").innerHTML = INCOME.length ? INCOME.map(i=>`
+    <li><div class="grow"><div class="nm">${esc(i.name)}</div>
+      <div class="meta">${FREQ_LABEL[i.frequency]||i.frequency}${i.frequency==="monthly"?(" · day "+i.dayOfMonth):(" · from "+new Date(i.anchorDate).toLocaleDateString("en-GB",{day:'numeric',month:'short'}))}</div></div>
+      <div class="amt pos">${cur(i.amount)}</div>
+      <button class="btn small" onclick='editIncome(${JSON.stringify(i.id)})'>Edit</button></li>`).join("")
+    : `<li class="empty" style="border:0;">No income yet.</li>`;
+  $("billList").innerHTML = BILLS.length ? BILLS.slice().sort((a,b)=>a.dayOfMonth-b.dayOfMonth).map(b=>`
+    <li><div class="grow"><div class="nm">${esc(b.name)}</div>
+      <div class="meta">Day ${b.dayOfMonth} · ${esc(b.category||"")}</div></div>
+      <div class="amt neg">${cur(b.amount)}</div>
+      <button class="btn small" onclick='editBill(${JSON.stringify(b.id)})'>Edit</button></li>`).join("")
+    : `<li class="empty" style="border:0;">No bills yet.</li>`;
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openModal(html){ $("modalBody").innerHTML=html; $("modalBg").classList.add("on"); }
+function closeModal(){ $("modalBg").classList.remove("on"); }
+$("modalBg").addEventListener("click",e=>{ if(e.target===$("modalBg")) closeModal(); });
+
+function catOptions(sel){ return (CFG.categories||[]).map(c=>`<option ${c===sel?"selected":""}>${esc(c)}</option>`).join(""); }
+
+function editBill(id){
+  const b = id? BILLS.find(x=>x.id===id) : {name:"",amount:"",dayOfMonth:1,category:"Bills & utilities"};
+  openModal(`<h2>${id?"Edit":"Add"} bill</h2>
+    <label>Name</label><input id="m_name" value="${esc(b.name)}" placeholder="e.g. Council Tax">
+    <div class="grid2"><div><label>Amount (£)</label><input id="m_amt" type="number" step="0.01" value="${b.amount}"></div>
+      <div><label>Day of month</label><input id="m_day" type="number" min="1" max="31" value="${b.dayOfMonth}"></div></div>
+    <label>Category</label><select id="m_cat">${catOptions(b.category)}</select>
+    <div class="row" style="margin-top:16px;justify-content:space-between;">
+      <div class="row">${id?`<button class="btn danger" onclick='delBill(${JSON.stringify(id)})'>Delete</button>`:""}</div>
+      <div class="row"><button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick='saveBill(${JSON.stringify(id||"")})'>Save</button></div></div>`);
+}
+async function saveBill(id){
+  const body={ id:id||undefined, name:$("m_name").value.trim(), amount:$("m_amt").value, dayOfMonth:$("m_day").value, category:$("m_cat").value };
+  if(!body.name){ toast("Give the bill a name"); return; }
+  const r=await apiPost("/finance/bill",body); if(!r.ok){ toast(r.error||"Error"); return; }
+  const i=BILLS.findIndex(x=>x.id===r.bill.id); if(i>=0) BILLS[i]=r.bill; else BILLS.push(r.bill);
+  closeModal(); renderOverview(); renderSetup(); toast("Saved");
+}
+async function delBill(id){ if(!confirm("Delete this bill?"))return; await apiPost("/finance/bill/delete",{id}); BILLS=BILLS.filter(x=>x.id!==id); closeModal(); renderOverview(); renderSetup(); toast("Deleted"); }
+
+function editIncome(id){
+  const i = id? INCOME.find(x=>x.id===id) : {name:"",amount:"",frequency:"weekly",anchorDate:ymd(new Date()),dayOfMonth:1};
+  openModal(`<h2>${id?"Edit":"Add"} income</h2>
+    <label>Name</label><input id="m_name" value="${esc(i.name)}" placeholder="e.g. Wages">
+    <label>Amount (£)</label><input id="m_amt" type="number" step="0.01" value="${i.amount}">
+    <label>How often</label>
+    <select id="m_freq" onchange="incFreqUI()">${Object.entries(FREQ_LABEL).map(([k,v])=>`<option value="${k}" ${k===i.frequency?"selected":""}>${v}</option>`).join("")}</select>
+    <div id="incAnchor"><label>Next / last pay date</label><input id="m_anchor" type="date" value="${(i.anchorDate||ymd(new Date())).slice(0,10)}"></div>
+    <div id="incDom" class="hidden"><label>Day of month</label><input id="m_day" type="number" min="1" max="31" value="${i.dayOfMonth||1}"></div>
+    <div class="row" style="margin-top:16px;justify-content:space-between;">
+      <div class="row">${id?`<button class="btn danger" onclick='delIncome(${JSON.stringify(id)})'>Delete</button>`:""}</div>
+      <div class="row"><button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick='saveIncome(${JSON.stringify(id||"")})'>Save</button></div></div>`);
+  incFreqUI();
+}
+function incFreqUI(){ const m=$("m_freq").value; $("incDom").classList.toggle("hidden",m!=="monthly"); $("incAnchor").classList.toggle("hidden",m==="monthly"); }
+async function saveIncome(id){
+  const body={ id:id||undefined, name:$("m_name").value.trim(), amount:$("m_amt").value, frequency:$("m_freq").value,
+    anchorDate:$("m_anchor")?$("m_anchor").value:undefined, dayOfMonth:$("m_day")?$("m_day").value:1 };
+  if(!body.name){ toast("Give it a name"); return; }
+  const r=await apiPost("/finance/income",body); if(!r.ok){ toast(r.error||"Error"); return; }
+  const i=INCOME.findIndex(x=>x.id===r.income.id); if(i>=0) INCOME[i]=r.income; else INCOME.push(r.income);
+  closeModal(); renderOverview(); renderSetup(); toast("Saved");
+}
+async function delIncome(id){ if(!confirm("Delete this income source?"))return; await apiPost("/finance/income/delete",{id}); INCOME=INCOME.filter(x=>x.id!==id); closeModal(); renderOverview(); renderSetup(); toast("Deleted"); }
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+function renderSettings(){
+  $("cfgBal").value = CFG.openingBalance ?? 0;
+  $("cfgDate").value = (CFG.openingDate||ymd(new Date())).slice(0,10);
+  $("ruleCat").innerHTML = catOptions("");
+  renderRules();
+}
+function renderRules(){
+  $("rulesList").innerHTML = (CFG.rules||[]).map((r,idx)=>`
+    <div class="bar-row"><div class="grow" style="flex:1;">“${esc(r.match)}” → <b>${esc(r.category)}</b></div>
+    <button class="btn small danger" onclick="delRule(${idx})">×</button></div>`).join("") || `<p class="small muted">No rules.</p>`;
+}
+function addRule(){ const m=$("ruleMatch").value.trim().toLowerCase(); if(!m)return; CFG.rules.push({match:m,category:$("ruleCat").value}); $("ruleMatch").value=""; renderRules(); }
+function delRule(i){ CFG.rules.splice(i,1); renderRules(); }
+async function saveRules(){ const r=await apiPost("/finance/config",{rules:CFG.rules}); if(r.ok){CFG=r.config; toast("Rules saved");} else toast(r.error||"Error"); }
+async function saveBalance(){
+  const r=await apiPost("/finance/config",{openingBalance:$("cfgBal").value, openingDate:$("cfgDate").value});
+  if(r.ok){ CFG=r.config; renderOverview(); toast("Saved"); } else toast(r.error||"Error");
+}
+
+// ── Statements: parse + review ───────────────────────────────────────────────
+let REVIEW=[];
+$("fileIn").addEventListener("change", async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("fileName").textContent=" "+f.name;
+  $("parseMsg").textContent="Reading… (this stays on your device)";
+  try{
+    const res = await StatementParse.parseFile(f);
+    REVIEW = res.rows;
+    $("parseMsg").textContent = `Read ${res.rows.length} transaction(s) from a ${res.format.toUpperCase()} file.`;
+    renderReview(res);
+  }catch(err){ $("parseMsg").textContent="Couldn't read that file ("+(err.message||err)+")."; }
+  e.target.value="";
+});
+function renderReview(res){
+  if(!REVIEW.length){ $("reviewCard").classList.add("hidden"); return; }
+  $("reviewCard").classList.remove("hidden");
+  $("revCount").textContent = REVIEW.length + " rows";
+  const warns=(res.warnings||[]).slice();
+  if(res.format==="pdf") warns.unshift("PDF statements are read best-effort — please double-check the amounts and in/out arrows before saving.");
+  $("revWarn").innerHTML = warns.length? warns.map(w=>`<div class="warnbox">⚠️ ${esc(w)}</div>`).join("") : "";
+  drawReview();
+  $("reviewCard").scrollIntoView({behavior:"smooth",block:"start"});
+}
+function drawReview(){
+  const show=REVIEW.slice(0,300);
+  let rows = show.map((r,i)=>`<tr>
+    <td>${esc(r.date)}</td>
+    <td>${esc(r.description)}</td>
+    <td style="text-align:center;"><button class="btn small" onclick="flip(${i})">${r.amount<0?"⬇️ out":"⬆️ in"}</button></td>
+    <td class="r ${r.amount<0?'neg':'pos'}">${cur(r.amount)}</td>
+    <td><select onchange="setCat(${i},this.value)">${(CFG.categories||[]).map(c=>`<option ${c===(r.category||autoCat(r))?"selected":""}>${esc(c)}</option>`).join("")}</select></td>
+    <td><button class="btn small danger" onclick="dropRow(${i})">×</button></td></tr>`).join("");
+  $("revTable").innerHTML = `<thead><tr><th>Date</th><th>Description</th><th>In/Out</th><th class="r">Amount</th><th>Category</th><th></th></tr></thead><tbody>${rows}</tbody>`
+    + (REVIEW.length>300?`<caption class="small muted" style="caption-side:bottom;padding-top:8px;">Showing first 300 of ${REVIEW.length} — all will be saved.</caption>`:"");
+}
+function autoCat(r){ const d=(r.description||"").toLowerCase(); for(const rule of CFG.rules||[]){ if(rule.match && d.includes(rule.match)) return rule.category; } return r.amount>0?"Income":"Other"; }
+function flip(i){ REVIEW[i].amount = -REVIEW[i].amount; drawReview(); }
+function flipAll(sign){ REVIEW.forEach(r=>{ r.amount = sign<0? -Math.abs(r.amount) : Math.abs(r.amount); }); drawReview(); }
+function setCat(i,v){ REVIEW[i].category=v; }
+function dropRow(i){ REVIEW.splice(i,1); drawReview(); $("revCount").textContent=REVIEW.length+" rows"; if(!REVIEW.length) $("reviewCard").classList.add("hidden"); }
+function cancelReview(){ REVIEW=[]; $("reviewCard").classList.add("hidden"); $("parseMsg").textContent=""; $("fileName").textContent=""; }
+async function doImport(){
+  if(!REVIEW.length) return;
+  $("importBtn").disabled=true; $("importBtn").textContent="Saving…";
+  const payload = REVIEW.map(r=>({date:r.date, description:r.description, amount:r.amount, category:r.category||autoCat(r)}));
+  const r = await apiPost("/finance/transactions/import",{transactions:payload, account:$("acctName").value.trim()});
+  $("importBtn").disabled=false; $("importBtn").textContent="Save these transactions";
+  if(r.ok){ toast(`Saved ${r.created} new (${r.skipped} already there)`); cancelReview();
+    const d=await apiGet("/finance/data"); $("txCount").textContent=d.txCount; $("spByCat").dataset.loaded=""; }
+  else toast(r.error||"Import failed");
+}
+async function clearAll(){
+  if(!confirm("Delete ALL saved transactions? Your bills and income stay.")) return;
+  const r=await apiPost("/finance/transactions/clear",{}); if(r.ok){ $("txCount").textContent="0"; $("spByCat").dataset.loaded=""; toast("All transactions deleted"); }
+}
+
+// This-month mini spend on the Overview tab.
+async function loadMonthSpend(){
+  const now=new Date(); const from=ymd(new Date(now.getFullYear(),now.getMonth(),1)); const to=ymd(now);
+  try{
+    const d=await apiGet(`/finance/spending?from=${from}&to=${to}`);
+    const t=d.totals||{out:0,n:0}; const cats=(d.byCategory||[]).slice(0,6);
+    if(!t.n){ $("monthSub").textContent="Upload a statement to see where the money actually went."; $("monthSpend").innerHTML=""; return; }
+    $("monthSub").textContent = `${cur0(t.out||0)} spent so far this month across ${t.n} transactions.`;
+    const max=Math.max(...cats.map(c=>c.total),1);
+    $("monthSpend").innerHTML = cats.map(c=>bar(c.category||"Uncategorised",c.total,max,c.n)).join("");
+  }catch(e){ /* leave the prompt text */ }
+}
+
+// ── Spending ─────────────────────────────────────────────────────────────────
+function spRange(months){
+  const to=new Date(); const from=new Date(); from.setMonth(from.getMonth()-months); from.setDate(1);
+  if(months===1){ from.setTime(new Date(to.getFullYear(),to.getMonth(),1).getTime()); }
+  $("spFrom").value=ymd(from); $("spTo").value=ymd(to);
+}
+async function loadSpending(){
+  if(!$("spFrom").value) spRange(3);
+  const from=$("spFrom").value, to=$("spTo").value;
+  try{
+    const d = await apiGet(`/finance/spending?from=${from}&to=${to}`);
+    $("spByCat").dataset.loaded="1";
+    renderSpending(d);
+  }catch(e){ toast("Couldn't load spending"); }
+}
+function renderSpending(d){
+  const t=d.totals||{inn:0,out:0,n:0};
+  $("spSummary").innerHTML = `<div class="kpis">
+    <div class="kpi"><div class="v pos">${cur0(t.inn||0)}</div><div class="l">Money in</div></div>
+    <div class="kpi"><div class="v neg">${cur0(t.out||0)}</div><div class="l">Money out</div></div>
+    <div class="kpi"><div class="v ${((t.inn||0)-(t.out||0))<0?'neg':'pos'}">${cur0((t.inn||0)-(t.out||0))}</div><div class="l">Net</div></div></div>
+    <p class="small muted" style="margin:10px 0 0;">${t.n||0} transactions${t.first?` · ${t.first} → ${t.last}`:""}</p>`;
+
+  const cats=d.byCategory||[]; const maxC=Math.max(...cats.map(c=>c.total),1);
+  $("spByCat").innerHTML = cats.length? cats.map(c=>bar(c.category||"Uncategorised", c.total, maxC, c.n)).join("") : `<p class="empty">No spending in this range.</p>`;
+
+  const ms=d.merchants||[]; const maxM=Math.max(...ms.map(m=>m.total),1);
+  $("spMerchants").innerHTML = ms.length? ms.map(m=>bar(m.description||"—", m.total, maxM, m.n)).join("") : `<p class="empty">No data.</p>`;
+
+  const mo=d.monthly||[];
+  if(!mo.length){ $("spMonthly").innerHTML=`<p class="empty">No data.</p>`; }
+  else{
+    const maxV=Math.max(...mo.flatMap(m=>[m.inn,m.out]),1);
+    $("spMonthly").innerHTML = mo.map(m=>`
+      <div style="margin:10px 0;"><div class="small muted" style="margin-bottom:3px;">${m.ym}</div>
+      <div class="bar-row"><div class="lab" style="width:34px;">In</div><div class="bar-track"><div class="bar-fill" style="width:${(m.inn/maxV*100).toFixed(1)}%;background:#16a34a;"></div></div><div class="bar-val pos">${cur0(m.inn)}</div></div>
+      <div class="bar-row"><div class="lab" style="width:34px;">Out</div><div class="bar-track"><div class="bar-fill" style="width:${(m.out/maxV*100).toFixed(1)}%;background:#dc2626;"></div></div><div class="bar-val neg">${cur0(m.out)}</div></div></div>`).join("");
+  }
+}
+function bar(label,val,max,n){
+  return `<div class="bar-row"><div class="lab">${esc(label)}</div>
+    <div class="bar-track"><div class="bar-fill" style="width:${(val/max*100).toFixed(1)}%;"></div></div>
+    <div class="bar-val">${cur0(val)}</div></div>`;
+}
+
+boot();
+</script>
+</body>
+</html>

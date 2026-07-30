@@ -95,3 +95,7 @@
   Cache-Control: no-cache
 /timesheets-admin.html
   Cache-Control: no-cache
+/wealth.html
+  Cache-Control: no-cache
+/statement-parse.js
+  Cache-Control: no-cache

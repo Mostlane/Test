@@ -141,7 +141,10 @@ var TENANT_TABLES = /* @__PURE__ */ new Set([
   "key_log",
   "notify_log",
   "audit_log",
-  "hs_documents"
+  "hs_documents",
+  "fin_bills",
+  "fin_income",
+  "fin_transactions"
 ]);
 var DEFAULT_TENANT_ID = 1;
 async function resolveTenantId(env, request) {
@@ -3043,7 +3046,7 @@ function effectiveCfg(cfg, u) {
     profile = u.profile ? JSON.parse(u.profile) : {};
   } catch {
   }
-  const num2 = (v) => {
+  const num3 = (v) => {
     const n = parseFloat(v);
     return isFinite(n) && n > 0 ? n : null;
   };
@@ -3064,7 +3067,7 @@ function effectiveCfg(cfg, u) {
     lunchThresholdH: Number(mine.lunchThresholdH ?? cfg.defaults.lunchThresholdH) || 6,
     pencePerMile: Number(mine.pencePerMile ?? profile.pencePerMile ?? cfg.defaults.pencePerMile) || 45,
     rateType: mine.rateType === "day" ? "day" : "hour",
-    rate: num2(mine.rate) ?? (mine.rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate),
+    rate: num3(mine.rate) ?? (mine.rateType === "day" ? num3(profile.dayRate) : num3(profile.hourlyRate)) ?? num3(profile.hourlyRate),
     homePostcode: String(mine.homePostcode || "").toUpperCase(),
     details: Array.isArray(mine.details) ? mine.details : [],
     // extra lines under their name on the invoice
@@ -8279,7 +8282,7 @@ async function handle20(request, env, ctx, url, sess) {
     await ensureVehTable(env);
     const b = await readJson4(request);
     const list = sub === "/vehicles-import" ? b.vehicles || [] : [b];
-    const num2 = (x) => {
+    const num3 = (x) => {
       const n = parseInt(String(x == null ? "" : x).replace(/[^0-9]/g, ""), 10);
       return isNaN(n) ? null : n;
     };
@@ -8306,12 +8309,12 @@ async function handle20(request, env, ctx, url, sess) {
         v.taxDue || v.taxDate || "",
         v.nextServiceDate || v.serviceDate || "",
         v.notes || "",
-        num2(v.svcIntervalDays),
-        num2(v.svcIntervalMiles),
+        num3(v.svcIntervalDays),
+        num3(v.svcIntervalMiles),
         v.lastServiceDate || "",
-        num2(v.lastServiceMiles),
-        num2(v.warnDays),
-        num2(v.warnMiles),
+        num3(v.lastServiceMiles),
+        num3(v.warnDays),
+        num3(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
       count++;
@@ -8731,6 +8734,394 @@ async function handle21(request, env, ctx, url, sess) {
   return jr4({ error: "Not found: " + sub }, headers, 404);
 }
 
+// src/routes/finance.js
+var migrated = false;
+async function ensureTables2(env) {
+  if (migrated) return;
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS fin_bills (
+      tenant_id INTEGER NOT NULL DEFAULT 1,
+      id   TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS fin_income (
+      tenant_id INTEGER NOT NULL DEFAULT 1,
+      id   TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS fin_transactions (
+      tenant_id   INTEGER NOT NULL DEFAULT 1,
+      id          TEXT PRIMARY KEY,
+      dt          TEXT NOT NULL,           -- ISO date (YYYY-MM-DD)
+      description TEXT NOT NULL,
+      amount      REAL NOT NULL,           -- signed: +in / -out
+      category    TEXT,
+      account     TEXT,
+      hash        TEXT NOT NULL,           -- dedupe key
+      data        TEXT
+    )`),
+    env.DB.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS fin_tx_hash ON fin_transactions (tenant_id, hash)`),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS fin_tx_dt ON fin_transactions (tenant_id, dt)`)
+  ]);
+  migrated = true;
+}
+async function ownerGate(env, request) {
+  const sess = await requireSession(env, request);
+  if (!sess) return { code: 401, error: "Not authenticated" };
+  const OWNER = env.OWNER_USERNAME || "Jamie Line";
+  if (sess.user.username !== OWNER) return { code: 403, error: "This area is private." };
+  return { sess };
+}
+var DEFAULT_CATEGORIES2 = [
+  "Groceries",
+  "Eating out",
+  "Fuel / transport",
+  "Shopping",
+  "Bills & utilities",
+  "Rent / mortgage",
+  "Subscriptions",
+  "Health",
+  "Kids",
+  "Cash",
+  "Savings & transfers",
+  "Income",
+  "Other"
+];
+var DEFAULT_RULES = [
+  { match: "tesco", category: "Groceries" },
+  { match: "sainsbury", category: "Groceries" },
+  { match: "asda", category: "Groceries" },
+  { match: "aldi", category: "Groceries" },
+  { match: "lidl", category: "Groceries" },
+  { match: "morrison", category: "Groceries" },
+  { match: "co-op", category: "Groceries" },
+  { match: "iceland", category: "Groceries" },
+  { match: "waitrose", category: "Groceries" },
+  { match: "m&s", category: "Groceries" },
+  { match: "greggs", category: "Eating out" },
+  { match: "mcdonald", category: "Eating out" },
+  { match: "costa", category: "Eating out" },
+  { match: "starbucks", category: "Eating out" },
+  { match: "just eat", category: "Eating out" },
+  { match: "deliveroo", category: "Eating out" },
+  { match: "uber eats", category: "Eating out" },
+  { match: "nando", category: "Eating out" },
+  { match: "shell", category: "Fuel / transport" },
+  { match: "bp ", category: "Fuel / transport" },
+  { match: "esso", category: "Fuel / transport" },
+  { match: "texaco", category: "Fuel / transport" },
+  { match: "trainline", category: "Fuel / transport" },
+  { match: "uber", category: "Fuel / transport" },
+  { match: "tfl", category: "Fuel / transport" },
+  { match: "amazon", category: "Shopping" },
+  { match: "argos", category: "Shopping" },
+  { match: "ebay", category: "Shopping" },
+  { match: "b&q", category: "Shopping" },
+  { match: "screwfix", category: "Shopping" },
+  { match: "netflix", category: "Subscriptions" },
+  { match: "spotify", category: "Subscriptions" },
+  { match: "disney", category: "Subscriptions" },
+  { match: "youtube", category: "Subscriptions" },
+  { match: "prime video", category: "Subscriptions" },
+  { match: "apple.com", category: "Subscriptions" },
+  { match: "google", category: "Subscriptions" },
+  { match: "british gas", category: "Bills & utilities" },
+  { match: "octopus energy", category: "Bills & utilities" },
+  { match: "edf", category: "Bills & utilities" },
+  { match: "eon", category: "Bills & utilities" },
+  { match: "e.on", category: "Bills & utilities" },
+  { match: "thames water", category: "Bills & utilities" },
+  { match: "council tax", category: "Bills & utilities" },
+  { match: "vodafone", category: "Bills & utilities" },
+  { match: "ee ", category: "Bills & utilities" },
+  { match: "o2", category: "Bills & utilities" },
+  { match: "three", category: "Bills & utilities" },
+  { match: "sky", category: "Bills & utilities" },
+  { match: "virgin media", category: "Bills & utilities" },
+  { match: "bt ", category: "Bills & utilities" },
+  { match: "boots", category: "Health" },
+  { match: "pharmacy", category: "Health" },
+  { match: "puregym", category: "Health" },
+  { match: "the gym", category: "Health" }
+];
+function defaultConfig() {
+  return {
+    openingBalance: 0,
+    openingDate: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+    currency: "\xA3",
+    categories: DEFAULT_CATEGORIES2.slice(),
+    rules: DEFAULT_RULES.slice()
+  };
+}
+async function getConfig2(env, db) {
+  const row = await db.prepare("SELECT value FROM app_config WHERE key=? AND tenant_id=?").bind("fin:config", db.tenantId).first();
+  if (!row) return defaultConfig();
+  try {
+    const c = JSON.parse(row.value);
+    return Object.assign(defaultConfig(), c);
+  } catch {
+    return defaultConfig();
+  }
+}
+async function saveConfig(env, db, config) {
+  await db.prepare(`INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(db.tenantId, "fin:config", JSON.stringify(config)).run();
+}
+var rid = (p) => p + Math.random().toString(36).slice(2, 9);
+function num2(v, d = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+function txHash(dt, amount, description, account) {
+  const norm = String(description || "").toLowerCase().replace(/\s+/g, " ").trim();
+  return [dt, Math.round(num2(amount) * 100), norm, account || ""].join("|");
+}
+function categorise(description, amount, rules) {
+  const d = String(description || "").toLowerCase();
+  for (const r of rules || []) {
+    if (r && r.match && d.includes(String(r.match).toLowerCase())) return r.category || "Other";
+  }
+  return num2(amount) > 0 ? "Income" : "Other";
+}
+async function handle22(request, env, ctx, url, sess) {
+  const cors = corsHeaders(env, request);
+  const { pathname, searchParams } = url;
+  const method = request.method.toUpperCase();
+  const json3 = (data, code = 200) => new Response(JSON.stringify(data), { status: code, headers: { ...cors, "Content-Type": "application/json" } });
+  const gate = await ownerGate(env, request);
+  if (gate.error) return json3({ ok: false, error: gate.error }, gate.code);
+  await ensureTables2(env);
+  const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
+  const db = tenantDB(env, tenantId);
+  if (method === "GET" && pathname === "/finance/data") {
+    const [bills, income] = await Promise.all([
+      db.prepare("SELECT data FROM fin_bills WHERE tenant_id=?").bind(db.tenantId).all(),
+      db.prepare("SELECT data FROM fin_income WHERE tenant_id=?").bind(db.tenantId).all()
+    ]);
+    const parse = (r) => {
+      try {
+        return JSON.parse(r.data);
+      } catch {
+        return null;
+      }
+    };
+    const config = await getConfig2(env, db);
+    const txCount = await db.prepare("SELECT COUNT(*) n FROM fin_transactions WHERE tenant_id=?").bind(db.tenantId).first();
+    return json3({
+      ok: true,
+      bills: (bills.results || []).map(parse).filter(Boolean),
+      income: (income.results || []).map(parse).filter(Boolean),
+      config,
+      txCount: txCount ? txCount.n : 0
+    });
+  }
+  if (method === "POST" && pathname === "/finance/bill") {
+    const b = await request.json().catch(() => ({}));
+    if (!String(b.name || "").trim()) return json3({ ok: false, error: "A bill needs a name" }, 400);
+    const id = String(b.id || "").trim() || rid("B-");
+    const bill = {
+      id,
+      name: String(b.name).trim(),
+      amount: num2(b.amount),
+      dayOfMonth: Math.min(31, Math.max(1, Math.round(num2(b.dayOfMonth, 1)))),
+      category: String(b.category || "Bills & utilities"),
+      notes: String(b.notes || "").trim(),
+      active: b.active !== false
+    };
+    await db.prepare(`INSERT INTO fin_bills (id, tenant_id, data) VALUES (?,?,?)
+      ON CONFLICT(id) DO UPDATE SET data=excluded.data`).bind(id, db.tenantId, JSON.stringify(bill)).run();
+    return json3({ ok: true, bill });
+  }
+  if (method === "POST" && pathname === "/finance/bill/delete") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    await db.prepare("DELETE FROM fin_bills WHERE id=? AND tenant_id=?").bind(id, db.tenantId).run();
+    return json3({ ok: true });
+  }
+  if (method === "POST" && pathname === "/finance/income") {
+    const b = await request.json().catch(() => ({}));
+    if (!String(b.name || "").trim()) return json3({ ok: false, error: "An income source needs a name" }, 400);
+    const freq = ["weekly", "fortnightly", "fourweekly", "monthly"].includes(b.frequency) ? b.frequency : "weekly";
+    const id = String(b.id || "").trim() || rid("I-");
+    const inc = {
+      id,
+      name: String(b.name).trim(),
+      amount: num2(b.amount),
+      frequency: freq,
+      // weekly/fortnightly/4-weekly are anchored to a real pay date; monthly to a day-of-month.
+      anchorDate: String(b.anchorDate || "").slice(0, 10) || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+      dayOfMonth: Math.min(31, Math.max(1, Math.round(num2(b.dayOfMonth, 1)))),
+      notes: String(b.notes || "").trim(),
+      active: b.active !== false
+    };
+    await db.prepare(`INSERT INTO fin_income (id, tenant_id, data) VALUES (?,?,?)
+      ON CONFLICT(id) DO UPDATE SET data=excluded.data`).bind(id, db.tenantId, JSON.stringify(inc)).run();
+    return json3({ ok: true, income: inc });
+  }
+  if (method === "POST" && pathname === "/finance/income/delete") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    await db.prepare("DELETE FROM fin_income WHERE id=? AND tenant_id=?").bind(id, db.tenantId).run();
+    return json3({ ok: true });
+  }
+  if (method === "POST" && pathname === "/finance/config") {
+    const b = await request.json().catch(() => ({}));
+    const cur = await getConfig2(env, db);
+    if (b.openingBalance !== void 0) cur.openingBalance = num2(b.openingBalance);
+    if (b.openingDate) cur.openingDate = String(b.openingDate).slice(0, 10);
+    if (b.currency) cur.currency = String(b.currency).slice(0, 3);
+    if (Array.isArray(b.categories)) cur.categories = b.categories.map((c) => String(c).slice(0, 60)).filter(Boolean);
+    if (Array.isArray(b.rules)) {
+      cur.rules = b.rules.filter((r) => r && r.match).map((r) => ({ match: String(r.match).toLowerCase().slice(0, 60), category: String(r.category || "Other").slice(0, 60) }));
+    }
+    await saveConfig(env, db, cur);
+    return json3({ ok: true, config: cur });
+  }
+  if (method === "GET" && pathname === "/finance/transactions") {
+    const where = ["tenant_id=?"];
+    const binds = [db.tenantId];
+    const from = searchParams.get("from"), to = searchParams.get("to");
+    const q = searchParams.get("q"), cat = searchParams.get("category");
+    if (from) {
+      where.push("dt>=?");
+      binds.push(from);
+    }
+    if (to) {
+      where.push("dt<=?");
+      binds.push(to);
+    }
+    if (cat) {
+      where.push("category=?");
+      binds.push(cat);
+    }
+    if (q) {
+      where.push("LOWER(description) LIKE ?");
+      binds.push("%" + q.toLowerCase() + "%");
+    }
+    const limit = Math.min(1e3, Math.max(1, parseInt(searchParams.get("limit") || "200", 10)));
+    const offset = Math.max(0, parseInt(searchParams.get("offset") || "0", 10));
+    const sql = `SELECT id, dt, description, amount, category, account FROM fin_transactions
+      WHERE ${where.join(" AND ")} ORDER BY dt DESC, id DESC LIMIT ? OFFSET ?`;
+    const { results } = await db.prepare(sql).bind(...binds, limit, offset).all();
+    const total = await db.prepare(`SELECT COUNT(*) n FROM fin_transactions WHERE ${where.join(" AND ")}`).bind(...binds).first();
+    return json3({ ok: true, transactions: results || [], total: total ? total.n : 0, limit, offset });
+  }
+  if (method === "POST" && pathname === "/finance/transactions/import") {
+    const b = await request.json().catch(() => ({}));
+    const rows = Array.isArray(b.transactions) ? b.transactions : [];
+    if (!rows.length) return json3({ ok: false, error: "No transactions to import" }, 400);
+    if (rows.length > 5e3) return json3({ ok: false, error: "Too many rows in one import (max 5000) \u2014 split the file." }, 400);
+    const config = await getConfig2(env, db);
+    const account = String(b.account || "").slice(0, 60);
+    let created = 0, skipped = 0;
+    const stmts = [];
+    for (const r of rows) {
+      const dt = String(r.date || r.dt || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+        skipped++;
+        continue;
+      }
+      const amount = num2(r.amount);
+      if (!amount) {
+        skipped++;
+        continue;
+      }
+      const description = String(r.description || "").slice(0, 200).trim();
+      const acct = String(r.account || account).slice(0, 60);
+      const hash = txHash(dt, amount, description, acct);
+      const category = String(r.category || "").trim() || categorise(description, amount, config.rules);
+      stmts.push(db.prepare(
+        `INSERT OR IGNORE INTO fin_transactions (id, tenant_id, dt, description, amount, category, account, hash, data)
+         VALUES (?,?,?,?,?,?,?,?,?)`
+      ).bind(rid("T-"), db.tenantId, dt, description, amount, category, acct, hash, null));
+    }
+    for (let i = 0; i < stmts.length; i += 100) {
+      const chunk = stmts.slice(i, i + 100);
+      const res = await db.batch(chunk);
+      for (const r of res) created += r.meta && r.meta.changes ? r.meta.changes : 0;
+    }
+    skipped += stmts.length - created;
+    return json3({ ok: true, created, skipped, received: rows.length });
+  }
+  if (method === "POST" && pathname === "/finance/transaction") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    const sets = [], binds = [];
+    if (b.category !== void 0) {
+      sets.push("category=?");
+      binds.push(String(b.category).slice(0, 60));
+    }
+    if (b.description !== void 0) {
+      sets.push("description=?");
+      binds.push(String(b.description).slice(0, 200));
+    }
+    if (!sets.length) return json3({ ok: false, error: "Nothing to update" }, 400);
+    await db.prepare(`UPDATE fin_transactions SET ${sets.join(", ")} WHERE id=? AND tenant_id=?`).bind(...binds, id, db.tenantId).run();
+    return json3({ ok: true });
+  }
+  if (method === "POST" && pathname === "/finance/transaction/delete") {
+    const b = await request.json().catch(() => ({}));
+    const id = String(b.id || "");
+    if (!id) return json3({ ok: false, error: "Missing id" }, 400);
+    await db.prepare("DELETE FROM fin_transactions WHERE id=? AND tenant_id=?").bind(id, db.tenantId).run();
+    return json3({ ok: true });
+  }
+  if (method === "POST" && pathname === "/finance/transactions/clear") {
+    const b = await request.json().catch(() => ({}));
+    if (b.account) {
+      await db.prepare("DELETE FROM fin_transactions WHERE tenant_id=? AND account=?").bind(db.tenantId, String(b.account)).run();
+    } else {
+      await db.prepare("DELETE FROM fin_transactions WHERE tenant_id=?").bind(db.tenantId).run();
+    }
+    return json3({ ok: true });
+  }
+  if (method === "GET" && pathname === "/finance/spending") {
+    const where = ["tenant_id=?"];
+    const binds = [db.tenantId];
+    const from = searchParams.get("from"), to = searchParams.get("to");
+    if (from) {
+      where.push("dt>=?");
+      binds.push(from);
+    }
+    if (to) {
+      where.push("dt<=?");
+      binds.push(to);
+    }
+    const w = where.join(" AND ");
+    const byCat = await db.prepare(
+      `SELECT category, COUNT(*) n, SUM(-amount) total FROM fin_transactions
+       WHERE ${w} AND amount<0 GROUP BY category ORDER BY total DESC`
+    ).bind(...binds).all();
+    const merchants = await db.prepare(
+      `SELECT description, COUNT(*) n, SUM(-amount) total FROM fin_transactions
+       WHERE ${w} AND amount<0 GROUP BY LOWER(description) ORDER BY total DESC LIMIT 15`
+    ).bind(...binds).all();
+    const monthly = await db.prepare(
+      `SELECT substr(dt,1,7) ym,
+              SUM(CASE WHEN amount>0 THEN amount ELSE 0 END) inn,
+              SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END) out
+       FROM fin_transactions WHERE ${w} GROUP BY ym ORDER BY ym`
+    ).bind(...binds).all();
+    const totals = await db.prepare(
+      `SELECT SUM(CASE WHEN amount>0 THEN amount ELSE 0 END) inn,
+              SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END) out,
+              MIN(dt) first, MAX(dt) last, COUNT(*) n
+       FROM fin_transactions WHERE ${w}`
+    ).bind(...binds).first();
+    return json3({
+      ok: true,
+      byCategory: byCat.results || [],
+      merchants: merchants.results || [],
+      monthly: monthly.results || [],
+      totals: totals || { inn: 0, out: 0, n: 0 }
+    });
+  }
+  return json3({ ok: false, error: "Not found: " + pathname }, 404);
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -8764,6 +9155,8 @@ var ROUTES = [
   // office ↔ engineer messages (Inbox)
   ["*", "/ts", handle7],
   // engineer timesheets + invoices + mileage
+  ["*", "/finance", handle22],
+  // owner-only household wealth tracker (private)
   ["*", "/get-sites", handle9],
   ["*", "/add-site", handle9],
   ["*", "/update-site", handle9],
