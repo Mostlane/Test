@@ -38,7 +38,8 @@
   .scard.alert .val{color:#dc2626;}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;}
+  .card-actions button{cursor:pointer;}
   .reg-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
   .reg{font-size:16px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;background:#fde047;color:#111;padding:4px 9px;border-radius:6px;border:1px solid #d4b106;font-family:"Segoe UI",Arial,sans-serif;}
   .reg.inactive{background:#e2e8f0;color:#475569;border-color:#cbd5e1;}
@@ -81,7 +82,7 @@
   .doc .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:14px;}
   .doc .nm span{font-size:11.5px;color:var(--muted);}
   /* vehicle photos */
-  .vphoto{width:100%;height:150px;border-radius:10px;object-fit:cover;display:block;background:#eef2f7;cursor:zoom-in;}
+  .vphoto{width:100%;height:170px;border-radius:10px;object-fit:contain;display:block;background:#eef2f7;cursor:pointer;}
   .vphoto-empty{width:100%;height:96px;border-radius:10px;background:#f1f5f9;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:13px;cursor:pointer;}
   .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
   .pcell{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#f8fafc;}
@@ -298,7 +299,7 @@
         : `<span class="odo"><small>🛣 mileage will show once a van check records it</small></span>`;
       const card=document.createElement("div"); card.className="card"; card.dataset.reg=reg;
       const photo = v.photoUrl
-        ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="enlarge('${esc(v.photoUrl)}')">`
+        ? `<img class="vphoto" src="${esc(v.photoUrl)}" alt="${esc(reg)}" loading="lazy" onclick="openVehicle('${esc(reg)}')">`
         : `<div class="vphoto-empty" onclick="openPhotoModal('${esc(reg)}')">📷 Add a photo</div>`;
       card.innerHTML=`
         ${photo}
@@ -323,8 +324,67 @@
           <button class="btn ghost small" onclick="openDocModal('${esc(reg)}')">📎 Docs</button>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
         </div>`;
+      // Tap anywhere on the card (except the action buttons, drag handle or a
+      // link) to open the vehicle deep-dive.
+      card.addEventListener("click", function(e){
+        if(e.target.closest(".card-actions, .grip, button, a")) return;
+        openVehicle(reg);
+      });
       grid.appendChild(card);
     }
+  }
+
+  /* ── Vehicle deep-dive modal (tap a card) ────────────────────────────────
+     Read-only overview built from the fleet list already in memory. Sections
+     are deliberately easy to extend — add more detailRow()s or blocks as the
+     required sections are decided. */
+  function detailRow(label, val){
+    if(val==null || val==="") return "";
+    return `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)">`+
+           `<span style="color:var(--muted)">${label}</span>`+
+           `<span style="font-weight:650;text-align:right">${val}</span></div>`;
+  }
+  function openVehicle(reg){
+    const v = FLEET.find(x => (x.reg||"")===reg);
+    if(!v){ return; }
+    const drv = v.driver ? pName(v.driver) : "Unassigned";
+    const miles = v.currentMiles!=null
+      ? `${fmtMiles(v.currentMiles)} mi <small style="color:var(--muted);font-weight:400">(van check ${v.milesAt?fmtDMY(v.milesAt):"—"})</small>`
+      : `<small style="color:var(--muted);font-weight:400">Not recorded yet</small>`;
+    const photo = v.photoUrl
+      ? `<img src="${esc(v.photoUrl)}" alt="${esc(reg)}" style="width:100%;max-height:240px;object-fit:contain;background:#eef2f7;border-radius:12px;display:block;margin-bottom:12px;cursor:zoom-in" onclick="enlarge('${esc(v.photoUrl)}')">`
+      : `<div class="vphoto-empty" style="margin-bottom:12px" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Add a photo</div>`;
+    const svc = serviceTag(v) || "";
+    const svcReason = v.serviceReason ? `<div class="hint" style="margin:2px 0 10px">${esc(v.serviceReason)}</div>` : "";
+    const html = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 12px">
+        <h3 style="margin:0">${esc(reg)}</h3>
+        <button class="btn ghost small" onclick="pClose()">✕ Close</button>
+      </div>
+      ${photo}
+      <div class="tags" style="margin-bottom:6px">${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${svc}</div>
+      ${svcReason}
+      <div>
+        ${detailRow("Status", v.active===false?"Inactive":"Active")}
+        ${detailRow("Current driver", esc(drv))}
+        ${detailRow("Make / model", esc([v.make,v.model].filter(Boolean).join(" ")||"—"))}
+        ${detailRow("Fuel", v.fuel?esc(v.fuel):"")}
+        ${detailRow("Mileage", miles)}
+        ${detailRow("MOT due", v.motDue?fmtDMY(v.motDue):"—")}
+        ${detailRow("Tax due", v.taxDue?fmtDMY(v.taxDue):"—")}
+        ${detailRow("Next service", v.nextServiceDate?fmtDMY(v.nextServiceDate):"—")}
+        ${detailRow("Last service", v.lastServiceDate?fmtDMY(v.lastServiceDate):"")}
+        ${detailRow("Notes", v.notes?esc(v.notes):"")}
+      </div>
+      <div class="hint" style="margin:12px 0 4px">More sections can be added here — tell me what you'd like.</div>
+      <div class="card-actions" style="border-top:0;padding-top:4px">
+        <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
+        <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
+        <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
+        <button class="btn ghost small" onclick="pClose();openDocModal('${esc(reg)}')">📎 Docs</button>
+        <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>
+      </div>`;
+    pModal(html);
   }
 
   /* ── Driver assignment (registry with history) ── */
