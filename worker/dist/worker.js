@@ -1220,7 +1220,7 @@ async function handle5(request, env, ctx, url, sess) {
   if (!user) return text("Unauthorised", 401);
   const year = getYear(url);
   const isAdmin = ["Admin", "Director"].includes(role);
-  async function cfgGet(key) {
+  async function cfgGet2(key) {
     const row = await db.prepare("SELECT value FROM app_config WHERE tenant_id = ? AND key = ?").bind(db.tenantId, key).first();
     return row ? JSON.parse(row.value) : null;
   }
@@ -1230,16 +1230,16 @@ async function handle5(request, env, ctx, url, sess) {
     ).bind(db.tenantId, key, JSON.stringify(val)).run();
   }
   async function getYearConfig() {
-    return await cfgGet(`holiday:config:${year}`) || { defaultAllowance: 28 };
+    return await cfgGet2(`holiday:config:${year}`) || { defaultAllowance: 28 };
   }
   async function getDefaultAllowance() {
     return Number((await getYearConfig()).defaultAllowance ?? 28);
   }
   async function getBankHolidays() {
-    return await cfgGet(`holiday:bankholidays:${year}`) || [];
+    return await cfgGet2(`holiday:bankholidays:${year}`) || [];
   }
   async function getShutdownDays() {
-    return await cfgGet(`holiday:shutdown:${year}`) || [];
+    return await cfgGet2(`holiday:shutdown:${year}`) || [];
   }
   async function getUserAllowance(username) {
     const row = await db.prepare(
@@ -2885,6 +2885,18 @@ async function ensureTables(env) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
     started_at TEXT NOT NULL, ended_at TEXT)`).run();
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
+  } catch {
+  }
 }
 var TS_ACTIVE = /* @__PURE__ */ new Set(["travelling", "in progress"]);
 async function trackJobTime(env, tid, actor, before, after) {
@@ -2916,11 +2928,15 @@ async function trackJobTime(env, tid, actor, before, after) {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
       ).bind(now, tid, actor, String(after.id)).run();
+      const kind = as === "travelling" ? "travel" : "onsite";
       const open = await env.DB.prepare(
-        "SELECT id FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+        "SELECT id, kind FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(tid, actor, String(after.id)).first();
-      if (!open) await env.DB.prepare(
-        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at) VALUES (?,?,?,?,?,?,?)"
+      if (open && (open.kind || "onsite") !== kind) {
+        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(now, open.id, tid).run();
+      }
+      if (!open || (open.kind || "onsite") !== kind) await env.DB.prepare(
+        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, kind) VALUES (?,?,?,?,?,?,?,?)"
       ).bind(
         tid,
         actor,
@@ -2928,7 +2944,8 @@ async function trackJobTime(env, tid, actor, before, after) {
         after.helpdeskRef || String(after.id),
         after.siteName || "",
         String(after.postcode || "").toUpperCase(),
-        now
+        now,
+        kind
       ).run();
     } else {
       await env.DB.prepare(
@@ -2972,7 +2989,7 @@ async function jobTimeAuto(env, tid, username, monday) {
           const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
           endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
           try {
-            await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
+            await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
           } catch {
           }
         } else {
@@ -3649,7 +3666,7 @@ async function handle7(request, env, ctx, url, sess) {
         const n = norm(e);
         return !!n && (n === meN || n.includes(meN) || meN.includes(n));
       };
-      const londonDate3 = (iso) => {
+      const londonDate4 = (iso) => {
         try {
           return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
         } catch {
@@ -3680,7 +3697,7 @@ async function handle7(request, env, ctx, url, sess) {
           mine
         });
         if (!mine) continue;
-        const date = londonDate3(r.scheduled_at);
+        const date = londonDate4(r.scheduled_at);
         (byDay[date] = byDay[date] || []).push({
           ref: r.helpdesk_ref || r.id,
           label: (r.helpdesk_ref || r.id) + (d.description ? " \u2014 " + String(d.description).slice(0, 44) : ""),
@@ -3700,13 +3717,21 @@ async function handle7(request, env, ctx, url, sess) {
   if (sub === "/sites" && method === "GET") {
     const term = String(q.get("q") || "").trim();
     const like = "%" + term.replace(/[%_]/g, "") + "%";
-    const { results } = await env.DB.prepare(
-      "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
-    ).bind(tid, like, like, like).all();
+    let results;
+    try {
+      ({ results } = await env.DB.prepare(
+        "SELECT site_name, site_number, postcode, archived FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY archived, site_name LIMIT 15"
+      ).bind(tid, like, like, like).all());
+    } catch {
+      ({ results } = await env.DB.prepare(
+        "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
+      ).bind(tid, like, like, like).all());
+    }
     const sites = (results || []).map((s) => ({
       name: s.site_name || "Site " + s.site_number,
       code: s.site_number,
-      postcode: (s.postcode || "").replace(/\*+$/, "")
+      postcode: (s.postcode || "").replace(/\*+$/, ""),
+      ...s.archived ? { archived: true } : {}
     }));
     const seen = new Set(sites.map((s) => s.name.trim().toLowerCase()));
     for (const r of await poSiteRows(env, term, 15)) {
@@ -3783,9 +3808,16 @@ async function handle7(request, env, ctx, url, sess) {
       errs.sla = String(e && e.message || e);
     }
     try {
-      const { results } = await env.DB.prepare(
-        "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
-      ).bind(tid, like, like).all();
+      let results;
+      try {
+        ({ results } = await env.DB.prepare(
+          "SELECT job_number, site_name, client, postcode, archived FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY archived, site_name LIMIT 8"
+        ).bind(tid, like, like).all());
+      } catch {
+        ({ results } = await env.DB.prepare(
+          "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+        ).bind(tid, like, like).all());
+      }
       for (const r of results || []) {
         const hasJob = r.job_number != null && r.job_number !== "";
         const name = r.site_name || r.client || "site";
@@ -3794,7 +3826,8 @@ async function handle7(request, env, ctx, url, sess) {
           label: (hasJob ? r.job_number + " \u2014 " : "") + name,
           kind: "project",
           site: name,
-          postcode: (r.postcode || "").replace(/\*+$/, "")
+          postcode: (r.postcode || "").replace(/\*+$/, ""),
+          ...r.archived ? { archived: true } : {}
         });
       }
     } catch (e) {
@@ -6858,10 +6891,10 @@ async function handle12(request, env, ctx, url, sess) {
     const nameOf = {};
     for (const u of userRows || []) nameOf[u.username] = `${u.first_name || ""} ${u.last_name || ""}`.trim() || u.username;
     const map = {};
-    const ensure3 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
-    for (const u of permUsers || []) ensure3(u.username);
+    const ensure4 = (u) => map[u] || (map[u] = { username: u, name: nameOf[u] || u, days: {}, total: 0, open: false });
+    for (const u of permUsers || []) ensure4(u.username);
     for (const r of results || []) {
-      const e = ensure3(r.username);
+      const e = ensure4(r.username);
       if (isOpenRow(r)) {
         e.open = true;
         continue;
@@ -8731,6 +8764,707 @@ async function handle21(request, env, ctx, url, sess) {
   return jr4({ error: "Not found: " + sub }, headers, 404);
 }
 
+// src/routes/costing.js
+var UNALLOC_MIN = 15;
+var CLAIM_GAP_MIN = 30;
+async function handle22(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+  if (path === "/ledger/scan" && method === "POST") return scanIntake(request, env);
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const admin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.TimesheetAdmin === "Yes";
+  await ensure3(env);
+  if (path === "/sites/register" && method === "GET") {
+    const reg = await loadRegister(env, tid);
+    return json({ ok: true, sites: reg.list, aliases: reg.aliases, ignored: reg.ignored }, {}, env, request);
+  }
+  if (path.startsWith("/sites/register/") && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    if (path === "/sites/register/update") {
+      const client = String(b.client || "").toLowerCase().trim();
+      const num2 = String(b.siteNumber || "").trim();
+      if (!client || !num2) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(tid, client, num2).first();
+      if (!row) return error("Site not found", 404, env, request);
+      let data = {};
+      try {
+        data = JSON.parse(row.data || "{}");
+      } catch {
+      }
+      if (b.archived !== void 0) data.archived = !!b.archived;
+      if (b.name) data.siteName = String(b.name).trim();
+      if (b.postcode !== void 0) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
+          postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
+        WHERE tenant_id=? AND client=? AND site_number=?`).bind(
+        b.archived !== void 0 ? b.archived ? 1 : 0 : data.archived ? 1 : 0,
+        b.name ? String(b.name).trim() : null,
+        b.postcode !== void 0 ? String(b.postcode || "").toUpperCase().trim() : null,
+        JSON.stringify(data),
+        tid,
+        client,
+        num2
+      ).run();
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/add") {
+      const name = String(b.name || "").trim();
+      if (!name) return error("name required", 400, env, request);
+      const client = String(b.client || "general").toLowerCase().trim() || "general";
+      const num2 = slugNum(name);
+      const data = {
+        client,
+        siteNumber: num2,
+        siteName: name,
+        postcode: String(b.postcode || "").toUpperCase().trim(),
+        addedVia: "register"
+      };
+      await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
+        VALUES (?,?,?,?,?,1,0,?,datetime('now'))
+        ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
+      return json({ ok: true, client, siteNumber: num2 }, {}, env, request);
+    }
+    if (path === "/sites/register/merge") {
+      const alias = normName(b.alias);
+      if (!alias) return error("alias required", 400, env, request);
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      aliases[alias] = { client: String(b.client || "").toLowerCase(), siteNumber: String(b.siteNumber || ""), label: String(b.alias || "").trim() };
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/unmerge") {
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      delete aliases[normName(b.alias)];
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/ignore") {
+      const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+      const k = normName(b.name);
+      if (!k) return error("name required", 400, env, request);
+      if (b.undo) delete ignored[k];
+      else ignored[k] = String(b.name || "").trim();
+      await cfgSet(env, tid, "site_reg_ignore", ignored);
+      return json({ ok: true }, {}, env, request);
+    }
+    if (path === "/sites/register/push-candidates") {
+      const names = Array.isArray(b.names) ? b.names.slice(0, 2e3) : [];
+      const source = String(b.source || "external").slice(0, 30);
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const n of names) {
+        const k = normName(n);
+        if (!k) continue;
+        const cur = ext[k] || { name: String(n).trim(), sources: [] };
+        if (!cur.sources.includes(source)) cur.sources.push(source);
+        ext[k] = cur;
+      }
+      await cfgSet(env, tid, "site_reg_ext", ext);
+      return json({ ok: true, stored: Object.keys(ext).length }, {}, env, request);
+    }
+  }
+  if (path === "/sites/register/candidates" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const reg = await loadRegister(env, tid);
+    const ignored = reg.ignored;
+    const found = {};
+    const add = (name, source) => {
+      const k = normName(name);
+      if (!k || k.length < 3) return;
+      if (reg.byNorm[k] || ignored[k]) return;
+      const cur = found[k] || (found[k] = { name: String(name).trim(), sources: [], count: 0 });
+      cur.count++;
+      if (!cur.sources.includes(source)) cur.sources.push(source);
+    };
+    try {
+      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
+      for (const r of results || []) {
+        try {
+          const j = JSON.parse(r.data || "{}");
+          if (j.siteName) add(j.siteName, "jobs");
+        } catch {
+        }
+      }
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM job_time_segments WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
+      ).bind(tid).all();
+      for (const r of results || []) add(r.site, "time-capture");
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM sitelog_scans WHERE tenant_id=? AND site IS NOT NULL AND site!=''"
+      ).bind(tid).all();
+      for (const r of results || []) add(r.site, "sitelog");
+    } catch {
+    }
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT data FROM eng_timesheets WHERE tenant_id=? ORDER BY week DESC LIMIT 260"
+      ).bind(tid).all();
+      for (const r of results || []) {
+        try {
+          const days = JSON.parse(r.data || "{}").days || {};
+          for (const d of Object.values(days))
+            for (const m of Array.isArray(d.mileage) ? d.mileage : [])
+              if (m && m.site) add(m.site, "timesheets");
+        } catch {
+        }
+      }
+    } catch {
+    }
+    try {
+      for (const n of await poOrderSiteNames(env)) add(n, "po");
+    } catch {
+    }
+    try {
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const [k, v] of Object.entries(ext)) {
+        if (reg.byNorm[k] || ignored[k]) continue;
+        const cur = found[k] || (found[k] = { name: v.name, sources: [], count: 0 });
+        cur.count = Math.max(cur.count, 1);
+        for (const s of v.sources || []) if (!cur.sources.includes(s)) cur.sources.push(s);
+      }
+    } catch {
+    }
+    const candidates = Object.values(found).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 500);
+    return json({ ok: true, candidates }, {}, env, request);
+  }
+  if (path === "/ledger/day" && method === "GET") {
+    const user = q.get("user") || me;
+    if (user !== me && !admin) return error("Forbidden", 403, env, request);
+    const date = q.get("date") || londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    const reg = await loadRegister(env, tid);
+    const day = await buildDay(env, tid, user, date, reg);
+    return json({ ok: true, ...day }, {}, env, request);
+  }
+  if (path === "/ledger/scans" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? ORDER BY at DESC LIMIT 200"
+    ).bind(tid).all();
+    return json({ ok: true, scans: results || [] }, {}, env, request);
+  }
+  if (path === "/costing/summary" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const rates = await ratesMap(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+    const bySite = {};
+    for (const d of days) {
+      for (const e of d.entries) {
+        const key = e.resolved ? e.resolved.norm : "?" + normName(e.site || "(no site)");
+        const s = bySite[key] || (bySite[key] = {
+          site: e.resolved ? e.resolved.name : e.site || "(no site)",
+          client: e.resolved ? e.resolved.client : "",
+          archived: !!(e.resolved && e.resolved.archived),
+          unmatched: !e.resolved,
+          travelMins: 0,
+          onsiteMins: 0,
+          visitMins: 0,
+          cost: 0,
+          costPartial: false,
+          jobs: {},
+          engineers: {}
+        });
+        const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
+        s[bucket] += e.mins;
+        if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
+        const eng = s.engineers[e.user] || (s.engineers[e.user] = { mins: 0, cost: null });
+        eng.mins += e.mins;
+        const r = rates[e.user];
+        if (r && r.rateType === "hour" && r.rate) {
+          eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
+          s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
+        } else if (r && r.rateType === "day") {
+          s.costPartial = true;
+        } else {
+          s.costPartial = true;
+        }
+      }
+    }
+    let sites = Object.values(bySite).map((s) => ({
+      ...s,
+      totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+      jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+      engineers: Object.entries(s.engineers).map(([u, v]) => ({ user: u, ...v })).sort((a, b) => b.mins - a.mins)
+    })).sort((a, b) => b.totalMins - a.totalMins);
+    const only = normName(q.get("site") || "");
+    if (only) sites = sites.filter((s) => normName(s.site) === only);
+    return json({ ok: true, from, to, sites }, {}, env, request);
+  }
+  if (path === "/exceptions" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+    const ex = [];
+    for (const d of days) {
+      for (const e of d.entries) {
+        if (e.flags.includes("auto-closed"))
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "auto-closed",
+            site: e.site,
+            detail: `${e.jobRef || e.site || "segment"} was never finished \u2014 closed automatically (${fmtMins(e.mins)} recorded)`
+          });
+        if (e.flags.includes("mismatch"))
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "site-mismatch",
+            site: e.site,
+            detail: `SiteLog scan at "${e.scanSite}" while working job ${e.jobRef || "?"} at "${e.site}"`
+          });
+        if (e.resolved && e.resolved.archived)
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "archived-site",
+            site: e.resolved.name,
+            detail: `${fmtMins(e.mins)} recorded against ARCHIVED site "${e.resolved.name}"${e.jobRef ? " (job " + e.jobRef + ")" : ""}`
+          });
+        if (!e.resolved && e.site)
+          ex.push({
+            date: d.date,
+            user: d.user,
+            type: "unmatched-site",
+            site: e.site,
+            detail: `"${e.site}" isn't in the site register (${fmtMins(e.mins)}) \u2014 add or merge it`
+          });
+      }
+      if (d.unallocMins > UNALLOC_MIN)
+        ex.push({
+          date: d.date,
+          user: d.user,
+          type: "unallocated",
+          detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead`
+        });
+    }
+    try {
+      const capByKey = {};
+      for (const d of days) capByKey[d.user + "|" + d.date] = d.entries.reduce((a, e) => a + e.mins, 0);
+      const { results } = await env.DB.prepare(
+        "SELECT username, week, data FROM eng_timesheets WHERE tenant_id=? AND week>=? AND week<=?"
+      ).bind(tid, mondayOf4(from), to).all();
+      for (const r of results || []) {
+        let daysObj = {};
+        try {
+          daysObj = JSON.parse(r.data || "{}").days || {};
+        } catch {
+        }
+        for (const [date, d] of Object.entries(daysObj)) {
+          if (date < from || date > to || !d || !d.start || !d.finish) continue;
+          const span = spanMins(d.start, d.finish);
+          if (span == null) continue;
+          const captured = capByKey[r.username + "|" + date] || 0;
+          const diff = span - captured;
+          if (Math.abs(diff) > CLAIM_GAP_MIN && captured > 0)
+            ex.push({
+              date,
+              user: r.username,
+              type: diff > 0 ? "claimed-over-captured" : "captured-over-claimed",
+              detail: `Timesheet says ${fmtMins(span)}, system captured ${fmtMins(captured)} (${diff > 0 ? "+" : ""}${fmtMins(Math.abs(diff))} difference)`
+            });
+        }
+      }
+    } catch {
+    }
+    ex.sort((a, b) => b.date.localeCompare(a.date) || a.user.localeCompare(b.user));
+    return json({ ok: true, from, to, exceptions: ex.slice(0, 500) }, {}, env, request);
+  }
+  return error("Unknown costing route", 404, env, request);
+}
+async function scanIntake(request, env) {
+  try {
+    const raw = await request.text();
+    const sig = request.headers.get("x-portal-sig") || "";
+    if (!env.PORTAL_BRIDGE_SECRET) return new Response(JSON.stringify({ ok: false, error: "bridge secret unset" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const want = await hmacB64u(env.PORTAL_BRIDGE_SECRET, raw);
+    if (!timingSafeEq(sig, want)) return new Response(JSON.stringify({ ok: false, error: "bad signature" }), { status: 403, headers: { "Content-Type": "application/json" } });
+    const b = JSON.parse(raw || "{}");
+    const username = String(b.username || "").trim();
+    const site = String(b.site || b.siteName || "").trim();
+    const dir = b.direction === "out" ? "out" : "in";
+    if (!username || !site) return new Response(JSON.stringify({ ok: false, error: "username and site required" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    await ensure3(env);
+    await env.DB.prepare(
+      "INSERT INTO sitelog_scans (tenant_id, username, site, direction, at, source) VALUES (?,?,?,?,?,?)"
+    ).bind(
+      Number(b.tenantId) || 1,
+      username,
+      site,
+      dir,
+      b.at ? new Date(b.at).toISOString() : (/* @__PURE__ */ new Date()).toISOString(),
+      "sitelog"
+    ).run();
+    return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+}
+async function buildDay(env, tid, user, date, reg) {
+  const entries = [];
+  const dayStart = Date.parse(date + "T00:00:00Z") - 2 * 36e5;
+  const dayEnd = dayStart + 30 * 36e5;
+  const segs = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at"
+    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    for (const s of results || []) if (londonDate3(s.started_at) === date) segs.push(s);
+  } catch {
+  }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  const today = londonDate3(nowIso);
+  for (const s of segs) {
+    let end = s.ended_at, flags = [];
+    if (s.auto_closed) flags.push("auto-closed");
+    if (!end) {
+      if (date < today) {
+        end = lazyCloseAt(s.started_at, date);
+        flags.push("auto-closed");
+      } else {
+        end = nowIso;
+        flags.push("open");
+      }
+    }
+    const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 6e4));
+    if (!mins) continue;
+    entries.push({
+      user,
+      src: "job",
+      kind: s.kind === "travel" ? "travel" : "onsite",
+      site: s.site || "",
+      jobRef: s.job_ref || s.job_id,
+      start: s.started_at,
+      end,
+      mins,
+      flags,
+      resolved: resolveSite(reg, s.site)
+    });
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at"
+    ).bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    const scans = (results || []).filter((s) => londonDate3(s.at) === date);
+    const open = {};
+    const visits = [];
+    for (const s of scans) {
+      const k = normName(s.site);
+      if (s.direction === "in") {
+        if (!open[k]) open[k] = { at: s.at, site: s.site };
+      } else if (open[k]) {
+        visits.push({ site: open[k].site, start: open[k].at, end: s.at, flags: [] });
+        delete open[k];
+      }
+    }
+    for (const k of Object.keys(open)) {
+      const v = open[k];
+      visits.push({ site: v.site, start: v.at, end: lazyCloseAt(v.at, date), flags: ["auto-closed"] });
+    }
+    const jobIv = entries.map((e) => [Date.parse(e.start), Date.parse(e.end), e]);
+    for (const v of visits) {
+      let ivs = [[Date.parse(v.start), Date.parse(v.end)]];
+      const vNorm = normName(v.site);
+      for (const [js, je, e] of jobIv) {
+        const next = [];
+        for (const [vs, ve] of ivs) {
+          if (je <= vs || js >= ve) {
+            next.push([vs, ve]);
+            continue;
+          }
+          if (normName(e.site) !== vNorm && !e.flags.includes("mismatch")) {
+            e.flags.push("mismatch");
+            e.scanSite = v.site;
+          }
+          if (vs < js) next.push([vs, js]);
+          if (ve > je) next.push([je, ve]);
+        }
+        ivs = next;
+      }
+      for (const [vs, ve] of ivs) {
+        const mins = Math.round((ve - vs) / 6e4);
+        if (mins < 3) continue;
+        entries.push({
+          user,
+          src: "sitelog",
+          kind: "onsite",
+          site: v.site,
+          jobRef: "",
+          start: new Date(vs).toISOString(),
+          end: new Date(ve).toISOString(),
+          mins,
+          flags: v.flags.slice(),
+          resolved: resolveSite(reg, v.site)
+        });
+      }
+    }
+  } catch {
+  }
+  let shift = null, unallocMins = 0;
+  try {
+    shift = await env.DB.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?").bind(tid, user, date).first();
+  } catch {
+  }
+  if (shift && shift.clock_on_at) {
+    const on = Date.parse(shift.clock_on_at);
+    const off = shift.clock_off_at ? Date.parse(shift.clock_off_at) : date < today ? Date.parse(lazyCloseAt(shift.clock_on_at, date)) : Date.now();
+    let covered = mergeIntervals(entries.map((e) => [Math.max(on, Date.parse(e.start)), Math.min(off, Date.parse(e.end))]).filter(([a, b]) => b > a));
+    const total = Math.max(0, off - on);
+    const cov = covered.reduce((a, [s, e]) => a + (e - s), 0);
+    unallocMins = Math.max(0, Math.round((total - cov) / 6e4));
+  }
+  entries.sort((a, b) => a.start.localeCompare(b.start));
+  return {
+    user,
+    date,
+    entries,
+    unallocMins,
+    shift: shift ? { on: shift.clock_on_at || "", off: shift.clock_off_at || "" } : null,
+    totals: {
+      travelMins: entries.filter((e) => e.kind === "travel").reduce((a, e) => a + e.mins, 0),
+      onsiteMins: entries.filter((e) => e.kind !== "travel" && e.src === "job").reduce((a, e) => a + e.mins, 0),
+      visitMins: entries.filter((e) => e.src === "sitelog").reduce((a, e) => a + e.mins, 0),
+      unallocMins
+    }
+  };
+}
+async function reconcileRange(env, tid, from, to, reg) {
+  const users = /* @__PURE__ */ new Set();
+  const dates = {};
+  const seen = (u, d) => {
+    users.add(u);
+    (dates[u] = dates[u] || /* @__PURE__ */ new Set()).add(d);
+  };
+  const lo = from + "T00:00:00Z", hi = to + "T23:59:59Z";
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, started_at FROM job_time_segments WHERE tenant_id=? AND started_at>=? AND started_at<=?"
+    ).bind(tid, lo, hi).all();
+    for (const r of results || []) {
+      const d = londonDate3(r.started_at);
+      if (d >= from && d <= to) seen(r.username, d);
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, at FROM sitelog_scans WHERE tenant_id=? AND at>=? AND at<=?"
+    ).bind(tid, lo, hi).all();
+    for (const r of results || []) {
+      const d = londonDate3(r.at);
+      if (d >= from && d <= to) seen(r.username, d);
+    }
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, date FROM shifts WHERE tenant_id=? AND date>=? AND date<=?"
+    ).bind(tid, from, to).all();
+    for (const r of results || []) seen(r.username, r.date);
+  } catch {
+  }
+  const out = [];
+  for (const u of users) for (const d of dates[u]) out.push(await buildDay(env, tid, u, d, reg));
+  return out;
+}
+async function loadRegister(env, tid) {
+  const list = [];
+  const byNorm = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      const entry = {
+        client: r.client,
+        siteNumber: r.site_number,
+        name: r.site_name || "Site " + r.site_number,
+        postcode: (r.postcode || "").replace(/\*+$/, ""),
+        active: r.active !== 0,
+        archived: !!r.archived,
+        jobNumber: r.job_number || "",
+        norm: normName(r.site_name || r.site_number)
+      };
+      list.push(entry);
+      if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
+    }
+  } catch {
+  }
+  const aliases = await cfgGet(env, tid, "site_aliases", {});
+  for (const [norm, tgt] of Object.entries(aliases)) {
+    const target = list.find((s) => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
+    if (target && !byNorm[norm]) byNorm[norm] = target;
+  }
+  const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+  return { list, byNorm, aliases, ignored };
+}
+function resolveSite(reg, name) {
+  const k = normName(name);
+  return k && reg.byNorm[k] || null;
+}
+async function ratesMap(env, tid) {
+  const out = {};
+  let cfg = { byUser: {} };
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`engts:cfg:${tid}`).first();
+    if (row && row.value) cfg = Object.assign(cfg, JSON.parse(row.value));
+  } catch {
+  }
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+    const num2 = (v) => {
+      const n = parseFloat(v);
+      return isFinite(n) && n > 0 ? n : null;
+    };
+    for (const u of results || []) {
+      let profile = {};
+      try {
+        profile = u.profile ? JSON.parse(u.profile) : {};
+      } catch {
+      }
+      const mine = cfg.byUser && cfg.byUser[u.username] || {};
+      const rateType = mine.rateType === "day" ? "day" : "hour";
+      const rate = num2(mine.rate) ?? (rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate);
+      out[u.username] = { rate, rateType };
+    }
+  } catch {
+  }
+  return out;
+}
+async function ensure3(env) {
+  try {
+    await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
+      at TEXT NOT NULL, source TEXT)`).run();
+  } catch {
+  }
+}
+async function cfgGet(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {
+  }
+  return fallback;
+}
+async function cfgSet(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
+}
+function normName(s) {
+  return String(s || "").toLowerCase().replace(/[’'`"]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function slugNum(name) {
+  const s = normName(name).replace(/ /g, "-").slice(0, 40);
+  return s || "site-" + Math.abs(hashCode(String(name)));
+}
+function hashCode(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = h * 31 + s.charCodeAt(i) | 0;
+  }
+  return h;
+}
+function londonDate3(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  } catch {
+    return String(iso).slice(0, 10);
+  }
+}
+function lazyCloseAt(startedIso, date) {
+  const cut = new Date(startedIso);
+  cut.setHours(cut.getHours() + 1);
+  const evening = /* @__PURE__ */ new Date(date + "T18:00:00Z");
+  return (cut > evening ? cut : evening).toISOString();
+}
+function mergeIntervals(ivs) {
+  const s = ivs.slice().sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const iv of s) {
+    if (out.length && iv[0] <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], iv[1]);
+    else out.push(iv.slice());
+  }
+  return out;
+}
+function rangeOf(q) {
+  const today = londonDate3((/* @__PURE__ */ new Date()).toISOString());
+  let from = q.get("from") || "", to = q.get("to") || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) to = today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+    const d = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 27);
+    from = d.toISOString().slice(0, 10);
+  }
+  return { from, to };
+}
+function mondayOf4(dateStr) {
+  const d = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function spanMins(start, finish) {
+  const m = (s) => {
+    const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+    return x ? +x[1] * 60 + +x[2] : null;
+  };
+  const a = m(start), b = m(finish);
+  if (a == null || b == null) return null;
+  return b >= a ? b - a : b + 1440 - a;
+}
+function fmtMins(m) {
+  return Math.floor(m / 60) + "h " + m % 60 + "m";
+}
+async function hmacB64u(secret, body) {
+  const enc3 = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc3.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc3.encode(body));
+  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function timingSafeEq(a, b) {
+  a = String(a);
+  b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
 // src/index.js
 var ROUTES = [
   ["*", "/auth", handle],
@@ -8773,6 +9507,14 @@ var ROUTES = [
   ["*", "/import-sites", handle9],
   ["*", "/sites", handle9],
   // /sites/street-images (bulk imagery)
+  ["*", "/sites/register", handle22],
+  // master site register (longest prefix wins over /sites)
+  ["*", "/ledger", handle22],
+  // labour ledger (reconciled time)
+  ["*", "/costing", handle22],
+  // per-site labour cost roll-up
+  ["*", "/exceptions", handle22],
+  // needs-a-human-eye list
   ["*", "/settings", handle10],
   ["*", "/oncall", handle10],
   ["*", "/daily-logs", handle10],
@@ -8931,7 +9673,9 @@ var PUBLIC_ROUTES = [
   // Imported archive job files (photos/signatures/PDFs) — signed URL, verified in-handler.
   ["GET", "/sla/archive-file"],
   // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
-  ["GET", "/ts/invoice-file"]
+  ["GET", "/ts/invoice-file"],
+  // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
+  ["POST", "/ledger/scan"]
 ];
 function isPublic(method, pathname) {
   if (PUBLIC_ROUTES.some(([m, p]) => m === method && pathname === p)) return true;
