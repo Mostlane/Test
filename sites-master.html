@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sites (master) — Mostlane</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+<script src="/portal-config.js?v=2"></script>
+<script src="auth.js"></script>
+<style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b;
+         --brand:#2563eb; --good:#16a34a; --bad:#dc2626; --warn:#b45309; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;}
+  a.ml-back{color:#fff;text-decoration:none;font-size:15px;}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 14px 0;max-width:1000px;margin:0 auto;}
+  .tabs button{appearance:none;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;padding:8px 14px;font-size:14px;font-weight:600;white-space:nowrap;cursor:pointer;font-family:inherit;}
+  .tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .wrap{max-width:1000px;margin:0 auto;padding:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;}
+  .card h2{margin:0 0 8px;font-size:16px;}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5;}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:9px 13px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.small{padding:6px 10px;font-size:13px;border-radius:8px;}
+  .btn.warn{color:var(--warn);border-color:#fde68a;}
+  .btn.good{color:var(--good);border-color:#bbf7d0;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  input,select{font-family:inherit;font-size:15px;padding:9px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);}
+  label{font-size:13px;font-weight:600;color:var(--muted);display:block;margin:8px 0 4px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:8px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle;}
+  td.r,th.r{text-align:right;}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr.flag td{background:#fef2f2;}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;}
+  .pill.active{background:#e3f6e8;color:#0c7d27;} .pill.archived{background:#fde8ea;color:#b00020;}
+  .pill.grey{background:#eef2f7;color:#334155;}
+  .banner{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:11px 13px;font-size:13px;margin-bottom:12px;font-weight:600;}
+  .empty{color:var(--muted);text-align:center;padding:22px 8px;font-size:14px;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;display:none;z-index:60;max-width:90%;}
+  .hidden{display:none!important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:14px;}
+  .modal-bg.on{display:flex;}
+  .modal{background:#fff;border-radius:14px;padding:18px;width:100%;max-width:460px;max-height:88vh;overflow:auto;}
+  .foot{font-size:12px;color:var(--muted);margin-top:8px;}
+  .num{font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+<header class="page">
+  <a class="ml-back" href="/main.html">‹ Back</a>
+  <h1>📍 Sites (master list)</h1>
+  <a class="ml-back" href="/sites.html" title="Full site editor">✎ Editor</a>
+</header>
+
+<div class="tabs" id="tabs">
+  <button data-tab="manage" class="on">Manage</button>
+  <button data-tab="reconcile">Reconcile</button>
+  <button data-tab="costing">Job costing</button>
+</div>
+
+<div class="wrap">
+  <div id="loading" class="empty">Loading…</div>
+  <div id="denied" class="card hidden"><h2>Access denied</h2><p class="sub">You need the Sites or Full-Access permission to manage the master site list.</p></div>
+
+  <!-- MANAGE -->
+  <section id="tab-manage" class="tabpane hidden">
+    <div id="flagBanner" class="banner hidden"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row" id="statusChips">
+          <button class="btn small primary" data-st="active">Active</button>
+          <button class="btn small" data-st="archived">Archived</button>
+          <button class="btn small" data-st="all">All</button>
+        </div>
+        <input id="search" placeholder="Search name / client / code" style="flex:1;min-width:140px;">
+      </div>
+      <p class="sub" style="margin:12px 0 0;">Archiving a site removes it from every picker (PO, timesheets, jobs, SiteLog). If an archived site still has open jobs it's flagged red here so nothing is costed to it undetected.</p>
+    </div>
+    <div class="card">
+      <div style="overflow-x:auto;"><table id="manageTable"></table></div>
+      <p class="foot" id="manageCount"></p>
+    </div>
+  </section>
+
+  <!-- RECONCILE -->
+  <section id="tab-reconcile" class="tabpane hidden">
+    <div class="card">
+      <h2>Untracked site references</h2>
+      <p class="sub">Site names that appear on jobs or in the PO / timesheet pickers but have <b>no record in the master list</b>. Adopt each one so everything costs to a single, clean site.</p>
+      <div class="row"><button class="btn small" onclick="loadReconcile()">↻ Refresh</button></div>
+    </div>
+    <div class="card">
+      <div style="overflow-x:auto;"><table id="recTable"></table></div>
+      <p class="foot" id="recCount"></p>
+    </div>
+  </section>
+
+  <!-- COSTING -->
+  <section id="tab-costing" class="tabpane hidden">
+    <div class="card">
+      <h2>Per-site job costing</h2>
+      <p class="sub">Jobs raised and engineer labour hours captured against each site. Use it to see how each site is performing.</p>
+      <div class="row">
+        <div><label>From</label><input type="date" id="coFrom"></div>
+        <div><label>To</label><input type="date" id="coTo"></div>
+        <div style="align-self:flex-end;"><button class="btn small" onclick="coRange(3)">3 mo</button>
+          <button class="btn small" onclick="coRange(12)">12 mo</button>
+          <button class="btn primary small" onclick="loadCosting()">Show</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="overflow-x:auto;"><table id="coTable"></table></div>
+      <p class="foot" id="coFoot"></p>
+    </div>
+  </section>
+</div>
+
+<div class="modal-bg" id="modalBg"><div class="modal" id="modalBody"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev");
+const $ = id => document.getElementById(id);
+function authFetch(path, opts={}){
+  const t = localStorage.getItem("mostlaneToken");
+  opts.headers = Object.assign({}, opts.headers, t ? {"Authorization":"Bearer "+t} : {});
+  return fetch(API + path, opts);
+}
+async function apiGet(path){ const r = await authFetch(path); if(r.status===403) throw {denied:true}; if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }
+async function apiPost(path, body){ const r = await authFetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})}); return r.json().catch(()=>({ok:false})); }
+function esc(s){ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
+function digitsOf(s){ const m=String(s||"").match(/\d+/); return m?String(Number(m[0])):""; }
+function normKey(s){ return String(s||"").toLowerCase().replace(/\s+/g," ").trim(); }
+
+let USAGE = [];        // sites with counts
+let UNMATCHED = [];    // job refs with no master site
+let CLIENTS = [];      // known client slugs (for adopt)
+let statusFilter = "active";
+
+$("tabs").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));
+  document.querySelectorAll(".tabpane").forEach(p=>p.classList.add("hidden"));
+  $("tab-"+b.dataset.tab).classList.remove("hidden");
+  if(b.dataset.tab==="reconcile" && !$("recTable").dataset.loaded) loadReconcile();
+  if(b.dataset.tab==="costing" && !$("coTable").dataset.loaded){ coRange(3); loadCosting(); }
+});
+$("statusChips").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  statusFilter=b.dataset.st;
+  document.querySelectorAll("#statusChips button").forEach(x=>x.classList.toggle("primary",x===b));
+  renderManage();
+});
+$("search").addEventListener("input", renderManage);
+
+async function boot(){
+  try{
+    const u = await apiGet("/sites/usage");
+    USAGE = u.sites||[]; UNMATCHED = u.unmatched||[];
+    CLIENTS = [...new Set(USAGE.map(s=>s.client))].sort();
+    $("loading").classList.add("hidden");
+    $("tab-manage").classList.remove("hidden");
+    renderManage();
+  }catch(e){
+    $("loading").classList.add("hidden");
+    if(e && e.denied){ $("denied").classList.remove("hidden"); document.querySelector(".tabs").classList.add("hidden"); }
+    else { $("loading").classList.remove("hidden"); $("loading").textContent="Couldn't load ("+(e.message||"error")+")."; }
+  }
+}
+
+// ── Manage ──────────────────────────────────────────────────────────────────
+function renderManage(){
+  const flagged = USAGE.filter(s=>s.archivedButUsed);
+  const bn=$("flagBanner");
+  if(flagged.length){ bn.classList.remove("hidden"); bn.textContent = `⚠️ ${flagged.length} archived site(s) still have open jobs — review below.`; }
+  else bn.classList.add("hidden");
+
+  const term = normKey($("search").value);
+  const rows = USAGE.filter(s=>{
+    if(statusFilter==="active" && s.active===0) return false;
+    if(statusFilter==="archived" && s.active!==0) return false;
+    if(term){ const hay=normKey(s.siteName+" "+s.client+" "+s.siteNumber); if(!hay.includes(term)) return false; }
+    return true;
+  });
+  $("manageCount").textContent = rows.length + " site(s)";
+  $("manageTable").innerHTML = `<thead><tr><th>Site</th><th>Client</th><th>Code</th><th class="r">Jobs (open/total)</th><th>Status</th><th></th></tr></thead><tbody>`
+    + (rows.length? rows.map(s=>`
+      <tr class="${s.archivedButUsed?'flag':''}">
+        <td>${esc(s.siteName||"(no name)")}</td>
+        <td>${esc(s.client)}</td>
+        <td class="num">${esc(s.siteNumber)}</td>
+        <td class="r num">${s.jobsOpen}/${s.jobsTotal}</td>
+        <td>${s.active===0?'<span class="pill archived">Archived</span>':'<span class="pill active">Active</span>'}${s.archivedButUsed?' <span class="pill grey">in use</span>':''}</td>
+        <td class="r">${s.active===0
+          ? `<button class="btn small good" onclick='setArchive(${J(s)},false)'>Restore</button>`
+          : `<button class="btn small warn" onclick='setArchive(${J(s)},true)'>Archive</button>`}</td>
+      </tr>`).join("")
+      : `<tr><td colspan="6" class="empty">No sites match.</td></tr>`)
+    + `</tbody>`;
+}
+function J(o){ return JSON.stringify({client:o.client,siteNumber:o.siteNumber,siteName:o.siteName}).replace(/'/g,"&#39;"); }
+async function setArchive(s, archived){
+  if(archived && !confirm(`Archive "${s.siteName}"? It will disappear from all pickers.`)) return;
+  const r = await apiPost("/site/archive",{client:s.client, siteNumber:s.siteNumber, archived});
+  if(r.ok){ const row=USAGE.find(x=>x.client===s.client && x.siteNumber===s.siteNumber); if(row){ row.active=archived?0:1; row.archivedButUsed=archived && row.jobsOpen>0; } renderManage(); toast(archived?"Archived":"Restored"); }
+  else toast(r.error||"Failed");
+}
+
+// ── Reconcile ────────────────────────────────────────────────────────────────
+async function loadReconcile(){
+  $("recTable").dataset.loaded="1";
+  $("recCount").textContent="Loading…";
+  // master names (all statuses) to diff against
+  let master=[]; try{ master = await apiGet("/get-sites?status=all"); }catch{}
+  const have = new Set(master.map(s=>normKey(s.siteName)));
+  master.forEach(s=>{ const c=digitsOf(s.siteNumber); if(c) have.add("#"+c); });
+  const cand = new Map(); // normkey -> {label, sources:Set, count}
+  const add=(label, source, count)=>{ const k=normKey(label); if(!k||have.has(k)) return; const e=cand.get(k)||{label,sources:new Set(),count:0}; e.sources.add(source); e.count+=count||1; cand.set(k,e); };
+  // from job references with no master site
+  UNMATCHED.forEach(u=>add(u.label,"jobs",u.count));
+  // from the merged PO / timesheet picker
+  try{ const ts = await apiGet("/ts/sites?q="); (ts.sites||ts||[]).forEach(s=>{ const nm=s.name||s.siteName; if(nm) add(nm, s.source||"PO", 1); }); }catch{}
+  const list=[...cand.values()].sort((a,b)=>b.count-a.count);
+  $("recCount").textContent = list.length + " untracked reference(s)";
+  $("recTable").innerHTML = `<thead><tr><th>Site reference</th><th>Seen in</th><th class="r">Count</th><th></th></tr></thead><tbody>`
+    + (list.length? list.map((c,i)=>`<tr>
+        <td>${esc(c.label)}</td><td>${[...c.sources].map(esc).join(", ")}</td><td class="r num">${c.count}</td>
+        <td class="r"><button class="btn small primary" onclick='adopt(${JSON.stringify(c.label).replace(/'/g,"&#39;")})'>Adopt</button></td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">Nothing untracked — every referenced site is in the master list. 🎉</td></tr>`)
+    + `</tbody>`;
+}
+function adopt(label){
+  const num = digitsOf(label);
+  openModal(`<h2>Adopt site</h2>
+    <p class="sub">Create a master record for “${esc(label)}”.</p>
+    <label>Client / category</label>
+    <input id="a_client" list="a_clients" placeholder="e.g. retail" value="">
+    <datalist id="a_clients">${CLIENTS.map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
+    <label>Site number / code</label><input id="a_num" value="${esc(num)}">
+    <label>Site name</label><input id="a_name" value="${esc(label)}">
+    <label>Postcode</label><input id="a_pc" placeholder="optional">
+    <div class="row" style="margin-top:16px;justify-content:flex-end;">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="doAdopt()">Create site</button></div>`);
+}
+async function doAdopt(){
+  const client=($("a_client").value||"").toLowerCase().trim(), num=$("a_num").value.trim();
+  if(!client||!num){ toast("Client and site number are required"); return; }
+  const site={ client, siteNumber:num, siteName:$("a_name").value.trim(), postcode:$("a_pc").value.trim(), active:true };
+  const r = await apiPost("/add-site?category="+encodeURIComponent(client), site);
+  if(r.success||r.ok){ closeModal(); toast("Site created"); await boot(); loadReconcile(); }
+  else toast(r.error||"Failed");
+}
+
+// ── Costing ──────────────────────────────────────────────────────────────────
+function coRange(months){ const to=new Date(); const from=new Date(); from.setMonth(from.getMonth()-months); $("coFrom").value=from.toISOString().slice(0,10); $("coTo").value=to.toISOString().slice(0,10); }
+async function loadCosting(){
+  $("coTable").dataset.loaded="1";
+  if(!$("coFrom").value) coRange(3);
+  $("coFoot").textContent="Loading…";
+  try{
+    const d = await apiGet(`/sites/costing?from=${$("coFrom").value}&to=${$("coTo").value}`);
+    const rows=d.sites||[];
+    $("coTable").innerHTML = `<thead><tr><th>Site</th><th>Client</th><th class="r">Jobs</th><th class="r">Labour hrs</th><th class="r">PO spend</th></tr></thead><tbody>`
+      + (rows.length? rows.map(s=>`<tr><td>${esc(s.siteName||"(no name)")}${s.active===0?' <span class="pill archived">arch</span>':''}</td><td>${esc(s.client)}</td>
+          <td class="r num">${s.jobs}</td><td class="r num">${s.hours}</td><td class="r num muted">—</td></tr>`).join("")
+        : `<tr><td colspan="5" class="empty">No activity in this range.</td></tr>`)
+      + `</tbody>`;
+    const un=d.unlinked||{jobs:0,hours:0};
+    $("coFoot").innerHTML = `${rows.length} site(s). Unlinked (no matching master site): ${un.jobs} job(s), ${un.hours} hr(s) — clean these up in Reconcile. `
+      + `<b>PO spend</b> reads from the PO system — coming in the next step.`;
+  }catch(e){ $("coFoot").textContent="Couldn't load costing."; }
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(html){ $("modalBody").innerHTML=html; $("modalBg").classList.add("on"); }
+function closeModal(){ $("modalBg").classList.remove("on"); }
+$("modalBg").addEventListener("click",e=>{ if(e.target===$("modalBg")) closeModal(); });
+
+boot();
+</script>
+</body>
+</html>

@@ -99,3 +99,5 @@
   Cache-Control: no-cache
 /statement-parse.js
   Cache-Control: no-cache
+/sites-master.html
+  Cache-Control: no-cache

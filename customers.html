@@ -176,7 +176,7 @@ $("saveBtn").addEventListener("click", async () => {
 function fetchOldSites(){
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
-    x.open("GET", "https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all");
+    x.open("GET", "https://mostlane-sites.jamie-def.workers.dev/get-sites?category=all&status=all");
     x.onload = () => {
       try{
         const list = JSON.parse(x.responseText);

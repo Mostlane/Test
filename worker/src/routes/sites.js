@@ -16,6 +16,7 @@
 
 import { json, error } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
+import { permissionsFor } from "../lib/auth.js";
 
 const OLD_SITES_WORKER = "https://mostlane-sites.jamie-def.workers.dev";
 
@@ -26,16 +27,24 @@ export async function handle(request, env, ctx, url, sess) {
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
 
+  // Permission helper for the admin-only sites-master endpoints. Pickers
+  // (/get-sites) stay open to any logged-in user; archive/usage/costing don't.
+  const perms = sess ? await permissionsFor(env, tenantId, sess.user.username) : {};
+  const can = (...keys) => keys.some(k => perms[k] === "Yes");
+
   /* ── Sites (old API, ported) ─────────────────────────────────────────── */
 
   if (path === "/get-sites" && method === "GET") {
     const cat = (q.get("category") || "all").toLowerCase();
-    let rows;
-    if (cat === "all") {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
-    } else {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
-    }
+    // status: active (default — archived sites drop out of every picker) |
+    // archived | all. Admin pages pass status=all to see everything.
+    const status = (q.get("status") || "active").toLowerCase();
+    const clauses = ["tenant_id=?"]; const binds = [db.tenantId];
+    if (cat !== "all") { clauses.push("client=?"); binds.push(cat); }
+    if (status === "active") clauses.push("COALESCE(active,1)=1");
+    else if (status === "archived") clauses.push("COALESCE(active,1)=0");
+    const sql = `SELECT data FROM sites WHERE ${clauses.join(" AND ")} ORDER BY client, site_number`;
+    const { results: rows } = await db.prepare(sql).bind(...binds).all();
     return json((rows || []).map(r => JSON.parse(r.data)), {}, env, request);
   }
 
@@ -246,10 +255,156 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
   }
 
+  /* ── Master sites admin: archive / usage / costing ───────────────────────
+     These make the sites table the single source of truth: archive a site so
+     it drops out of the pickers, see how many jobs each site carries, flag any
+     ARCHIVED site that still has open work (so nothing is costed to it
+     undetected), and roll up per-site job-costing. Admin-gated. */
+
+  // Archive (default) or restore a site — flips the existing `active` flag and
+  // stamps archivedAt in the site JSON (no schema change needed).
+  if (path === "/site/archive" && method === "POST") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = String(b.client || "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client and siteNumber required", 400, env, request);
+    const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+      .bind(db.tenantId, client, siteNumber).first();
+    if (!row) return error("Site not found", 404, env, request);
+    const site = JSON.parse(row.data);
+    const archived = b.archived !== false;      // default action is to archive
+    site.active = !archived;
+    if (archived) site.archivedAt = new Date().toISOString(); else delete site.archivedAt;
+    await saveSite(env, tenantId, site);
+    return json({ ok: true, site }, {}, env, request);
+  }
+
+  // Usage per site + the two audit lists: sites archived-but-still-used, and
+  // job site references that don't match any master site ("untracked").
+  if (path === "/sites/usage" && method === "GET") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const { results: srows } = await db.prepare(
+      "SELECT client, site_number, site_name, COALESCE(active,1) AS active, data FROM sites WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const sites = (srows || []).map(r => ({
+      client: r.client, siteNumber: r.site_number, siteName: r.site_name,
+      active: r.active, data: safeParse(r.data),
+    }));
+    const keyOf = s => s.client + "|" + s.siteNumber;
+    const { codeToSite, nameToSite } = siteMatchers(sites, keyOf);
+
+    const usage = new Map();
+    const bump = (k, done) => { const u = usage.get(k) || { open: 0, done: 0, total: 0 }; u.total++; done ? u.done++ : u.open++; usage.set(k, u); };
+    const unmatched = new Map();
+
+    const { results: jrows } = await db.prepare("SELECT site_code, status, data FROM sla_jobs WHERE tenant_id=?").bind(db.tenantId).all();
+    for (const j of jrows || []) {
+      const jd = safeParse(j.data) || {};
+      const c = digitsOf(j.site_code);
+      const nm = normKey(jd.siteName || jd.site || "");
+      const k = (c && codeToSite.get(c)) || (nm && nameToSite.get(nm));
+      const done = DONE_STATUS.has(String(j.status || "").toLowerCase());
+      if (k) bump(k, done);
+      else if (jd.siteName || j.site_code) {
+        const label = String(jd.siteName || j.site_code).trim();
+        if (label) unmatched.set(label, (unmatched.get(label) || 0) + 1);
+      }
+    }
+
+    const out = sites.map(s => {
+      const u = usage.get(keyOf(s)) || { open: 0, done: 0, total: 0 };
+      return {
+        client: s.client, siteNumber: s.siteNumber, siteName: s.siteName, active: s.active,
+        archivedAt: (s.data && s.data.archivedAt) || null,
+        jobsOpen: u.open, jobsDone: u.done, jobsTotal: u.total,
+        archivedButUsed: s.active === 0 && u.open > 0,
+      };
+    });
+    out.sort((a, b) => (Number(b.archivedButUsed) - Number(a.archivedButUsed)) || (b.jobsTotal - a.jobsTotal) ||
+      String(a.siteName || "").localeCompare(String(b.siteName || "")));
+    const unmatchedArr = [...unmatched.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+    return json({ ok: true, sites: out, unmatched: unmatchedArr }, {}, env, request);
+  }
+
+  // Per-site job costing: job counts (in date range) + engineer labour hours
+  // captured against the site. PO spend is the next layer (reads the PO DB).
+  if (path === "/sites/costing" && method === "GET") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const from = q.get("from") || "", to = q.get("to") || "";
+    const { results: srows } = await db.prepare(
+      "SELECT client, site_number, site_name, COALESCE(active,1) AS active, data FROM sites WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const sites = (srows || []).map(r => ({
+      client: r.client, siteNumber: r.site_number, siteName: r.site_name, active: r.active, data: safeParse(r.data),
+    }));
+    const keyOf = s => s.client + "|" + s.siteNumber;
+    const meta = new Map(sites.map(s => [keyOf(s), { client: s.client, siteNumber: s.siteNumber, siteName: s.siteName, active: s.active, jobs: 0, hours: 0 }]));
+    const { codeToSite, nameToSite } = siteMatchers(sites, keyOf);
+    let unlinkedHours = 0, unlinkedJobs = 0;
+
+    // Jobs in range (by raised_at, falling back to created_at).
+    const jClauses = ["tenant_id=?"]; const jBinds = [db.tenantId];
+    if (from) { jClauses.push("COALESCE(raised_at,created_at) >= ?"); jBinds.push(from); }
+    if (to) { jClauses.push("COALESCE(raised_at,created_at) <= ?"); jBinds.push(to + "T23:59:59Z"); }
+    const { results: jrows } = await db.prepare(`SELECT site_code, data FROM sla_jobs WHERE ${jClauses.join(" AND ")}`).bind(...jBinds).all();
+    for (const j of jrows || []) {
+      const jd = safeParse(j.data) || {};
+      const k = (digitsOf(j.site_code) && codeToSite.get(digitsOf(j.site_code))) || (normKey(jd.siteName || jd.site) && nameToSite.get(normKey(jd.siteName || jd.site)));
+      if (k && meta.has(k)) meta.get(k).jobs++; else unlinkedJobs++;
+    }
+
+    // Labour hours from closed job-time segments in range.
+    const sClauses = ["tenant_id=?", "ended_at IS NOT NULL"]; const sBinds = [db.tenantId];
+    if (from) { sClauses.push("started_at >= ?"); sBinds.push(from); }
+    if (to) { sClauses.push("started_at <= ?"); sBinds.push(to + "T23:59:59Z"); }
+    const { results: seg } = await db.prepare(`SELECT site, started_at, ended_at FROM job_time_segments WHERE ${sClauses.join(" AND ")}`).bind(...sBinds).all();
+    for (const s of seg || []) {
+      const hrs = (Date.parse(s.ended_at) - Date.parse(s.started_at)) / 3600000;
+      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) continue;   // guard bad rows
+      const k = normKey(s.site) && nameToSite.get(normKey(s.site));
+      if (k && meta.has(k)) meta.get(k).hours += hrs; else unlinkedHours += hrs;
+    }
+
+    const rowsOut = [...meta.values()]
+      .filter(m => m.jobs > 0 || m.hours > 0)
+      .map(m => ({ ...m, hours: Math.round(m.hours * 10) / 10 }))
+      .sort((a, b) => (b.jobs - a.jobs) || (b.hours - a.hours));
+    return json({
+      ok: true, from, to, sites: rowsOut,
+      unlinked: { jobs: unlinkedJobs, hours: Math.round(unlinkedHours * 10) / 10 },
+      poSpend: null,   // reserved — PO-system spend joins here in the next layer
+    }, {}, env, request);
+  }
+
   return error("Unknown sites route", 404, env, request);
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
+
+// Finished job statuses (mirror of the SLA "done" buckets) — an archived site
+// with jobs in any OTHER status is flagged as still in use.
+const DONE_STATUS = new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+
+function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+
+// Normalise a site name for matching (mirror of timesheets.js normKey).
+function normKey(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
+// First digit-run of a string, Number()-normalised (mirror of sla.js digitsOf).
+function digitsOf(s) { const m = String(s || "").match(/\d+/); return m ? String(Number(m[0])) : ""; }
+
+// Build code→site and name→site lookup maps so a job/segment resolves to a
+// single master site in one pass.
+function siteMatchers(sites, keyOf) {
+  const codeToSite = new Map(), nameToSite = new Map();
+  for (const s of sites) {
+    const c = digitsOf(s.siteNumber);
+    if (c && !codeToSite.has(c)) codeToSite.set(c, keyOf(s));
+    const nm = normKey(s.siteName || (s.data && s.data.siteName));
+    if (nm && !nameToSite.has(nm)) nameToSite.set(nm, keyOf(s));
+  }
+  return { codeToSite, nameToSite };
+}
 
 async function saveSite(env, tenantId, site) {
   const db = tenantDB(env, tenantId);

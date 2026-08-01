@@ -101,7 +101,7 @@
     { key: "Forms", href: "forms.html", label: "Forms", icon: "📝", group: "Portal" },
     { key: "Compliance", href: "compliance.html", label: "Compliance", icon: "✔️", group: "Portal" },
     { key: "PurchaseOrders", href: "po.html", label: "PO system", icon: "🧾", group: "Portal" },
-    { key: "Sites", href: "sites.html", label: "Manage sites", icon: "📍", group: "Portal" },
+    { key: "Sites", href: "sites-master.html", label: "Manage sites", icon: "📍", group: "Portal" },
     { key: "Customers", href: "customers.html", label: "Customers", icon: "🏢", group: "Portal" },
     { key: "Projects", href: "projects.html", label: "Projects", icon: "📋", group: "Portal" },
     { key: "HSPlan", href: "hs-docs.html", label: "H&S", icon: "🦺", group: "Portal" },

@@ -647,7 +647,7 @@ function cleanPostcode(site) {
   // Worker IO
   async function fetchAllSites() {
     statusEl.textContent = "Loading sites...";
-    const res = await fetch(`${workerBase}/get-sites?category=all`);
+    const res = await fetch(`${workerBase}/get-sites?category=all&status=all`);
     const data = await res.json();
     ALL_SITES = Array.isArray(data)?data:[];
     renderRows();

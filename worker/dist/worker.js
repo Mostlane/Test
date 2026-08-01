@@ -5909,14 +5909,21 @@ async function handle9(request, env, ctx, url, sess) {
   const q = url.searchParams;
   const tenantId = sess ? sess.tenantId : await resolveTenantId(env, request);
   const db = tenantDB(env, tenantId);
+  const perms = sess ? await permissionsFor(env, tenantId, sess.user.username) : {};
+  const can = (...keys) => keys.some((k) => perms[k] === "Yes");
   if (path === "/get-sites" && method === "GET") {
     const cat = (q.get("category") || "all").toLowerCase();
-    let rows;
-    if (cat === "all") {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? ORDER BY client, site_number").bind(db.tenantId).all());
-    } else {
-      ({ results: rows } = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? ORDER BY site_number").bind(db.tenantId, cat).all());
+    const status = (q.get("status") || "active").toLowerCase();
+    const clauses = ["tenant_id=?"];
+    const binds = [db.tenantId];
+    if (cat !== "all") {
+      clauses.push("client=?");
+      binds.push(cat);
     }
+    if (status === "active") clauses.push("COALESCE(active,1)=1");
+    else if (status === "archived") clauses.push("COALESCE(active,1)=0");
+    const sql = `SELECT data FROM sites WHERE ${clauses.join(" AND ")} ORDER BY client, site_number`;
+    const { results: rows } = await db.prepare(sql).bind(...binds).all();
     return json((rows || []).map((r) => JSON.parse(r.data)), {}, env, request);
   }
   if ((path === "/add-site" || path === "/update-site") && method === "POST") {
@@ -6112,7 +6119,164 @@ async function handle9(request, env, ctx, url, sess) {
     for (const c of clients) await ensureCustomer(env, tenantId, c);
     return json({ ok: true, imported, customers: [...clients] }, {}, env, request);
   }
+  if (path === "/site/archive" && method === "POST") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const client = String(b.client || "").toLowerCase().trim();
+    const siteNumber = String(b.siteNumber || "").trim();
+    if (!client || !siteNumber) return error("client and siteNumber required", 400, env, request);
+    const row = await db.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?").bind(db.tenantId, client, siteNumber).first();
+    if (!row) return error("Site not found", 404, env, request);
+    const site = JSON.parse(row.data);
+    const archived = b.archived !== false;
+    site.active = !archived;
+    if (archived) site.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
+    else delete site.archivedAt;
+    await saveSite(env, tenantId, site);
+    return json({ ok: true, site }, {}, env, request);
+  }
+  if (path === "/sites/usage" && method === "GET") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const { results: srows } = await db.prepare(
+      "SELECT client, site_number, site_name, COALESCE(active,1) AS active, data FROM sites WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const sites = (srows || []).map((r) => ({
+      client: r.client,
+      siteNumber: r.site_number,
+      siteName: r.site_name,
+      active: r.active,
+      data: safeParse(r.data)
+    }));
+    const keyOf = (s) => s.client + "|" + s.siteNumber;
+    const { codeToSite, nameToSite } = siteMatchers(sites, keyOf);
+    const usage = /* @__PURE__ */ new Map();
+    const bump = (k, done) => {
+      const u = usage.get(k) || { open: 0, done: 0, total: 0 };
+      u.total++;
+      done ? u.done++ : u.open++;
+      usage.set(k, u);
+    };
+    const unmatched = /* @__PURE__ */ new Map();
+    const { results: jrows } = await db.prepare("SELECT site_code, status, data FROM sla_jobs WHERE tenant_id=?").bind(db.tenantId).all();
+    for (const j of jrows || []) {
+      const jd = safeParse(j.data) || {};
+      const c = digitsOf2(j.site_code);
+      const nm = normKey2(jd.siteName || jd.site || "");
+      const k = c && codeToSite.get(c) || nm && nameToSite.get(nm);
+      const done = DONE_STATUS.has(String(j.status || "").toLowerCase());
+      if (k) bump(k, done);
+      else if (jd.siteName || j.site_code) {
+        const label = String(jd.siteName || j.site_code).trim();
+        if (label) unmatched.set(label, (unmatched.get(label) || 0) + 1);
+      }
+    }
+    const out = sites.map((s) => {
+      const u = usage.get(keyOf(s)) || { open: 0, done: 0, total: 0 };
+      return {
+        client: s.client,
+        siteNumber: s.siteNumber,
+        siteName: s.siteName,
+        active: s.active,
+        archivedAt: s.data && s.data.archivedAt || null,
+        jobsOpen: u.open,
+        jobsDone: u.done,
+        jobsTotal: u.total,
+        archivedButUsed: s.active === 0 && u.open > 0
+      };
+    });
+    out.sort((a, b) => Number(b.archivedButUsed) - Number(a.archivedButUsed) || b.jobsTotal - a.jobsTotal || String(a.siteName || "").localeCompare(String(b.siteName || "")));
+    const unmatchedArr = [...unmatched.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+    return json({ ok: true, sites: out, unmatched: unmatchedArr }, {}, env, request);
+  }
+  if (path === "/sites/costing" && method === "GET") {
+    if (!can("FullAccess", "Sites")) return error("Forbidden", 403, env, request);
+    const from = q.get("from") || "", to = q.get("to") || "";
+    const { results: srows } = await db.prepare(
+      "SELECT client, site_number, site_name, COALESCE(active,1) AS active, data FROM sites WHERE tenant_id=?"
+    ).bind(db.tenantId).all();
+    const sites = (srows || []).map((r) => ({
+      client: r.client,
+      siteNumber: r.site_number,
+      siteName: r.site_name,
+      active: r.active,
+      data: safeParse(r.data)
+    }));
+    const keyOf = (s) => s.client + "|" + s.siteNumber;
+    const meta = new Map(sites.map((s) => [keyOf(s), { client: s.client, siteNumber: s.siteNumber, siteName: s.siteName, active: s.active, jobs: 0, hours: 0 }]));
+    const { codeToSite, nameToSite } = siteMatchers(sites, keyOf);
+    let unlinkedHours = 0, unlinkedJobs = 0;
+    const jClauses = ["tenant_id=?"];
+    const jBinds = [db.tenantId];
+    if (from) {
+      jClauses.push("COALESCE(raised_at,created_at) >= ?");
+      jBinds.push(from);
+    }
+    if (to) {
+      jClauses.push("COALESCE(raised_at,created_at) <= ?");
+      jBinds.push(to + "T23:59:59Z");
+    }
+    const { results: jrows } = await db.prepare(`SELECT site_code, data FROM sla_jobs WHERE ${jClauses.join(" AND ")}`).bind(...jBinds).all();
+    for (const j of jrows || []) {
+      const jd = safeParse(j.data) || {};
+      const k = digitsOf2(j.site_code) && codeToSite.get(digitsOf2(j.site_code)) || normKey2(jd.siteName || jd.site) && nameToSite.get(normKey2(jd.siteName || jd.site));
+      if (k && meta.has(k)) meta.get(k).jobs++;
+      else unlinkedJobs++;
+    }
+    const sClauses = ["tenant_id=?", "ended_at IS NOT NULL"];
+    const sBinds = [db.tenantId];
+    if (from) {
+      sClauses.push("started_at >= ?");
+      sBinds.push(from);
+    }
+    if (to) {
+      sClauses.push("started_at <= ?");
+      sBinds.push(to + "T23:59:59Z");
+    }
+    const { results: seg } = await db.prepare(`SELECT site, started_at, ended_at FROM job_time_segments WHERE ${sClauses.join(" AND ")}`).bind(...sBinds).all();
+    for (const s of seg || []) {
+      const hrs = (Date.parse(s.ended_at) - Date.parse(s.started_at)) / 36e5;
+      if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) continue;
+      const k = normKey2(s.site) && nameToSite.get(normKey2(s.site));
+      if (k && meta.has(k)) meta.get(k).hours += hrs;
+      else unlinkedHours += hrs;
+    }
+    const rowsOut = [...meta.values()].filter((m) => m.jobs > 0 || m.hours > 0).map((m) => ({ ...m, hours: Math.round(m.hours * 10) / 10 })).sort((a, b) => b.jobs - a.jobs || b.hours - a.hours);
+    return json({
+      ok: true,
+      from,
+      to,
+      sites: rowsOut,
+      unlinked: { jobs: unlinkedJobs, hours: Math.round(unlinkedHours * 10) / 10 },
+      poSpend: null
+      // reserved — PO-system spend joins here in the next layer
+    }, {}, env, request);
+  }
   return error("Unknown sites route", 404, env, request);
+}
+var DONE_STATUS = /* @__PURE__ */ new Set(["complete", "closed", "closed jobs", "invoiced", "cancelled"]);
+function safeParse(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+function normKey2(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+function digitsOf2(s) {
+  const m = String(s || "").match(/\d+/);
+  return m ? String(Number(m[0])) : "";
+}
+function siteMatchers(sites, keyOf) {
+  const codeToSite = /* @__PURE__ */ new Map(), nameToSite = /* @__PURE__ */ new Map();
+  for (const s of sites) {
+    const c = digitsOf2(s.siteNumber);
+    if (c && !codeToSite.has(c)) codeToSite.set(c, keyOf(s));
+    const nm = normKey2(s.siteName || s.data && s.data.siteName);
+    if (nm && !nameToSite.has(nm)) nameToSite.set(nm, keyOf(s));
+  }
+  return { codeToSite, nameToSite };
 }
 async function saveSite(env, tenantId, site) {
   const db = tenantDB(env, tenantId);
