@@ -87,6 +87,11 @@ async function ensureTables(env) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
     username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
     started_at TEXT NOT NULL, ended_at TEXT)`).run();
+  // Ledger columns (costing.js): travel-vs-onsite split + auto-close tag.
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+  // Site register archived flag (costing.js) — read by /ts/sites suggestions.
+  try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
 }
 
 // ── Job-status time capture (called from sla.js on every status change) ─────
@@ -125,13 +130,20 @@ export async function trackJobTime(env, tid, actor, before, after) {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND ended_at IS NULL AND job_id!=?"
       ).bind(now, tid, actor, String(after.id)).run();
+      // Travelling and In Progress are separate segments (travel vs on-site
+      // costing) — a status flip on the SAME job closes the old kind first.
+      const kind = as === "travelling" ? "travel" : "onsite";
       const open = await env.DB.prepare(
-        "SELECT id FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
+        "SELECT id, kind FROM job_time_segments WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
       ).bind(tid, actor, String(after.id)).first();
-      if (!open) await env.DB.prepare(
-        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at) VALUES (?,?,?,?,?,?,?)"
+      if (open && (open.kind || "onsite") !== kind) {
+        await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?")
+          .bind(now, open.id, tid).run();
+      }
+      if (!open || (open.kind || "onsite") !== kind) await env.DB.prepare(
+        "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, kind) VALUES (?,?,?,?,?,?,?,?)"
       ).bind(tid, actor, String(after.id), after.helpdeskRef || String(after.id),
-        after.siteName || "", String(after.postcode || "").toUpperCase(), now).run();
+        after.siteName || "", String(after.postcode || "").toUpperCase(), now, kind).run();
     } else {
       await env.DB.prepare(
         "UPDATE job_time_segments SET ended_at=? WHERE tenant_id=? AND username=? AND job_id=? AND ended_at IS NULL"
@@ -164,7 +176,8 @@ async function jobTimeAuto(env, tid, username, monday) {
           const cut = new Date(seg.started_at); cut.setHours(cut.getHours() + 1);
           const sevenPm = new Date(date + "T18:00:00Z");   // ≈19:00 London in summer, 18:00 in winter — close enough for a fallback
           endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
-          try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=? WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
+          // auto_closed marks it for the exceptions list ("never finished the job")
+          try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
         } else { open = true; }
       }
       const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
@@ -504,7 +517,7 @@ async function poOrderDiscover(env) {
   await poDiscover(env);   // single-flight; fills PO_ORD too
   return PO_ORD || null;
 }
-async function poOrderSiteNames(env) {
+export async function poOrderSiteNames(env) {
   const m = await poOrderDiscover(env);
   if (!m) return [];
   if (PO_ORD_CACHE && Date.now() - PO_ORD_CACHE.at < 5 * 60 * 1000) return PO_ORD_CACHE.list;
@@ -795,11 +808,22 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/sites" && method === "GET") {
     const term = String(q.get("q") || "").trim();
     const like = "%" + term.replace(/[%_]/g, "") + "%";
-    const { results } = await env.DB.prepare(
-      "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
-    ).bind(tid, like, like, like).all();
+    // Archived sites stay pickable but carry a flag — the picker shows an
+    // amber "archived" warning instead of hiding them (late invoices on
+    // finished jobs are real life; the exceptions list still catches strays).
+    let results;
+    try {
+      ({ results } = await env.DB.prepare(
+        "SELECT site_name, site_number, postcode, archived FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY archived, site_name LIMIT 15"
+      ).bind(tid, like, like, like).all());
+    } catch {
+      ({ results } = await env.DB.prepare(
+        "SELECT site_name, site_number, postcode FROM sites WHERE tenant_id=? AND active=1 AND (site_name LIKE ? OR postcode LIKE ? OR site_number LIKE ?) ORDER BY site_name LIMIT 15"
+      ).bind(tid, like, like, like).all());
+    }
     const sites = (results || []).map(s => ({
-      name: s.site_name || ("Site " + s.site_number), code: s.site_number, postcode: (s.postcode || "").replace(/\*+$/, "") }));
+      name: s.site_name || ("Site " + s.site_number), code: s.site_number, postcode: (s.postcode || "").replace(/\*+$/, ""),
+      ...(s.archived ? { archived: true } : {}) }));
     const seen = new Set(sites.map(s => s.name.trim().toLowerCase()));
     for (const r of await poSiteRows(env, term, 15)) {
       const name = String(r.name || "").trim();
@@ -877,15 +901,23 @@ export async function handle(request, env, ctx, url, sess) {
     // has one, otherwise the site name itself (commas softened so the
     // comma-separated jobs box doesn't split it).
     try {
-      const { results } = await env.DB.prepare(
-        "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
-      ).bind(tid, like, like).all();
+      let results;
+      try {
+        ({ results } = await env.DB.prepare(
+          "SELECT job_number, site_name, client, postcode, archived FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY archived, site_name LIMIT 8"
+        ).bind(tid, like, like).all());
+      } catch {
+        ({ results } = await env.DB.prepare(
+          "SELECT job_number, site_name, client, postcode FROM sites WHERE tenant_id=? AND active=1 AND (job_number LIKE ? OR site_name LIKE ?) ORDER BY site_name LIMIT 8"
+        ).bind(tid, like, like).all());
+      }
       for (const r of results || []) {
         const hasJob = r.job_number != null && r.job_number !== "";
         const name = r.site_name || r.client || "site";
         project.push({ ref: hasJob ? String(r.job_number) : nameRef(name),
           label: (hasJob ? r.job_number + " — " : "") + name, kind: "project",
-          site: name, postcode: (r.postcode || "").replace(/\*+$/, "") });
+          site: name, postcode: (r.postcode || "").replace(/\*+$/, ""),
+          ...(r.archived ? { archived: true } : {}) });
       }
     } catch (e) { errs.project = String(e && e.message || e); }
     // PO-system sites (PO_DB binding) — sites table AND names typed on POs.

@@ -60,6 +60,15 @@
   .dedrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
   .ded{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);background:#f2f5fa;border-radius:999px;padding:4px 10px}
   .ded.off{opacity:.4;text-decoration:line-through}
+  /* overhead (non-site) one-tap chips */
+  .ovhrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .ovh{border:1px dashed #c7d2e2;background:#fff;color:var(--muted);border-radius:999px;padding:5px 11px;font:600 12px inherit;font-family:inherit;cursor:pointer}
+  .ovh:active{background:#f2f5fa}
+  /* archived-site heads-up — a soft amber CAUTION band, deliberately unlike
+     the red error styles: it means "fine, but flagged", not "failed" */
+  .warnband{display:flex;gap:8px;align-items:flex-start;background:#fef3c7;border:1px solid #fcd34d;border-left:5px solid #f59e0b;color:#92400e;border-radius:10px;padding:9px 12px;font-size:13px;margin:8px 0;animation:wbin .25s ease}
+  .warnband b{font-weight:700}
+  @keyframes wbin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
   .booked{display:flex;gap:7px;flex-wrap:wrap;margin:4px 0 2px}
   .bk{appearance:none;border:1.5px solid #cfe0f5;background:linear-gradient(180deg,#f4f9ff,#e9f2fd);color:#0e3a6d;border-radius:12px;padding:8px 12px;font-size:13.5px;font-weight:600;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-tap-highlight-color:transparent}
   .bk:active{transform:scale(.97)}
@@ -272,6 +281,10 @@ function render(){
         </div>
         <div class="flab">Jobs — tap above or type to add (as many as needed)</div>
         <div class="row joblist"></div>
+        <div class="ovhrow"><span class="flab" style="align-self:center;margin:0">Not on a site?</span>
+          <button type="button" class="ovh" data-o="Yard">🏠 Yard</button>
+          <button type="button" class="ovh" data-o="Supplier">🛒 Supplier</button>
+          <button type="button" class="ovh" data-o="Workshop">🔧 Workshop</button></div>
         ${ME&&ME.mileage?`<div class="mi"><div class="flab">Mileage — automatic from your site picks</div><div class="milist"></div></div>`:""}
         ${a?`<span class="autoline">⏱ From your jobs: ${esc(a.start)} – ${a.finish?esc(a.finish):"still running"}</span>`:""}
         ${deds.length?`<div class="dedrow">${deds.join("")}</div>`:""}
@@ -466,7 +479,7 @@ document.addEventListener("input",e=>{
     }
     if(!list.length||document.activeElement!==inp)return;
     const div=document.createElement("div");div.className="sugrow";
-    div.innerHTML=list.slice(0,6).map((j,ix)=>`<button type="button" class="sug" data-ix="${ix}" data-ref="${esc(j.ref)}" title="${esc(j.label)}">${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
+    div.innerHTML=list.slice(0,6).map((j,ix)=>`<button type="button" class="sug" data-ix="${ix}" data-ref="${esc(j.ref)}" title="${esc(j.label)}${j.archived?" (archived site)":""}">${j.archived?"🗄 ":""}${esc(j.label.length>36?j.label.slice(0,35)+"…":j.label)}</button>`).join("");
     inp.closest(".row").after(div);
     div.addEventListener("mousedown",ev=>{
       const b=ev.target.closest(".sug");if(!b)return;
@@ -478,11 +491,32 @@ document.addEventListener("input",e=>{
       if(addJobPill(card,b.dataset.ref)){
         // Fuel users: picking a site drops its mileage claim in automatically.
         if(j&&j.site)autoMileage(card,j);
+        // Archived site picked on purpose — allowed, but say so (soft amber
+        // caution, not an error) and it'll show on the office exceptions list.
+        if(j&&j.archived)warnArchived(card,j.site||j.ref);
         refreshTotals();
         clearTimeout(saveTimer);doSave();
       }
     });
   },250);
+});
+
+// Amber heads-up when an ARCHIVED site is used — deliberately not the red
+// error style: the entry still counts, it's just flagged for the office.
+function warnArchived(card,name){
+  const old=card.querySelector(".warnband");if(old)old.remove();
+  const w=document.createElement("div");w.className="warnband";
+  w.innerHTML=`<span>🗄</span><span><b>${esc(String(name))}</b> is an <b>archived</b> site. You can still use it (fine for late invoices) — it'll be flagged on the office review list so nothing lands there unnoticed.</span>`;
+  const body=card.querySelector(".cbody");body.insertBefore(w,body.firstChild);
+  setTimeout(()=>{try{w.remove();}catch(e){}},9000);
+}
+
+// Overhead one-tap chips: yard / supplier / workshop time isn't on a site but
+// still has to tally the day — the token goes into the jobs box like any job.
+document.addEventListener("click",e=>{
+  const b=e.target.closest(".ovh");if(!b)return;
+  const card=b.closest(".card[data-date]");if(!card||INVOICE)return;
+  if(addJobPill(card,b.dataset.o)){refreshTotals();clearTimeout(saveTimer);doSave();}
 });
 document.addEventListener("focusin",e=>{if(!e.target.classList||!e.target.classList.contains("jobs"))hideAllSug();});
 

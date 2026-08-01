@@ -39,6 +39,7 @@ import * as fleet from "./routes/fleet.js";        // DONE  (fleet reports: save
 import * as push from "./routes/push.js";          // DONE  (web push subscriptions + sending)
 import * as timesheets from "./routes/timesheets.js"; // DONE (engineer timesheets + self-employed invoices)
 import * as messages from "./routes/messages.js";  // DONE  (office ↔ engineer messages — Inbox)
+import * as costing from "./routes/costing.js";    // DONE  (site register, labour ledger, job costing, exceptions)
 import { sendWeeklyReminders } from "./routes/vancheck.js"; // cron: weekly van-check reminders
 
 // ── Route table: [method, pathPrefix, handler] ──────────────────────────────
@@ -73,6 +74,10 @@ const ROUTES = [
   ["*", "/customers",  sites.handle],
   ["*", "/import-sites", sites.handle],
   ["*", "/sites",      sites.handle],   // /sites/street-images (bulk imagery)
+  ["*", "/sites/register", costing.handle], // master site register (longest prefix wins over /sites)
+  ["*", "/ledger",     costing.handle],  // labour ledger (reconciled time)
+  ["*", "/costing",    costing.handle],  // per-site labour cost roll-up
+  ["*", "/exceptions", costing.handle],  // needs-a-human-eye list
   ["*", "/settings",   portal.handle],
   ["*", "/oncall",     portal.handle],
   ["*", "/daily-logs", portal.handle],
@@ -228,6 +233,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/sla/archive-file"],
   // Self-employed invoice PDFs opened in a new tab — signed URL, verified in-handler.
   ["GET", "/ts/invoice-file"],
+  // SiteLog scan intake — HMAC-signed with PORTAL_BRIDGE_SECRET, verified in-handler.
+  ["POST", "/ledger/scan"],
 ];
 
 function isPublic(method, pathname) {

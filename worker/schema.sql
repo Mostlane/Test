@@ -571,3 +571,25 @@ CREATE TABLE IF NOT EXISTS job_time_segments (
   started_at TEXT NOT NULL,
   ended_at   TEXT                          -- NULL = clock running
 );
+
+-- ── Site register + labour ledger (costing.js) ──────────────────────────────
+-- sites gains an `archived` flag (register: Active/Archived — archived stays
+-- pickable but is amber-flagged and surfaces on /exceptions):
+--   ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0;   (self-migrating)
+-- job_time_segments gains:
+--   ALTER TABLE job_time_segments ADD COLUMN kind TEXT;         -- 'travel' | 'onsite'
+--   ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER; -- lazily-closed flag
+-- Aliases / ignore-list / external candidate names live in app_config keys
+-- site_aliases:<tid>, site_reg_ignore:<tid>, site_reg_ext:<tid>.
+
+-- SiteLog scan feed (POST /ledger/scan, HMAC PORTAL_BRIDGE_SECRET) — pairs of
+-- in/out rows become on-site "visit" time in the labour ledger.
+CREATE TABLE IF NOT EXISTS sitelog_scans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  username  TEXT NOT NULL,
+  site      TEXT NOT NULL,
+  direction TEXT NOT NULL,               -- 'in' | 'out'
+  at        TEXT NOT NULL,               -- ISO time of the scan
+  source    TEXT                         -- 'sitelog'
+);

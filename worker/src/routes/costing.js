@@ -1,0 +1,641 @@
+// costing.js — Master site register, labour ledger, job costing + exceptions.
+//
+// The one place that answers "where did everyone's time go, and what did it
+// cost?" with minimal user input. Three layers:
+//
+//  1. SITE REGISTER — the existing `sites` table becomes the master list.
+//     Every site is Active or Archived (archived stays pickable but flagged),
+//     free-typed name variants map onto a canonical site via ALIASES, and a
+//     CANDIDATES harvest surfaces names seen in the wild (jobs, timesheets,
+//     scans, PO/compliance pushes) that aren't in the register yet.
+//       GET  /sites/register                 -> { sites, aliases, ignored }
+//       POST /sites/register/update          { client, siteNumber, archived?, name?, postcode? }
+//       POST /sites/register/add             { name, postcode?, client? }
+//       POST /sites/register/merge           { alias, client, siteNumber }
+//       POST /sites/register/unmerge         { alias }
+//       POST /sites/register/ignore          { name, undo? }
+//       GET  /sites/register/candidates      -> { candidates:[{name, sources, count}] }
+//       POST /sites/register/push-candidates { names:[...], source }   (browser-side PO/compliance lists)
+//
+//  2. LABOUR LEDGER — reconciles every time source into per-day entries:
+//     job_time_segments (SLA status capture, primary), SiteLog scans
+//     (sitelog_scans table, fed by POST /ledger/scan), and the day window
+//     (shifts). Job segments win; scan time only counts where no job segment
+//     covers it (never double-counted); a scan at a DIFFERENT site than the
+//     concurrent job segment flags a mismatch.
+//       POST /ledger/scan          (public, HMAC x-portal-sig with PORTAL_BRIDGE_SECRET)
+//       GET  /ledger/day?user=&date=YYYY-MM-DD
+//
+//  3. COSTING + EXCEPTIONS
+//       GET /costing/summary?from=&to=[&site=]  -> per-site hours (travel/onsite/visit) + labour cost
+//       GET /exceptions?from=&to=               -> everything needing a human eye
+//
+// All tables self-migrate. Every read tolerates rows written before a column
+// existed. Nothing here may ever break a job save or timesheet save.
+
+import { json, error } from "../lib/http.js";
+import { permissionsFor } from "../lib/auth.js";
+import { poOrderSiteNames } from "./timesheets.js";
+
+const UNALLOC_MIN = 15;   // minutes of uncovered day window before we flag it
+const CLAIM_GAP_MIN = 30; // claimed-vs-captured difference before we flag it
+
+export async function handle(request, env, ctx, url, sess) {
+  const path = url.pathname;
+  const method = request.method;
+  const q = url.searchParams;
+
+  // ── Public: SiteLog scan intake (HMAC, no session) ────────────────────────
+  if (path === "/ledger/scan" && method === "POST") return scanIntake(request, env);
+
+  if (!sess) return error("Not authenticated", 401, env, request);
+  const tid = sess.tenantId;
+  const me = sess.user.username;
+  const perms = await permissionsFor(env, tid, me);
+  const admin = perms.FullAccess === "Yes" || perms.SLAAdmin === "Yes" || perms.TimesheetAdmin === "Yes";
+
+  await ensure(env);
+
+  /* ══ 1. SITE REGISTER ═════════════════════════════════════════════════════ */
+
+  if (path === "/sites/register" && method === "GET") {
+    const reg = await loadRegister(env, tid);
+    return json({ ok: true, sites: reg.list, aliases: reg.aliases, ignored: reg.ignored }, {}, env, request);
+  }
+
+  if (path.startsWith("/sites/register/") && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+
+    if (path === "/sites/register/update") {
+      const client = String(b.client || "").toLowerCase().trim();
+      const num = String(b.siteNumber || "").trim();
+      if (!client || !num) return error("client and siteNumber required", 400, env, request);
+      const row = await env.DB.prepare("SELECT data FROM sites WHERE tenant_id=? AND client=? AND site_number=?")
+        .bind(tid, client, num).first();
+      if (!row) return error("Site not found", 404, env, request);
+      let data = {}; try { data = JSON.parse(row.data || "{}"); } catch {}
+      if (b.archived !== undefined) data.archived = !!b.archived;
+      if (b.name) data.siteName = String(b.name).trim();
+      if (b.postcode !== undefined) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
+          postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
+        WHERE tenant_id=? AND client=? AND site_number=?`)
+        .bind(b.archived !== undefined ? (b.archived ? 1 : 0) : (data.archived ? 1 : 0),
+              b.name ? String(b.name).trim() : null,
+              b.postcode !== undefined ? String(b.postcode || "").toUpperCase().trim() : null,
+              JSON.stringify(data), tid, client, num).run();
+      return json({ ok: true }, {}, env, request);
+    }
+
+    if (path === "/sites/register/add") {
+      const name = String(b.name || "").trim();
+      if (!name) return error("name required", 400, env, request);
+      const client = String(b.client || "general").toLowerCase().trim() || "general";
+      const num = slugNum(name);
+      const data = { client, siteNumber: num, siteName: name,
+        postcode: String(b.postcode || "").toUpperCase().trim(), addedVia: "register" };
+      await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
+        VALUES (?,?,?,?,?,1,0,?,datetime('now'))
+        ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
+          postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`)
+        .bind(tid, client, num, name, data.postcode || null, JSON.stringify(data)).run();
+      return json({ ok: true, client, siteNumber: num }, {}, env, request);
+    }
+
+    if (path === "/sites/register/merge") {
+      const alias = normName(b.alias);
+      if (!alias) return error("alias required", 400, env, request);
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      aliases[alias] = { client: String(b.client || "").toLowerCase(), siteNumber: String(b.siteNumber || ""), label: String(b.alias || "").trim() };
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+
+    if (path === "/sites/register/unmerge") {
+      const aliases = await cfgGet(env, tid, "site_aliases", {});
+      delete aliases[normName(b.alias)];
+      await cfgSet(env, tid, "site_aliases", aliases);
+      return json({ ok: true }, {}, env, request);
+    }
+
+    if (path === "/sites/register/ignore") {
+      const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+      const k = normName(b.name);
+      if (!k) return error("name required", 400, env, request);
+      if (b.undo) delete ignored[k]; else ignored[k] = String(b.name || "").trim();
+      await cfgSet(env, tid, "site_reg_ignore", ignored);
+      return json({ ok: true }, {}, env, request);
+    }
+
+    if (path === "/sites/register/push-candidates") {
+      const names = Array.isArray(b.names) ? b.names.slice(0, 2000) : [];
+      const source = String(b.source || "external").slice(0, 30);
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const n of names) {
+        const k = normName(n); if (!k) continue;
+        const cur = ext[k] || { name: String(n).trim(), sources: [] };
+        if (!cur.sources.includes(source)) cur.sources.push(source);
+        ext[k] = cur;
+      }
+      await cfgSet(env, tid, "site_reg_ext", ext);
+      return json({ ok: true, stored: Object.keys(ext).length }, {}, env, request);
+    }
+  }
+
+  if (path === "/sites/register/candidates" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const reg = await loadRegister(env, tid);
+    const ignored = reg.ignored;
+    const found = {};   // norm -> { name, sources:Set-ish array, count }
+    const add = (name, source) => {
+      const k = normName(name);
+      if (!k || k.length < 3) return;
+      if (reg.byNorm[k] || ignored[k]) return;
+      const cur = found[k] || (found[k] = { name: String(name).trim(), sources: [], count: 0 });
+      cur.count++;
+      if (!cur.sources.includes(source)) cur.sources.push(source);
+    };
+    // Live SLA jobs' site names
+    try {
+      const { results } = await env.DB.prepare("SELECT data FROM sla_jobs WHERE tenant_id=?").bind(tid).all();
+      for (const r of results || []) { try { const j = JSON.parse(r.data || "{}"); if (j.siteName) add(j.siteName, "jobs"); } catch {} }
+    } catch {}
+    // Captured time segments
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM job_time_segments WHERE tenant_id=? AND site IS NOT NULL AND site!=''").bind(tid).all();
+      for (const r of results || []) add(r.site, "time-capture");
+    } catch {}
+    // SiteLog scans
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT DISTINCT site FROM sitelog_scans WHERE tenant_id=? AND site IS NOT NULL AND site!=''").bind(tid).all();
+      for (const r of results || []) add(r.site, "sitelog");
+    } catch {}
+    // Timesheet mileage rows (recent 26 weeks of saved sheets)
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT data FROM eng_timesheets WHERE tenant_id=? ORDER BY week DESC LIMIT 260").bind(tid).all();
+      for (const r of results || []) {
+        try {
+          const days = (JSON.parse(r.data || "{}").days) || {};
+          for (const d of Object.values(days))
+            for (const m of (Array.isArray(d.mileage) ? d.mileage : []))
+              if (m && m.site) add(m.site, "timesheets");
+        } catch {}
+      }
+    } catch {}
+    // Site names typed on PO records (PO_DB binding — fails soft when unbound)
+    try { for (const n of await poOrderSiteNames(env)) add(n, "po"); } catch {}
+    // Browser-pushed lists (PO worker / compliance stores)
+    try {
+      const ext = await cfgGet(env, tid, "site_reg_ext", {});
+      for (const [k, v] of Object.entries(ext)) {
+        if (reg.byNorm[k] || ignored[k]) continue;
+        const cur = found[k] || (found[k] = { name: v.name, sources: [], count: 0 });
+        cur.count = Math.max(cur.count, 1);
+        for (const s of v.sources || []) if (!cur.sources.includes(s)) cur.sources.push(s);
+      }
+    } catch {}
+    const candidates = Object.values(found).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 500);
+    return json({ ok: true, candidates }, {}, env, request);
+  }
+
+  /* ══ 2. LABOUR LEDGER ═════════════════════════════════════════════════════ */
+
+  if (path === "/ledger/day" && method === "GET") {
+    const user = q.get("user") || me;
+    if (user !== me && !admin) return error("Forbidden", 403, env, request);
+    const date = q.get("date") || londonDate(new Date().toISOString());
+    const reg = await loadRegister(env, tid);
+    const day = await buildDay(env, tid, user, date, reg);
+    return json({ ok: true, ...day }, {}, env, request);
+  }
+
+  if (path === "/ledger/scans" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? ORDER BY at DESC LIMIT 200").bind(tid).all();
+    return json({ ok: true, scans: results || [] }, {}, env, request);
+  }
+
+  /* ══ 3. COSTING + EXCEPTIONS ══════════════════════════════════════════════ */
+
+  if (path === "/costing/summary" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const rates = await ratesMap(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+
+    const bySite = {};   // norm -> aggregate
+    for (const d of days) {
+      for (const e of d.entries) {
+        const key = e.resolved ? e.resolved.norm : ("?" + normName(e.site || "(no site)"));
+        const s = bySite[key] || (bySite[key] = {
+          site: e.resolved ? e.resolved.name : (e.site || "(no site)"),
+          client: e.resolved ? e.resolved.client : "",
+          archived: !!(e.resolved && e.resolved.archived),
+          unmatched: !e.resolved,
+          travelMins: 0, onsiteMins: 0, visitMins: 0, cost: 0, costPartial: false,
+          jobs: {}, engineers: {}
+        });
+        const bucket = e.kind === "travel" ? "travelMins" : (e.src === "sitelog" ? "visitMins" : "onsiteMins");
+        s[bucket] += e.mins;
+        if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
+        const eng = s.engineers[e.user] || (s.engineers[e.user] = { mins: 0, cost: null });
+        eng.mins += e.mins;
+        const r = rates[e.user];
+        if (r && r.rateType === "hour" && r.rate) {
+          eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
+          s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
+        } else if (r && r.rateType === "day") {
+          s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
+        } else {
+          s.costPartial = true;   // no rate on file
+        }
+      }
+    }
+    let sites = Object.values(bySite).map(s => ({
+      ...s,
+      totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+      jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+      engineers: Object.entries(s.engineers).map(([u, v]) => ({ user: u, ...v })).sort((a, b) => b.mins - a.mins)
+    })).sort((a, b) => b.totalMins - a.totalMins);
+    const only = normName(q.get("site") || "");
+    if (only) sites = sites.filter(s => normName(s.site) === only);
+    return json({ ok: true, from, to, sites }, {}, env, request);
+  }
+
+  if (path === "/exceptions" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const { from, to } = rangeOf(q);
+    const reg = await loadRegister(env, tid);
+    const days = await reconcileRange(env, tid, from, to, reg);
+    const ex = [];
+
+    for (const d of days) {
+      for (const e of d.entries) {
+        if (e.flags.includes("auto-closed"))
+          ex.push({ date: d.date, user: d.user, type: "auto-closed", site: e.site,
+            detail: `${e.jobRef || e.site || "segment"} was never finished — closed automatically (${fmtMins(e.mins)} recorded)` });
+        if (e.flags.includes("mismatch"))
+          ex.push({ date: d.date, user: d.user, type: "site-mismatch", site: e.site,
+            detail: `SiteLog scan at "${e.scanSite}" while working job ${e.jobRef || "?"} at "${e.site}"` });
+        if (e.resolved && e.resolved.archived)
+          ex.push({ date: d.date, user: d.user, type: "archived-site", site: e.resolved.name,
+            detail: `${fmtMins(e.mins)} recorded against ARCHIVED site "${e.resolved.name}"${e.jobRef ? " (job " + e.jobRef + ")" : ""}` });
+        if (!e.resolved && e.site)
+          ex.push({ date: d.date, user: d.user, type: "unmatched-site", site: e.site,
+            detail: `"${e.site}" isn't in the site register (${fmtMins(e.mins)}) — add or merge it` });
+      }
+      if (d.unallocMins > UNALLOC_MIN)
+        ex.push({ date: d.date, user: d.user, type: "unallocated",
+          detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead` });
+    }
+
+    // Claimed (timesheet span) vs captured (ledger) per user-day
+    try {
+      const capByKey = {};
+      for (const d of days) capByKey[d.user + "|" + d.date] = d.entries.reduce((a, e) => a + e.mins, 0);
+      const { results } = await env.DB.prepare(
+        "SELECT username, week, data FROM eng_timesheets WHERE tenant_id=? AND week>=? AND week<=?")
+        .bind(tid, mondayOf(from), to).all();
+      for (const r of results || []) {
+        let daysObj = {}; try { daysObj = (JSON.parse(r.data || "{}").days) || {}; } catch {}
+        for (const [date, d] of Object.entries(daysObj)) {
+          if (date < from || date > to || !d || !d.start || !d.finish) continue;
+          const span = spanMins(d.start, d.finish);
+          if (span == null) continue;
+          const captured = capByKey[r.username + "|" + date] || 0;
+          const diff = span - captured;
+          if (Math.abs(diff) > CLAIM_GAP_MIN && captured > 0)
+            ex.push({ date, user: r.username, type: diff > 0 ? "claimed-over-captured" : "captured-over-claimed",
+              detail: `Timesheet says ${fmtMins(span)}, system captured ${fmtMins(captured)} (${diff > 0 ? "+" : ""}${fmtMins(Math.abs(diff))} difference)` });
+        }
+      }
+    } catch {}
+
+    ex.sort((a, b) => b.date.localeCompare(a.date) || a.user.localeCompare(b.user));
+    return json({ ok: true, from, to, exceptions: ex.slice(0, 500) }, {}, env, request);
+  }
+
+  return error("Unknown costing route", 404, env, request);
+}
+
+/* ══ SiteLog scan intake ═════════════════════════════════════════════════════
+   POST /ledger/scan  { username, site, direction: "in"|"out", at? }
+   Header x-portal-sig = base64url(HMAC-SHA256(rawBody, PORTAL_BRIDGE_SECRET)).
+   Called by the SiteLog worker once its patcher lands; sig means no session. */
+async function scanIntake(request, env) {
+  try {
+    const raw = await request.text();
+    const sig = request.headers.get("x-portal-sig") || "";
+    if (!env.PORTAL_BRIDGE_SECRET) return new Response(JSON.stringify({ ok: false, error: "bridge secret unset" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    const want = await hmacB64u(env.PORTAL_BRIDGE_SECRET, raw);
+    if (!timingSafeEq(sig, want)) return new Response(JSON.stringify({ ok: false, error: "bad signature" }), { status: 403, headers: { "Content-Type": "application/json" } });
+    const b = JSON.parse(raw || "{}");
+    const username = String(b.username || "").trim();
+    const site = String(b.site || b.siteName || "").trim();
+    const dir = b.direction === "out" ? "out" : "in";
+    if (!username || !site) return new Response(JSON.stringify({ ok: false, error: "username and site required" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    await ensure(env);
+    await env.DB.prepare(
+      "INSERT INTO sitelog_scans (tenant_id, username, site, direction, at, source) VALUES (?,?,?,?,?,?)")
+      .bind(Number(b.tenantId) || 1, username, site, dir,
+            b.at ? new Date(b.at).toISOString() : new Date().toISOString(), "sitelog").run();
+    return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+  }
+}
+
+/* ══ Reconciliation core ════════════════════════════════════════════════════ */
+
+// One user-day: job segments are primary; scan intervals contribute only the
+// time no job segment covers (clipped — never double-counted); the shift
+// window gives the unallocated remainder.
+async function buildDay(env, tid, user, date, reg) {
+  const entries = [];
+  const dayStart = Date.parse(date + "T00:00:00Z") - 2 * 3600e3;   // London slack
+  const dayEnd = dayStart + 30 * 3600e3;
+
+  // Job segments
+  const segs = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<? ORDER BY started_at")
+      .bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    for (const s of results || []) if (londonDate(s.started_at) === date) segs.push(s);
+  } catch {}
+
+  const nowIso = new Date().toISOString();
+  const today = londonDate(nowIso);
+  for (const s of segs) {
+    let end = s.ended_at, flags = [];
+    if (s.auto_closed) flags.push("auto-closed");
+    if (!end) {
+      if (date < today) { end = lazyCloseAt(s.started_at, date); flags.push("auto-closed"); }
+      else { end = nowIso; flags.push("open"); }
+    }
+    const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 60000));
+    if (!mins) continue;
+    entries.push({
+      user, src: "job", kind: s.kind === "travel" ? "travel" : "onsite",
+      site: s.site || "", jobRef: s.job_ref || s.job_id, start: s.started_at, end,
+      mins, flags, resolved: resolveSite(reg, s.site)
+    });
+  }
+
+  // SiteLog scans → visit intervals, clipped to time not already covered
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM sitelog_scans WHERE tenant_id=? AND username=? AND at>=? AND at<? ORDER BY at")
+      .bind(tid, user, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()).all();
+    const scans = (results || []).filter(s => londonDate(s.at) === date);
+    const open = {};   // site -> inAt
+    const visits = [];
+    for (const s of scans) {
+      const k = normName(s.site);
+      if (s.direction === "in") { if (!open[k]) open[k] = { at: s.at, site: s.site }; }
+      else if (open[k]) { visits.push({ site: open[k].site, start: open[k].at, end: s.at, flags: [] }); delete open[k]; }
+    }
+    for (const k of Object.keys(open)) {   // scanned in, never out
+      const v = open[k];
+      visits.push({ site: v.site, start: v.at, end: lazyCloseAt(v.at, date), flags: ["auto-closed"] });
+    }
+    const jobIv = entries.map(e => [Date.parse(e.start), Date.parse(e.end), e]);
+    for (const v of visits) {
+      let ivs = [[Date.parse(v.start), Date.parse(v.end)]];
+      const vNorm = normName(v.site);
+      for (const [js, je, e] of jobIv) {
+        const next = [];
+        for (const [vs, ve] of ivs) {
+          if (je <= vs || js >= ve) { next.push([vs, ve]); continue; }
+          // overlap — mismatch when the concurrent job is at a DIFFERENT site
+          if (normName(e.site) !== vNorm && !e.flags.includes("mismatch")) {
+            e.flags.push("mismatch"); e.scanSite = v.site;
+          }
+          if (vs < js) next.push([vs, js]);
+          if (ve > je) next.push([je, ve]);
+        }
+        ivs = next;
+      }
+      for (const [vs, ve] of ivs) {
+        const mins = Math.round((ve - vs) / 60000);
+        if (mins < 3) continue;
+        entries.push({ user, src: "sitelog", kind: "onsite", site: v.site, jobRef: "",
+          start: new Date(vs).toISOString(), end: new Date(ve).toISOString(),
+          mins, flags: v.flags.slice(), resolved: resolveSite(reg, v.site) });
+      }
+    }
+  } catch {}
+
+  // Day window → unallocated remainder
+  let shift = null, unallocMins = 0;
+  try {
+    shift = await env.DB.prepare("SELECT * FROM shifts WHERE tenant_id=? AND username=? AND date=?")
+      .bind(tid, user, date).first();
+  } catch {}
+  if (shift && shift.clock_on_at) {
+    const on = Date.parse(shift.clock_on_at);
+    const off = shift.clock_off_at ? Date.parse(shift.clock_off_at) : (date < today ? Date.parse(lazyCloseAt(shift.clock_on_at, date)) : Date.now());
+    let covered = mergeIntervals(entries.map(e => [Math.max(on, Date.parse(e.start)), Math.min(off, Date.parse(e.end))]).filter(([a, b]) => b > a));
+    const total = Math.max(0, off - on);
+    const cov = covered.reduce((a, [s, e]) => a + (e - s), 0);
+    unallocMins = Math.max(0, Math.round((total - cov) / 60000));
+  }
+
+  entries.sort((a, b) => a.start.localeCompare(b.start));
+  return { user, date, entries, unallocMins,
+    shift: shift ? { on: shift.clock_on_at || "", off: shift.clock_off_at || "" } : null,
+    totals: {
+      travelMins: entries.filter(e => e.kind === "travel").reduce((a, e) => a + e.mins, 0),
+      onsiteMins: entries.filter(e => e.kind !== "travel" && e.src === "job").reduce((a, e) => a + e.mins, 0),
+      visitMins: entries.filter(e => e.src === "sitelog").reduce((a, e) => a + e.mins, 0),
+      unallocMins
+    } };
+}
+
+// Every user-day in a range that has ANY activity (segments, scans or a shift).
+async function reconcileRange(env, tid, from, to, reg) {
+  const users = new Set();
+  const dates = {};   // user -> Set of dates
+  const seen = (u, d) => { users.add(u); (dates[u] = dates[u] || new Set()).add(d); };
+  const lo = from + "T00:00:00Z", hi = to + "T23:59:59Z";
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, started_at FROM job_time_segments WHERE tenant_id=? AND started_at>=? AND started_at<=?")
+      .bind(tid, lo, hi).all();
+    for (const r of results || []) { const d = londonDate(r.started_at); if (d >= from && d <= to) seen(r.username, d); }
+  } catch {}
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, at FROM sitelog_scans WHERE tenant_id=? AND at>=? AND at<=?").bind(tid, lo, hi).all();
+    for (const r of results || []) { const d = londonDate(r.at); if (d >= from && d <= to) seen(r.username, d); }
+  } catch {}
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT username, date FROM shifts WHERE tenant_id=? AND date>=? AND date<=?").bind(tid, from, to).all();
+    for (const r of results || []) seen(r.username, r.date);
+  } catch {}
+  const out = [];
+  for (const u of users) for (const d of dates[u]) out.push(await buildDay(env, tid, u, d, reg));
+  return out;
+}
+
+/* ══ Register loading + resolution ══════════════════════════════════════════ */
+
+async function loadRegister(env, tid) {
+  const list = [];
+  const byNorm = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE")
+      .bind(tid).all();
+    for (const r of results || []) {
+      const entry = { client: r.client, siteNumber: r.site_number,
+        name: r.site_name || ("Site " + r.site_number), postcode: (r.postcode || "").replace(/\*+$/, ""),
+        active: r.active !== 0, archived: !!r.archived, jobNumber: r.job_number || "",
+        norm: normName(r.site_name || r.site_number) };
+      list.push(entry);
+      if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
+    }
+  } catch {}
+  const aliases = await cfgGet(env, tid, "site_aliases", {});
+  for (const [norm, tgt] of Object.entries(aliases)) {
+    const target = list.find(s => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
+    if (target && !byNorm[norm]) byNorm[norm] = target;
+  }
+  const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
+  return { list, byNorm, aliases, ignored };
+}
+
+function resolveSite(reg, name) {
+  const k = normName(name);
+  return (k && reg.byNorm[k]) || null;
+}
+
+/* ══ Rates (mirrors timesheets.js effectiveCfg, read-only subset) ═══════════ */
+
+async function ratesMap(env, tid) {
+  const out = {};
+  let cfg = { byUser: {} };
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`engts:cfg:${tid}`).first();
+    if (row && row.value) cfg = Object.assign(cfg, JSON.parse(row.value));
+  } catch {}
+  try {
+    const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
+    const num = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+    for (const u of results || []) {
+      let profile = {}; try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+      const mine = (cfg.byUser && cfg.byUser[u.username]) || {};
+      const rateType = mine.rateType === "day" ? "day" : "hour";
+      const rate = num(mine.rate) ?? (rateType === "day" ? num(profile.dayRate) : num(profile.hourlyRate)) ?? num(profile.hourlyRate);
+      out[u.username] = { rate, rateType };
+    }
+  } catch {}
+  return out;
+}
+
+/* ══ Tables + small helpers ═════════════════════════════════════════════════ */
+
+async function ensure(env) {
+  // Register flag on sites (created elsewhere; column added here).
+  try { await env.DB.prepare("ALTER TABLE sites ADD COLUMN archived INTEGER DEFAULT 0").run(); } catch {}
+  // Segment table may not exist yet on a fresh DB (normally created by
+  // timesheets.js) — create-if-missing, then add our columns.
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS job_time_segments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, job_id TEXT NOT NULL, job_ref TEXT, site TEXT, postcode TEXT,
+      started_at TEXT NOT NULL, ended_at TEXT)`).run();
+  } catch {}
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+      username TEXT NOT NULL, site TEXT NOT NULL, direction TEXT NOT NULL,
+      at TEXT NOT NULL, source TEXT)`).run();
+  } catch {}
+}
+
+async function cfgGet(env, tid, name, fallback) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(`${name}:${tid}`).first();
+    if (row && row.value) return JSON.parse(row.value);
+  } catch {}
+  return fallback;
+}
+async function cfgSet(env, tid, name, value) {
+  await env.DB.prepare(
+    "INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    .bind(tid, `${name}:${tid}`, JSON.stringify(value)).run();
+}
+
+function normName(s) {
+  return String(s || "").toLowerCase()
+    .replace(/[’'`"]/g, "").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function slugNum(name) {
+  const s = normName(name).replace(/ /g, "-").slice(0, 40);
+  return s || ("site-" + Math.abs(hashCode(String(name))));
+}
+function hashCode(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; } return h; }
+
+function londonDate(iso) {
+  try { return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
+  catch { return String(iso).slice(0, 10); }
+}
+// Forgot-to-finish close: 19:00-ish that day, or an hour after it started.
+function lazyCloseAt(startedIso, date) {
+  const cut = new Date(startedIso); cut.setHours(cut.getHours() + 1);
+  const evening = new Date(date + "T18:00:00Z");
+  return (cut > evening ? cut : evening).toISOString();
+}
+function mergeIntervals(ivs) {
+  const s = ivs.slice().sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const iv of s) {
+    if (out.length && iv[0] <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], iv[1]);
+    else out.push(iv.slice());
+  }
+  return out;
+}
+function rangeOf(q) {
+  const today = londonDate(new Date().toISOString());
+  let from = q.get("from") || "", to = q.get("to") || "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) to = today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) { const d = new Date(to + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - 27); from = d.toISOString().slice(0, 10); }
+  return { from, to };
+}
+function mondayOf(dateStr) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function spanMins(start, finish) {
+  const m = s => { const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim()); return x ? (+x[1]) * 60 + (+x[2]) : null; };
+  const a = m(start), b = m(finish);
+  if (a == null || b == null) return null;
+  return b >= a ? b - a : (b + 1440 - a);
+}
+function fmtMins(m) { return Math.floor(m / 60) + "h " + (m % 60) + "m"; }
+
+async function hmacB64u(secret, body) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(body));
+  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function timingSafeEq(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
