@@ -1,65 +1,56 @@
-# Mostlane Portal — single consolidated Worker
-# Replaces the ~19 separate *.jamie-def.workers.dev Workers with one API,
-# backed by a single D1 (SQLite) database instead of JSON files / KV.
+# Mostlane Portal — single consolidated Worker (deployed via Cloudflare Workers
+# Builds, connected to the Mostlane/Test repo, root directory = worker/).
 #
-# Deploy:  npx wrangler deploy
-# Dev:     npx wrangler dev
-# DB init: npx wrangler d1 execute mostlane --file=./schema.sql --remote
+# Bindings + non-secret vars live here so every deploy is COMPLETE and nothing
+# can silently go missing. SECRETS are never in git — they're set once in the
+# Cloudflare dashboard (Settings → Variables and Secrets) and persist across
+# deploys. See the secret list at the bottom.
 
-name = "mostlane-portal"
+name = "mostlane-api"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
-# ── D1: the single source of truth for all portal data ──────────────
-# Create once with:  npx wrangler d1 create mostlane
-# then paste the printed database_id below.
+# Keep the van-check reminder cron (hourly; self-gates to Mon 07:00 + the
+# pre-deadline chase). Declaring it here restores it automatically on deploy.
+[triggers]
+crons = ["0 * * * *"]
+
+# ── D1 databases ────────────────────────────────────────────────────
 [[d1_databases]]
 binding = "DB"
 database_name = "mostlane"
-database_id = "PASTE_DATABASE_ID_HERE"
+database_id = "e483b3b5-2cfd-4742-ae51-427c31598c87"
 
-# ── R2: binary files (SLA job photos & signatures) ──────────────────
-# These don't belong in D1. Reuses the existing bucket the mostlane-sla
-# Worker already wrote to, so existing photos keep working.
-# Create/confirm with:  npx wrangler r2 bucket create mostlane-job-files
+# PO system's own D1 — powers PO-site suggestions on the engineer timesheet.
+[[d1_databases]]
+binding = "PO_DB"
+database_name = "mostlane-po"
+database_id = "bcaf5f51-3085-4cdf-a993-42278893c313"
+
+# ── R2 buckets ──────────────────────────────────────────────────────
 [[r2_buckets]]
 binding = "JOB_FILES"
-bucket_name = "mostlane-job-files"   # set to the SLA Worker's existing bucket name
+bucket_name = "mostlane-job-files"
 
-# Asset photos (reuses the mostlane-assets Worker's existing bucket so old
-# images keep resolving).
 [[r2_buckets]]
 binding = "ASSET_BUCKET"
-bucket_name = "mostlane-assets"      # set to the assets Worker's existing bucket name
+bucket_name = "mostlane-asset-images"
 
-# ── Secrets (set via `wrangler secret put`, never commit them) ───────
-# SESSION_SECRET       - HMAC key used to sign session tokens
-#   npx wrangler secret put SESSION_SECRET
-# PDFSHIFT_API_KEY     - for SLA job PDF export (/sla/jobs/:id/export.pdf, /sla/pdf)
-#   npx wrangler secret put PDFSHIFT_API_KEY
-# MASTER_PASSWORD      - break-glass master password. Logs into ANY active account
-#   (audited as outcome "master" in login_history). Guard it; rotate if exposed.
-#   npx wrangler secret put MASTER_PASSWORD
-# RESEND_API_KEY       - transactional email (welcome + password-reset). Free tier
-#   at resend.com. This is all that's needed for the Worker to send email.
-#   npx wrangler secret put RESEND_API_KEY
-# RESET_EMAIL_WEBHOOK  - OPTIONAL fallback if you'd rather email via a webhook
-#   (e.g. a Zapier Catch Hook → Outlook/365). Only used if RESEND_API_KEY is unset.
-#   Receives JSON: { to, subject, html, text }
-#   npx wrangler secret put RESET_EMAIL_WEBHOOK
-#
-# Example local-dev values live in .dev.vars (git-ignored).
-
+# ── Non-secret configuration ────────────────────────────────────────
 [vars]
-# Non-secret config. Front-end origin(s) allowed to call this API (CORS).
 ALLOWED_ORIGINS = "*"
-SESSION_TTL_HOURS = "12"
-# Base URL of the portal front-end, used to build welcome / password-reset links.
+SESSION_TTL_HOURS = "2160"                       # 90-day logins
 APP_BASE_URL = "https://mostlane-portal.com"
-# From address for portal emails. The domain must be verified in your email
-# provider (Resend) for reliable delivery.
 EMAIL_FROM = "Mostlane <no-reply@mostlane-portal.com>"
-# Public base URL of the JOB_FILES R2 bucket (for photo/signature links).
 R2_PUBLIC_BASE = "https://pub-0a9aac7bfc6749bbbdbf9660503968e6.r2.dev"
-# Optional: base64 PNG of the Mostlane logo for PDF/HTML job exports.
-# MOSTLANE_LOGO_BASE64 = ""
+VAPID_PUBLIC = "BEZn7zi4zksuL2fy_OjgrllkbT0aM6gyQfHNO-br5cZ3LvSLadaP5RqUbjJiIqUX7LmlziVzLJRbrFRsj5EC-Jw"
+PUSH_CONTACT = "mailto:no-reply@mostlane-portal.com"
+
+# ── SECRETS — set in the dashboard, NEVER here ──────────────────────
+#   MASTER_PASSWORD        (your break-glass password)
+#   RESEND_API_KEY         (from resend.com)
+#   PORTAL_BRIDGE_SECRET   (shared with the SiteLog worker)
+#   SITELOG_ADMIN_SECRET   (your SiteLog admin PIN)
+#   HS_PLAN_TOKEN          (shared with the mostlane-hs worker as APP_TOKEN)
+#   VAPID_PRIVATE          (pairs with VAPID_PUBLIC above)
+#   JOBS_INBOUND_TOKEN     (shared with the Zapier job-intake zap)
