@@ -249,12 +249,41 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, prefs }, {}, env, request);
   }
 
+  // Engineer name aliases (map an alternate name → the canonical portal person),
+  // so e.g. the PO system's "JT" folds into "John Thorn" everywhere in costing.
+  if (path === "/costing/eng-aliases" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const alias = normName(b.alias), user = String(b.user || "").trim();
+    if (!alias || !user) return error("alias and user required", 400, env, request);
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    aliases[alias] = user;
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    delete aliases[normName(b.alias)];
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
     const days = await reconcileRange(env, tid, from, to, reg);
+    // Engineer aliases: collapse different names for one person (e.g. the PO
+    // system's "JT" → the portal's "John Thorn") so their labour + POs group.
+    const eAlias = await cfgGet(env, tid, "eng_aliases", {});
+    const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
 
     const bySite = {};   // norm -> aggregate
     const siteFor = (name, resolved) => {
@@ -309,7 +338,7 @@ export async function handle(request, env, ctx, url, sess) {
           if (!p.costedVisits) continue;   // only closed (costed) visits carry cost
           const portalUser = (p.portalUsername || "").trim();
           const isEmployee = !!portalUser;
-          const who = isEmployee ? portalUser : (p.name || "(unknown)");
+          const who = canonEng(isEmployee ? portalUser : (p.name || "(unknown)"));
           slCovered.add(sKey + "::" + normName(who));
           const workMins = Math.round((p.workH || 0) * 60);
           const travMins = Math.round((p.travelH || 0) * 60);
@@ -322,7 +351,7 @@ export async function handle(request, env, ctx, url, sess) {
           // Cost: portal rate for employees (falls back to SiteLog's own figure
           // when no portal rate is on file, so £ is never lost); SiteLog's cost
           // for subcontractors.
-          const r = isEmployee ? rates[portalUser] : null;
+          const r = isEmployee ? (rates[who] || rates[portalUser]) : null;
           let cost = null;
           if (r && r.rateType === "hour" && r.rate) {
             const fuel = (r.fuelPerMile != null) ? (p.miles || 0) * r.fuelPerMile : (p.fuelCost || 0);
@@ -350,15 +379,16 @@ export async function handle(request, env, ctx, url, sess) {
       for (const e of d.entries) {
         const s = siteFor(e.site, e.resolved);
         const sKey = siteKeyOf(e.resolved, e.site);
-        if (slCovered.has(sKey + "::" + normName(e.user))) continue;   // deduped
+        const cu = canonEng(e.user);
+        if (slCovered.has(sKey + "::" + normName(cu))) continue;   // deduped
         const bucket = e.kind === "travel" ? "travelMins" : (e.src === "sitelog" ? "visitMins" : "onsiteMins");
         s[bucket] += e.mins;
         if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
-        const eng = engFor(s, e.user);
+        const eng = engFor(s, cu);
         eng.mins += e.mins;
         eng.days.add(d.date);   // distinct on-site days = visits for tap-only people
         addSrc(eng, "sla");
-        const r = rates[e.user];
+        const r = rates[cu];
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
@@ -380,7 +410,7 @@ export async function handle(request, env, ctx, url, sess) {
       const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
       if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addTo(s.poB, p.d || to, val); }
       else s.poUnpriced++;
-      const eng = engFor(s, p.engineer_name || "(unknown)");
+      const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
       if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
       eng.pos = eng.pos || [];
       eng.pos.push({ supplier: p.supplier || "", cost: (val != null && isFinite(val)) ? val : null,
@@ -399,7 +429,7 @@ export async function handle(request, env, ctx, url, sess) {
       const visits = await fetchSitelogVisits(env, from, to);
       for (const v of (visits || [])) {
         if (!v.check_in_at || !v.check_out_at) continue;
-        const who = String(v.portal_username || "").trim() || jcNameLike(v);
+        const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
         const resolved = resolveSiteCode(reg, v.site_code);
         const sKey = siteKeyOf(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
