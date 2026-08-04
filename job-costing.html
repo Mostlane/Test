@@ -30,6 +30,14 @@
   .sub{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;display:none;font-size:13px;}
   .sub .li{display:flex;justify-content:space-between;gap:10px;padding:4px 0;color:var(--muted);}
   .sub .li b{color:var(--ink);font-weight:650;}
+  .sub .li.eng{color:var(--ink);font-weight:650;border-top:1px solid var(--line);margin-top:4px;padding-top:7px;}
+  .sub .li.po{font-size:12px;padding:2px 0 2px 16px;}
+  .poamt{color:#7c3aed;font-weight:650;}
+  .grouplbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:10px 0 2px;}
+  .totline{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;font-weight:650;margin:2px 0 2px;}
+  .totline span{color:var(--ink);}
+  .note{font-size:11px;color:var(--muted);margin-top:8px;}
+  .chip.unpriced{background:#ede9fe;color:#6d28d9;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
   .chip.arch{background:var(--amberbg);color:var(--amber);}
   .chip.unm{background:#fee2e2;color:var(--red);}
@@ -91,20 +99,38 @@
       $("costView").innerHTML=d.sites.map(function(s,i){
         var tot=s.totalMins||1;
         var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'');
-        var engs=s.engineers.map(function(e){return '<div class="li"><span>👷 '+esc(e.user)+'</span><span><b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):'')+'</span></div>';}).join("");
+        // Per-engineer: labour (hours + £) then that engineer's PO lines beneath.
+        var engs=s.engineers.map(function(e){
+          var head='<div class="li eng"><span>👷 '+esc(e.user)+'</span><span>'+
+            (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):''):'')+
+            (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
+          var pos=(e.pos||[]).map(function(p){
+            return '<div class="li po"><span>🧾 '+esc(p.supplier||"PO")+(p.incident?' · '+esc(p.incident):'')+'</span>'+
+              '<span>'+(p.cost!=null?money(p.cost):'<i style="color:var(--muted)">unpriced</i>')+'</span></div>';
+          }).join("");
+          return head+pos;
+        }).join("");
         var jobs=(s.jobs||[]).slice(0,10).map(function(j){return '<div class="li"><span>🔧 '+esc(j.ref)+'</span><b>'+hm(j.mins)+'</b></div>';}).join("");
+        var poNote=s.poUnpriced?('<span class="chip unpriced" title="POs raised but not yet priced">'+s.poUnpriced+' PO unpriced</span>'):'';
         return '<div class="card siteRow" data-i="'+i+'">'+
           '<div class="siteHead"><span class="nm">'+esc(s.site)+'</span>'+chips+
-            '<span class="chip t">'+hm(s.totalMins)+'</span>'+
-            '<span class="cost">'+(s.cost?money(s.cost):'')+(s.costPartial?' <small style="color:var(--muted);font-weight:400">(partial — some rates missing/day-rate)</small>':'')+'</span></div>'+
+            '<span class="cost">'+money(s.grandTotal||0)+(s.costPartial?' <small style="color:var(--muted);font-weight:400">*</small>':'')+'</span></div>'+
+          '<div class="totline">'+
+            '<span>🛠 Labour '+(s.laborCost?money(s.laborCost):hm(s.totalMins))+'</span>'+
+            '<span>🧾 PO '+money(s.poTotal||0)+'</span>'+poNote+'</div>'+
           '<div class="bar">'+
             '<i class="tr" style="width:'+(s.travelMins/tot*100)+'%" title="Travel '+hm(s.travelMins)+'"></i>'+
             '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
             '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
-          '<div class="sub"><div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
+          '<div class="sub">'+
+            '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
             '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
             (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
-            engs+jobs+'</div></div>';
+            '<div class="grouplbl">People — labour + their POs</div>'+
+            (engs||'<div class="li"><span style="color:var(--muted)">No time or POs yet</span></div>')+
+            (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
+            (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
+          '</div></div>';
       }).join("");
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
   }
