@@ -156,6 +156,7 @@ export async function trackJobTime(env, tid, actor, before, after) {
 // { "YYYY-MM-DD": { start, finish|null, open, jobs:[{ref,site,postcode}] } }.
 // A segment left open on an earlier day is lazily closed at 19:00 that day
 // (or an hour after it started, if it started later than that).
+const MAX_SEG_MS = 14 * 3600e3; // a session longer than a long shift = forgotten status change → clamp
 async function jobTimeAuto(env, tid, username, monday) {
   const endD = new Date(monday + "T12:00:00Z"); endD.setUTCDate(endD.getUTCDate() + 7);
   const end = endD.toISOString().slice(0, 10);
@@ -170,15 +171,23 @@ async function jobTimeAuto(env, tid, username, monday) {
     for (const seg of results || []) {
       const date = lDate(seg.started_at);
       let endedAt = seg.ended_at, open = false;
+      const forgotClose = () => {   // close at ~19:00 that day (or start+1h)
+        const cut = new Date(seg.started_at); cut.setHours(cut.getHours() + 1);
+        const sevenPm = new Date(date + "T18:00:00Z");   // ≈19:00 London summer / 18:00 winter — a fallback
+        return (cut > sevenPm ? cut : sevenPm).toISOString();
+      };
       if (!endedAt) {
         if (date < today) {
-          // forgot to complete — close at 19:00 that day (or start+1h)
-          const cut = new Date(seg.started_at); cut.setHours(cut.getHours() + 1);
-          const sevenPm = new Date(date + "T18:00:00Z");   // ≈19:00 London in summer, 18:00 in winter — close enough for a fallback
-          endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
+          endedAt = forgotClose();
           // auto_closed marks it for the exceptions list ("never finished the job")
           try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
         } else { open = true; }
+      } else if (Date.parse(endedAt) - Date.parse(seg.started_at) > MAX_SEG_MS) {
+        // Closed only when the NEXT job was tapped days later → a forgotten
+        // status change. Clamp so one stale session can't span days (would
+        // otherwise show a wild finish time and inflate pay/costing).
+        endedAt = forgotClose();
+        try { await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run(); } catch {}
       }
       const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
       o.s = Math.min(o.s, Date.parse(seg.started_at));

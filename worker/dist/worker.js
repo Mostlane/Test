@@ -2955,6 +2955,7 @@ async function trackJobTime(env, tid, actor, before, after) {
   } catch {
   }
 }
+var MAX_SEG_MS = 14 * 36e5;
 async function jobTimeAuto(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -2982,18 +2983,27 @@ async function jobTimeAuto(env, tid, username, monday) {
     for (const seg of results || []) {
       const date = lDate(seg.started_at);
       let endedAt = seg.ended_at, open = false;
+      const forgotClose = () => {
+        const cut = new Date(seg.started_at);
+        cut.setHours(cut.getHours() + 1);
+        const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
+        return (cut > sevenPm ? cut : sevenPm).toISOString();
+      };
       if (!endedAt) {
         if (date < today) {
-          const cut = new Date(seg.started_at);
-          cut.setHours(cut.getHours() + 1);
-          const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
-          endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
+          endedAt = forgotClose();
           try {
             await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
           } catch {
           }
         } else {
           open = true;
+        }
+      } else if (Date.parse(endedAt) - Date.parse(seg.started_at) > MAX_SEG_MS) {
+        endedAt = forgotClose();
+        try {
+          await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
+        } catch {
         }
       }
       const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
@@ -8767,6 +8777,8 @@ async function handle21(request, env, ctx, url, sess) {
 // src/routes/costing.js
 var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
+var MAX_SEG_HOURS = 14;
+var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
 async function handle22(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
@@ -9269,6 +9281,10 @@ async function buildDay(env, tid, user, date, reg) {
         end = nowIso;
         flags.push("open");
       }
+    }
+    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS2) {
+      end = lazyCloseAt(s.started_at, date);
+      if (!flags.includes("auto-closed")) flags.push("auto-closed");
     }
     const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 6e4));
     if (!mins) continue;
