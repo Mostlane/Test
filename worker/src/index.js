@@ -151,6 +151,10 @@ export default {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sendWeeklyReminders(env).catch(e => console.error("scheduled van-check reminder:", e)));
+    // P4: pull recent SiteLog visits and reconcile them into SLA sessions —
+    // close sessions a scan-out ended, and feed project scans into the
+    // engineer timesheet. Idempotent; fails soft when SiteLog is unset/down.
+    ctx.waitUntil(costing.reconcileSitelogSessions(env, 1).catch(e => console.error("scheduled sitelog reconcile:", e)));
   },
 };
 

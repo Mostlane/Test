@@ -8953,6 +8953,11 @@ async function handle22(request, env, ctx, url, sess) {
     ).bind(tid).all();
     return json({ ok: true, scans: results || [] }, {}, env, request);
   }
+  if (path === "/costing/reconcile-sitelog" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
+    return json(r, {}, env, request);
+  }
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
@@ -9472,6 +9477,117 @@ async function fetchSitelogCosting(env, from, to) {
     return null;
   }
 }
+async function fetchSitelogVisits(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  try {
+    const res = await fetch(
+      base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
+      { headers: { "x-admin-secret": secret } }
+    );
+    if (!res.ok) return null;
+    const j = await res.json();
+    return Array.isArray(j.visits) ? j.visits : null;
+  } catch {
+    return null;
+  }
+}
+async function reconcileSitelogSessions(env, tid, opts) {
+  const o = opts || {};
+  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
+  await ensure3(env);
+  const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
+  const to = londonDate3(now.toISOString());
+  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const from = londonDate3(fromD.toISOString());
+  const visits = await fetchSitelogVisits(env, from, to);
+  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
+  const reg = await loadRegister(env, tid);
+  let closed = 0, created = 0, skipped = 0;
+  for (const v of visits) {
+    const user = String(v.portal_username || "").trim();
+    if (!user) {
+      skipped++;
+      continue;
+    }
+    if (!v.check_in_at || !v.check_out_at) {
+      skipped++;
+      continue;
+    }
+    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
+    if (!(outMs > inMs)) {
+      skipped++;
+      continue;
+    }
+    const resolved = resolveSiteCode(reg, v.site_code);
+    const siteName = resolved ? resolved.name : v.provided_site_name || String(v.site_code || "").trim();
+    const dayKey = londonDate3(v.check_out_at);
+    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 36e5;
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL"
+      ).bind(tid, user).all();
+      for (const seg of results || []) {
+        const sMs = Date.parse(seg.started_at);
+        if (sMs <= outMs && sMs >= dayStartMs) {
+          await env.DB.prepare(
+            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?"
+          ).bind(new Date(outMs).toISOString(), seg.id, tid).run();
+          closed++;
+        }
+      }
+    } catch {
+    }
+    const vid = "sl:" + (v.visit_id != null ? v.visit_id : user + "|" + v.check_in_at);
+    let exists = false, overlaps = false;
+    try {
+      const dup = await env.DB.prepare(
+        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1"
+      ).bind(tid, vid).first();
+      exists = !!dup;
+    } catch {
+    }
+    if (!exists) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL"
+        ).bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 36e5).toISOString()).all();
+        for (const seg of results || []) {
+          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
+          if (eMs > inMs && sMs < outMs) {
+            overlaps = true;
+            break;
+          }
+        }
+      } catch {
+      }
+      if (!overlaps) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
+          ).bind(
+            tid,
+            user,
+            vid,
+            "",
+            siteName,
+            resolved ? resolved.postcode : "",
+            new Date(inMs).toISOString(),
+            new Date(outMs).toISOString(),
+            "onsite",
+            vid
+          ).run();
+          created++;
+        } catch {
+        }
+      } else {
+        skipped++;
+      }
+    }
+  }
+  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
+}
 async function poRows(env, from, to) {
   if (!env.PO_DB) return [];
   try {
@@ -9534,6 +9650,10 @@ async function ensure3(env) {
   }
   try {
     await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run();
   } catch {
   }
   try {
@@ -9747,6 +9867,7 @@ var index_default = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
+    ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
   }
 };
 var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
