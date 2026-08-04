@@ -245,18 +245,73 @@ export async function handle(request, env, ctx, url, sess) {
       // Match a PO's engineer_name to a labour engineer by normalised name so
       // one person's labour + POs sit together; else start a new engineer row.
       let key = Object.keys(s.engineers).find(k => normName(k) === normName(name)) || name || "(unknown)";
-      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [] });
+      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [], src: null });
     };
+    const addSrc = (eng, src) => { eng.src = !eng.src ? src : (eng.src === src ? src : "mixed"); };
 
-    // Labour
+    // ── SiteLog labour (authoritative per site+person) ───────────────────────
+    // Pull SiteLog's own job costing and fold it in FIRST, so we know which
+    // (site, person) pairs SiteLog covers and can drop the matching SLA time
+    // below (no double-count). Employees (linked portal users) are costed at the
+    // PORTAL rate on SiteLog's measured hours/miles; subcontractors keep
+    // SiteLog's own computed cost (SiteLog holds their rate). Fails soft: when
+    // SiteLog is unreachable, slSites is null and costing is SLA-only as before.
+    const slSites = await fetchSitelogCosting(env, from, to);
+    const slCovered = new Set();   // `${siteKey}::${normName(person)}` handled by SiteLog
+    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
+    if (slSites) {
+      for (const slSite of slSites) {
+        const resolved = resolveSiteCode(reg, slSite.siteCode);
+        const s = siteFor(resolved ? resolved.name : (slSite.siteCode || "(no site)"), resolved);
+        const sKey = siteKeyOf(resolved, slSite.siteCode);
+        for (const p of (slSite.people || [])) {
+          if (!p.costedVisits) continue;   // only closed (costed) visits carry cost
+          const portalUser = (p.portalUsername || "").trim();
+          const isEmployee = !!portalUser;
+          const who = isEmployee ? portalUser : (p.name || "(unknown)");
+          slCovered.add(sKey + "::" + normName(who));
+          const workMins = Math.round((p.workH || 0) * 60);
+          const travMins = Math.round((p.travelH || 0) * 60);
+          s.visitMins += workMins;
+          s.travelMins += travMins;
+          const eng = engFor(s, who);
+          eng.mins += workMins + travMins;
+          addSrc(eng, "sitelog");
+          // Cost: portal rate for employees (falls back to SiteLog's own figure
+          // when no portal rate is on file, so £ is never lost); SiteLog's cost
+          // for subcontractors.
+          const r = isEmployee ? rates[portalUser] : null;
+          let cost = null;
+          if (r && r.rateType === "hour" && r.rate) {
+            const fuel = (r.fuelPerMile != null) ? (p.miles || 0) * r.fuelPerMile : (p.fuelCost || 0);
+            cost = ((p.workH || 0) + (p.travelH || 0)) * r.rate + fuel;
+          } else {
+            cost = (p.total != null) ? Number(p.total) : null;   // SiteLog's own cost
+          }
+          if (cost != null && isFinite(cost)) {
+            cost = Math.round(cost * 100) / 100;
+            eng.cost = Math.round(((eng.cost || 0) + cost) * 100) / 100;
+            s.cost = Math.round((s.cost + cost) * 100) / 100;
+          } else {
+            s.costPartial = true;
+          }
+        }
+      }
+    }
+
+    // ── SLA labour (job_time_segments), skipping anyone SiteLog already covers
+    // at that site — SiteLog is authoritative for a scanned visit.
     for (const d of days) {
       for (const e of d.entries) {
         const s = siteFor(e.site, e.resolved);
+        const sKey = siteKeyOf(e.resolved, e.site);
+        if (slCovered.has(sKey + "::" + normName(e.user))) continue;   // deduped
         const bucket = e.kind === "travel" ? "travelMins" : (e.src === "sitelog" ? "visitMins" : "onsiteMins");
         s[bucket] += e.mins;
         if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
         const eng = engFor(s, e.user);
         eng.mins += e.mins;
+        addSrc(eng, "sla");
         const r = rates[e.user];
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
@@ -294,14 +349,16 @@ export async function handle(request, env, ctx, url, sess) {
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
         jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
         engineers: Object.entries(s.engineers).map(([u, v]) => ({
-          user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0,
+          user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0, src: v.src || null,
           pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
         })).sort((a, b) => ((b.cost || 0) + (b.poCost || 0)) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins)
       };
     }).sort((a, b) => (b.grandTotal - a.grandTotal) || (b.totalMins - a.totalMins));
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter(s => normName(s.site) === only);
-    return json({ ok: true, from, to, sites }, {}, env, request);
+    // sitelog: true = SiteLog costing folded in; false = SiteLog unreachable or
+    // SITELOG_ADMIN_SECRET unset, so labour is SLA-only (front-end shows a note).
+    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
   }
 
   if (path === "/exceptions" && method === "GET") {
@@ -342,6 +399,20 @@ export async function handle(request, env, ctx, url, sess) {
       else if (!resolved && p.site)
         ex.push({ date: p.d || to, user: p.engineer_name || "", type: "unmatched-site", site: p.site,
           detail: `PO (${money}, ${p.supplier || "supplier"}) on "${p.site}" — not in the site register; add or merge it` });
+    }
+
+    // SiteLog labour landing on a site the register doesn't know (so it can't be
+    // costed against the right project) or on an archived one.
+    const slSites = await fetchSitelogCosting(env, from, to);
+    for (const slSite of (slSites || [])) {
+      const resolved = resolveSiteCode(reg, slSite.siteCode);
+      const hrs = (slSite.workH || 0) + (slSite.travelH || 0);
+      if (resolved && resolved.archived)
+        ex.push({ date: to, user: "", type: "archived-site", site: resolved.name,
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) recorded against ARCHIVED site "${resolved.name}"` });
+      else if (!resolved && slSite.siteCode)
+        ex.push({ date: to, user: "", type: "unmatched-site", site: String(slSite.siteCode),
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) at store "${slSite.siteCode}" — not matched to the site register; add or merge it` });
     }
 
     // Claimed (timesheet span) vs captured (ledger) per user-day
@@ -557,13 +628,49 @@ async function loadRegister(env, tid) {
     const target = list.find(s => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
     if (target && !byNorm[norm]) byNorm[norm] = target;
   }
+  // byCode: SiteLog scans/costing key sites by a numeric store code
+  // (digitsOf(name), same convention the portal uses when it pushes geofences).
+  // Map those back to a register entry so SiteLog labour lands on the right site.
+  const byCode = {};
+  for (const e of list) {
+    for (const code of [String(e.siteNumber || ""), digitsOf(e.name), digitsOf(e.siteNumber)]) {
+      if (code && !byCode[code]) byCode[code] = e;
+    }
+  }
   const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
-  return { list, byNorm, aliases, ignored };
+  return { list, byNorm, byCode, aliases, ignored };
 }
 
 function resolveSite(reg, name) {
   const k = normName(name);
   return (k && reg.byNorm[k]) || null;
+}
+// Resolve a SiteLog site_code (numeric store code, or a name) to a register
+// entry: by code first, then by name/alias (so a code OR a name both land).
+function resolveSiteCode(reg, code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const d = digitsOf(c);
+  return (d && reg.byCode && reg.byCode[d]) || (reg.byCode && reg.byCode[c]) || resolveSite(reg, c) || null;
+}
+function digitsOf(s) { return String(s || "").replace(/\D+/g, ""); }
+
+// Pull SiteLog's own job-costing (per-site → per-person labour, computed with
+// SiteLog's rates). Custom domain, so server-side fetch works (mostlane-api is
+// on *.workers.dev and CANNOT be fetched back — the flow is always portal→
+// SiteLog). Fails soft to null so costing degrades to SLA-only when SiteLog is
+// unreachable or SITELOG_ADMIN_SECRET isn't set.
+async function fetchSitelogCosting(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  try {
+    const res = await fetch(base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
+      { headers: { "x-admin-secret": secret } });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j && j.ok && Array.isArray(j.sites)) ? j.sites : null;
+  } catch { return null; }
 }
 
 // PO spend from the PO system's own D1 (PO_DB binding). Fails soft to [] when
@@ -592,12 +699,17 @@ async function ratesMap(env, tid) {
   try {
     const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
     const num = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+    const defs = cfg.defaults || {};
+    const defPence = num(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {}; try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch {}
       const mine = (cfg.byUser && cfg.byUser[u.username]) || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
       const rate = num(mine.rate) ?? (rateType === "day" ? num(profile.dayRate) : num(profile.hourlyRate)) ?? num(profile.hourlyRate);
-      out[u.username] = { rate, rateType };
+      // Fuel: portal pence-per-mile (per-user override → default). £/mile for costing.
+      const pence = num(mine.pencePerMile) ?? defPence;
+      const fuelPerMile = pence != null ? pence / 100 : null;
+      out[u.username] = { rate, rateType, fuelPerMile };
     }
   } catch {}
   return out;

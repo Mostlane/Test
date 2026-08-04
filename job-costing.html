@@ -39,6 +39,8 @@
   .note{font-size:11px;color:var(--muted);margin-top:8px;}
   .chip.unpriced{background:#ede9fe;color:#6d28d9;}
   .warnbar{background:#fef3c7;border:1px solid #fcd34d;border-left:5px solid #f59e0b;color:#92400e;border-radius:10px;padding:10px 13px;font-size:13px;margin:0 0 12px;line-height:1.45;}
+  .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
+  .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
   .chip.arch{background:var(--amberbg);color:var(--amber);}
   .chip.unm{background:#fee2e2;color:var(--red);}
@@ -97,13 +99,24 @@
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
       if(!d.sites.length){ $("costView").innerHTML='<div class="msg">No captured time in this period yet.</div>'; return; }
-      var banner='<div class="warnbar">⚠️ <b>Labour figures are provisional</b> — they currently come from job-status taps, not SiteLog scans. We\'re wiring labour to your SiteLog scan data so it matches SiteLog exactly. <b>PO spend below is live and correct.</b></div>';
+      // When SiteLog couldn't be reached the labour is job-status-taps only —
+      // say so plainly. When it IS folded in, no banner (figures are live).
+      var banner=(d.sitelog===false)
+        ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
+        : '';
+      // Small badge showing where a person's labour came from.
+      function srcBadge(src){
+        if(src==='sitelog') return ' <span class="sbadge sl" title="From SiteLog scans">SiteLog</span>';
+        if(src==='sla') return ' <span class="sbadge sla" title="From job-status taps">taps</span>';
+        if(src==='mixed') return ' <span class="sbadge mix" title="SiteLog scans + job-status taps">SiteLog + taps</span>';
+        return '';
+      }
       $("costView").innerHTML=banner+d.sites.map(function(s,i){
         var tot=s.totalMins||1;
         var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'');
         // Per-engineer: labour (hours + £) then that engineer's PO lines beneath.
         var engs=s.engineers.map(function(e){
-          var head='<div class="li eng"><span>👷 '+esc(e.user)+'</span><span>'+
+          var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
             (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):''):'')+
             (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
           var pos=(e.pos||[]).map(function(p){
