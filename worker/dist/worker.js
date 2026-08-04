@@ -8960,26 +8960,35 @@ async function handle22(request, env, ctx, url, sess) {
     const rates = await ratesMap(env, tid);
     const days = await reconcileRange(env, tid, from, to, reg);
     const bySite = {};
+    const siteFor = (name, resolved) => {
+      const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
+      return bySite[key] || (bySite[key] = {
+        site: resolved ? resolved.name : name || "(no site)",
+        client: resolved ? resolved.client : "",
+        archived: !!(resolved && resolved.archived),
+        unmatched: !resolved,
+        travelMins: 0,
+        onsiteMins: 0,
+        visitMins: 0,
+        cost: 0,
+        costPartial: false,
+        poTotal: 0,
+        poUnpriced: 0,
+        jobs: {},
+        engineers: {}
+      });
+    };
+    const engFor = (s, name) => {
+      let key = Object.keys(s.engineers).find((k) => normName(k) === normName(name)) || name || "(unknown)";
+      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [] });
+    };
     for (const d of days) {
       for (const e of d.entries) {
-        const key = e.resolved ? e.resolved.norm : "?" + normName(e.site || "(no site)");
-        const s = bySite[key] || (bySite[key] = {
-          site: e.resolved ? e.resolved.name : e.site || "(no site)",
-          client: e.resolved ? e.resolved.client : "",
-          archived: !!(e.resolved && e.resolved.archived),
-          unmatched: !e.resolved,
-          travelMins: 0,
-          onsiteMins: 0,
-          visitMins: 0,
-          cost: 0,
-          costPartial: false,
-          jobs: {},
-          engineers: {}
-        });
+        const s = siteFor(e.site, e.resolved);
         const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
         s[bucket] += e.mins;
         if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
-        const eng = s.engineers[e.user] || (s.engineers[e.user] = { mins: 0, cost: null });
+        const eng = engFor(s, e.user);
         eng.mins += e.mins;
         const r = rates[e.user];
         if (r && r.rateType === "hour" && r.rate) {
@@ -8992,12 +9001,42 @@ async function handle22(request, env, ctx, url, sess) {
         }
       }
     }
-    let sites = Object.values(bySite).map((s) => ({
-      ...s,
-      totalMins: s.travelMins + s.onsiteMins + s.visitMins,
-      jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
-      engineers: Object.entries(s.engineers).map(([u, v]) => ({ user: u, ...v })).sort((a, b) => b.mins - a.mins)
-    })).sort((a, b) => b.totalMins - a.totalMins);
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const s = siteFor(p.site, resolved);
+      const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
+      if (val != null && isFinite(val)) s.poTotal = Math.round((s.poTotal + val) * 100) / 100;
+      else s.poUnpriced++;
+      const eng = engFor(s, p.engineer_name || "(unknown)");
+      if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
+      eng.pos = eng.pos || [];
+      eng.pos.push({
+        supplier: p.supplier || "",
+        cost: val != null && isFinite(val) ? val : null,
+        incident: p.incident_no || "",
+        date: p.d || "",
+        category: p.cost_category || ""
+      });
+    }
+    let sites = Object.values(bySite).map((s) => {
+      const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
+      return {
+        ...s,
+        totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+        laborCost,
+        poTotal,
+        poUnpriced: s.poUnpriced || 0,
+        grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
+        jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+        engineers: Object.entries(s.engineers).map(([u, v]) => ({
+          user: u,
+          mins: v.mins || 0,
+          cost: v.cost,
+          poCost: v.poCost || 0,
+          pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins)
+      };
+    }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter((s) => normName(s.site) === only);
     return json({ ok: true, from, to, sites }, {}, env, request);
@@ -9049,6 +9088,26 @@ async function handle22(request, env, ctx, url, sess) {
           user: d.user,
           type: "unallocated",
           detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead`
+        });
+    }
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const money2 = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? "\xA3" + Number(p.cost_ex_vat).toFixed(2) : "unpriced";
+      if (resolved && resolved.archived)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "archived-site",
+          site: resolved.name,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) raised against ARCHIVED site "${resolved.name}"`
+        });
+      else if (!resolved && p.site)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "unmatched-site",
+          site: p.site,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) on "${p.site}" \u2014 not in the site register; add or merge it`
         });
     }
     try {
@@ -9314,6 +9373,17 @@ async function loadRegister(env, tid) {
 function resolveSite(reg, name) {
   const k = normName(name);
   return k && reg.byNorm[k] || null;
+}
+async function poRows(env, from, to) {
+  if (!env.PO_DB) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
+    ).bind(from, to).all();
+    return results || [];
+  } catch {
+    return [];
+  }
 }
 async function ratesMap(env, tid) {
   const out = {};
