@@ -61,11 +61,15 @@
 
     <div class="card">
       <h2>Add a site</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input class="txt" id="addName" placeholder="Site name" style="flex:2;min-width:180px">
         <input class="txt" id="addPc" placeholder="Postcode (optional)" style="flex:1;min-width:120px">
+        <input class="txt" id="addLat" placeholder="Lat" style="width:96px">
+        <input class="txt" id="addLng" placeholder="Lng" style="width:96px">
+        <button class="btn small" id="addGeo">📍 From postcode</button>
         <button class="btn primary" id="addBtn">➕ Add</button>
       </div>
+      <div class="hint" style="margin-top:6px">📍 Coordinates are pushed to SiteLog as a geofence, so the scanner recognises the location on-site. Use “From postcode” to look them up, or paste lat/lng from Google Maps.</div>
     </div>
 
     <div class="card">
@@ -145,9 +149,11 @@
     if(!list.length){ $("regList").textContent = q?"No sites match.":"No sites yet."; return; }
     $("regList").innerHTML=list.slice(0,400).map(function(s){
       var al=aliasesFor(s).map(function(a){return '<span class="alias">↳ '+esc(a.label)+' <button title="Un-merge" data-unmerge="'+esc(a.key)+'">✕</button></span>';}).join("");
+      var hasLoc=(s.lat!=null&&s.lng!=null);
       return '<div class="row">'+
-        '<div class="nm">'+esc(s.name)+'<small>'+esc(s.client)+' · '+esc(s.siteNumber)+(s.postcode?' · '+esc(s.postcode):'')+'</small>'+al+'</div>'+
+        '<div class="nm">'+esc(s.name)+'<small>'+esc(s.client)+' · '+esc(s.siteNumber)+(s.postcode?' · '+esc(s.postcode):'')+(hasLoc?' · 📍':'')+'</small>'+al+'</div>'+
         '<span class="chip '+(s.archived?'off':'on')+'">'+(s.archived?'Archived':'Active')+'</span>'+
+        '<button class="btn small" data-loc="'+esc(s.client)+'|'+esc(s.siteNumber)+'">📍 '+(hasLoc?'Edit location':'Set location')+'</button>'+
         '<button class="btn small" data-tog="'+esc(s.client)+'|'+esc(s.siteNumber)+'|'+(s.archived?0:1)+'">'+(s.archived?'♻️ Reactivate':'🗄 Archive')+'</button>'+
       '</div>';
     }).join("");
@@ -174,6 +180,26 @@
       var r=await (await aFetch("/sites/register/update",{method:"POST",body:JSON.stringify({client:p[0],siteNumber:p[1],archived:p[2]==="1"})})).json();
       if(r.ok){ toast(p[2]==="1"?"Archived":"Reactivated"); load(); } else toast(r.error||"Couldn't update");
     }
+    if(b.dataset.loc){
+      var lp=b.dataset.loc.split("|");
+      var site=SITES.find(function(x){return x.client===lp[0]&&String(x.siteNumber)===lp[1];});
+      var cur=(site&&site.lat!=null)?(site.lat+","+site.lng):"";
+      var ans=prompt("Location for "+(site?site.name:"site")+"\nEnter lat,lng — or leave blank to look up from its postcode"+(site&&site.postcode?" ("+site.postcode+")":""),cur);
+      if(ans===null) return;
+      var lat,lng;
+      ans=ans.trim();
+      if(ans===""){
+        if(!site||!site.postcode){ toast("No postcode on file — enter lat,lng"); return; }
+        var g=await geocodePostcode(site.postcode);
+        if(!g){ toast("Couldn't find that postcode"); return; }
+        lat=g.lat; lng=g.lng;
+      } else {
+        var pp=ans.split(/[, ]+/); lat=parseFloat(pp[0]); lng=parseFloat(pp[1]);
+        if(!isFinite(lat)||!isFinite(lng)){ toast("Enter as: lat,lng"); return; }
+      }
+      var rl=await (await aFetch("/sites/register/update",{method:"POST",body:JSON.stringify({client:lp[0],siteNumber:lp[1],lat:lat,lng:lng})})).json();
+      if(rl.ok){ toast(rl.sitelogPushed?"Location saved · sent to SiteLog 📍":"Location saved"); load(); } else toast(rl.error||"Couldn't save");
+    }
     if(b.dataset.unmerge!==undefined && b.dataset.unmerge!==""){
       var r2=await (await aFetch("/sites/register/unmerge",{method:"POST",body:JSON.stringify({alias:b.dataset.unmerge})})).json();
       if(r2.ok){ toast("Un-merged"); load(); }
@@ -194,10 +220,25 @@
     }
   });
 
+  async function geocodePostcode(pc){
+    pc=(pc||"").trim(); if(!pc) return null;
+    try{ var r=await fetch("https://api.postcodes.io/postcodes/"+encodeURIComponent(pc)); var j=await r.json();
+      if(j&&j.status===200&&j.result&&j.result.latitude!=null) return {lat:j.result.latitude,lng:j.result.longitude}; }catch(e){}
+    return null;
+  }
+  $("addGeo").onclick=async function(){
+    var pc=$("addPc").value.trim(); if(!pc){ toast("Enter a postcode first"); return; }
+    this.textContent="…"; var g=await geocodePostcode(pc); this.textContent="📍 From postcode";
+    if(g){ $("addLat").value=g.lat; $("addLng").value=g.lng; toast("Found location"); } else toast("Couldn't find that postcode");
+  };
   $("addBtn").onclick=async function(){
     var name=$("addName").value.trim(); if(!name){ toast("Type a site name"); return; }
-    var r=await (await aFetch("/sites/register/add",{method:"POST",body:JSON.stringify({name:name,postcode:$("addPc").value.trim()})})).json();
-    if(r.ok){ $("addName").value="";$("addPc").value=""; toast("Site added"); load(); } else toast(r.error||"Couldn't add");
+    var body={name:name,postcode:$("addPc").value.trim()};
+    var la=$("addLat").value.trim(), ln=$("addLng").value.trim();
+    if(la&&ln){ body.lat=la; body.lng=ln; }
+    var r=await (await aFetch("/sites/register/add",{method:"POST",body:JSON.stringify(body)})).json();
+    if(r.ok){ $("addName").value="";$("addPc").value="";$("addLat").value="";$("addLng").value="";
+      toast(r.sitelogPushed?"Site added · sent to SiteLog 📍":"Site added"); load(); } else toast(r.error||"Couldn't add");
   };
 
   /* merge modal */
