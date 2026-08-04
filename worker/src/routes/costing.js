@@ -310,7 +310,7 @@ export async function handle(request, env, ctx, url, sess) {
     const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
     cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
     const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate(new Date().toISOString());
-    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200) });
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
     fin[key] = cur;
     await cfgSet(env, tid, "proj_fin", fin);
     return json({ ok: true, fin: cur }, {}, env, request);
@@ -913,23 +913,40 @@ function computeFin(f, cost) {
   const value = r(f.value);
   const planned = Math.max(0, Math.round(Number(f.planned) || 0));
   const valuations = (Array.isArray(f.valuations) ? f.valuations : [])
-    .map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "" }))
+    .map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final }))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
   const remainingValue = r(value - valued);
   const remainingVals = Math.max(0, planned - valuations.length);
-  const position = r(valued - cost);                       // cash position now (+ = ahead of cost)
+  const position = r(valued - cost);                       // profit so far (+ = value earned ahead of cost)
   const marginPct = value > 0 ? r((value - cost) / value * 100) : null;   // projected margin on full value
   const breakEven = Math.max(0, r(cost - valued));         // next valuation to be ≥ cost (stay positive)
   const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
   // Suggest: at least break even, at least your even share, never more than what's left to claim.
   let suggestedNext = Math.max(breakEven, evenShare);
   suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+
+  // ── Retention ──────────────────────────────────────────────────────────
+  // Every interim valuation retains 5% of the cumulative value. At the final
+  // account all 5% held to date is released and a new retention of 2.5% of the
+  // project value is held instead (the other half, released after defects).
+  const RET = 0.05, FINAL_RET = 0.025;
+  const retBase = value > 0 ? value : valued;
+  const isFinal = valuations.some((v) => v.final);
+  const retentionRate = isFinal ? FINAL_RET : RET;
+  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
+  const cashReceived = r(valued - retentionHeld);          // cash in after retention
+  const nextIsFinal = !isFinal && remainingValue > 0.005 && remainingVals <= 1;   // last valuation = final account
+  const retentionIfFinal = r(FINAL_RET * retBase);         // what would be held after the final account
+  const retentionCurrent = r(RET * valued);                // interim retention held right now
+
   return {
     value, planned, valuations, valued, cost: r(cost), position, marginPct,
     remainingValue, remainingVals, breakEven: r(breakEven), evenShare: r(evenShare),
     suggestedNext, overCommitted: breakEven > remainingValue + 0.005,
     positionAfterSuggested: r(valued + suggestedNext - cost),
+    retentionRate: retentionRate * 100, retentionHeld, cashReceived, isFinal,
+    nextIsFinal, retentionIfFinal, retentionCurrent,
   };
 }
 

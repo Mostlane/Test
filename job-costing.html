@@ -135,7 +135,7 @@
   function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}
   function today(){return new Date().toISOString().slice(0,10);}
   function hm(m){return Math.floor(m/60)+"h "+(m%60)+"m";}
-  function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
+  function money(n){return "£"+(Math.round(n*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});}
 
   var days=28;
   var lastSites=[], lastSitelog=true;
@@ -208,14 +208,17 @@
       return '<div class="grouplbl">Project</div><div class="mergeRow"><button class="ic" data-finsetup="'+esc(s.key)+'">📈 Track project value &amp; valuations</button></div>';
     }
     var vals=(f.valuations||[]).map(function(v){
-      return '<div class="li"><span>🧾 '+esc(v.date)+(v.note?' · '+esc(v.note):'')+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
+      return '<div class="li"><span>🧾 '+esc(v.date)+(v.final?' · <b style="color:#1e40af">final account</b>':'')+(v.note?' · '+esc(v.note):'')+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
     }).join('')||'<div class="li"><span style="color:var(--muted)">No valuations submitted yet</span></div>';
     var sug='';
     if(f.overCommitted){
       sug='<div class="finsug warn"><div class="sugbig">⚠️ Heading into loss</div><div class="sugnote">Cost so far ('+money(f.cost)+') is more than the value left to claim. The most you can still value is '+money(f.remainingValue)+'.</div></div>';
     } else if(f.remainingValue>0.005){
+      var fnote = f.nextIsFinal
+        ? ' This is the <b>final account</b>: it releases the '+money(f.retentionCurrent)+' retention held and holds '+money(f.retentionIfFinal)+' (2.5% of value) instead.'
+        : ' You’d receive '+money(f.suggestedNext*0.95)+' after 5% retention.';
       sug='<div class="finsug"><div class="sugbig">Suggested next valuation: '+money(f.suggestedNext)+'</div>'+
-        '<div class="sugnote">Keeps you cash-positive and leaves a fair share for the '+f.remainingVals+' valuation'+(f.remainingVals===1?'':'s')+' still to come. After submitting it your position would be '+money(f.positionAfterSuggested)+'.</div></div>';
+        '<div class="sugnote">Keeps you cash-positive and leaves a fair share for the '+f.remainingVals+' valuation'+(f.remainingVals===1?'':'s')+' still to come. After submitting it your position would be '+money(f.positionAfterSuggested)+'.'+fnote+'</div></div>';
     } else {
       sug='<div class="finsug"><div class="sugnote">Fully valued — nothing left to claim on this contract.</div></div>';
     }
@@ -223,6 +226,8 @@
     return '<div class="grouplbl">Project financials</div>'+
       '<div class="li"><span>📐 Contract value'+(f.planned?' · '+f.planned+' valuations planned':'')+'</span><b>'+money(f.value)+'</b></div>'+
       '<div class="li"><span>✅ Valued to date ('+(f.valuations||[]).length+(f.planned?' of '+f.planned:'')+')</span><b>'+money(f.valued)+'</b></div>'+
+      '<div class="li"><span>🔒 Retention held ('+(f.retentionRate||5)+'%)'+(f.isFinal?' · final':'')+'</span><b>'+money(f.retentionHeld)+'</b></div>'+
+      '<div class="li"><span>💰 Cash received (after retention)</span><b>'+money(f.cashReceived)+'</b></div>'+
       '<div class="li"><span>💷 Cost to date (labour + PO)</span><b>'+money(f.cost)+'</b></div>'+
       '<div class="li"><span>📊 Position now (valued − cost)</span><b class="'+posCls+'">'+money(f.position)+(f.marginPct!=null?' · '+f.marginPct+'% margin at full value':'')+'</b></div>'+
       '<div class="li"><span>🕗 Left to value</span><b>'+money(f.remainingValue)+'</b></div>'+
@@ -409,7 +414,8 @@
     var a=prompt("Valuation amount just submitted — £:"); if(a===null) return;
     a=parseFloat(String(a).replace(/[^0-9.]/g,"")); if(!isFinite(a)){ alert("Enter a number"); return; }
     var d=prompt("Date submitted (YYYY-MM-DD):", today()); if(d===null) return;
-    try{ var r=await (await postJSON("/costing/fin/valuation",{key:key,amount:a,date:d})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
+    var fin=confirm("Is this the FINAL ACCOUNT?\n\nOK = yes (releases the 5% retention held so far and holds 2.5% of the project value instead).\nCancel = no, a normal interim valuation (5% retention).");
+    try{ var r=await (await postJSON("/costing/fin/valuation",{key:key,amount:a,date:d,final:fin})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
     catch(e){ alert("Couldn't add — "+e.message); }
   }
   async function finDelValuation(combo){

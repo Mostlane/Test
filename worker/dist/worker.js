@@ -9043,7 +9043,7 @@ async function handle22(request, env, ctx, url, sess) {
     const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
     cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
     const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate3((/* @__PURE__ */ new Date()).toISOString());
-    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200) });
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
     fin[key] = cur;
     await cfgSet(env, tid, "proj_fin", fin);
     return json({ ok: true, fin: cur }, {}, env, request);
@@ -9706,7 +9706,7 @@ function computeFin(f, cost) {
   const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
   const value = r(f.value);
   const planned = Math.max(0, Math.round(Number(f.planned) || 0));
-  const valuations = (Array.isArray(f.valuations) ? f.valuations : []).map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "" })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const valuations = (Array.isArray(f.valuations) ? f.valuations : []).map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
   const remainingValue = r(value - valued);
   const remainingVals = Math.max(0, planned - valuations.length);
@@ -9716,6 +9716,15 @@ function computeFin(f, cost) {
   const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
   let suggestedNext = Math.max(breakEven, evenShare);
   suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+  const RET = 0.05, FINAL_RET = 0.025;
+  const retBase = value > 0 ? value : valued;
+  const isFinal = valuations.some((v) => v.final);
+  const retentionRate = isFinal ? FINAL_RET : RET;
+  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
+  const cashReceived = r(valued - retentionHeld);
+  const nextIsFinal = !isFinal && remainingValue > 5e-3 && remainingVals <= 1;
+  const retentionIfFinal = r(FINAL_RET * retBase);
+  const retentionCurrent = r(RET * valued);
   return {
     value,
     planned,
@@ -9730,7 +9739,14 @@ function computeFin(f, cost) {
     evenShare: r(evenShare),
     suggestedNext,
     overCommitted: breakEven > remainingValue + 5e-3,
-    positionAfterSuggested: r(valued + suggestedNext - cost)
+    positionAfterSuggested: r(valued + suggestedNext - cost),
+    retentionRate: retentionRate * 100,
+    retentionHeld,
+    cashReceived,
+    isFinal,
+    nextIsFinal,
+    retentionIfFinal,
+    retentionCurrent
   };
 }
 function buildSiteSeries(labD, poD) {
