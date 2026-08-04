@@ -303,7 +303,7 @@ export async function handle(request, env, ctx, url, sess) {
         unmatched: !resolved,
         travelMins: 0, onsiteMins: 0, visitMins: 0, cost: 0, costPartial: false,
         poTotal: 0, poUnpriced: 0, jobs: {}, engineers: {},
-        labB: {}, poB: {}, suppliers: {}   // per-site: labour-by-bucket, PO-by-bucket, spend-by-supplier
+        labD: {}, poD: {}, suppliers: {}   // per-site: labour-by-day, PO-by-day, spend-by-supplier
       });
     };
     const engFor = (s, name) => {
@@ -314,15 +314,12 @@ export async function handle(request, env, ctx, url, sess) {
     };
     const addSrc = (eng, src) => { eng.src = !eng.src ? src : (eng.src === src ? src : "mixed"); };
 
-    // ── Per-site spend-over-time series (labour + materials, bucketed) ───────
-    // Each site card gets its OWN trend, so the chart shown when a job is
-    // expanded is that job only. labB/poB accumulators live on each site (see
-    // siteFor); addTo() drops a £ amount into the right time bucket.
-    const spanDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1);
-    const bMode = spanDays <= 45 ? "day" : spanDays <= 186 ? "week" : "month";
-    const bKey = (dateStr) => bMode === "day" ? String(dateStr).slice(0, 10)
-      : bMode === "week" ? mondayOf(dateStr) : String(dateStr).slice(0, 7);
-    const addTo = (map, dateStr, v) => { const k = bKey(dateStr); map[k] = Math.round(((map[k] || 0) + v) * 100) / 100; };
+    // ── Per-site spend-over-time series (labour + materials) ─────────────────
+    // Each site card gets its OWN trend. We accumulate £ at DAY granularity
+    // (labD/poD on each site, see siteFor); the series is bucketed later over
+    // each site's ACTUAL active span (so "All time" doesn't stretch an axis
+    // back to year dot with everything crammed into one spike).
+    const addDay = (map, day, v) => { const k = String(day || "").slice(0, 10); if (!k) return; map[k] = Math.round(((map[k] || 0) + v) * 100) / 100; };
     // Per SiteLog person (site+who) → summary cost + onsite hours, to spread that
     // cost across their actual visit dates (from /admin) for the labour line.
     const slRate = {};
@@ -400,7 +397,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
-          addTo(s.labB, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
+          addDay(s.labD, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
         } else if (r && r.rateType === "day") {
           s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
         } else {
@@ -416,7 +413,7 @@ export async function handle(request, env, ctx, url, sess) {
       const resolved = resolveSite(reg, p.site);
       const s = siteFor(p.site, resolved);
       const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
-      if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addTo(s.poB, p.d || to, val); }
+      if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addDay(s.poD, p.d || to, val); }
       else s.poUnpriced++;
       const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
       if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
@@ -445,7 +442,7 @@ export async function handle(request, env, ctx, url, sess) {
         const site = bySite[sKey];
         if (!site) continue;
         const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 3600e3);
-        if (hrs > 0) addTo(site.labB, v.check_in_at, hrs * (rt.cost / rt.hrs));
+        if (hrs > 0) addDay(site.labD, londonDate(v.check_in_at), hrs * (rt.cost / rt.hrs));
       }
     }
 
@@ -463,8 +460,8 @@ export async function handle(request, env, ctx, url, sess) {
           visits: (v.visits || 0) + (v.days ? v.days.size : 0),   // on-site visits/days
           pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
         })).sort((a, b) => ((b.cost || 0) + (b.poCost || 0)) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
-        // Per-site trend (labour + materials over time) and spend per supplier.
-        series: buildSeriesBuckets(from, to, bMode, s.labB, s.poB),
+        // Per-site trend (labour + materials over its own active span) + supplier spend.
+        series: buildSiteSeries(s.labD, s.poD),
         suppliers: Object.values(s.suppliers)
           .sort((a, b) => (b.total - a.total) || (b.count - a.count))
       };
@@ -473,7 +470,7 @@ export async function handle(request, env, ctx, url, sess) {
     if (only) sites = sites.filter(s => normName(s.site) === only);
     // sitelog: true = SiteLog costing folded in; false = SiteLog unreachable or
     // SITELOG_ADMIN_SECRET unset, so labour is SLA-only (front-end shows a note).
-    return json({ ok: true, from, to, sites, sitelog: slSites != null, bucket: bMode }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
   }
 
   if (path === "/exceptions" && method === "GET") {
@@ -861,8 +858,24 @@ async function fetchSitelogVisits(env, from, to) {
 }
 function jcNameLike(v) { return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)"; }
 
+// Build a site's trend from its day-level labour/PO maps: span only the site's
+// ACTIVE dates (first→last with any spend) and pick the granularity from that
+// span (day ≤45d, week ≤~6mo, else month), so the line is spread across when
+// work/POs actually happened — never one spike on a year-long empty axis.
+function buildSiteSeries(labD, poD) {
+  const days = Object.keys(labD).concat(Object.keys(poD)).filter(Boolean).sort();
+  if (!days.length) return [];
+  const min = days[0], max = days[days.length - 1];
+  const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
+  const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
+  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf(d) : d.slice(0, 7);
+  const labB = {}, poB = {};
+  const roll = (src, dst) => { for (const [d, v] of Object.entries(src)) { const k = bk(d); dst[k] = Math.round(((dst[k] || 0) + v) * 100) / 100; } };
+  roll(labD, labB); roll(poD, poB);
+  return buildSeriesBuckets(min, max, mode, labB, poB);
+}
 // Turn the per-bucket labour/PO maps into an ordered, zero-filled series across
-// the whole range so the front-end line chart has no gaps.
+// the given from→to so the front-end line chart has no gaps.
 function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
   const keys = [];
   if (mode === "day") {
