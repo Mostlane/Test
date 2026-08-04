@@ -8811,6 +8811,11 @@ async function handle22(request, env, ctx, url, sess) {
       if (b.archived !== void 0) data.archived = !!b.archived;
       if (b.name) data.siteName = String(b.name).trim();
       if (b.postcode !== void 0) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      const ll = parseLatLngPair(b.lat, b.lng);
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
       await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
           postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
         WHERE tenant_id=? AND client=? AND site_number=?`).bind(
@@ -8822,13 +8827,16 @@ async function handle22(request, env, ctx, url, sess) {
         client,
         num2
       ).run();
-      return json({ ok: true }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog2(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/add") {
       const name = String(b.name || "").trim();
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
       const num2 = slugNum(name);
+      const ll = parseLatLngPair(b.lat, b.lng);
       const data = {
         client,
         siteNumber: num2,
@@ -8836,11 +8844,17 @@ async function handle22(request, env, ctx, url, sess) {
         postcode: String(b.postcode || "").toUpperCase().trim(),
         addedVia: "register"
       };
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
-      return json({ ok: true, client, siteNumber: num2 }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog2(env, name, ll.lat, ll.lng, client);
+      return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
       const alias = normName(b.alias);
@@ -9516,9 +9530,15 @@ async function loadRegister(env, tid) {
   const byNorm = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
     ).bind(tid).all();
     for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
       const entry = {
         client: r.client,
         siteNumber: r.site_number,
@@ -9527,6 +9547,8 @@ async function loadRegister(env, tid) {
         active: r.active !== 0,
         archived: !!r.archived,
         jobNumber: r.job_number || "",
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
         norm: normName(r.site_name || r.site_number)
       };
       list.push(entry);
@@ -9560,6 +9582,28 @@ function resolveSiteCode(reg, code) {
 }
 function digitsOf2(s) {
   return String(s || "").replace(/\D+/g, "");
+}
+function parseLatLngPair(latIn, lngIn) {
+  const lat = Number(latIn), lng = Number(lngIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+async function pushSiteToSiteLog2(env, name, lat, lng, client) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
+    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
+    const res = await fetch(base + "/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 async function fetchSitelogCosting(env, from, to) {
   const secret = env.SITELOG_ADMIN_SECRET;

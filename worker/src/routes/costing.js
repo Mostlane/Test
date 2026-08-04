@@ -80,6 +80,8 @@ export async function handle(request, env, ctx, url, sess) {
       if (b.archived !== undefined) data.archived = !!b.archived;
       if (b.name) data.siteName = String(b.name).trim();
       if (b.postcode !== undefined) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      const ll = parseLatLngPair(b.lat, b.lng);
+      if (ll) { data.lat = ll.lat; data.lng = ll.lng; }
       await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
           postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
         WHERE tenant_id=? AND client=? AND site_number=?`)
@@ -87,7 +89,9 @@ export async function handle(request, env, ctx, url, sess) {
               b.name ? String(b.name).trim() : null,
               b.postcode !== undefined ? String(b.postcode || "").toUpperCase().trim() : null,
               JSON.stringify(data), tid, client, num).run();
-      return json({ ok: true }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
 
     if (path === "/sites/register/add") {
@@ -95,14 +99,18 @@ export async function handle(request, env, ctx, url, sess) {
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
       const num = slugNum(name);
+      const ll = parseLatLngPair(b.lat, b.lng);
       const data = { client, siteNumber: num, siteName: name,
         postcode: String(b.postcode || "").toUpperCase().trim(), addedVia: "register" };
+      if (ll) { data.lat = ll.lat; data.lng = ll.lng; }
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`)
         .bind(tid, client, num, name, data.postcode || null, JSON.stringify(data)).run();
-      return json({ ok: true, client, siteNumber: num }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
+      return json({ ok: true, client, siteNumber: num, sitelogPushed: pushed }, {}, env, request);
     }
 
     if (path === "/sites/register/merge") {
@@ -728,12 +736,15 @@ async function loadRegister(env, tid) {
   const byNorm = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE")
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE")
       .bind(tid).all();
     for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
       const entry = { client: r.client, siteNumber: r.site_number,
         name: r.site_name || ("Site " + r.site_number), postcode: (r.postcode || "").replace(/\*+$/, ""),
         active: r.active !== 0, archived: !!r.archived, jobNumber: r.job_number || "",
+        lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
         norm: normName(r.site_name || r.site_number) };
       list.push(entry);
       if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
@@ -770,6 +781,32 @@ function resolveSiteCode(reg, code) {
   return (d && reg.byCode && reg.byCode[d]) || (reg.byCode && reg.byCode[c]) || resolveSite(reg, c) || null;
 }
 function digitsOf(s) { return String(s || "").replace(/\D+/g, ""); }
+
+// Parse a lat/lng pair; returns {lat,lng} only when both are valid UK-ish coords.
+function parseLatLngPair(latIn, lngIn) {
+  const lat = Number(latIn), lng = Number(lngIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+// Push a portal site to SiteLog as a geofence (same shape as sites.js), so a
+// site added/located in the portal is recognised on-site by the scanner.
+// Custom domain is fetchable server-side; best-effort, never blocks the save.
+async function pushSiteToSiteLog(env, name, lat, lng, client) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
+    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim() || "Projects";
+    const res = await fetch(base + "/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
+    });
+    return res.ok;
+  } catch { return false; }
+}
 
 // Pull SiteLog's own job-costing (per-site → per-person labour, computed with
 // SiteLog's rates). Custom domain, so server-side fetch works (mostlane-api is
