@@ -48,6 +48,15 @@
   .note{font-size:11px;color:var(--muted);margin-top:8px;}
   .chip.unpriced{background:#ede9fe;color:#6d28d9;}
   .warnbar{background:#fef3c7;border:1px solid #fcd34d;border-left:5px solid #f59e0b;color:#92400e;border-radius:10px;padding:10px 13px;font-size:13px;margin:0 0 12px;line-height:1.45;}
+  .charts{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px;}
+  .chartcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;flex:1 1 320px;min-width:280px;}
+  .ctitle{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;font-weight:700;}
+  .dwrap{display:flex;align-items:center;gap:16px;}
+  .legend{font-size:13px;color:var(--ink);display:flex;flex-direction:column;gap:6px;}
+  .legend.row{flex-direction:row;gap:14px;margin-top:6px;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+  .chartcard svg{max-width:100%;height:auto;display:block;}
+  .cempty{font-size:12px;color:var(--muted);padding:14px 0;}
   .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
   .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
@@ -99,9 +108,66 @@
   function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
 
   var days=28;
-  var lastSites=[], lastSitelog=true;
+  var lastSites=[], lastSitelog=true, lastSeries=[];
   var prefs={pinned:[],hidden:[],order:[]};
   function inArr(a,k){return a.indexOf(k)>=0;}
+  function shortMoney(n){ n=Math.round(n); if(Math.abs(n)>=1000) return "£"+(n/1000).toFixed(n>=10000?0:1)+"k"; return "£"+n; }
+  function fmtBucket(b){
+    var l=b.label;
+    if(b.mode==="month"){ var mm=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return mm[(+l.slice(5,7))-1]+" "+l.slice(2,4); }
+    return l.slice(8,10)+"/"+l.slice(5,7);   // DD/MM (day or week-commencing)
+  }
+
+  // ── Inline-SVG charts (no external libraries) ──
+  function doughnut(labour,materials){
+    var tot=labour+materials; if(tot<=0) return '';
+    var C=326.726, lLen=(labour/tot)*C, mLen=(materials/tot)*C, pct=Math.round(labour/tot*100);
+    return '<svg viewBox="0 0 120 120" width="118" height="118" role="img" aria-label="Labour vs materials">'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#eef2f7" stroke-width="15"/>'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#2563eb" stroke-width="15" stroke-dasharray="'+lLen.toFixed(1)+' '+(C-lLen).toFixed(1)+'" transform="rotate(-90 60 60)"/>'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#7c3aed" stroke-width="15" stroke-dasharray="'+mLen.toFixed(1)+' '+(C-mLen).toFixed(1)+'" stroke-dashoffset="'+(-lLen).toFixed(1)+'" transform="rotate(-90 60 60)"/>'+
+      '<text x="60" y="58" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">'+pct+'%</text>'+
+      '<text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">labour</text></svg>';
+  }
+  function lineChart(series){
+    if(!series||!series.length) return '<div class="cempty">No dated spend in this period.</div>';
+    var W=560,H=170,padL=6,padR=6,padT=14,padB=22,n=series.length;
+    var max=Math.max(1); series.forEach(function(b){max=Math.max(max,b.total);});
+    var X=function(i){ return padL+(n<=1?(W-padL-padR)/2:(i/(n-1))*(W-padL-padR)); };
+    var Y=function(v){ return padT+(1-v/max)*(H-padT-padB); };
+    function poly(key,color,w){
+      if(n===1){ var cx=X(0),cy=Y(series[0][key]); return '<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="3" fill="'+color+'"/>'; }
+      return '<polyline fill="none" stroke="'+color+'" stroke-width="'+w+'" stroke-linejoin="round" points="'+series.map(function(b,i){return X(i).toFixed(1)+","+Y(b[key]).toFixed(1);}).join(" ")+'"/>';
+    }
+    var labels='';
+    var idxs=n<=1?[0]:[0,Math.floor((n-1)/2),n-1];
+    idxs.forEach(function(i){ var anc=i===0?"start":(i===n-1?"end":"middle");
+      labels+='<text x="'+X(i).toFixed(1)+'" y="'+(H-6)+'" text-anchor="'+anc+'" font-size="10" fill="#94a3b8">'+esc(fmtBucket(series[i]))+'</text>'; });
+    return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="Spend over time">'+
+      '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#e2e8f0"/>'+
+      '<text x="'+padL+'" y="10" font-size="10" fill="#94a3b8">'+esc(shortMoney(max))+'</text>'+
+      poly("po","#7c3aed",1.5)+poly("labour","#2563eb",1.5)+poly("total","#0f172a",2.5)+
+      labels+'</svg>';
+  }
+  function chartsHtml(){
+    var labour=0,materials=0; lastSites.forEach(function(s){labour+=s.laborCost||0;materials+=s.poTotal||0;});
+    if(labour+materials<=0) return '';
+    var tot=labour+materials, lp=Math.round(labour/tot*100), mp=100-lp;
+    return '<div class="charts">'+
+      '<div class="chartcard"><div class="ctitle">Labour vs materials</div><div class="dwrap">'+doughnut(labour,materials)+
+        '<div class="legend">'+
+          '<div><span class="dot" style="background:#2563eb"></span>Labour '+money(labour)+' · '+lp+'%</div>'+
+          '<div><span class="dot" style="background:#7c3aed"></span>Materials '+money(materials)+' · '+mp+'%</div>'+
+          '<div style="font-weight:700;color:#0f172a">Total '+money(tot)+'</div>'+
+        '</div></div></div>'+
+      '<div class="chartcard"><div class="ctitle">Spend over time</div>'+lineChart(lastSeries)+
+        '<div class="legend row">'+
+          '<span><span class="dot" style="background:#0f172a"></span>Total</span>'+
+          '<span><span class="dot" style="background:#2563eb"></span>Labour</span>'+
+          '<span><span class="dot" style="background:#7c3aed"></span>Materials</span>'+
+        '</div></div>'+
+    '</div>';
+  }
 
   function rangeQS(){
     var to=new Date();
@@ -150,7 +216,7 @@
     var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'')+(pinned?'<span class="pinbadge">📌</span>':'');
     var engs=s.engineers.map(function(e){
       var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
-        (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):''):'')+
+        (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.visits?' · '+e.visits+(e.visits===1?' day':' days'):'')+(e.cost!=null?' · '+money(e.cost):''):'')+
         (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
       var pos=(e.pos||[]).map(function(p){
         return '<div class="li po"><span>🧾 '+esc(p.supplier||"PO")+(p.incident?' · '+esc(p.incident):'')+'</span>'+
@@ -195,8 +261,9 @@
     var banner=(lastSitelog===false)
       ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
       : '';
-    if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
-    $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
+    var charts=chartsHtml();
+    if(!visible.length){ $("costView").innerHTML=banner+charts+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
+    $("costView").innerHTML=banner+charts+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
   }
 
   function renderHidden(){
@@ -218,7 +285,7 @@
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      lastSites=d.sites||[]; lastSitelog=d.sitelog;
+      lastSites=d.sites||[]; lastSitelog=d.sitelog; lastSeries=d.series||[];
       renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
   }
