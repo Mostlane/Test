@@ -232,6 +232,23 @@ export async function handle(request, env, ctx, url, sess) {
     return json(r, {}, env, request);
   }
 
+  // Per-view organisation of the job-costing screen (shared across admins):
+  // which site cards are pinned to the top, hidden, and their manual order.
+  // Keyed by the site `key` returned in /costing/summary.
+  if (path === "/costing/prefs" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const arr = v => Array.isArray(v) ? v.filter(x => typeof x === "string").slice(0, 2000) : [];
+    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
+    await cfgSet(env, tid, "costing_prefs", prefs);
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
@@ -350,10 +367,11 @@ export async function handle(request, env, ctx, url, sess) {
         incident: p.incident_no || "", date: p.d || "", category: p.cost_category || "" });
     }
 
-    let sites = Object.values(bySite).map(s => {
+    let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
+        key,   // stable per-site id the front-end pins/hides/orders against
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,

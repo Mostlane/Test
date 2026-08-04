@@ -8970,6 +8970,19 @@ async function handle22(request, env, ctx, url, sess) {
     const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
     return json(r, {}, env, request);
   }
+  if (path === "/costing/prefs" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const arr = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 2e3) : [];
+    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
+    await cfgSet(env, tid, "costing_prefs", prefs);
+    return json({ ok: true, prefs }, {}, env, request);
+  }
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
@@ -9080,10 +9093,12 @@ async function handle22(request, env, ctx, url, sess) {
         category: p.cost_category || ""
       });
     }
-    let sites = Object.values(bySite).map((s) => {
+    let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
         ...s,
+        key,
+        // stable per-site id the front-end pins/hides/orders against
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost,
         poTotal,
