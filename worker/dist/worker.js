@@ -9005,7 +9005,11 @@ async function handle22(request, env, ctx, url, sess) {
         poTotal: 0,
         poUnpriced: 0,
         jobs: {},
-        engineers: {}
+        engineers: {},
+        labB: {},
+        poB: {},
+        suppliers: {}
+        // per-site: labour-by-bucket, PO-by-bucket, spend-by-supplier
       });
     };
     const engFor = (s, name) => {
@@ -9018,14 +9022,9 @@ async function handle22(request, env, ctx, url, sess) {
     const spanDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1);
     const bMode = spanDays <= 45 ? "day" : spanDays <= 186 ? "week" : "month";
     const bKey = (dateStr) => bMode === "day" ? String(dateStr).slice(0, 10) : bMode === "week" ? mondayOf4(dateStr) : String(dateStr).slice(0, 7);
-    const labourByB = {}, poByB = {};
-    const addLabB = (dateStr, v) => {
+    const addTo = (map, dateStr, v) => {
       const k = bKey(dateStr);
-      labourByB[k] = Math.round(((labourByB[k] || 0) + v) * 100) / 100;
-    };
-    const addPoB = (dateStr, v) => {
-      const k = bKey(dateStr);
-      poByB[k] = Math.round(((poByB[k] || 0) + v) * 100) / 100;
+      map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
     };
     const slRate = {};
     const slSites = await fetchSitelogCosting(env, from, to);
@@ -9086,7 +9085,7 @@ async function handle22(request, env, ctx, url, sess) {
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
-          addLabB(d.date, e.mins / 60 * r.rate);
+          addTo(s.labB, d.date, e.mins / 60 * r.rate);
         } else if (r && r.rateType === "day") {
           s.costPartial = true;
         } else {
@@ -9100,7 +9099,7 @@ async function handle22(request, env, ctx, url, sess) {
       const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
       if (val != null && isFinite(val)) {
         s.poTotal = Math.round((s.poTotal + val) * 100) / 100;
-        addPoB(p.d || to, val);
+        addTo(s.poB, p.d || to, val);
       } else s.poUnpriced++;
       const eng = engFor(s, p.engineer_name || "(unknown)");
       if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
@@ -9112,6 +9111,11 @@ async function handle22(request, env, ctx, url, sess) {
         date: p.d || "",
         category: p.cost_category || ""
       });
+      const supName = (p.supplier || "").trim() || "(no supplier)";
+      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+      sup.count++;
+      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
+      else sup.unpriced++;
     }
     if (slSites && Object.keys(slRate).length) {
       const visits = await fetchSitelogVisits(env, from, to);
@@ -9122,11 +9126,12 @@ async function handle22(request, env, ctx, url, sess) {
         const sKey = siteKeyOf(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
         if (!rt) continue;
+        const site = bySite[sKey];
+        if (!site) continue;
         const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 36e5);
-        if (hrs > 0) addLabB(v.check_in_at, hrs * (rt.cost / rt.hrs));
+        if (hrs > 0) addTo(site.labB, v.check_in_at, hrs * (rt.cost / rt.hrs));
       }
     }
-    const series = buildSeriesBuckets(from, to, bMode, labourByB, poByB);
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
       return {
@@ -9148,12 +9153,15 @@ async function handle22(request, env, ctx, url, sess) {
           visits: (v.visits || 0) + (v.days ? v.days.size : 0),
           // on-site visits/days
           pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
-        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins)
+        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
+        // Per-site trend (labour + materials over time) and spend per supplier.
+        series: buildSeriesBuckets(from, to, bMode, s.labB, s.poB),
+        suppliers: Object.values(s.suppliers).sort((a, b) => b.total - a.total || b.count - a.count)
       };
     }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter((s) => normName(s.site) === only);
-    return json({ ok: true, from, to, sites, sitelog: slSites != null, series }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null, bucket: bMode }, {}, env, request);
   }
   if (path === "/exceptions" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
