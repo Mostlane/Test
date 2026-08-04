@@ -108,7 +108,7 @@
   function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
 
   var days=28;
-  var lastSites=[], lastSitelog=true, lastSeries=[];
+  var lastSites=[], lastSitelog=true;
   var prefs={pinned:[],hidden:[],order:[]};
   function inArr(a,k){return a.indexOf(k)>=0;}
   function shortMoney(n){ n=Math.round(n); if(Math.abs(n)>=1000) return "£"+(n/1000).toFixed(n>=10000?0:1)+"k"; return "£"+n; }
@@ -149,24 +149,33 @@
       poly("po","#7c3aed",1.5)+poly("labour","#2563eb",1.5)+poly("total","#0f172a",2.5)+
       labels+'</svg>';
   }
-  function chartsHtml(){
-    var labour=0,materials=0; lastSites.forEach(function(s){labour+=s.laborCost||0;materials+=s.poTotal||0;});
-    if(labour+materials<=0) return '';
-    var tot=labour+materials, lp=Math.round(labour/tot*100), mp=100-lp;
-    return '<div class="charts">'+
+  // Charts for ONE site (shown inside that job's expanded section).
+  function siteCharts(s){
+    var labour=s.laborCost||0, materials=s.poTotal||0;
+    var hasSeries=(s.series||[]).some(function(b){return b.total>0;});
+    if(labour+materials<=0 && !hasSeries) return '';
+    var tot=labour+materials, lp=tot>0?Math.round(labour/tot*100):0, mp=tot>0?100-lp:0;
+    return '<div class="grouplbl">Spend breakdown</div><div class="charts">'+
       '<div class="chartcard"><div class="ctitle">Labour vs materials</div><div class="dwrap">'+doughnut(labour,materials)+
         '<div class="legend">'+
           '<div><span class="dot" style="background:#2563eb"></span>Labour '+money(labour)+' · '+lp+'%</div>'+
           '<div><span class="dot" style="background:#7c3aed"></span>Materials '+money(materials)+' · '+mp+'%</div>'+
           '<div style="font-weight:700;color:#0f172a">Total '+money(tot)+'</div>'+
         '</div></div></div>'+
-      '<div class="chartcard"><div class="ctitle">Spend over time</div>'+lineChart(lastSeries)+
+      '<div class="chartcard"><div class="ctitle">Spend over time</div>'+lineChart(s.series||[])+
         '<div class="legend row">'+
           '<span><span class="dot" style="background:#0f172a"></span>Total</span>'+
           '<span><span class="dot" style="background:#2563eb"></span>Labour</span>'+
           '<span><span class="dot" style="background:#7c3aed"></span>Materials</span>'+
         '</div></div>'+
     '</div>';
+  }
+  // Spend grouped by supplier for ONE site.
+  function suppliersHtml(s){
+    if(!s.suppliers||!s.suppliers.length) return '';
+    return '<div class="grouplbl">Spend per supplier</div>'+s.suppliers.map(function(x){
+      return '<div class="li"><span>🏢 '+esc(x.supplier)+(x.unpriced?' <i style="color:var(--muted)">('+x.unpriced+' unpriced)</i>':'')+'</span><b>'+money(x.total)+'</b></div>';
+    }).join("");
   }
 
   function rangeQS(){
@@ -249,8 +258,10 @@
         (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
         '<div class="grouplbl">People — labour + their POs</div>'+
         (engs||'<div class="li"><span style="color:var(--muted)">No time or POs yet</span></div>')+
+        suppliersHtml(s)+
         (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
         (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
+        siteCharts(s)+
       '</div></div>';
   }
 
@@ -261,9 +272,8 @@
     var banner=(lastSitelog===false)
       ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
       : '';
-    var charts=chartsHtml();
-    if(!visible.length){ $("costView").innerHTML=banner+charts+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
-    $("costView").innerHTML=banner+charts+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
+    if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
+    $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
   }
 
   function renderHidden(){
@@ -285,7 +295,7 @@
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      lastSites=d.sites||[]; lastSitelog=d.sitelog; lastSeries=d.series||[];
+      lastSites=d.sites||[]; lastSitelog=d.sitelog;
       renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
   }

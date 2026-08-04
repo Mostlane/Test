@@ -265,7 +265,8 @@ export async function handle(request, env, ctx, url, sess) {
         archived: !!(resolved && resolved.archived),
         unmatched: !resolved,
         travelMins: 0, onsiteMins: 0, visitMins: 0, cost: 0, costPartial: false,
-        poTotal: 0, poUnpriced: 0, jobs: {}, engineers: {}
+        poTotal: 0, poUnpriced: 0, jobs: {}, engineers: {},
+        labB: {}, poB: {}, suppliers: {}   // per-site: labour-by-bucket, PO-by-bucket, spend-by-supplier
       });
     };
     const engFor = (s, name) => {
@@ -276,14 +277,15 @@ export async function handle(request, env, ctx, url, sess) {
     };
     const addSrc = (eng, src) => { eng.src = !eng.src ? src : (eng.src === src ? src : "mixed"); };
 
-    // ── Spend-over-time series (labour + materials, bucketed by the range) ────
+    // ── Per-site spend-over-time series (labour + materials, bucketed) ───────
+    // Each site card gets its OWN trend, so the chart shown when a job is
+    // expanded is that job only. labB/poB accumulators live on each site (see
+    // siteFor); addTo() drops a £ amount into the right time bucket.
     const spanDays = Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1);
     const bMode = spanDays <= 45 ? "day" : spanDays <= 186 ? "week" : "month";
     const bKey = (dateStr) => bMode === "day" ? String(dateStr).slice(0, 10)
       : bMode === "week" ? mondayOf(dateStr) : String(dateStr).slice(0, 7);
-    const labourByB = {}, poByB = {};
-    const addLabB = (dateStr, v) => { const k = bKey(dateStr); labourByB[k] = Math.round(((labourByB[k] || 0) + v) * 100) / 100; };
-    const addPoB = (dateStr, v) => { const k = bKey(dateStr); poByB[k] = Math.round(((poByB[k] || 0) + v) * 100) / 100; };
+    const addTo = (map, dateStr, v) => { const k = bKey(dateStr); map[k] = Math.round(((map[k] || 0) + v) * 100) / 100; };
     // Per SiteLog person (site+who) → summary cost + onsite hours, to spread that
     // cost across their actual visit dates (from /admin) for the labour line.
     const slRate = {};
@@ -360,7 +362,7 @@ export async function handle(request, env, ctx, url, sess) {
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
-          addLabB(d.date, (e.mins / 60) * r.rate);   // dated labour for the trend line
+          addTo(s.labB, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
         } else if (r && r.rateType === "day") {
           s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
         } else {
@@ -376,13 +378,19 @@ export async function handle(request, env, ctx, url, sess) {
       const resolved = resolveSite(reg, p.site);
       const s = siteFor(p.site, resolved);
       const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
-      if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addPoB(p.d || to, val); }
+      if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addTo(s.poB, p.d || to, val); }
       else s.poUnpriced++;
       const eng = engFor(s, p.engineer_name || "(unknown)");
       if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
       eng.pos = eng.pos || [];
       eng.pos.push({ supplier: p.supplier || "", cost: (val != null && isFinite(val)) ? val : null,
         incident: p.incident_no || "", date: p.d || "", category: p.cost_category || "" });
+      // Spend per supplier, per site (grouped for the "by supplier" breakdown).
+      const supName = (p.supplier || "").trim() || "(no supplier)";
+      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+      sup.count++;
+      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
+      else sup.unpriced++;
     }
 
     // Spread each SiteLog person's cost across the dates they actually scanned
@@ -396,12 +404,12 @@ export async function handle(request, env, ctx, url, sess) {
         const sKey = siteKeyOf(resolved, v.site_code);
         const rt = slRate[sKey + "::" + normName(who)];
         if (!rt) continue;
+        const site = bySite[sKey];
+        if (!site) continue;
         const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 3600e3);
-        if (hrs > 0) addLabB(v.check_in_at, hrs * (rt.cost / rt.hrs));
+        if (hrs > 0) addTo(site.labB, v.check_in_at, hrs * (rt.cost / rt.hrs));
       }
     }
-    // Build the ordered bucket list across the whole range (zero-filled).
-    const series = buildSeriesBuckets(from, to, bMode, labourByB, poByB);
 
     let sites = Object.entries(bySite).map(([key, s]) => {
       const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
@@ -416,14 +424,18 @@ export async function handle(request, env, ctx, url, sess) {
           user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0, src: v.src || null,
           visits: (v.visits || 0) + (v.days ? v.days.size : 0),   // on-site visits/days
           pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
-        })).sort((a, b) => ((b.cost || 0) + (b.poCost || 0)) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins)
+        })).sort((a, b) => ((b.cost || 0) + (b.poCost || 0)) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
+        // Per-site trend (labour + materials over time) and spend per supplier.
+        series: buildSeriesBuckets(from, to, bMode, s.labB, s.poB),
+        suppliers: Object.values(s.suppliers)
+          .sort((a, b) => (b.total - a.total) || (b.count - a.count))
       };
     }).sort((a, b) => (b.grandTotal - a.grandTotal) || (b.totalMins - a.totalMins));
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter(s => normName(s.site) === only);
     // sitelog: true = SiteLog costing folded in; false = SiteLog unreachable or
     // SITELOG_ADMIN_SECRET unset, so labour is SLA-only (front-end shows a note).
-    return json({ ok: true, from, to, sites, sitelog: slSites != null, series }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null, bucket: bMode }, {}, env, request);
   }
 
   if (path === "/exceptions" && method === "GET") {
