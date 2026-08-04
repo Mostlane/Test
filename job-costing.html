@@ -57,6 +57,19 @@
   .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
   .chartcard svg{max-width:100%;height:auto;display:block;}
   .cempty{font-size:12px;color:var(--muted);padding:14px 0;}
+  .mergeRow{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 8px;}
+  .modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .modal.on{display:flex;}
+  .modalcard{background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:85vh;overflow:auto;padding:16px;}
+  .modalcard h3{margin:0 0 4px;font-size:16px;}
+  .modalcard .sub2{font-size:12px;color:var(--muted);margin:0 0 10px;}
+  .mlist{border:1px solid var(--line);border-radius:10px;max-height:46vh;overflow:auto;margin-top:8px;}
+  .mlist button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:#fff;padding:9px 11px;font:500 13px "Segoe UI",system-ui;cursor:pointer;color:var(--ink);}
+  .mlist button:hover{background:#f1f5f9;}
+  .mlist button:last-child{border-bottom:0;}
+  .mlist small{color:var(--muted);}
+  .msearch{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;margin-top:4px;}
+  .mrow2{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
   .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
   .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
@@ -93,6 +106,13 @@
     </div>
 
     <div id="costView"><div class="msg">Loading…</div></div>
+    <div id="mergeModal" class="modal"><div class="modalcard">
+      <h3 id="mmTitle">Merge site</h3>
+      <div class="sub2" id="mmSub"></div>
+      <input id="mmSearch" class="msearch" placeholder="Search the site register…" autocomplete="off">
+      <div class="mlist" id="mmList"></div>
+      <div class="mrow2"><button class="btn" id="mmClose">Cancel</button></div>
+    </div></div>
     <div id="exView" style="display:none"><div class="msg">Loading…</div></div>
     <div id="hiddenView" style="display:none"><div class="msg">Loading…</div></div>
   </div>
@@ -254,6 +274,8 @@
         '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
       '<div class="sub">'+
         siteCharts(s)+
+        '<div class="mergeRow"><button class="ic" data-merge="'+esc(s.key)+'">🔗 Merge into another site</button>'+
+          (s.unmatched?'<button class="ic" data-addreg="'+esc(s.key)+'">➕ Add to register</button>':'')+'</div>'+
         '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
         '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
         (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
@@ -290,6 +312,8 @@
     $("hiddenView").innerHTML=rows||'<div class="msg">Nothing hidden. Use 🙈 on a site to hide it here.</div>';
   }
 
+  function siteByKey(k){ for(var i=0;i<lastSites.length;i++) if(lastSites[i].key===k) return lastSites[i]; return null; }
+
   async function loadCost(){
     $("costView").innerHTML='<div class="msg">Loading…</div>';
     try{
@@ -298,6 +322,45 @@
       lastSites=d.sites||[]; lastSitelog=d.sitelog;
       renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
+  }
+
+  // ── Merge a site (as shown in costing, incl. all-time) into a register site ──
+  var mmSite=null, mmReg=[];
+  async function openMerge(key){
+    var s=siteByKey(key); if(!s) return; mmSite=s;
+    $("mmTitle").textContent="Merge “"+s.site+"” into…";
+    $("mmSub").textContent="Its labour + POs will roll into whichever registered site you pick. Good for old names / SiteLog codes that should be one job.";
+    $("mmSearch").value=""; $("mmList").innerHTML='<div class="msg" style="padding:11px">Loading sites…</div>';
+    $("mergeModal").classList.add("on"); $("mmSearch").focus();
+    if(!mmReg.length){
+      try{ var d=await (await aFetch("/sites/register")).json(); mmReg=(d.sites||[]).filter(function(x){return !x.archived;}); }catch(e){ mmReg=[]; }
+    }
+    renderMergeList("");
+  }
+  function renderMergeList(q){
+    q=(q||"").toLowerCase();
+    var rows=mmReg.filter(function(x){ return !q || (x.name||"").toLowerCase().indexOf(q)>=0 || (x.client||"").toLowerCase().indexOf(q)>=0; })
+      .sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).slice(0,300);
+    $("mmList").innerHTML = rows.length ? rows.map(function(x){
+      return '<button data-client="'+esc(x.client)+'" data-num="'+esc(x.siteNumber)+'"><span>'+esc(x.name)+'</span><small>'+esc(x.client||"")+'</small></button>';
+    }).join("") : '<div class="msg" style="padding:11px">No matching registered site.</div>';
+  }
+  async function doMerge(client,num){
+    if(!mmSite) return;
+    var post=function(p,b){ var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)}); };
+    try{
+      var r=await (await post("/sites/register/merge",{alias:mmSite.site,client:client,siteNumber:num})).json();
+      if(!r.ok) throw new Error(r.error||"merge failed");
+      $("mergeModal").classList.remove("on"); loadCost();
+    }catch(e){ alert("Couldn't merge — "+e.message); }
+  }
+  async function addToRegister(key){
+    var s=siteByKey(key); if(!s) return;
+    if(!confirm('Add "'+s.site+'" to the site register as a new site?')) return;
+    var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);
+    try{ var r=await (await fetch(API+"/sites/register/add",{method:"POST",headers:h,body:JSON.stringify({name:s.site})})).json();
+      if(!r.ok) throw new Error(r.error||"add failed"); loadCost();
+    }catch(e){ alert("Couldn't add — "+e.message); }
   }
 
   async function loadEx(){
@@ -321,6 +384,9 @@
   // Pin / hide / unhide / expand
   function toggleArr(a,k){ var i=a.indexOf(k); if(i>=0)a.splice(i,1); else a.push(k); }
   document.addEventListener("click",function(e){
+    var mg=e.target.closest("[data-merge]"); if(mg){ e.stopPropagation(); openMerge(mg.getAttribute("data-merge")); return; }
+    var ar=e.target.closest("[data-addreg]"); if(ar){ e.stopPropagation(); addToRegister(ar.getAttribute("data-addreg")); return; }
+    var pick=e.target.closest("#mmList button"); if(pick){ doMerge(pick.getAttribute("data-client"),pick.getAttribute("data-num")); return; }
     var un=e.target.closest("[data-unhide]");
     if(un){ var k=un.getAttribute("data-unhide"); var i=prefs.hidden.indexOf(k); if(i>=0)prefs.hidden.splice(i,1); savePrefs(); renderCost(); renderHidden(); return; }
     var ic=e.target.closest(".ic[data-act]");
@@ -373,6 +439,9 @@
     $("exView").style.display=which==="ex"?"":"none";
     $("hiddenView").style.display=which==="hidden"?"":"none";
   }
+  $("mmSearch").addEventListener("input",function(){ renderMergeList(this.value); });
+  $("mmClose").onclick=function(){ $("mergeModal").classList.remove("on"); };
+  $("mergeModal").addEventListener("click",function(e){ if(e.target===this) this.classList.remove("on"); });
   $("tabCost").onclick=function(){ showTab("cost"); };
   $("tabEx").onclick=function(){ showTab("ex"); };
   $("tabHidden").onclick=function(){ renderHidden(); showTab("hidden"); };
