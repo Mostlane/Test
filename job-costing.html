@@ -70,6 +70,14 @@
   .mlist small{color:var(--muted);}
   .msearch{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;margin-top:4px;}
   .mrow2{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
+  .finsug{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:9px 12px;margin:8px 0;}
+  .finsug.warn{background:#fef2f2;border-color:#fecaca;}
+  .sugbig{font-weight:700;font-size:14px;color:#1e40af;}
+  .finsug.warn .sugbig{color:#b91c1c;}
+  .sugnote{font-size:12px;color:var(--muted);margin-top:2px;}
+  .li b.pos{color:#15803d;} .li b.neg{color:#dc2626;}
+  .xdel{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 2px;}
+  .xdel:hover{color:#dc2626;}
   .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
   .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
@@ -124,6 +132,8 @@
   var $=function(id){return document.getElementById(id)};
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function aFetch(p){var h=new Headers();var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{headers:h,cache:"no-store"});}
+  function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}
+  function today(){return new Date().toISOString().slice(0,10);}
   function hm(m){return Math.floor(m/60)+"h "+(m%60)+"m";}
   function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
 
@@ -190,6 +200,37 @@
         '</div></div>'+
     '</div>';
   }
+  // Project financials for ONE site: contract value, valuations, running
+  // position + a suggested next valuation.
+  function finHtml(s){
+    var f=s.fin;
+    if(!f){
+      return '<div class="grouplbl">Project</div><div class="mergeRow"><button class="ic" data-finsetup="'+esc(s.key)+'">📈 Track project value &amp; valuations</button></div>';
+    }
+    var vals=(f.valuations||[]).map(function(v){
+      return '<div class="li"><span>🧾 '+esc(v.date)+(v.note?' · '+esc(v.note):'')+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
+    }).join('')||'<div class="li"><span style="color:var(--muted)">No valuations submitted yet</span></div>';
+    var sug='';
+    if(f.overCommitted){
+      sug='<div class="finsug warn"><div class="sugbig">⚠️ Heading into loss</div><div class="sugnote">Cost so far ('+money(f.cost)+') is more than the value left to claim. The most you can still value is '+money(f.remainingValue)+'.</div></div>';
+    } else if(f.remainingValue>0.005){
+      sug='<div class="finsug"><div class="sugbig">Suggested next valuation: '+money(f.suggestedNext)+'</div>'+
+        '<div class="sugnote">Keeps you cash-positive and leaves a fair share for the '+f.remainingVals+' valuation'+(f.remainingVals===1?'':'s')+' still to come. After submitting it your position would be '+money(f.positionAfterSuggested)+'.</div></div>';
+    } else {
+      sug='<div class="finsug"><div class="sugnote">Fully valued — nothing left to claim on this contract.</div></div>';
+    }
+    var posCls=f.position>=0?'pos':'neg';
+    return '<div class="grouplbl">Project financials</div>'+
+      '<div class="li"><span>📐 Contract value'+(f.planned?' · '+f.planned+' valuations planned':'')+'</span><b>'+money(f.value)+'</b></div>'+
+      '<div class="li"><span>✅ Valued to date ('+(f.valuations||[]).length+(f.planned?' of '+f.planned:'')+')</span><b>'+money(f.valued)+'</b></div>'+
+      '<div class="li"><span>💷 Cost to date (labour + PO)</span><b>'+money(f.cost)+'</b></div>'+
+      '<div class="li"><span>📊 Position now (valued − cost)</span><b class="'+posCls+'">'+money(f.position)+(f.marginPct!=null?' · '+f.marginPct+'% margin at full value':'')+'</b></div>'+
+      '<div class="li"><span>🕗 Left to value</span><b>'+money(f.remainingValue)+'</b></div>'+
+      sug+
+      '<div class="mergeRow"><button class="ic" data-finval="'+esc(s.key)+'">➕ Add valuation</button><button class="ic" data-finedit="'+esc(s.key)+'">⚙ Edit value / plan</button></div>'+
+      vals;
+  }
+
   // Spend grouped by supplier for ONE site.
   function suppliersHtml(s){
     if(!s.suppliers||!s.suppliers.length) return '';
@@ -274,6 +315,7 @@
         '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
       '<div class="sub">'+
         siteCharts(s)+
+        finHtml(s)+
         '<div class="mergeRow"><button class="ic" data-merge="'+esc(s.key)+'">🔗 Merge into another site</button>'+
           (s.unmatched?'<button class="ic" data-addreg="'+esc(s.key)+'">➕ Add to register</button>':'')+'</div>'+
         '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
@@ -354,6 +396,26 @@
       $("mergeModal").classList.remove("on"); loadCost();
     }catch(e){ alert("Couldn't merge — "+e.message); }
   }
+  async function finSetup(key){
+    var s=siteByKey(key), f=s&&s.fin;
+    var v=prompt("Project (contract) value for “"+(s?s.site:"")+"” — £ (total the job is worth):", f?f.value:"");
+    if(v===null) return; v=parseFloat(String(v).replace(/[^0-9.]/g,"")); if(!isFinite(v)){ alert("Enter a number"); return; }
+    var n=prompt("How many valuations do you plan to submit across the whole project?", f?f.planned:"");
+    if(n===null) return; n=parseInt(n,10); if(!isFinite(n)||n<0) n=0;
+    try{ var r=await (await postJSON("/costing/fin",{key:key,value:v,planned:n})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
+    catch(e){ alert("Couldn't save — "+e.message); }
+  }
+  async function finAddValuation(key){
+    var a=prompt("Valuation amount just submitted — £:"); if(a===null) return;
+    a=parseFloat(String(a).replace(/[^0-9.]/g,"")); if(!isFinite(a)){ alert("Enter a number"); return; }
+    var d=prompt("Date submitted (YYYY-MM-DD):", today()); if(d===null) return;
+    try{ var r=await (await postJSON("/costing/fin/valuation",{key:key,amount:a,date:d})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
+    catch(e){ alert("Couldn't add — "+e.message); }
+  }
+  async function finDelValuation(combo){
+    var p=combo.split("|"); if(!confirm("Delete this valuation?")) return;
+    try{ await postJSON("/costing/fin/valuation/delete",{key:p[0],id:p[1]}); loadCost(); }catch(e){}
+  }
   async function addToRegister(key){
     var s=siteByKey(key); if(!s) return;
     if(!confirm('Add "'+s.site+'" to the site register as a new site?')) return;
@@ -384,6 +446,10 @@
   // Pin / hide / unhide / expand
   function toggleArr(a,k){ var i=a.indexOf(k); if(i>=0)a.splice(i,1); else a.push(k); }
   document.addEventListener("click",function(e){
+    var fs=e.target.closest("[data-finsetup],[data-finedit]");
+    if(fs){ e.stopPropagation(); finSetup(fs.getAttribute("data-finsetup")||fs.getAttribute("data-finedit")); return; }
+    var fv=e.target.closest("[data-finval]"); if(fv){ e.stopPropagation(); finAddValuation(fv.getAttribute("data-finval")); return; }
+    var fd=e.target.closest("[data-findel]"); if(fd){ e.stopPropagation(); finDelValuation(fd.getAttribute("data-findel")); return; }
     var mg=e.target.closest("[data-merge]"); if(mg){ e.stopPropagation(); openMerge(mg.getAttribute("data-merge")); return; }
     var ar=e.target.closest("[data-addreg]"); if(ar){ e.stopPropagation(); addToRegister(ar.getAttribute("data-addreg")); return; }
     var pick=e.target.closest("#mmList button"); if(pick){ doMerge(pick.getAttribute("data-client"),pick.getAttribute("data-num")); return; }

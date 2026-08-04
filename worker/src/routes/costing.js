@@ -282,6 +282,49 @@ export async function handle(request, env, ctx, url, sess) {
     return json({ ok: true, aliases }, {}, env, request);
   }
 
+  // ── Project valuations / financials (per site, keyed by the summary `key`) ──
+  // Track a project's contract value, how many valuations are planned, and each
+  // valuation submitted (amount + date). /costing/summary folds in the running
+  // position + a suggested next valuation. Stored in app_config `proj_fin`.
+  if (path === "/costing/fin" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    if (!key) return error("key required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    if (b.value !== undefined) cur.value = Math.max(0, Number(b.value) || 0);
+    if (b.planned !== undefined) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
+    if (b.name !== undefined) cur.name = String(b.name || "").slice(0, 120);
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    const amount = Number(b.amount);
+    if (!key || !Number.isFinite(amount)) return error("key and amount required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate(new Date().toISOString());
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200) });
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim(), id = String(b.id || "");
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key];
+    if (cur && Array.isArray(cur.valuations)) { cur.valuations = cur.valuations.filter(v => v.id !== id); await cfgSet(env, tid, "proj_fin", fin); }
+    return json({ ok: true, fin: cur || null }, {}, env, request);
+  }
+
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
@@ -292,6 +335,7 @@ export async function handle(request, env, ctx, url, sess) {
     // system's "JT" → the portal's "John Thorn") so their labour + POs group.
     const eAlias = await cfgGet(env, tid, "eng_aliases", {});
     const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
+    const projFin = await cfgGet(env, tid, "proj_fin", {});   // per-site contract value + valuations
 
     const bySite = {};   // norm -> aggregate
     const siteFor = (name, resolved) => {
@@ -454,6 +498,7 @@ export async function handle(request, env, ctx, url, sess) {
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
+        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100),
         jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
         engineers: Object.entries(s.engineers).map(([u, v]) => ({
           user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0, src: v.src || null,
@@ -857,6 +902,36 @@ async function fetchSitelogVisits(env, from, to) {
   } catch { return got ? out : null; }
 }
 function jcNameLike(v) { return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)"; }
+
+// Project financials for one site: contract value, valuations submitted, and
+// how the job is looking + a suggested next valuation. Returns null when the
+// project hasn't been set up (so only real projects show it). `cost` is the
+// job's grand total (labour + PO) so far.
+function computeFin(f, cost) {
+  if (!f || (!(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0))) return null;
+  const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
+  const value = r(f.value);
+  const planned = Math.max(0, Math.round(Number(f.planned) || 0));
+  const valuations = (Array.isArray(f.valuations) ? f.valuations : [])
+    .map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "" }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
+  const remainingValue = r(value - valued);
+  const remainingVals = Math.max(0, planned - valuations.length);
+  const position = r(valued - cost);                       // cash position now (+ = ahead of cost)
+  const marginPct = value > 0 ? r((value - cost) / value * 100) : null;   // projected margin on full value
+  const breakEven = Math.max(0, r(cost - valued));         // next valuation to be ≥ cost (stay positive)
+  const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
+  // Suggest: at least break even, at least your even share, never more than what's left to claim.
+  let suggestedNext = Math.max(breakEven, evenShare);
+  suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+  return {
+    value, planned, valuations, valued, cost: r(cost), position, marginPct,
+    remainingValue, remainingVals, breakEven: r(breakEven), evenShare: r(evenShare),
+    suggestedNext, overCommitted: breakEven > remainingValue + 0.005,
+    positionAfterSuggested: r(valued + suggestedNext - cost),
+  };
+}
 
 // Build a site's trend from its day-level labour/PO maps: span only the site's
 // ACTIVE dates (first→last with any spend) and pick the granularity from that
