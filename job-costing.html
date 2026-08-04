@@ -38,6 +38,7 @@
   .totline span{color:var(--ink);}
   .note{font-size:11px;color:var(--muted);margin-top:8px;}
   .chip.unpriced{background:#ede9fe;color:#6d28d9;}
+  .warnbar{background:#fef3c7;border:1px solid #fcd34d;border-left:5px solid #f59e0b;color:#92400e;border-radius:10px;padding:10px 13px;font-size:13px;margin:0 0 12px;line-height:1.45;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
   .chip.arch{background:var(--amberbg);color:var(--amber);}
   .chip.unm{background:#fee2e2;color:var(--red);}
@@ -95,8 +96,9 @@
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      if(!d.sites.length){ $("costView").innerHTML='<div class="msg">No captured time in this period yet. Time appears here as engineers travel / work jobs, scan into sites, and fill timesheets.</div>'; return; }
-      $("costView").innerHTML=d.sites.map(function(s,i){
+      if(!d.sites.length){ $("costView").innerHTML='<div class="msg">No captured time in this period yet.</div>'; return; }
+      var banner='<div class="warnbar">⚠️ <b>Labour figures are provisional</b> — they currently come from job-status taps, not SiteLog scans. We\'re wiring labour to your SiteLog scan data so it matches SiteLog exactly. <b>PO spend below is live and correct.</b></div>';
+      $("costView").innerHTML=banner+d.sites.map(function(s,i){
         var tot=s.totalMins||1;
         var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'');
         // Per-engineer: labour (hours + £) then that engineer's PO lines beneath.
