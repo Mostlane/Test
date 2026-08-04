@@ -253,6 +253,7 @@
         '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
         '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
       '<div class="sub">'+
+        siteCharts(s)+
         '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
         '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
         (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
@@ -261,7 +262,6 @@
         suppliersHtml(s)+
         (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
         (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
-        siteCharts(s)+
       '</div></div>';
   }
 
