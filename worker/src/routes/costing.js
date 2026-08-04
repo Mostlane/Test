@@ -222,6 +222,14 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* ══ 3. COSTING + EXCEPTIONS ══════════════════════════════════════════════ */
 
+  // Manual trigger for the SiteLog→SLA session reconcile (same work the hourly
+  // cron does). Handy for testing and for an on-demand "sync now" button.
+  if (path === "/costing/reconcile-sitelog" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
+    return json(r, {}, env, request);
+  }
+
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
@@ -673,6 +681,103 @@ async function fetchSitelogCosting(env, from, to) {
   } catch { return null; }
 }
 
+// Raw SiteLog visits (for the session reconcile — needs check-in/out times, not
+// just aggregates). Same portal→SiteLog custom-domain fetch; fails soft to null.
+async function fetchSitelogVisits(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  try {
+    const res = await fetch(base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
+      { headers: { "x-admin-secret": secret } });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return Array.isArray(j.visits) ? j.visits : null;
+  } catch { return null; }
+}
+
+/* ══ P4: SiteLog → SLA session reconcile ════════════════════════════════════
+   mostlane-api can't be called from SiteLog (1042), so instead of SiteLog
+   pushing "scan-out" events, the portal PULLS recent visits and reconciles:
+   for each LINKED employee's completed visit, (a) close any SLA job-status
+   session still open at scan-out — "the scan ends the session"; (b) if no SLA
+   segment already covers that visit, materialise one from the scan so the
+   engineer's timesheet autofill + job costing see it. Idempotent (segments
+   carry the SiteLog visit id); subcontractors are skipped (no portal
+   timesheet — job costing already reads their cost from SiteLog directly).
+   Runs on the hourly cron over a rolling window; safe to run repeatedly. */
+export async function reconcileSitelogSessions(env, tid, opts) {
+  const o = opts || {};
+  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
+  await ensure(env);
+  const now = o.now ? new Date(o.now) : new Date();
+  const to = londonDate(now.toISOString());
+  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const from = londonDate(fromD.toISOString());
+  const visits = await fetchSitelogVisits(env, from, to);
+  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
+  const reg = await loadRegister(env, tid);
+  let closed = 0, created = 0, skipped = 0;
+  for (const v of visits) {
+    const user = String(v.portal_username || "").trim();
+    if (!user) { skipped++; continue; }               // subcontractor → costing only
+    if (!v.check_in_at || !v.check_out_at) { skipped++; continue; }   // open visit → leave it
+    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
+    if (!(outMs > inMs)) { skipped++; continue; }
+    const resolved = resolveSiteCode(reg, v.site_code);
+    const siteName = resolved ? resolved.name : (v.provided_site_name || String(v.site_code || "").trim());
+    const dayKey = londonDate(v.check_out_at);
+    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 3600e3;
+
+    // (a) Close SLA sessions left open at scan-out that day (the scan ends them).
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL")
+        .bind(tid, user).all();
+      for (const seg of results || []) {
+        const sMs = Date.parse(seg.started_at);
+        if (sMs <= outMs && sMs >= dayStartMs) {
+          await env.DB.prepare(
+            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?")
+            .bind(new Date(outMs).toISOString(), seg.id, tid).run();
+          closed++;
+        }
+      }
+    } catch {}
+
+    // (b) Materialise a segment from the scan — unless we already did (idempotent
+    // by sitelog_visit_id) or an SLA segment already overlaps this visit.
+    const vid = "sl:" + (v.visit_id != null ? v.visit_id : (user + "|" + v.check_in_at));
+    let exists = false, overlaps = false;
+    try {
+      const dup = await env.DB.prepare(
+        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1").bind(tid, vid).first();
+      exists = !!dup;
+    } catch {}
+    if (!exists) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL")
+          .bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 3600e3).toISOString()).all();
+        for (const seg of results || []) {
+          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
+          if (eMs > inMs && sMs < outMs) { overlaps = true; break; }   // SLA already covers it
+        }
+      } catch {}
+      if (!overlaps) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)")
+            .bind(tid, user, vid, "", siteName, resolved ? resolved.postcode : "",
+              new Date(inMs).toISOString(), new Date(outMs).toISOString(), "onsite", vid).run();
+          created++;
+        } catch {}
+      } else { skipped++; }
+    }
+  }
+  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
+}
+
 // PO spend from the PO system's own D1 (PO_DB binding). Fails soft to [] when
 // the binding is absent or the schema differs. cost_ex_vat is the job-costing
 // figure (VAT is reclaimed); NULL = raised-but-not-priced-yet.
@@ -730,6 +835,9 @@ async function ensure(env) {
   } catch {}
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+  // P4: links a segment materialised from a SiteLog visit back to that visit, so
+  // the reconcile is idempotent (never creates the same session twice).
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run(); } catch {}
   try {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
