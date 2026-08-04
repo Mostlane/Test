@@ -20,8 +20,17 @@
   .tabs{display:flex;gap:8px;margin:0 0 12px;}
   .range{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
-  .siteRow{cursor:pointer;}
+  .siteRow{cursor:pointer;position:relative;}
+  .siteRow.pinned{border-color:#c7d2fe;box-shadow:0 0 0 2px #e0e7ff inset;}
+  .siteRow.dragging{opacity:.55;}
+  .siteRow.dragover{border-color:var(--brand);}
   .siteHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .drag{cursor:grab;color:#94a3b8;font-size:16px;padding:0 2px;touch-action:none;user-select:none;flex:0 0 auto;}
+  .drag:active{cursor:grabbing;}
+  .rowbtns{display:flex;gap:4px;flex:0 0 auto;}
+  .rowbtns .ic{border:1px solid var(--line);background:#fff;border-radius:8px;padding:3px 7px;font-size:13px;cursor:pointer;line-height:1.1;}
+  .rowbtns .ic.act{background:#eef2ff;border-color:#c7d2fe;}
+  .pinbadge{font-size:11px;color:#4338ca;font-weight:700;}
   .siteHead .nm{font-weight:700;font-size:15px;flex:1;min-width:0;}
   .siteHead .cost{font-weight:700;}
   .bar{height:8px;border-radius:6px;background:#eef2f7;overflow:hidden;display:flex;margin-top:8px;}
@@ -65,15 +74,18 @@
     <div class="tabs">
       <button class="btn on" id="tabCost">Costing</button>
       <button class="btn" id="tabEx">Exceptions <span id="exCount"></span></button>
+      <button class="btn" id="tabHidden">🙈 Hidden <span id="hidCount"></span></button>
     </div>
     <div class="range" id="range">
       <button class="btn" data-d="7">7 days</button>
       <button class="btn on" data-d="28">28 days</button>
       <button class="btn" data-d="91">3 months</button>
+      <button class="btn" data-d="all">All time</button>
     </div>
 
     <div id="costView"><div class="msg">Loading…</div></div>
     <div id="exView" style="display:none"><div class="msg">Loading…</div></div>
+    <div id="hiddenView" style="display:none"><div class="msg">Loading…</div></div>
   </div>
 
 <script>
@@ -87,10 +99,118 @@
   function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
 
   var days=28;
+  var lastSites=[], lastSitelog=true;
+  var prefs={pinned:[],hidden:[],order:[]};
+  function inArr(a,k){return a.indexOf(k)>=0;}
+
   function rangeQS(){
-    var to=new Date(), from=new Date(Date.now()-(days-1)*86400000);
+    var to=new Date();
+    var from=(days==="all")?new Date("2000-01-01T00:00:00Z"):new Date(Date.now()-(days-1)*86400000);
     var f=function(d){return d.toISOString().slice(0,10);};
     return "from="+f(from)+"&to="+f(to);
+  }
+
+  async function loadPrefs(){
+    try{ var d=await (await aFetch("/costing/prefs")).json();
+      if(d&&d.ok&&d.prefs){ prefs={pinned:d.prefs.pinned||[],hidden:d.prefs.hidden||[],order:d.prefs.order||[]}; }
+    }catch(e){}
+  }
+  var saveT=null;
+  function savePrefs(){
+    if(saveT)clearTimeout(saveT);
+    saveT=setTimeout(function(){
+      var h=new Headers();h.set("Content-Type","application/json");
+      var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);
+      fetch(API+"/costing/prefs",{method:"POST",headers:h,body:JSON.stringify(prefs)}).catch(function(){});
+    },500);
+  }
+
+  function srcBadge(src){
+    if(src==='sitelog') return ' <span class="sbadge sl" title="From SiteLog scans">SiteLog</span>';
+    if(src==='sla') return ' <span class="sbadge sla" title="From job-status taps">taps</span>';
+    if(src==='mixed') return ' <span class="sbadge mix" title="SiteLog scans + job-status taps">SiteLog + taps</span>';
+    return '';
+  }
+
+  // pinned first (by saved order), then the rest (by saved drag order, else £).
+  function sortSites(sites){
+    var oi={}; prefs.order.forEach(function(k,i){oi[k]=i;});
+    var pin={}; prefs.pinned.forEach(function(k){pin[k]=true;});
+    return sites.slice().sort(function(a,b){
+      var ap=pin[a.key]?0:1, bp=pin[b.key]?0:1; if(ap!==bp) return ap-bp;
+      var ao=oi[a.key], bo=oi[b.key];
+      if(ao==null&&bo==null) return (b.grandTotal||0)-(a.grandTotal||0);
+      if(ao==null) return 1; if(bo==null) return -1; return ao-bo;
+    });
+  }
+
+  function cardHtml(s){
+    var tot=s.totalMins||1;
+    var pinned=inArr(prefs.pinned,s.key);
+    var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'')+(pinned?'<span class="pinbadge">📌</span>':'');
+    var engs=s.engineers.map(function(e){
+      var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
+        (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):''):'')+
+        (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
+      var pos=(e.pos||[]).map(function(p){
+        return '<div class="li po"><span>🧾 '+esc(p.supplier||"PO")+(p.incident?' · '+esc(p.incident):'')+'</span>'+
+          '<span>'+(p.cost!=null?money(p.cost):'<i style="color:var(--muted)">unpriced</i>')+'</span></div>';
+      }).join("");
+      return head+pos;
+    }).join("");
+    var jobs=(s.jobs||[]).slice(0,10).map(function(j){return '<div class="li"><span>🔧 '+esc(j.ref)+'</span><b>'+hm(j.mins)+'</b></div>';}).join("");
+    var poNote=s.poUnpriced?('<span class="chip unpriced" title="POs raised but not yet priced">'+s.poUnpriced+' PO unpriced</span>'):'';
+    return '<div class="card siteRow'+(pinned?' pinned':'')+'" data-key="'+esc(s.key)+'">'+
+      '<div class="siteHead">'+
+        '<span class="drag" title="Drag to reorder">⠿</span>'+
+        '<span class="nm">'+esc(s.site)+'</span>'+chips+
+        '<span class="cost">'+money(s.grandTotal||0)+(s.costPartial?' <small style="color:var(--muted);font-weight:400">*</small>':'')+'</span>'+
+        '<span class="rowbtns">'+
+          '<button class="ic'+(pinned?' act':'')+'" data-act="pin" title="'+(pinned?'Unpin':'Pin to top')+'">📌</button>'+
+          '<button class="ic" data-act="hide" title="Hide this site">🙈</button>'+
+        '</span>'+
+      '</div>'+
+      '<div class="totline">'+
+        '<span>🛠 Labour '+(s.laborCost?money(s.laborCost):hm(s.totalMins))+'</span>'+
+        '<span>🧾 PO '+money(s.poTotal||0)+'</span>'+poNote+'</div>'+
+      '<div class="bar">'+
+        '<i class="tr" style="width:'+(s.travelMins/tot*100)+'%" title="Travel '+hm(s.travelMins)+'"></i>'+
+        '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
+        '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
+      '<div class="sub">'+
+        '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
+        '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
+        (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
+        '<div class="grouplbl">People — labour + their POs</div>'+
+        (engs||'<div class="li"><span style="color:var(--muted)">No time or POs yet</span></div>')+
+        (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
+        (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
+      '</div></div>';
+  }
+
+  function renderCost(){
+    var hidden={}; prefs.hidden.forEach(function(k){hidden[k]=true;});
+    var visible=lastSites.filter(function(s){return !hidden[s.key];});
+    $("hidCount").textContent=prefs.hidden.length?("("+prefs.hidden.length+")"):"";
+    var banner=(lastSitelog===false)
+      ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
+      : '';
+    if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
+    $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
+  }
+
+  function renderHidden(){
+    var byKey={}; lastSites.forEach(function(s){byKey[s.key]=s;});
+    var rows=prefs.hidden.map(function(k){
+      var s=byKey[k];
+      var label=s?s.site:k.replace(/^\?/,"")+" (not in this period)";
+      var amt=s?money(s.grandTotal||0):"";
+      return '<div class="card" style="display:flex;align-items:center;gap:10px;">'+
+        '<span class="nm" style="flex:1;font-weight:700;">'+esc(label)+'</span>'+
+        '<span class="cost">'+amt+'</span>'+
+        '<button class="ic" data-unhide="'+esc(k)+'" title="Unhide">↩︎ Unhide</button></div>';
+    }).join("");
+    $("hiddenView").innerHTML=rows||'<div class="msg">Nothing hidden. Use 🙈 on a site to hide it here.</div>';
   }
 
   async function loadCost(){
@@ -98,55 +218,8 @@
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      if(!d.sites.length){ $("costView").innerHTML='<div class="msg">No captured time in this period yet.</div>'; return; }
-      // When SiteLog couldn't be reached the labour is job-status-taps only —
-      // say so plainly. When it IS folded in, no banner (figures are live).
-      var banner=(d.sitelog===false)
-        ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
-        : '';
-      // Small badge showing where a person's labour came from.
-      function srcBadge(src){
-        if(src==='sitelog') return ' <span class="sbadge sl" title="From SiteLog scans">SiteLog</span>';
-        if(src==='sla') return ' <span class="sbadge sla" title="From job-status taps">taps</span>';
-        if(src==='mixed') return ' <span class="sbadge mix" title="SiteLog scans + job-status taps">SiteLog + taps</span>';
-        return '';
-      }
-      $("costView").innerHTML=banner+d.sites.map(function(s,i){
-        var tot=s.totalMins||1;
-        var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'');
-        // Per-engineer: labour (hours + £) then that engineer's PO lines beneath.
-        var engs=s.engineers.map(function(e){
-          var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
-            (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):''):'')+
-            (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
-          var pos=(e.pos||[]).map(function(p){
-            return '<div class="li po"><span>🧾 '+esc(p.supplier||"PO")+(p.incident?' · '+esc(p.incident):'')+'</span>'+
-              '<span>'+(p.cost!=null?money(p.cost):'<i style="color:var(--muted)">unpriced</i>')+'</span></div>';
-          }).join("");
-          return head+pos;
-        }).join("");
-        var jobs=(s.jobs||[]).slice(0,10).map(function(j){return '<div class="li"><span>🔧 '+esc(j.ref)+'</span><b>'+hm(j.mins)+'</b></div>';}).join("");
-        var poNote=s.poUnpriced?('<span class="chip unpriced" title="POs raised but not yet priced">'+s.poUnpriced+' PO unpriced</span>'):'';
-        return '<div class="card siteRow" data-i="'+i+'">'+
-          '<div class="siteHead"><span class="nm">'+esc(s.site)+'</span>'+chips+
-            '<span class="cost">'+money(s.grandTotal||0)+(s.costPartial?' <small style="color:var(--muted);font-weight:400">*</small>':'')+'</span></div>'+
-          '<div class="totline">'+
-            '<span>🛠 Labour '+(s.laborCost?money(s.laborCost):hm(s.totalMins))+'</span>'+
-            '<span>🧾 PO '+money(s.poTotal||0)+'</span>'+poNote+'</div>'+
-          '<div class="bar">'+
-            '<i class="tr" style="width:'+(s.travelMins/tot*100)+'%" title="Travel '+hm(s.travelMins)+'"></i>'+
-            '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
-            '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
-          '<div class="sub">'+
-            '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
-            '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
-            (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
-            '<div class="grouplbl">People — labour + their POs</div>'+
-            (engs||'<div class="li"><span style="color:var(--muted)">No time or POs yet</span></div>')+
-            (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
-            (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
-          '</div></div>';
-      }).join("");
+      lastSites=d.sites||[]; lastSitelog=d.sitelog;
+      renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
   }
 
@@ -168,18 +241,70 @@
     }catch(e){ $("exView").innerHTML='<div class="msg">Couldn\'t load exceptions — '+esc(e.message)+'</div>'; }
   }
 
+  // Pin / hide / unhide / expand
+  function toggleArr(a,k){ var i=a.indexOf(k); if(i>=0)a.splice(i,1); else a.push(k); }
   document.addEventListener("click",function(e){
+    var un=e.target.closest("[data-unhide]");
+    if(un){ var k=un.getAttribute("data-unhide"); var i=prefs.hidden.indexOf(k); if(i>=0)prefs.hidden.splice(i,1); savePrefs(); renderCost(); renderHidden(); return; }
+    var ic=e.target.closest(".ic[data-act]");
+    if(ic){
+      e.stopPropagation();
+      var card=ic.closest(".siteRow"); if(!card) return;
+      var key=card.getAttribute("data-key");
+      if(ic.dataset.act==="pin"){ toggleArr(prefs.pinned,key); }
+      else if(ic.dataset.act==="hide"){ if(prefs.hidden.indexOf(key)<0)prefs.hidden.push(key); var pi=prefs.pinned.indexOf(key); if(pi>=0)prefs.pinned.splice(pi,1); }
+      savePrefs(); renderCost(); renderHidden(); return;
+    }
+    if(e.target.closest(".drag")) return;   // drag handle, not an expand
     var row=e.target.closest(".siteRow");
     if(row){ var s=row.querySelector(".sub"); s.style.display=s.style.display==="block"?"none":"block"; }
   });
-  $("tabCost").onclick=function(){ this.classList.add("on");$("tabEx").classList.remove("on");$("costView").style.display="";$("exView").style.display="none"; };
-  $("tabEx").onclick=function(){ this.classList.add("on");$("tabCost").classList.remove("on");$("exView").style.display="";$("costView").style.display="none"; };
+
+  // Pointer-based drag reordering (mouse + touch), by the ⠿ handle.
+  var drag=null;
+  document.addEventListener("pointerdown",function(e){
+    var h=e.target.closest(".drag"); if(!h) return;
+    var card=h.closest(".siteRow"); var box=$("cards"); if(!card||!box) return;
+    e.preventDefault();
+    drag={card:card,box:box}; card.classList.add("dragging");
+    try{ h.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  document.addEventListener("pointermove",function(e){
+    if(!drag) return;
+    var el=document.elementFromPoint(e.clientX,e.clientY);
+    var over=el&&el.closest?el.closest(".siteRow"):null;
+    if(!over||over===drag.card||over.parentNode!==drag.box) return;
+    var r=over.getBoundingClientRect();
+    var after=e.clientY>(r.top+r.height/2);
+    drag.box.insertBefore(drag.card, after?over.nextSibling:over);
+  });
+  function endDrag(){
+    if(!drag) return;
+    drag.card.classList.remove("dragging");
+    // Persist the on-screen order of all visible cards.
+    prefs.order=[].map.call(drag.box.querySelectorAll(".siteRow"),function(c){return c.getAttribute("data-key");});
+    drag=null; savePrefs(); renderCost();
+  }
+  document.addEventListener("pointerup",endDrag);
+  document.addEventListener("pointercancel",endDrag);
+
+  function showTab(which){
+    $("tabCost").classList.toggle("on",which==="cost");
+    $("tabEx").classList.toggle("on",which==="ex");
+    $("tabHidden").classList.toggle("on",which==="hidden");
+    $("costView").style.display=which==="cost"?"":"none";
+    $("exView").style.display=which==="ex"?"":"none";
+    $("hiddenView").style.display=which==="hidden"?"":"none";
+  }
+  $("tabCost").onclick=function(){ showTab("cost"); };
+  $("tabEx").onclick=function(){ showTab("ex"); };
+  $("tabHidden").onclick=function(){ renderHidden(); showTab("hidden"); };
   $("range").addEventListener("click",function(e){
     var b=e.target.closest("button"); if(!b) return;
     [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});
-    days=+b.dataset.d; loadCost(); loadEx();
+    days=(b.dataset.d==="all")?"all":+b.dataset.d; loadCost(); loadEx();
   });
-  loadCost(); loadEx();
+  (async function(){ await loadPrefs(); loadCost(); loadEx(); })();
 })();
 </script>
 </body>
