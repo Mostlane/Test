@@ -39,6 +39,8 @@ import { poOrderSiteNames } from "./timesheets.js";
 
 const UNALLOC_MIN = 15;   // minutes of uncovered day window before we flag it
 const CLAIM_GAP_MIN = 30; // claimed-vs-captured difference before we flag it
+const MAX_SEG_HOURS = 14; // a single job session longer than this = forgotten status change → clamp
+const MAX_SEG_MS = MAX_SEG_HOURS * 3600e3;
 
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
@@ -506,6 +508,15 @@ async function buildDay(env, tid, user, date, reg) {
     if (!end) {
       if (date < today) { end = lazyCloseAt(s.started_at, date); flags.push("auto-closed"); }
       else { end = nowIso; flags.push("open"); }
+    }
+    // Guard a forgotten status change: a real session can't run for days. If a
+    // segment — even one "closed" only when the next job was tapped much later —
+    // spans more than a long shift, clamp it to a forgot-to-finish close on its
+    // start day and flag it. Without this, one stale "In Progress" job inflates
+    // costing by thousands (e.g. an 11-day Verwood session = 262h ≈ £5k).
+    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS) {
+      end = lazyCloseAt(s.started_at, date);
+      if (!flags.includes("auto-closed")) flags.push("auto-closed");
     }
     const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 60000));
     if (!mins) continue;
