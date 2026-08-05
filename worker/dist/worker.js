@@ -2955,6 +2955,7 @@ async function trackJobTime(env, tid, actor, before, after) {
   } catch {
   }
 }
+var MAX_SEG_MS = 14 * 36e5;
 async function jobTimeAuto(env, tid, username, monday) {
   const endD = /* @__PURE__ */ new Date(monday + "T12:00:00Z");
   endD.setUTCDate(endD.getUTCDate() + 7);
@@ -2982,18 +2983,27 @@ async function jobTimeAuto(env, tid, username, monday) {
     for (const seg of results || []) {
       const date = lDate(seg.started_at);
       let endedAt = seg.ended_at, open = false;
+      const forgotClose = () => {
+        const cut = new Date(seg.started_at);
+        cut.setHours(cut.getHours() + 1);
+        const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
+        return (cut > sevenPm ? cut : sevenPm).toISOString();
+      };
       if (!endedAt) {
         if (date < today) {
-          const cut = new Date(seg.started_at);
-          cut.setHours(cut.getHours() + 1);
-          const sevenPm = /* @__PURE__ */ new Date(date + "T18:00:00Z");
-          endedAt = (cut > sevenPm ? cut : sevenPm).toISOString();
+          endedAt = forgotClose();
           try {
             await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
           } catch {
           }
         } else {
           open = true;
+        }
+      } else if (Date.parse(endedAt) - Date.parse(seg.started_at) > MAX_SEG_MS) {
+        endedAt = forgotClose();
+        try {
+          await env.DB.prepare("UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?").bind(endedAt, seg.id, tid).run();
+        } catch {
         }
       }
       const o = out[date] = out[date] || { s: Infinity, e: 0, open: false, jobs: [] };
@@ -8068,6 +8078,38 @@ var regKey = (reg) => String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 var vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${regKey(reg)}/`;
 var vphotoPrefix = (tid, reg) => `vehiclephotos/${tid}/${regKey(reg)}/`;
 var vphotoRoot = (tid) => `vehiclephotos/${tid}/`;
+var vmaintPrefix = (tid, reg) => `vehiclemaint/${tid}/${regKey(reg)}/`;
+var parseJson = (s, d) => {
+  try {
+    return s ? JSON.parse(s) : d;
+  } catch {
+    return d;
+  }
+};
+var MCATS_KEY = (tid) => `fleet:maintcats:${tid}`;
+var DEFAULT_MAINT_CATS = [
+  { name: "Service", colour: "#2563eb" },
+  { name: "MOT", colour: "#7c3aed" },
+  { name: "Tyres", colour: "#0891b2" },
+  { name: "Brakes", colour: "#dc2626" },
+  { name: "Windscreen", colour: "#0d9488" },
+  { name: "Bodywork", colour: "#ea580c" },
+  { name: "Electrical", colour: "#ca8a04" },
+  { name: "Battery", colour: "#65a30d" },
+  { name: "Repair", colour: "#db2777" },
+  { name: "Other", colour: "#64748b" }
+];
+async function maintCats(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(MCATS_KEY(tid)).first();
+    if (row && row.value) {
+      const a = JSON.parse(row.value);
+      if (Array.isArray(a) && a.length) return a;
+    }
+  } catch {
+  }
+  return DEFAULT_MAINT_CATS;
+}
 async function coverMap(env, tid) {
   try {
     const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(CKEY(tid)).first();
@@ -8116,6 +8158,19 @@ async function handle20(request, env, ctx, url, sess) {
   if (sub === "/vehicle-doc" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("vehicledocs/")) return jr3({ error: "Bad key" }, headers, 400);
+    if (!sess && !await verifyFileSig(env, key, q)) return jr3({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers,
+      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600"
+    } });
+  }
+  if (sub === "/maintenance-doc" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("vehiclemaint/")) return jr3({ error: "Bad key" }, headers, 400);
     if (!sess && !await verifyFileSig(env, key, q)) return jr3({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
@@ -8287,6 +8342,7 @@ async function handle20(request, env, ctx, url, sess) {
         serviceReason: sv.reason,
         currentMiles: cm ? cm.miles : null,
         milesAt: cm ? cm.at : "",
+        specs: parseJson(v.specs, []),
         photoCount: pics.length,
         photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : ""
       };
@@ -8347,6 +8403,10 @@ async function handle20(request, env, ctx, url, sess) {
         num2(v.warnMiles),
         (/* @__PURE__ */ new Date()).toISOString()
       ).run();
+      if (v.specs !== void 0) {
+        const specsStr = typeof v.specs === "string" ? v.specs : JSON.stringify(Array.isArray(v.specs) ? v.specs : []);
+        await env.DB.prepare("UPDATE vehicles SET specs=? WHERE tenant_id=? AND reg=?").bind(specsStr, tid, reg).run();
+      }
       count++;
     }
     return jr3({ ok: true, count }, headers);
@@ -8362,6 +8422,13 @@ async function handle20(request, env, ctx, url, sess) {
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
       const pics = await env.JOB_FILES.list({ prefix: vphotoPrefix(tid, reg) });
       for (const o of pics.objects || []) await env.JOB_FILES.delete(o.key);
+      const maint = await env.JOB_FILES.list({ prefix: vmaintPrefix(tid, reg) });
+      for (const o of maint.objects || []) await env.JOB_FILES.delete(o.key);
+    } catch {
+    }
+    try {
+      await ensureMaintTable(env);
+      await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND reg=?").bind(tid, reg).run();
     } catch {
     }
     try {
@@ -8426,6 +8493,115 @@ async function handle20(request, env, ctx, url, sess) {
     const key = String(b.key || "");
     if (!key || !key.startsWith("vehicledocs/")) return jr3({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    return jr3({ ok: true }, headers);
+  }
+  if (sub === "/maint-categories" && method === "GET") {
+    return jr3({ ok: true, categories: await maintCats(env, tid) }, headers);
+  }
+  if (sub === "/maint-categories" && method === "POST") {
+    const b = await readJson4(request);
+    const seen = /* @__PURE__ */ new Set(), out = [];
+    for (const c of Array.isArray(b.categories) ? b.categories : []) {
+      const name = String(c && c.name || "").trim().slice(0, 40);
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ name, colour: String(c.colour || "#64748b").slice(0, 9) });
+    }
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, MCATS_KEY(tid), JSON.stringify(out)).run();
+    return jr3({ ok: true, categories: out }, headers);
+  }
+  if (sub === "/maintenance" && method === "GET") {
+    await ensureMaintTable(env);
+    const reg = q.get("reg") || "";
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM vehicle_maintenance WHERE tenant_id=? AND reg=? ORDER BY date DESC, id DESC"
+    ).bind(tid, reg).all();
+    const records = [];
+    for (const r of results || []) {
+      const allocs = (parseJson(r.allocs, []) || []).map((a) => ({ cat: String(a.cat || a.category || ""), cost: Number(a.cost) || 0 })).filter((a) => a.cat);
+      records.push({
+        id: r.id,
+        date: r.date || "",
+        description: r.description || "",
+        allocs,
+        total: allocs.reduce((s, a) => s + a.cost, 0),
+        docKey: r.doc_key || "",
+        docName: r.doc_name || "",
+        docUrl: r.doc_key ? await signedFileUrl(env, url.origin, "/fleet/maintenance-doc", r.doc_key) : "",
+        by: r.by || "",
+        at: r.at || ""
+      });
+    }
+    const totals = {};
+    let grandTotal = 0;
+    for (const rec of records) for (const a of rec.allocs) {
+      totals[a.cat] = (totals[a.cat] || 0) + a.cost;
+      grandTotal += a.cost;
+    }
+    return jr3({ ok: true, reg, records, totals, grandTotal, categories: await maintCats(env, tid) }, headers);
+  }
+  if (sub === "/maintenance" && method === "POST") {
+    await ensureMaintTable(env);
+    const form = await request.formData();
+    const reg = String(form.get("reg") || "").trim();
+    if (!reg) return jr3({ error: "reg required" }, headers, 400);
+    const id = parseInt(String(form.get("id") || ""), 10);
+    const date = String(form.get("date") || "").slice(0, 10);
+    const description = String(form.get("description") || "").slice(0, 500);
+    const allocs = (parseJson(String(form.get("allocs") || "[]"), []) || []).map((a) => ({ cat: String(a.cat || a.category || "").trim().slice(0, 40), cost: Math.round((Number(a.cost) || 0) * 100) / 100 })).filter((a) => a.cat);
+    const file = form.get("file");
+    const removeDoc = String(form.get("removeDoc") || "") === "1";
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const existing = id && !isNaN(id) ? await env.DB.prepare("SELECT * FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).first() : null;
+    let docKey = existing ? existing.doc_key || "" : "";
+    let docName = existing ? existing.doc_name || "" : "";
+    if (file && typeof file.stream === "function") {
+      if (docKey) {
+        try {
+          await env.JOB_FILES.delete(docKey);
+        } catch {
+        }
+      }
+      const safe = String(file.name || "document").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+      docKey = `${vmaintPrefix(tid, reg)}${Date.now()}-${safe}`;
+      docName = file.name || safe;
+      await env.JOB_FILES.put(docKey, file.stream(), {
+        httpMetadata: { contentType: file.type || "application/octet-stream" },
+        customMetadata: { name: docName, reg, by: sess.user.username, at: now }
+      });
+    } else if (removeDoc && docKey) {
+      try {
+        await env.JOB_FILES.delete(docKey);
+      } catch {
+      }
+      docKey = "";
+      docName = "";
+    }
+    if (existing) {
+      await env.DB.prepare("UPDATE vehicle_maintenance SET date=?,description=?,allocs=?,doc_key=?,doc_name=? WHERE tenant_id=? AND id=?").bind(date, description, JSON.stringify(allocs), docKey, docName, tid, id).run();
+      return jr3({ ok: true, id }, headers);
+    }
+    const res = await env.DB.prepare(
+      "INSERT INTO vehicle_maintenance (tenant_id,reg,date,description,allocs,doc_key,doc_name,by,at) VALUES (?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, reg, date, description, JSON.stringify(allocs), docKey, docName, sess.user.username, now).run();
+    return jr3({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
+  }
+  if (sub === "/maintenance-delete" && method === "POST") {
+    await ensureMaintTable(env);
+    const b = await readJson4(request);
+    const id = parseInt(String(b.id || ""), 10);
+    if (!id || isNaN(id)) return jr3({ error: "id required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT doc_key FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (row && row.doc_key) {
+      try {
+        await env.JOB_FILES.delete(row.doc_key);
+      } catch {
+      }
+    }
+    await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).run();
     return jr3({ ok: true }, headers);
   }
   if (sub === "/vehicle-photos" && method === "GET") {
@@ -8575,13 +8751,25 @@ async function ensureVehTable(env) {
     "last_service_date TEXT",
     "last_service_miles INTEGER",
     "warn_days INTEGER",
-    "warn_miles INTEGER"
+    "warn_miles INTEGER",
+    "specs TEXT"
+    // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
   ];
   for (const c of cols) {
     try {
       await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run();
     } catch {
     }
+  }
+}
+async function ensureMaintTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT NOT NULL, date TEXT, description TEXT, allocs TEXT,
+    doc_key TEXT, doc_name TEXT, by TEXT, at TEXT)`).run();
+  try {
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vmaint_reg ON vehicle_maintenance(tenant_id,reg)").run();
+  } catch {
   }
 }
 async function latestMileage(env, tid) {
@@ -8767,6 +8955,8 @@ async function handle21(request, env, ctx, url, sess) {
 // src/routes/costing.js
 var UNALLOC_MIN = 15;
 var CLAIM_GAP_MIN = 30;
+var MAX_SEG_HOURS = 14;
+var MAX_SEG_MS2 = MAX_SEG_HOURS * 36e5;
 async function handle22(request, env, ctx, url, sess) {
   const path = url.pathname;
   const method = request.method;
@@ -8799,6 +8989,11 @@ async function handle22(request, env, ctx, url, sess) {
       if (b.archived !== void 0) data.archived = !!b.archived;
       if (b.name) data.siteName = String(b.name).trim();
       if (b.postcode !== void 0) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      const ll = parseLatLngPair(b.lat, b.lng);
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
       await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
           postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
         WHERE tenant_id=? AND client=? AND site_number=?`).bind(
@@ -8810,13 +9005,16 @@ async function handle22(request, env, ctx, url, sess) {
         client,
         num2
       ).run();
-      return json({ ok: true }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog2(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/add") {
       const name = String(b.name || "").trim();
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
       const num2 = slugNum(name);
+      const ll = parseLatLngPair(b.lat, b.lng);
       const data = {
         client,
         siteNumber: num2,
@@ -8824,11 +9022,17 @@ async function handle22(request, env, ctx, url, sess) {
         postcode: String(b.postcode || "").toUpperCase().trim(),
         addedVia: "register"
       };
+      if (ll) {
+        data.lat = ll.lat;
+        data.lng = ll.lng;
+      }
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`).bind(tid, client, num2, name, data.postcode || null, JSON.stringify(data)).run();
-      return json({ ok: true, client, siteNumber: num2 }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog2(env, name, ll.lat, ll.lng, client);
+      return json({ ok: true, client, siteNumber: num2, sitelogPushed: pushed }, {}, env, request);
     }
     if (path === "/sites/register/merge") {
       const alias = normName(b.alias);
@@ -8953,38 +9157,206 @@ async function handle22(request, env, ctx, url, sess) {
     ).bind(tid).all();
     return json({ ok: true, scans: results || [] }, {}, env, request);
   }
+  if (path === "/costing/reconcile-sitelog" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
+    return json(r, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const arr = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 2e3) : [];
+    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
+    await cfgSet(env, tid, "costing_prefs", prefs);
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/eng-aliases" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
+  }
+  if (path === "/costing/po-engineers" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const out = [];
+    if (env.PO_DB) {
+      try {
+        const { results } = await env.PO_DB.prepare(
+          "SELECT engineer_name AS name, COUNT(*) AS n FROM po_log WHERE (deleted IS NULL OR deleted=0) AND engineer_name IS NOT NULL AND TRIM(engineer_name)!='' GROUP BY engineer_name ORDER BY n DESC"
+        ).all();
+        for (const r of results || []) out.push({ name: r.name, count: r.n });
+      } catch {
+      }
+    }
+    return json({ ok: true, engineers: out, poBound: !!env.PO_DB }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const alias = normName(b.alias), user = String(b.user || "").trim();
+    if (!alias || !user) return error("alias and user required", 400, env, request);
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    aliases[alias] = user;
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    delete aliases[normName(b.alias)];
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/fin" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    if (!key) return error("key required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    if (b.value !== void 0) cur.value = Math.max(0, Number(b.value) || 0);
+    if (b.planned !== void 0) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
+    if (b.name !== void 0) cur.name = String(b.name || "").slice(0, 120);
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    const amount = Number(b.amount);
+    if (!key || !Number.isFinite(amount)) return error("key and amount required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate3((/* @__PURE__ */ new Date()).toISOString());
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim(), id = String(b.id || "");
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key];
+    if (cur && Array.isArray(cur.valuations)) {
+      cur.valuations = cur.valuations.filter((v) => v.id !== id);
+      await cfgSet(env, tid, "proj_fin", fin);
+    }
+    return json({ ok: true, fin: cur || null }, {}, env, request);
+  }
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
     const days = await reconcileRange(env, tid, from, to, reg);
+    const eAlias = await cfgGet(env, tid, "eng_aliases", {});
+    const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
+    const projFin = await cfgGet(env, tid, "proj_fin", {});
     const bySite = {};
+    const siteFor = (name, resolved) => {
+      const key = resolved ? resolved.norm : "?" + normName(name || "(no site)");
+      return bySite[key] || (bySite[key] = {
+        site: resolved ? resolved.name : name || "(no site)",
+        client: resolved ? resolved.client : "",
+        archived: !!(resolved && resolved.archived),
+        unmatched: !resolved,
+        travelMins: 0,
+        onsiteMins: 0,
+        visitMins: 0,
+        cost: 0,
+        costPartial: false,
+        poTotal: 0,
+        poUnpriced: 0,
+        jobs: {},
+        engineers: {},
+        labD: {},
+        poD: {},
+        suppliers: {}
+        // per-site: labour-by-day, PO-by-day, spend-by-supplier
+      });
+    };
+    const engFor = (s, name) => {
+      let key = Object.keys(s.engineers).find((k) => normName(k) === normName(name)) || name || "(unknown)";
+      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [], src: null, visits: 0, days: /* @__PURE__ */ new Set() });
+    };
+    const addSrc = (eng, src) => {
+      eng.src = !eng.src ? src : eng.src === src ? src : "mixed";
+    };
+    const addDay = (map, day, v) => {
+      const k = String(day || "").slice(0, 10);
+      if (!k) return;
+      map[k] = Math.round(((map[k] || 0) + v) * 100) / 100;
+    };
+    const slRate = {};
+    const slSites = await fetchSitelogCosting(env, from, to);
+    const slCovered = /* @__PURE__ */ new Set();
+    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : "?" + normName(name || "(no site)");
+    if (slSites) {
+      for (const slSite of slSites) {
+        const resolved = resolveSiteCode(reg, slSite.siteCode);
+        const s = siteFor(resolved ? resolved.name : slSite.siteCode || "(no site)", resolved);
+        const sKey = siteKeyOf(resolved, slSite.siteCode);
+        for (const p of slSite.people || []) {
+          if (!p.costedVisits) continue;
+          const portalUser = (p.portalUsername || "").trim();
+          const isEmployee = !!portalUser;
+          const who = canonEng(isEmployee ? portalUser : p.name || "(unknown)");
+          slCovered.add(sKey + "::" + normName(who));
+          const workMins = Math.round((p.workH || 0) * 60);
+          const travMins = Math.round((p.travelH || 0) * 60);
+          s.visitMins += workMins;
+          s.travelMins += travMins;
+          const eng = engFor(s, who);
+          eng.mins += workMins + travMins;
+          eng.visits += (p.costedVisits || 0) + (p.openCount || 0);
+          addSrc(eng, "sitelog");
+          const r = isEmployee ? rates[who] || rates[portalUser] : null;
+          let cost = null;
+          if (r && r.rateType === "hour" && r.rate) {
+            const fuel = r.fuelPerMile != null ? (p.miles || 0) * r.fuelPerMile : p.fuelCost || 0;
+            cost = ((p.workH || 0) + (p.travelH || 0)) * r.rate + fuel;
+          } else {
+            cost = p.total != null ? Number(p.total) : null;
+          }
+          if (cost != null && isFinite(cost)) {
+            cost = Math.round(cost * 100) / 100;
+            eng.cost = Math.round(((eng.cost || 0) + cost) * 100) / 100;
+            s.cost = Math.round((s.cost + cost) * 100) / 100;
+            const hrs = (p.workH || 0) > 0 ? p.workH : (p.workH || 0) + (p.travelH || 0);
+            if (hrs > 0) slRate[sKey + "::" + normName(who)] = { cost, hrs };
+          } else {
+            s.costPartial = true;
+          }
+        }
+      }
+    }
     for (const d of days) {
       for (const e of d.entries) {
-        const key = e.resolved ? e.resolved.norm : "?" + normName(e.site || "(no site)");
-        const s = bySite[key] || (bySite[key] = {
-          site: e.resolved ? e.resolved.name : e.site || "(no site)",
-          client: e.resolved ? e.resolved.client : "",
-          archived: !!(e.resolved && e.resolved.archived),
-          unmatched: !e.resolved,
-          travelMins: 0,
-          onsiteMins: 0,
-          visitMins: 0,
-          cost: 0,
-          costPartial: false,
-          jobs: {},
-          engineers: {}
-        });
+        const s = siteFor(e.site, e.resolved);
+        const sKey = siteKeyOf(e.resolved, e.site);
+        const cu = canonEng(e.user);
+        if (slCovered.has(sKey + "::" + normName(cu))) continue;
         const bucket = e.kind === "travel" ? "travelMins" : e.src === "sitelog" ? "visitMins" : "onsiteMins";
         s[bucket] += e.mins;
         if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
-        const eng = s.engineers[e.user] || (s.engineers[e.user] = { mins: 0, cost: null });
+        const eng = engFor(s, cu);
         eng.mins += e.mins;
-        const r = rates[e.user];
+        eng.days.add(d.date);
+        addSrc(eng, "sla");
+        const r = rates[cu];
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + e.mins / 60 * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + e.mins / 60 * r.rate) * 100) / 100;
+          addDay(s.labD, d.date, e.mins / 60 * r.rate);
         } else if (r && r.rateType === "day") {
           s.costPartial = true;
         } else {
@@ -8992,15 +9364,76 @@ async function handle22(request, env, ctx, url, sess) {
         }
       }
     }
-    let sites = Object.values(bySite).map((s) => ({
-      ...s,
-      totalMins: s.travelMins + s.onsiteMins + s.visitMins,
-      jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
-      engineers: Object.entries(s.engineers).map(([u, v]) => ({ user: u, ...v })).sort((a, b) => b.mins - a.mins)
-    })).sort((a, b) => b.totalMins - a.totalMins);
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const s = siteFor(p.site, resolved);
+      const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
+      if (val != null && isFinite(val)) {
+        s.poTotal = Math.round((s.poTotal + val) * 100) / 100;
+        addDay(s.poD, p.d || to, val);
+      } else s.poUnpriced++;
+      const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
+      if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
+      eng.pos = eng.pos || [];
+      eng.pos.push({
+        supplier: p.supplier || "",
+        cost: val != null && isFinite(val) ? val : null,
+        incident: p.incident_no || "",
+        date: p.d || "",
+        category: p.cost_category || ""
+      });
+      const supName = (p.supplier || "").trim() || "(no supplier)";
+      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+      sup.count++;
+      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
+      else sup.unpriced++;
+    }
+    if (slSites && Object.keys(slRate).length) {
+      const visits = await fetchSitelogVisits(env, from, to);
+      for (const v of visits || []) {
+        if (!v.check_in_at || !v.check_out_at) continue;
+        const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
+        const resolved = resolveSiteCode(reg, v.site_code);
+        const sKey = siteKeyOf(resolved, v.site_code);
+        const rt = slRate[sKey + "::" + normName(who)];
+        if (!rt) continue;
+        const site = bySite[sKey];
+        if (!site) continue;
+        const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 36e5);
+        if (hrs > 0) addDay(site.labD, londonDate3(v.check_in_at), hrs * (rt.cost / rt.hrs));
+      }
+    }
+    let sites = Object.entries(bySite).map(([key, s]) => {
+      const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
+      return {
+        ...s,
+        key,
+        // stable per-site id the front-end pins/hides/orders against
+        totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+        laborCost,
+        poTotal,
+        poUnpriced: s.poUnpriced || 0,
+        grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
+        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100, mergeDayMaps(s.labD, s.poD)),
+        jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+        engineers: Object.entries(s.engineers).map(([u, v]) => ({
+          user: u,
+          mins: v.mins || 0,
+          cost: v.cost,
+          poCost: v.poCost || 0,
+          src: v.src || null,
+          visits: (v.visits || 0) + (v.days ? v.days.size : 0),
+          // on-site visits/days
+          pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        })).sort((a, b) => (b.cost || 0) + (b.poCost || 0) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
+        // Per-site trend (labour + materials over its own active span) + supplier spend.
+        series: buildSiteSeries(s.labD, s.poD),
+        suppliers: Object.values(s.suppliers).sort((a, b) => b.total - a.total || b.count - a.count)
+      };
+    }).sort((a, b) => b.grandTotal - a.grandTotal || b.totalMins - a.totalMins);
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter((s) => normName(s.site) === only);
-    return json({ ok: true, from, to, sites }, {}, env, request);
+    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
   }
   if (path === "/exceptions" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
@@ -9049,6 +9482,47 @@ async function handle22(request, env, ctx, url, sess) {
           user: d.user,
           type: "unallocated",
           detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead`
+        });
+    }
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const money2 = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? "\xA3" + Number(p.cost_ex_vat).toFixed(2) : "unpriced";
+      if (resolved && resolved.archived)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "archived-site",
+          site: resolved.name,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) raised against ARCHIVED site "${resolved.name}"`
+        });
+      else if (!resolved && p.site)
+        ex.push({
+          date: p.d || to,
+          user: p.engineer_name || "",
+          type: "unmatched-site",
+          site: p.site,
+          detail: `PO (${money2}, ${p.supplier || "supplier"}) on "${p.site}" \u2014 not in the site register; add or merge it`
+        });
+    }
+    const slSites = await fetchSitelogCosting(env, from, to);
+    for (const slSite of slSites || []) {
+      const resolved = resolveSiteCode(reg, slSite.siteCode);
+      const hrs = (slSite.workH || 0) + (slSite.travelH || 0);
+      if (resolved && resolved.archived)
+        ex.push({
+          date: to,
+          user: "",
+          type: "archived-site",
+          site: resolved.name,
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) recorded against ARCHIVED site "${resolved.name}"`
+        });
+      else if (!resolved && slSite.siteCode)
+        ex.push({
+          date: to,
+          user: "",
+          type: "unmatched-site",
+          site: String(slSite.siteCode),
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) at store "${slSite.siteCode}" \u2014 not matched to the site register; add or merge it`
         });
     }
     try {
@@ -9138,6 +9612,10 @@ async function buildDay(env, tid, user, date, reg) {
         end = nowIso;
         flags.push("open");
       }
+    }
+    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS2) {
+      end = lazyCloseAt(s.started_at, date);
+      if (!flags.includes("auto-closed")) flags.push("auto-closed");
     }
     const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 6e4));
     if (!mins) continue;
@@ -9285,9 +9763,15 @@ async function loadRegister(env, tid) {
   const byNorm = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE"
     ).bind(tid).all();
     for (const r of results || []) {
+      let d = {};
+      try {
+        d = JSON.parse(r.data || "{}");
+      } catch {
+      }
+      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
       const entry = {
         client: r.client,
         siteNumber: r.site_number,
@@ -9296,6 +9780,8 @@ async function loadRegister(env, tid) {
         active: r.active !== 0,
         archived: !!r.archived,
         jobNumber: r.job_number || "",
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
         norm: normName(r.site_name || r.site_number)
       };
       list.push(entry);
@@ -9308,12 +9794,333 @@ async function loadRegister(env, tid) {
     const target = list.find((s) => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
     if (target && !byNorm[norm]) byNorm[norm] = target;
   }
+  const byCode = {};
+  for (const e of list) {
+    for (const code of [String(e.siteNumber || ""), digitsOf2(e.name), digitsOf2(e.siteNumber)]) {
+      if (code && !byCode[code]) byCode[code] = e;
+    }
+  }
   const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
-  return { list, byNorm, aliases, ignored };
+  return { list, byNorm, byCode, aliases, ignored };
 }
 function resolveSite(reg, name) {
   const k = normName(name);
   return k && reg.byNorm[k] || null;
+}
+function resolveSiteCode(reg, code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const d = digitsOf2(c);
+  return d && reg.byCode && reg.byCode[d] || reg.byCode && reg.byCode[c] || resolveSite(reg, c) || null;
+}
+function digitsOf2(s) {
+  return String(s || "").replace(/\D+/g, "");
+}
+function parseLatLngPair(latIn, lngIn) {
+  const lat = Number(latIn), lng = Number(lngIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+async function pushSiteToSiteLog2(env, name, lat, lng, client) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
+    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || "Projects";
+    const res = await fetch(base + "/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+async function fetchSitelogCosting(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  try {
+    const res = await fetch(
+      base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
+      { headers: { "x-admin-secret": secret } }
+    );
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j && j.ok && Array.isArray(j.sites) ? j.sites : null;
+  } catch {
+    return null;
+  }
+}
+async function fetchSitelogVisits(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const headers = { "x-admin-secret": secret };
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  let before = null, got = false;
+  try {
+    for (let page = 0; page < 30; page++) {
+      let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+      if (before) u += "&before=" + encodeURIComponent(before);
+      const res = await fetch(u, { headers });
+      if (!res.ok) return got ? out : null;
+      const j = await res.json();
+      const rows = Array.isArray(j.visits) ? j.visits : [];
+      got = true;
+      if (!rows.length) break;
+      let added = 0, oldest = null;
+      for (const r of rows) {
+        const id = r.visit_id != null ? r.visit_id : r.person_id + "|" + r.check_in_at;
+        if (!seen.has(id)) {
+          seen.add(id);
+          out.push(r);
+          added++;
+        }
+        if (oldest == null || r.check_in_at && r.check_in_at < oldest) oldest = r.check_in_at;
+      }
+      if (rows.length < 500 || !oldest || added === 0) break;
+      before = oldest;
+    }
+    return out;
+  } catch {
+    return got ? out : null;
+  }
+}
+function jcNameLike(v) {
+  return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)";
+}
+function mergeDayMaps(a, b) {
+  const out = {};
+  for (const [d, v] of Object.entries(a || {})) out[d] = (out[d] || 0) + v;
+  for (const [d, v] of Object.entries(b || {})) out[d] = (out[d] || 0) + v;
+  return out;
+}
+function computeFin(f, cost, costByDay) {
+  if (!f || !(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0)) return null;
+  const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
+  const value = r(f.value);
+  const planned = Math.max(0, Math.round(Number(f.planned) || 0));
+  const valuations = (Array.isArray(f.valuations) ? f.valuations : []).map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final })).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const costDays = Object.keys(costByDay || {}).sort();
+  const cumCostUpTo = (date) => {
+    let c = 0;
+    for (const d of costDays) {
+      if (d <= date) c += costByDay[d];
+      else break;
+    }
+    return c;
+  };
+  let prevCumCost = 0, runVal = 0;
+  for (const v of valuations) {
+    runVal += v.amount;
+    const cumCost = cumCostUpTo(v.date);
+    const costPortion = Math.max(0, r(cumCost - prevCumCost));
+    v.costAtTime = costPortion;
+    v.profitAtTime = r(v.amount - costPortion);
+    v.profitToDate = r(runVal - cumCost);
+    prevCumCost = cumCost;
+  }
+  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
+  const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
+  const remainingValue = r(value - valued);
+  const remainingVals = Math.max(0, planned - valuations.length);
+  const position = r(valued - cost);
+  const marginPct = value > 0 ? r((value - cost) / value * 100) : null;
+  const breakEven = Math.max(0, r(cost - valued));
+  const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
+  let suggestedNext = Math.max(breakEven, evenShare);
+  suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+  const RET = 0.05, FINAL_RET = 0.025;
+  const retBase = value > 0 ? value : valued;
+  const isFinal = valuations.some((v) => v.final);
+  const retentionRate = isFinal ? FINAL_RET : RET;
+  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
+  const cashReceived = r(valued - retentionHeld);
+  const nextIsFinal = !isFinal && remainingValue > 5e-3 && remainingVals <= 1;
+  const retentionIfFinal = r(FINAL_RET * retBase);
+  const retentionCurrent = r(RET * valued);
+  return {
+    value,
+    planned,
+    valuations,
+    valued,
+    cost: r(cost),
+    position,
+    marginPct,
+    remainingValue,
+    remainingVals,
+    breakEven: r(breakEven),
+    evenShare: r(evenShare),
+    suggestedNext,
+    overCommitted: breakEven > remainingValue + 5e-3,
+    positionAfterSuggested: r(valued + suggestedNext - cost),
+    retentionRate: retentionRate * 100,
+    retentionHeld,
+    cashReceived,
+    isFinal,
+    nextIsFinal,
+    retentionIfFinal,
+    retentionCurrent,
+    costSinceLastVal
+  };
+}
+function buildSiteSeries(labD, poD) {
+  const days = Object.keys(labD).concat(Object.keys(poD)).filter(Boolean).sort();
+  if (!days.length) return [];
+  const min = days[0], max = days[days.length - 1];
+  const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
+  const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
+  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf4(d) : d.slice(0, 7);
+  const labB = {}, poB = {};
+  const roll = (src, dst) => {
+    for (const [d, v] of Object.entries(src)) {
+      const k = bk(d);
+      dst[k] = Math.round(((dst[k] || 0) + v) * 100) / 100;
+    }
+  };
+  roll(labD, labB);
+  roll(poD, poB);
+  return buildSeriesBuckets(min, max, mode, labB, poB);
+}
+function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
+  const keys = [];
+  if (mode === "day") {
+    let d = /* @__PURE__ */ new Date(from + "T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  } else if (mode === "week") {
+    let d = /* @__PURE__ */ new Date(mondayOf4(from) + "T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to + "T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 10));
+      d.setUTCDate(d.getUTCDate() + 7);
+    }
+  } else {
+    let d = /* @__PURE__ */ new Date(from.slice(0, 7) + "-01T12:00:00Z");
+    const end = /* @__PURE__ */ new Date(to.slice(0, 7) + "-01T12:00:00Z");
+    while (d <= end) {
+      keys.push(d.toISOString().slice(0, 7));
+      d.setUTCMonth(d.getUTCMonth() + 1);
+    }
+  }
+  return keys.map((k) => {
+    const labour = Math.round((labourByB[k] || 0) * 100) / 100;
+    const po = Math.round((poByB[k] || 0) * 100) / 100;
+    return { label: k, mode, labour, po, total: Math.round((labour + po) * 100) / 100 };
+  });
+}
+async function reconcileSitelogSessions(env, tid, opts) {
+  const o = opts || {};
+  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
+  await ensure3(env);
+  const now = o.now ? new Date(o.now) : /* @__PURE__ */ new Date();
+  const to = londonDate3(now.toISOString());
+  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const from = londonDate3(fromD.toISOString());
+  const visits = await fetchSitelogVisits(env, from, to);
+  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
+  const reg = await loadRegister(env, tid);
+  let closed = 0, created = 0, skipped = 0;
+  for (const v of visits) {
+    const user = String(v.portal_username || "").trim();
+    if (!user) {
+      skipped++;
+      continue;
+    }
+    if (!v.check_in_at || !v.check_out_at) {
+      skipped++;
+      continue;
+    }
+    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
+    if (!(outMs > inMs)) {
+      skipped++;
+      continue;
+    }
+    const resolved = resolveSiteCode(reg, v.site_code);
+    const siteName = resolved ? resolved.name : v.provided_site_name || String(v.site_code || "").trim();
+    const dayKey = londonDate3(v.check_out_at);
+    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 36e5;
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL"
+      ).bind(tid, user).all();
+      for (const seg of results || []) {
+        const sMs = Date.parse(seg.started_at);
+        if (sMs <= outMs && sMs >= dayStartMs) {
+          await env.DB.prepare(
+            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?"
+          ).bind(new Date(outMs).toISOString(), seg.id, tid).run();
+          closed++;
+        }
+      }
+    } catch {
+    }
+    const vid = "sl:" + (v.visit_id != null ? v.visit_id : user + "|" + v.check_in_at);
+    let exists = false, overlaps = false;
+    try {
+      const dup = await env.DB.prepare(
+        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1"
+      ).bind(tid, vid).first();
+      exists = !!dup;
+    } catch {
+    }
+    if (!exists) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL"
+        ).bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 36e5).toISOString()).all();
+        for (const seg of results || []) {
+          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
+          if (eMs > inMs && sMs < outMs) {
+            overlaps = true;
+            break;
+          }
+        }
+      } catch {
+      }
+      if (!overlaps) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)"
+          ).bind(
+            tid,
+            user,
+            vid,
+            "",
+            siteName,
+            resolved ? resolved.postcode : "",
+            new Date(inMs).toISOString(),
+            new Date(outMs).toISOString(),
+            "onsite",
+            vid
+          ).run();
+          created++;
+        } catch {
+        }
+      } else {
+        skipped++;
+      }
+    }
+  }
+  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
+}
+async function poRows(env, from, to) {
+  if (!env.PO_DB) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, substr(issued_at,1,10) AS d FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
+    ).bind(from, to).all();
+    return results || [];
+  } catch {
+    return [];
+  }
 }
 async function ratesMap(env, tid) {
   const out = {};
@@ -9329,6 +10136,8 @@ async function ratesMap(env, tid) {
       const n = parseFloat(v);
       return isFinite(n) && n > 0 ? n : null;
     };
+    const defs = cfg.defaults || {};
+    const defPence = num2(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {};
       try {
@@ -9338,7 +10147,9 @@ async function ratesMap(env, tid) {
       const mine = cfg.byUser && cfg.byUser[u.username] || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
       const rate = num2(mine.rate) ?? (rateType === "day" ? num2(profile.dayRate) : num2(profile.hourlyRate)) ?? num2(profile.hourlyRate);
-      out[u.username] = { rate, rateType };
+      const pence = num2(mine.pencePerMile) ?? defPence;
+      const fuelPerMile = pence != null ? pence / 100 : null;
+      out[u.username] = { rate, rateType, fuelPerMile };
     }
   } catch {
   }
@@ -9362,6 +10173,10 @@ async function ensure3(env) {
   }
   try {
     await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run();
+  } catch {
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run();
   } catch {
   }
   try {
@@ -9575,6 +10390,7 @@ var index_default = {
   //                 each nudge is deduped per week — no spam.)
   async scheduled(event, env, ctx) {
     ctx.waitUntil(sendWeeklyReminders(env).catch((e) => console.error("scheduled van-check reminder:", e)));
+    ctx.waitUntil(reconcileSitelogSessions(env, 1).catch((e) => console.error("scheduled sitelog reconcile:", e)));
   }
 };
 var AUDIT_METHODS = ["POST", "PUT", "PATCH", "DELETE"];
@@ -9666,6 +10482,8 @@ var PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-doc"],
   // Vehicle photos (card cover + gallery/lightbox) — signed URL.
   ["GET", "/fleet/vehicle-photo"],
+  // Maintenance-record documents opened in a new tab — signed URL.
+  ["GET", "/fleet/maintenance-doc"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],

@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   last_service_miles INTEGER,
   warn_days          INTEGER,         -- pre-warning window (default 30)
   warn_miles         INTEGER,         -- pre-warning window (default 1000)
+  specs              TEXT,            -- extra spec fields as JSON [{label,value}] (AC, payload, dimensions, handsfree…)
   at                 TEXT,
   PRIMARY KEY (tenant_id, reg)
 );
@@ -225,6 +226,25 @@ CREATE TABLE IF NOT EXISTS van_timesheets (
 );
 -- Vehicle repair/invoice documents live in R2 (JOB_FILES) under
 -- vehicledocs/<tenant>/<REG>/… — no D1 table.
+
+-- Vehicle maintenance log: dated, categorised work with cost-split allocations
+-- and an optional document per record (routes/fleet.js). Self-migrating via
+-- ensureMaintTable(). allocs = JSON [{cat,cost}] — a shared invoice can split its
+-- cost across categories (Brakes £200 / Tyres £250) so category totals combine.
+-- The record's document (if any) lives in R2 under vehiclemaint/<tenant>/<REG>/…
+CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id   INTEGER NOT NULL DEFAULT 1,
+  reg         TEXT NOT NULL,
+  date        TEXT,                     -- date the work was done (YYYY-MM-DD)
+  description TEXT,
+  allocs      TEXT,                     -- JSON [{cat,cost}] category cost split
+  doc_key     TEXT, doc_name TEXT,      -- optional R2 document (vehiclemaint/…)
+  by          TEXT, at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vmaint_reg ON vehicle_maintenance(tenant_id,reg);
+-- Managed maintenance category list (name + colour) is app_config
+-- fleet:maintcats:<tenant> (JSON [{name,colour}]).
 
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (

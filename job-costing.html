@@ -20,8 +20,17 @@
   .tabs{display:flex;gap:8px;margin:0 0 12px;}
   .range{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px;}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
-  .siteRow{cursor:pointer;}
+  .siteRow{cursor:pointer;position:relative;}
+  .siteRow.pinned{border-color:#c7d2fe;box-shadow:0 0 0 2px #e0e7ff inset;}
+  .siteRow.dragging{opacity:.55;}
+  .siteRow.dragover{border-color:var(--brand);}
   .siteHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .drag{cursor:grab;color:#94a3b8;font-size:16px;padding:0 2px;touch-action:none;user-select:none;flex:0 0 auto;}
+  .drag:active{cursor:grabbing;}
+  .rowbtns{display:flex;gap:4px;flex:0 0 auto;}
+  .rowbtns .ic{border:1px solid var(--line);background:#fff;border-radius:8px;padding:3px 7px;font-size:13px;cursor:pointer;line-height:1.1;}
+  .rowbtns .ic.act{background:#eef2ff;border-color:#c7d2fe;}
+  .pinbadge{font-size:11px;color:#4338ca;font-weight:700;}
   .siteHead .nm{font-weight:700;font-size:15px;flex:1;min-width:0;}
   .siteHead .cost{font-weight:700;}
   .bar{height:8px;border-radius:6px;background:#eef2f7;overflow:hidden;display:flex;margin-top:8px;}
@@ -30,6 +39,48 @@
   .sub{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;display:none;font-size:13px;}
   .sub .li{display:flex;justify-content:space-between;gap:10px;padding:4px 0;color:var(--muted);}
   .sub .li b{color:var(--ink);font-weight:650;}
+  .sub .li.eng{color:var(--ink);font-weight:650;border-top:1px solid var(--line);margin-top:4px;padding-top:7px;}
+  .sub .li.po{font-size:12px;padding:2px 0 2px 16px;}
+  .poamt{color:#7c3aed;font-weight:650;}
+  .grouplbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:10px 0 2px;}
+  .totline{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;font-weight:650;margin:2px 0 2px;}
+  .totline span{color:var(--ink);}
+  .note{font-size:11px;color:var(--muted);margin-top:8px;}
+  .chip.unpriced{background:#ede9fe;color:#6d28d9;}
+  .warnbar{background:#fef3c7;border:1px solid #fcd34d;border-left:5px solid #f59e0b;color:#92400e;border-radius:10px;padding:10px 13px;font-size:13px;margin:0 0 12px;line-height:1.45;}
+  .charts{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 14px;}
+  .chartcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;flex:1 1 320px;min-width:280px;}
+  .ctitle{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;font-weight:700;}
+  .dwrap{display:flex;align-items:center;gap:16px;}
+  .legend{font-size:13px;color:var(--ink);display:flex;flex-direction:column;gap:6px;}
+  .legend.row{flex-direction:row;gap:14px;margin-top:6px;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+  .chartcard svg{max-width:100%;height:auto;display:block;}
+  .cempty{font-size:12px;color:var(--muted);padding:14px 0;}
+  .mergeRow{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 8px;}
+  .modal{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:16px;}
+  .modal.on{display:flex;}
+  .modalcard{background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:85vh;overflow:auto;padding:16px;}
+  .modalcard h3{margin:0 0 4px;font-size:16px;}
+  .modalcard .sub2{font-size:12px;color:var(--muted);margin:0 0 10px;}
+  .mlist{border:1px solid var(--line);border-radius:10px;max-height:46vh;overflow:auto;margin-top:8px;}
+  .mlist button{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:#fff;padding:9px 11px;font:500 13px "Segoe UI",system-ui;cursor:pointer;color:var(--ink);}
+  .mlist button:hover{background:#f1f5f9;}
+  .mlist button:last-child{border-bottom:0;}
+  .mlist small{color:var(--muted);}
+  .msearch{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;margin-top:4px;}
+  .mrow2{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
+  .finsug{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:9px 12px;margin:8px 0;}
+  .finsug.warn{background:#fef2f2;border-color:#fecaca;}
+  .sugbig{font-weight:700;font-size:14px;color:#1e40af;}
+  .finsug.warn .sugbig{color:#b91c1c;}
+  .sugnote{font-size:12px;color:var(--muted);margin-top:2px;}
+  .li b.pos{color:#15803d;} .li b.neg{color:#dc2626;}
+  .xdel{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 2px;}
+  .xdel:hover{color:#dc2626;}
+  .valsplit{font-size:11px;color:var(--muted);margin-top:2px;font-weight:400;}
+  .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
+  .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
   .chip.arch{background:var(--amberbg);color:var(--amber);}
   .chip.unm{background:#fee2e2;color:var(--red);}
@@ -48,21 +99,32 @@
     <a class="ml-back" data-role="home" href="sites-register.html">‹ Back</a>
     <h1>📊 Job Costing</h1>
     <a class="btn" href="sites-register.html">🗂️ Site register</a>
+    <a class="btn" href="sitelog-links.html">🔗 SiteLog links</a>
   </header>
 
   <div class="wrap">
     <div class="tabs">
       <button class="btn on" id="tabCost">Costing</button>
       <button class="btn" id="tabEx">Exceptions <span id="exCount"></span></button>
+      <button class="btn" id="tabHidden">🙈 Hidden <span id="hidCount"></span></button>
     </div>
     <div class="range" id="range">
       <button class="btn" data-d="7">7 days</button>
       <button class="btn on" data-d="28">28 days</button>
       <button class="btn" data-d="91">3 months</button>
+      <button class="btn" data-d="all">All time</button>
     </div>
 
     <div id="costView"><div class="msg">Loading…</div></div>
+    <div id="mergeModal" class="modal"><div class="modalcard">
+      <h3 id="mmTitle">Merge site</h3>
+      <div class="sub2" id="mmSub"></div>
+      <input id="mmSearch" class="msearch" placeholder="Search the site register…" autocomplete="off">
+      <div class="mlist" id="mmList"></div>
+      <div class="mrow2"><button class="btn" id="mmClose">Cancel</button></div>
+    </div></div>
     <div id="exView" style="display:none"><div class="msg">Loading…</div></div>
+    <div id="hiddenView" style="display:none"><div class="msg">Loading…</div></div>
   </div>
 
 <script>
@@ -72,41 +134,310 @@
   var $=function(id){return document.getElementById(id)};
   function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
   function aFetch(p){var h=new Headers();var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{headers:h,cache:"no-store"});}
+  function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}
+  function today(){return new Date().toISOString().slice(0,10);}
   function hm(m){return Math.floor(m/60)+"h "+(m%60)+"m";}
-  function money(n){return "£"+(Math.round(n*100)/100).toFixed(2);}
+  function money(n){return "£"+(Math.round(n*100)/100).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});}
 
   var days=28;
+  var lastSites=[], lastSitelog=true;
+  var prefs={pinned:[],hidden:[],order:[]};
+  function inArr(a,k){return a.indexOf(k)>=0;}
+  function shortMoney(n){ n=Math.round(n); if(Math.abs(n)>=1000) return "£"+(n/1000).toFixed(n>=10000?0:1)+"k"; return "£"+n; }
+  function fmtBucket(b){
+    var l=b.label;
+    if(b.mode==="month"){ var mm=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return mm[(+l.slice(5,7))-1]+" "+l.slice(2,4); }
+    return l.slice(8,10)+"/"+l.slice(5,7);   // DD/MM (day or week-commencing)
+  }
+
+  // ── Inline-SVG charts (no external libraries) ──
+  function doughnut(labour,materials){
+    var tot=labour+materials; if(tot<=0) return '';
+    var C=326.726, lLen=(labour/tot)*C, mLen=(materials/tot)*C, pct=Math.round(labour/tot*100);
+    return '<svg viewBox="0 0 120 120" width="118" height="118" role="img" aria-label="Labour vs materials">'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#eef2f7" stroke-width="15"/>'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#2563eb" stroke-width="15" stroke-dasharray="'+lLen.toFixed(1)+' '+(C-lLen).toFixed(1)+'" transform="rotate(-90 60 60)"/>'+
+      '<circle cx="60" cy="60" r="52" fill="none" stroke="#7c3aed" stroke-width="15" stroke-dasharray="'+mLen.toFixed(1)+' '+(C-mLen).toFixed(1)+'" stroke-dashoffset="'+(-lLen).toFixed(1)+'" transform="rotate(-90 60 60)"/>'+
+      '<text x="60" y="58" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">'+pct+'%</text>'+
+      '<text x="60" y="74" text-anchor="middle" font-size="9" fill="#64748b">labour</text></svg>';
+  }
+  function lineChart(series){
+    if(!series||!series.length) return '<div class="cempty">No dated spend in this period.</div>';
+    var W=560,H=170,padL=6,padR=6,padT=14,padB=22,n=series.length;
+    var max=Math.max(1); series.forEach(function(b){max=Math.max(max,b.total);});
+    var X=function(i){ return padL+(n<=1?(W-padL-padR)/2:(i/(n-1))*(W-padL-padR)); };
+    var Y=function(v){ return padT+(1-v/max)*(H-padT-padB); };
+    function poly(key,color,w){
+      if(n===1){ var cx=X(0),cy=Y(series[0][key]); return '<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="3" fill="'+color+'"/>'; }
+      return '<polyline fill="none" stroke="'+color+'" stroke-width="'+w+'" stroke-linejoin="round" points="'+series.map(function(b,i){return X(i).toFixed(1)+","+Y(b[key]).toFixed(1);}).join(" ")+'"/>';
+    }
+    var labels='';
+    var idxs=n<=1?[0]:[0,Math.floor((n-1)/2),n-1];
+    idxs.forEach(function(i){ var anc=i===0?"start":(i===n-1?"end":"middle");
+      labels+='<text x="'+X(i).toFixed(1)+'" y="'+(H-6)+'" text-anchor="'+anc+'" font-size="10" fill="#94a3b8">'+esc(fmtBucket(series[i]))+'</text>'; });
+    return '<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="Spend over time">'+
+      '<line x1="'+padL+'" y1="'+(H-padB)+'" x2="'+(W-padR)+'" y2="'+(H-padB)+'" stroke="#e2e8f0"/>'+
+      '<text x="'+padL+'" y="10" font-size="10" fill="#94a3b8">'+esc(shortMoney(max))+'</text>'+
+      poly("po","#7c3aed",1.5)+poly("labour","#2563eb",1.5)+poly("total","#0f172a",2.5)+
+      labels+'</svg>';
+  }
+  // Charts for ONE site (shown inside that job's expanded section).
+  function siteCharts(s){
+    var labour=s.laborCost||0, materials=s.poTotal||0;
+    var hasSeries=(s.series||[]).some(function(b){return b.total>0;});
+    if(labour+materials<=0 && !hasSeries) return '';
+    var tot=labour+materials, lp=tot>0?Math.round(labour/tot*100):0, mp=tot>0?100-lp:0;
+    return '<div class="grouplbl">Spend breakdown</div><div class="charts">'+
+      '<div class="chartcard"><div class="ctitle">Labour vs materials</div><div class="dwrap">'+doughnut(labour,materials)+
+        '<div class="legend">'+
+          '<div><span class="dot" style="background:#2563eb"></span>Labour '+money(labour)+' · '+lp+'%</div>'+
+          '<div><span class="dot" style="background:#7c3aed"></span>Materials '+money(materials)+' · '+mp+'%</div>'+
+          '<div style="font-weight:700;color:#0f172a">Total '+money(tot)+'</div>'+
+        '</div></div></div>'+
+      '<div class="chartcard"><div class="ctitle">Spend over time</div>'+lineChart(s.series||[])+
+        '<div class="legend row">'+
+          '<span><span class="dot" style="background:#0f172a"></span>Total</span>'+
+          '<span><span class="dot" style="background:#2563eb"></span>Labour</span>'+
+          '<span><span class="dot" style="background:#7c3aed"></span>Materials</span>'+
+        '</div></div>'+
+    '</div>';
+  }
+  // Project financials for ONE site: contract value, valuations, running
+  // position + a suggested next valuation.
+  function finHtml(s){
+    var f=s.fin;
+    if(!f){
+      return '<div class="grouplbl">Project</div><div class="mergeRow"><button class="ic" data-finsetup="'+esc(s.key)+'">📈 Track project value &amp; valuations</button></div>';
+    }
+    var vals=(f.valuations||[]).map(function(v){
+      var split = (v.costAtTime!=null)
+        ? '<div class="valsplit">covers '+money(v.costAtTime)+' cost · <b class="'+(v.profitAtTime>=0?'pos':'neg')+'">'+money(v.profitAtTime)+' profit</b> · running profit '+money(v.profitToDate)+'</div>'
+        : '';
+      return '<div class="li"><span>🧾 '+esc(v.date)+(v.final?' · <b style="color:#1e40af">final account</b>':'')+(v.note?' · '+esc(v.note):'')+split+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
+    }).join('')||'<div class="li"><span style="color:var(--muted)">No valuations submitted yet</span></div>';
+    var sug='';
+    if(f.overCommitted){
+      sug='<div class="finsug warn"><div class="sugbig">⚠️ Heading into loss</div><div class="sugnote">Cost so far ('+money(f.cost)+') is more than the value left to claim. The most you can still value is '+money(f.remainingValue)+'.</div></div>';
+    } else if(f.remainingValue>0.005){
+      var fnote = f.nextIsFinal
+        ? ' This is the <b>final account</b>: it releases the '+money(f.retentionCurrent)+' retention held and holds '+money(f.retentionIfFinal)+' (2.5% of value) instead.'
+        : ' You’d receive '+money(f.suggestedNext*0.95)+' after 5% retention.';
+      sug='<div class="finsug"><div class="sugbig">Suggested next valuation: '+money(f.suggestedNext)+'</div>'+
+        '<div class="sugnote">Keeps you cash-positive and leaves a fair share for the '+f.remainingVals+' valuation'+(f.remainingVals===1?'':'s')+' still to come. After submitting it your position would be '+money(f.positionAfterSuggested)+'.'+fnote+'</div></div>';
+    } else {
+      sug='<div class="finsug"><div class="sugnote">Fully valued — nothing left to claim on this contract.</div></div>';
+    }
+    var posCls=f.position>=0?'pos':'neg';
+    return '<div class="grouplbl">Project financials</div>'+
+      '<div class="li"><span>📐 Contract value'+(f.planned?' · '+f.planned+' valuations planned':'')+'</span><b>'+money(f.value)+'</b></div>'+
+      '<div class="li"><span>✅ Valued to date ('+(f.valuations||[]).length+(f.planned?' of '+f.planned:'')+')</span><b>'+money(f.valued)+'</b></div>'+
+      '<div class="li"><span>🔒 Retention held ('+(f.retentionRate||5)+'%)'+(f.isFinal?' · final':'')+'</span><b>'+money(f.retentionHeld)+'</b></div>'+
+      '<div class="li"><span>💰 Cash received (after retention)</span><b>'+money(f.cashReceived)+'</b></div>'+
+      '<div class="li"><span>💷 Cost to date (labour + PO)</span><b>'+money(f.cost)+'</b></div>'+
+      '<div class="li"><span>📊 Position now (valued − cost)</span><b class="'+posCls+'">'+money(f.position)+(f.marginPct!=null?' · '+f.marginPct+'% margin at full value':'')+'</b></div>'+
+      '<div class="li"><span>🕗 Left to value</span><b>'+money(f.remainingValue)+'</b></div>'+
+      sug+
+      '<div class="mergeRow"><button class="ic" data-finval="'+esc(s.key)+'">➕ Add valuation</button><button class="ic" data-finedit="'+esc(s.key)+'">⚙ Edit value / plan</button></div>'+
+      vals+
+      ((f.costSinceLastVal>0.005 && (f.valuations||[]).length)
+        ? '<div class="li"><span>⏳ Cost since last valuation (not yet claimed)</span><b class="neg">'+money(f.costSinceLastVal)+'</b></div>'+
+          '<div class="valsplit" style="padding-left:0">Last valuation left you +'+money((f.valuations[f.valuations.length-1]||{}).profitToDate||0)+'; the '+money(f.costSinceLastVal)+' spent since brings your position to '+money(f.position)+' — worth valuing again.</div>'
+        : '');
+  }
+
+  // Spend grouped by supplier for ONE site.
+  function suppliersHtml(s){
+    if(!s.suppliers||!s.suppliers.length) return '';
+    return '<div class="grouplbl">Spend per supplier</div>'+s.suppliers.map(function(x){
+      return '<div class="li"><span>🏢 '+esc(x.supplier)+(x.unpriced?' <i style="color:var(--muted)">('+x.unpriced+' unpriced)</i>':'')+'</span><b>'+money(x.total)+'</b></div>';
+    }).join("");
+  }
+
   function rangeQS(){
-    var to=new Date(), from=new Date(Date.now()-(days-1)*86400000);
+    var to=new Date();
+    var from=(days==="all")?new Date("2000-01-01T00:00:00Z"):new Date(Date.now()-(days-1)*86400000);
     var f=function(d){return d.toISOString().slice(0,10);};
     return "from="+f(from)+"&to="+f(to);
   }
+
+  async function loadPrefs(){
+    try{ var d=await (await aFetch("/costing/prefs")).json();
+      if(d&&d.ok&&d.prefs){ prefs={pinned:d.prefs.pinned||[],hidden:d.prefs.hidden||[],order:d.prefs.order||[]}; }
+    }catch(e){}
+  }
+  var saveT=null;
+  function savePrefs(){
+    if(saveT)clearTimeout(saveT);
+    saveT=setTimeout(function(){
+      var h=new Headers();h.set("Content-Type","application/json");
+      var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);
+      fetch(API+"/costing/prefs",{method:"POST",headers:h,body:JSON.stringify(prefs)}).catch(function(){});
+    },500);
+  }
+
+  function srcBadge(src){
+    if(src==='sitelog') return ' <span class="sbadge sl" title="From SiteLog scans">SiteLog</span>';
+    if(src==='sla') return ' <span class="sbadge sla" title="From job-status taps">taps</span>';
+    if(src==='mixed') return ' <span class="sbadge mix" title="SiteLog scans + job-status taps">SiteLog + taps</span>';
+    return '';
+  }
+
+  // pinned first (by saved order), then the rest (by saved drag order, else £).
+  function sortSites(sites){
+    var oi={}; prefs.order.forEach(function(k,i){oi[k]=i;});
+    var pin={}; prefs.pinned.forEach(function(k){pin[k]=true;});
+    return sites.slice().sort(function(a,b){
+      var ap=pin[a.key]?0:1, bp=pin[b.key]?0:1; if(ap!==bp) return ap-bp;
+      var ao=oi[a.key], bo=oi[b.key];
+      if(ao==null&&bo==null) return (b.grandTotal||0)-(a.grandTotal||0);
+      if(ao==null) return 1; if(bo==null) return -1; return ao-bo;
+    });
+  }
+
+  function cardHtml(s){
+    var tot=s.totalMins||1;
+    var pinned=inArr(prefs.pinned,s.key);
+    var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'')+(pinned?'<span class="pinbadge">📌</span>':'');
+    var engs=s.engineers.map(function(e){
+      var head='<div class="li eng"><span>👷 '+esc(e.user)+srcBadge(e.src)+'</span><span>'+
+        (e.mins?'<b>'+hm(e.mins)+'</b>'+(e.visits?' · '+e.visits+(e.visits===1?' day':' days'):'')+(e.cost!=null?' · '+money(e.cost):''):'')+
+        (e.poCost?' <span class="poamt">+ '+money(e.poCost)+' PO</span>':'')+'</span></div>';
+      var pos=(e.pos||[]).map(function(p){
+        return '<div class="li po"><span>🧾 '+esc(p.supplier||"PO")+(p.incident?' · '+esc(p.incident):'')+'</span>'+
+          '<span>'+(p.cost!=null?money(p.cost):'<i style="color:var(--muted)">unpriced</i>')+'</span></div>';
+      }).join("");
+      return head+pos;
+    }).join("");
+    var jobs=(s.jobs||[]).slice(0,10).map(function(j){return '<div class="li"><span>🔧 '+esc(j.ref)+'</span><b>'+hm(j.mins)+'</b></div>';}).join("");
+    var poNote=s.poUnpriced?('<span class="chip unpriced" title="POs raised but not yet priced">'+s.poUnpriced+' PO unpriced</span>'):'';
+    return '<div class="card siteRow'+(pinned?' pinned':'')+'" data-key="'+esc(s.key)+'">'+
+      '<div class="siteHead">'+
+        '<span class="drag" title="Drag to reorder">⠿</span>'+
+        '<span class="nm">'+esc(s.site)+'</span>'+chips+
+        '<span class="cost">'+money(s.grandTotal||0)+(s.costPartial?' <small style="color:var(--muted);font-weight:400">*</small>':'')+'</span>'+
+        '<span class="rowbtns">'+
+          '<button class="ic'+(pinned?' act':'')+'" data-act="pin" title="'+(pinned?'Unpin':'Pin to top')+'">📌</button>'+
+          '<button class="ic" data-act="hide" title="Hide this site">🙈</button>'+
+        '</span>'+
+      '</div>'+
+      '<div class="totline">'+
+        '<span>🛠 Labour '+(s.laborCost?money(s.laborCost):hm(s.totalMins))+'</span>'+
+        '<span>🧾 PO '+money(s.poTotal||0)+'</span>'+poNote+'</div>'+
+      '<div class="bar">'+
+        '<i class="tr" style="width:'+(s.travelMins/tot*100)+'%" title="Travel '+hm(s.travelMins)+'"></i>'+
+        '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
+        '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
+      '<div class="sub">'+
+        siteCharts(s)+
+        finHtml(s)+
+        '<div class="mergeRow"><button class="ic" data-merge="'+esc(s.key)+'">🔗 Merge into another site</button>'+
+          (s.unmatched?'<button class="ic" data-addreg="'+esc(s.key)+'">➕ Add to register</button>':'')+'</div>'+
+        '<div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
+        '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
+        (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
+        '<div class="grouplbl">People — labour + their POs</div>'+
+        (engs||'<div class="li"><span style="color:var(--muted)">No time or POs yet</span></div>')+
+        suppliersHtml(s)+
+        (jobs?'<div class="grouplbl">Jobs (labour)</div>'+jobs:'')+
+        (s.costPartial?'<div class="note">* some labour has no hourly rate on file, so £ is partial — set rates to complete it.</div>':'')+
+      '</div></div>';
+  }
+
+  function renderCost(){
+    var hidden={}; prefs.hidden.forEach(function(k){hidden[k]=true;});
+    var visible=lastSites.filter(function(s){return !hidden[s.key];});
+    $("hidCount").textContent=prefs.hidden.length?("("+prefs.hidden.length+")"):"";
+    var banner=(lastSitelog===false)
+      ? '<div class="warnbar">⚠️ <b>SiteLog wasn\'t reachable</b> just now, so labour below is from job-status taps only (subcontractors who only scan won\'t show). PO spend is unaffected. Reload to try again.</div>'
+      : '';
+    if(!visible.length){ $("costView").innerHTML=banner+'<div class="msg">No captured time in this period'+(prefs.hidden.length?" (some sites hidden)":"")+'.</div>'; return; }
+    $("costView").innerHTML=banner+'<div id="cards">'+sortSites(visible).map(cardHtml).join("")+'</div>';
+  }
+
+  function renderHidden(){
+    var byKey={}; lastSites.forEach(function(s){byKey[s.key]=s;});
+    var rows=prefs.hidden.map(function(k){
+      var s=byKey[k];
+      var label=s?s.site:k.replace(/^\?/,"")+" (not in this period)";
+      var amt=s?money(s.grandTotal||0):"";
+      return '<div class="card" style="display:flex;align-items:center;gap:10px;">'+
+        '<span class="nm" style="flex:1;font-weight:700;">'+esc(label)+'</span>'+
+        '<span class="cost">'+amt+'</span>'+
+        '<button class="ic" data-unhide="'+esc(k)+'" title="Unhide">↩︎ Unhide</button></div>';
+    }).join("");
+    $("hiddenView").innerHTML=rows||'<div class="msg">Nothing hidden. Use 🙈 on a site to hide it here.</div>';
+  }
+
+  function siteByKey(k){ for(var i=0;i<lastSites.length;i++) if(lastSites[i].key===k) return lastSites[i]; return null; }
 
   async function loadCost(){
     $("costView").innerHTML='<div class="msg">Loading…</div>';
     try{
       var d=await (await aFetch("/costing/summary?"+rangeQS())).json();
       if(!d.ok) throw new Error(d.error||"costing error");
-      if(!d.sites.length){ $("costView").innerHTML='<div class="msg">No captured time in this period yet. Time appears here as engineers travel / work jobs, scan into sites, and fill timesheets.</div>'; return; }
-      $("costView").innerHTML=d.sites.map(function(s,i){
-        var tot=s.totalMins||1;
-        var chips=(s.archived?'<span class="chip arch">ARCHIVED</span>':'')+(s.unmatched?'<span class="chip unm">NOT IN REGISTER</span>':'');
-        var engs=s.engineers.map(function(e){return '<div class="li"><span>👷 '+esc(e.user)+'</span><span><b>'+hm(e.mins)+'</b>'+(e.cost!=null?' · '+money(e.cost):'')+'</span></div>';}).join("");
-        var jobs=(s.jobs||[]).slice(0,10).map(function(j){return '<div class="li"><span>🔧 '+esc(j.ref)+'</span><b>'+hm(j.mins)+'</b></div>';}).join("");
-        return '<div class="card siteRow" data-i="'+i+'">'+
-          '<div class="siteHead"><span class="nm">'+esc(s.site)+'</span>'+chips+
-            '<span class="chip t">'+hm(s.totalMins)+'</span>'+
-            '<span class="cost">'+(s.cost?money(s.cost):'')+(s.costPartial?' <small style="color:var(--muted);font-weight:400">(partial — some rates missing/day-rate)</small>':'')+'</span></div>'+
-          '<div class="bar">'+
-            '<i class="tr" style="width:'+(s.travelMins/tot*100)+'%" title="Travel '+hm(s.travelMins)+'"></i>'+
-            '<i class="on" style="width:'+(s.onsiteMins/tot*100)+'%" title="On site '+hm(s.onsiteMins)+'"></i>'+
-            '<i class="vi" style="width:'+(s.visitMins/tot*100)+'%" title="Scanned visits '+hm(s.visitMins)+'"></i></div>'+
-          '<div class="sub"><div class="li"><span>🚐 Travel</span><b>'+hm(s.travelMins)+'</b></div>'+
-            '<div class="li"><span>🛠 On site</span><b>'+hm(s.onsiteMins)+'</b></div>'+
-            (s.visitMins?'<div class="li"><span>📲 Scanned visits</span><b>'+hm(s.visitMins)+'</b></div>':'')+
-            engs+jobs+'</div></div>';
-      }).join("");
+      lastSites=d.sites||[]; lastSitelog=d.sitelog;
+      renderCost(); renderHidden();
     }catch(e){ $("costView").innerHTML='<div class="msg">Couldn\'t load costing — '+esc(e.message)+'</div>'; }
+  }
+
+  // ── Merge a site (as shown in costing, incl. all-time) into a register site ──
+  var mmSite=null, mmReg=[];
+  async function openMerge(key){
+    var s=siteByKey(key); if(!s) return; mmSite=s;
+    $("mmTitle").textContent="Merge “"+s.site+"” into…";
+    $("mmSub").textContent="Its labour + POs will roll into whichever registered site you pick. Good for old names / SiteLog codes that should be one job.";
+    $("mmSearch").value=""; $("mmList").innerHTML='<div class="msg" style="padding:11px">Loading sites…</div>';
+    $("mergeModal").classList.add("on"); $("mmSearch").focus();
+    if(!mmReg.length){
+      try{ var d=await (await aFetch("/sites/register")).json(); mmReg=(d.sites||[]).filter(function(x){return !x.archived;}); }catch(e){ mmReg=[]; }
+    }
+    renderMergeList("");
+  }
+  function renderMergeList(q){
+    q=(q||"").toLowerCase();
+    var rows=mmReg.filter(function(x){ return !q || (x.name||"").toLowerCase().indexOf(q)>=0 || (x.client||"").toLowerCase().indexOf(q)>=0; })
+      .sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).slice(0,300);
+    $("mmList").innerHTML = rows.length ? rows.map(function(x){
+      return '<button data-client="'+esc(x.client)+'" data-num="'+esc(x.siteNumber)+'"><span>'+esc(x.name)+'</span><small>'+esc(x.client||"")+'</small></button>';
+    }).join("") : '<div class="msg" style="padding:11px">No matching registered site.</div>';
+  }
+  async function doMerge(client,num){
+    if(!mmSite) return;
+    var post=function(p,b){ var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)}); };
+    try{
+      var r=await (await post("/sites/register/merge",{alias:mmSite.site,client:client,siteNumber:num})).json();
+      if(!r.ok) throw new Error(r.error||"merge failed");
+      $("mergeModal").classList.remove("on"); loadCost();
+    }catch(e){ alert("Couldn't merge — "+e.message); }
+  }
+  async function finSetup(key){
+    var s=siteByKey(key), f=s&&s.fin;
+    var v=prompt("Project (contract) value for “"+(s?s.site:"")+"” — £ (total the job is worth):", f?f.value:"");
+    if(v===null) return; v=parseFloat(String(v).replace(/[^0-9.]/g,"")); if(!isFinite(v)){ alert("Enter a number"); return; }
+    var n=prompt("How many valuations do you plan to submit across the whole project?", f?f.planned:"");
+    if(n===null) return; n=parseInt(n,10); if(!isFinite(n)||n<0) n=0;
+    try{ var r=await (await postJSON("/costing/fin",{key:key,value:v,planned:n})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
+    catch(e){ alert("Couldn't save — "+e.message); }
+  }
+  async function finAddValuation(key){
+    var a=prompt("Valuation amount just submitted — £:"); if(a===null) return;
+    a=parseFloat(String(a).replace(/[^0-9.]/g,"")); if(!isFinite(a)){ alert("Enter a number"); return; }
+    var d=prompt("Date submitted (YYYY-MM-DD):", today()); if(d===null) return;
+    var fin=confirm("Is this the FINAL ACCOUNT?\n\nOK = yes (releases the 5% retention held so far and holds 2.5% of the project value instead).\nCancel = no, a normal interim valuation (5% retention).");
+    try{ var r=await (await postJSON("/costing/fin/valuation",{key:key,amount:a,date:d,final:fin})).json(); if(!r.ok) throw new Error(r.error||"failed"); loadCost(); }
+    catch(e){ alert("Couldn't add — "+e.message); }
+  }
+  async function finDelValuation(combo){
+    var p=combo.split("|"); if(!confirm("Delete this valuation?")) return;
+    try{ await postJSON("/costing/fin/valuation/delete",{key:p[0],id:p[1]}); loadCost(); }catch(e){}
+  }
+  async function addToRegister(key){
+    var s=siteByKey(key); if(!s) return;
+    if(!confirm('Add "'+s.site+'" to the site register as a new site?')) return;
+    var h=new Headers();h.set("Content-Type","application/json");var t=localStorage.getItem("mostlaneToken");if(t)h.set("Authorization","Bearer "+t);
+    try{ var r=await (await fetch(API+"/sites/register/add",{method:"POST",headers:h,body:JSON.stringify({name:s.site})})).json();
+      if(!r.ok) throw new Error(r.error||"add failed"); loadCost();
+    }catch(e){ alert("Couldn't add — "+e.message); }
   }
 
   async function loadEx(){
@@ -127,18 +458,80 @@
     }catch(e){ $("exView").innerHTML='<div class="msg">Couldn\'t load exceptions — '+esc(e.message)+'</div>'; }
   }
 
+  // Pin / hide / unhide / expand
+  function toggleArr(a,k){ var i=a.indexOf(k); if(i>=0)a.splice(i,1); else a.push(k); }
   document.addEventListener("click",function(e){
+    var fs=e.target.closest("[data-finsetup],[data-finedit]");
+    if(fs){ e.stopPropagation(); finSetup(fs.getAttribute("data-finsetup")||fs.getAttribute("data-finedit")); return; }
+    var fv=e.target.closest("[data-finval]"); if(fv){ e.stopPropagation(); finAddValuation(fv.getAttribute("data-finval")); return; }
+    var fd=e.target.closest("[data-findel]"); if(fd){ e.stopPropagation(); finDelValuation(fd.getAttribute("data-findel")); return; }
+    var mg=e.target.closest("[data-merge]"); if(mg){ e.stopPropagation(); openMerge(mg.getAttribute("data-merge")); return; }
+    var ar=e.target.closest("[data-addreg]"); if(ar){ e.stopPropagation(); addToRegister(ar.getAttribute("data-addreg")); return; }
+    var pick=e.target.closest("#mmList button"); if(pick){ doMerge(pick.getAttribute("data-client"),pick.getAttribute("data-num")); return; }
+    var un=e.target.closest("[data-unhide]");
+    if(un){ var k=un.getAttribute("data-unhide"); var i=prefs.hidden.indexOf(k); if(i>=0)prefs.hidden.splice(i,1); savePrefs(); renderCost(); renderHidden(); return; }
+    var ic=e.target.closest(".ic[data-act]");
+    if(ic){
+      e.stopPropagation();
+      var card=ic.closest(".siteRow"); if(!card) return;
+      var key=card.getAttribute("data-key");
+      if(ic.dataset.act==="pin"){ toggleArr(prefs.pinned,key); }
+      else if(ic.dataset.act==="hide"){ if(prefs.hidden.indexOf(key)<0)prefs.hidden.push(key); var pi=prefs.pinned.indexOf(key); if(pi>=0)prefs.pinned.splice(pi,1); }
+      savePrefs(); renderCost(); renderHidden(); return;
+    }
+    if(e.target.closest(".drag")) return;   // drag handle, not an expand
     var row=e.target.closest(".siteRow");
     if(row){ var s=row.querySelector(".sub"); s.style.display=s.style.display==="block"?"none":"block"; }
   });
-  $("tabCost").onclick=function(){ this.classList.add("on");$("tabEx").classList.remove("on");$("costView").style.display="";$("exView").style.display="none"; };
-  $("tabEx").onclick=function(){ this.classList.add("on");$("tabCost").classList.remove("on");$("exView").style.display="";$("costView").style.display="none"; };
+
+  // Pointer-based drag reordering (mouse + touch), by the ⠿ handle.
+  var drag=null;
+  document.addEventListener("pointerdown",function(e){
+    var h=e.target.closest(".drag"); if(!h) return;
+    var card=h.closest(".siteRow"); var box=$("cards"); if(!card||!box) return;
+    e.preventDefault();
+    drag={card:card,box:box}; card.classList.add("dragging");
+    try{ h.setPointerCapture(e.pointerId); }catch(_){}
+  });
+  document.addEventListener("pointermove",function(e){
+    if(!drag) return;
+    var el=document.elementFromPoint(e.clientX,e.clientY);
+    var over=el&&el.closest?el.closest(".siteRow"):null;
+    if(!over||over===drag.card||over.parentNode!==drag.box) return;
+    var r=over.getBoundingClientRect();
+    var after=e.clientY>(r.top+r.height/2);
+    drag.box.insertBefore(drag.card, after?over.nextSibling:over);
+  });
+  function endDrag(){
+    if(!drag) return;
+    drag.card.classList.remove("dragging");
+    // Persist the on-screen order of all visible cards.
+    prefs.order=[].map.call(drag.box.querySelectorAll(".siteRow"),function(c){return c.getAttribute("data-key");});
+    drag=null; savePrefs(); renderCost();
+  }
+  document.addEventListener("pointerup",endDrag);
+  document.addEventListener("pointercancel",endDrag);
+
+  function showTab(which){
+    $("tabCost").classList.toggle("on",which==="cost");
+    $("tabEx").classList.toggle("on",which==="ex");
+    $("tabHidden").classList.toggle("on",which==="hidden");
+    $("costView").style.display=which==="cost"?"":"none";
+    $("exView").style.display=which==="ex"?"":"none";
+    $("hiddenView").style.display=which==="hidden"?"":"none";
+  }
+  $("mmSearch").addEventListener("input",function(){ renderMergeList(this.value); });
+  $("mmClose").onclick=function(){ $("mergeModal").classList.remove("on"); };
+  $("mergeModal").addEventListener("click",function(e){ if(e.target===this) this.classList.remove("on"); });
+  $("tabCost").onclick=function(){ showTab("cost"); };
+  $("tabEx").onclick=function(){ showTab("ex"); };
+  $("tabHidden").onclick=function(){ renderHidden(); showTab("hidden"); };
   $("range").addEventListener("click",function(e){
     var b=e.target.closest("button"); if(!b) return;
     [].forEach.call(this.children,function(x){x.classList.toggle("on",x===b);});
-    days=+b.dataset.d; loadCost(); loadEx();
+    days=(b.dataset.d==="all")?"all":+b.dataset.d; loadCost(); loadEx();
   });
-  loadCost(); loadEx();
+  (async function(){ await loadPrefs(); loadCost(); loadEx(); })();
 })();
 </script>
 </body>

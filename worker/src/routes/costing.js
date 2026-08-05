@@ -39,6 +39,8 @@ import { poOrderSiteNames } from "./timesheets.js";
 
 const UNALLOC_MIN = 15;   // minutes of uncovered day window before we flag it
 const CLAIM_GAP_MIN = 30; // claimed-vs-captured difference before we flag it
+const MAX_SEG_HOURS = 14; // a single job session longer than this = forgotten status change → clamp
+const MAX_SEG_MS = MAX_SEG_HOURS * 3600e3;
 
 export async function handle(request, env, ctx, url, sess) {
   const path = url.pathname;
@@ -78,6 +80,8 @@ export async function handle(request, env, ctx, url, sess) {
       if (b.archived !== undefined) data.archived = !!b.archived;
       if (b.name) data.siteName = String(b.name).trim();
       if (b.postcode !== undefined) data.postcode = String(b.postcode || "").toUpperCase().trim();
+      const ll = parseLatLngPair(b.lat, b.lng);
+      if (ll) { data.lat = ll.lat; data.lng = ll.lng; }
       await env.DB.prepare(`UPDATE sites SET archived=?, site_name=COALESCE(?, site_name),
           postcode=COALESCE(?, postcode), data=?, updated_at=datetime('now')
         WHERE tenant_id=? AND client=? AND site_number=?`)
@@ -85,7 +89,9 @@ export async function handle(request, env, ctx, url, sess) {
               b.name ? String(b.name).trim() : null,
               b.postcode !== undefined ? String(b.postcode || "").toUpperCase().trim() : null,
               JSON.stringify(data), tid, client, num).run();
-      return json({ ok: true }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, data.siteName || b.name || "", ll.lat, ll.lng, client);
+      return json({ ok: true, sitelogPushed: pushed }, {}, env, request);
     }
 
     if (path === "/sites/register/add") {
@@ -93,14 +99,18 @@ export async function handle(request, env, ctx, url, sess) {
       if (!name) return error("name required", 400, env, request);
       const client = String(b.client || "general").toLowerCase().trim() || "general";
       const num = slugNum(name);
+      const ll = parseLatLngPair(b.lat, b.lng);
       const data = { client, siteNumber: num, siteName: name,
         postcode: String(b.postcode || "").toUpperCase().trim(), addedVia: "register" };
+      if (ll) { data.lat = ll.lat; data.lng = ll.lng; }
       await env.DB.prepare(`INSERT INTO sites (tenant_id, client, site_number, site_name, postcode, active, archived, data, updated_at)
         VALUES (?,?,?,?,?,1,0,?,datetime('now'))
         ON CONFLICT(client, site_number) DO UPDATE SET site_name=excluded.site_name,
           postcode=excluded.postcode, archived=0, data=excluded.data, updated_at=datetime('now')`)
         .bind(tid, client, num, name, data.postcode || null, JSON.stringify(data)).run();
-      return json({ ok: true, client, siteNumber: num }, {}, env, request);
+      let pushed = false;
+      if (ll) pushed = await pushSiteToSiteLog(env, name, ll.lat, ll.lng, client);
+      return json({ ok: true, client, siteNumber: num, sitelogPushed: pushed }, {}, env, request);
     }
 
     if (path === "/sites/register/merge") {
@@ -222,34 +232,230 @@ export async function handle(request, env, ctx, url, sess) {
 
   /* ══ 3. COSTING + EXCEPTIONS ══════════════════════════════════════════════ */
 
+  // Manual trigger for the SiteLog→SLA session reconcile (same work the hourly
+  // cron does). Handy for testing and for an on-demand "sync now" button.
+  if (path === "/costing/reconcile-sitelog" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const r = await reconcileSitelogSessions(env, tid, { days: Number(q.get("days")) || 4 });
+    return json(r, {}, env, request);
+  }
+
+  // Per-view organisation of the job-costing screen (shared across admins):
+  // which site cards are pinned to the top, hidden, and their manual order.
+  // Keyed by the site `key` returned in /costing/summary.
+  if (path === "/costing/prefs" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const prefs = await cfgGet(env, tid, "costing_prefs", { pinned: [], hidden: [], order: [] });
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+  if (path === "/costing/prefs" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const arr = v => Array.isArray(v) ? v.filter(x => typeof x === "string").slice(0, 2000) : [];
+    const prefs = { pinned: arr(b.pinned), hidden: arr(b.hidden), order: arr(b.order) };
+    await cfgSet(env, tid, "costing_prefs", prefs);
+    return json({ ok: true, prefs }, {}, env, request);
+  }
+
+  // Engineer name aliases (map an alternate name → the canonical portal person),
+  // so e.g. the PO system's "JT" folds into "John Thorn" everywhere in costing.
+  if (path === "/costing/eng-aliases" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
+  }
+  // Distinct engineer names used on PO records (for the PO↔portal link admin).
+  if (path === "/costing/po-engineers" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const out = [];
+    if (env.PO_DB) {
+      try {
+        const { results } = await env.PO_DB.prepare(
+          "SELECT engineer_name AS name, COUNT(*) AS n FROM po_log WHERE (deleted IS NULL OR deleted=0) AND engineer_name IS NOT NULL AND TRIM(engineer_name)!='' GROUP BY engineer_name ORDER BY n DESC"
+        ).all();
+        for (const r of results || []) out.push({ name: r.name, count: r.n });
+      } catch {}
+    }
+    return json({ ok: true, engineers: out, poBound: !!env.PO_DB }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const alias = normName(b.alias), user = String(b.user || "").trim();
+    if (!alias || !user) return error("alias and user required", 400, env, request);
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    aliases[alias] = user;
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+  if (path === "/costing/eng-alias/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const aliases = await cfgGet(env, tid, "eng_aliases", {});
+    delete aliases[normName(b.alias)];
+    await cfgSet(env, tid, "eng_aliases", aliases);
+    return json({ ok: true, aliases }, {}, env, request);
+  }
+
+  // ── Project valuations / financials (per site, keyed by the summary `key`) ──
+  // Track a project's contract value, how many valuations are planned, and each
+  // valuation submitted (amount + date). /costing/summary folds in the running
+  // position + a suggested next valuation. Stored in app_config `proj_fin`.
+  if (path === "/costing/fin" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    if (!key) return error("key required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    if (b.value !== undefined) cur.value = Math.max(0, Number(b.value) || 0);
+    if (b.planned !== undefined) cur.planned = Math.max(0, Math.round(Number(b.planned) || 0));
+    if (b.name !== undefined) cur.name = String(b.name || "").slice(0, 120);
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim();
+    const amount = Number(b.amount);
+    if (!key || !Number.isFinite(amount)) return error("key and amount required", 400, env, request);
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key] || { value: 0, planned: 0, valuations: [] };
+    cur.valuations = Array.isArray(cur.valuations) ? cur.valuations : [];
+    const date = /^\d{4}-\d{2}-\d{2}/.test(String(b.date || "")) ? String(b.date).slice(0, 10) : londonDate(new Date().toISOString());
+    cur.valuations.push({ id: crypto.randomUUID(), amount: Math.round(amount * 100) / 100, date, note: String(b.note || "").slice(0, 200), final: !!b.final });
+    fin[key] = cur;
+    await cfgSet(env, tid, "proj_fin", fin);
+    return json({ ok: true, fin: cur }, {}, env, request);
+  }
+  if (path === "/costing/fin/valuation/delete" && method === "POST") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const b = await request.json().catch(() => ({}));
+    const key = String(b.key || "").trim(), id = String(b.id || "");
+    const fin = await cfgGet(env, tid, "proj_fin", {});
+    const cur = fin[key];
+    if (cur && Array.isArray(cur.valuations)) { cur.valuations = cur.valuations.filter(v => v.id !== id); await cfgSet(env, tid, "proj_fin", fin); }
+    return json({ ok: true, fin: cur || null }, {}, env, request);
+  }
+
   if (path === "/costing/summary" && method === "GET") {
     if (!admin) return error("Forbidden", 403, env, request);
     const { from, to } = rangeOf(q);
     const reg = await loadRegister(env, tid);
     const rates = await ratesMap(env, tid);
     const days = await reconcileRange(env, tid, from, to, reg);
+    // Engineer aliases: collapse different names for one person (e.g. the PO
+    // system's "JT" → the portal's "John Thorn") so their labour + POs group.
+    const eAlias = await cfgGet(env, tid, "eng_aliases", {});
+    const canonEng = (n) => eAlias[normName(n)] || (n || "(unknown)");
+    const projFin = await cfgGet(env, tid, "proj_fin", {});   // per-site contract value + valuations
 
     const bySite = {};   // norm -> aggregate
+    const siteFor = (name, resolved) => {
+      const key = resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
+      return bySite[key] || (bySite[key] = {
+        site: resolved ? resolved.name : (name || "(no site)"),
+        client: resolved ? resolved.client : "",
+        archived: !!(resolved && resolved.archived),
+        unmatched: !resolved,
+        travelMins: 0, onsiteMins: 0, visitMins: 0, cost: 0, costPartial: false,
+        poTotal: 0, poUnpriced: 0, jobs: {}, engineers: {},
+        labD: {}, poD: {}, suppliers: {}   // per-site: labour-by-day, PO-by-day, spend-by-supplier
+      });
+    };
+    const engFor = (s, name) => {
+      // Match a PO's engineer_name to a labour engineer by normalised name so
+      // one person's labour + POs sit together; else start a new engineer row.
+      let key = Object.keys(s.engineers).find(k => normName(k) === normName(name)) || name || "(unknown)";
+      return s.engineers[key] || (s.engineers[key] = { mins: 0, cost: null, poCost: 0, pos: [], src: null, visits: 0, days: new Set() });
+    };
+    const addSrc = (eng, src) => { eng.src = !eng.src ? src : (eng.src === src ? src : "mixed"); };
+
+    // ── Per-site spend-over-time series (labour + materials) ─────────────────
+    // Each site card gets its OWN trend. We accumulate £ at DAY granularity
+    // (labD/poD on each site, see siteFor); the series is bucketed later over
+    // each site's ACTUAL active span (so "All time" doesn't stretch an axis
+    // back to year dot with everything crammed into one spike).
+    const addDay = (map, day, v) => { const k = String(day || "").slice(0, 10); if (!k) return; map[k] = Math.round(((map[k] || 0) + v) * 100) / 100; };
+    // Per SiteLog person (site+who) → summary cost + onsite hours, to spread that
+    // cost across their actual visit dates (from /admin) for the labour line.
+    const slRate = {};
+
+    // ── SiteLog labour (authoritative per site+person) ───────────────────────
+    // Pull SiteLog's own job costing and fold it in FIRST, so we know which
+    // (site, person) pairs SiteLog covers and can drop the matching SLA time
+    // below (no double-count). Employees (linked portal users) are costed at the
+    // PORTAL rate on SiteLog's measured hours/miles; subcontractors keep
+    // SiteLog's own computed cost (SiteLog holds their rate). Fails soft: when
+    // SiteLog is unreachable, slSites is null and costing is SLA-only as before.
+    const slSites = await fetchSitelogCosting(env, from, to);
+    const slCovered = new Set();   // `${siteKey}::${normName(person)}` handled by SiteLog
+    const siteKeyOf = (resolved, name) => resolved ? resolved.norm : ("?" + normName(name || "(no site)"));
+    if (slSites) {
+      for (const slSite of slSites) {
+        const resolved = resolveSiteCode(reg, slSite.siteCode);
+        const s = siteFor(resolved ? resolved.name : (slSite.siteCode || "(no site)"), resolved);
+        const sKey = siteKeyOf(resolved, slSite.siteCode);
+        for (const p of (slSite.people || [])) {
+          if (!p.costedVisits) continue;   // only closed (costed) visits carry cost
+          const portalUser = (p.portalUsername || "").trim();
+          const isEmployee = !!portalUser;
+          const who = canonEng(isEmployee ? portalUser : (p.name || "(unknown)"));
+          slCovered.add(sKey + "::" + normName(who));
+          const workMins = Math.round((p.workH || 0) * 60);
+          const travMins = Math.round((p.travelH || 0) * 60);
+          s.visitMins += workMins;
+          s.travelMins += travMins;
+          const eng = engFor(s, who);
+          eng.mins += workMins + travMins;
+          eng.visits += (p.costedVisits || 0) + (p.openCount || 0);   // 1 scan session = 1 visit
+          addSrc(eng, "sitelog");
+          // Cost: portal rate for employees (falls back to SiteLog's own figure
+          // when no portal rate is on file, so £ is never lost); SiteLog's cost
+          // for subcontractors.
+          const r = isEmployee ? (rates[who] || rates[portalUser]) : null;
+          let cost = null;
+          if (r && r.rateType === "hour" && r.rate) {
+            const fuel = (r.fuelPerMile != null) ? (p.miles || 0) * r.fuelPerMile : (p.fuelCost || 0);
+            cost = ((p.workH || 0) + (p.travelH || 0)) * r.rate + fuel;
+          } else {
+            cost = (p.total != null) ? Number(p.total) : null;   // SiteLog's own cost
+          }
+          if (cost != null && isFinite(cost)) {
+            cost = Math.round(cost * 100) / 100;
+            eng.cost = Math.round(((eng.cost || 0) + cost) * 100) / 100;
+            s.cost = Math.round((s.cost + cost) * 100) / 100;
+            // Remember cost + onsite hours so /admin visit dates can spread it.
+            const hrs = (p.workH || 0) > 0 ? p.workH : ((p.workH || 0) + (p.travelH || 0));
+            if (hrs > 0) slRate[sKey + "::" + normName(who)] = { cost, hrs };
+          } else {
+            s.costPartial = true;
+          }
+        }
+      }
+    }
+
+    // ── SLA labour (job_time_segments), skipping anyone SiteLog already covers
+    // at that site — SiteLog is authoritative for a scanned visit.
     for (const d of days) {
       for (const e of d.entries) {
-        const key = e.resolved ? e.resolved.norm : ("?" + normName(e.site || "(no site)"));
-        const s = bySite[key] || (bySite[key] = {
-          site: e.resolved ? e.resolved.name : (e.site || "(no site)"),
-          client: e.resolved ? e.resolved.client : "",
-          archived: !!(e.resolved && e.resolved.archived),
-          unmatched: !e.resolved,
-          travelMins: 0, onsiteMins: 0, visitMins: 0, cost: 0, costPartial: false,
-          jobs: {}, engineers: {}
-        });
+        const s = siteFor(e.site, e.resolved);
+        const sKey = siteKeyOf(e.resolved, e.site);
+        const cu = canonEng(e.user);
+        if (slCovered.has(sKey + "::" + normName(cu))) continue;   // deduped
         const bucket = e.kind === "travel" ? "travelMins" : (e.src === "sitelog" ? "visitMins" : "onsiteMins");
         s[bucket] += e.mins;
         if (e.jobRef) s.jobs[e.jobRef] = (s.jobs[e.jobRef] || 0) + e.mins;
-        const eng = s.engineers[e.user] || (s.engineers[e.user] = { mins: 0, cost: null });
+        const eng = engFor(s, cu);
         eng.mins += e.mins;
-        const r = rates[e.user];
+        eng.days.add(d.date);   // distinct on-site days = visits for tap-only people
+        addSrc(eng, "sla");
+        const r = rates[cu];
         if (r && r.rateType === "hour" && r.rate) {
           eng.cost = Math.round(((eng.cost || 0) + (e.mins / 60) * r.rate) * 100) / 100;
           s.cost = Math.round((s.cost + (e.mins / 60) * r.rate) * 100) / 100;
+          addDay(s.labD, d.date, (e.mins / 60) * r.rate);   // dated labour for this site's trend
         } else if (r && r.rateType === "day") {
           s.costPartial = true;   // day-rate labour shown as hours, not £ (can't split a day rate per site fairly)
         } else {
@@ -257,15 +463,73 @@ export async function handle(request, env, ctx, url, sess) {
         }
       }
     }
-    let sites = Object.values(bySite).map(s => ({
-      ...s,
-      totalMins: s.travelMins + s.onsiteMins + s.visitMins,
-      jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
-      engineers: Object.entries(s.engineers).map(([u, v]) => ({ user: u, ...v })).sort((a, b) => b.mins - a.mins)
-    })).sort((a, b) => b.totalMins - a.totalMins);
+
+    // PO spend (ex VAT) from the PO system's D1 — folded in per site + per
+    // engineer. Fails soft when PO_DB isn't bound. Unpriced POs (no cost yet)
+    // are counted separately so pending spend is visible, not hidden.
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const s = siteFor(p.site, resolved);
+      const val = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? Number(p.cost_ex_vat) : null;
+      if (val != null && isFinite(val)) { s.poTotal = Math.round((s.poTotal + val) * 100) / 100; addDay(s.poD, p.d || to, val); }
+      else s.poUnpriced++;
+      const eng = engFor(s, canonEng(p.engineer_name || "(unknown)"));
+      if (val != null && isFinite(val)) eng.poCost = Math.round(((eng.poCost || 0) + val) * 100) / 100;
+      eng.pos = eng.pos || [];
+      eng.pos.push({ supplier: p.supplier || "", cost: (val != null && isFinite(val)) ? val : null,
+        incident: p.incident_no || "", date: p.d || "", category: p.cost_category || "" });
+      // Spend per supplier, per site (grouped for the "by supplier" breakdown).
+      const supName = (p.supplier || "").trim() || "(no supplier)";
+      const sup = s.suppliers[supName] || (s.suppliers[supName] = { supplier: supName, total: 0, count: 0, unpriced: 0 });
+      sup.count++;
+      if (val != null && isFinite(val)) sup.total = Math.round((sup.total + val) * 100) / 100;
+      else sup.unpriced++;
+    }
+
+    // Spread each SiteLog person's cost across the dates they actually scanned
+    // (from /admin) so the labour line is dated. Sums back to their site total.
+    if (slSites && Object.keys(slRate).length) {
+      const visits = await fetchSitelogVisits(env, from, to);
+      for (const v of (visits || [])) {
+        if (!v.check_in_at || !v.check_out_at) continue;
+        const who = canonEng(String(v.portal_username || "").trim() || jcNameLike(v));
+        const resolved = resolveSiteCode(reg, v.site_code);
+        const sKey = siteKeyOf(resolved, v.site_code);
+        const rt = slRate[sKey + "::" + normName(who)];
+        if (!rt) continue;
+        const site = bySite[sKey];
+        if (!site) continue;
+        const hrs = Math.max(0, (Date.parse(v.check_out_at) - Date.parse(v.check_in_at)) / 3600e3);
+        if (hrs > 0) addDay(site.labD, londonDate(v.check_in_at), hrs * (rt.cost / rt.hrs));
+      }
+    }
+
+    let sites = Object.entries(bySite).map(([key, s]) => {
+      const laborCost = s.cost || 0, poTotal = s.poTotal || 0;
+      return {
+        ...s,
+        key,   // stable per-site id the front-end pins/hides/orders against
+        totalMins: s.travelMins + s.onsiteMins + s.visitMins,
+        laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
+        grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
+        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100, mergeDayMaps(s.labD, s.poD)),
+        jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
+        engineers: Object.entries(s.engineers).map(([u, v]) => ({
+          user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0, src: v.src || null,
+          visits: (v.visits || 0) + (v.days ? v.days.size : 0),   // on-site visits/days
+          pos: (v.pos || []).sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        })).sort((a, b) => ((b.cost || 0) + (b.poCost || 0)) - ((a.cost || 0) + (a.poCost || 0)) || b.mins - a.mins),
+        // Per-site trend (labour + materials over its own active span) + supplier spend.
+        series: buildSiteSeries(s.labD, s.poD),
+        suppliers: Object.values(s.suppliers)
+          .sort((a, b) => (b.total - a.total) || (b.count - a.count))
+      };
+    }).sort((a, b) => (b.grandTotal - a.grandTotal) || (b.totalMins - a.totalMins));
     const only = normName(q.get("site") || "");
     if (only) sites = sites.filter(s => normName(s.site) === only);
-    return json({ ok: true, from, to, sites }, {}, env, request);
+    // sitelog: true = SiteLog costing folded in; false = SiteLog unreachable or
+    // SITELOG_ADMIN_SECRET unset, so labour is SLA-only (front-end shows a note).
+    return json({ ok: true, from, to, sites, sitelog: slSites != null }, {}, env, request);
   }
 
   if (path === "/exceptions" && method === "GET") {
@@ -293,6 +557,33 @@ export async function handle(request, env, ctx, url, sess) {
       if (d.unallocMins > UNALLOC_MIN)
         ex.push({ date: d.date, user: d.user, type: "unallocated",
           detail: `${fmtMins(d.unallocMins)} of the working day not covered by any job, scan or overhead` });
+    }
+
+    // POs raised against an archived or unregistered site — so PO spend can't
+    // land on a dead/unknown site undetected.
+    for (const p of await poRows(env, from, to)) {
+      const resolved = resolveSite(reg, p.site);
+      const money = p.cost_ex_vat != null && p.cost_ex_vat !== "" ? "£" + Number(p.cost_ex_vat).toFixed(2) : "unpriced";
+      if (resolved && resolved.archived)
+        ex.push({ date: p.d || to, user: p.engineer_name || "", type: "archived-site", site: resolved.name,
+          detail: `PO (${money}, ${p.supplier || "supplier"}) raised against ARCHIVED site "${resolved.name}"` });
+      else if (!resolved && p.site)
+        ex.push({ date: p.d || to, user: p.engineer_name || "", type: "unmatched-site", site: p.site,
+          detail: `PO (${money}, ${p.supplier || "supplier"}) on "${p.site}" — not in the site register; add or merge it` });
+    }
+
+    // SiteLog labour landing on a site the register doesn't know (so it can't be
+    // costed against the right project) or on an archived one.
+    const slSites = await fetchSitelogCosting(env, from, to);
+    for (const slSite of (slSites || [])) {
+      const resolved = resolveSiteCode(reg, slSite.siteCode);
+      const hrs = (slSite.workH || 0) + (slSite.travelH || 0);
+      if (resolved && resolved.archived)
+        ex.push({ date: to, user: "", type: "archived-site", site: resolved.name,
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) recorded against ARCHIVED site "${resolved.name}"` });
+      else if (!resolved && slSite.siteCode)
+        ex.push({ date: to, user: "", type: "unmatched-site", site: String(slSite.siteCode),
+          detail: `SiteLog labour (${hrs.toFixed(1)}h) at store "${slSite.siteCode}" — not matched to the site register; add or merge it` });
     }
 
     // Claimed (timesheet span) vs captured (ledger) per user-day
@@ -378,6 +669,15 @@ async function buildDay(env, tid, user, date, reg) {
     if (!end) {
       if (date < today) { end = lazyCloseAt(s.started_at, date); flags.push("auto-closed"); }
       else { end = nowIso; flags.push("open"); }
+    }
+    // Guard a forgotten status change: a real session can't run for days. If a
+    // segment — even one "closed" only when the next job was tapped much later —
+    // spans more than a long shift, clamp it to a forgot-to-finish close on its
+    // start day and flag it. Without this, one stale "In Progress" job inflates
+    // costing by thousands (e.g. an 11-day Verwood session = 262h ≈ £5k).
+    if (Date.parse(end) - Date.parse(s.started_at) > MAX_SEG_MS) {
+      end = lazyCloseAt(s.started_at, date);
+      if (!flags.includes("auto-closed")) flags.push("auto-closed");
     }
     const mins = Math.max(0, Math.round((Date.parse(end) - Date.parse(s.started_at)) / 60000));
     if (!mins) continue;
@@ -492,12 +792,15 @@ async function loadRegister(env, tid) {
   const byNorm = {};
   try {
     const { results } = await env.DB.prepare(
-      "SELECT client, site_number, site_name, postcode, active, archived, job_number FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE")
+      "SELECT client, site_number, site_name, postcode, active, archived, job_number, data FROM sites WHERE tenant_id=? ORDER BY site_name COLLATE NOCASE")
       .bind(tid).all();
     for (const r of results || []) {
+      let d = {}; try { d = JSON.parse(r.data || "{}"); } catch {}
+      const lat = Number(d.lat), lng = Number(d.lng ?? d.lon);
       const entry = { client: r.client, siteNumber: r.site_number,
         name: r.site_name || ("Site " + r.site_number), postcode: (r.postcode || "").replace(/\*+$/, ""),
         active: r.active !== 0, archived: !!r.archived, jobNumber: r.job_number || "",
+        lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
         norm: normName(r.site_name || r.site_number) };
       list.push(entry);
       if (entry.norm && !byNorm[entry.norm]) byNorm[entry.norm] = entry;
@@ -508,13 +811,313 @@ async function loadRegister(env, tid) {
     const target = list.find(s => s.client === tgt.client && s.siteNumber === tgt.siteNumber);
     if (target && !byNorm[norm]) byNorm[norm] = target;
   }
+  // byCode: SiteLog scans/costing key sites by a numeric store code
+  // (digitsOf(name), same convention the portal uses when it pushes geofences).
+  // Map those back to a register entry so SiteLog labour lands on the right site.
+  const byCode = {};
+  for (const e of list) {
+    for (const code of [String(e.siteNumber || ""), digitsOf(e.name), digitsOf(e.siteNumber)]) {
+      if (code && !byCode[code]) byCode[code] = e;
+    }
+  }
   const ignored = await cfgGet(env, tid, "site_reg_ignore", {});
-  return { list, byNorm, aliases, ignored };
+  return { list, byNorm, byCode, aliases, ignored };
 }
 
 function resolveSite(reg, name) {
   const k = normName(name);
   return (k && reg.byNorm[k]) || null;
+}
+// Resolve a SiteLog site_code (numeric store code, or a name) to a register
+// entry: by code first, then by name/alias (so a code OR a name both land).
+function resolveSiteCode(reg, code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const d = digitsOf(c);
+  return (d && reg.byCode && reg.byCode[d]) || (reg.byCode && reg.byCode[c]) || resolveSite(reg, c) || null;
+}
+function digitsOf(s) { return String(s || "").replace(/\D+/g, ""); }
+
+// Parse a lat/lng pair; returns {lat,lng} only when both are valid UK-ish coords.
+function parseLatLngPair(latIn, lngIn) {
+  const lat = Number(latIn), lng = Number(lngIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+// Push a portal site to SiteLog as a geofence (same shape as sites.js), so a
+// site added/located in the portal is recognised on-site by the scanner.
+// Custom domain is fetchable server-side; best-effort, never blocks the save.
+async function pushSiteToSiteLog(env, name, lat, lng, client) {
+  try {
+    if (!env.SITELOG_ADMIN_SECRET || !String(name || "").trim()) return false;
+    const base = env.SITELOG_API || "https://api.site-log.co.uk";
+    const category = String(client || "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim() || "Projects";
+    const res = await fetch(base + "/bulk-add-sites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-secret": env.SITELOG_ADMIN_SECRET },
+      body: JSON.stringify({ sites: [{ siteName: String(name).trim(), lat, lng, radius: 500, category }] })
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+// Pull SiteLog's own job-costing (per-site → per-person labour, computed with
+// SiteLog's rates). Custom domain, so server-side fetch works (mostlane-api is
+// on *.workers.dev and CANNOT be fetched back — the flow is always portal→
+// SiteLog). Fails soft to null so costing degrades to SLA-only when SiteLog is
+// unreachable or SITELOG_ADMIN_SECRET isn't set.
+async function fetchSitelogCosting(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  try {
+    const res = await fetch(base + "/job-costing?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to),
+      { headers: { "x-admin-secret": secret } });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j && j.ok && Array.isArray(j.sites)) ? j.sites : null;
+  } catch { return null; }
+}
+
+// Raw SiteLog visits (for the reconcile + the labour trend — needs check-in/out
+// dates, not just aggregates). Pages back by check_in_at so a wide range isn't
+// capped at /admin's 500. Same portal→SiteLog custom-domain fetch; soft-null.
+async function fetchSitelogVisits(env, from, to) {
+  const secret = env.SITELOG_ADMIN_SECRET;
+  if (!secret) return null;
+  const base = env.SITELOG_API || "https://api.site-log.co.uk";
+  const headers = { "x-admin-secret": secret };
+  const seen = new Set();
+  const out = [];
+  let before = null, got = false;
+  try {
+    for (let page = 0; page < 30; page++) {   // ≤15k visits
+      let u = base + "/admin?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to);
+      if (before) u += "&before=" + encodeURIComponent(before);
+      const res = await fetch(u, { headers });
+      if (!res.ok) return got ? out : null;
+      const j = await res.json();
+      const rows = Array.isArray(j.visits) ? j.visits : [];
+      got = true;
+      if (!rows.length) break;
+      let added = 0, oldest = null;
+      for (const r of rows) {
+        const id = r.visit_id != null ? r.visit_id : (r.person_id + "|" + r.check_in_at);
+        if (!seen.has(id)) { seen.add(id); out.push(r); added++; }
+        if (oldest == null || (r.check_in_at && r.check_in_at < oldest)) oldest = r.check_in_at;
+      }
+      if (rows.length < 500 || !oldest || added === 0) break;
+      before = oldest;
+    }
+    return out;
+  } catch { return got ? out : null; }
+}
+function jcNameLike(v) { return ((v.first_name || "") + " " + (v.last_name || "")).trim() || "(unknown)"; }
+
+// Project financials for one site: contract value, valuations submitted, and
+// how the job is looking + a suggested next valuation. Returns null when the
+// project hasn't been set up (so only real projects show it). `cost` is the
+// job's grand total (labour + PO) so far.
+function mergeDayMaps(a, b) {
+  const out = {};
+  for (const [d, v] of Object.entries(a || {})) out[d] = (out[d] || 0) + v;
+  for (const [d, v] of Object.entries(b || {})) out[d] = (out[d] || 0) + v;
+  return out;
+}
+function computeFin(f, cost, costByDay) {
+  if (!f || (!(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0))) return null;
+  const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
+  const value = r(f.value);
+  const planned = Math.max(0, Math.round(Number(f.planned) || 0));
+  const valuations = (Array.isArray(f.valuations) ? f.valuations : [])
+    .map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  // Split each valuation into cost-covered vs profit "at the time": the cost
+  // dated up to that valuation, minus the cost already covered by earlier ones.
+  const costDays = Object.keys(costByDay || {}).sort();
+  const cumCostUpTo = (date) => { let c = 0; for (const d of costDays) { if (d <= date) c += costByDay[d]; else break; } return c; };
+  let prevCumCost = 0, runVal = 0;
+  for (const v of valuations) {
+    runVal += v.amount;
+    const cumCost = cumCostUpTo(v.date);
+    const costPortion = Math.max(0, r(cumCost - prevCumCost));   // cost incurred in this valuation's window
+    v.costAtTime = costPortion;
+    v.profitAtTime = r(v.amount - costPortion);                  // profit taken in this valuation (− if it didn't cover cost)
+    v.profitToDate = r(runVal - cumCost);                        // running profit after this valuation
+    prevCumCost = cumCost;
+  }
+  // Cost incurred AFTER the last valuation — not yet claimed. This is why the
+  // last valuation's "running profit" won't match the current position.
+  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
+  const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
+  const remainingValue = r(value - valued);
+  const remainingVals = Math.max(0, planned - valuations.length);
+  const position = r(valued - cost);                       // profit so far (+ = value earned ahead of cost)
+  const marginPct = value > 0 ? r((value - cost) / value * 100) : null;   // projected margin on full value
+  const breakEven = Math.max(0, r(cost - valued));         // next valuation to be ≥ cost (stay positive)
+  const evenShare = remainingVals > 0 ? r(remainingValue / remainingVals) : Math.max(0, remainingValue);
+  // Suggest: at least break even, at least your even share, never more than what's left to claim.
+  let suggestedNext = Math.max(breakEven, evenShare);
+  suggestedNext = r(Math.max(0, Math.min(suggestedNext, Math.max(0, remainingValue))));
+
+  // ── Retention ──────────────────────────────────────────────────────────
+  // Every interim valuation retains 5% of the cumulative value. At the final
+  // account all 5% held to date is released and a new retention of 2.5% of the
+  // project value is held instead (the other half, released after defects).
+  const RET = 0.05, FINAL_RET = 0.025;
+  const retBase = value > 0 ? value : valued;
+  const isFinal = valuations.some((v) => v.final);
+  const retentionRate = isFinal ? FINAL_RET : RET;
+  const retentionHeld = r(retentionRate * (isFinal ? retBase : valued));
+  const cashReceived = r(valued - retentionHeld);          // cash in after retention
+  const nextIsFinal = !isFinal && remainingValue > 0.005 && remainingVals <= 1;   // last valuation = final account
+  const retentionIfFinal = r(FINAL_RET * retBase);         // what would be held after the final account
+  const retentionCurrent = r(RET * valued);                // interim retention held right now
+
+  return {
+    value, planned, valuations, valued, cost: r(cost), position, marginPct,
+    remainingValue, remainingVals, breakEven: r(breakEven), evenShare: r(evenShare),
+    suggestedNext, overCommitted: breakEven > remainingValue + 0.005,
+    positionAfterSuggested: r(valued + suggestedNext - cost),
+    retentionRate: retentionRate * 100, retentionHeld, cashReceived, isFinal,
+    nextIsFinal, retentionIfFinal, retentionCurrent, costSinceLastVal,
+  };
+}
+
+// Build a site's trend from its day-level labour/PO maps: span only the site's
+// ACTIVE dates (first→last with any spend) and pick the granularity from that
+// span (day ≤45d, week ≤~6mo, else month), so the line is spread across when
+// work/POs actually happened — never one spike on a year-long empty axis.
+function buildSiteSeries(labD, poD) {
+  const days = Object.keys(labD).concat(Object.keys(poD)).filter(Boolean).sort();
+  if (!days.length) return [];
+  const min = days[0], max = days[days.length - 1];
+  const span = Math.max(1, Math.round((Date.parse(max + "T12:00:00Z") - Date.parse(min + "T12:00:00Z")) / 864e5) + 1);
+  const mode = span <= 45 ? "day" : span <= 186 ? "week" : "month";
+  const bk = (d) => mode === "day" ? d : mode === "week" ? mondayOf(d) : d.slice(0, 7);
+  const labB = {}, poB = {};
+  const roll = (src, dst) => { for (const [d, v] of Object.entries(src)) { const k = bk(d); dst[k] = Math.round(((dst[k] || 0) + v) * 100) / 100; } };
+  roll(labD, labB); roll(poD, poB);
+  return buildSeriesBuckets(min, max, mode, labB, poB);
+}
+// Turn the per-bucket labour/PO maps into an ordered, zero-filled series across
+// the given from→to so the front-end line chart has no gaps.
+function buildSeriesBuckets(from, to, mode, labourByB, poByB) {
+  const keys = [];
+  if (mode === "day") {
+    let d = new Date(from + "T12:00:00Z"); const end = new Date(to + "T12:00:00Z");
+    while (d <= end) { keys.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+  } else if (mode === "week") {
+    let d = new Date(mondayOf(from) + "T12:00:00Z"); const end = new Date(to + "T12:00:00Z");
+    while (d <= end) { keys.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 7); }
+  } else {
+    let d = new Date(from.slice(0, 7) + "-01T12:00:00Z"); const end = new Date(to.slice(0, 7) + "-01T12:00:00Z");
+    while (d <= end) { keys.push(d.toISOString().slice(0, 7)); d.setUTCMonth(d.getUTCMonth() + 1); }
+  }
+  return keys.map(k => {
+    const labour = Math.round((labourByB[k] || 0) * 100) / 100;
+    const po = Math.round((poByB[k] || 0) * 100) / 100;
+    return { label: k, mode, labour, po, total: Math.round((labour + po) * 100) / 100 };
+  });
+}
+
+/* ══ P4: SiteLog → SLA session reconcile ════════════════════════════════════
+   mostlane-api can't be called from SiteLog (1042), so instead of SiteLog
+   pushing "scan-out" events, the portal PULLS recent visits and reconciles:
+   for each LINKED employee's completed visit, (a) close any SLA job-status
+   session still open at scan-out — "the scan ends the session"; (b) if no SLA
+   segment already covers that visit, materialise one from the scan so the
+   engineer's timesheet autofill + job costing see it. Idempotent (segments
+   carry the SiteLog visit id); subcontractors are skipped (no portal
+   timesheet — job costing already reads their cost from SiteLog directly).
+   Runs on the hourly cron over a rolling window; safe to run repeatedly. */
+export async function reconcileSitelogSessions(env, tid, opts) {
+  const o = opts || {};
+  if (!env.SITELOG_ADMIN_SECRET) return { ok: false, reason: "SITELOG_ADMIN_SECRET unset" };
+  await ensure(env);
+  const now = o.now ? new Date(o.now) : new Date();
+  const to = londonDate(now.toISOString());
+  const fromD = new Date(now.getTime() - (o.days || 4) * 864e5);
+  const from = londonDate(fromD.toISOString());
+  const visits = await fetchSitelogVisits(env, from, to);
+  if (!visits) return { ok: false, reason: "SiteLog unreachable" };
+  const reg = await loadRegister(env, tid);
+  let closed = 0, created = 0, skipped = 0;
+  for (const v of visits) {
+    const user = String(v.portal_username || "").trim();
+    if (!user) { skipped++; continue; }               // subcontractor → costing only
+    if (!v.check_in_at || !v.check_out_at) { skipped++; continue; }   // open visit → leave it
+    const inMs = Date.parse(v.check_in_at), outMs = Date.parse(v.check_out_at);
+    if (!(outMs > inMs)) { skipped++; continue; }
+    const resolved = resolveSiteCode(reg, v.site_code);
+    const siteName = resolved ? resolved.name : (v.provided_site_name || String(v.site_code || "").trim());
+    const dayKey = londonDate(v.check_out_at);
+    const dayStartMs = Date.parse(dayKey + "T00:00:00Z") - 2 * 3600e3;
+
+    // (a) Close SLA sessions left open at scan-out that day (the scan ends them).
+    try {
+      const { results } = await env.DB.prepare(
+        "SELECT id, started_at FROM job_time_segments WHERE tenant_id=? AND username=? AND ended_at IS NULL")
+        .bind(tid, user).all();
+      for (const seg of results || []) {
+        const sMs = Date.parse(seg.started_at);
+        if (sMs <= outMs && sMs >= dayStartMs) {
+          await env.DB.prepare(
+            "UPDATE job_time_segments SET ended_at=?, auto_closed=1 WHERE id=? AND tenant_id=?")
+            .bind(new Date(outMs).toISOString(), seg.id, tid).run();
+          closed++;
+        }
+      }
+    } catch {}
+
+    // (b) Materialise a segment from the scan — unless we already did (idempotent
+    // by sitelog_visit_id) or an SLA segment already overlaps this visit.
+    const vid = "sl:" + (v.visit_id != null ? v.visit_id : (user + "|" + v.check_in_at));
+    let exists = false, overlaps = false;
+    try {
+      const dup = await env.DB.prepare(
+        "SELECT 1 FROM job_time_segments WHERE tenant_id=? AND sitelog_visit_id=? LIMIT 1").bind(tid, vid).first();
+      exists = !!dup;
+    } catch {}
+    if (!exists) {
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT started_at, ended_at FROM job_time_segments WHERE tenant_id=? AND username=? AND started_at>=? AND started_at<=? AND sitelog_visit_id IS NULL")
+          .bind(tid, user, new Date(dayStartMs).toISOString(), new Date(outMs + 3600e3).toISOString()).all();
+        for (const seg of results || []) {
+          const sMs = Date.parse(seg.started_at), eMs = seg.ended_at ? Date.parse(seg.ended_at) : outMs;
+          if (eMs > inMs && sMs < outMs) { overlaps = true; break; }   // SLA already covers it
+        }
+      } catch {}
+      if (!overlaps) {
+        try {
+          await env.DB.prepare(
+            "INSERT INTO job_time_segments (tenant_id, username, job_id, job_ref, site, postcode, started_at, ended_at, kind, sitelog_visit_id) VALUES (?,?,?,?,?,?,?,?,?,?)")
+            .bind(tid, user, vid, "", siteName, resolved ? resolved.postcode : "",
+              new Date(inMs).toISOString(), new Date(outMs).toISOString(), "onsite", vid).run();
+          created++;
+        } catch {}
+      } else { skipped++; }
+    }
+  }
+  return { ok: true, from, to, closed, created, skipped, visits: visits.length };
+}
+
+// PO spend from the PO system's own D1 (PO_DB binding). Fails soft to [] when
+// the binding is absent or the schema differs. cost_ex_vat is the job-costing
+// figure (VAT is reclaimed); NULL = raised-but-not-priced-yet.
+async function poRows(env, from, to) {
+  if (!env.PO_DB) return [];
+  try {
+    const { results } = await env.PO_DB.prepare(
+      "SELECT engineer_name, site, supplier, cost_ex_vat, incident_no, cost_category, substr(issued_at,1,10) AS d " +
+      "FROM po_log WHERE (deleted IS NULL OR deleted=0) AND substr(issued_at,1,10) BETWEEN ? AND ?"
+    ).bind(from, to).all();
+    return results || [];
+  } catch { return []; }
 }
 
 /* ══ Rates (mirrors timesheets.js effectiveCfg, read-only subset) ═══════════ */
@@ -529,12 +1132,17 @@ async function ratesMap(env, tid) {
   try {
     const { results } = await env.DB.prepare("SELECT username, profile FROM users WHERE tenant_id=?").bind(tid).all();
     const num = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+    const defs = cfg.defaults || {};
+    const defPence = num(defs.pencePerMile);
     for (const u of results || []) {
       let profile = {}; try { profile = u.profile ? JSON.parse(u.profile) : {}; } catch {}
       const mine = (cfg.byUser && cfg.byUser[u.username]) || {};
       const rateType = mine.rateType === "day" ? "day" : "hour";
       const rate = num(mine.rate) ?? (rateType === "day" ? num(profile.dayRate) : num(profile.hourlyRate)) ?? num(profile.hourlyRate);
-      out[u.username] = { rate, rateType };
+      // Fuel: portal pence-per-mile (per-user override → default). £/mile for costing.
+      const pence = num(mine.pencePerMile) ?? defPence;
+      const fuelPerMile = pence != null ? pence / 100 : null;
+      out[u.username] = { rate, rateType, fuelPerMile };
     }
   } catch {}
   return out;
@@ -555,6 +1163,9 @@ async function ensure(env) {
   } catch {}
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN kind TEXT").run(); } catch {}
   try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN auto_closed INTEGER").run(); } catch {}
+  // P4: links a segment materialised from a SiteLog visit back to that visit, so
+  // the reconcile is idempotent (never creates the same session twice).
+  try { await env.DB.prepare("ALTER TABLE job_time_segments ADD COLUMN sitelog_visit_id TEXT").run(); } catch {}
   try {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS sitelog_scans (
       id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
