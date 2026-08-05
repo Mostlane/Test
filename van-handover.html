@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Van Handover</title>
+  <script src="/portal-config.js?v=2"></script>
+  <script src="auth.js"></script>
+  <style>
+    :root { --brand:#003366; --ok:#0a7d33; --bad:#b00020; --line:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#eef1f4; color:#1f2937; }
+    header.page { background:var(--brand); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; }
+    header.page h1 { font-size:18px; margin:0; flex:1; }
+    .wrap { max-width:640px; margin:14px auto 60px; padding:0 12px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(6,24,54,.06); padding:14px; margin-bottom:12px; }
+    label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+    input[type=text],input[type=number],textarea { width:100%; padding:11px; border:1px solid #ccd5dd; border-radius:9px; font-size:16px; font-family:inherit; }
+    textarea { min-height:60px; }
+    .btn { background:var(--brand); color:#fff; border:none; border-radius:10px; padding:12px 16px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; }
+    .btn.grey { background:#5b6b7b; } .btn.small { padding:7px 10px; font-size:13px; font-weight:600; }
+    .muted { color:#6b7a90; }
+    .due { border-radius:10px; padding:10px 12px; font-size:13.5px; font-weight:600; margin-bottom:12px; }
+    .due.warn { background:#fff6e5; color:#8a5a00; border:1px solid #f0d9a6; }
+    .item { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid #f0f3f7; }
+    .item:first-child { border-top:none; }
+    .item .lbl { flex:1; font-size:14.5px; }
+    .seg { display:flex; border:1px solid #ccd5dd; border-radius:9px; overflow:hidden; flex:none; }
+    .seg button { border:none; background:#fff; padding:9px 13px; font:600 13px inherit; font-family:inherit; cursor:pointer; color:#5b6b7b; }
+    .seg button.on-ok { background:var(--ok); color:#fff; }
+    .seg button.on-bad { background:var(--bad); color:#fff; }
+    .defnote { margin:2px 0 8px; display:none; }
+    .defnote.show { display:block; }
+    .photos { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .ph { position:relative; }
+    .ph img { width:74px; height:74px; object-fit:cover; border-radius:9px; border:1px solid var(--line); }
+    .ph .rm { position:absolute; top:-7px; right:-7px; width:22px; height:22px; border-radius:50%; background:var(--bad); color:#fff; border:none; font-size:12px; cursor:pointer; padding:0; }
+    .safe { display:flex; gap:10px; }
+    .safe button { flex:1; border:2px solid #ccd5dd; background:#fff; border-radius:11px; padding:13px; font:700 15px inherit; font-family:inherit; cursor:pointer; color:#5b6b7b; }
+    .safe button.on-yes { border-color:var(--ok); background:#e6f6ec; color:var(--ok); }
+    .safe button.on-no { border-color:var(--bad); background:#fdecea; color:var(--bad); }
+    .msg { font-size:14px; margin:10px 0; } .msg.err { color:#b00020; } .msg.ok { color:#0a7d33; }
+    .donebox { text-align:center; padding:22px 14px; }
+    .donebox .big { font-size:42px; }
+    .slot { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid #f0f3f7; }
+    .slot:first-child { border-top:none; }
+    .slot .lbl { flex:1; font-size:14px; }
+    .slot .lbl .req { color:var(--bad); }
+    .slot img { width:56px; height:56px; object-fit:cover; border-radius:8px; border:2px solid var(--ok); }
+    .slot .cam { background:var(--brand); color:#fff; border:none; border-radius:9px; padding:9px 12px; font:600 13px inherit; font-family:inherit; cursor:pointer; }
+    .slot .redo { background:#5b6b7b; }
+    .dmg { border:1px solid #f0d9a6; background:#fffdf6; border-radius:10px; padding:10px; margin-bottom:8px; }
+    .dmg .row { display:flex; gap:8px; align-items:center; margin-top:6px; }
+    .dmg img { width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+    .sigwrap { border:1px dashed #ccd5dd; border-radius:10px; background:#fff; }
+    #sigPad { width:100%; height:170px; display:block; border-radius:10px; touch-action:none; }
+    .sigbar { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" data-role="home" href="/vehicles.html" style="color:#fff;text-decoration:none;">←</a>
+    <h1>🤝 Van Handover</h1>
+  </header>
+  <div class="wrap">
+    <div class="due warn" id="dueBox" style="display:none;"></div>
+
+    <div class="card donebox" id="noneBox" style="display:none;">
+      <div class="big">✅</div>
+      <h2 style="margin:6px 0;">No handover to complete</h2>
+      <p class="muted">You don't have a van handover waiting. If you've just been given a van, ask the office to send one.</p>
+      <a class="btn grey" href="/vehicles.html" style="text-decoration:none;display:inline-block;">Back to vehicles</a>
+    </div>
+
+    <div id="formWrap" style="display:none;">
+      <div class="card">
+        <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Complete this full handover check before you use the vehicle. Report its condition honestly — it protects you if damage is queried later.</p>
+        <label>Vehicle</label>
+        <input type="text" id="f_vehicle" readonly>
+        <label>Mileage</label>
+        <input type="number" id="f_mileage" inputmode="numeric" placeholder="Current mileage">
+      </div>
+
+      <div class="card">
+        <b>Vehicle checks</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Tap OK or Defect for every item. Add a note for any defect.</p>
+        <div id="checkItems"></div>
+      </div>
+
+      <div class="card">
+        <b>Equipment on board</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Confirm each item is present. Mark Missing if it isn't.</p>
+        <div id="equipItems"></div>
+      </div>
+
+      <div class="card">
+        <b>Condition report</b>
+        <label>Exterior condition</label>
+        <textarea id="f_ext" placeholder="Overall exterior condition, existing marks/scuffs…"></textarea>
+        <label>Interior condition</label>
+        <textarea id="f_int" placeholder="Cab & load area condition, cleanliness…"></textarea>
+      </div>
+
+      <div class="card">
+        <b>Damage</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Log any existing damage — a note and a photo for each. Add as many as you need.</p>
+        <div id="dmgList"></div>
+        <button class="btn grey small" type="button" id="addDmg" style="margin-top:6px;">＋ Add damage</button>
+      </div>
+
+      <div class="card">
+        <b>Photos</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Take each photo with the camera. Items marked * are required.</p>
+        <div id="slotList"></div>
+        <div style="border-top:1px solid #f0f3f7; margin-top:8px; padding-top:8px;">
+          <b style="font-size:13.5px;">Extra photos</b>
+          <div class="photos" id="photoRow"></div>
+          <button class="btn grey small" type="button" id="addPhoto" style="margin-top:8px;">📷 Add extra photo</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <b>Safe to drive?</b>
+        <div class="safe" style="margin-top:8px;">
+          <button type="button" id="safeYes">✔ Safe to drive</button>
+          <button type="button" id="safeNo">✖ NOT safe</button>
+        </div>
+        <label>Anything else to report?</label>
+        <textarea id="f_note" placeholder="Optional"></textarea>
+      </div>
+
+      <div class="card">
+        <b>Signature</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Sign to confirm you accept the vehicle in the condition recorded above.</p>
+        <div class="sigwrap"><canvas id="sigPad"></canvas></div>
+        <div class="sigbar"><span class="muted" style="font-size:12px;" id="sigName"></span><button class="btn grey small" type="button" id="sigClear">Clear</button></div>
+      </div>
+
+      <p class="msg" id="msg"></p>
+      <button class="btn" id="submitBtn" style="width:100%;">Submit handover</button>
+    </div>
+  </div>
+
+<script>
+  const API = window.MOSTLANE_API;
+  const g = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  function authFetch(path, opts = {}) {
+    opts.headers = Object.assign({ "Authorization": "Bearer " + localStorage.getItem("mostlaneToken") }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+  let HO = null, TPL = null;
+  let answers = {}, defectNotes = {}, photos = [], slotPhotos = {}, damage = [], safe = null, sigData = "";
+
+  const meUser = sessionStorage.getItem("mostlaneUser") || localStorage.getItem("mostlaneUser") || "me";
+
+  // ── Crash-proof draft (IndexedDB, keyed by handover id) ──
+  function idb() { return new Promise((res, rej) => { const r = indexedDB.open("mlHandover", 1); r.onupgradeneeded = () => r.result.createObjectStore("d"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  function draftKey() { return "ho:" + (HO ? HO.id : "x"); }
+  async function draftPut(v) { try { const d = await idb(); await new Promise((res, rej) => { const tx = d.transaction("d", "readwrite"); tx.objectStore("d").put(v, draftKey()); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} }
+  async function draftGet() { try { const d = await idb(); return await new Promise((res, rej) => { const tx = d.transaction("d", "readonly"); const q = tx.objectStore("d").get(draftKey()); q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); }); } catch (e) { return null; } }
+  async function draftDel() { try { const d = await idb(); await new Promise((res, rej) => { const tx = d.transaction("d", "readwrite"); tx.objectStore("d").delete(draftKey()); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); } catch (e) {} }
+  let saveT = null;
+  function saveDraft() {
+    if (!HO) return;
+    if (saveT) clearTimeout(saveT);
+    saveT = setTimeout(() => {
+      draftPut({ at: Date.now(), answers, defectNotes, photos, slotPhotos, damage, safe, sigData,
+        mileage: g("f_mileage").value, ext: g("f_ext").value, int: g("f_int").value, note: g("f_note").value });
+    }, 350);
+  }
+
+  (async () => {
+    let d;
+    try { d = await authFetch("/fleet/handover/mine").then(r => r.json()); }
+    catch (e) { document.querySelector(".wrap").innerHTML = "<p class='muted'>Couldn't load — check your connection and try again.</p>"; return; }
+    if (!d || !d.ok) { location.href = "/main.html"; return; }
+    TPL = d.template || { checklist: [], equipment: [], photoSlots: [] };
+    if (!d.handover) { g("noneBox").style.display = "block"; return; }
+    HO = d.handover;
+    g("dueBox").style.display = "block";
+    g("dueBox").innerHTML = "🤝 Handover for <b>" + esc(HO.reg) + "</b> — please complete it before using the van.";
+    g("f_vehicle").value = HO.reg || "";
+    g("sigName").textContent = "Signed by " + (sessionStorage.getItem("mostlaneUsername") || meUser);
+
+    const draft = await draftGet();
+    if (draft) {
+      answers = draft.answers || {}; defectNotes = draft.defectNotes || {};
+      photos = draft.photos || []; slotPhotos = draft.slotPhotos || {}; damage = draft.damage || [];
+      safe = (draft.safe === true || draft.safe === false) ? draft.safe : null; sigData = draft.sigData || "";
+      g("f_mileage").value = draft.mileage || ""; g("f_ext").value = draft.ext || "";
+      g("f_int").value = draft.int || ""; g("f_note").value = draft.note || "";
+    }
+    startForm();
+    if (draft) { const m = g("msg"); m.className = "msg ok"; m.textContent = "📝 Restored your unsaved draft — carry on where you left off."; }
+  })();
+
+  function startForm() {
+    g("formWrap").style.display = "block";
+    renderItems(); renderEquip(); renderSlots(); renderPhotos(); renderDamage(); renderSafe(); initSig();
+  }
+
+  // ── Checklist (OK/Defect) ──
+  function renderItems() {
+    g("checkItems").innerHTML = (TPL.checklist || []).map(it => `
+      <div class="item">
+        <span class="lbl">${esc(it.label)}</span>
+        <span class="seg">
+          <button type="button" class="${answers[it.id] === "ok" ? "on-ok" : ""}" data-ok="${esc(it.id)}">OK</button>
+          <button type="button" class="${answers[it.id] === "defect" ? "on-bad" : ""}" data-bad="${esc(it.id)}">Defect</button>
+        </span>
+      </div>
+      <div class="defnote ${answers[it.id] === "defect" ? "show" : ""}">
+        <input type="text" placeholder="What's wrong?" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
+      </div>`).join("");
+  }
+  g("checkItems").addEventListener("click", e => {
+    const ok = e.target.dataset.ok, bad = e.target.dataset.bad;
+    if (ok) { answers[ok] = "ok"; delete defectNotes[ok]; renderItems(); saveDraft(); }
+    if (bad) { answers[bad] = "defect"; renderItems(); saveDraft(); }
+  });
+  g("checkItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
+
+  // ── Equipment (Present/Missing) ──
+  function renderEquip() {
+    g("equipItems").innerHTML = (TPL.equipment || []).map(it => `
+      <div class="item">
+        <span class="lbl">${esc(it.label)}</span>
+        <span class="seg">
+          <button type="button" class="${answers[it.id] === "present" ? "on-ok" : ""}" data-pres="${esc(it.id)}">Present</button>
+          <button type="button" class="${answers[it.id] === "missing" ? "on-bad" : ""}" data-miss="${esc(it.id)}">Missing</button>
+        </span>
+      </div>
+      <div class="defnote ${answers[it.id] === "missing" ? "show" : ""}">
+        <input type="text" placeholder="Note (optional)" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
+      </div>`).join("");
+  }
+  g("equipItems").addEventListener("click", e => {
+    const pres = e.target.dataset.pres, miss = e.target.dataset.miss;
+    if (pres) { answers[pres] = "present"; delete defectNotes[pres]; renderEquip(); saveDraft(); }
+    if (miss) { answers[miss] = "missing"; renderEquip(); saveDraft(); }
+  });
+  g("equipItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
+
+  ["f_mileage", "f_ext", "f_int", "f_note"].forEach(id => g(id).addEventListener("input", saveDraft));
+
+  function renderSafe() {
+    g("safeYes").className = safe === true ? "on-yes" : "";
+    g("safeNo").className = safe === false ? "on-no" : "";
+  }
+  g("safeYes").onclick = () => { safe = true; renderSafe(); saveDraft(); };
+  g("safeNo").onclick = () => { safe = false; renderSafe(); saveDraft(); };
+
+  // ── Photos (shrink client-side) ──
+  async function shrink(file) {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.75);
+  }
+  function capture(cb) {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*"; input.setAttribute("capture", "environment");
+    input.onchange = async () => { const f = input.files[0]; if (!f) return; try { cb(await shrink(f)); } catch (e) { alert("Couldn't read that photo — try again."); } };
+    input.click();
+  }
+  function renderSlots() {
+    g("slotList").innerHTML = (TPL.photoSlots || []).map(sl => {
+      const p = slotPhotos[sl.id];
+      return `<div class="slot">
+        <span class="lbl">${esc(sl.label)}${sl.required !== false ? ' <span class="req">*</span>' : ""}</span>
+        ${p ? `<img src="${esc(p.data || "")}" alt="">` : ""}
+        <button type="button" class="cam ${p ? "redo" : ""}" data-slot="${esc(sl.id)}">${p ? "↻ Retake" : "📷 Take"}</button>
+      </div>`;
+    }).join("");
+  }
+  g("slotList").addEventListener("click", e => {
+    const id = e.target.dataset.slot; if (!id) return;
+    capture(data => { slotPhotos[id] = { data }; renderSlots(); saveDraft(); });
+  });
+  g("addPhoto").onclick = () => { if (photos.length >= 8) { alert("8 extra photos max."); return; } capture(data => { photos.push({ data }); renderPhotos(); saveDraft(); }); };
+  function renderPhotos() {
+    g("photoRow").innerHTML = photos.map((p, i) => `<span class="ph"><img src="${esc(p.data || "")}" alt=""><button class="rm" data-rm="${i}">✕</button></span>`).join("");
+  }
+  g("photoRow").addEventListener("click", e => { if (e.target.dataset.rm !== undefined) { photos.splice(Number(e.target.dataset.rm), 1); renderPhotos(); saveDraft(); } });
+
+  // ── Damage entries (note + photo) ──
+  function renderDamage() {
+    g("dmgList").innerHTML = damage.map((d, i) => `
+      <div class="dmg">
+        <input type="text" placeholder="Describe the damage & where" value="${esc(d.note || "")}" data-dmgnote="${i}">
+        <div class="row">
+          ${d.photo ? `<img src="${esc(d.photo)}" alt="">` : ""}
+          <button class="btn grey small" type="button" data-dmgphoto="${i}">${d.photo ? "↻ Retake photo" : "📷 Photo"}</button>
+          <button class="btn grey small" type="button" data-dmgrm="${i}" style="margin-left:auto;background:#b00020;">Remove</button>
+        </div>
+      </div>`).join("");
+  }
+  g("addDmg").onclick = () => { damage.push({ note: "", photo: "" }); renderDamage(); saveDraft(); };
+  g("dmgList").addEventListener("input", e => { const i = e.target.dataset.dmgnote; if (i !== undefined) { damage[Number(i)].note = e.target.value; saveDraft(); } });
+  g("dmgList").addEventListener("click", e => {
+    const ph = e.target.dataset.dmgphoto, rm = e.target.dataset.dmgrm;
+    if (ph !== undefined) capture(data => { damage[Number(ph)].photo = data; renderDamage(); saveDraft(); });
+    if (rm !== undefined) { damage.splice(Number(rm), 1); renderDamage(); saveDraft(); }
+  });
+
+  // ── Signature pad ──
+  let sctx = null, drawing = false;
+  function initSig() {
+    const c = g("sigPad");
+    const w = c.clientWidth || 320, h = 170;
+    c.width = w; c.height = h;
+    sctx = c.getContext("2d");
+    sctx.fillStyle = "#fff"; sctx.fillRect(0, 0, w, h);
+    sctx.strokeStyle = "#0f172a"; sctx.lineWidth = 2.2; sctx.lineJoin = "round"; sctx.lineCap = "round";
+    if (sigData) { const img = new Image(); img.onload = () => sctx.drawImage(img, 0, 0, w, h); img.src = sigData; }
+    const pos = e => { const r = c.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return { x: t.clientX - r.left, y: t.clientY - r.top }; };
+    const down = e => { drawing = true; const p = pos(e); sctx.beginPath(); sctx.moveTo(p.x, p.y); e.preventDefault(); };
+    const move = e => { if (!drawing) return; const p = pos(e); sctx.lineTo(p.x, p.y); sctx.stroke(); e.preventDefault(); };
+    const up = () => { if (!drawing) return; drawing = false; sigData = c.toDataURL("image/png"); saveDraft(); };
+    c.onpointerdown = down; c.onpointermove = move; c.onpointerup = up; c.onpointerleave = up;
+  }
+  g("sigClear").onclick = () => { const c = g("sigPad"); sctx.fillStyle = "#fff"; sctx.fillRect(0, 0, c.width, c.height); sigData = ""; saveDraft(); };
+
+  // ── Submit ──
+  g("submitBtn").onclick = async () => {
+    const msg = g("msg"); msg.className = "msg";
+    const unChk = (TPL.checklist || []).filter(it => !answers[it.id]);
+    if (unChk.length) { msg.className = "msg err"; msg.textContent = "Answer every vehicle check — " + unChk.length + " left (" + unChk[0].label + "…)."; return; }
+    const unEq = (TPL.equipment || []).filter(it => !answers[it.id]);
+    if (unEq.length) { msg.className = "msg err"; msg.textContent = "Mark every equipment item — " + unEq.length + " left (" + unEq[0].label + "…)."; return; }
+    const missSlots = (TPL.photoSlots || []).filter(sl => sl.required !== false && !slotPhotos[sl.id]);
+    if (missSlots.length) { msg.className = "msg err"; msg.textContent = "Photos still needed: " + missSlots.map(sl => sl.label).join(", "); return; }
+    if (safe === null) { msg.className = "msg err"; msg.textContent = "Tap whether the van is safe to drive."; return; }
+    if (!sigData) { msg.className = "msg err"; msg.textContent = "Please sign to accept the vehicle."; return; }
+    g("submitBtn").disabled = true; msg.className = "msg"; msg.textContent = "Sending…";
+    try {
+      const r = await authFetch("/fleet/handover/submit", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: HO.id, mileage: g("f_mileage").value.trim(),
+          answers, defectNotes,
+          conditionExterior: g("f_ext").value.trim(), conditionInterior: g("f_int").value.trim(),
+          damage: damage.filter(d => d.note || d.photo).map(d => ({ note: d.note, photo: d.photo || "" })),
+          photoSlots: Object.fromEntries(Object.entries(slotPhotos).map(([k, p]) => [k, p.data || p.key])),
+          photos: photos.map(p => p.data || p.key),
+          signature: sigData, safeToDrive: safe, note: g("f_note").value.trim(),
+        }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "send failed");
+      await draftDel();
+      g("formWrap").style.display = "none"; g("dueBox").style.display = "none";
+      g("noneBox").innerHTML = '<div class="big">✅</div><h2 style="margin:6px 0;">Handover complete</h2><p class="muted">Thanks — the office has been notified. You\'re good to use the van.</p><a class="btn grey" href="/vehicles.html" style="text-decoration:none;display:inline-block;">Back to vehicles</a>';
+      g("noneBox").style.display = "block";
+    } catch (e) { msg.className = "msg err"; msg.textContent = "Couldn't send — " + e.message; }
+    finally { g("submitBtn").disabled = false; }
+  };
+</script>
+</body>
+</html>

@@ -75,6 +75,10 @@
   Cache-Control: no-cache
 /vehicle-maintenance.html
   Cache-Control: no-cache
+/vehicle-checks.html
+  Cache-Control: no-cache
+/van-handover.html
+  Cache-Control: no-cache
 /office-timesheet.html
   Cache-Control: no-cache
 /users-admin.html

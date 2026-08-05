@@ -16,6 +16,7 @@ import { corsHeaders } from "../lib/http.js";
 import { tenantDB, resolveTenantId } from "../lib/tenantdb.js";
 import { permissionsFor } from "../lib/auth.js";
 import { signedFileUrl, verifyFileSig } from "../lib/filesign.js";
+import { sendToUser } from "./push.js";
 
 function jr(o, h, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...h, "Content-Type": "application/json" } }); }
 async function readJson(req) { try { return await req.json(); } catch { return {}; } }
@@ -57,6 +58,87 @@ async function maintCats(env, tid) {
     if (row && row.value) { const a = JSON.parse(row.value); if (Array.isArray(a) && a.length) return a; }
   } catch {}
   return DEFAULT_MAINT_CATS;
+}
+
+// Username → display name map (for check/handover listings).
+async function nameMap(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) out[u.username] = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+  } catch {}
+  return out;
+}
+
+// ── Van Handover: a detailed condition check sent to a newly-assigned driver.
+// Its own template (editable via app_config, defaults below), and its own table
+// vehicle_handovers. Photos + the signature go to ASSET_BUCKET under
+// handover/<user>/<id>/… (served by the public /asset-image + /asset-thumb).
+const HANDOVER_TPL_KEY = tid => `handover:template:${tid}`;
+const DEFAULT_HANDOVER = {
+  checklist: [
+    { id: "exterior", label: "Exterior bodywork condition (walk all sides)" },
+    { id: "glass", label: "Windscreen, windows & mirrors" },
+    { id: "lights", label: "Lights & indicators" },
+    { id: "tyres", label: "Tyres & wheels (tread & condition)" },
+    { id: "wipers", label: "Wipers & washers" },
+    { id: "oil", label: "Engine oil level" },
+    { id: "coolant", label: "Coolant level" },
+    { id: "screenwash", label: "Screen wash level" },
+    { id: "brakes", label: "Brakes & handbrake" },
+    { id: "horn", label: "Horn" },
+    { id: "seatbelts", label: "Seatbelts" },
+    { id: "dash", label: "Dashboard warning lights (none showing)" },
+    { id: "interior", label: "Interior condition & cleanliness" },
+    { id: "load", label: "Load area & racking condition" },
+  ],
+  equipment: [
+    { id: "spare_wheel", label: "Spare wheel" },
+    { id: "jack", label: "Jack" },
+    { id: "tyre_tools", label: "Tyre changing tools (wheel brace)" },
+    { id: "locking_nut", label: "Locking wheel-nut key" },
+    { id: "warning_triangle", label: "Warning triangle" },
+    { id: "hi_vis", label: "Hi-vis vest" },
+    { id: "first_aid", label: "First aid kit" },
+    { id: "fire_ext", label: "Fire extinguisher" },
+  ],
+  photoSlots: [
+    { id: "front", label: "Front", required: true },
+    { id: "rear", label: "Rear", required: true },
+    { id: "nearside", label: "Nearside (passenger side)", required: true },
+    { id: "offside", label: "Offside (driver side)", required: true },
+    { id: "dashcam", label: "Dashboard & mileage", required: true },
+    { id: "cab", label: "Cab interior", required: true },
+    { id: "loadarea", label: "Load area", required: false },
+  ],
+};
+async function handoverTemplate(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(HANDOVER_TPL_KEY(tid)).first();
+    if (row && row.value) { const t = JSON.parse(row.value); if (t && Array.isArray(t.checklist)) return { ...DEFAULT_HANDOVER, ...t }; }
+  } catch {}
+  return DEFAULT_HANDOVER;
+}
+async function ensureHandoverTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_handovers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT NOT NULL, username TEXT NOT NULL, status TEXT DEFAULT 'pending',
+    requested_by TEXT, requested_at TEXT, completed_at TEXT,
+    mileage TEXT, safe_to_drive INTEGER, note TEXT, items TEXT)`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_handover_reg ON vehicle_handovers(tenant_id,reg)").run(); } catch {}
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_handover_user ON vehicle_handovers(tenant_id,username,status)").run(); } catch {}
+}
+// data:image/... base64 → ASSET_BUCKET key under handover/<user>/<id>/. Returns
+// an already-stored key untouched (idempotent resubmit). 5 MB cap per image.
+async function storeHandoverImg(env, userDir, id, tag, p, nRef) {
+  if (typeof p === "string" && /^handover\//.test(p)) return p;
+  const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(p || "");
+  if (!m) return null;
+  const bytes = Uint8Array.from(atob(m[2]), c => c.charCodeAt(0));
+  if (bytes.length > 5 * 1024 * 1024) return null;
+  const key = `handover/${userDir}/${id}/${tag}-${++nRef.n}-${crypto.randomUUID().slice(0, 8)}.${m[1] === "jpeg" ? "jpg" : "png"}`;
+  await env.ASSET_BUCKET.put(key, bytes, { httpMetadata: { contentType: `image/${m[1]}` } });
+  return key;
 }
 
 // Load the chosen-cover map ({ REGNORM: photoKey }) for a tenant.
@@ -268,6 +350,16 @@ export async function handle(request, env, ctx, url, sess) {
     const miles = await latestMileage(env, tid);
     const photos = await photoIndex(env, tid);
     const covers = await coverMap(env, tid);
+    // Handover state per reg: latest completed (for the card's direct link) +
+    // whether one is still pending (a badge / "awaiting handover" hint).
+    await ensureHandoverTable(env);
+    const hoRows = (await env.DB.prepare("SELECT id, reg, status, completed_at FROM vehicle_handovers WHERE tenant_id=?").bind(tid).all()).results || [];
+    const lastHo = {}, pendHo = {};
+    for (const h of hoRows) {
+      const k = dn(h.reg);
+      if (h.status === "done") { const cur = lastHo[k]; if (!cur || new Date(h.completed_at || 0) > new Date(cur.at || 0)) lastHo[k] = { id: h.id, at: h.completed_at || "" }; }
+      else if (h.status === "pending") pendHo[k] = (pendHo[k] || 0) + 1;
+    }
     const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
@@ -286,7 +378,10 @@ export async function handle(request, env, ctx, url, sess) {
         currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : "",
         specs: parseJson(v.specs, []),
         photoCount: pics.length,
-        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : ""
+        photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : "",
+        lastHandoverId: (lastHo[dn(v.reg)] || {}).id || null,
+        lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
+        pendingHandover: pendHo[dn(v.reg)] || 0
       };
     }));
     // Apply the saved manual order (drag-to-reorder); unknown regs fall to the
@@ -351,6 +446,16 @@ export async function handle(request, env, ctx, url, sess) {
       for (const o of maint.objects || []) await env.JOB_FILES.delete(o.key);
     } catch {}
     try { await ensureMaintTable(env); await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND reg=?").bind(tid, reg).run(); } catch {}
+    // Handover records + their photos/signatures (keyed by driver+id in ASSET_BUCKET).
+    try {
+      await ensureHandoverTable(env);
+      const hos = (await env.DB.prepare("SELECT id, username FROM vehicle_handovers WHERE tenant_id=? AND reg=?").bind(tid, reg).all()).results || [];
+      for (const h of hos) {
+        const ud = String(h.username).replace(/[^A-Za-z0-9._-]/g, "_");
+        try { const l = await env.ASSET_BUCKET.list({ prefix: `handover/${ud}/${h.id}/` }); for (const o of l.objects || []) await env.ASSET_BUCKET.delete(o.key); } catch {}
+      }
+      await env.DB.prepare("DELETE FROM vehicle_handovers WHERE tenant_id=? AND reg=?").bind(tid, reg).run();
+    } catch {}
     try { const covers = await coverMap(env, tid); if (covers[regKey(reg)]) { delete covers[regKey(reg)]; await saveCoverMap(env, tid, covers); } } catch {}
     return jr({ ok: true }, headers);
   }
@@ -505,6 +610,168 @@ export async function handle(request, env, ctx, url, sess) {
     if (row && row.doc_key) { try { await env.JOB_FILES.delete(row.doc_key); } catch {} }
     await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).run();
     return jr({ ok: true }, headers);
+  }
+
+  // ── Van check history for a vehicle (completed weekly checks, newest first) ─
+  // Reads the shared vehicle_checks table, filtered to this reg; skips are not
+  // real checks. Photos are ASSET_BUCKET keys served by /asset-image + /asset-thumb.
+  if (sub === "/vehicle-checks" && method === "GET") {
+    const reg = q.get("reg") || "";
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    const { results } = await env.DB.prepare(
+      "SELECT username, week, vehicle, checked_at, safe_to_drive, items, note FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!=''"
+    ).bind(tid).all();
+    const names = await nameMap(env, tid);
+    const checks = [];
+    for (const r of results || []) {
+      if (regKey(r.vehicle) !== rk) continue;
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      if (items.skipped) continue;
+      const answers = items.answers || {};
+      const defects = Object.keys(answers).filter(k => answers[k] === "defect");
+      const slot = items.slotPhotos || {};
+      const photos = Array.from(new Set([...Object.values(slot), ...((items.photos) || [])]));
+      checks.push({
+        username: r.username, name: names[r.username] || r.username, week: r.week,
+        checkedAt: r.checked_at, safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
+        defectCount: defects.length, note: r.note || "", mileage: items.mileage || "",
+        answers, defectNotes: items.defectNotes || {}, slotPhotos: slot, photos,
+      });
+    }
+    checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
+    return jr({ ok: true, reg, checks }, headers);
+  }
+
+  // ── Van handover: request (from assign popup) → pushes the new driver ──────
+  if (sub === "/handover/request" && method === "POST") {
+    await ensureHandoverTable(env);
+    const b = await readJson(request);
+    const reg = String(b.reg || "").trim();
+    const username = String(b.username || "").trim();
+    if (!reg || !username) return jr({ error: "reg and username required" }, headers, 400);
+    const now = new Date().toISOString();
+    await env.DB.prepare("UPDATE vehicle_handovers SET status='superseded' WHERE tenant_id=? AND reg=? AND username=? AND status='pending'").bind(tid, reg, username).run();
+    const res = await env.DB.prepare(
+      "INSERT INTO vehicle_handovers (tenant_id,reg,username,status,requested_by,requested_at) VALUES (?,?,?,?,?,?)"
+    ).bind(tid, reg, username, "pending", sess.user.username, now).run();
+    const id = res.meta ? res.meta.last_row_id : null;
+    if (ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, username, {
+      title: "Van handover required",
+      body: `Please complete the handover check for ${reg} before using the vehicle.`,
+      url: "/van-handover.html", tag: "van-handover"
+    }));
+    return jr({ ok: true, id }, headers, 201);
+  }
+
+  // ── Van handover: the driver's pending one + the template (van-handover.html) ─
+  if (sub === "/handover/mine" && method === "GET") {
+    await ensureHandoverTable(env);
+    const row = await env.DB.prepare(
+      "SELECT id, reg, requested_by, requested_at FROM vehicle_handovers WHERE tenant_id=? AND username=? AND status='pending' ORDER BY requested_at DESC, id DESC LIMIT 1"
+    ).bind(tid, sess.user.username).first();
+    return jr({
+      ok: true,
+      handover: row ? { id: row.id, reg: row.reg, requestedBy: row.requested_by, requestedAt: row.requested_at } : null,
+      template: await handoverTemplate(env, tid),
+    }, headers);
+  }
+
+  // ── Van handover: attention (badge/gate for the assigned driver) ──────────
+  if (sub === "/handover/attention" && method === "GET") {
+    await ensureHandoverTable(env);
+    const row = await env.DB.prepare(
+      "SELECT id, reg FROM vehicle_handovers WHERE tenant_id=? AND username=? AND status='pending' ORDER BY requested_at DESC, id DESC LIMIT 1"
+    ).bind(tid, sess.user.username).first();
+    return jr({ ok: true, mineDue: !!row, id: row ? row.id : null, reg: row ? row.reg : "" }, headers);
+  }
+
+  // ── Van handover: submit (the assigned driver completes it) ───────────────
+  if (sub === "/handover/submit" && method === "POST") {
+    await ensureHandoverTable(env);
+    const b = await readJson(request);
+    const id = parseInt(String(b.id || ""), 10);
+    if (!id || isNaN(id)) return jr({ error: "id required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT * FROM vehicle_handovers WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (!row) return jr({ error: "Handover not found" }, headers, 404);
+    if (row.username !== sess.user.username) {
+      const p = await permissionsFor(env, tid, sess.user.username);
+      if (p.FullAccess !== "Yes") return jr({ error: "This handover isn't assigned to you." }, headers, 403);
+    }
+    const tpl = await handoverTemplate(env, tid);
+    const userDir = String(row.username).replace(/[^A-Za-z0-9._-]/g, "_");
+    const nRef = { n: 0 };
+    const answers = (b.answers && typeof b.answers === "object") ? b.answers : {};
+    const defectNotes = (b.defectNotes && typeof b.defectNotes === "object") ? b.defectNotes : {};
+    const slotIn = (b.photoSlots && typeof b.photoSlots === "object") ? b.photoSlots : {};
+    const slotPhotos = {};
+    for (const sl of tpl.photoSlots) { const key = await storeHandoverImg(env, userDir, id, sl.id, slotIn[sl.id], nRef); if (key) slotPhotos[sl.id] = key; }
+    const missing = tpl.photoSlots.filter(sl => sl.required !== false && !slotPhotos[sl.id]);
+    if (missing.length) return jr({ error: "Missing required photos: " + missing.map(m => m.label).join(", ") }, headers, 400);
+    const photos = [];
+    for (const p of (Array.isArray(b.photos) ? b.photos : []).slice(0, 8)) { const key = await storeHandoverImg(env, userDir, id, "extra", p, nRef); if (key) photos.push(key); }
+    const damage = [];
+    for (const d of (Array.isArray(b.damage) ? b.damage : []).slice(0, 20)) {
+      const note = String(d && d.note || "").slice(0, 300);
+      let photo = ""; if (d && d.photo) { const key = await storeHandoverImg(env, userDir, id, "damage", d.photo, nRef); if (key) photo = key; }
+      if (note || photo) damage.push({ note, photo });
+    }
+    let signature = b.signature ? (await storeHandoverImg(env, userDir, id, "signature", b.signature, nRef) || "") : "";
+    if (!signature) return jr({ error: "Signature required." }, headers, 400);
+    const items = {
+      answers, defectNotes,
+      conditionInterior: String(b.conditionInterior || "").slice(0, 1000),
+      conditionExterior: String(b.conditionExterior || "").slice(0, 1000),
+      damage, slotPhotos, photos, signature, source: "portal",
+    };
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "UPDATE vehicle_handovers SET status='done', completed_at=?, mileage=?, safe_to_drive=?, note=?, items=? WHERE tenant_id=? AND id=?"
+    ).bind(now, String(b.mileage || "").trim(), b.safeToDrive === false ? 0 : 1, String(b.note || "").slice(0, 1000), JSON.stringify(items), tid, id).run();
+    if (row.requested_by && row.requested_by !== row.username && ctx && ctx.waitUntil) ctx.waitUntil(sendToUser(env, tid, row.requested_by, {
+      title: "Van handover completed", body: `${row.username} completed the handover for ${row.reg}.`,
+      url: "/vehicle-checks.html?reg=" + encodeURIComponent(row.reg), tag: "van-handover"
+    }));
+    return jr({ ok: true, id }, headers);
+  }
+
+  // ── Van handover: admin cancels a pending one (mistaken send) ─────────────
+  if (sub === "/handover/cancel" && method === "POST") {
+    await ensureHandoverTable(env);
+    const b = await readJson(request); const id = parseInt(String(b.id || ""), 10);
+    if (!id || isNaN(id)) return jr({ error: "id required" }, headers, 400);
+    await env.DB.prepare("UPDATE vehicle_handovers SET status='cancelled' WHERE tenant_id=? AND id=? AND status='pending'").bind(tid, id).run();
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Van handover: full history for a vehicle (listing + detail) ───────────
+  if (sub === "/handovers" && method === "GET") {
+    await ensureHandoverTable(env);
+    const reg = q.get("reg") || "";
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const rk = regKey(reg);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM vehicle_handovers WHERE tenant_id=? ORDER BY COALESCE(completed_at,requested_at) DESC, id DESC"
+    ).bind(tid).all();
+    const names = await nameMap(env, tid);
+    const handovers = [];
+    for (const r of results || []) {
+      if (regKey(r.reg) !== rk) continue;
+      let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
+      const answers = items.answers || {};
+      const defects = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
+      handovers.push({
+        id: r.id, reg: r.reg, username: r.username, name: names[r.username] || r.username,
+        status: r.status, requestedBy: r.requested_by, requestedByName: names[r.requested_by] || r.requested_by,
+        requestedAt: r.requested_at, completedAt: r.completed_at,
+        mileage: r.mileage || "", safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive), note: r.note || "",
+        defectCount: defects.length,
+        answers, defectNotes: items.defectNotes || {},
+        conditionInterior: items.conditionInterior || "", conditionExterior: items.conditionExterior || "",
+        damage: items.damage || [], slotPhotos: items.slotPhotos || {}, photos: items.photos || [], signature: items.signature || "",
+      });
+    }
+    return jr({ ok: true, reg, handovers, template: await handoverTemplate(env, tid) }, headers);
   }
 
   // ── Vehicle photos (gallery; one is the card cover) ───────────────────────

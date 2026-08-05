@@ -720,7 +720,22 @@ const MAP = window.ML_PERM_MAP || {
           }
         }).catch(function () {}));
 
-      var ORDER = { "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
+      // Van handover: a newly-assigned driver must complete a full handover
+      // check before using the van. Blocking + required, but only ONE 4-hour
+      // snooze (maxSnooze:1) — stricter than the weekly check. Clears on submit.
+      jobs.push(fetch(window.MOSTLANE_API + "/fleet/handover/attention", H)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok || !d.mineDue) return;
+          dot("Vehicles", 1);
+          notes.push({
+            n: 1, icon: "🤝", href: "van-handover.html", maxSnooze: 1,
+            title: "Van handover to complete",
+            text: "Complete the handover check for " + (d.reg || "your new van") + " before you use it."
+          });
+        }).catch(function () {}));
+
+      var ORDER = { "van-handover.html": -1, "van-check.html": 0, "hs-docs.html": 1, "my-assets.html": 2, "asset-requests.html": 3, "holiday-admin.html": 4, "holiday.html": 5, "van-checks.html": 6 };
       jobs.push(prefsP);   // PREFS must be resolved before show() reads the snooze state
       Promise.all(jobs).then(function () {
         if (notes.length) show(notes.sort(function (a, b) { return (ORDER[a.href] || 9) - (ORDER[b.href] || 9); }));
@@ -792,7 +807,7 @@ const MAP = window.ML_PERM_MAP || {
           });
           items = items.filter(function (i) { return !i.snoozedNow; });
           if (!items.length) return;   // everything snoozed — back when it expires
-          canSnooze = items.every(function (i) { return i.snoozes < SNOOZE_MAX; });
+          canSnooze = items.every(function (i) { return i.snoozes < (i.maxSnooze || SNOOZE_MAX); });
         }
 
         var rows = items.map(function (i) {
@@ -828,7 +843,7 @@ const MAP = window.ML_PERM_MAP || {
               "#mlNotify .mln-card{position:relative;}");
         document.head.appendChild(css);
 
-        var left = SNOOZE_MAX - Math.max.apply(null, [0].concat(items.map(function (i) { return i.snoozes || 0; })));
+        var left = Math.max(0, Math.min.apply(null, items.map(function (i) { return (i.maxSnooze || SNOOZE_MAX) - (i.snoozes || 0); })));
         var el = document.createElement("div");
         el.id = "mlNotify";
         el.innerHTML = '<div class="mln-card">' +

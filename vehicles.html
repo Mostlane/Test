@@ -330,11 +330,13 @@
           <span>${v.active===false?"Inactive":"Active"}</span>
         </div>
         <div>${odo}</div>
-        <div class="tags">${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}</div>
+        <div class="tags">${dateTag(v.motDue,"MOT")}${dateTag(v.taxDue,"Tax")}${serviceTag(v)}${v.pendingHandover?'<span class="tag warn">Handover pending<em>awaiting driver</em></span>':""}</div>
         <div class="card-actions">
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
+          <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
+          ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
           <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
         </div>`;
@@ -395,6 +397,8 @@
         <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
         <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
+        <a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}">📋 Checks</a>
+        ${v.lastHandoverId?`<a class="btn ghost small" href="vehicle-checks.html?reg=${encodeURIComponent(reg)}&open=ho${v.lastHandoverId}">🤝 Handover</a>`:""}
         <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
         <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>
       </div>`;
@@ -416,7 +420,16 @@
   async function saveAssign(reg){
     const username=$("asgUser").value, fromDate=$("asgDate").value;
     try{ const r=await aFetch("/fleet/assign",{method:"POST",body:JSON.stringify({reg,username,fromDate})}).then(r=>r.json());
-      if(r.ok){ pClose(); toast("Driver updated"); await loadFleet(); } else alert(r.error||"Failed to save"); }catch(e){ alert("Failed to save"); }
+      if(r.ok){
+        pClose(); toast("Driver updated");
+        // Offer to send the new driver a full Van Handover to complete.
+        if(username && confirm("Send a Van Handover to "+pName(username)+"?\n\nThey'll be asked to complete a full handover check (condition, damage, equipment + photos) for "+reg+" before using it.")){
+          try{ const hr=await aFetch("/fleet/handover/request",{method:"POST",body:JSON.stringify({reg,username})}).then(r=>r.json());
+            toast(hr&&hr.ok?"Handover sent to "+pName(username):"Couldn't send handover"); }
+          catch(e){ toast("Couldn't send handover"); }
+        }
+        await loadFleet();
+      } else alert(r.error||"Failed to save"); }catch(e){ alert("Failed to save"); }
   }
   function openHistory(reg){
     pModal(`<h3>${esc(reg)} — driver history</h3><div id="histBody" class="hint">Loading…</div><div class="mfoot"><span></span><button class="btn small" onclick="pClose()">Close</button></div>`);
