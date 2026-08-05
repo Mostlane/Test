@@ -263,6 +263,20 @@ export async function handle(request, env, ctx, url, sess) {
     if (!admin) return error("Forbidden", 403, env, request);
     return json({ ok: true, aliases: await cfgGet(env, tid, "eng_aliases", {}) }, {}, env, request);
   }
+  // Distinct engineer names used on PO records (for the PO↔portal link admin).
+  if (path === "/costing/po-engineers" && method === "GET") {
+    if (!admin) return error("Forbidden", 403, env, request);
+    const out = [];
+    if (env.PO_DB) {
+      try {
+        const { results } = await env.PO_DB.prepare(
+          "SELECT engineer_name AS name, COUNT(*) AS n FROM po_log WHERE (deleted IS NULL OR deleted=0) AND engineer_name IS NOT NULL AND TRIM(engineer_name)!='' GROUP BY engineer_name ORDER BY n DESC"
+        ).all();
+        for (const r of results || []) out.push({ name: r.name, count: r.n });
+      } catch {}
+    }
+    return json({ ok: true, engineers: out, poBound: !!env.PO_DB }, {}, env, request);
+  }
   if (path === "/costing/eng-alias" && method === "POST") {
     if (!admin) return error("Forbidden", 403, env, request);
     const b = await request.json().catch(() => ({}));
