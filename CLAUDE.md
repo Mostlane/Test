@@ -481,6 +481,40 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   edge auto-scroll), saves `/fleet/vehicle-order` (app_config
   `fleet:vehorder:<tid>` = [reg,…]); order applied server-side in
   /fleet/vehicles so it's the same everywhere.
+- **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
+  reached from a 📋 Checks button on each card + the deep-dive):
+  - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
+    weekly check for that reg from the shared `vehicle_checks` table (skips
+    excluded), with photos (ASSET_BUCKET keys served by the public /asset-image
+    + /asset-thumb). The page groups them into **collapsible month dropdowns**;
+    tapping one opens its photos + checklist answers (labels resolved from
+    /vancheck/settings).
+  - **Van handovers** — a NEW detailed condition check sent to a newly-assigned
+    driver. Table **vehicle_handovers** (self-migrating; status
+    pending|done|cancelled|superseded). Template (checklist + **equipment**:
+    Spare wheel / Jack / Tyre tools / Locking wheel-nut key… as separate items +
+    photo slots) in code, overridable via app_config `handover:template:<tid>`.
+    The driver form **van-handover.html** (modeled on van-check.html: OK/Defect
+    + Present/Missing toggles, interior/exterior condition, a **damage log**
+    [{note,photo}], photo slots, mileage, safe-to-drive, and a **required drawn
+    signature**; IndexedDB draft). Photos + signature → ASSET_BUCKET under
+    `handover/<user>/<id>/…`.
+    - **Trigger:** assigning a driver in vehicles.html pops **"Send a Van
+      Handover to <driver>?"** → **POST /fleet/handover/request** {reg,username}
+      creates a pending row + pushes the driver (sendToUser).
+    - **Required + push + attention gate:** pending handovers surface in
+      main.html's blocking attention gate via **GET /fleet/handover/attention**,
+      as a note with **maxSnooze:1** (one 4-hour snooze then enforced — stricter
+      than the van check's 2×). The gate now honours a per-note `maxSnooze`
+      (defaults to SNOOZE_MAX=2). Clears when submitted.
+    - Routes: **GET /fleet/handover/mine** (driver's pending one + template),
+      **POST /fleet/handover/submit** (assigned driver or FullAccess; stores
+      photos/signature, marks done, notifies the requester), **POST
+      /fleet/handover/cancel** {id} (admin), **GET /fleet/handovers?reg=** (full
+      history + template, for the listing page). /fleet/vehicles returns
+      `lastHandoverId`/`lastHandoverAt` (card's direct 🤝 Handover link →
+      vehicle-checks.html?reg=…&open=ho<id>) + `pendingHandover` (a "Handover
+      pending" card pill). vehicle-delete purges handover rows + their photos.
 - **Driver assignment registry** (who drives what, when — the single source):
   `/fleet/assign` POST, `/fleet/current` GET (?week=), `/fleet/assignments`
   GET (?reg=, full history). Table `vehicle_assignments` (open row =
@@ -582,7 +616,9 @@ sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
 **vehicles** (+`specs` JSON [{label,value}] extra fields), **vehicle_assignments**,
 **vehicle_maintenance** (categorised, cost-split maintenance log; docs in R2
-`vehiclemaint/<tid>/<REG>/…`), **van_timesheets**, **sla_jobs_archive**
+`vehiclemaint/<tid>/<REG>/…`), **vehicle_handovers** (detailed handover checks
+sent to newly-assigned drivers; photos+signature in ASSET_BUCKET
+`handover/<user>/<id>/…`), **van_timesheets**, **sla_jobs_archive**
 (imported job history — separate from live sla_jobs), **eng_timesheets**,
 **eng_invoices** (engineer weekly timesheets + self-employed invoice register;
 PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`), **job_time_segments** (SLA
@@ -612,7 +648,9 @@ NOT EXISTS + ALTER on read) — no manual SQL needed.
   outstanding items (no dismiss button); desktop gets a dismissible corner
   panel (sessionStorage sig). "💤 Remind me later" = 4h snooze, max 2 per
   notification (identified by page+count; counts shared across devices via
-  prefs), then enforced. Every shown/snoozed/opened/dismissed is POSTed to
+  prefs), then enforced. A note may carry **`maxSnooze`** to override the 2×
+  default (the **van handover** uses `maxSnooze:1` — one 4h snooze then
+  enforced). Every shown/snoozed/opened/dismissed is POSTed to
   /notify/log → viewer notify-log.html (FullAccess, linked from Users Admin)
   — proof against "mine never showed that".
 
@@ -679,8 +717,8 @@ no-cache on: portal-config.js, auth.js, device-auth.js, docviewer.js,
 login.html, main.html, holiday.html, holiday-admin.html, theme.html,
 personalise.html, help.html, activity-log.html, my-documents.html,
 notification-centre.html, fleet-report.html, van-timesheet.html,
-vehicles.html, vehicle-maintenance.html, job-costing.html, sites-register.html,
-sitelog-links.html.
+vehicles.html, vehicle-maintenance.html, vehicle-checks.html, van-handover.html,
+job-costing.html, sites-register.html, sitelog-links.html.
 **ADD NEW HOT PAGES HERE when created** — a page shipped
 without no-cache once got cache-poisoned on phones (that's why
 personalise.html had to replace theme.html). (NB: _headers is a DEAD file on

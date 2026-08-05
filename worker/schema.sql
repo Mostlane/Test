@@ -246,6 +246,28 @@ CREATE INDEX IF NOT EXISTS idx_vmaint_reg ON vehicle_maintenance(tenant_id,reg);
 -- Managed maintenance category list (name + colour) is app_config
 -- fleet:maintcats:<tenant> (JSON [{name,colour}]).
 
+-- Van handovers: a detailed condition check sent to a newly-assigned driver
+-- (routes/fleet.js). Self-migrating via ensureHandoverTable(). status =
+-- pending|done|cancelled|superseded. items JSON = { answers, defectNotes,
+-- conditionInterior, conditionExterior, damage:[{note,photo}], slotPhotos,
+-- photos, signature } — all photo/signature values are ASSET_BUCKET keys under
+-- handover/<user>/<id>/… (served by the public /asset-image + /asset-thumb).
+CREATE TABLE IF NOT EXISTS vehicle_handovers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id     INTEGER NOT NULL DEFAULT 1,
+  reg           TEXT NOT NULL,
+  username      TEXT NOT NULL,             -- the new driver who must complete it
+  status        TEXT DEFAULT 'pending',
+  requested_by  TEXT, requested_at TEXT,
+  completed_at  TEXT,
+  mileage       TEXT, safe_to_drive INTEGER,
+  note          TEXT, items TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_handover_reg  ON vehicle_handovers(tenant_id,reg);
+CREATE INDEX IF NOT EXISTS idx_handover_user ON vehicle_handovers(tenant_id,username,status);
+-- The handover checklist/equipment/photo template is app_config
+-- handover:template:<tenant> (defaults in fleet.js until customised).
+
 -- Self-service password reset tokens (forgot-password flow).
 CREATE TABLE IF NOT EXISTS password_resets (
   tenant_id  INTEGER NOT NULL DEFAULT 1,
