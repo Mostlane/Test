@@ -9732,6 +9732,7 @@ function computeFin(f, cost, costByDay) {
     v.profitToDate = r(runVal - cumCost);
     prevCumCost = cumCost;
   }
+  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
   const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
   const remainingValue = r(value - valued);
   const remainingVals = Math.max(0, planned - valuations.length);
@@ -9771,7 +9772,8 @@ function computeFin(f, cost, costByDay) {
     isFinal,
     nextIsFinal,
     retentionIfFinal,
-    retentionCurrent
+    retentionCurrent,
+    costSinceLastVal
   };
 }
 function buildSiteSeries(labD, poD) {

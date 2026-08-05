@@ -935,6 +935,9 @@ function computeFin(f, cost, costByDay) {
     v.profitToDate = r(runVal - cumCost);                        // running profit after this valuation
     prevCumCost = cumCost;
   }
+  // Cost incurred AFTER the last valuation — not yet claimed. This is why the
+  // last valuation's "running profit" won't match the current position.
+  const costSinceLastVal = valuations.length ? Math.max(0, r(cost - prevCumCost)) : r(cost);
   const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
   const remainingValue = r(value - valued);
   const remainingVals = Math.max(0, planned - valuations.length);
@@ -966,7 +969,7 @@ function computeFin(f, cost, costByDay) {
     suggestedNext, overCommitted: breakEven > remainingValue + 0.005,
     positionAfterSuggested: r(valued + suggestedNext - cost),
     retentionRate: retentionRate * 100, retentionHeld, cashReceived, isFinal,
-    nextIsFinal, retentionIfFinal, retentionCurrent,
+    nextIsFinal, retentionIfFinal, retentionCurrent, costSinceLastVal,
   };
 }
 
