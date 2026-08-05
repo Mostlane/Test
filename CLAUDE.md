@@ -1,11 +1,16 @@
-# Mostlane Portal — State of Play (14 July 2026)
+# Mostlane Portal — State of Play (5 August 2026)
 
 Read this first. It is the handover brief for the whole system. The owner (Jamie)
 is not a developer: he deploys by pasting into the Cloudflare dashboard and
 running SQL in the D1 console — often from a phone. NO wrangler, NO local tools.
-The Cloudflare connector (mcp__Cloudflare_Developer_Platform__*) is available in
-sessions: D1/KV/R2 are READ-WRITE (create tables directly — no SQL paste needed),
-workers are READ-ONLY (Jamie must paste worker.js manually).
+The Cloudflare connector (mcp__Cloudflare_Developer_Platform__* / a Cloudflare
+d1_database_query tool) is available in sessions: D1/KV/R2 are READ-WRITE (create
+tables + edit config rows directly — no SQL paste needed), workers are READ-ONLY
+via the connector. **mostlane-api now AUTO-DEPLOYS from GitHub (Cloudflare
+Workers Builds — see deploy section); the SiteLog & PO workers are still manual
+pastes.** D1 database_ids: mostlane e483b3b5-2cfd-4742-ae51-427c31598c87,
+mostlane-po bcaf5f51-3085-4cdf-a993-42278893c313, sitelog-db
+1e891155-dd61-4e0e-90fe-ad5f4895f2c8.
 
 ## Architecture (one line)
 Static HTML pages (this repo = mostlane-portal.com, Cloudflare Pages) + ONE
@@ -36,26 +41,33 @@ systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
     site silently froze on the last good build while still accepting commits.
     (c) Check deploys with the **GitHub Actions "pages build and deployment"**
     runs (mcp__github__actions_list / get_job_logs), not a Cloudflare dashboard.
-- **Worker (`mostlane-api`)**: NOT auto-deployed. Source `worker/src/`
-  (entry `src/index.js`); build:
-  `npx esbuild src/index.js --bundle --format=esm --outfile=dist/worker.js`
-  (+ `--minify` → dist/worker.min.js). Always give commit hash + line/byte
-  count + the expected tail `export { index_default as default };` so a
-  truncated paste is detectable. Jamie pastes into Cloudflare → mostlane-api →
-  Edit code → Deploy. Three delivery routes (his preference has varied — offer
-  the one he asks for): (a) **SendUserFile** dist/worker.js; (b) an **Artifact
-  copy page** — a self-contained HTML page with the whole file in a read-only
-  textarea + a Copy button (build it so `textarea.value` returns the exact
-  bytes: HTML-escape only `&`→`&amp;` and `<`→`&lt;`; verify byte-exact
-  headlessly before publishing); (c) **straight from GitHub** — dist/worker.js
-  is committed, so link the blob (has a copy-raw button):
-  github.com/Mostlane/Test/blob/main/worker/dist/worker.js.
-  **Worker last sent ≈ the custom-job-categories build (commit d8f72ec, 7,013
-  lines, dist/worker.js — adds GET/POST /sla/categories + /sla/categories/delete
-  and category-aware normalizeStatus). Jamie confirmed deploying it.** Earlier
-  milestone was the Web Push Phase-1 build (routes/push.js + lib/webpush.js) —
-  still needs VAPID_PUBLIC/VAPID_PRIVATE set in the dashboard. Confirm with
-  Jamie what's actually pasted before assuming.
+- **Worker (`mostlane-api`)**: **AUTO-DEPLOYS via Cloudflare Workers Builds**,
+  git-connected to **Mostlane/Test**, **root directory `worker/`** — every push
+  to `main` rebuilds and deploys from `worker/src/` (entry `src/index.js`, per
+  `worker/wrangler.toml`: name/main/compat_date, D1 `DB`+`PO_DB`, R2
+  `JOB_FILES`+`ASSET_BUCKET`, `[triggers] crons=["0 * * * *"]`, non-secret
+  `[vars]`; **secrets stay in the dashboard, never in git**). So the normal flow
+  is now: edit `worker/src/`, commit, `merge --no-ff` into `main`, push — done,
+  no paste. **Still rebuild the committed `dist/worker.js`+`dist/worker.min.js`**
+  (`npx esbuild src/index.js --bundle --format=esm --outfile=dist/worker.js`,
+  `--minify` for the min) — Workers Builds bundles from src, but dist is kept in
+  sync as a source-of-truth/manual-paste fallback.
+  - **Recovery history (4 Aug):** the worker had briefly become a
+    "static-assets-only" type (from a stray git build) which hid the code editor
+    and rejected bindings/secrets; fixed by deploying a correct `wrangler.toml`
+    with Root directory `worker`. If bindings/secrets "won't save" or the Edit-
+    code button vanishes, that's the symptom. Secrets don't survive that kind of
+    reset — re-add them in the dashboard (list in the Secrets section).
+  - **Manual-paste fallback** (only if Workers Builds is down): SendUserFile
+    `dist/worker.js`, or link the committed blob
+    github.com/Mostlane/Test/blob/main/worker/dist/worker.js. Give line/byte
+    count + expected tail `export { index_default as default };`.
+- **SiteLog worker** (`api.site-log.co.uk`, repo `Mostlane/SiteLog`, root
+  `worker.js`): **still a MANUAL PASTE** (Jamie pastes into its Cloudflare
+  worker). The repo IS git-connected but Jamie deploys it by paste; commit
+  changes to Mostlane/SiteLog `main` as source-of-truth AND SendUserFile the
+  file with line count + tail `};`. `PORTAL_BRIDGE_SECRET` must be IDENTICAL on
+  mostlane-api and this worker (signs the launch token).
 - **Schema changes**: worker/schema.sql is the reference. Create tables LIVE
   via the D1 connector (done for all current tables), then update schema.sql.
 - **External workers (PO, SiteLog)**: never retype their code. Deliver changes
@@ -275,6 +287,13 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   push to SiteLog), `sitelog.js` (HMAC launch + admin proxy), `office.js`
   (clock segments; edits keep originals struck-through; /office/my,
   /office/timesheet), `email.js` lib (Resend templates).
+- `costing.js` — **Master site register + labour ledger + job costing +
+  project valuations** (see the dedicated "Job costing & SiteLog↔Portal
+  integration" section below). Routes: /sites/register(+/add,/update,/merge,
+  /unmerge,/ignore,/candidates,/push-candidates), /ledger/scan,/ledger/day,
+  /ledger/scans, /costing/summary, /costing/prefs, /costing/reconcile-sitelog,
+  /costing/eng-aliases,/eng-alias(+/delete), /costing/po-engineers,
+  /costing/fin(+/valuation,+/valuation/delete), /exceptions.
 - `timesheets.js` (**added 17 Jul**) — engineer weekly timesheets at **/ts/***
   (+ `lib/pdf.js`, a dependency-free PDF writer — base-14 Helvetica, WinAnsi,
   no PDFShift/external API). Engineers enter start/finish + job(s) per day
@@ -455,6 +474,76 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
 - Legacy `vehicles.jamie-def.workers.dev` is now import-only; the standalone
   /vehicles and /fsm sub-app folders are separate and unmigrated.
 
+## Job costing & SiteLog↔Portal integration (costing.js + job-costing.html — Aug 2026)
+The big Aug workstream: one **master site register** and a **per-site/per-job
+P&L** that unifies labour (SiteLog scans + SLA job-status taps), materials (PO
+spend) and project valuations. Direction-of-travel rule: **the portal always
+PULLS from SiteLog** — mostlane-api is on `*.workers.dev` so SiteLog→portal
+fetch is blocked by Cloudflare 1042; `api.site-log.co.uk` is a custom domain and
+IS fetchable server-side, so the portal calls it (via SITELOG_ADMIN_SECRET).
+- **Site register** (`sites` table + `app_config` `site_aliases`,
+  `site_reg_ignore`, `site_reg_ext`): active/archive, **merge** (alias a name →
+  a canonical site; resolveSite/resolveSiteCode use byNorm+byCode+aliases),
+  candidates harvest. Front-end **sites-register.html**. **Coordinates→SiteLog:**
+  /sites/register/add+update accept {lat,lng}, store in the site's data JSON, and
+  push a geofence to SiteLog (`/bulk-add-sites`, radius 500); the page has lat/lng
+  fields + "📍 From postcode" (postcodes.io) + per-row "Set location".
+- **Labour reconciliation** (`job_time_segments` = SLA status capture, primary;
+  `sitelog_scans` = optional pushed scans; buildDay clips scans to non-overlap).
+  **Runaway-session clamp:** any segment (open OR "closed" only when the next job
+  was tapped days later) longer than **14h** is clamped to a forgot-to-finish
+  close on its start day + flagged auto-closed — in BOTH buildDay (costing.js)
+  and jobTimeAuto (timesheets.js). Stops a stale "In Progress" job billing days.
+- **GET /costing/summary** — per-site card data. Folds in: **SiteLog /job-costing**
+  (authoritative per site+person; employees=linked portal users costed at PORTAL
+  rate+fuel, subcontractors=SiteLog's own cost; the person's SLA time at that site
+  is dropped to dedupe), **SLA labour** (portal rates), **PO spend** (PO_DB
+  po_log). Each site returns: laborCost, poTotal, grandTotal, engineers[] (with
+  `src` sitelog|sla|mixed, `visits`=on-site days), `suppliers[]` (spend per
+  supplier), `series` (spend-over-time, bucketed day/week/month over the site's
+  OWN active date span — NOT the requested range, so "All time" isn't one spike),
+  `key` (stable id), and `fin` (project financials, below). Also returns
+  `sitelog:true/false` (false = SiteLog unreachable → SLA-only, banner shown).
+- **Project valuations** (`app_config` `proj_fin` per site key): contract value,
+  N valuations planned, each valuation {amount,date,note,final}. computeFin
+  returns valued, cost, position (valued−cost), margin%, remaining, **suggested
+  next valuation** (max of break-even and even-share, capped at remaining),
+  per-valuation **cost-vs-profit at the time** + running profit, **costSinceLastVal**
+  (reconciles last valuation's running profit to current position), and
+  **retention** (5% interim; on the `final` valuation the 5% releases and 2.5%
+  of project VALUE is held). POST /costing/fin, /costing/fin/valuation(+/delete).
+- **View prefs** (`app_config` `costing_prefs`): pin / hide / drag-order site
+  cards (shared across admins). GET/POST /costing/prefs.
+- **Engineer aliases** (`app_config` `eng_aliases` = normName→portal user):
+  collapse PO/SiteLog name variants into one person (e.g. **"JT"→"John Thorn"**);
+  applied across SLA, SiteLog and PO in costing (canonEng). GET /costing/eng-aliases,
+  POST /costing/eng-alias(+/delete), GET /costing/po-engineers (distinct PO names).
+- **/exceptions** — auto-closed / site-mismatch / archived-site / unmatched-site
+  / unallocated / claimed-vs-captured, incl. unmatched SiteLog sites.
+- **P4 reconcile** (`reconcileSitelogSessions`, hourly cron + POST
+  /costing/reconcile-sitelog): pulls recent SiteLog visits (/admin), and for
+  LINKED employees closes an SLA session left open at scan-out + materialises a
+  segment from a scan (idempotent via `sitelog_visit_id`). Open (no scan-out)
+  visits cost NOTHING until closed; SiteLog's own cron auto-closes them at 16:00
+  (day shift) / +12h (evening), after which they're costed.
+- **job-costing.html**: range 7d/28d/3mo/**All time**; each card pins/hides/drags;
+  **Hidden** tab; **expand a card** → per-job labour-vs-materials doughnut +
+  spend-over-time line (inline SVG, no libs), spend-per-supplier, people (hours +
+  on-site days + src badge), **project financials** block, and **🔗 Merge into
+  another site / ➕ Add to register** (merge any visible site — incl. all-time /
+  SiteLog-only names — into a register site). Header links to sites-register.html
+  and **sitelog-links.html**.
+- **sitelog-links.html** ("People links", FullAccess): two tabs — **SiteLog
+  scanners** (set portal_username via /sitelog/update-engineer through the admin
+  proxy) and **PO raisers** (set eng_alias). Auto-suggests the matching portal
+  user; one portal user ↔ one person per system. This is the manual backfill for
+  the auto identity-link (P1).
+- **SiteLog↔portal identity (P1)**: opening SiteLog from the portal tile
+  (sitelog.html → /sitelog-launch → SCAN_URL#pt=<HMAC token>) makes SiteLog bind
+  that phone→portal user (`/portal-link`, stamps people.portal_username). One
+  launch per phone, then permanent; cross-origin means it can't be zero-touch.
+  Unlinked people are costed on SiteLog's own rate+fuel (fine for subbies).
+
 ## D1 `mostlane` tables
 users (profile JSON holds poUrl, theme, prefs, rates…), user_permissions,
 sessions, devices, login_history, password_resets, holidays(+config/log/
@@ -464,10 +553,18 @@ daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
 **vehicles**, **vehicle_assignments**, **van_timesheets**, **sla_jobs_archive**
 (imported job history — separate from live sla_jobs), **eng_timesheets**,
 **eng_invoices** (engineer weekly timesheets + self-employed invoice register;
-PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`). app_config also
+PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`), **job_time_segments** (SLA
+status-capture time; +`sitelog_visit_id` links a segment materialised from a
+SiteLog visit), **sitelog_scans** (optional pushed scans), **site_miles**
+(round-trip miles per site). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
-`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>` and the
-notification-suppression rules. R2 (JOB_FILES): `fleetreports/<tid>/…`,
+`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>`, the
+notification-suppression rules, and the costing keys `site_aliases:<tid>`,
+`site_reg_ignore:<tid>`, `site_reg_ext:<tid>`, `eng_aliases:<tid>`,
+`proj_fin:<tid>` (project value + valuations), `costing_prefs:<tid>` (pin/hide/
+order), `engts:cfg:<tid>` (timesheet rates + pencePerMile). The SiteLog D1
+(`sitelog-db`) holds people(+portal_username, hourly_rate, fuel_paid, fuel_rate,
+travel caps), devices(device_token→person_id), visits. R2 (JOB_FILES): `fleetreports/<tid>/…`,
 `vehicledocs/<tid>/<REG>/…`, `vehiclephotos/<tid>/<REG>/…`; staff docs via
 hrdocs. All fleet tables are self-migrating (CREATE TABLE IF
 NOT EXISTS + ALTER on read) — no manual SQL needed.
@@ -549,9 +646,12 @@ no-cache on: portal-config.js, auth.js, device-auth.js, docviewer.js,
 login.html, main.html, holiday.html, holiday-admin.html, theme.html,
 personalise.html, help.html, activity-log.html, my-documents.html,
 notification-centre.html, fleet-report.html, van-timesheet.html,
-vehicles.html. **ADD NEW HOT PAGES HERE when created** — a page shipped
+vehicles.html, job-costing.html, sites-register.html, sitelog-links.html.
+**ADD NEW HOT PAGES HERE when created** — a page shipped
 without no-cache once got cache-poisoned on phones (that's why
-personalise.html had to replace theme.html).
+personalise.html had to replace theme.html). (NB: _headers is a DEAD file on
+GitHub Pages — real freshness is the SW cache version + `?v=` bumps; this list
+is kept as documentation of the hot pages.)
 
 ## Secrets/vars on mostlane-api (dashboard)
 RESEND_API_KEY, MASTER_PASSWORD, HS_PLAN_TOKEN, PORTAL_BRIDGE_SECRET,
@@ -560,7 +660,11 @@ SITELOG_ADMIN_SECRET, **VAPID_PRIVATE**, **JOBS_INBOUND_TOKEN** (secrets); EMAIL
 SESSION_TTL_HOURS / OWNER_USERNAME (vars); R2 bindings JOB_FILES
 (mostlane-job-files) + ASSET_BUCKET (mostlane-asset-images); D1 binding DB
 (mostlane) + OPTIONAL PO_DB (mostlane-po — PO-site suggestions on the
-engineer timesheet). After changing dashboard secrets you must hit Deploy.
+engineer timesheet AND PO spend in job costing). After changing dashboard
+secrets you must hit Deploy. Job costing's SiteLog pull uses SITELOG_ADMIN_SECRET
+(→ api.site-log.co.uk); optional var `SITELOG_API` overrides that base URL.
+All of the above are declared in `worker/wrangler.toml` too (vars/bindings) so a
+Workers Builds deploy restores them; **secrets are dashboard-only**.
 
 ## Push notifications (Web Push — routes/push.js + lib/webpush.js + sw.js)
 Phase 1 (plumbing + test) + Phase 2 (real events + all-staff) DONE. Real OS
@@ -640,17 +744,37 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
    20 Jul (2,311 lines, tail `function escapeHtmlServer(s) …`) — Jamie pastes
    it into the PO worker in the Cloudflare dashboard. my-day.html's generic
    "Raise a PO" link carries no payload (by design).
-2. **SiteLog** — repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk),
-   worker api.site-log.co.uk (secret ADMIN_SECRET = admin PIN; custom domain
-   IS fetchable server-side; *.workers.dev hosts are NOT — error 1042).
+2. **SiteLog** — repo `Mostlane/SiteLog` (docs/ = Pages at site-log.co.uk;
+   worker `worker.js` = **manual paste**, not auto-deployed; commit to
+   Mostlane/SiteLog `main` as source-of-truth). Worker api.site-log.co.uk
+   (secret ADMIN_SECRET = admin PIN + PORTAL_BRIDGE_SECRET matching mostlane-api;
+   custom domain IS fetchable server-side; *.workers.dev hosts are NOT — 1042).
    Portal sitelog.html: HMAC #pt= launch token binds deviceToken→person
    (stores portal_username), on-site list + geofence push via /sitelog/*
    admin proxy. 348+ portal sites pushed as geofences; new sites auto-push.
+   **Costing-relevant endpoints added Aug 2026** (portal PULLS these): `people`
+   gained **portal_username** (the portal link); **POST /portal-link** (verifies
+   the #pt token, stamps portal_username onto the scanning person); **GET
+   /job-costing?from=&to=** (per-site/per-person labour, same maths as its
+   admin.html — jcCostVisits; open/no-sign-out visits cost £0, SiteLog's cron
+   auto-closes them 16:00/+12h); **/update-engineer** now also sets
+   portal_username (powers the manual People-links page). `/admin?from=&to=`
+   returns raw visits (portal dates SiteLog labour + P4 reconcile from these).
+   Worker last pasted ≈ the /update-engineer-portal_username build (3,184 lines,
+   tail `};`); before that the /job-costing build. Confirm with Jamie what's live.
 3. **H&S planner** — static app IN THIS REPO at /hs-plan/; worker
    `mostlane-hs-jobs` (own D1 + APP_TOKEN secret). Menu 🦺 builds
    `hs-plan/#worker=...&token=` via /hs-plan-config.
 
 ## FUTURE PLANS / NEXT UP (agreed with Jamie)
+0. **Job costing & SiteLog↔Portal — DONE (Aug 2026)**, see the dedicated
+   section: site register + coordinates→SiteLog geofence, unified labour
+   (SiteLog+SLA deduped) + PO + project valuations/retention, per-job charts,
+   spend-per-supplier, pin/hide/drag, People-links (SiteLog + PO). **Loose
+   ends for next phase:** (a) fix pencePerMile 0.25→25/45 (see Known quirks);
+   (b) get engineers linked (People-links backfill, or the SiteLog "Connect to
+   portal" prompt — not built); (c) optional deeper cost views. Jamie is
+   starting a NEW project for the next phase.
 1. **Satellite audit logging** (agreed in principle; waiting for a DESKTOP
    session — patcher pages don't work on his phone):
    a. Quick win, portal-side, no paste: log /po-config, /hs-plan-config and
@@ -718,3 +842,17 @@ files to this public repo.
   job-view.html has a `Promise.race` timeout on its category fetch). Keep
   secondary data (like categories) OFF the first-paint critical path — load it
   after the board shows and merge it in when it arrives.
+- **pencePerMile is stored in PENCE** (code does `miles × pencePerMile ÷ 100`;
+  default 25/45). But every user's per-user value in `engts:cfg` byUser is set
+  to **0.25** — read as 0.25p/mile (~£0), so timesheet mileage AND (once a person
+  is linked) job-costing fuel come out ~1/100th. **OPEN:** fix per-user (and the
+  default) to 25 (or 45 HMRC) — Jamie to confirm the rate before bulk-changing
+  (touches pay/invoices). Unlinked SiteLog people are unaffected (SiteLog's own
+  fuel_rate 0.25 there means £0.25/mile — SiteLog treats it as £/mile, correct).
+- **SiteLog identity is one-launch, not zero-touch:** portal & SiteLog are
+  different origins, so SiteLog can only learn the portal user when the portal
+  hands over the #pt token at launch (sitelog.html tile). Home-screen/bookmark
+  opens skip it. As of 5 Aug NO SiteLog people were linked yet (portal_username
+  all null) — use sitelog-links.html to backfill, and/or get engineers to open
+  SiteLog via the portal tile once. Considered but not built: a "Connect to
+  portal" prompt inside SiteLog for unlinked phones (needs a SiteLog paste).
