@@ -481,14 +481,17 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   edge auto-scroll), saves `/fleet/vehicle-order` (app_config
   `fleet:vehorder:<tid>` = [reg,…]); order applied server-side in
   /fleet/vehicles so it's the same everywhere.
-- **Fuel cards, MPG & running cost (money = Full Access only)** — page
-  **fuel-cards.html** (⛽ Fuel Cards button in the vehicles header, shown only to
-  FullAccess). A fuel card = a user's `profile.fuelCard` (set in Users Admin).
-  Log fill-ups (**date · litres · cost £**) per card → table **fuel_entries**
-  (self-migrating). Routes (all `canMoney` = FullAccess): **GET
-  /fleet/fuel/cards** (card→user→current van), **GET /fleet/fuel/entries?card=**,
-  **POST /fleet/fuel/entry** (create/update), **POST /fleet/fuel/entry-delete**,
-  **GET /fleet/fuel/stats?card=** (overall + per-period + per-vehicle).
+- **Fuel cards, MPG & running cost** — page **fuel-cards.html** (⛽ Fuel Cards
+  button in the vehicles header, shown to ANY Vehicles user). A fuel card = a
+  user's `profile.fuelCard` (set in Users Admin). Log fill-ups (**date · litres ·
+  cost £**) per card → table **fuel_entries** (self-migrating). **Access split:
+  fuel (cards/entries/stats/MPG/spend) is open to any Vehicles user (`canFleet`);
+  the vehicle FINANCIALS + the running-cost rollup stay Full-Access (`canMoney`).**
+  Routes (Vehicles): **GET /fleet/fuel/cards** (card→user→current van), **GET
+  /fleet/fuel/entries?card=**, **POST /fleet/fuel/entry** (create/update), **POST
+  /fleet/fuel/entry-delete**, **GET /fleet/fuel/stats?card=** (overall +
+  per-period + per-vehicle; the response's `money:true/false` says whether
+  per-vehicle `running` cost was included — the page hides that column when false).
   - **MPG** (`mpgByVehicle`, all-available-data): litres attributed to a vehicle
     via card→user→**assignment-at-date** (`vehicle_assignments`, fallback current
     `vehicle_assigned`) ÷ UK gallon (4.54609), miles = the van's van-check
@@ -503,7 +506,8 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     {ownership owned|financed, insuranceYear, roadTaxYear, financeMonthly,
     financeEnd, allowedMiles, excessPence}. Edited in the vehicles.html edit
     modal (💷 Financials group, FullAccess only), saved via **POST /fleet/finance**
-    (separate from /fleet/vehicle so Vehicles-only users can't write money).
+    (FullAccess-gated, separate from /fleet/vehicle so Vehicles-only users can't
+    write/read money).
   - **Running cost / year** (`runningCost`): insurance + road tax + finance
     (financed→monthly×12) + **projected** fuel (from the van's own spend/day
     ×365) + maintenance (real, last 12 months from vehicle_maintenance) +

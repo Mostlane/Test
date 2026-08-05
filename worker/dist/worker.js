@@ -8742,8 +8742,8 @@ async function handle20(request, env, ctx, url, sess) {
     return jr3({ ok: true }, headers);
   }
   if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" || sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
-    if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
     if (sub === "/finance" && method === "POST") {
+      if (!await canMoney(env, tid, sess)) return jr3({ error: "Forbidden" }, headers, 403);
       await ensureVehTable(env);
       const b = await readJson4(request);
       const reg = String(b.reg || "").trim();
@@ -8851,22 +8851,28 @@ async function handle20(request, env, ctx, url, sess) {
       const gallons = litres / UK_GALLON;
       const overallMpg = miles > 0 && gallons > 0 ? Math.round(miles / gallons * 10) / 10 : null;
       const periods = spanDays ? periodStats(spanDays, { spend, litres, miles }) : null;
+      const money2 = await canMoney(env, tid, sess);
       const vrows = (await env.DB.prepare("SELECT reg, finance FROM vehicles WHERE tenant_id=?").bind(tid).all()).results || [];
-      const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
       const maint12 = {};
-      try {
-        await ensureMaintTable(env);
-        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
-        for (const m of mrows || []) maint12[dnReg(m.reg)] = (maint12[dnReg(m.reg)] || 0) + (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
-      } catch {
+      if (money2) {
+        const since = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+        try {
+          await ensureMaintTable(env);
+          const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
+          for (const m of mrows || []) maint12[dnReg(m.reg)] = (maint12[dnReg(m.reg)] || 0) + (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+        } catch {
+        }
       }
       const vehicles = vrows.map((v) => {
         const k = dnReg(v.reg);
-        return { reg: v.reg, mpg: (mpg[k] || {}).mpg || null, spend: Math.round((fuelV[k] || {}).spend || 0), litres: Math.round(((fuelV[k] || {}).litres || 0) * 10) / 10, running: runningCost(financeOf(v), fuelV[k], odoV[k], maint12[k] || 0) };
+        const row = { reg: v.reg, mpg: (mpg[k] || {}).mpg || null, spend: Math.round((fuelV[k] || {}).spend || 0), litres: Math.round(((fuelV[k] || {}).litres || 0) * 10) / 10 };
+        if (money2) row.running = runningCost(financeOf(v), fuelV[k], odoV[k], maint12[k] || 0);
+        return row;
       });
       return jr3({
         ok: true,
         card,
+        money: money2,
         overall: { spend: Math.round(spend * 100) / 100, litres: Math.round(litres * 10) / 10, miles, mpg: overallMpg, first, last, spanDays: Math.round(spanDays), spanWeeks, entries: rows.length },
         periods,
         vehicles,

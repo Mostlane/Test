@@ -101,9 +101,9 @@
       </div>
 
       <div class="panel">
-        <h2>Per-vehicle — MPG &amp; running cost</h2>
+        <h2 id="vehPanelTitle">Per-vehicle — MPG &amp; fuel spend</h2>
         <div id="vehTable"></div>
-        <div class="span-note">Running cost is per year. Fuel &amp; excess-mileage figures are <b>projected</b> from real data and marked accordingly.</div>
+        <div class="span-note" id="vehNote" style="display:none">Running cost is per year. Fuel &amp; excess-mileage figures are <b>projected</b> from real data and marked accordingly.</div>
       </div>
 
       <div class="panel">
@@ -132,7 +132,7 @@
   function mpgTxt(n){ return (n==null||n==="")?"—":Number(n).toFixed(1)+" mpg"; }
   function fmtDMY(s){ if(!s)return ""; const d=new Date(s); if(isNaN(d))return esc(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getFullYear()).slice(2); }
 
-  let CARDS=[], EDIT_ID=null;
+  let CARDS=[], EDIT_ID=null, MONEY=false;
   const cardVal = () => $("cardSel").value;
 
   async function boot(){
@@ -163,6 +163,9 @@
     $("overall").innerHTML='<span class="empty">Loading…</span>'; $("folds").innerHTML=""; $("spanNote").textContent="";
     let d; try{ d=await aFetch("/fleet/fuel/stats?card="+encodeURIComponent(cardVal())).then(r=>r.json()); }catch(e){ $("overall").innerHTML='<span class="empty">Couldn\'t load stats.</span>'; return; }
     if(!d.ok){ $("overall").innerHTML='<span class="empty">Couldn\'t load stats.</span>'; return; }
+    MONEY = !!d.money;
+    $("vehPanelTitle").textContent = MONEY ? "Per-vehicle — MPG, spend & running cost" : "Per-vehicle — MPG & fuel spend";
+    $("vehNote").style.display = MONEY ? "" : "none";
     const o=d.overall||{};
     $("overall").innerHTML=[
       ['Total spend', money(o.spend)],
@@ -192,23 +195,26 @@
   function renderVehicles(vehicles){
     const withData=vehicles.filter(v=>v.mpg!=null||v.spend>0||(v.running&&v.running.total>0));
     if(!withData.length){ $("vehTable").innerHTML='<span class="empty">No vehicle data yet — add fuel entries and van-check mileage.</span>'; return; }
-    $("vehTable").innerHTML='<table><thead><tr><th>Vehicle</th><th class="num">MPG</th><th class="num">Fuel spend</th><th class="num">Running cost/yr</th><th></th></tr></thead><tbody>'+
+    // The running-cost column (which includes financials) is Full-Access only.
+    const rc = MONEY ? '<th class="num">Running cost/yr</th><th></th>' : '';
+    $("vehTable").innerHTML='<table><thead><tr><th>Vehicle</th><th class="num">MPG</th><th class="num">Fuel spend</th>'+rc+'</tr></thead><tbody>'+
       withData.map((v,i)=>{
         const r=v.running||{};
         const proj=r.projected?'<span class="proj">proj</span>':"";
-        return `<tr>
-          <td class="reg">${esc(v.reg)}</td>
-          <td class="num">${mpgTxt(v.mpg)}</td>
-          <td class="num">${money0(v.spend)}</td>
-          <td class="num">${r.total?money0(r.total):"—"} ${proj}</td>
-          <td class="num"><button class="btn ghost small" onclick="toggleBreak(${i})">Breakdown</button></td>
-        </tr>
-        <tr id="brk${i}" style="display:none"><td colspan="5"><div class="runbreak">
+        const rcCell = MONEY ? `<td class="num">${r.total?money0(r.total):"—"} ${proj}</td>
+          <td class="num">${r.total?`<button class="btn ghost small" onclick="toggleBreak(${i})">Breakdown</button>`:""}</td>` : '';
+        const rcBreak = MONEY ? `<tr id="brk${i}" style="display:none"><td colspan="5"><div class="runbreak">
           ${runRow('Insurance',r.insurance)}${runRow('Road tax',r.roadTax)}${runRow('Finance',r.finance)}
           ${runRow('Fuel'+(r.fuelProjected?' (projected)':''),r.fuel)}${runRow('Maintenance (12mo)',r.maintenance)}
           ${r.excess?runRow('Excess mileage (projected)',r.excess):""}
           <div style="font-weight:800;border-bottom:none"><span>Total / year</span><span>${money0(r.total)}</span></div>
-        </div></td></tr>`;
+        </div></td></tr>` : '';
+        return `<tr>
+          <td class="reg">${esc(v.reg)}</td>
+          <td class="num">${mpgTxt(v.mpg)}</td>
+          <td class="num">${money0(v.spend)}</td>
+          ${rcCell}
+        </tr>${rcBreak}`;
       }).join("")+'</tbody></table>';
   }
   function runRow(l,v){ return `<div><span>${l}</span><span>${money0(v||0)}</span></div>`; }

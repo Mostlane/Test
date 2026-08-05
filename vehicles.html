@@ -100,7 +100,7 @@
     <h1>🚐 Vehicles</h1>
     <div class="head-actions">
       <a class="btn small" href="van-checks.html">Van Checks</a>
-      <a class="btn small" id="fuelLink" href="fuel-cards.html" style="display:none">⛽ Fuel Cards</a>
+      <a class="btn small" id="fuelLink" href="fuel-cards.html">⛽ Fuel Cards</a>
       <a class="btn small" href="fleet-report.html">🚚 Fleet Report</a>
       <button class="btn small primary" onclick="openAddModal()">＋ Add vehicle</button>
       <button class="btn small" onclick="loadFleet()">⟳ Refresh</button>
@@ -239,10 +239,10 @@
   function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
 
   let FLEET=[], PUSERS=[], EDIT_REG=null;
-  // Money views (fuel, financials, running cost) are Full-Access only.
+  // Financials + running cost are Full-Access only (Fuel Cards itself is open to
+  // any Vehicles user, so its header button always shows).
   let IS_FULL=false;
   try{ const p=JSON.parse(sessionStorage.getItem("mostlanePermissions")||localStorage.getItem("mostlanePermissions")||"{}"); IS_FULL = p.FullAccess==="Yes"; }catch(e){}
-  if(IS_FULL){ const fl=$("fuelLink"); if(fl) fl.style.display=""; }
 
   /* ── Vehicle spec fields (AC, payload, dimensions, handsfree… + your own) ── */
   const SPEC_PRESETS=["Air con","Handsfree","Payload","Length","Height","Width","Load length","VIN","Euro / ULEZ","Colour"];
