@@ -498,7 +498,7 @@ export async function handle(request, env, ctx, url, sess) {
         totalMins: s.travelMins + s.onsiteMins + s.visitMins,
         laborCost, poTotal, poUnpriced: s.poUnpriced || 0,
         grandTotal: Math.round((laborCost + poTotal) * 100) / 100,
-        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100),
+        fin: computeFin(projFin[key], Math.round((laborCost + poTotal) * 100) / 100, mergeDayMaps(s.labD, s.poD)),
         jobs: Object.entries(s.jobs).map(([ref, mins]) => ({ ref, mins })).sort((a, b) => b.mins - a.mins),
         engineers: Object.entries(s.engineers).map(([u, v]) => ({
           user: u, mins: v.mins || 0, cost: v.cost, poCost: v.poCost || 0, src: v.src || null,
@@ -907,7 +907,13 @@ function jcNameLike(v) { return ((v.first_name || "") + " " + (v.last_name || ""
 // how the job is looking + a suggested next valuation. Returns null when the
 // project hasn't been set up (so only real projects show it). `cost` is the
 // job's grand total (labour + PO) so far.
-function computeFin(f, cost) {
+function mergeDayMaps(a, b) {
+  const out = {};
+  for (const [d, v] of Object.entries(a || {})) out[d] = (out[d] || 0) + v;
+  for (const [d, v] of Object.entries(b || {})) out[d] = (out[d] || 0) + v;
+  return out;
+}
+function computeFin(f, cost, costByDay) {
   if (!f || (!(Number(f.value) > 0) && !(f.valuations && f.valuations.length) && !(Number(f.planned) > 0))) return null;
   const r = (x) => Math.round((Number(x) || 0) * 100) / 100;
   const value = r(f.value);
@@ -915,6 +921,20 @@ function computeFin(f, cost) {
   const valuations = (Array.isArray(f.valuations) ? f.valuations : [])
     .map((v) => ({ id: v.id || "", amount: r(v.amount), date: v.date || "", note: v.note || "", final: !!v.final }))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  // Split each valuation into cost-covered vs profit "at the time": the cost
+  // dated up to that valuation, minus the cost already covered by earlier ones.
+  const costDays = Object.keys(costByDay || {}).sort();
+  const cumCostUpTo = (date) => { let c = 0; for (const d of costDays) { if (d <= date) c += costByDay[d]; else break; } return c; };
+  let prevCumCost = 0, runVal = 0;
+  for (const v of valuations) {
+    runVal += v.amount;
+    const cumCost = cumCostUpTo(v.date);
+    const costPortion = Math.max(0, r(cumCost - prevCumCost));   // cost incurred in this valuation's window
+    v.costAtTime = costPortion;
+    v.profitAtTime = r(v.amount - costPortion);                  // profit taken in this valuation (− if it didn't cover cost)
+    v.profitToDate = r(runVal - cumCost);                        // running profit after this valuation
+    prevCumCost = cumCost;
+  }
   const valued = r(valuations.reduce((a, v) => a + v.amount, 0));
   const remainingValue = r(value - valued);
   const remainingVals = Math.max(0, planned - valuations.length);

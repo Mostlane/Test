@@ -78,6 +78,7 @@
   .li b.pos{color:#15803d;} .li b.neg{color:#dc2626;}
   .xdel{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;padding:0 2px;}
   .xdel:hover{color:#dc2626;}
+  .valsplit{font-size:11px;color:var(--muted);margin-top:2px;font-weight:400;}
   .sbadge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;vertical-align:middle;margin-left:2px;letter-spacing:.02em;}
   .sbadge.sl{background:#dcfce7;color:#166534;} .sbadge.sla{background:#e5e7eb;color:#374151;} .sbadge.mix{background:#dbeafe;color:#1e40af;}
   .chip{border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;}
@@ -208,7 +209,10 @@
       return '<div class="grouplbl">Project</div><div class="mergeRow"><button class="ic" data-finsetup="'+esc(s.key)+'">📈 Track project value &amp; valuations</button></div>';
     }
     var vals=(f.valuations||[]).map(function(v){
-      return '<div class="li"><span>🧾 '+esc(v.date)+(v.final?' · <b style="color:#1e40af">final account</b>':'')+(v.note?' · '+esc(v.note):'')+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
+      var split = (v.costAtTime!=null)
+        ? '<div class="valsplit">covers '+money(v.costAtTime)+' cost · <b class="'+(v.profitAtTime>=0?'pos':'neg')+'">'+money(v.profitAtTime)+' profit</b> · running profit '+money(v.profitToDate)+'</div>'
+        : '';
+      return '<div class="li"><span>🧾 '+esc(v.date)+(v.final?' · <b style="color:#1e40af">final account</b>':'')+(v.note?' · '+esc(v.note):'')+split+'</span><span><b>'+money(v.amount)+'</b> <button class="xdel" data-findel="'+esc(s.key)+'|'+esc(v.id)+'" title="Delete this valuation">✕</button></span></div>';
     }).join('')||'<div class="li"><span style="color:var(--muted)">No valuations submitted yet</span></div>';
     var sug='';
     if(f.overCommitted){
