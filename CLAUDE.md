@@ -19,6 +19,8 @@ database_id e483b3b5-2cfd-4742-ae51-427c31598c87) + R2, with three satellite
 systems (PO, SiteLog, H&S) on their own workers/DBs, bridged to the portal.
 
 ## How things deploy — CRITICAL CONVENTIONS
+(Plain-English version for Jamie: **`DEPLOY.md`** at the repo root — how GitHub
+→ Cloudflare works, why bindings/secrets survive, and the static-worker recovery.)
 - **Pages**: the site is **Cloudflare Pages connected to this GitHub repo
   (Mostlane/Test)** — GitHub holds the code and **GitHub Pages builds + serves
   mostlane-portal.com on every push to `main`** (the "pages build and
