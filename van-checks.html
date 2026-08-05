@@ -45,6 +45,7 @@
     <a class="ml-back" data-role="home" href="/vehicles.html" style="text-decoration:none;">←</a>
     <h1>🚐 Weekly Van Checks</h1>
     <button class="btn grey small" id="remindBtn">🔔 Remind now</button>
+    <button class="btn grey small hide" id="hoTplBtn">🤝 Handover template</button>
     <button class="btn grey small hide" id="settingsBtn">⚙ Settings</button>
   </header>
   <div class="wrap">
@@ -101,6 +102,28 @@
     </div>
   </div>
 
+  <!-- Van handover template -->
+  <div class="overlay" id="hoModal">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <h2 style="margin:0;">Van handover template</h2>
+        <button class="btn grey small" onclick="document.getElementById('hoModal').classList.remove('open')">✕</button>
+      </div>
+      <p class="muted" style="font-size:12.5px;margin:8px 0 0;">This is the check a new driver completes when they're given a van. Edit the lists below — changes apply to every handover sent from now on.</p>
+      <label>Vehicle checks — one per line (driver taps OK / Defect)</label>
+      <textarea id="h_checks" style="min-height:150px; font-size:14px;"></textarea>
+      <label>Equipment on board — one per line (driver taps Present / Missing)</label>
+      <textarea id="h_equip" style="min-height:120px; font-size:14px;"></textarea>
+      <label>Photos — one per line (add <b>?</b> at the end to make one optional)</label>
+      <textarea id="h_slots" style="min-height:120px; font-size:14px;"></textarea>
+      <p class="msg" id="hMsg"></p>
+      <div class="row" style="margin-top:10px;justify-content:space-between;">
+        <button class="btn ghost small" id="hReset">Reset to defaults</button>
+        <button class="btn green" id="hSave">Save template</button>
+      </div>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" onclick="this.classList.remove('open')"><img id="viewerImg"></div>
 
 <script>
@@ -123,6 +146,7 @@
       if (!me.ok || !(me.user.FullAccess === "Yes" || me.user.Vehicles === "Yes")) { alert("This page needs Vehicles access."); location.href = "/main.html"; return; }
       ME = me.user;
       g("settingsBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
+      g("hoTplBtn").classList.toggle("hide", ME.FullAccess !== "Yes");
     } catch (e) { location.href = "/main.html"; return; }
     WEEK = mondayOf(new Date().toISOString().slice(0, 10));
     load();
@@ -227,6 +251,40 @@
       if (!r.ok) throw new Error(r.error || "save failed");
       m.className = "msg ok"; m.textContent = "Saved ✓ — applies to everyone from now.";
       load();
+    } catch (e) { m.className = "msg err"; m.textContent = e.message; }
+  };
+
+  // ── Van handover template ──
+  let HO_DEFAULTS = null;
+  function fillHoTemplate(t) {
+    g("h_checks").value = (t.checklist || []).map(i => i.label).join("\n");
+    g("h_equip").value = (t.equipment || []).map(i => i.label).join("\n");
+    g("h_slots").value = (t.photoSlots || []).map(i => i.label + (i.required === false ? " ?" : "")).join("\n");
+  }
+  g("hoTplBtn").onclick = async () => {
+    g("hMsg").textContent = "Loading…"; g("hMsg").className = "msg";
+    g("hoModal").classList.add("open");
+    try {
+      const d = await authFetch("/fleet/handover/template").then(r => r.json());
+      if (!d.ok) throw new Error(d.error || "load failed");
+      HO_DEFAULTS = d.defaults || null;
+      fillHoTemplate(d.template || {});
+      g("hMsg").textContent = "";
+    } catch (e) { g("hMsg").className = "msg err"; g("hMsg").textContent = "Couldn't load — " + e.message; }
+  };
+  g("hReset").onclick = () => { if (HO_DEFAULTS) fillHoTemplate(HO_DEFAULTS); g("hMsg").className = "msg"; g("hMsg").textContent = "Reset to the built-in defaults — press Save to apply."; };
+  const lines = v => v.split("\n").map(t => t.trim()).filter(Boolean);
+  g("hSave").onclick = async () => {
+    const m = g("hMsg"); m.className = "msg"; m.textContent = "Saving…";
+    const checklist = lines(g("h_checks").value).map(label => ({ label }));
+    const equipment = lines(g("h_equip").value).map(label => ({ label }));
+    const photoSlots = lines(g("h_slots").value).map(t => { const optional = /\?$/.test(t); return { label: t.replace(/\s*\?$/, ""), required: !optional }; });
+    if (!checklist.length && !equipment.length && !photoSlots.length) { m.className = "msg err"; m.textContent = "Add at least one item."; return; }
+    try {
+      const r = await authFetch("/fleet/handover/template", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checklist, equipment, photoSlots }) }).then(r => r.json());
+      if (!r.ok) throw new Error(r.error || "save failed");
+      m.className = "msg ok"; m.textContent = "Saved ✓ — applies to every handover from now.";
     } catch (e) { m.className = "msg err"; m.textContent = e.message; }
   };
 </script>

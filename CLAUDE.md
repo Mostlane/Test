@@ -525,9 +525,14 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
     /vancheck/settings).
   - **Van handovers** — a NEW detailed condition check sent to a newly-assigned
     driver. Table **vehicle_handovers** (self-migrating; status
-    pending|done|cancelled|superseded). Template (checklist + **equipment**:
-    Spare wheel / Jack / Tyre tools / Locking wheel-nut key… as separate items +
-    photo slots) in code, overridable via app_config `handover:template:<tid>`.
+    pending|done|cancelled|superseded). Template = checklist + **equipment**
+    (Spare wheel / Jack / Tyre tools / Locking wheel-nut key… as separate items) +
+    photo slots; **customisable** on van-checks.html ("🤝 Handover template"
+    button, FullAccess) via **GET /fleet/handover/template** (any Vehicles user) +
+    **POST /fleet/handover/template** (FullAccess; item id = slug(label)), stored
+    in app_config `handover:template:<tid>` (defaults in fleet.js until edited).
+    The vehicle-checks.html handover detail labels answers by the CURRENT template
+    but falls back to the raw id, so a later template edit never hides old records.
     The driver form **van-handover.html** (modeled on van-check.html: OK/Defect
     + Present/Missing toggles, interior/exterior condition, a **damage log**
     [{note,photo}], photo slots, mileage, safe-to-drive, and a **required drawn

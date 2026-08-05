@@ -8939,6 +8939,31 @@ async function handle20(request, env, ctx, url, sess) {
     }));
     return jr3({ ok: true, id }, headers, 201);
   }
+  if (sub === "/handover/template" && method === "GET") {
+    return jr3({ ok: true, template: await handoverTemplate(env, tid), defaults: DEFAULT_HANDOVER }, headers);
+  }
+  if (sub === "/handover/template" && method === "POST") {
+    if (!await canMoney(env, tid, sess)) return jr3({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
+    const b = await readJson4(request);
+    const slug2 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    const mkList = (arr, withReq) => {
+      const out = [], seen = /* @__PURE__ */ new Set();
+      for (const it of Array.isArray(arr) ? arr : []) {
+        const label = String(it && it.label || "").trim().slice(0, 120);
+        if (!label) continue;
+        let id = slug2(it && it.id) || slug2(label) || "item" + (out.length + 1);
+        while (seen.has(id)) id = id + "_" + (out.length + 1);
+        seen.add(id);
+        out.push(withReq ? { id, label, required: !(it && it.required === false) } : { id, label });
+      }
+      return out;
+    };
+    const tpl = { checklist: mkList(b.checklist, false), equipment: mkList(b.equipment, false), photoSlots: mkList(b.photoSlots, true) };
+    if (!tpl.checklist.length && !tpl.equipment.length && !tpl.photoSlots.length)
+      return jr3({ error: "Add at least one item." }, headers, 400);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, HANDOVER_TPL_KEY(tid), JSON.stringify(tpl)).run();
+    return jr3({ ok: true, template: tpl }, headers);
+  }
   if (sub === "/handover/mine" && method === "GET") {
     await ensureHandoverTable(env);
     const row = await env.DB.prepare(

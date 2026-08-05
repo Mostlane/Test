@@ -837,6 +837,33 @@ export async function handle(request, env, ctx, url, sess) {
     return jr({ ok: true, id }, headers, 201);
   }
 
+  // ── Van handover: the editable template (GET any Vehicles user; POST FullAccess) ─
+  if (sub === "/handover/template" && method === "GET") {
+    return jr({ ok: true, template: await handoverTemplate(env, tid), defaults: DEFAULT_HANDOVER }, headers);
+  }
+  if (sub === "/handover/template" && method === "POST") {
+    if (!(await canMoney(env, tid, sess))) return jr({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
+    const b = await readJson(request);
+    const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+    const mkList = (arr, withReq) => {
+      const out = [], seen = new Set();
+      for (const it of Array.isArray(arr) ? arr : []) {
+        const label = String(it && it.label || "").trim().slice(0, 120); if (!label) continue;
+        let id = slug(it && it.id) || slug(label) || ("item" + (out.length + 1));
+        while (seen.has(id)) id = id + "_" + (out.length + 1);
+        seen.add(id);
+        out.push(withReq ? { id, label, required: !(it && it.required === false) } : { id, label });
+      }
+      return out;
+    };
+    const tpl = { checklist: mkList(b.checklist, false), equipment: mkList(b.equipment, false), photoSlots: mkList(b.photoSlots, true) };
+    if (!tpl.checklist.length && !tpl.equipment.length && !tpl.photoSlots.length)
+      return jr({ error: "Add at least one item." }, headers, 400);
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, HANDOVER_TPL_KEY(tid), JSON.stringify(tpl)).run();
+    return jr({ ok: true, template: tpl }, headers);
+  }
+
   // ── Van handover: the driver's pending one + the template (van-handover.html) ─
   if (sub === "/handover/mine" && method === "GET") {
     await ensureHandoverTable(env);
