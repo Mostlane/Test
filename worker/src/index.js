@@ -230,6 +230,8 @@ const PUBLIC_ROUTES = [
   ["GET", "/fleet/vehicle-doc"],
   // Vehicle photos (card cover + gallery/lightbox) — signed URL.
   ["GET", "/fleet/vehicle-photo"],
+  // Maintenance-record documents opened in a new tab — signed URL.
+  ["GET", "/fleet/maintenance-doc"],
   // Machine-to-machine job intake (Zapier) — JOBS_INBOUND_TOKEN verified in-handler.
   ["POST", "/sla/inbound"],
   ["GET", "/sla/inbound"],   // connection self-check (fingerprint only, no secret)

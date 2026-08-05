@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=2"></script>
+  <title>Mostlane • Vehicle maintenance</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:180px;}
+  header.page h1 small{display:block;font-size:12px;font-weight:400;opacity:.75;margin-top:2px;}
+  a.ml-back{color:#fff;text-decoration:none;font-size:15px;}
+  .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .wrap{max-width:960px;margin:0 auto;padding:16px;}
+
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.small{padding:6px 10px;font-size:13px;}
+  .btn.danger{color:#dc2626;border-color:#fca5a5;background:#fff;}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--brand);}
+  header.page .btn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff;}
+  header.page .btn.primary{background:var(--brand);border-color:var(--brand);}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .panel h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 12px;}
+  .totalline{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .totalline .big{font-size:30px;font-weight:800;}
+  .totalline .sub{font-size:13px;color:var(--muted);}
+
+  /* category spend bars */
+  .bars{display:flex;flex-direction:column;gap:9px;}
+  .bar{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:10px;}
+  .bar .nm{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;min-width:0;}
+  .bar .nm .sw{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
+  .bar .nm span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .bar .track{height:14px;background:#eef2f7;border-radius:999px;overflow:hidden;}
+  .bar .fill{height:100%;border-radius:999px;min-width:2px;}
+  .bar .amt{font-size:13.5px;font-weight:700;text-align:right;white-space:nowrap;}
+  @media(max-width:560px){ .bar{grid-template-columns:100px 1fr auto;} }
+
+  /* filter chips */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;color:var(--ink);}
+  .chip .sw{width:10px;height:10px;border-radius:3px;}
+  .chip .ct{color:var(--muted);font-weight:600;}
+  .chip.on{background:#0f172a;color:#fff;border-color:#0f172a;}
+  .chip.on .ct{color:rgba(255,255,255,.75);}
+
+  /* timeline */
+  .rec{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:11px;}
+  .rec .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+  .rec .date{font-size:12.5px;color:var(--muted);font-weight:600;}
+  .rec .desc{font-weight:650;margin:3px 0 8px;font-size:15px;}
+  .rec .rtot{font-size:15px;font-weight:800;white-space:nowrap;}
+  .cbadges{display:flex;flex-wrap:wrap;gap:6px;}
+  .cbadge{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff;display:inline-flex;gap:6px;align-items:center;}
+  .cbadge em{font-style:normal;font-weight:600;opacity:.9;}
+  .cbadge.dim{opacity:.4;}
+  .rec .ract{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);}
+  .empty{color:var(--muted);font-size:14px;padding:8px 2px;}
+
+  /* modal */
+  .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:2000;padding:14px;}
+  .modal{background:#fff;width:100%;max-width:520px;max-height:90vh;overflow:auto;border-radius:14px;padding:18px;}
+  .modal h3{margin:0 0 12px;font-size:17px;}
+  .mrow{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+  .mrow label{font-size:13px;font-weight:600;color:#334155;}
+  .mrow input,.mrow select,.mrow textarea{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
+  .mrow .hint{font-size:11.5px;color:var(--muted);}
+  .allocrow{display:flex;gap:6px;align-items:center;margin-bottom:7px;}
+  .allocrow select{flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
+  .allocrow .cost{flex:0 0 108px;position:relative;}
+  .allocrow .cost input{width:100%;padding:8px 8px 8px 20px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
+  .allocrow .cost .cur{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;}
+  .alloctot{font-size:13px;color:var(--muted);margin-top:6px;font-weight:600;}
+  .doc{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:#fafbfc;margin-bottom:8px;}
+  .doc .nm{flex:1;min-width:0;}
+  .doc .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:14px;}
+  .doc .nm span{font-size:11.5px;color:var(--muted);}
+  .mfoot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;}
+  .catmrow{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .catmrow input[type=text]{flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;}
+  .catmrow input[type=color]{width:40px;height:36px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:3000;}
+  .status-line{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:14px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="vehicles.html" title="Back to vehicles">‹ Back</a>
+    <h1 id="pageTitle">🔧 Maintenance<small id="vehSub"></small></h1>
+    <div class="head-actions">
+      <button class="btn small" onclick="openCatMgr()">🏷 Categories</button>
+      <button class="btn small primary" onclick="openRecord()">＋ Add maintenance</button>
+      <button class="btn small" onclick="load()">⟳ Refresh</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="panel" id="summaryPanel">
+      <h2>Spend by category</h2>
+      <div class="totalline">
+        <span class="big" id="grandTotal">£0.00</span>
+        <span class="sub" id="grandSub">across 0 records</span>
+      </div>
+      <div class="bars" id="bars"></div>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="panel">
+      <h2 id="listTitle">Maintenance history</h2>
+      <div id="recList"><span class="empty">Loading…</span></div>
+    </div>
+
+    <div class="status-line"><span id="statusLine"></span><span>Mostlane • Vehicles</span></div>
+  </div>
+
+  <!-- RECORD MODAL -->
+  <div class="backdrop" id="recBackdrop">
+    <div class="modal">
+      <h3 id="recTitle">Add maintenance</h3>
+      <div class="mrow"><label>Date of work</label><input id="recDate" type="date"></div>
+      <div class="mrow"><label>Description</label><input id="recDesc" placeholder="e.g. 2 front tyres + tracking"></div>
+
+      <div class="mrow">
+        <label>Cost by category</label>
+        <div class="hint" style="margin-bottom:6px">Split the cost across the work done. A shared invoice can go to more than one — e.g. Brakes £200 and Tyres £250. Each category's totals add up in the chart.</div>
+        <div id="allocRows"></div>
+        <button type="button" class="btn ghost small" onclick="addAllocRow()">＋ Add category</button>
+        <div class="alloctot" id="allocTot">Total: £0.00</div>
+      </div>
+
+      <div class="mrow">
+        <label>Document (optional)</label>
+        <div id="curDoc"></div>
+        <input type="file" id="recFile" accept="application/pdf,image/*" style="font-size:14px">
+        <div class="hint">Invoice, receipt or photo. Choosing a file replaces any current document. The same document is shared by every category you tagged above.</div>
+      </div>
+
+      <div class="mfoot">
+        <button class="btn danger small" id="recDelBtn" onclick="deleteRecord()" style="display:none">🗑 Delete</button>
+        <div style="display:flex;gap:10px;margin-left:auto">
+          <button class="btn small" onclick="closeRecord()">Cancel</button>
+          <button class="btn primary small" id="recSaveBtn" onclick="saveRecord()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY MANAGER MODAL -->
+  <div class="backdrop" id="catBackdrop">
+    <div class="modal">
+      <h3>Maintenance categories</h3>
+      <div class="hint" style="margin-bottom:12px">These are the sections you tag work against (Tyres, Service, Brakes…). Pick a colour for each — it's used in the chart and badges.</div>
+      <div id="catRows"></div>
+      <button type="button" class="btn ghost small" onclick="addCatRow()">＋ Add category</button>
+      <div class="mfoot">
+        <button class="btn small" onclick="closeCatMgr()">Cancel</button>
+        <button class="btn primary small" onclick="saveCats()">Save categories</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") { window.location.href = "login.html"; }
+
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+pTok()},o.headers||{}); if(o.body&&!(o.body instanceof FormData)&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  const $ = id => document.getElementById(id);
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
+  function money(n){ return "£"+Number(n||0).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function fmtDMY(s){ if(!s)return ""; const d=new Date(s); if(isNaN(d))return esc(s); return String(d.getDate()).padStart(2,"0")+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+d.getFullYear(); }
+
+  const REG = new URLSearchParams(location.search).get("reg") || "";
+  let CATS=[], RECORDS=[], TOTALS={}, GRAND=0, SELCAT="";           // dashboard state
+  let EDIT_ID=null, CUR_DOC=null, REMOVE_DOC=false;                 // record-modal state
+
+  function colourFor(cat){ const c=CATS.find(x=>x.name===cat); return c?c.colour:"#64748b"; }
+
+  async function load(){
+    if(!REG){ $("statusLine").textContent="No vehicle specified."; return; }
+    $("vehSub").textContent=REG;
+    $("statusLine").textContent="Loading…";
+    try{
+      const d=await aFetch("/fleet/maintenance?reg="+encodeURIComponent(REG)).then(r=>r.json());
+      if(!d.ok) throw new Error(d.error||"load failed");
+      CATS=d.categories||[]; RECORDS=d.records||[]; TOTALS=d.totals||{}; GRAND=d.grandTotal||0;
+      render();
+      $("statusLine").textContent=RECORDS.length?("Loaded "+RECORDS.length+" record(s).") : "No maintenance recorded yet.";
+    }catch(e){ console.error(e); $("statusLine").textContent="Couldn't load maintenance."; $("recList").innerHTML='<span class="empty">Couldn\'t load maintenance.</span>'; }
+    // Vehicle name for the header (non-blocking, nice-to-have).
+    aFetch("/fleet/vehicles").then(r=>r.json()).then(d=>{
+      const n=r=>String(r||"").replace(/\s+/g,"").toUpperCase();
+      const v=(d.vehicles||[]).find(x=>n(x.reg)===n(REG));
+      if(v){ const mm=[v.make,v.model].filter(Boolean).join(" "); $("vehSub").textContent=REG+(mm?" · "+mm:""); }
+    }).catch(()=>{});
+  }
+
+  function render(){ renderSummary(); renderList(); }
+
+  function renderSummary(){
+    $("grandTotal").textContent=money(GRAND);
+    $("grandSub").textContent="across "+RECORDS.length+" record"+(RECORDS.length===1?"":"s");
+    // Bars: every category with spend, biggest first.
+    const rows=Object.keys(TOTALS).map(cat=>({cat,amt:TOTALS[cat]})).filter(x=>x.amt>0).sort((a,b)=>b.amt-a.amt);
+    const max=rows.reduce((m,x)=>Math.max(m,x.amt),0)||1;
+    $("bars").innerHTML = rows.length ? rows.map(x=>`
+      <div class="bar">
+        <div class="nm"><span class="sw" style="background:${esc(colourFor(x.cat))}"></span><span>${esc(x.cat)}</span></div>
+        <div class="track"><div class="fill" style="width:${Math.max(2,Math.round(x.amt/max*100))}%;background:${esc(colourFor(x.cat))}"></div></div>
+        <div class="amt">${money(x.amt)}</div>
+      </div>`).join("") : '<span class="empty">No costs recorded yet.</span>';
+    // Filter chips.
+    let chips=`<div class="chip ${SELCAT===""?"on":""}" onclick="setFilter('')">All <span class="ct">${money(GRAND)}</span></div>`;
+    chips+=rows.map(x=>`<div class="chip ${SELCAT===x.cat?"on":""}" onclick="setFilter('${esc(x.cat).replace(/'/g,"\\'")}')"><span class="sw" style="background:${esc(colourFor(x.cat))}"></span>${esc(x.cat)} <span class="ct">${money(x.amt)}</span></div>`).join("");
+    $("chips").innerHTML=chips;
+  }
+
+  function setFilter(cat){ SELCAT=(SELCAT===cat)?"":cat; renderSummary(); renderList(); }
+
+  function renderList(){
+    $("listTitle").textContent=SELCAT?("Maintenance history — "+SELCAT):"Maintenance history";
+    let recs=RECORDS.slice();
+    if(SELCAT) recs=recs.filter(r=>(r.allocs||[]).some(a=>a.cat===SELCAT));
+    if(!recs.length){ $("recList").innerHTML='<span class="empty">'+(SELCAT?("No "+esc(SELCAT)+" work recorded."):"No maintenance recorded yet. Use “Add maintenance”.")+'</span>'; return; }
+    $("recList").innerHTML=recs.map(r=>{
+      const badges=(r.allocs||[]).map(a=>`<span class="cbadge ${SELCAT&&a.cat!==SELCAT?"dim":""}" style="background:${esc(colourFor(a.cat))}">${esc(a.cat)} <em>${money(a.cost)}</em></span>`).join("");
+      const doc=r.docUrl?`<a class="btn ghost small" href="${esc(r.docUrl)}" target="_blank" rel="noopener">📄 ${esc(r.docName||"Document")}</a>`:"";
+      return `<div class="rec">
+        <div class="top">
+          <div style="min-width:0">
+            <div class="date">${r.date?fmtDMY(r.date):"No date"}</div>
+            <div class="desc">${r.description?esc(r.description):"<span style=color:var(--muted)>(no description)</span>"}</div>
+            <div class="cbadges">${badges||'<span class="empty">No categories</span>'}</div>
+          </div>
+          <div class="rtot">${money(r.total)}</div>
+        </div>
+        <div class="ract">
+          ${doc}
+          <button class="btn ghost small" onclick="openRecord(${r.id})" style="margin-left:auto">✏️ Edit</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  /* ── Record add/edit ── */
+  function catOptions(sel){
+    let names=CATS.map(c=>c.name);
+    if(sel && !names.includes(sel)) names=[sel].concat(names);   // keep a since-removed category visible
+    return '<option value="">— category —</option>'+names.map(n=>`<option value="${esc(n)}" ${n===sel?"selected":""}>${esc(n)}</option>`).join("");
+  }
+  function allocRowHtml(cat,cost){
+    return `<div class="allocrow">
+      <select class="aCat">${catOptions(cat||"")}</select>
+      <div class="cost"><span class="cur">£</span><input class="aCost" type="number" min="0" step="0.01" placeholder="0.00" value="${cost!=null&&cost!==""?esc(cost):""}" oninput="recalcAlloc()"></div>
+      <button type="button" class="btn ghost small" onclick="this.closest('.allocrow').remove();recalcAlloc()" title="Remove">✕</button>
+    </div>`;
+  }
+  function addAllocRow(cat,cost){ $("allocRows").insertAdjacentHTML("beforeend",allocRowHtml(cat||"",cost)); recalcAlloc(); }
+  function collectAllocs(){
+    const out=[];
+    $("allocRows").querySelectorAll(".allocrow").forEach(r=>{
+      const cat=r.querySelector(".aCat").value.trim();
+      const cost=parseFloat(r.querySelector(".aCost").value);
+      if(cat) out.push({cat,cost:isNaN(cost)?0:cost});
+    });
+    return out;
+  }
+  function recalcAlloc(){
+    const t=collectAllocs().reduce((s,a)=>s+(a.cost||0),0);
+    $("allocTot").textContent="Total: "+money(t);
+  }
+  function renderCurDoc(){
+    const el=$("curDoc");
+    if(EDIT_ID && CUR_DOC && CUR_DOC.docKey && !REMOVE_DOC){
+      el.innerHTML=`<div class="doc"><div class="nm"><b>${esc(CUR_DOC.docName||"Document")}</b><span>Current document</span></div>
+        <a class="btn small" href="${esc(CUR_DOC.docUrl)}" target="_blank" rel="noopener">Open</a>
+        <button type="button" class="btn danger small" onclick="removeCurDoc()">Remove</button></div>`;
+    } else if(EDIT_ID && CUR_DOC && CUR_DOC.docKey && REMOVE_DOC){
+      el.innerHTML='<div class="hint" style="margin-bottom:8px">Current document will be removed on save.</div>';
+    } else { el.innerHTML=""; }
+  }
+  function removeCurDoc(){ REMOVE_DOC=true; $("recFile").value=""; renderCurDoc(); }
+
+  function openRecord(id){
+    EDIT_ID=(id!=null)?id:null; REMOVE_DOC=false; CUR_DOC=null;
+    $("recFile").value="";
+    if(EDIT_ID!=null){
+      const r=RECORDS.find(x=>x.id===EDIT_ID); if(!r){ return; }
+      $("recTitle").textContent="Edit maintenance";
+      $("recDate").value=r.date||"";
+      $("recDesc").value=r.description||"";
+      $("allocRows").innerHTML="";
+      (r.allocs&&r.allocs.length?r.allocs:[{cat:"",cost:""}]).forEach(a=>addAllocRow(a.cat,a.cost));
+      CUR_DOC={docKey:r.docKey,docName:r.docName,docUrl:r.docUrl};
+      $("recDelBtn").style.display="inline-flex";
+    } else {
+      $("recTitle").textContent="Add maintenance";
+      $("recDate").value=new Date().toISOString().slice(0,10);
+      $("recDesc").value="";
+      $("allocRows").innerHTML=""; addAllocRow("","");
+      $("recDelBtn").style.display="none";
+    }
+    renderCurDoc(); recalcAlloc();
+    $("recBackdrop").style.display="flex";
+  }
+  function closeRecord(){ $("recBackdrop").style.display="none"; }
+
+  async function saveRecord(){
+    const allocs=collectAllocs();
+    const desc=$("recDesc").value.trim();
+    const file=$("recFile").files[0];
+    if(!desc && !allocs.length && !file){ alert("Add a description or at least one category cost."); return; }
+    if(file && file.size>15*1024*1024){ alert("Document too big (max 15MB)."); return; }
+    $("recSaveBtn").disabled=true; $("recSaveBtn").textContent="Saving…";
+    try{
+      const form=new FormData();
+      form.append("reg",REG);
+      if(EDIT_ID!=null) form.append("id",EDIT_ID);
+      form.append("date",$("recDate").value||"");
+      form.append("description",desc);
+      form.append("allocs",JSON.stringify(allocs));
+      if(file) form.append("file",file,file.name);
+      else if(REMOVE_DOC) form.append("removeDoc","1");
+      const r=await aFetch("/fleet/maintenance",{method:"POST",body:form}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||"save failed");
+      closeRecord(); toast(EDIT_ID!=null?"Saved":"Added"); await load();
+    }catch(e){ console.error(e); alert("Couldn't save — "+(e.message||"")); }
+    $("recSaveBtn").disabled=false; $("recSaveBtn").textContent="Save";
+  }
+  async function deleteRecord(){
+    if(EDIT_ID==null) return;
+    if(!confirm("Delete this maintenance record? Its document is removed too.")) return;
+    try{
+      const r=await aFetch("/fleet/maintenance-delete",{method:"POST",body:JSON.stringify({id:EDIT_ID})}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||"delete failed");
+      closeRecord(); toast("Deleted"); await load();
+    }catch(e){ alert("Couldn't delete — "+(e.message||"")); }
+  }
+
+  /* ── Category manager ── */
+  const CAT_PALETTE=["#2563eb","#7c3aed","#0891b2","#dc2626","#0d9488","#ea580c","#ca8a04","#65a30d","#db2777","#64748b"];
+  function catRowHtml(name,colour){
+    return `<div class="catmrow">
+      <input type="color" value="${esc(colour||"#64748b")}">
+      <input type="text" value="${esc(name||"")}" placeholder="Category name" maxlength="40">
+      <button type="button" class="btn ghost small" onclick="this.closest('.catmrow').remove()" title="Remove">✕</button>
+    </div>`;
+  }
+  function addCatRow(name,colour){
+    const n=$("catRows").querySelectorAll(".catmrow").length;
+    $("catRows").insertAdjacentHTML("beforeend",catRowHtml(name||"",colour||CAT_PALETTE[n%CAT_PALETTE.length]));
+  }
+  function openCatMgr(){
+    $("catRows").innerHTML="";
+    (CATS.length?CATS:[]).forEach(c=>addCatRow(c.name,c.colour));
+    if(!CATS.length) addCatRow("","");
+    $("catBackdrop").style.display="flex";
+  }
+  function closeCatMgr(){ $("catBackdrop").style.display="none"; }
+  async function saveCats(){
+    const cats=[];
+    $("catRows").querySelectorAll(".catmrow").forEach(r=>{
+      const colour=r.querySelector("input[type=color]").value;
+      const name=r.querySelector("input[type=text]").value.trim();
+      if(name) cats.push({name,colour});
+    });
+    try{
+      const r=await aFetch("/fleet/maint-categories",{method:"POST",body:JSON.stringify({categories:cats})}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||"save failed");
+      CATS=r.categories||cats; closeCatMgr(); toast("Categories saved"); render();
+    }catch(e){ alert("Couldn't save categories — "+(e.message||"")); }
+  }
+
+  // close modals on backdrop click
+  ["recBackdrop","catBackdrop"].forEach(id=>{ const b=$(id); b.addEventListener("click",e=>{ if(e.target===b) b.style.display="none"; }); });
+
+  Object.assign(window,{load,setFilter,openRecord,closeRecord,saveRecord,deleteRecord,addAllocRow,recalcAlloc,removeCurDoc,openCatMgr,closeCatMgr,addCatRow,saveCats});
+  window.addEventListener("DOMContentLoaded",load);
+  </script>
+</body>
+</html>

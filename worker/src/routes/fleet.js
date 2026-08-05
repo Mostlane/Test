@@ -31,6 +31,33 @@ const regKey = reg => String(reg).replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 const vdocPrefix = (tid, reg) => `vehicledocs/${tid}/${regKey(reg)}/`;
 const vphotoPrefix = (tid, reg) => `vehiclephotos/${tid}/${regKey(reg)}/`;
 const vphotoRoot = tid => `vehiclephotos/${tid}/`;
+const vmaintPrefix = (tid, reg) => `vehiclemaint/${tid}/${regKey(reg)}/`;   // maintenance-record documents
+
+const parseJson = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
+
+// Maintenance categories (Tyres / Service / Brakes …). A managed list per
+// tenant in app_config, each with a colour for the chart; falls back to a
+// sensible default set until the office customises it.
+const MCATS_KEY = tid => `fleet:maintcats:${tid}`;
+const DEFAULT_MAINT_CATS = [
+  { name: "Service",    colour: "#2563eb" },
+  { name: "MOT",        colour: "#7c3aed" },
+  { name: "Tyres",      colour: "#0891b2" },
+  { name: "Brakes",     colour: "#dc2626" },
+  { name: "Windscreen", colour: "#0d9488" },
+  { name: "Bodywork",   colour: "#ea580c" },
+  { name: "Electrical", colour: "#ca8a04" },
+  { name: "Battery",    colour: "#65a30d" },
+  { name: "Repair",     colour: "#db2777" },
+  { name: "Other",      colour: "#64748b" },
+];
+async function maintCats(env, tid) {
+  try {
+    const row = await env.DB.prepare("SELECT value FROM app_config WHERE key=?").bind(MCATS_KEY(tid)).first();
+    if (row && row.value) { const a = JSON.parse(row.value); if (Array.isArray(a) && a.length) return a; }
+  } catch {}
+  return DEFAULT_MAINT_CATS;
+}
 
 // Load the chosen-cover map ({ REGNORM: photoKey }) for a tenant.
 async function coverMap(env, tid) {
@@ -80,6 +107,19 @@ export async function handle(request, env, ctx, url, sess) {
   if (sub === "/vehicle-doc" && method === "GET") {
     const key = q.get("key");
     if (!key || !String(key).startsWith("vehicledocs/")) return jr({ error: "Bad key" }, headers, 400);
+    if (!sess && !(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
+    const obj = await env.JOB_FILES.get(key);
+    if (!obj) return new Response("Not found", { status: 404, headers });
+    return new Response(obj.body, { status: 200, headers: {
+      ...headers, "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Disposition": "inline", "Cache-Control": "private, max-age=3600"
+    }});
+  }
+
+  // ── Open a maintenance-record document (public, but signature-gated) ───────
+  if (sub === "/maintenance-doc" && method === "GET") {
+    const key = q.get("key");
+    if (!key || !String(key).startsWith("vehiclemaint/")) return jr({ error: "Bad key" }, headers, 400);
     if (!sess && !(await verifyFileSig(env, key, q))) return jr({ error: "Link expired or invalid" }, headers, 403);
     const obj = await env.JOB_FILES.get(key);
     if (!obj) return new Response("Not found", { status: 404, headers });
@@ -244,6 +284,7 @@ export async function handle(request, env, ctx, url, sess) {
         warnDays: sv.warnDays, warnMiles: sv.warnMiles,
         serviceDueMiles: sv.dueMiles, serviceStatus: sv.status, serviceReason: sv.reason,
         currentMiles: cm ? cm.miles : null, milesAt: cm ? cm.at : "",
+        specs: parseJson(v.specs, []),
         photoCount: pics.length,
         photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : ""
       };
@@ -283,6 +324,13 @@ export async function handle(request, env, ctx, url, sess) {
           v.motDue || v.motDate || "", v.taxDue || v.taxDate || "", v.nextServiceDate || v.serviceDate || "", v.notes || "",
           num(v.svcIntervalDays), num(v.svcIntervalMiles), v.lastServiceDate || "", num(v.lastServiceMiles),
           num(v.warnDays), num(v.warnMiles), new Date().toISOString()).run();
+      // Extra spec fields (AC, payload, dimensions, handsfree …) are stored as a
+      // JSON array of {label,value}. Only written when supplied, so the legacy
+      // import (which carries no specs) never wipes an existing vehicle's specs.
+      if (v.specs !== undefined) {
+        const specsStr = typeof v.specs === "string" ? v.specs : JSON.stringify(Array.isArray(v.specs) ? v.specs : []);
+        await env.DB.prepare("UPDATE vehicles SET specs=? WHERE tenant_id=? AND reg=?").bind(specsStr, tid, reg).run();
+      }
       count++;
     }
     return jr({ ok: true, count }, headers);
@@ -299,7 +347,10 @@ export async function handle(request, env, ctx, url, sess) {
       for (const o of listed.objects || []) await env.JOB_FILES.delete(o.key);
       const pics = await env.JOB_FILES.list({ prefix: vphotoPrefix(tid, reg) });
       for (const o of pics.objects || []) await env.JOB_FILES.delete(o.key);
+      const maint = await env.JOB_FILES.list({ prefix: vmaintPrefix(tid, reg) });
+      for (const o of maint.objects || []) await env.JOB_FILES.delete(o.key);
     } catch {}
+    try { await ensureMaintTable(env); await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND reg=?").bind(tid, reg).run(); } catch {}
     try { const covers = await coverMap(env, tid); if (covers[regKey(reg)]) { delete covers[regKey(reg)]; await saveCoverMap(env, tid, covers); } } catch {}
     return jr({ ok: true }, headers);
   }
@@ -352,6 +403,107 @@ export async function handle(request, env, ctx, url, sess) {
     const b = await readJson(request); const key = String(b.key || "");
     if (!key || !key.startsWith("vehicledocs/")) return jr({ error: "Bad key" }, headers, 400);
     await env.JOB_FILES.delete(key);
+    return jr({ ok: true }, headers);
+  }
+
+  // ── Maintenance categories (managed list + colours for the charts) ────────
+  if (sub === "/maint-categories" && method === "GET") {
+    return jr({ ok: true, categories: await maintCats(env, tid) }, headers);
+  }
+  if (sub === "/maint-categories" && method === "POST") {
+    const b = await readJson(request);
+    const seen = new Set(), out = [];
+    for (const c of Array.isArray(b.categories) ? b.categories : []) {
+      const name = String(c && c.name || "").trim().slice(0, 40);
+      if (!name) continue;
+      const k = name.toLowerCase(); if (seen.has(k)) continue; seen.add(k);
+      out.push({ name, colour: String(c.colour || "#64748b").slice(0, 9) });
+    }
+    await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .bind(tid, MCATS_KEY(tid), JSON.stringify(out)).run();
+    return jr({ ok: true, categories: out }, headers);
+  }
+
+  // ── Maintenance records (dated work, categorised, cost-split) ─────────────
+  // A record = date + description + optional document + one or more category
+  // allocations [{cat,cost}]. A £450 invoice split Brakes £200 / Tyres £250 is
+  // one record whose document appears under BOTH categories when filtered, and
+  // whose costs sum into each category's total. Rows live in vehicle_maintenance.
+  if (sub === "/maintenance" && method === "GET") {
+    await ensureMaintTable(env);
+    const reg = q.get("reg") || "";
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const { results } = await env.DB.prepare(
+      "SELECT * FROM vehicle_maintenance WHERE tenant_id=? AND reg=? ORDER BY date DESC, id DESC"
+    ).bind(tid, reg).all();
+    const records = [];
+    for (const r of results || []) {
+      const allocs = (parseJson(r.allocs, []) || [])
+        .map(a => ({ cat: String(a.cat || a.category || ""), cost: Number(a.cost) || 0 }))
+        .filter(a => a.cat);
+      records.push({
+        id: r.id, date: r.date || "", description: r.description || "", allocs,
+        total: allocs.reduce((s, a) => s + a.cost, 0),
+        docKey: r.doc_key || "", docName: r.doc_name || "",
+        docUrl: r.doc_key ? await signedFileUrl(env, url.origin, "/fleet/maintenance-doc", r.doc_key) : "",
+        by: r.by || "", at: r.at || ""
+      });
+    }
+    const totals = {}; let grandTotal = 0;
+    for (const rec of records) for (const a of rec.allocs) { totals[a.cat] = (totals[a.cat] || 0) + a.cost; grandTotal += a.cost; }
+    return jr({ ok: true, reg, records, totals, grandTotal, categories: await maintCats(env, tid) }, headers);
+  }
+  if (sub === "/maintenance" && method === "POST") {
+    await ensureMaintTable(env);
+    const form = await request.formData();
+    const reg = String(form.get("reg") || "").trim();
+    if (!reg) return jr({ error: "reg required" }, headers, 400);
+    const id = parseInt(String(form.get("id") || ""), 10);
+    const date = String(form.get("date") || "").slice(0, 10);
+    const description = String(form.get("description") || "").slice(0, 500);
+    const allocs = (parseJson(String(form.get("allocs") || "[]"), []) || [])
+      .map(a => ({ cat: String(a.cat || a.category || "").trim().slice(0, 40), cost: Math.round((Number(a.cost) || 0) * 100) / 100 }))
+      .filter(a => a.cat);
+    const file = form.get("file");
+    const removeDoc = String(form.get("removeDoc") || "") === "1";
+    const now = new Date().toISOString();
+
+    const existing = (id && !isNaN(id))
+      ? await env.DB.prepare("SELECT * FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).first()
+      : null;
+    let docKey = existing ? (existing.doc_key || "") : "";
+    let docName = existing ? (existing.doc_name || "") : "";
+    if (file && typeof file.stream === "function") {
+      if (docKey) { try { await env.JOB_FILES.delete(docKey); } catch {} }   // replace old document
+      const safe = String(file.name || "document").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+      docKey = `${vmaintPrefix(tid, reg)}${Date.now()}-${safe}`;
+      docName = file.name || safe;
+      await env.JOB_FILES.put(docKey, file.stream(), {
+        httpMetadata: { contentType: file.type || "application/octet-stream" },
+        customMetadata: { name: docName, reg, by: sess.user.username, at: now }
+      });
+    } else if (removeDoc && docKey) {
+      try { await env.JOB_FILES.delete(docKey); } catch {}
+      docKey = ""; docName = "";
+    }
+
+    if (existing) {
+      await env.DB.prepare("UPDATE vehicle_maintenance SET date=?,description=?,allocs=?,doc_key=?,doc_name=? WHERE tenant_id=? AND id=?")
+        .bind(date, description, JSON.stringify(allocs), docKey, docName, tid, id).run();
+      return jr({ ok: true, id }, headers);
+    }
+    const res = await env.DB.prepare(
+      "INSERT INTO vehicle_maintenance (tenant_id,reg,date,description,allocs,doc_key,doc_name,by,at) VALUES (?,?,?,?,?,?,?,?,?)"
+    ).bind(tid, reg, date, description, JSON.stringify(allocs), docKey, docName, sess.user.username, now).run();
+    return jr({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
+  }
+  if (sub === "/maintenance-delete" && method === "POST") {
+    await ensureMaintTable(env);
+    const b = await readJson(request); const id = parseInt(String(b.id || ""), 10);
+    if (!id || isNaN(id)) return jr({ error: "id required" }, headers, 400);
+    const row = await env.DB.prepare("SELECT doc_key FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).first();
+    if (row && row.doc_key) { try { await env.JOB_FILES.delete(row.doc_key); } catch {} }
+    await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).run();
     return jr({ ok: true }, headers);
   }
 
@@ -477,9 +629,19 @@ async function ensureVehTable(env) {
   const cols = [
     "svc_interval_days INTEGER", "svc_interval_miles INTEGER",
     "last_service_date TEXT", "last_service_miles INTEGER",
-    "warn_days INTEGER", "warn_miles INTEGER"
+    "warn_days INTEGER", "warn_miles INTEGER",
+    "specs TEXT"   // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
   ];
   for (const c of cols) { try { await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run(); } catch {} }
+}
+// Maintenance records: dated, categorised work with cost-split allocations and
+// an optional document per record. Self-migrating (CREATE IF NOT EXISTS).
+async function ensureMaintTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS vehicle_maintenance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    reg TEXT NOT NULL, date TEXT, description TEXT, allocs TEXT,
+    doc_key TEXT, doc_name TEXT, by TEXT, at TEXT)`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vmaint_reg ON vehicle_maintenance(tenant_id,reg)").run(); } catch {}
 }
 // Latest odometer reading per vehicle, pulled from the weekly van checks.
 async function latestMileage(env, tid) {

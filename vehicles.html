@@ -168,6 +168,13 @@
         <div class="hint" id="svcPreview" style="margin-top:8px"></div>
       </div>
 
+      <div class="grp">
+        <h4>Specification</h4>
+        <div class="hint" style="margin-bottom:8px">Air con, payload, dimensions, handsfree — anything you want on the vehicle. Fill in the details, add your own fields, or clear ones you don't need (blank rows are ignored).</div>
+        <div id="specsRows"></div>
+        <button type="button" class="btn ghost small" onclick="addSpecRow()">＋ Add field</button>
+      </div>
+
       <div class="mrow"><label>Notes</label><input id="editNotes"></div>
 
       <div class="mfoot">
@@ -177,22 +184,6 @@
           <button class="btn primary small" onclick="saveVehicleEdits()">Save</button>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- DOCS MODAL -->
-  <div class="backdrop" id="docBackdrop">
-    <div class="modal">
-      <h3 id="docTitle">Documents</h3>
-      <div class="hint" style="margin-bottom:10px">Repair invoices, service receipts, MOT certificates — anything for this vehicle.</div>
-      <div id="docList"><span class="hint">Loading…</span></div>
-      <div class="grp" style="margin-top:12px">
-        <h4>Add a document</h4>
-        <input type="file" id="docFile" accept="application/pdf,image/*" style="font:inherit;font-size:14px;margin-bottom:8px">
-        <button class="btn primary small" id="docUpBtn" onclick="uploadDoc()">Upload</button>
-        <span id="docMsg" class="hint" style="margin-left:8px"></span>
-      </div>
-      <div class="mfoot"><span></span><button class="btn small" onclick="closeDocModal()">Close</button></div>
     </div>
   </div>
 
@@ -228,7 +219,30 @@
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
   function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
 
-  let FLEET=[], PUSERS=[], EDIT_REG=null, DOC_REG=null;
+  let FLEET=[], PUSERS=[], EDIT_REG=null;
+
+  /* ── Vehicle spec fields (AC, payload, dimensions, handsfree… + your own) ── */
+  const SPEC_PRESETS=["Air con","Handsfree","Payload","Length","Height","Width","Load length","VIN","Euro / ULEZ","Colour"];
+  function specRowHtml(label,value){
+    return `<div class="specrow" style="display:flex;gap:6px;margin-bottom:6px">
+      <input class="specL" placeholder="Field" value="${esc(label||"")}" style="flex:0 0 42%;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px">
+      <input class="specV" placeholder="Detail" value="${esc(value||"")}" style="flex:1;min-width:0;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px">
+      <button type="button" class="btn ghost small" onclick="this.closest('.specrow').remove()" title="Remove">✕</button>
+    </div>`;
+  }
+  function renderSpecRows(specs){
+    const rows=(Array.isArray(specs)&&specs.length)?specs:SPEC_PRESETS.map(l=>({label:l,value:""}));
+    $("specsRows").innerHTML=rows.map(s=>specRowHtml(s.label,s.value)).join("");
+  }
+  function addSpecRow(){ $("specsRows").insertAdjacentHTML("beforeend",specRowHtml("","")); }
+  function collectSpecs(){
+    const out=[];
+    $("specsRows").querySelectorAll(".specrow").forEach(r=>{
+      const label=r.querySelector(".specL").value.trim(), value=r.querySelector(".specV").value.trim();
+      if(label&&value) out.push({label,value});
+    });
+    return out;
+  }
   function pLabel(u){ const n=((u.FirstName||"")+" "+(u.LastName||"")).trim(); return n||u.Username; }
   function pName(username){ if(!username)return ""; const u=PUSERS.find(x=>x.Username===username); return u?pLabel(u):username; }
   const pNorm = r => String(r||"").replace(/\s+/g,"").toUpperCase();
@@ -321,7 +335,7 @@
           <button class="btn small" onclick="openAssign('${esc(reg)}')">👤 Driver</button>
           <button class="btn ghost small" onclick="openHistory('${esc(reg)}')">History</button>
           <button class="btn ghost small" onclick="openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
-          <button class="btn ghost small" onclick="openDocModal('${esc(reg)}')">📎 Docs</button>
+          <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
           <button class="btn small" onclick="openEditModal('${esc(reg)}')">Edit</button>
         </div>`;
       // Tap anywhere on the card (except the action buttons, drag handle or a
@@ -374,14 +388,14 @@
         ${detailRow("Tax due", v.taxDue?fmtDMY(v.taxDue):"—")}
         ${detailRow("Next service", v.nextServiceDate?fmtDMY(v.nextServiceDate):"—")}
         ${detailRow("Last service", v.lastServiceDate?fmtDMY(v.lastServiceDate):"")}
+        ${(v.specs||[]).map(s=>detailRow(esc(s.label), esc(s.value))).join("")}
         ${detailRow("Notes", v.notes?esc(v.notes):"")}
       </div>
-      <div class="hint" style="margin:12px 0 4px">More sections can be added here — tell me what you'd like.</div>
       <div class="card-actions" style="border-top:0;padding-top:4px">
         <button class="btn small" onclick="pClose();openAssign('${esc(reg)}')">👤 Driver</button>
         <button class="btn ghost small" onclick="pClose();openHistory('${esc(reg)}')">History</button>
         <button class="btn ghost small" onclick="pClose();openPhotoModal('${esc(reg)}')">📷 Photos${v.photoCount?` (${v.photoCount})`:""}</button>
-        <button class="btn ghost small" onclick="pClose();openDocModal('${esc(reg)}')">📎 Docs</button>
+        <a class="btn ghost small" href="vehicle-maintenance.html?reg=${encodeURIComponent(reg)}">🔧 Maintenance</a>
         <button class="btn small" onclick="pClose();openEditModal('${esc(reg)}')">✏️ Edit</button>
       </div>`;
     pModal(html);
@@ -419,6 +433,7 @@
     $("editReg").readOnly=false; $("regHint").style.display="none";
     ["editReg","editMake","editModel","editFuel","editMOT","editTax","editService","editIntMonths","editIntMiles","editLastDate","editLastMiles","editWarnDays","editWarnMiles","editNotes"].forEach(id=>$(id).value="");
     $("editActive").value="true";
+    renderSpecRows([]);
     $("deleteBtn").style.display="none";
     $("svcPreview").textContent="";
     $("editBackdrop").style.display="flex";
@@ -439,6 +454,7 @@
     $("editWarnMiles").value=(v.warnMiles!=null&&v.warnMiles!==1000)?v.warnMiles:"";
     $("editService").value=(v.svcIntervalDays||v.svcIntervalMiles)?"":(v.nextServiceDate||"");
     $("editNotes").value=v.notes||"";
+    renderSpecRows(v.specs||[]);
     $("deleteBtn").style.display="inline-flex";
     $("svcPreview").textContent = v.serviceReason ? ("Currently: "+v.serviceReason) : "";
     $("editBackdrop").style.display="flex";
@@ -462,7 +478,8 @@
       warnDays: numOr("editWarnDays"),
       warnMiles: numOr("editWarnMiles"),
       nextServiceDate: (months!=null||numOr("editIntMiles")!=null)?"":$("editService").value,
-      notes:$("editNotes").value.trim()
+      notes:$("editNotes").value.trim(),
+      specs: collectSpecs()
     };
     try{
       const res=await aFetch("/fleet/vehicle",{method:"POST",body:JSON.stringify(body)});
@@ -477,39 +494,6 @@
       const r=await aFetch("/fleet/vehicle-delete",{method:"POST",body:JSON.stringify({reg:EDIT_REG})}).then(r=>r.json());
       if(r.ok){ closeEditModal(); toast("Vehicle removed"); await loadFleet(); } else alert(r.error||"Failed");
     }catch(e){ alert("Failed to remove."); }
-  }
-
-  /* ── Documents ── */
-  function openDocModal(reg){ DOC_REG=reg; $("docTitle").textContent="Documents — "+reg; $("docMsg").textContent=""; $("docFile").value=""; $("docBackdrop").style.display="flex"; loadDocs(); }
-  function closeDocModal(){ $("docBackdrop").style.display="none"; }
-  async function loadDocs(){
-    const el=$("docList"); el.innerHTML='<span class="hint">Loading…</span>';
-    try{
-      const d=await aFetch("/fleet/vehicle-docs?reg="+encodeURIComponent(DOC_REG)).then(r=>r.json());
-      const docs=d.docs||[];
-      if(!docs.length){ el.innerHTML='<span class="hint">No documents yet.</span>'; return; }
-      el.innerHTML=docs.map(f=>`<div class="doc">
-        <div class="nm"><b>${esc(f.name)}</b><span>${esc((f.at||"").slice(0,10))}${f.by?" · "+esc(pName(f.by)):""}</span></div>
-        <a class="btn small" href="${esc(f.url)}" target="_blank" rel="noopener">Open</a>
-        <button class="btn danger small" onclick="deleteDoc('${esc(f.key)}')">Delete</button>
-      </div>`).join("");
-    }catch(e){ el.innerHTML='<span class="hint">Couldn\'t load documents.</span>'; }
-  }
-  async function uploadDoc(){
-    const f=$("docFile").files[0]; if(!f){ $("docMsg").textContent="Choose a file first."; return; }
-    if(f.size>15*1024*1024){ $("docMsg").textContent="File too big (max 15MB)."; return; }
-    $("docUpBtn").disabled=true; $("docMsg").textContent="Uploading…";
-    try{
-      const form=new FormData(); form.append("reg",DOC_REG); form.append("file",f,f.name);
-      const r=await aFetch("/fleet/vehicle-doc",{method:"POST",body:form}).then(r=>r.json());
-      $("docMsg").textContent=r.ok?"✓ Uploaded":("Failed — "+(r.error||"")); $("docFile").value="";
-      if(r.ok) loadDocs();
-    }catch(e){ $("docMsg").textContent="Upload failed."; }
-    $("docUpBtn").disabled=false;
-  }
-  async function deleteDoc(key){
-    if(!confirm("Delete this document?")) return;
-    try{ const r=await aFetch("/fleet/vehicle-doc-delete",{method:"POST",body:JSON.stringify({key})}).then(r=>r.json()); if(r.ok) loadDocs(); }catch(e){}
   }
 
   /* ── Photos (gallery + cover) ── */
@@ -629,7 +613,7 @@
   }
 
   // expose for inline handlers
-  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,openDocModal,closeDocModal,uploadDoc,deleteDoc,importOld,pClose,openPhotoModal,closePhotoModal,uploadPhoto,setCover,deletePhoto,enlarge,closeLightbox});
+  Object.assign(window,{loadFleet,renderFleet,openAssign,saveAssign,openHistory,openAddModal,openEditModal,closeEditModal,saveVehicleEdits,deleteVehicle,addSpecRow,importOld,pClose,openPhotoModal,closePhotoModal,uploadPhoto,setCover,deletePhoto,enlarge,closeLightbox});
   document.addEventListener("DOMContentLoaded",()=>{ const g=$("fleetGrid"); if(g) g.addEventListener("pointerdown",onGripDown); });
 
   window.addEventListener("DOMContentLoaded", loadFleet);

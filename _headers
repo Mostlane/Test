@@ -73,6 +73,8 @@
   Cache-Control: no-cache
 /vehicles.html
   Cache-Control: no-cache
+/vehicle-maintenance.html
+  Cache-Control: no-cache
 /office-timesheet.html
   Cache-Control: no-cache
 /users-admin.html

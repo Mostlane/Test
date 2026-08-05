@@ -433,10 +433,38 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   due" count + filter on the page.
 - **Mileage** comes from the weekly van checks (vehicle_checks.items.mileage,
   latest checked_at wins) — not stored on the vehicle row (latestMileage()).
-- **Documents** (repair invoices/receipts): `/fleet/vehicle-doc` POST
-  (multipart → R2 JOB_FILES `vehicledocs/<tid>/<REG>/…`), `/fleet/vehicle-docs`
-  GET (signed URLs), `/fleet/vehicle-doc-delete` POST, `/fleet/vehicle-doc` GET
-  (public+signed stream, inline). 📎 Docs button on each card.
+- **Specifications** (extra per-vehicle fields — AC, payload, dimensions,
+  handsfree, VIN…): `vehicles.specs` column = JSON `[{label,value}]`. The edit
+  modal (vehicles.html) seeds a preset list (Air con/Handsfree/Payload/Length/
+  Height/Width/Load length/VIN/Euro-ULEZ/Colour) but every row's label is
+  editable and "＋ Add field" appends custom rows; blanks are dropped on save.
+  Shown on the deep-dive card. `/fleet/vehicle` POST writes specs with a
+  SEPARATE non-destructive UPDATE (only when supplied) so the legacy import
+  never wipes them. `/fleet/vehicles` GET returns `specs` (parsed array).
+- **Maintenance log** (replaced the old loose "📎 Docs" — see below): a
+  categorised, dated, cost-split work history per vehicle on a dedicated page
+  **vehicle-maintenance.html?reg=…** (🔧 Maintenance button on each card + the
+  deep-dive). A record = date + description + optional document + one or more
+  category allocations `[{cat,cost}]`. A shared invoice splits its cost across
+  categories (Brakes £200 / Tyres £250) — the SAME document then shows under
+  each category when filtered, and each category's total combines across
+  records. Table **vehicle_maintenance** (self-migrating; documents in R2
+  JOB_FILES `vehiclemaint/<tid>/<REG>/…`). Categories are a managed list in
+  app_config `fleet:maintcats:<tid>` = `[{name,colour}]` (defaults until edited;
+  colours drive the chart + badges). Routes (FullAccess|Vehicles):
+  **GET /fleet/maintenance?reg=** (records + per-category totals + grandTotal +
+  categories), **POST /fleet/maintenance** (multipart: reg,id?,date,description,
+  allocs JSON, file?, removeDoc?; new file replaces the old doc), **POST
+  /fleet/maintenance-delete** `{id}` (also purges the R2 doc), **GET/POST
+  /fleet/maint-categories**, **GET /fleet/maintenance-doc** (PUBLIC_ROUTES,
+  sig-verified, streams inline). The page shows a spend-per-category bar chart +
+  tap-to-filter chips + a chronological timeline (date · description · coloured
+  category badges w/ per-cat cost · total · open-document · edit). vehicle-delete
+  purges the maintenance rows + their R2 docs.
+- **Old vehicle documents** (`/fleet/vehicle-doc*`, R2 `vehicledocs/…`): the UI
+  was REMOVED (replaced by the Maintenance log). The GET/list/POST/delete
+  endpoints remain in fleet.js so any old signed links still open, but nothing
+  surfaces them now; previously-uploaded loose docs were NOT auto-migrated.
 - **Photos** (gallery per van, one is the card cover): `/fleet/vehicle-photo`
   POST (multipart → R2 JOB_FILES `vehiclephotos/<tid>/<REG>/…`; client shrinks
   to 1600px JPEG before upload), `/fleet/vehicle-photos` GET (signed URLs +
@@ -552,7 +580,9 @@ sessions, devices, login_history, password_resets, holidays(+config/log/
 allowance/system_days), assets, asset_transfers, asset_transfer_requests,
 sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
-**vehicles**, **vehicle_assignments**, **van_timesheets**, **sla_jobs_archive**
+**vehicles** (+`specs` JSON [{label,value}] extra fields), **vehicle_assignments**,
+**vehicle_maintenance** (categorised, cost-split maintenance log; docs in R2
+`vehiclemaint/<tid>/<REG>/…`), **van_timesheets**, **sla_jobs_archive**
 (imported job history — separate from live sla_jobs), **eng_timesheets**,
 **eng_invoices** (engineer weekly timesheets + self-employed invoice register;
 PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`), **job_time_segments** (SLA
@@ -560,7 +590,8 @@ status-capture time; +`sitelog_visit_id` links a segment materialised from a
 SiteLog visit), **sitelog_scans** (optional pushed scans), **site_miles**
 (round-trip miles per site). app_config also
 holds JSON blobs keyed `fleet:drivers:<tid>`, `fleet:poolalloc:<tid>`,
-`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>`, the
+`fleet:paycfg:<tid>`, `fleet:vehorder:<tid>`, `fleet:vehcover:<tid>`,
+`fleet:maintcats:<tid>` (vehicle-maintenance categories [{name,colour}]), the
 notification-suppression rules, and the costing keys `site_aliases:<tid>`,
 `site_reg_ignore:<tid>`, `site_reg_ext:<tid>`, `eng_aliases:<tid>`,
 `proj_fin:<tid>` (project value + valuations), `costing_prefs:<tid>` (pin/hide/
@@ -648,7 +679,8 @@ no-cache on: portal-config.js, auth.js, device-auth.js, docviewer.js,
 login.html, main.html, holiday.html, holiday-admin.html, theme.html,
 personalise.html, help.html, activity-log.html, my-documents.html,
 notification-centre.html, fleet-report.html, van-timesheet.html,
-vehicles.html, job-costing.html, sites-register.html, sitelog-links.html.
+vehicles.html, vehicle-maintenance.html, job-costing.html, sites-register.html,
+sitelog-links.html.
 **ADD NEW HOT PAGES HERE when created** — a page shipped
 without no-cache once got cache-poisoned on phones (that's why
 personalise.html had to replace theme.html). (NB: _headers is a DEAD file on
