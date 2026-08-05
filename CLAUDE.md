@@ -386,7 +386,12 @@ reach stubborn phone caches, bump to ?v=3 across all pages with sed. Provides:
   PORTAL_BRIDGE_SECRET). Activity-log FRIENDLY entries added.
 - `vancheck.js` — weekly van checks (replaces the old Jotform walkaround):
   driver form (mileage + photo slots → R2 vancheck/…), /vancheck/week admin
-  grid, badges. **/vancheck/skip** (admin skips a driver's week → writes a
+  grid, badges. Settings (van-checks.html ⚙, FullAccess) = due day/time +
+  editable **checklist** (OK/Defect), **equipment** (Present/Missing, opt-in —
+  empty by default; a missing item counts as an issue) and **photo slots**; all
+  three ride in the app_config `vancheck:settings` JSON and are returned by
+  /vancheck/config + /vancheck/settings. van-check.html shows the equipment
+  section only when items exist and merges its answers into the same answers map. **/vancheck/skip** (admin skips a driver's week → writes a
   "skipped" row into vehicle_checks with items.skipped/skippedBy, shows in the
   Vehicles weekly grid) + **/vancheck/unskip**. Attention gate honours
   vehicle-check suppression. **/vancheck/remind-now** (admin: Vehicles|

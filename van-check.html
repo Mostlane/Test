@@ -80,6 +80,11 @@
         <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Tap OK or Defect for every item. Add a note for any defect.</p>
         <div id="checkItems"></div>
       </div>
+      <div class="card" id="equipCard" style="display:none;">
+        <b>Equipment on board</b>
+        <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Confirm each item is present. Mark Missing if it isn't.</p>
+        <div id="equipItems"></div>
+      </div>
       <div class="card">
         <b>Photos</b>
         <p class="muted" style="font-size:12.5px; margin:4px 0 6px;">Take each photo with the camera. Items marked * are required.</p>
@@ -187,8 +192,32 @@
   function startForm() {
     g("doneBox").style.display = "none"; g("formWrap").style.display = "block";
     if (!g("f_vehicle").value) g("f_vehicle").value = CFG.vehicle || "";
-    renderItems(); renderSlots(); renderPhotos(); renderSafe();
+    renderItems(); renderEquip(); renderSlots(); renderPhotos(); renderSafe();
   }
+
+  // Equipment on board (Present/Missing) — only shown if the office added items.
+  function renderEquip() {
+    const eq = (CFG.equipment || []);
+    g("equipCard").style.display = eq.length ? "block" : "none";
+    if (!eq.length) return;
+    g("equipItems").innerHTML = eq.map(it => `
+      <div class="item">
+        <span class="lbl">${esc(it.label)}</span>
+        <span class="seg">
+          <button type="button" class="${answers[it.id] === "present" ? "on-ok" : ""}" data-pres="${esc(it.id)}">Present</button>
+          <button type="button" class="${answers[it.id] === "missing" ? "on-bad" : ""}" data-miss="${esc(it.id)}">Missing</button>
+        </span>
+      </div>
+      <div class="defnote ${answers[it.id] === "missing" ? "show" : ""}">
+        <input type="text" placeholder="Note (optional)" value="${esc(defectNotes[it.id] || "")}" data-dn="${esc(it.id)}">
+      </div>`).join("");
+  }
+  g("equipItems").addEventListener("click", e => {
+    const pres = e.target.dataset.pres, miss = e.target.dataset.miss;
+    if (pres) { answers[pres] = "present"; delete defectNotes[pres]; renderEquip(); saveDraft(); }
+    if (miss) { answers[miss] = "missing"; renderEquip(); saveDraft(); }
+  });
+  g("equipItems").addEventListener("input", e => { if (e.target.dataset.dn) { defectNotes[e.target.dataset.dn] = e.target.value; saveDraft(); } });
 
   function renderItems() {
     g("checkItems").innerHTML = CFG.checklist.map(it => `
@@ -277,6 +306,8 @@
     const msg = g("msg"); msg.className = "msg";
     const unanswered = CFG.checklist.filter(it => !answers[it.id]);
     if (unanswered.length) { msg.className = "msg err"; msg.textContent = "Answer every item — " + unanswered.length + " left (" + unanswered[0].label + "…)."; return; }
+    const unEquip = (CFG.equipment || []).filter(it => !answers[it.id]);
+    if (unEquip.length) { msg.className = "msg err"; msg.textContent = "Mark every equipment item — " + unEquip.length + " left (" + unEquip[0].label + "…)."; return; }
     if (safe === null) { msg.className = "msg err"; msg.textContent = "Tap whether the van is safe to drive."; return; }
     const missingSlots = (CFG.photoSlots || []).filter(sl => sl.required !== false && !slotPhotos[sl.id]);
     if (missingSlots.length) { msg.className = "msg err"; msg.textContent = "Photos still needed: " + missingSlots.map(sl => sl.label).join(", "); return; }
