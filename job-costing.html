@@ -237,7 +237,11 @@
       '<div class="li"><span>🕗 Left to value</span><b>'+money(f.remainingValue)+'</b></div>'+
       sug+
       '<div class="mergeRow"><button class="ic" data-finval="'+esc(s.key)+'">➕ Add valuation</button><button class="ic" data-finedit="'+esc(s.key)+'">⚙ Edit value / plan</button></div>'+
-      vals;
+      vals+
+      ((f.costSinceLastVal>0.005 && (f.valuations||[]).length)
+        ? '<div class="li"><span>⏳ Cost since last valuation (not yet claimed)</span><b class="neg">'+money(f.costSinceLastVal)+'</b></div>'+
+          '<div class="valsplit" style="padding-left:0">Last valuation left you +'+money((f.valuations[f.valuations.length-1]||{}).profitToDate||0)+'; the '+money(f.costSinceLastVal)+' spent since brings your position to '+money(f.position)+' — worth valuing again.</div>'
+        : '');
   }
 
   // Spend grouped by supplier for ONE site.
