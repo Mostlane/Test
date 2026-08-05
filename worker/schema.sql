@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   warn_days          INTEGER,         -- pre-warning window (default 30)
   warn_miles         INTEGER,         -- pre-warning window (default 1000)
   specs              TEXT,            -- extra spec fields as JSON [{label,value}] (AC, payload, dimensions, handsfree…)
+  finance            TEXT,            -- financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence,note}
   at                 TEXT,
   PRIMARY KEY (tenant_id, reg)
 );
@@ -265,6 +266,20 @@ CREATE TABLE IF NOT EXISTS vehicle_handovers (
 );
 CREATE INDEX IF NOT EXISTS idx_handover_reg  ON vehicle_handovers(tenant_id,reg);
 CREATE INDEX IF NOT EXISTS idx_handover_user ON vehicle_handovers(tenant_id,username,status);
+
+-- Fuel card spend entries (routes/fleet.js, /fleet/fuel/*). Self-migrating via
+-- ensureFuelTable(). A card = a user's profile.fuelCard; MPG is derived per
+-- vehicle from these litres + the van-check odometer span (miles ÷ gallons).
+CREATE TABLE IF NOT EXISTS fuel_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL DEFAULT 1,
+  card      TEXT,                     -- fuel card number (→ user via profile.fuelCard)
+  username  TEXT,                     -- resolved card holder at entry time
+  date      TEXT,                     -- YYYY-MM-DD of the fill
+  litres    REAL, cost REAL,          -- volume + spend (£)
+  note      TEXT, by TEXT, at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fuel_card ON fuel_entries(tenant_id,card);
 -- The handover checklist/equipment/photo template is app_config
 -- handover:template:<tenant> (defaults in fleet.js until customised).
 

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script src="/portal-config.js?v=2"></script>
+  <title>Mostlane • Fuel Cards</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="auth.js"></script>
+  <style>
+  :root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:180px;}
+  a.ml-back{text-decoration:none;font-size:15px;}
+  .head-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .wrap{max-width:900px;margin:0 auto;padding:16px;}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;}
+  .btn.primary{background:var(--brand);color:#fff;border-color:var(--brand);}
+  .btn.small{padding:6px 10px;font-size:13px;}
+  .btn.danger{color:#dc2626;border-color:#fca5a5;background:#fff;}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--brand);}
+  header.page .btn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff;}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px;}
+  .panel h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 12px;}
+  .cardpick{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+  select,input[type=date],input[type=number],input[type=text]{padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:14px;background:#fff;}
+  .who{font-size:13px;color:var(--muted);}
+  .who b{color:var(--ink);}
+
+  .stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;}
+  .stat{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+  .stat .l{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
+  .stat .v{font-size:23px;font-weight:800;margin-top:3px;}
+  .stat .s{font-size:12px;color:var(--muted);margin-top:2px;}
+  .span-note{font-size:12.5px;color:var(--muted);margin-top:10px;}
+  .proj{display:inline-block;font-size:10.5px;font-weight:700;color:#92400e;background:#fef3c7;padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:middle;}
+
+  details.fold{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden;}
+  details.fold>summary{list-style:none;cursor:pointer;padding:11px 13px;font-weight:700;font-size:14px;background:#f8fafc;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  details.fold>summary::-webkit-details-marker{display:none;}
+  details.fold .body{padding:12px 13px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
+  .mini .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;} .mini .v{font-size:18px;font-weight:700;}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;}
+  td.num,th.num{text-align:right;white-space:nowrap;}
+  .reg{font-weight:800;letter-spacing:.06em;}
+  .entry{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);}
+  .entry .d{font-weight:700;white-space:nowrap;font-size:13.5px;}
+  .entry .m{flex:1;min-width:0;font-size:13px;color:#475569;}
+  .empty{color:var(--muted);font-size:14px;padding:8px 2px;}
+  .mrow{display:flex;flex-direction:column;gap:4px;}
+  .mrow label{font-size:12px;font-weight:600;color:#334155;}
+  .addgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;align-items:end;}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;display:none;z-index:3000;}
+  .runbreak{font-size:12.5px;color:#475569;}
+  .runbreak div{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--line);}
+  .status-line{font-size:12px;color:var(--muted);margin-top:8px;}
+  </style>
+</head>
+<body>
+  <header class="page">
+    <a class="ml-back" href="vehicles.html" title="Back to vehicles">‹ Back</a>
+    <h1>⛽ Fuel Cards</h1>
+    <div class="head-actions"><button class="btn small" onclick="reloadAll()">⟳ Refresh</button></div>
+  </header>
+
+  <div class="wrap">
+    <div id="gateMsg" style="display:none" class="panel"><span class="empty">This page needs Full Access.</span></div>
+
+    <div id="main" style="display:none">
+      <div class="panel">
+        <h2>Fuel card</h2>
+        <div class="cardpick">
+          <select id="cardSel" onchange="onCardChange()"></select>
+          <span class="who" id="cardWho"></span>
+        </div>
+      </div>
+
+      <div class="panel" id="addPanel" style="display:none">
+        <h2>Add a fill-up</h2>
+        <div class="addgrid">
+          <div class="mrow"><label>Date</label><input type="date" id="eDate"></div>
+          <div class="mrow"><label>Litres</label><input type="number" id="eLitres" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 62.4"></div>
+          <div class="mrow"><label>Cost (£)</label><input type="number" id="eCost" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 94.20"></div>
+          <div class="mrow"><label>Note (optional)</label><input type="text" id="eNote" placeholder="Station / ref"></div>
+          <div class="mrow"><label>&nbsp;</label><button class="btn primary" id="addBtn" onclick="saveEntry()">＋ Add</button></div>
+        </div>
+        <div class="status-line" id="addMsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2 id="statsTitle">Stats</h2>
+        <div class="stat-row" id="overall"></div>
+        <div class="span-note" id="spanNote"></div>
+        <div style="margin-top:14px" id="folds"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Per-vehicle — MPG &amp; running cost</h2>
+        <div id="vehTable"></div>
+        <div class="span-note">Running cost is per year. Fuel &amp; excess-mileage figures are <b>projected</b> from real data and marked accordingly.</div>
+      </div>
+
+      <div class="panel">
+        <h2 id="entriesTitle">Fill-ups</h2>
+        <div id="entryList"><span class="empty">Loading…</span></div>
+      </div>
+
+      <div class="status-line" id="statusLine"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  if (sessionStorage.getItem("mostlaneLoggedIn") !== "true") { window.location.href = "login.html"; }
+  const API = window.MOSTLANE_API || "https://mostlane-api.jamie-def.workers.dev";
+  function pTok(){ return localStorage.getItem("mostlaneToken") || ""; }
+  function aFetch(p,o={}){ o.headers=Object.assign({Authorization:"Bearer "+pTok()},o.headers||{}); if(o.body&&!o.headers["Content-Type"])o.headers["Content-Type"]="application/json"; return fetch(API+p,o); }
+  const $ = id => document.getElementById(id);
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display="none",2600); }
+  function money(n){ return "£"+Number(n||0).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function money0(n){ return "£"+Math.round(Number(n||0)).toLocaleString("en-GB"); }
+  function litres(n){ return (Number(n||0)).toLocaleString("en-GB",{maximumFractionDigits:1})+" L"; }
+  function miles(n){ return Math.round(Number(n||0)).toLocaleString("en-GB")+" mi"; }
+  function mpgTxt(n){ return (n==null||n==="")?"—":Number(n).toFixed(1)+" mpg"; }
+  function fmtDMY(s){ if(!s)return ""; const d=new Date(s); if(isNaN(d))return esc(s); return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getFullYear()).slice(2); }
+
+  let CARDS=[], EDIT_ID=null;
+  const cardVal = () => $("cardSel").value;
+
+  async function boot(){
+    // Card list also gates the page (403 => not Full Access).
+    let d;
+    try{ const r=await aFetch("/fleet/fuel/cards"); if(r.status===403){ $("gateMsg").style.display="block"; return; } d=await r.json(); }
+    catch(e){ $("statusLine").textContent="Couldn't load."; return; }
+    $("main").style.display="block";
+    CARDS=(d&&d.cards)||[];
+    const opts=['<option value="">All cards</option>'].concat(CARDS.map(c=>`<option value="${esc(c.card)}">${esc(c.name)} · ${esc(c.card)}${c.vehicle?" · "+esc(c.vehicle):""}${c.active?"":" (inactive)"}</option>`));
+    $("cardSel").innerHTML=opts.join("");
+    $("eDate").value=new Date().toISOString().slice(0,10);
+    onCardChange();
+  }
+  function onCardChange(){
+    const card=cardVal();
+    const c=CARDS.find(x=>x.card===card);
+    $("cardWho").innerHTML = card ? (c?`<b>${esc(c.name)}</b> · card ${esc(c.card)}${c.vehicle?` · van <b>${esc(c.vehicle)}</b>`:" · no van allocated"}`:"") : "Showing every fuel card combined.";
+    $("addPanel").style.display = card ? "block" : "none";
+    $("statsTitle").textContent = card ? "Stats — "+(c?c.name:card) : "Stats — all cards";
+    $("entriesTitle").textContent = card ? "Fill-ups — "+(c?c.name:card) : "Fill-ups — all cards";
+    EDIT_ID=null; resetForm();
+    loadStats(); loadEntries();
+  }
+  function reloadAll(){ boot(); }
+
+  async function loadStats(){
+    $("overall").innerHTML='<span class="empty">Loading…</span>'; $("folds").innerHTML=""; $("spanNote").textContent="";
+    let d; try{ d=await aFetch("/fleet/fuel/stats?card="+encodeURIComponent(cardVal())).then(r=>r.json()); }catch(e){ $("overall").innerHTML='<span class="empty">Couldn\'t load stats.</span>'; return; }
+    if(!d.ok){ $("overall").innerHTML='<span class="empty">Couldn\'t load stats.</span>'; return; }
+    const o=d.overall||{};
+    $("overall").innerHTML=[
+      ['Total spend', money(o.spend)],
+      ['Fuel', litres(o.litres)],
+      ['Miles', miles(o.miles)],
+      ['MPG', mpgTxt(o.mpg)],
+    ].map(([l,v])=>`<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+    $("spanNote").innerHTML = o.spanDays ? `Based on <b>${o.spanWeeks}</b> week(s) of real data (${fmtDMY(o.first)} → ${fmtDMY(o.last)}, ${o.entries} fill-up${o.entries===1?"":"s"}). Averages below use only this real span.` : "No fuel entries yet.";
+    // Foldable period averages.
+    const P=d.periods; if(P){
+      const defs=[['Weekly','week'],['Monthly','month'],['3-Monthly','quarter'],['Yearly','year']];
+      $("folds").innerHTML=defs.map(([label,key],i)=>{
+        const p=P[key]||{}; const pj=p.projected?'<span class="proj">projected</span>':"";
+        return `<details class="fold" ${i===0?"open":""}>
+          <summary><span>${label} average${pj}</span><span style="color:var(--muted);font-weight:700">${money(p.spend)}</span></summary>
+          <div class="body">
+            <div class="mini"><div class="l">Spend</div><div class="v">${money(p.spend)}</div></div>
+            <div class="mini"><div class="l">Mileage</div><div class="v">${miles(p.miles)}</div></div>
+            <div class="mini"><div class="l">Fuel</div><div class="v">${litres(p.litres)}</div></div>
+          </div>
+        </details>`;
+      }).join("");
+    }
+    renderVehicles(d.vehicles||[]);
+  }
+
+  function renderVehicles(vehicles){
+    const withData=vehicles.filter(v=>v.mpg!=null||v.spend>0||(v.running&&v.running.total>0));
+    if(!withData.length){ $("vehTable").innerHTML='<span class="empty">No vehicle data yet — add fuel entries and van-check mileage.</span>'; return; }
+    $("vehTable").innerHTML='<table><thead><tr><th>Vehicle</th><th class="num">MPG</th><th class="num">Fuel spend</th><th class="num">Running cost/yr</th><th></th></tr></thead><tbody>'+
+      withData.map((v,i)=>{
+        const r=v.running||{};
+        const proj=r.projected?'<span class="proj">proj</span>':"";
+        return `<tr>
+          <td class="reg">${esc(v.reg)}</td>
+          <td class="num">${mpgTxt(v.mpg)}</td>
+          <td class="num">${money0(v.spend)}</td>
+          <td class="num">${r.total?money0(r.total):"—"} ${proj}</td>
+          <td class="num"><button class="btn ghost small" onclick="toggleBreak(${i})">Breakdown</button></td>
+        </tr>
+        <tr id="brk${i}" style="display:none"><td colspan="5"><div class="runbreak">
+          ${runRow('Insurance',r.insurance)}${runRow('Road tax',r.roadTax)}${runRow('Finance',r.finance)}
+          ${runRow('Fuel'+(r.fuelProjected?' (projected)':''),r.fuel)}${runRow('Maintenance (12mo)',r.maintenance)}
+          ${r.excess?runRow('Excess mileage (projected)',r.excess):""}
+          <div style="font-weight:800;border-bottom:none"><span>Total / year</span><span>${money0(r.total)}</span></div>
+        </div></td></tr>`;
+      }).join("")+'</tbody></table>';
+  }
+  function runRow(l,v){ return `<div><span>${l}</span><span>${money0(v||0)}</span></div>`; }
+  function toggleBreak(i){ const el=$("brk"+i); if(el) el.style.display = el.style.display==="none"?"table-row":"none"; }
+
+  async function loadEntries(){
+    $("entryList").innerHTML='<span class="empty">Loading…</span>';
+    let d; try{ d=await aFetch("/fleet/fuel/entries?card="+encodeURIComponent(cardVal())).then(r=>r.json()); }catch(e){ $("entryList").innerHTML='<span class="empty">Couldn\'t load.</span>'; return; }
+    const rows=(d&&d.entries)||[];
+    if(!rows.length){ $("entryList").innerHTML='<span class="empty">No fill-ups logged yet.</span>'; return; }
+    const showName = !cardVal();
+    $("entryList").innerHTML=rows.map(e=>`<div class="entry">
+      <span class="d">${fmtDMY(e.date)}</span>
+      <span class="m">${litres(e.litres)} · ${money(e.cost)}${e.ppl?` · ${money(e.ppl)}/L`:""}${showName?` · ${esc(e.name)}`:""}${e.note?` · ${esc(e.note)}`:""}</span>
+      <button class="btn ghost small" onclick='editEntry(${JSON.stringify(e).replace(/'/g,"&#39;")})'>Edit</button>
+      <button class="btn danger small" onclick="delEntry(${e.id})">✕</button>
+    </div>`).join("");
+  }
+
+  function resetForm(){ $("eLitres").value=""; $("eCost").value=""; $("eNote").value=""; $("eDate").value=new Date().toISOString().slice(0,10); $("addBtn").textContent="＋ Add"; $("addMsg").textContent=""; }
+  function editEntry(e){
+    // switch the card selector to this entry's card if we're in "all" view
+    if(cardVal()!==e.card && CARDS.some(c=>c.card===e.card)){ $("cardSel").value=e.card; onCardChange(); }
+    EDIT_ID=e.id; $("eDate").value=e.date; $("eLitres").value=e.litres; $("eCost").value=e.cost; $("eNote").value=e.note||""; $("addBtn").textContent="Save changes"; $("addMsg").textContent="Editing an existing fill-up.";
+    $("addPanel").scrollIntoView({behavior:"smooth",block:"center"});
+  }
+  async function saveEntry(){
+    const card=cardVal(); if(!card){ toast("Pick a card first"); return; }
+    const litresV=parseFloat($("eLitres").value), cost=parseFloat($("eCost").value), date=$("eDate").value;
+    if(!date){ $("addMsg").textContent="Enter a date."; return; }
+    if(!(litresV>0)&&!(cost>0)){ $("addMsg").textContent="Enter litres and/or cost."; return; }
+    $("addBtn").disabled=true; $("addMsg").textContent="Saving…";
+    try{
+      const body={id:EDIT_ID||undefined,card,date,litres:isNaN(litresV)?0:litresV,cost:isNaN(cost)?0:cost,note:$("eNote").value.trim()};
+      const r=await aFetch("/fleet/fuel/entry",{method:"POST",body:JSON.stringify(body)}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||"failed");
+      EDIT_ID=null; resetForm(); toast("Saved"); loadEntries(); loadStats();
+    }catch(e){ $("addMsg").textContent="Couldn't save — "+(e.message||""); }
+    $("addBtn").disabled=false;
+  }
+  async function delEntry(id){
+    if(!confirm("Delete this fill-up?")) return;
+    try{ const r=await aFetch("/fleet/fuel/entry-delete",{method:"POST",body:JSON.stringify({id})}).then(r=>r.json()); if(r.ok){ toast("Deleted"); loadEntries(); loadStats(); } }catch(e){}
+  }
+
+  Object.assign(window,{onCardChange,reloadAll,saveEntry,editEntry,delEntry,toggleBreak});
+  window.addEventListener("DOMContentLoaded",boot);
+  </script>
+</body>
+</html>

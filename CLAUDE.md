@@ -481,6 +481,36 @@ theme, header.page, cards — NOT the old dark embossed page) and is the hub.
   edge auto-scroll), saves `/fleet/vehicle-order` (app_config
   `fleet:vehorder:<tid>` = [reg,…]); order applied server-side in
   /fleet/vehicles so it's the same everywhere.
+- **Fuel cards, MPG & running cost (money = Full Access only)** — page
+  **fuel-cards.html** (⛽ Fuel Cards button in the vehicles header, shown only to
+  FullAccess). A fuel card = a user's `profile.fuelCard` (set in Users Admin).
+  Log fill-ups (**date · litres · cost £**) per card → table **fuel_entries**
+  (self-migrating). Routes (all `canMoney` = FullAccess): **GET
+  /fleet/fuel/cards** (card→user→current van), **GET /fleet/fuel/entries?card=**,
+  **POST /fleet/fuel/entry** (create/update), **POST /fleet/fuel/entry-delete**,
+  **GET /fleet/fuel/stats?card=** (overall + per-period + per-vehicle).
+  - **MPG** (`mpgByVehicle`, all-available-data): litres attributed to a vehicle
+    via card→user→**assignment-at-date** (`vehicle_assignments`, fallback current
+    `vehicle_assigned`) ÷ UK gallon (4.54609), miles = the van's van-check
+    odometer span (max−min, needs ≥2 readings). Shown as **Current MPG** on the
+    vehicle cards + deep-dive (MPG isn't money, so any Vehicles user sees it);
+    `/fleet/vehicles` returns `currentMpg` for everyone.
+  - **Stats** foldable **Weekly / Monthly / 3-Monthly / Yearly** (`periodStats`):
+    every average = total ÷ (real data span in days) × period days; a period
+    LONGER than the real span is flagged **`projected`** in the response and
+    badged in the UI. "Based on N weeks of real data" is always shown.
+  - **Vehicle financials** — `vehicles.finance` JSON column
+    {ownership owned|financed, insuranceYear, roadTaxYear, financeMonthly,
+    financeEnd, allowedMiles, excessPence}. Edited in the vehicles.html edit
+    modal (💷 Financials group, FullAccess only), saved via **POST /fleet/finance**
+    (separate from /fleet/vehicle so Vehicles-only users can't write money).
+  - **Running cost / year** (`runningCost`): insurance + road tax + finance
+    (financed→monthly×12) + **projected** fuel (from the van's own spend/day
+    ×365) + maintenance (real, last 12 months from vehicle_maintenance) +
+    **projected** excess-mileage charge (financed with an allowance: projected
+    annual miles over allowedMiles × excessPence). Returned in /fleet/vehicles +
+    /fleet/fuel/stats for FullAccess only; shown on the deep-dive ("Cost to run
+    /year") and the fuel page's per-vehicle table with a `projected` badge.
 - **Van check history + Van handovers** (page **vehicle-checks.html?reg=**,
   reached from a 📋 Checks button on each card + the deep-dive):
   - **Van checks** — **GET /fleet/vehicle-checks?reg=** returns every completed
@@ -614,11 +644,13 @@ sessions, devices, login_history, password_resets, holidays(+config/log/
 allowance/system_days), assets, asset_transfers, asset_transfer_requests,
 sites, customers, sla_jobs, shifts, vehicle_checks, office_shifts, oncall_log,
 daily_logs, app_config, portal_keys, key_log, notify_log, audit_log,
-**vehicles** (+`specs` JSON [{label,value}] extra fields), **vehicle_assignments**,
+**vehicles** (+`specs` JSON [{label,value}] extra fields, +`finance` JSON
+financials), **vehicle_assignments**,
 **vehicle_maintenance** (categorised, cost-split maintenance log; docs in R2
 `vehiclemaint/<tid>/<REG>/…`), **vehicle_handovers** (detailed handover checks
 sent to newly-assigned drivers; photos+signature in ASSET_BUCKET
-`handover/<user>/<id>/…`), **van_timesheets**, **sla_jobs_archive**
+`handover/<user>/<id>/…`), **fuel_entries** (fuel-card fill-ups → per-vehicle
+MPG + running cost), **van_timesheets**, **sla_jobs_archive**
 (imported job history — separate from live sla_jobs), **eng_timesheets**,
 **eng_invoices** (engineer weekly timesheets + self-employed invoice register;
 PDFs in R2 JOB_FILES `invoices/<tid>/<user>/`), **job_time_segments** (SLA
@@ -718,7 +750,7 @@ login.html, main.html, holiday.html, holiday-admin.html, theme.html,
 personalise.html, help.html, activity-log.html, my-documents.html,
 notification-centre.html, fleet-report.html, van-timesheet.html,
 vehicles.html, vehicle-maintenance.html, vehicle-checks.html, van-handover.html,
-job-costing.html, sites-register.html, sitelog-links.html.
+fuel-cards.html, job-costing.html, sites-register.html, sitelog-links.html.
 **ADD NEW HOT PAGES HERE when created** — a page shipped
 without no-cache once got cache-poisoned on phones (that's why
 personalise.html had to replace theme.html). (NB: _headers is a DEAD file on
