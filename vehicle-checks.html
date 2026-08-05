@@ -204,8 +204,17 @@
         <p class="empty">Not completed yet — it's still with the driver.</p></div>`);
       return;
     }
-    const chk=(HO_TPL.checklist||[]).filter(it=>h.answers[it.id]!==undefined).map(it=>`<div class="chk"><span>${esc(it.label)}</span><span>${answerChip(h.answers[it.id])}${h.defectNotes&&h.defectNotes[it.id]?` <span class="n">${esc(h.defectNotes[it.id])}</span>`:""}</span></div>`).join("");
-    const eq=(HO_TPL.equipment||[]).filter(it=>h.answers[it.id]!==undefined).map(it=>`<div class="chk"><span>${esc(it.label)}</span><span>${answerChip(h.answers[it.id])}${h.defectNotes&&h.defectNotes[it.id]?` <span class="n">${esc(h.defectNotes[it.id])}</span>`:""}</span></div>`).join("");
+    // Iterate the record's OWN answers (labelled by the current template, falling
+    // back to the raw id) so a later template edit never hides old answers.
+    const lbl={}; (HO_TPL.checklist||[]).forEach(it=>lbl[it.id]=it.label); (HO_TPL.equipment||[]).forEach(it=>lbl[it.id]=it.label);
+    const chkRows=[], eqRows=[];
+    for(const id of Object.keys(h.answers||{})){
+      const v=h.answers[id];
+      const note=(h.defectNotes&&h.defectNotes[id])?` <span class="n">${esc(h.defectNotes[id])}</span>`:"";
+      const row=`<div class="chk"><span>${esc(lbl[id]||id)}</span><span>${answerChip(v)}${note}</span></div>`;
+      (v==="present"||v==="missing"?eqRows:chkRows).push(row);
+    }
+    const chk=chkRows.join(""), eq=eqRows.join("");
     const damage=(h.damage||[]).map(d=>`<div class="dmgitem">${esc(d.note||"(no description)")}${d.photo?`<br><img src="${esc(thumb(d.photo))}" onclick="enlarge('${esc(full(d.photo))}')" alt="">`:""}</div>`).join("");
     const slotKeys=Object.values(h.slotPhotos||{});
     showDetail(`
