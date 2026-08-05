@@ -1,0 +1,134 @@
+<script src="/portal-config.js?v=2"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiteLog ↔ Portal links</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<style>
+:root{ --bg:#f4f6f9; --card:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b; --brand:#2563eb; --green:#15803d; --red:#dc2626; }
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif;}
+header.page{background:#0f172a;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+header.page h1{font-size:18px;margin:0;font-weight:600;flex:1;min-width:160px;}
+a.ml-back{color:#fff;text-decoration:none;font-size:15px;}
+header.page .btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:9px;padding:7px 12px;font:600 13px "Segoe UI";cursor:pointer;text-decoration:none;}
+.wrap{max-width:920px;margin:0 auto;padding:16px;}
+.hint{font-size:13px;color:var(--muted);line-height:1.5;margin:0 0 14px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.nm{font-weight:700;font-size:15px;flex:1;min-width:180px;}
+.nm small{display:block;color:var(--muted);font-weight:400;font-size:12px;margin-top:1px;}
+.linked{color:var(--green);font-weight:700;font-size:13px;}
+.notlinked{color:var(--muted);font-size:13px;}
+select{border:1px solid var(--line);border-radius:8px;padding:7px 9px;font-size:14px;max-width:230px;background:#fff;}
+.btn{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:8px;padding:7px 12px;font:600 13px "Segoe UI";cursor:pointer;}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;}
+.btn.link0{background:#f1f5f9;}
+.pill{font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;}
+.pill.on{background:#dcfce7;color:var(--green);} .pill.off{background:#e5e7eb;color:#475569;}
+.msg{font-size:13px;color:var(--muted);}
+.suggest{font-size:11px;color:var(--brand);margin-left:2px;}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(80px);background:#0f172a;color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;transition:transform .25s;z-index:50;}
+.toast.show{transform:translateX(-50%) translateY(0);}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px;}
+.bar input{border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;flex:1;min-width:160px;}
+</style>
+
+<header class="page">
+  <a class="ml-back" data-role="home" href="job-costing.html">‹ Back</a>
+  <h1>🔗 SiteLog ↔ Portal links</h1>
+  <a class="btn" href="job-costing.html">📊 Job Costing</a>
+</header>
+
+<div class="wrap">
+  <p class="hint">Link each <b>SiteLog</b> scanning person to their <b>portal user</b>. Once linked, that person is treated as an employee in job costing — their labour is priced at the <b>portal</b> rate and fuel/travel allowances (from Engineer Timesheet settings), and their SiteLog scans tie into the portal timesheet. People left unlinked are costed on SiteLog's own rate + fuel (fine for subcontractors). One portal user links to one SiteLog person.</p>
+  <div class="bar"><input id="search" placeholder="Search SiteLog people…" autocomplete="off"><span class="msg" id="count"></span></div>
+  <div id="list"><div class="msg">Loading…</div></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var API=(window.MOSTLANE_API||"").replace(/\/$/,"");
+  var $=function(id){return document.getElementById(id)};
+  function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function tok(){return localStorage.getItem("mostlaneToken");}
+  function aFetch(p){var h=new Headers();var t=tok();if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{headers:h,cache:"no-store"});}
+  function postJSON(p,b){var h=new Headers();h.set("Content-Type","application/json");var t=tok();if(t)h.set("Authorization","Bearer "+t);return fetch(API+p,{method:"POST",headers:h,body:JSON.stringify(b)});}
+  function norm(s){return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();}
+  var toastT;
+  function toast(m){var t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(function(){t.classList.remove("show");},2200);}
+
+  var PEOPLE=[], USERS=[];
+
+  async function load(){
+    $("list").innerHTML='<div class="msg">Loading…</div>';
+    try{
+      var results=await Promise.all([ aFetch("/users"), aFetch("/sitelog/engineers") ]);
+      if(results[1].status===403){ $("list").innerHTML='<div class="msg">This page is for Full Access (owner) users only.</div>'; return; }
+      var ud=await results[0].json(), ed=await results[1].json();
+      USERS=(ud.Users||ud.users||[]).map(function(u){return {username:u.Username||u.username, name:((u.FirstName||"")+" "+(u.LastName||"")).trim(), status:u.Status||u.status||""};})
+        .filter(function(u){return u.username;});
+      PEOPLE=(ed.engineers||ed.people||[]).slice().sort(function(a,b){return (a.first_name+" "+a.last_name).localeCompare(b.first_name+" "+b.last_name);});
+      render();
+    }catch(e){ $("list").innerHTML='<div class="msg">Couldn\'t load — '+esc(e.message)+'</div>'; }
+  }
+
+  function usersLinkedElsewhere(){
+    var m={}; PEOPLE.forEach(function(p){ if(p.portal_username) m[norm(p.portal_username)]=p.id; }); return m;
+  }
+  function suggest(p){
+    var full=norm((p.first_name||"")+" "+(p.last_name||""));
+    var u=USERS.find(function(x){return norm(x.name)===full && full;}) || USERS.find(function(x){return norm(x.username)===full && full;});
+    return u?u.username:"";
+  }
+
+  function render(){
+    var q=norm($("search").value);
+    var list=PEOPLE.filter(function(p){ if(!q) return true; return norm((p.first_name||"")+" "+(p.last_name||"")+" "+(p.company||"")+" "+(p.portal_username||"")).indexOf(q)>=0; });
+    var nLinked=PEOPLE.filter(function(p){return p.portal_username;}).length;
+    $("count").textContent=nLinked+" of "+PEOPLE.length+" linked";
+    if(!list.length){ $("list").innerHTML='<div class="msg">No SiteLog people'+(q?" match":"")+'.</div>'; return; }
+    $("list").innerHTML=list.map(function(p){
+      var cur=(p.portal_username||"").trim();
+      var sug=cur?"":suggest(p);
+      var opts='<option value="">— choose portal user —</option>'+USERS.map(function(u){
+        var sel=(cur&&norm(u.username)===norm(cur))||(!cur&&sug&&u.username===sug)?" selected":"";
+        return '<option value="'+esc(u.username)+'"'+sel+'>'+esc(u.name||u.username)+' ('+esc(u.username)+')</option>';
+      }).join("");
+      var status=cur
+        ? '<span class="linked">✅ '+esc(cur)+'</span>'
+        : '<span class="notlinked">not linked'+(sug?' <span class="suggest">· suggested: '+esc(sug)+'</span>':'')+'</span>';
+      return '<div class="card"><div class="row">'+
+        '<div class="nm">'+esc((p.first_name||"")+" "+(p.last_name||"")).trim()+
+          '<small>'+esc(p.company||"—")+(p.visit_count!=null?' · '+p.visit_count+' scans':'')+'</small></div>'+
+        status+
+        '<select data-sel="'+esc(p.id)+'">'+opts+'</select>'+
+        '<button class="btn primary" data-link="'+esc(p.id)+'">'+(cur?"Re-link":"Link")+'</button>'+
+        (cur?'<button class="btn link0" data-unlink="'+esc(p.id)+'">Unlink</button>':'')+
+      '</div></div>';
+    }).join("");
+  }
+
+  async function setLink(id, username){
+    try{
+      var r=await (await postJSON("/sitelog/update-engineer",{id:id, portalUsername:username})).json();
+      if(r&&r.ok===false) throw new Error(r.error||"failed");
+      var p=PEOPLE.find(function(x){return x.id===id;}); if(p) p.portal_username=username||null;
+      // one-to-one: clear this username off any other person locally
+      if(username) PEOPLE.forEach(function(x){ if(x.id!==id && norm(x.portal_username)===norm(username)) x.portal_username=null; });
+      toast(username?"Linked ✓":"Unlinked");
+      render();
+    }catch(e){ toast("Couldn't save — "+e.message); }
+  }
+
+  document.addEventListener("click",function(e){
+    var lb=e.target.closest("[data-link]");
+    if(lb){ var id=lb.getAttribute("data-link"); var sel=document.querySelector('[data-sel="'+CSS.escape(id)+'"]'); var u=sel?sel.value:""; if(!u){ toast("Pick a portal user first"); return; } setLink(id,u); return; }
+    var ub=e.target.closest("[data-unlink]");
+    if(ub){ setLink(ub.getAttribute("data-unlink"),""); return; }
+  });
+  $("search").addEventListener("input",render);
+  load();
+})();
+</script>
