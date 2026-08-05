@@ -79,6 +79,8 @@
   Cache-Control: no-cache
 /van-handover.html
   Cache-Control: no-cache
+/fuel-cards.html
+  Cache-Control: no-cache
 /office-timesheet.html
   Cache-Control: no-cache
 /users-admin.html

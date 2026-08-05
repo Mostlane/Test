@@ -25,6 +25,13 @@ async function canFleet(env, tid, sess) {
   const p = await permissionsFor(env, tid, sess.user.username);
   return p.FullAccess === "Yes" || p.Vehicles === "Yes";
 }
+// Money views (fuel spend, vehicle financials, running cost) are Full-Access only.
+async function canMoney(env, tid, sess) {
+  if (!sess) return false;
+  const p = await permissionsFor(env, tid, sess.user.username);
+  return p.FullAccess === "Yes";
+}
+const UK_GALLON = 4.54609;   // litres per imperial gallon (MPG is UK)
 const DKEY = tid => `fleet:drivers:${tid}`;
 const CKEY = tid => `fleet:vehcover:${tid}`;   // { REGNORM: photoKey } — chosen cover per van
 const prefix = tid => `fleetreports/${tid}/`;
@@ -360,6 +367,23 @@ export async function handle(request, env, ctx, url, sess) {
       if (h.status === "done") { const cur = lastHo[k]; if (!cur || new Date(h.completed_at || 0) > new Date(cur.at || 0)) lastHo[k] = { id: h.id, at: h.completed_at || "" }; }
       else if (h.status === "pending") pendHo[k] = (pendHo[k] || 0) + 1;
     }
+    // MPG (all users) + money views (Full Access only): fuel/odo spans, finance,
+    // last-12-months maintenance, running cost.
+    const mpg = await mpgByVehicle(env, tid);
+    const money = await canMoney(env, tid, sess);
+    let fuelV = {}, odoV = {}, maint12 = {};
+    if (money) {
+      fuelV = await fuelByVehicle(env, tid); odoV = await odoByVehicle(env, tid);
+      try {
+        await ensureMaintTable(env);
+        const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
+        for (const m of mrows || []) {
+          const sum = (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+          maint12[dn(m.reg)] = (maint12[dn(m.reg)] || 0) + sum;
+        }
+      } catch {}
+    }
     const vehicles = await Promise.all((results || []).map(async v => {
       const cm = miles[dn(v.reg)] || null;
       const sv = serviceView(v, cm);
@@ -381,7 +405,11 @@ export async function handle(request, env, ctx, url, sess) {
         photoUrl: coverKey ? await signedFileUrl(env, url.origin, "/fleet/vehicle-photo", coverKey) : "",
         lastHandoverId: (lastHo[dn(v.reg)] || {}).id || null,
         lastHandoverAt: (lastHo[dn(v.reg)] || {}).at || "",
-        pendingHandover: pendHo[dn(v.reg)] || 0
+        pendingHandover: pendHo[dn(v.reg)] || 0,
+        currentMpg: (mpg[dn(v.reg)] || {}).mpg || null,
+        // Money views — Full Access only.
+        finance: money ? financeOf(v) : undefined,
+        runningCost: money ? runningCost(financeOf(v), fuelV[dn(v.reg)], odoV[dn(v.reg)], maint12[dn(v.reg)] || 0) : undefined
       };
     }));
     // Apply the saved manual order (drag-to-reorder); unknown regs fall to the
@@ -610,6 +638,143 @@ export async function handle(request, env, ctx, url, sess) {
     if (row && row.doc_key) { try { await env.JOB_FILES.delete(row.doc_key); } catch {} }
     await env.DB.prepare("DELETE FROM vehicle_maintenance WHERE tenant_id=? AND id=?").bind(tid, id).run();
     return jr({ ok: true }, headers);
+  }
+
+  // ── Fuel cards + spend entries + stats (Full Access only — money) ─────────
+  if (sub === "/finance" || sub === "/fuel/cards" || sub === "/fuel/entries" ||
+      sub === "/fuel/entry" || sub === "/fuel/entry-delete" || sub === "/fuel/stats") {
+    if (!(await canMoney(env, tid, sess))) return jr({ error: "Forbidden" }, headers, 403);
+
+    // Save a vehicle's financials.
+    if (sub === "/finance" && method === "POST") {
+      await ensureVehTable(env);
+      const b = await readJson(request);
+      const reg = String(b.reg || "").trim();
+      if (!reg) return jr({ error: "reg required" }, headers, 400);
+      const f = b.finance && typeof b.finance === "object" ? b.finance : {};
+      const num = x => { const n = Number(x); return isFinite(n) && n !== 0 ? n : (x === 0 || x === "0" ? 0 : null); };
+      const clean = {
+        ownership: f.ownership === "financed" ? "financed" : "owned",
+        insuranceYear: num(f.insuranceYear), roadTaxYear: num(f.roadTaxYear),
+        financeMonthly: num(f.financeMonthly), financeEnd: /^\d{4}-\d{2}-\d{2}$/.test(f.financeEnd || "") ? f.financeEnd : "",
+        allowedMiles: num(f.allowedMiles), excessPence: num(f.excessPence),
+        note: String(f.note || "").slice(0, 300),
+      };
+      await env.DB.prepare("UPDATE vehicles SET finance=? WHERE tenant_id=? AND reg=?").bind(JSON.stringify(clean), tid, reg).run();
+      return jr({ ok: true, finance: clean }, headers);
+    }
+
+    // Card list (card → user → current vehicle), from users.profile.fuelCard.
+    if (sub === "/fuel/cards" && method === "GET") {
+      const { cards } = await fuelCardMap(env, tid);
+      cards.sort((a, b) => (b.active - a.active) || String(a.name).localeCompare(String(b.name)));
+      return jr({ ok: true, cards }, headers);
+    }
+
+    // List spend entries (optionally for one card), newest first.
+    if (sub === "/fuel/entries" && method === "GET") {
+      await ensureFuelTable(env);
+      const card = q.get("card") || "";
+      const rows = card
+        ? (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? AND card=? ORDER BY date DESC, id DESC").bind(tid, card).all()).results
+        : (await env.DB.prepare("SELECT * FROM fuel_entries WHERE tenant_id=? ORDER BY date DESC, id DESC").bind(tid).all()).results;
+      const { byCard } = await fuelCardMap(env, tid);
+      const entries = (rows || []).map(r => ({
+        id: r.id, card: r.card, username: r.username, name: (byCard[r.card] || {}).name || r.username || "",
+        date: r.date || "", litres: Number(r.litres) || 0, cost: Number(r.cost) || 0, note: r.note || "",
+        ppl: (Number(r.litres) > 0) ? Math.round((Number(r.cost) / Number(r.litres)) * 100) / 100 : null,
+      }));
+      return jr({ ok: true, entries }, headers);
+    }
+
+    // Create / update a spend entry.
+    if (sub === "/fuel/entry" && method === "POST") {
+      await ensureFuelTable(env);
+      const b = await readJson(request);
+      const card = String(b.card || "").trim();
+      if (!card) return jr({ error: "card required" }, headers, 400);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date : "";
+      if (!date) return jr({ error: "valid date required" }, headers, 400);
+      const litres = Math.round((Number(b.litres) || 0) * 100) / 100;
+      const cost = Math.round((Number(b.cost) || 0) * 100) / 100;
+      const note = String(b.note || "").slice(0, 200);
+      const { byCard } = await fuelCardMap(env, tid);
+      const username = (byCard[card] || {}).username || "";
+      const id = parseInt(String(b.id || ""), 10);
+      const now = new Date().toISOString();
+      if (id && !isNaN(id)) {
+        await env.DB.prepare("UPDATE fuel_entries SET card=?,username=?,date=?,litres=?,cost=?,note=? WHERE tenant_id=? AND id=?")
+          .bind(card, username, date, litres, cost, note, tid, id).run();
+        return jr({ ok: true, id }, headers);
+      }
+      const res = await env.DB.prepare("INSERT INTO fuel_entries (tenant_id,card,username,date,litres,cost,note,by,at) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(tid, card, username, date, litres, cost, note, sess.user.username, now).run();
+      return jr({ ok: true, id: res.meta ? res.meta.last_row_id : null }, headers, 201);
+    }
+    if (sub === "/fuel/entry-delete" && method === "POST") {
+      await ensureFuelTable(env);
+      const b = await readJson(request); const id = parseInt(String(b.id || ""), 10);
+      if (!id || isNaN(id)) return jr({ error: "id required" }, headers, 400);
+      await env.DB.prepare("DELETE FROM fuel_entries WHERE tenant_id=? AND id=?").bind(tid, id).run();
+      return jr({ ok: true }, headers);
+    }
+
+    // Aggregated stats: overall + per-period (real-span averages, projections
+    // flagged) + per-vehicle MPG/running cost. Optional ?card= scopes spend.
+    if (sub === "/fuel/stats" && method === "GET") {
+      await ensureFuelTable(env);
+      const card = q.get("card") || "";
+      const { byCard, cards } = await fuelCardMap(env, tid);
+      const fuelV = await fuelByVehicle(env, tid);
+      const odoV = await odoByVehicle(env, tid);
+      const mpg = await mpgByVehicle(env, tid);
+
+      // Spend/litres from entries (scoped to a card if given).
+      const rows = (card
+        ? (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=? AND card=?").bind(tid, card).all()).results
+        : (await env.DB.prepare("SELECT date,litres,cost,card,username FROM fuel_entries WHERE tenant_id=?").bind(tid).all()).results) || [];
+      let spend = 0, litres = 0, first = "", last = "";
+      for (const r of rows) {
+        spend += Number(r.cost) || 0; litres += Number(r.litres) || 0;
+        if (r.date && (!first || r.date < first)) first = r.date;
+        if (r.date && (!last || r.date > last)) last = r.date;
+      }
+      // Miles for the scope: the linked vehicle(s) odometer span.
+      const regsInScope = new Set();
+      if (card) {
+        const u = (byCard[card] || {}).username;
+        const ivs = await assignmentIntervals(env, tid);
+        for (const e of rows) { const rg = regForUserOnDate(ivs, u, e.date) || (byCard[card] || {}).vehicle; if (rg) regsInScope.add(dnReg(rg)); }
+      } else { for (const k of Object.keys(fuelV)) regsInScope.add(k); }
+      let miles = 0;
+      for (const k of regsInScope) if (odoV[k]) miles += odoV[k].milesDriven;
+
+      const spanDays = (first && last) ? Math.max(1, (Date.parse(last) - Date.parse(first)) / 86400000) : 0;
+      const spanWeeks = spanDays ? Math.round(spanDays / 7 * 10) / 10 : 0;
+      const gallons = litres / UK_GALLON;
+      const overallMpg = (miles > 0 && gallons > 0) ? Math.round((miles / gallons) * 10) / 10 : null;
+      const periods = spanDays ? periodStats(spanDays, { spend, litres, miles }) : null;
+
+      // Per-vehicle table (MPG + running cost) — always whole fleet.
+      const vrows = (await env.DB.prepare("SELECT reg, finance FROM vehicles WHERE tenant_id=?").bind(tid).all()).results || [];
+      const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      const maint12 = {};
+      try {
+        await ensureMaintTable(env);
+        const { results: mrows } = await env.DB.prepare("SELECT reg, allocs FROM vehicle_maintenance WHERE tenant_id=? AND date>=?").bind(tid, since).all();
+        for (const m of mrows || []) maint12[dnReg(m.reg)] = (maint12[dnReg(m.reg)] || 0) + (parseJson(m.allocs, []) || []).reduce((s, a) => s + (Number(a.cost) || 0), 0);
+      } catch {}
+      const vehicles = vrows.map(v => {
+        const k = dnReg(v.reg);
+        return { reg: v.reg, mpg: (mpg[k] || {}).mpg || null, spend: Math.round((fuelV[k] || {}).spend || 0), litres: Math.round(((fuelV[k] || {}).litres || 0) * 10) / 10, running: runningCost(financeOf(v), fuelV[k], odoV[k], maint12[k] || 0) };
+      });
+
+      return jr({
+        ok: true, card,
+        overall: { spend: Math.round(spend * 100) / 100, litres: Math.round(litres * 10) / 10, miles, mpg: overallMpg, first, last, spanDays: Math.round(spanDays), spanWeeks, entries: rows.length },
+        periods, vehicles, cards,
+      }, headers);
+    }
   }
 
   // ── Van check history for a vehicle (completed weekly checks, newest first) ─
@@ -897,7 +1062,8 @@ async function ensureVehTable(env) {
     "svc_interval_days INTEGER", "svc_interval_miles INTEGER",
     "last_service_date TEXT", "last_service_miles INTEGER",
     "warn_days INTEGER", "warn_miles INTEGER",
-    "specs TEXT"   // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
+    "specs TEXT",  // extra spec fields (AC, payload, dimensions, handsfree …) as JSON [{label,value}]
+    "finance TEXT" // vehicle financials JSON {ownership,insuranceYear,roadTaxYear,financeMonthly,financeEnd,allowedMiles,excessPence}
   ];
   for (const c of cols) { try { await env.DB.prepare(`ALTER TABLE vehicles ADD COLUMN ${c}`).run(); } catch {} }
 }
@@ -926,6 +1092,155 @@ async function latestMileage(env, tid) {
   } catch {}
   return out;
 }
+
+// ── Fuel / MPG / running-cost helpers ─────────────────────────────────────
+const dnReg = s => String(s || "").replace(/\s+/g, "").toUpperCase();
+async function ensureFuelTable(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fuel_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 1,
+    card TEXT, username TEXT, date TEXT, litres REAL, cost REAL, note TEXT, by TEXT, at TEXT)`).run();
+  try { await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_fuel_card ON fuel_entries(tenant_id,card)").run(); } catch {}
+}
+// card number → { username, name } from users.profile.fuelCard.
+async function fuelCardMap(env, tid) {
+  const byCard = {}, cards = [];
+  try {
+    const { results } = await env.DB.prepare("SELECT username, first_name, last_name, status, profile, vehicle_assigned FROM users WHERE tenant_id=?").bind(tid).all();
+    for (const u of results || []) {
+      let p = {}; try { p = u.profile ? JSON.parse(u.profile) : {}; } catch {}
+      const card = String(p.fuelCard || "").trim();
+      if (!card) continue;
+      const name = ((u.first_name || "") + " " + (u.last_name || "")).trim() || u.username;
+      byCard[card] = { username: u.username, name, vehicle: u.vehicle_assigned || "" };
+      cards.push({ card, username: u.username, name, vehicle: u.vehicle_assigned || "", active: u.status === "Active" });
+    }
+  } catch {}
+  return { byCard, cards };
+}
+// Assignment intervals per username (reg + [start,end]); resolves which vehicle
+// a driver held on a given date (falls back to their current vehicle_assigned).
+async function assignmentIntervals(env, tid) {
+  const list = [];
+  try {
+    const { results } = await env.DB.prepare("SELECT reg, username, start_date, end_date FROM vehicle_assignments WHERE tenant_id=?").bind(tid).all();
+    for (const r of results || []) list.push({ reg: r.reg, username: r.username, start: r.start_date || "", end: r.end_date || "" });
+  } catch {}
+  return list;
+}
+function regForUserOnDate(intervals, username, date) {
+  let best = null;
+  for (const iv of intervals) {
+    if (iv.username !== username) continue;
+    if (iv.start && date < iv.start) continue;
+    if (iv.end && date > iv.end) continue;
+    if (!best || iv.start > best.start) best = iv;
+  }
+  if (best) return best.reg;
+  return "";   // caller falls back to the driver's current vehicle
+}
+// Total litres + spend attributed to each vehicle (all-time), via card→user→
+// assignment-at-date. Returns { REGNORM: {litres, spend, first, last, count} }.
+async function fuelByVehicle(env, tid) {
+  await ensureFuelTable(env);
+  const { byCard } = await fuelCardMap(env, tid);
+  const userCurrent = {};
+  for (const c of Object.values(byCard)) userCurrent[c.username] = c.vehicle;
+  const intervals = await assignmentIntervals(env, tid);
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare("SELECT card, username, date, litres, cost FROM fuel_entries WHERE tenant_id=?").bind(tid).all();
+    for (const e of results || []) {
+      const user = e.username || (byCard[e.card] ? byCard[e.card].username : "");
+      if (!user) continue;
+      let reg = regForUserOnDate(intervals, user, e.date || "") || userCurrent[user] || "";
+      if (!reg) continue;
+      const k = dnReg(reg);
+      const o = out[k] || (out[k] = { litres: 0, spend: 0, first: "", last: "", count: 0 });
+      o.litres += Number(e.litres) || 0; o.spend += Number(e.cost) || 0; o.count++;
+      if (e.date && (!o.first || e.date < o.first)) o.first = e.date;
+      if (e.date && (!o.last || e.date > o.last)) o.last = e.date;
+    }
+  } catch {}
+  return out;
+}
+// Odometer span per vehicle from van checks. { REGNORM: {min,max,milesDriven,first,last,readings} }.
+async function odoByVehicle(env, tid) {
+  const out = {};
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT vehicle, items, checked_at FROM vehicle_checks WHERE tenant_id=? AND vehicle IS NOT NULL AND vehicle!='' ORDER BY checked_at ASC"
+    ).bind(tid).all();
+    for (const r of results || []) {
+      let m = ""; try { m = (JSON.parse(r.items || "{}").mileage || "").toString().replace(/[^0-9]/g, ""); } catch {}
+      if (!m) continue;
+      const miles = parseInt(m, 10); if (!miles) continue;
+      const k = dnReg(r.vehicle);
+      const o = out[k] || (out[k] = { min: miles, max: miles, first: r.checked_at, last: r.checked_at, readings: 0 });
+      o.min = Math.min(o.min, miles); o.max = Math.max(o.max, miles); o.readings++;
+      if (r.checked_at < o.first) o.first = r.checked_at;
+      if (r.checked_at > o.last) o.last = r.checked_at;
+    }
+    for (const k of Object.keys(out)) out[k].milesDriven = Math.max(0, out[k].max - out[k].min);
+  } catch {}
+  return out;
+}
+// MPG per vehicle (all available data). { REGNORM: {mpg, miles, litres, gallons} }.
+async function mpgByVehicle(env, tid) {
+  const fuel = await fuelByVehicle(env, tid);
+  const odo = await odoByVehicle(env, tid);
+  const out = {};
+  for (const k of Object.keys(odo)) {
+    const f = fuel[k]; const o = odo[k];
+    if (!f || !(f.litres > 0) || !(o.milesDriven > 0) || o.readings < 2) continue;
+    const gallons = f.litres / UK_GALLON;
+    out[k] = { mpg: Math.round((o.milesDriven / gallons) * 10) / 10, miles: o.milesDriven, litres: Math.round(f.litres * 10) / 10, gallons };
+  }
+  return out;
+}
+function financeOf(v) { return parseJson(v && v.finance, {}) || {}; }
+// Annual running cost for one vehicle. Combines fixed costs (insurance, tax,
+// finance) with projected fuel (from its own spend rate) + maintenance (last 12
+// months) + projected excess-mileage charge. `projected` flags the estimates.
+function runningCost(fin, fuelV, odoV, maint12) {
+  fin = fin || {}; const num = x => { const n = Number(x); return isFinite(n) ? n : 0; };
+  const insurance = num(fin.insuranceYear), roadTax = num(fin.roadTaxYear);
+  const finance = (fin.ownership === "financed") ? num(fin.financeMonthly) * 12 : 0;
+  // Projected annual fuel from the vehicle's own spend/day (real span).
+  let fuelYear = 0, fuelProjected = false, milesYear = 0;
+  if (fuelV && fuelV.spend > 0 && fuelV.first && fuelV.last) {
+    const days = Math.max(1, (Date.parse(fuelV.last) - Date.parse(fuelV.first)) / 86400000);
+    fuelYear = fuelV.spend / days * 365; fuelProjected = days < 365;
+  }
+  if (odoV && odoV.milesDriven > 0 && odoV.first && odoV.last) {
+    const days = Math.max(1, (Date.parse(odoV.last) - Date.parse(odoV.first)) / 86400000);
+    milesYear = odoV.milesDriven / days * 365;
+  }
+  const maintenance = num(maint12);   // real: last 12 months
+  // Excess mileage (financed agreements with an allowance + per-mile charge).
+  let excess = 0, excessProjected = false;
+  const allowed = num(fin.allowedMiles), excessPence = num(fin.excessPence);
+  if (fin.ownership === "financed" && allowed > 0 && excessPence > 0 && milesYear > allowed) {
+    excess = (milesYear - allowed) * excessPence / 100; excessProjected = true;
+  }
+  const total = insurance + roadTax + finance + fuelYear + maintenance + excess;
+  return {
+    insurance, roadTax, finance, fuel: Math.round(fuelYear), maintenance, excess: Math.round(excess),
+    milesYear: Math.round(milesYear), total: Math.round(total),
+    projected: fuelProjected || excessProjected, fuelProjected, excessProjected,
+  };
+}
+// Given a card | 'all', return spend/litres/miles totals + per-period averages.
+// Every average uses the REAL data span (days); a period longer than the span
+// is flagged `projected`. Miles come from the linked vehicle(s) odometer span.
+function periodStats(spanDays, totals) {
+  const per = (days) => {
+    const v = { spend: totals.spend / spanDays * days, litres: totals.litres / spanDays * days, miles: totals.miles / spanDays * days, projected: spanDays < days };
+    v.spend = Math.round(v.spend * 100) / 100; v.litres = Math.round(v.litres * 10) / 10; v.miles = Math.round(v.miles);
+    return v;
+  };
+  return { week: per(7), month: per(30.44), quarter: per(91.31), year: per(365) };
+}
+
 // Given a vehicle row + current mileage, work out the next service and a status.
 function serviceView(v, cur) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
