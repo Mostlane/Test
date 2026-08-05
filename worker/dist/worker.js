@@ -7281,7 +7281,8 @@ var DEFAULT_PHOTO_SLOTS = [
   { id: "cab", label: "Inside cab", required: true },
   { id: "load", label: "Load area", required: false }
 ];
-var DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, photoSlots: DEFAULT_PHOTO_SLOTS };
+var DEFAULT_EQUIPMENT = [];
+var DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS };
 function londonDate2(d = /* @__PURE__ */ new Date()) {
   return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
@@ -7315,6 +7316,7 @@ async function getSettings(db) {
   const out = { ...DEFAULT_SETTINGS, ...s || {} };
   if (!Array.isArray(out.checklist) || !out.checklist.length) out.checklist = DEFAULT_CHECKLIST;
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
+  if (!Array.isArray(out.equipment)) out.equipment = [];
   return out;
 }
 function deadlineFor(week, s) {
@@ -7330,7 +7332,7 @@ function shapeCheck(r) {
   } catch {
   }
   const answers = items.answers || {};
-  const defects = Object.keys(answers).filter((k) => answers[k] === "defect");
+  const defects = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
   return {
     username: r.username,
     week: r.week,
@@ -7381,6 +7383,9 @@ async function handle16(request, env, ctx, url, sess) {
       const slots = b.photoSlots.map((i) => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim(), required: i.required !== false })).filter((i) => i.label);
       if (slots.length) s.photoSlots = slots;
     }
+    if (Array.isArray(b.equipment)) {
+      s.equipment = b.equipment.map((i) => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() })).filter((i) => i.label);
+    }
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, SETTINGS_KEY2, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
   }
@@ -7395,6 +7400,7 @@ async function handle16(request, env, ctx, url, sess) {
       vehicle: sess.user.vehicle_assigned || "",
       deadline: { dow: s.dueDow, time: s.dueTime, dueAt, overdue: Date.now() > Date.parse(dueAt) },
       checklist: s.checklist,
+      equipment: s.equipment || [],
       photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine)
     }, {}, env, request);
@@ -8898,7 +8904,7 @@ async function handle20(request, env, ctx, url, sess) {
       }
       if (items.skipped) continue;
       const answers = items.answers || {};
-      const defects = Object.keys(answers).filter((k) => answers[k] === "defect");
+      const defects = Object.keys(answers).filter((k) => answers[k] === "defect" || answers[k] === "missing");
       const slot = items.slotPhotos || {};
       const photos = Array.from(/* @__PURE__ */ new Set([...Object.values(slot), ...items.photos || []]));
       checks.push({

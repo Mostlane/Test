@@ -53,7 +53,10 @@ const DEFAULT_PHOTO_SLOTS = [
   { id: "cab", label: "Inside cab", required: true },
   { id: "load", label: "Load area", required: false },
 ];
-const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, photoSlots: DEFAULT_PHOTO_SLOTS }; // Friday 17:00 UK
+// Equipment on board (Present/Missing) — off by default (opt-in), editable in
+// van-check settings like the checklist. A missing item counts as an issue.
+const DEFAULT_EQUIPMENT = [];
+const DEFAULT_SETTINGS = { dueDow: 5, dueTime: "17:00", checklist: DEFAULT_CHECKLIST, equipment: DEFAULT_EQUIPMENT, photoSlots: DEFAULT_PHOTO_SLOTS }; // Friday 17:00 UK
 
 function londonDate(d = new Date()) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
 function londonHM(d) { return new Date(d).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour12: false, hour: "2-digit", minute: "2-digit" }); }
@@ -81,6 +84,7 @@ async function getSettings(db) {
   const out = { ...DEFAULT_SETTINGS, ...(s || {}) };
   if (!Array.isArray(out.checklist) || !out.checklist.length) out.checklist = DEFAULT_CHECKLIST;
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
+  if (!Array.isArray(out.equipment)) out.equipment = [];   // opt-in; empty = no equipment section
   return out;
 }
 // This week's deadline instant: Monday `week` + (dueDow-1) days at dueTime UK.
@@ -93,7 +97,8 @@ function shapeCheck(r) {
   if (!r) return null;
   let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
   const answers = items.answers || {};
-  const defects = Object.keys(answers).filter(k => answers[k] === "defect");
+  // A defect OR a missing equipment item counts as an issue to flag.
+  const defects = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
   return {
     username: r.username, week: r.week, vehicle: r.vehicle, checkedAt: r.checked_at,
     safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
@@ -144,6 +149,12 @@ export async function handle(request, env, ctx, url, sess) {
         .filter(i => i.label);
       if (slots.length) s.photoSlots = slots;
     }
+    // Equipment on board — opt-in Present/Missing items; an empty list clears it.
+    if (Array.isArray(b.equipment)) {
+      s.equipment = b.equipment
+        .map(i => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() }))
+        .filter(i => i.label);
+    }
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
       .bind(db.tenantId, SETTINGS_KEY, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
@@ -160,6 +171,7 @@ export async function handle(request, env, ctx, url, sess) {
       ok: true, week, vehicle: sess.user.vehicle_assigned || "",
       deadline: { dow: s.dueDow, time: s.dueTime, dueAt, overdue: Date.now() > Date.parse(dueAt) },
       checklist: s.checklist,
+      equipment: s.equipment || [],
       photoSlots: s.photoSlots,
       myCheck: shapeCheck(mine),
     }, {}, env, request);

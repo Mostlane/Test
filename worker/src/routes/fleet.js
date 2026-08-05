@@ -802,7 +802,7 @@ export async function handle(request, env, ctx, url, sess) {
       let items = {}; try { items = r.items ? JSON.parse(r.items) : {}; } catch {}
       if (items.skipped) continue;
       const answers = items.answers || {};
-      const defects = Object.keys(answers).filter(k => answers[k] === "defect");
+      const defects = Object.keys(answers).filter(k => answers[k] === "defect" || answers[k] === "missing");
       const slot = items.slotPhotos || {};
       const photos = Array.from(new Set([...Object.values(slot), ...((items.photos) || [])]));
       checks.push({

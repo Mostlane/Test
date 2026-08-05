@@ -182,7 +182,8 @@
 
   function openCheck(i){
     const c=CHECKS[i]; if(!c)return;
-    const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(VC.checklist,id))}</span><span>${answerChip(c.answers[id])}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
+    const vcLabels=[...(VC.checklist||[]),...(VC.equipment||[])];   // checklist + equipment labels
+    const checks=Object.keys(c.answers||{}).map(id=>`<div class="chk"><span>${esc(labelFor(vcLabels,id))}</span><span>${answerChip(c.answers[id])}${c.defectNotes&&c.defectNotes[id]?` <span class="n">${esc(c.defectNotes[id])}</span>`:""}</span></div>`).join("");
     showDetail(`
       <div class="mhead"><h3>Van check · ${fmtDMY(c.checkedAt)}</h3><button class="btn small" onclick="closeDetail()">✕ Close</button></div>
       <div class="mbody">
