@@ -731,8 +731,11 @@ Personalisation group; FullAccess implies both). Server-side filtering means
 revoking a permission reverts that user on their next page load.
 
 ## Help section
-help.html — ❓ tile (always visible, incl. Story users) + sidebar item. 46
-task-level SOP guides in a GROUPS array, each tagged perms:"always" or an
+help.html — ❓ tile (always visible, incl. Story users) + sidebar item. 50+
+task-level SOP guides in a GROUPS array (incl. a **"Vehicles & fleet"** group:
+weekly van check, complete a handover, maintenance & costs, checks/handover
+history + issues, fuel cards & MPG, cost-to-run + set-up-checks/alerts — the last
+two `__fullOnly`; driver guides "always"), each tagged perms:"always" or an
 any-of permission list (FullAccess sees all) — users only see guides for what
 they can use. 47 staged screenshots in help-img/ (generated headless with
 mocked data — people in screenshots are ALWAYS "User 1/2/3", never real or
@@ -931,8 +934,10 @@ iOS uses the Home-Screen (apple-touch) icon, Android uses the notification
    - Van-check walkaround already replaced the Jotform one (vancheck.js).
 3. Help: embed a real PO screenshot when Jamie sends one; deeper SLA
    job-view guide on request; keep guides in sync with new features.
-   **TODO: add Help guides for the new Vehicles/Fleet, Fleet Report, Van
-   Timesheet, My Documents (GDPR) and Notification Centre pages.**
+   **Vehicles/Fleet Help guides DONE** ("Vehicles & fleet" group — text-only,
+   no screenshots yet). **TODO: add Help guides for Fleet Report, Van
+   Timesheet, My Documents (GDPR) and Notification Centre; and stage screenshots
+   for the new Vehicles guides (help-img/, mocked "User 1/2/3" data).**
 4. **Next up agreed with Jamie (started)**: MOT/tax/service due warnings as a
    red badge on the main menu tile + sidebar (like holidays/transfers), and
    possibly `?v=3` cache-bust so phones pick up the new portal-config
