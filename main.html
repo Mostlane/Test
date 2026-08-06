@@ -112,9 +112,10 @@ a.button {
 }
 
 /* ── Mobile tile reorder (long-press → wobble → drag → Done/background saves) ── */
-@keyframes mlWobble { 0%{transform:rotate(-1.3deg)} 50%{transform:rotate(1.3deg)} 100%{transform:rotate(-1.3deg)} }
+@keyframes mlWobble { 0%{transform:rotate(-2.2deg)} 50%{transform:rotate(2.2deg)} 100%{transform:rotate(-2.2deg)} }
 .menu-grid.reordering { touch-action: none; }
-.menu-grid.reordering a.button.visible { animation: mlWobble .3s ease-in-out infinite; }
+.menu-grid.reordering a.button.visible { animation: mlWobble .28s ease-in-out infinite; transition: none; }
+.menu-grid.reordering a.button.visible:nth-child(even) { animation-delay: -.14s; }  /* offset so neighbours wobble out of sync */
 .menu-grid.reordering a.button.visible:hover { transform: none; }   /* hover lift off while arranging */
 .menu-grid.reordering a.button.dragging { animation: none; }
 a.button.dragging { opacity: .96; box-shadow: 0 16px 42px rgba(0,0,0,0.45); }
@@ -522,6 +523,12 @@ const MAP = window.ML_PERM_MAP || {
         const grid = document.getElementById("menuGrid");
         const bar = document.getElementById("reorderBar");
         if (!grid) return;
+
+        // Kill the browser's native drag-and-drop on the tile links. Without
+        // this, iOS Safari starts its OWN drag on long-press (the "ghost"),
+        // which steals the gesture so our arrange-mode never engages.
+        grid.querySelectorAll("a.button").forEach(b => b.setAttribute("draggable", "false"));
+        grid.addEventListener("dragstart", e => e.preventDefault());
         let editing = false, drag = null, holdTimer = null;
         let startX = 0, startY = 0, lastX = 0, lastY = 0, scrollRAF = null, scrollVel = 0, suppressClick = false;
 
@@ -569,6 +576,7 @@ const MAP = window.ML_PERM_MAP || {
           lastX = x; lastY = y;
           window.addEventListener("pointermove", onMove, { passive: false });
           window.addEventListener("pointerup", onUp, { once: true });
+          window.addEventListener("pointercancel", onUp, { once: true });
         }
         function onMove(e) {
           if (!drag) return;
@@ -585,6 +593,7 @@ const MAP = window.ML_PERM_MAP || {
         function onUp() {
           if (!drag) return;
           window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointercancel", onUp);
           scrollVel = 0; if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
           const { tile, ph } = drag;
           ph.parentNode.insertBefore(tile, ph); ph.remove();
