@@ -7317,7 +7317,31 @@ async function getSettings(db) {
   if (!Array.isArray(out.checklist) || !out.checklist.length) out.checklist = DEFAULT_CHECKLIST;
   if (!Array.isArray(out.photoSlots) || !out.photoSlots.length) out.photoSlots = DEFAULT_PHOTO_SLOTS;
   if (!Array.isArray(out.equipment)) out.equipment = [];
+  if (!Array.isArray(out.alertUsers)) out.alertUsers = [];
   return out;
+}
+function normAlertItem(i, failVal) {
+  const id = String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30);
+  const label = String(i.label || "").trim();
+  const out = { id, label };
+  if (i && i.alert) {
+    const on = i.alertOn;
+    out.alert = true;
+    out.alertOn = on === "ok" || on === "present" || on === "defect" || on === "missing" ? on : failVal;
+  }
+  return out;
+}
+function evalAlerts(answers, tpl) {
+  const out = [];
+  for (const it of [...tpl.checklist || [], ...tpl.equipment || []]) {
+    if (it && it.alert && it.alertOn && answers[it.id] === it.alertOn) {
+      out.push({ id: it.id, label: it.label, answer: answers[it.id] });
+    }
+  }
+  return out;
+}
+function answerWord(v) {
+  return v === "defect" ? "Defect" : v === "missing" ? "Missing" : v === "present" ? "Present" : v === "ok" ? "OK" : String(v || "");
 }
 function deadlineFor(week, s) {
   const dow = Math.min(7, Math.max(1, Number(s.dueDow) || 5));
@@ -7347,6 +7371,7 @@ function shapeCheck(r) {
     mileage: items.mileage || "",
     source: items.source || "story",
     defectCount: defects.length,
+    alerts: items.alerts || [],
     skipped: !!items.skipped,
     skippedBy: items.skippedBy || ""
   };
@@ -7376,7 +7401,7 @@ async function handle16(request, env, ctx, url, sess) {
     if (b.dueDow !== void 0) s.dueDow = Math.min(7, Math.max(1, Number(b.dueDow) || 5));
     if (b.dueTime !== void 0 && /^([01]\d|2[0-3]):[0-5]\d$/.test(b.dueTime)) s.dueTime = b.dueTime;
     if (Array.isArray(b.checklist)) {
-      const list = b.checklist.map((i) => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() })).filter((i) => i.label);
+      const list = b.checklist.map((i) => normAlertItem(i, "defect")).filter((i) => i.label);
       if (list.length) s.checklist = list;
     }
     if (Array.isArray(b.photoSlots)) {
@@ -7384,8 +7409,9 @@ async function handle16(request, env, ctx, url, sess) {
       if (slots.length) s.photoSlots = slots;
     }
     if (Array.isArray(b.equipment)) {
-      s.equipment = b.equipment.map((i) => ({ id: String(i.id || "").trim() || String(i.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30), label: String(i.label || "").trim() })).filter((i) => i.label);
+      s.equipment = b.equipment.map((i) => normAlertItem(i, "missing")).filter((i) => i.label);
     }
+    if (Array.isArray(b.alertUsers)) s.alertUsers = b.alertUsers.map((u) => String(u || "").trim()).filter(Boolean).slice(0, 50);
     await db.prepare("INSERT INTO app_config (tenant_id, key, value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(db.tenantId, SETTINGS_KEY2, JSON.stringify(s)).run();
     return json({ ok: true, settings: s }, {}, env, request);
   }
@@ -7440,13 +7466,15 @@ async function handle16(request, env, ctx, url, sess) {
       const key = await storeOne(p, "extra");
       if (key) photoKeys.push(key);
     }
+    const alerts = evalAlerts(answers, s2);
     const items = JSON.stringify({
       answers,
       defectNotes,
       photos: photoKeys,
       slotPhotos,
       mileage: String(b.mileage || "").trim(),
-      source: "portal"
+      source: "portal",
+      alerts
     });
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await db.prepare(`
@@ -7456,7 +7484,14 @@ async function handle16(request, env, ctx, url, sess) {
         vehicle=excluded.vehicle, checked_at=excluded.checked_at,
         safe_to_drive=excluded.safe_to_drive, items=excluded.items, note=excluded.note
     `).bind(db.tenantId, me, week, vehicle, now, b.safeToDrive === false ? 0 : 1, items, String(b.note || "").trim()).run();
-    return json({ ok: true, week, photos: photoKeys.length }, {}, env, request);
+    if (alerts.length && (s2.alertUsers || []).length) {
+      const who = `${sess.user.first_name || ""} ${sess.user.last_name || ""}`.trim() || me;
+      const body = `${who} \u2014 ${vehicle}: ` + alerts.map((a) => `${a.label}: ${answerWord(a.answer)}`).join(", ");
+      const payload = { title: "\u26A0 Van check alert", body, url: "/van-checks.html", tag: "vancheck-alert" };
+      ctx && ctx.waitUntil && ctx.waitUntil(Promise.all((s2.alertUsers || []).map((u) => sendToUser(env, tenantId, u, payload).catch(() => {
+      }))));
+    }
+    return json({ ok: true, week, photos: photoKeys.length, alerts: alerts.length }, {}, env, request);
   }
   if (path === "/vancheck/week" && method === "GET") {
     if (!await canViewAll()) return error("Forbidden", 403, env, request);
@@ -8167,7 +8202,9 @@ var DEFAULT_HANDOVER = {
     { id: "dashcam", label: "Dashboard & mileage", required: true },
     { id: "cab", label: "Cab interior", required: true },
     { id: "loadarea", label: "Load area", required: false }
-  ]
+  ],
+  alertUsers: []
+  // who to push when an "Alert if" answer is given
 };
 async function handoverTemplate(env, tid) {
   try {
@@ -8919,7 +8956,8 @@ async function handle20(request, env, ctx, url, sess) {
         answers,
         defectNotes: items.defectNotes || {},
         slotPhotos: slot,
-        photos
+        photos,
+        alerts: items.alerts || []
       });
     }
     checks.sort((a, b) => new Date(b.checkedAt || 0) - new Date(a.checkedAt || 0));
@@ -8952,7 +8990,7 @@ async function handle20(request, env, ctx, url, sess) {
     if (!await canMoney(env, tid, sess)) return jr3({ error: "Only a Full-Access admin can change the handover template." }, headers, 403);
     const b = await readJson4(request);
     const slug2 = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
-    const mkList = (arr, withReq) => {
+    const mkList = (arr, kind, failVal) => {
       const out = [], seen = /* @__PURE__ */ new Set();
       for (const it of Array.isArray(arr) ? arr : []) {
         const label = String(it && it.label || "").trim().slice(0, 120);
@@ -8960,11 +8998,22 @@ async function handle20(request, env, ctx, url, sess) {
         let id = slug2(it && it.id) || slug2(label) || "item" + (out.length + 1);
         while (seen.has(id)) id = id + "_" + (out.length + 1);
         seen.add(id);
-        out.push(withReq ? { id, label, required: !(it && it.required === false) } : { id, label });
+        if (kind === "photo") {
+          out.push({ id, label, required: !(it && it.required === false) });
+          continue;
+        }
+        const o = { id, label };
+        if (it && it.alert) {
+          const on = it.alertOn;
+          o.alert = true;
+          o.alertOn = on === "ok" || on === "present" || on === "defect" || on === "missing" ? on : failVal;
+        }
+        out.push(o);
       }
       return out;
     };
-    const tpl = { checklist: mkList(b.checklist, false), equipment: mkList(b.equipment, false), photoSlots: mkList(b.photoSlots, true) };
+    const alertUsers = (Array.isArray(b.alertUsers) ? b.alertUsers : []).map((u) => String(u || "").trim()).filter(Boolean).slice(0, 50);
+    const tpl = { checklist: mkList(b.checklist, "answer", "defect"), equipment: mkList(b.equipment, "answer", "missing"), photoSlots: mkList(b.photoSlots, "photo"), alertUsers };
     if (!tpl.checklist.length && !tpl.equipment.length && !tpl.photoSlots.length)
       return jr3({ error: "Add at least one item." }, headers, 400);
     await env.DB.prepare("INSERT INTO app_config (tenant_id,key,value) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(tid, HANDOVER_TPL_KEY(tid), JSON.stringify(tpl)).run();
@@ -9029,6 +9078,7 @@ async function handle20(request, env, ctx, url, sess) {
     }
     let signature = b.signature ? await storeHandoverImg(env, userDir, id, "signature", b.signature, nRef) || "" : "";
     if (!signature) return jr3({ error: "Signature required." }, headers, 400);
+    const alerts = evalAlerts(answers, tpl);
     const items = {
       answers,
       defectNotes,
@@ -9038,7 +9088,8 @@ async function handle20(request, env, ctx, url, sess) {
       slotPhotos,
       photos,
       signature,
-      source: "portal"
+      source: "portal",
+      alerts
     };
     const now = (/* @__PURE__ */ new Date()).toISOString();
     await env.DB.prepare(
@@ -9050,7 +9101,13 @@ async function handle20(request, env, ctx, url, sess) {
       url: "/vehicle-checks.html?reg=" + encodeURIComponent(row.reg),
       tag: "van-handover"
     }));
-    return jr3({ ok: true, id }, headers);
+    if (alerts.length && (tpl.alertUsers || []).length && ctx && ctx.waitUntil) {
+      const body = `${row.username} \u2014 ${row.reg}: ` + alerts.map((a) => `${a.label}: ${answerWord(a.answer)}`).join(", ");
+      const payload = { title: "\u26A0 Van handover alert", body, url: "/vehicle-checks.html?reg=" + encodeURIComponent(row.reg), tag: "handover-alert" };
+      ctx.waitUntil(Promise.all((tpl.alertUsers || []).map((u) => sendToUser(env, tid, u, payload).catch(() => {
+      }))));
+    }
+    return jr3({ ok: true, id, alerts: alerts.length }, headers);
   }
   if (sub === "/handover/cancel" && method === "POST") {
     await ensureHandoverTable(env);
@@ -9093,6 +9150,7 @@ async function handle20(request, env, ctx, url, sess) {
         safeToDrive: r.safe_to_drive === null ? null : !!Number(r.safe_to_drive),
         note: r.note || "",
         defectCount: defects.length,
+        alerts: items.alerts || [],
         answers,
         defectNotes: items.defectNotes || {},
         conditionInterior: items.conditionInterior || "",
